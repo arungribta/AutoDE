@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: var(--vscode-editor-background, #1f1f1f);
+        --panel: var(--vscode-sideBar-background, #252526);
+        --foreground: var(--vscode-foreground, #cccccc);
+        --muted: var(--vscode-descriptionForeground, #9d9d9d);
+        --border: var(--vscode-panel-border, rgba(255,255,255,0.12));
+        --border-soft: rgba(255,255,255,0.08);
+        --surface: rgba(255,255,255,0.025);
+        --surface-strong: rgba(255,255,255,0.04);
+        --success: #2ea043;
+        --warning: #d29922;
+        --error: #f85149;
+        --primary: var(--vscode-button-background, #0e639c);
+        --secondary: var(--vscode-button-secondaryBackground, #3c3c3c);
+        --text-on-primary: var(--vscode-button-foreground, #ffffff);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--foreground);
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      .workspace-shell {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 100vh;
+        background: linear-gradient(180deg, rgba(255,255,255,0.01), transparent 28%);
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 12px;
+        background: rgba(37, 37, 38, 0.92);
+        border-bottom: 1px solid var(--border-soft);
+        backdrop-filter: blur(8px);
+      }
+
+      .status-group {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        font-size: 12px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 0;
+        border-radius: 999px;
+        background: transparent;
+        border: none;
+        white-space: nowrap;
+        color: var(--foreground);
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+        display: inline-block;
+        box-shadow: 0 0 0 3px rgba(46,160,67,0.15);
+      }
+
+      .metric {
+        padding: 2px 0;
+        border-radius: 999px;
+        background: transparent;
+        border: none;
+        color: var(--muted);
+      }
+
+      .topbar-actions { display: flex; gap: 8px; }
+
+      button {
+        appearance: none;
+        border: 1px solid var(--border-soft);
+        background: rgba(255,255,255,0.02);
+        color: var(--foreground);
+        border-radius: 6px;
+        padding: 7px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+      }
+
+      button:hover {
+        background: rgba(255,255,255,0.04);
+        border-color: var(--border);
+      }
+
+      button.primary {
+        background: linear-gradient(180deg, rgba(14,99,156,0.92), rgba(14,99,156,0.75));
+        color: var(--text-on-primary);
+        border-color: rgba(14,99,156,0.8);
+      }
+
+      .workspace-layout {
+        display: block;
+        padding: 12px;
+        min-height: 0;
+        flex: 1;
+      }
+
+      .panel {
+        background: transparent;
+        border: 1px solid var(--border-soft);
+        border-radius: 10px;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .meta-panel {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .tabbar {
+        display: flex;
+        gap: 8px;
+        padding: 8px 8px 0;
+        border-bottom: 1px solid var(--border-soft);
+        background: transparent;
+      }
+
+      .tab-btn {
+        padding: 8px 12px;
+        border-radius: 8px 8px 0 0;
+        border: 1px solid transparent;
+        border-bottom: none;
+        background: transparent;
+        color: var(--muted);
+      }
+
+      .tab-btn.active {
+        background: rgba(14,99,156,0.08);
+        color: var(--foreground);
+        border-color: var(--border-soft);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+      }
+
+      .tab-panels {
+        padding: 12px 12px 0;
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel.active {
+        display: block;
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        font-weight: 600;
+        background: rgba(255,255,255,0.02);
+      }
+
+      .panel-body {
+        padding: 10px 12px 12px;
+        overflow: auto;
+      }
+
+      .collapsible-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .config-section {
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.01);
+        overflow: hidden;
+      }
+
+      .config-section summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 10px 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .config-section summary::-webkit-details-marker { display: none; }
+
+      .config-content {
+        padding: 0 12px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .empty-state {
+        padding: 10px 12px;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.02);
+        border: 1px dashed var(--border-soft);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .tree {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 13px;
+      }
+
+      .tree-node {
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 4px 6px;
+        background: rgba(255,255,255,0.01);
+      }
+
+      .tree-node-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+
+      .tree-toggle {
+        display: inline-block;
+        width: 12px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .tree-children {
+        margin-left: 16px;
+        margin-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .tree-children.collapsed { display: none; }
+
+      .agent-panel {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .agent-body {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 12px 0 16px;
+        overflow: auto;
+      }
+
+      .config-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .section {
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.015);
+        padding: 10px 12px;
+      }
+
+      .label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: var(--foreground);
+      }
+
+      textarea, input, select {
+        width: 100%;
+        box-sizing: border-box;
+        background: rgba(255,255,255,0.02);
+        color: var(--vscode-input-foreground, #cccccc);
+        border: 1px solid var(--vscode-input-border, var(--border-soft));
+        border-radius: 6px;
+        padding: 8px 10px;
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+
+      .action-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .plan-summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 0 10px;
+        font-size: 12px;
+      }
+
+      .chevron {
+        display: inline-block;
+        transition: transform 0.15s ease;
+      }
+
+      .plan-section[open] .chevron { transform: rotate(90deg); }
+
+      .plan-section {
+        margin-top: 8px;
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.015);
+      }
+
+      .plan-section summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 10px 12px;
+        font-weight: 600;
+        font-size: 12px;
+      }
+
+      .plan-section summary::-webkit-details-marker { display: none; }
+
+      .plan-body {
+        padding: 8px 12px 12px;
+      }
+
+      .plan-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .step-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border: 1px solid var(--border-soft);
+        border-left: 4px solid var(--muted);
+        background: rgba(255,255,255,0.015);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      .step-item.status-pending { border-left-color: var(--warning); }
+      .step-item.status-running { border-left-color: var(--primary); }
+      .step-item.status-completed { border-left-color: var(--success); }
+      .step-item.status-failed { border-left-color: var(--error); }
+
+      .step-status {
+        padding: 3px 7px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        background: rgba(255,255,255,0.04);
+      }
+
+      .chat-box {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .message {
+        max-width: 82%;
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 12px;
+        line-height: 1.4;
+        border: 1px solid var(--border-soft);
+      }
+
+      .message.user {
+        align-self: flex-end;
+        background: rgba(14,99,156,0.12);
+        border-color: rgba(14,99,156,0.2);
+      }
+
+      .message.ai {
+        align-self: flex-start;
+        background: rgba(255,255,255,0.02);
+      }
+
+      .chat-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+      .muted { color: var(--muted); }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="workspace-shell">
+      <div class="topbar">
+        <div class="status-group">
+          <div class="status-pill" id="connectionStatus"><span class="dot"></span> Snowflake connected</div>
+          <div class="metric" id="providerLabel">Snowflake</div>
+          <div class="metric" id="contextWindow">Context 128k</div>
+          <div class="metric" id="tokensSession">Tokens 0</div>
+          <div class="metric" id="tokensPlan">Plan 0</div>
+        </div>
+        <div class="topbar-actions">
+          <button id="stopConnectionBtn">Stop</button>
+        </div>
+      </div>
+
+      <div class="workspace-layout">
+        <main class="panel agent-panel">
+          <div class="tabbar" role="tablist" aria-label="Workspace tabs">
+            <button class="tab-btn active" data-tab="workspace" role="tab" aria-selected="true">DE Agent Workspace</button>
+            <button class="tab-btn" data-tab="integration" role="tab" aria-selected="false">Data Integration</button>
+            <button class="tab-btn" data-tab="llm" role="tab" aria-selected="false">LLM Settings</button>
+          </div>
+
+          <div class="tab-panels">
+            <div class="tab-panel active" id="workspaceTab" role="tabpanel">
+              <div class="agent-body">
+                <section class="section">
+                  <details class="config-section" id="contextSection" open>
+                    <summary>Context</summary>
+                    <div class="config-content">
+                      <div class="empty-state hidden" id="metadataEmptyState">Connect a database provider to enable context and metadata browsing.</div>
+                      <div class="tree" id="metadataTree"></div>
+                    </div>
+                  </details>
+                </section>
+
+                <section class="section">
+                  <label class="label" for="objectiveInput">Objective</label>
+                  <textarea id="objectiveInput" placeholder="Create an ingestion pipeline from S3 to Snowflake using Snowpipe and CDC with streams and tasks."></textarea>
+                  <div class="action-row">
+                    <button id="generatePlanBtn" class="primary">Generate Plan</button>
+                    <button id="executePlanBtn">Execute</button>
+                    <button id="pausePlanBtn">Pause</button>
+                    <button id="resetPlanBtn">Reset</button>
+                  </div>
+                </section>
+
+                <section class="section" id="planContainer">
+                  <div class="plan-summary">
+                    <span id="planSummaryText">Execution Plan</span>
+                    <span class="muted" id="planCount">0 steps</span>
+                  </div>
+
+                  <details class="plan-section" open>
+                    <summary><span class="chevron">?</span> Execution Plan</summary>
+                    <div class="plan-body">
+                      <div class="plan-list" id="planList"></div>
+                    </div>
+                  </details>
+                </section>
+
+                <section class="section">
+                  <div class="label">Chat Refinement Loop</div>
+                  <div class="chat-box" id="chatBox">
+                    <div class="message ai">Context loaded. I can refine the plan using the active metadata and execution state.</div>
+                  </div>
+                  <textarea id="chatInput" style="margin-top:10px; min-height: 72px;" placeholder="Modify the pipeline to include schema drift checks."></textarea>
+                  <div class="chat-actions">
+                    <button id="sendChatBtn" class="primary">Send</button>
+                    <button id="insertFileBtn">Insert into File</button>
+                    <button id="updatePlanBtn">Update Plan</button>
+                    <button id="reExecuteBtn">Re-Execute</button>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="integrationTab" role="tabpanel">
+              <div class="agent-body">
+                <section class="section config-form">
+                  <label class="label" for="providerSelect">Provider</label>
+                  <select id="providerSelect">
+                    <option value="snowflake">Snowflake</option>
+                    <option value="databricks">Databricks</option>
+                    <option value="bigquery">BigQuery</option>
+                    <option value="redshift">Redshift</option>
+                    <option value="synapse">Synapse</option>
+                    <option value="other">Other</option>
+                  </select>
+
+                  <label class="label" for="authModeSelect">Authentication</label>
+                  <select id="authModeSelect">
+                    <option value="key-pair">Key-Pair Authentication</option>
+                    <option value="username-password">Username + Password</option>
+                    <option value="oauth">OAuth</option>
+                    <option value="external-browser">External Browser</option>
+                    <option value="mcp">Snowflake MCP</option>
+                  </select>
+
+                  <label class="label" for="accountInput">Account</label>
+                  <input id="accountInput" placeholder="Account identifier" />
+
+                  <label class="label" for="usernameInput">Username</label>
+                  <input id="usernameInput" placeholder="Username" />
+
+                  <label class="label" for="warehouseInput">Warehouse</label>
+                  <input id="warehouseInput" placeholder="Warehouse" />
+
+                  <label class="label" for="databaseInput">Database</label>
+                  <input id="databaseInput" placeholder="Database" />
+
+                  <button id="testConnectionBtn">Test Connection</button>
+                </section>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="llmTab" role="tabpanel">
+              <div class="agent-body">
+                <section class="section config-form">
+                  <label class="label" for="llmProviderSelect">LLM Provider</label>
+                  <select id="llmProviderSelect">
+                    <option value="azure-openai">Azure OpenAI</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="ollama">Local LLM (Ollama)</option>
+                    <option value="copilot">GitHub Copilot</option>
+                  </select>
+
+                  <label class="label" for="llmModelInput">Model</label>
+                  <input id="llmModelInput" value="gpt-4o-mini" />
+
+                  <label class="label" for="llmApiKeyInput">API Key</label>
+                  <input id="llmApiKeyInput" type="password" placeholder="Optional for local or Copilot" />
+
+                  <button id="connectCopilotBtn">Connect GitHub Copilot</button>
+                </section>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      const vscode = acquireVsCodeApi();
+      const elements = {
+        objectiveInput: document.getElementById('objectiveInput'),
+        planList: document.getElementById('planList'),
+        planSummaryText: document.getElementById('planSummaryText'),
+        planCount: document.getElementById('planCount'),
+        chatBox: document.getElementById('chatBox'),
+        chatInput: document.getElementById('chatInput'),
+        connectionStatus: document.getElementById('connectionStatus'),
+        providerLabel: document.getElementById('providerLabel'),
+        contextSection: document.getElementById('contextSection'),
+        metadataTree: document.getElementById('metadataTree'),
+        metadataEmptyState: document.getElementById('metadataEmptyState'),
+        providerSelect: document.getElementById('providerSelect'),
+        authModeSelect: document.getElementById('authModeSelect'),
+        accountInput: document.getElementById('accountInput'),
+        usernameInput: document.getElementById('usernameInput'),
+        warehouseInput: document.getElementById('warehouseInput'),
+        databaseInput: document.getElementById('databaseInput'),
+        llmProviderSelect: document.getElementById('llmProviderSelect'),
+        llmModelInput: document.getElementById('llmModelInput'),
+        llmApiKeyInput: document.getElementById('llmApiKeyInput'),
+        testConnectionBtn: document.getElementById('testConnectionBtn'),
+        connectCopilotBtn: document.getElementById('connectCopilotBtn'),
+        contextWindow: document.getElementById('contextWindow'),
+        tokensSession: document.getElementById('tokensSession'),
+        tokensPlan: document.getElementById('tokensPlan'),
+        tabButtons: Array.from(document.querySelectorAll('.tab-btn')),
+        workspaceTab: document.getElementById('workspaceTab'),
+        integrationTab: document.getElementById('integrationTab'),
+        llmTab: document.getElementById('llmTab')
+      };
+
+      let currentSettings = {
+        defaultProvider: 'snowflake',
+        defaultSnowflakeAuthMode: 'key-pair',
+        defaultSnowflakeAccount: 'my_account',
+        defaultSnowflakeUsername: 'data_agent_user',
+        defaultSnowflakeWarehouse: 'WH_XS',
+        defaultSnowflakeDatabase: 'RAW_DB',
+        defaultSnowflakeSchema: 'PUBLIC',
+        defaultSnowflakeRole: 'SYSADMIN'
+      };
+
+      function titleCase(value) {
+        return String(value || '').replace(/[-_]+/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
+      }
+
+      function setActiveTab(tabName) {
+        elements.tabButtons.forEach((button) => {
+          const isActive = button.dataset.tab === tabName;
+          button.classList.toggle('active', isActive);
+          button.setAttribute('aria-selected', String(isActive));
+        });
+
+        const tabPanels = [
+          { name: 'workspace', element: elements.workspaceTab },
+          { name: 'integration', element: elements.integrationTab },
+          { name: 'llm', element: elements.llmTab }
+        ];
+
+        tabPanels.forEach(({ name, element }) => {
+          if (element) {
+            element.classList.toggle('active', name === tabName);
+          }
+        });
+      }
+
+      function updateConnectionStatus() {
+        const provider = (currentSettings.defaultProvider || 'snowflake');
+        const authMode = currentSettings.defaultSnowflakeAuthMode || 'key-pair';
+        const providerName = titleCase(provider);
+        const hasValidConnection = Boolean(
+          provider && (
+            currentSettings.defaultSnowflakeAccount ||
+            currentSettings.defaultSnowflakeDatabase ||
+            currentSettings.defaultSnowflakeWarehouse ||
+            currentSettings.defaultSnowflakeUsername
+          )
+        );
+
+        elements.connectionStatus.innerHTML = '<span class="dot"></span> ' + (hasValidConnection ? `${providerName} connected` : `${providerName} disconnected`);
+        elements.providerLabel.textContent = providerName;
+        elements.contextWindow.textContent = 'Context 128k';
+
+        if (elements.metadataEmptyState) {
+          elements.metadataEmptyState.classList.toggle('hidden', hasValidConnection);
+        }
+        if (elements.metadataTree) {
+          elements.metadataTree.classList.toggle('hidden', !hasValidConnection);
+        }
+        if (elements.contextSection) {
+          elements.contextSection.open = hasValidConnection;
+        }
+
+        if (elements.providerSelect) {
+          elements.providerSelect.value = provider;
+        }
+        if (elements.authModeSelect) {
+          elements.authModeSelect.value = authMode;
+        }
+        if (elements.accountInput) {
+          elements.accountInput.value = currentSettings.defaultSnowflakeAccount || '';
+        }
+        if (elements.usernameInput) {
+          elements.usernameInput.value = currentSettings.defaultSnowflakeUsername || '';
+        }
+        if (elements.warehouseInput) {
+          elements.warehouseInput.value = currentSettings.defaultSnowflakeWarehouse || '';
+        }
+        if (elements.databaseInput) {
+          elements.databaseInput.value = currentSettings.defaultSnowflakeDatabase || '';
+        }
+        if (elements.llmProviderSelect) {
+          const llmProvider = currentSettings.activeLlmProvider || 'copilot';
+          elements.llmProviderSelect.value = llmProvider;
+        }
+        if (elements.llmModelInput) {
+          elements.llmModelInput.value = currentSettings.activeLlmModel || 'gpt-4o-mini';
+        }
+      }
+
+      function makeTreeNode(name, children, options = {}) {
+        const node = document.createElement('div');
+        node.className = 'tree-node';
+
+        const labelRow = document.createElement('div');
+        labelRow.className = 'tree-node-label';
+        const toggle = document.createElement('span');
+        toggle.className = 'tree-toggle';
+        toggle.textContent = (children && children.length > 0) ? '?' : '�';
+
+        const label = document.createElement('span');
+        label.textContent = name;
+        labelRow.appendChild(toggle);
+        labelRow.appendChild(label);
+
+        node.appendChild(labelRow);
+
+        if (children && children.length > 0) {
+          const childContainer = document.createElement('div');
+          childContainer.className = 'tree-children';
+          for (const child of children) {
+            const nested = makeTreeNode(child.name, child.children || [], child.options || {});
+            childContainer.appendChild(nested);
+          }
+          node.appendChild(childContainer);
+        }
+
+        if (options.clickable) {
+          labelRow.style.cursor = 'pointer';
+          labelRow.addEventListener('click', () => {
+            const childContainer = node.querySelector('.tree-children');
+            if (childContainer) {
+              childContainer.classList.toggle('collapsed');
+              toggle.textContent = childContainer.classList.contains('collapsed') ? '?' : '?';
+            }
+          });
+        }
+
+        return node;
+      }
+
+      function buildMetadataTree() {
+        const provider = (currentSettings.defaultProvider || 'snowflake');
+        const hasValidConnection = Boolean(
+          provider && (
+            currentSettings.defaultSnowflakeAccount ||
+            currentSettings.defaultSnowflakeDatabase ||
+            currentSettings.defaultSnowflakeWarehouse ||
+            currentSettings.defaultSnowflakeUsername
+          )
+        );
+
+        if (!hasValidConnection) {
+          elements.metadataTree.innerHTML = '';
+          return;
+        }
+
+        const metadataMap = {
+          snowflake: [
+            { name: 'Databases', children: [
+                { name: 'RAW_DB', children: [
+                  { name: 'Schemas', children: [
+                    { name: 'PUBLIC', children: [
+                      { name: 'Tables', children: [
+                        { name: 'SALES_RAW', children: [] },
+                        { name: 'CUSTOMERS_RAW', children: [] },
+                        { name: 'ORDERS_RAW', children: [] }
+                      ] },
+                      { name: 'Views', children: [
+                        { name: 'V_SALES_DAILY', children: [] }
+                      ] }
+                    ] }
+                  ] }
+                ] }
+              ] },
+            { name: 'Semantic Objects', children: [
+                { name: 'customer_dimension', children: [] },
+                { name: 'sales_facts', children: [] }
+              ] }
+          ],
+          databricks: [
+            { name: 'Catalogs', children: [
+              { name: 'main', children: [
+                { name: 'Schemas', children: [
+                  { name: 'analytics', children: [
+                    { name: 'Tables', children: [
+                      { name: 'orders', children: [] }
+                    ] }
+                  ] }
+                ] }
+              ] }
+            ] }
+          ],
+          bigquery: [
+            { name: 'Projects', children: [
+              { name: 'analytics-prod', children: [
+                { name: 'Datasets', children: [
+                  { name: 'sales', children: [
+                    { name: 'Tables', children: [
+                      { name: 'sales_fact', children: [] }
+                    ] }
+                  ] }
+                ] }
+              ] }
+            ] }
+          ],
+          redshift: [
+            { name: 'Databases', children: [
+              { name: 'analytics', children: [
+                { name: 'Schemas', children: [
+                  { name: 'public', children: [
+                    { name: 'Tables', children: [
+                      { name: 'events', children: [] }
+                    ] }
+                  ] }
+                ] }
+              ] }
+            ] }
+          ],
+          synapse: [
+            { name: 'Serverless SQL Pool', children: [
+              { name: 'schemas', children: [
+                { name: 'dbo', children: [
+                  { name: 'Tables', children: [
+                    { name: 'fact_sales', children: [] }
+                  ] }
+                ] }
+              ] }
+            ] }
+          ],
+          other: [
+            { name: 'Custom Provider', children: [
+              { name: 'Objects', children: [
+                { name: 'Example Table', children: [] }
+              ] }
+            ] }
+          ]
+        };
+
+        const treeData = metadataMap[provider] || metadataMap.snowflake;
+        elements.metadataTree.innerHTML = '';
+        treeData.forEach((item) => {
+          const node = makeTreeNode(item.name, item.children || [], { clickable: true });
+          elements.metadataTree.appendChild(node);
+        });
+      }
+
+      function renderPlan(plan) {
+        const items = Array.isArray(plan) ? plan : [];
+        const count = items.length;
+        elements.planCount.textContent = `${count} step${count === 1 ? '' : 's'}`;
+        elements.planSummaryText.textContent = count > 0 ? 'Execution Plan' : 'No plan generated yet';
+        elements.planList.innerHTML = '';
+
+        if (items.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'muted';
+          empty.textContent = 'No execution plan available yet.';
+          elements.planList.appendChild(empty);
+          return;
+        }
+
+        items.forEach((step) => {
+          const row = document.createElement('div');
+          row.className = `step-item status-${step.status || 'pending'}`;
+          const left = document.createElement('div');
+          left.textContent = `${step.id}: ${step.taskDescription || 'No description'}`;
+          const badge = document.createElement('span');
+          badge.className = 'step-status';
+          badge.textContent = step.status || 'Pending';
+          row.appendChild(left);
+          row.appendChild(badge);
+          elements.planList.appendChild(row);
+        });
+      }
+
+      function appendChatMessage(role, text) {
+        const message = document.createElement('div');
+        message.className = `message ${role}`;
+        message.textContent = text;
+        elements.chatBox.appendChild(message);
+        elements.chatBox.scrollTop = elements.chatBox.scrollHeight;
+      }
+
+      function populateSettings(settings) {
+        currentSettings = {
+          ...currentSettings,
+          ...(settings || {})
+        };
+
+        updateConnectionStatus();
+        buildMetadataTree();
+      }
+
+      elements.providerSelect.addEventListener('change', (event) => {
+        currentSettings.defaultProvider = event.target.value;
+        updateConnectionStatus();
+        buildMetadataTree();
+      });
+
+      elements.authModeSelect.addEventListener('change', (event) => {
+        currentSettings.defaultSnowflakeAuthMode = event.target.value;
+        updateConnectionStatus();
+      });
+
+      elements.llmProviderSelect.addEventListener('change', (event) => {
+        currentSettings.activeLlmProvider = event.target.value;
+      });
+
+      elements.llmModelInput.addEventListener('input', (event) => {
+        currentSettings.activeLlmModel = event.target.value;
+      });
+
+      elements.testConnectionBtn.addEventListener('click', () => {
+        appendChatMessage('ai', 'Testing the selected provider connection and validating metadata access.');
+      });
+
+      elements.connectCopilotBtn.addEventListener('click', () => {
+        appendChatMessage('ai', 'GitHub Copilot linking flow is ready. Use the extension settings to complete onboarding when available.');
+      });
+
+      elements.tabButtons.forEach((button) => {
+        button.addEventListener('click', () => setActiveTab(button.dataset.tab));
+      });
+
+      document.getElementById('generatePlanBtn').addEventListener('click', () => {
+        const objective = elements.objectiveInput.value.trim();
+        if (!objective) {
+          appendChatMessage('ai', 'A clear objective is required before generating a plan.');
+          return;
+        }
+        vscode.postMessage({ type: 'generatePlan', objective, schemaContext: '' });
+      });
+
+      document.getElementById('executePlanBtn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'executePlan' });
+      });
+
+      document.getElementById('pausePlanBtn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'pausePlan' });
+      });
+
+      document.getElementById('resetPlanBtn').addEventListener('click', () => {
+        elements.objectiveInput.value = '';
+        elements.chatInput.value = '';
+        vscode.postMessage({ type: 'resetPlan' });
+        renderPlan([]);
+      });
+
+      document.getElementById('sendChatBtn').addEventListener('click', () => {
+        const value = elements.chatInput.value.trim();
+        if (!value) return;
+        appendChatMessage('user', value);
+        const response = `Updated plan context using: "${value}". I can incorporate the requested refinement into the current workflow.`;
+        setTimeout(() => appendChatMessage('ai', response), 150);
+        elements.chatInput.value = '';
+      });
+
+      document.getElementById('insertFileBtn').addEventListener('click', () => {
+        appendChatMessage('ai', 'Refinement prepared for insertion into the active file context.');
+      });
+
+      document.getElementById('updatePlanBtn').addEventListener('click', () => {
+        appendChatMessage('ai', 'Plan update requested and queued against the current execution state.');
+      });
+
+      document.getElementById('reExecuteBtn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'executePlan' });
+      });
+
+      document.getElementById('stopConnectionBtn').addEventListener('click', () => {
+        currentSettings.defaultProvider = 'snowflake';
+        currentSettings.defaultSnowflakeAuthMode = 'key-pair';
+        updateConnectionStatus();
+        appendChatMessage('ai', 'Connection stopped. Reconnect from the integrations configuration to resume metadata grounding.');
+      });
+
+      window.addEventListener('message', (event) => {
+        const message = event.data;
+        if (!message || !message.type) return;
+
+        if (message.type === 'settingsLoaded') {
+          populateSettings(message);
+          return;
+        }
+
+        if (message.type === 'stateUpdate') {
+          if (message.state && message.state.steps) {
+            renderPlan(message.state.steps);
+          }
+          return;
+        }
+
+        if (message.type === 'planUpdated') {
+          renderPlan(message.plan || []);
+          return;
+        }
+
+        if (message.type === 'logEntry') {
+          appendChatMessage('ai', message.message || '');
+          return;
+        }
+
+        if (message.type === 'error') {
+          appendChatMessage('ai', message.message || 'An error occurred.');
+        }
+      });
+
+      setActiveTab('workspace');
+      updateConnectionStatus();
+      buildMetadataTree();
+      renderPlan([]);
+    </script>
+  </body>
+</html>
