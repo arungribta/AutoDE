@@ -82,12 +82,35 @@ Commands (run from repository root):
 
 ---
 
+## Context Layer Engine (implemented)
+
+A production-ready Context Layer Engine has been added under `src/context/` with a focus on non-blocking, enterprise-grade operations. Key components implemented:
+
+- `src/context/types.ts` — strict TypeScript type definitions for nodes, edges, retrieval options, and diagnostics.
+- `src/context/GraphManager.ts` — a thread-safe in-memory graph manager that provides:
+  - fast lookup indexes for FQN, labels, and node types
+  - neighborhood traversal with decay-based relevance scoring (seeded BFS)
+  - snapshot serialization for worker transfer
+  - disposable lifecycle (implements `vscode.Disposable` semantics)
+
+The Context Layer is designed to be used with worker-thread-based engines (vectorization, hybrid retrieval) and to persist state atomically into the workspace `.ai-context/` directory.
+
+## Architecture Diagram
+
+A draw.io diagram depicting the Context Layer architecture and integration with the extension host and webview is available at `media/architecture.drawio`.
+
+## Changes since last update
+
+- Added the Context Layer types and GraphManager (see `src/context/`).
+- Updated the webview UX and context workflow.
+- README and architecture diagram added to explain the high-level design and operational constraints.
+
 ## Next steps (planned)
 
-- Implement the Context Layer module (metadata API) and wire it into the Snowflake adapter so the webview can fetch live provider metadata.
-- Add unit tests for the context layer and plan validation.
-- Implement provider adapters for Databricks, BigQuery, Redshift, and Synapse.
-- Enhance the plan/execution engine with versioned plans and improved logs.
+- Wire `GraphManager` into a Worker Thread implementation (vector engine + retriever) and implement `src/context/workers/*` for embedding and indexing.
+- Implement `ContextRetriever` with token-aware pruning and `js-tiktoken` integration for prompt budget enforcement.
+- Create `src/dqm/BaseAdapter.ts` and add a Snowflake concrete adapter implementing atomic persistence into `.ai-context/`.
+- Add unit and integration tests validating atomic writes, worker offloading, and token-precision behavior.
 
 ---
 
