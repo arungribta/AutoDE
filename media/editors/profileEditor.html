@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+:root { color-scheme: light dark; }
+body { background: var(--vscode-editor-background, #1f1f1f); color: var(--vscode-editor-foreground, #cccccc); font-family: var(--vscode-font-family, "Segoe UI", sans-serif); font-size: 13px; padding: 16px; line-height: 1.6; margin: 0; }
+.header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.12)); margin-bottom: 16px; }
+.header h1 { font-size: 16px; font-weight: 600; margin: 0; }
+.header .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: rgba(14,99,156,0.15); color: #58a6ff; }
+.content { white-space: pre-wrap; word-break: break-word; }
+.content h1, .content h2, .content h3 { color: var(--vscode-foreground, #cccccc); margin-top: 16px; }
+.content table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.content th { background: rgba(255,255,255,0.06); padding: 6px 10px; text-align: left; font-weight: 600; border: 1px solid rgba(255,255,255,0.1); }
+.content td { padding: 4px 10px; border: 1px solid rgba(255,255,255,0.06); }
+.content code { background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; font-family: var(--vscode-editor-font-family, "Consolas", monospace); }
+.content pre { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 12px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📈 Data Profile: {{FILENAME}}</h1>
+  <span class="badge">AutoDE Editor</span>
+</div>
+<div class="content" id="content"></div>
+<script>
+(function() {
+  var content = `{{CONTENT}}`;
+  var el = document.getElementById('content');
+  // Simple markdown rendering
+  var html = content
+    .replace(/### (.+)/g, '<h3>$1</h3>')
+    .replace(/## (.+)/g, '<h2>$1</h2>')
+    .replace(/# (.+)/g, '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  el.innerHTML = '<p>' + html + '</p>';
+})();
+</script>
+</body>
+</html>

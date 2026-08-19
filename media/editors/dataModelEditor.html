@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+:root { color-scheme: light dark; }
+body { background: var(--vscode-editor-background, #1f1f1f); color: var(--vscode-editor-foreground, #cccccc); font-family: var(--vscode-editor-font-family, "Consolas", monospace); font-size: 13px; padding: 16px; line-height: 1.6; margin: 0; }
+.header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.12)); margin-bottom: 16px; }
+.header h1 { font-size: 16px; font-weight: 600; margin: 0; color: var(--vscode-foreground, #cccccc); }
+.header .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: rgba(14,99,156,0.15); color: #58a6ff; }
+pre { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+.sql-keyword { color: #569cd6; }
+.sql-string { color: #ce9178; }
+.sql-comment { color: #6a9955; }
+.sql-table { color: #4ec9b0; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📐 Data Model: {{FILENAME}}</h1>
+  <span class="badge">AutoDE Editor</span>
+</div>
+<pre id="content"></pre>
+<script>
+(function() {
+  var content = `{{CONTENT}}`;
+  var el = document.getElementById('content');
+  // Basic SQL syntax highlighting
+  var highlighted = content
+    .replace(/--.*$/gm, '<span class="sql-comment">$&</span>')
+    .replace(/\b(CREATE|TABLE|OR|REPLACE|VIEW|SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|ON|AS|AND|PRIMARY|KEY|REFERENCES|FOREIGN|NOT|NULL|DEFAULT|CURRENT_TIMESTAMP|INTEGER|STRING|DECIMAL|BOOLEAN|DATE|TIMESTAMP_NTZ|VARIANT|INSERT|INTO|VALUES|UPDATE|SET|DELETE|DROP|ALTER|ADD|CONSTRAINT|INDEX|UNIQUE|CHECK|CASCADE)\b/gi, '<span class="sql-keyword">$&</span>')
+    .replace(/'[^']*'/g, '<span class="sql-string">$&</span>');
+  el.innerHTML = highlighted;
+})();
+</script>
+</body>
+</html>

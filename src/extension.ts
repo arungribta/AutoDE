@@ -6,6 +6,12 @@ import { DataAgentHubWebviewProvider } from './core/webviewProvider';
 import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './dqm/ConnectionManager';
 import { ProjectManager } from './context/ProjectManager';
+import { DataModelEditorProvider } from './editors/DataModelEditorProvider';
+import { SttmEditorProvider } from './editors/SttmEditorProvider';
+import { GraphEditorProvider } from './editors/GraphEditorProvider';
+import { ProfileEditorProvider } from './editors/ProfileEditorProvider';
+import { DocEditorProvider } from './editors/DocEditorProvider';
+import { EDITOR_DATA_MODEL, EDITOR_STTM, EDITOR_GRAPH, EDITOR_PROFILE, EDITOR_DOC } from './core/extensionIdentity';
 
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
@@ -170,6 +176,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, sidebarProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.window.registerWebviewViewProvider(EXTENSION_PANEL_VIEW_ID, panelProvider, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.window.registerCustomEditorProvider(EDITOR_DATA_MODEL, new DataModelEditorProvider(context)),
+    vscode.window.registerCustomEditorProvider(EDITOR_STTM, new SttmEditorProvider(context)),
+    vscode.window.registerCustomEditorProvider(EDITOR_GRAPH, new GraphEditorProvider(context)),
+    vscode.window.registerCustomEditorProvider(EDITOR_PROFILE, new ProfileEditorProvider(context)),
+    vscode.window.registerCustomEditorProvider(EDITOR_DOC, new DocEditorProvider(context)),
     openSidebar, generatePlan, executePlan, resetSession,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
     testConnection, sourceAssessment, syncMetadata, reindex,

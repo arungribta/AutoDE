@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+:root { color-scheme: light dark; }
+body { background: var(--vscode-editor-background, #1f1f1f); color: var(--vscode-editor-foreground, #cccccc); font-family: var(--vscode-editor-font-family, "Consolas", monospace); font-size: 13px; padding: 16px; line-height: 1.6; margin: 0; }
+.header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.12)); margin-bottom: 16px; }
+.header h1 { font-size: 16px; font-weight: 600; margin: 0; }
+.header .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: rgba(14,99,156,0.15); color: #58a6ff; }
+pre { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+.yaml-key { color: #9cdcfe; }
+.yaml-value { color: #ce9178; }
+.yaml-comment { color: #6a9955; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🗺 STTM Mapping: {{FILENAME}}</h1>
+  <span class="badge">AutoDE Editor</span>
+</div>
+<pre id="content"></pre>
+<script>
+(function() {
+  var content = `{{CONTENT}}`;
+  var el = document.getElementById('content');
+  var highlighted = content
+    .replace(/#.*$/gm, '<span class="yaml-comment">$&</span>')
+    .replace(/^(\s*)(\w+):/gm, '$1<span class="yaml-key">$2</span>:')
+    .replace(/:\s+(.+)$/gm, ': <span class="yaml-value">$1</span>');
+  el.innerHTML = highlighted;
+})();
+</script>
+</body>
+</html>
