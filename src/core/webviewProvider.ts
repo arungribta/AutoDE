@@ -275,6 +275,20 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+        case 'updateTargetConfig': {
+          const targetConfig = message.targetConfig;
+          if (targetConfig && typeof targetConfig === 'object') {
+            this.postLog('Updating target environment configuration...');
+            try {
+              this.hub.setTargetEnvironment(targetConfig as import('./types').TargetEnvironment);
+              this.postLog('Target environment updated.');
+              this.postMessage('targetConfigUpdated', { success: true });
+            } catch (err) {
+              this.postLog(`Failed to update target config: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+          break;
+        }
         case 'settingsLoaded': {
           // Webview requests settings on initial load — re-send the current settings payload
           try {

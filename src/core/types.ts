@@ -4,6 +4,77 @@ export type SnowflakeAuthMode = 'username-password' | 'oauth' | 'key-pair' | 'ex
 export type AgentType = 'ingestionAgent' | 'sttmAgent' | 'architectureAgent' | 'snowflakeExecutor' | 'sourceAssessmentAgent';
 export type PlanStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type SessionStatus = 'idle' | 'planning' | 'ready' | 'running' | 'paused' | 'failed' | 'completed';
+export type EnvironmentProfile = 'development' | 'staging' | 'production';
+export type ModelingApproach = 'dimensional' | 'data-vault' | 'obt' | '3nf' | 'raw-pass-through';
+export type NamingConvention = 'snake_case' | 'camelCase' | 'PascalCase';
+export type TransformationTool = 'dbt' | 'sqlmesh' | 'custom-sql' | 'stored-procedures' | 'none';
+export type OrchestrationTool = 'airflow' | 'dagster' | 'prefect' | 'dbt-cloud' | 'manual' | 'none';
+export type OutputFormat = 'ddl' | 'yaml' | 'markdown' | 'python' | 'sql';
+
+// ── Target Environment ──
+
+export interface SnowflakeTargetConfig {
+  account: string;
+  database: string;
+  schema: string;
+  warehouse: string;
+  role: string;
+}
+
+export interface DatabricksTargetConfig {
+  workspaceUrl: string;
+  catalog: string;
+  schema: string;
+}
+
+export interface BigQueryTargetConfig {
+  projectId: string;
+  dataset: string;
+  region: string;
+}
+
+export type PlatformTargetConfig = SnowflakeTargetConfig | DatabricksTargetConfig | BigQueryTargetConfig;
+
+export interface TargetEnvironment {
+  platform: DataPlatformProvider;
+  environmentProfile: EnvironmentProfile;
+  modelingApproach: ModelingApproach;
+  namingConvention: NamingConvention;
+  transformationTool: TransformationTool;
+  orchestrationTool: OrchestrationTool;
+  outputFormats: OutputFormat[];
+  platformConfig: PlatformTargetConfig;
+}
+
+export interface TargetProfile {
+  name: string;
+  inherits?: string;
+  environment: TargetEnvironment;
+}
+
+export interface TargetConfigFile {
+  profiles: TargetProfile[];
+  activeProfile: string;
+}
+
+// ── Artifact Types ──
+
+export type ArtifactType = 'data_model' | 'sttm_mapping' | 'ddl_script' | 'pipeline_dag' | 'architecture_diagram' | 'data_dictionary' | 'sql_script';
+
+export interface GeneratedArtifact {
+  id: string;
+  type: ArtifactType;
+  title: string;
+  description: string;
+  content: string;
+  language: 'sql' | 'yaml' | 'markdown' | 'python' | 'json';
+  generatedBy: AgentType;
+  generatedAt: string;
+  approved: boolean;
+  filePath?: string;
+}
+
+// ── Core Settings ──
 
 export interface DataAgentHubSettings {
   extensionDisplayName: string;
@@ -42,23 +113,28 @@ export interface PlanStep {
 export interface PlanState {
   objective: string;
   schemaContext: string;
-  provider: DataPlatformProvider;
+  sourceProvider: DataPlatformProvider;
+  targetEnvironment?: TargetEnvironment;
   steps: PlanStep[];
   mode: 'plan' | 'execute';
   status: SessionStatus;
   runningStepId?: string;
   lastError?: string;
+  artifacts?: GeneratedArtifact[];
 }
 
 export interface AgentExecutionContext {
   objective: string;
   schemaContext?: string;
+  sourceProvider: DataPlatformProvider;
+  targetEnvironment?: TargetEnvironment;
   settings: DataAgentHubSettings;
   configManager: {
     getSecret: (key: string) => Promise<string | undefined>;
     getSettings: () => DataAgentHubSettings;
   };
   log: (message: string) => void;
+  addArtifact?: (artifact: GeneratedArtifact) => void;
 }
 
 export interface AgentExecutionResult {
@@ -66,6 +142,7 @@ export interface AgentExecutionResult {
   message: string;
   details?: Record<string, unknown>;
   error?: string;
+  artifacts?: GeneratedArtifact[];
 }
 
 export interface WebviewSettingsMessage {

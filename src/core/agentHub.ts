@@ -11,12 +11,14 @@ import {
   PlanState,
   PlanStep,
   PlanStatus,
-  SessionStatus
+  SessionStatus,
+  TargetEnvironment,
+  GeneratedArtifact
 } from './types';
 
 const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent'];
 
-const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string }>> = {
+const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string; artifacts?: GeneratedArtifact[] }>> = {
   ingestionAgent: executeIngestionAgent,
   sttmAgent: executeSttmAgent,
   architectureAgent: executeArchitectureAgent,
@@ -28,10 +30,11 @@ export class DataAgentHubHub {
   private readonly state: PlanState = {
     objective: '',
     schemaContext: '',
-    provider: 'snowflake',
+    sourceProvider: 'snowflake',
     steps: [],
     mode: 'plan',
-    status: 'idle'
+    status: 'idle',
+    artifacts: []
   };
 
   private executionPaused = false;
@@ -51,9 +54,100 @@ export class DataAgentHubHub {
   public getPlan(): PlanState {
     return {
       ...this.state,
-      steps: this.state.steps.map((step) => ({ ...step }))
+      steps: this.state.steps.map((step) => ({ ...step })),
+      artifacts: this.state.artifacts ? [...this.state.artifacts] : undefined
     };
   }
+
+  // ── Target Environment Management ──
+
+  public setTargetEnvironment(env: TargetEnvironment): void {
+    this.state.targetEnvironment = env;
+    this.log(`Target environment set: ${env.platform} (${env.environmentProfile}) — ${env.modelingApproach} via ${env.transformationTool}`);
+    this.emitState();
+  }
+
+  public getTargetEnvironment(): TargetEnvironment | undefined {
+    return this.state.targetEnvironment;
+  }
+
+  private async extractTargetFromMessage(message: string): Promise<Partial<TargetEnvironment>> {
+    const prompt = `Extract the target data platform and toolchain from this message.
+Return ONLY valid JSON with these fields (omit unknown fields, use null for unknown):
+{
+  "platform": "snowflake" | "databricks" | "bigquery" | "redshift" | "synapse" | null,
+  "database": "string or null",
+  "schema": "string or null",
+  "transformationTool": "dbt" | "sqlmesh" | "custom-sql" | "stored-procedures" | "none" | null,
+  "orchestrationTool": "airflow" | "dagster" | "prefect" | "dbt-cloud" | "manual" | "none" | null,
+  "modelingApproach": "dimensional" | "data-vault" | "obt" | "3nf" | "raw-pass-through" | null,
+  "namingConvention": "snake_case" | "camelCase" | "PascalCase" | null
+}
+
+Message: ${message}`;
+
+    try {
+      const response = await this.callConfiguredLlm(prompt);
+      const parsed = JSON.parse(response);
+      return parsed as Partial<TargetEnvironment>;
+    } catch {
+      this.log('Could not extract target environment from message. User will be prompted for details.');
+      return {};
+    }
+  }
+
+  private buildTargetFromPartial(partial: Partial<TargetEnvironment>, settings: ReturnType<ConfigurationManager['getSettings']>): TargetEnvironment {
+    const platform = partial.platform ?? settings.defaultProvider ?? 'snowflake';
+
+    // Build platform-specific config
+    let platformConfig: TargetEnvironment['platformConfig'];
+    switch (platform) {
+      case 'snowflake':
+        platformConfig = {
+          account: settings.defaultSnowflakeAccount || '',
+          database: (partial as Record<string, unknown>)['database'] as string || settings.defaultSnowflakeDatabase || 'CURATED_DB',
+          schema: (partial as Record<string, unknown>)['schema'] as string || settings.defaultSnowflakeSchema || 'ANALYTICS',
+          warehouse: settings.defaultSnowflakeWarehouse || 'WH_XS',
+          role: settings.defaultSnowflakeRole || 'SYSADMIN'
+        };
+        break;
+      case 'databricks':
+        platformConfig = {
+          workspaceUrl: '',
+          catalog: (partial as Record<string, unknown>)['database'] as string || 'main',
+          schema: (partial as Record<string, unknown>)['schema'] as string || 'default'
+        };
+        break;
+      case 'bigquery':
+        platformConfig = {
+          projectId: '',
+          dataset: (partial as Record<string, unknown>)['database'] as string || 'analytics',
+          region: 'us-central1'
+        };
+        break;
+      default:
+        platformConfig = {
+          account: '',
+          database: (partial as Record<string, unknown>)['database'] as string || 'CURATED_DB',
+          schema: (partial as Record<string, unknown>)['schema'] as string || 'ANALYTICS',
+          warehouse: '',
+          role: ''
+        };
+    }
+
+    return {
+      platform,
+      environmentProfile: 'development',
+      modelingApproach: partial.modelingApproach ?? 'dimensional',
+      namingConvention: partial.namingConvention ?? 'snake_case',
+      transformationTool: partial.transformationTool ?? 'dbt',
+      orchestrationTool: partial.orchestrationTool ?? 'airflow',
+      outputFormats: ['ddl', 'yaml', 'markdown'],
+      platformConfig
+    };
+  }
+
+  // ── Chat ──
 
   public async chat(message: string, schemaContext?: string): Promise<string> {
     const trimmed = message.trim();
@@ -65,9 +159,17 @@ export class DataAgentHubHub {
     const provider = settings.activeLlmProvider ?? 'copilot';
     this.log(`Sending chat to ${provider}...`);
 
-    const contextBlock = schemaContext && schemaContext.trim().length > 0
-      ? `\n\nRelevant database and business context:\n${schemaContext}`
-      : '';
+    // Try to extract target environment from the message
+    if (!this.state.targetEnvironment) {
+      const partial = await this.extractTargetFromMessage(trimmed);
+      const hasKeyFields = partial.platform || partial.transformationTool || partial.modelingApproach;
+      if (hasKeyFields) {
+        const target = this.buildTargetFromPartial(partial, settings);
+        this.setTargetEnvironment(target);
+      }
+    }
+
+    const contextBlock = this.buildChatContextBlock(schemaContext);
 
     const prompt = `You are AutoDE, an expert data engineering assistant running inside VS Code. You help users with data engineering tasks including pipeline design, SQL authoring, schema analysis, data modeling, ETL/ELT workflows, and data platform operations.
 
@@ -87,6 +189,35 @@ User message: ${trimmed}`;
     }
   }
 
+  private buildChatContextBlock(schemaContext?: string): string {
+    const parts: string[] = [];
+
+    if (schemaContext && schemaContext.trim().length > 0) {
+      parts.push(`## Source Environment\n${schemaContext}`);
+    }
+
+    if (this.state.targetEnvironment) {
+      const t = this.state.targetEnvironment;
+      const pc = t.platformConfig as unknown as Record<string, string>;
+      const db = pc['database'] || pc['catalog'] || pc['dataset'] || '';
+      const schema = pc['schema'] || pc['dataset'] || '';
+      parts.push(
+        `## Target Environment\n` +
+        `- Platform: ${t.platform} (${db}.${schema})\n` +
+        `- Profile: ${t.environmentProfile}\n` +
+        `- Modeling: ${t.modelingApproach}\n` +
+        `- Transformation: ${t.transformationTool}\n` +
+        `- Orchestration: ${t.orchestrationTool}\n` +
+        `- Naming: ${t.namingConvention}\n` +
+        `- Outputs: ${t.outputFormats.join(', ')}`
+      );
+    }
+
+    return parts.length > 0 ? '\n\n' + parts.join('\n\n') : '';
+  }
+
+  // ── Plan Generation ──
+
   public async generatePlan(objective: string, schemaContext?: string): Promise<PlanStep[]> {
     const trimmedObjective = objective.trim();
     if (!trimmedObjective) {
@@ -96,12 +227,22 @@ User message: ${trimmed}`;
     const settings = this.configManager.getSettings();
     this.state.objective = trimmedObjective;
     this.state.schemaContext = schemaContext ?? '';
-    this.state.provider = settings.defaultProvider ?? 'snowflake';
+    this.state.sourceProvider = settings.defaultProvider ?? 'snowflake';
     this.state.mode = 'plan';
     this.state.status = 'planning';
     this.state.lastError = undefined;
     this.emitState();
-    this.log(`Generating execution plan via configured LLM provider for ${this.state.provider}.`);
+    this.log(`Generating execution plan via configured LLM provider for ${this.state.sourceProvider}.`);
+
+    // Try to extract target if not already set
+    if (!this.state.targetEnvironment) {
+      const partial = await this.extractTargetFromMessage(trimmedObjective);
+      const hasKeyFields = partial.platform || partial.transformationTool || partial.modelingApproach;
+      if (hasKeyFields) {
+        const target = this.buildTargetFromPartial(partial, settings);
+        this.setTargetEnvironment(target);
+      }
+    }
 
     try {
       const prompt = this.buildPlanPrompt(trimmedObjective, this.state.schemaContext);
@@ -123,6 +264,8 @@ User message: ${trimmed}`;
     }
   }
 
+  // ── Plan Execution ──
+
   public async executePlan(): Promise<void> {
     this.executionPaused = false;
 
@@ -137,7 +280,6 @@ User message: ${trimmed}`;
     this.emitState();
 
     const completedIds = new Set<string>();
-    const allById = new Map(this.state.steps.map((step) => [step.id, step]));
 
     for (const step of this.state.steps) {
       step.status = 'pending';
@@ -148,7 +290,6 @@ User message: ${trimmed}`;
         if (step.status === 'completed' || step.status === 'failed') {
           return false;
         }
-
         const dependencies = step.dependsOn ?? [];
         return dependencies.length === 0 || dependencies.every((dependencyId) => completedIds.has(dependencyId));
       });
@@ -190,12 +331,19 @@ User message: ${trimmed}`;
         const context: AgentExecutionContext = {
           objective: this.state.objective,
           schemaContext: this.state.schemaContext,
+          sourceProvider: this.state.sourceProvider,
+          targetEnvironment: this.state.targetEnvironment,
           settings: this.configManager.getSettings(),
           configManager: {
             getSecret: async (secretKey: string) => this.configManager.getSecret(secretKey),
             getSettings: () => this.configManager.getSettings()
           },
-          log: (message: string) => this.log(message)
+          log: (message: string) => this.log(message),
+          addArtifact: (artifact: GeneratedArtifact) => {
+            if (!this.state.artifacts) this.state.artifacts = [];
+            this.state.artifacts.push(artifact);
+            this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
+          }
         };
 
         const executor = AGENT_EXECUTORS[readyStep.assignedAgent];
@@ -210,6 +358,15 @@ User message: ${trimmed}`;
           this.emitState();
           await this.handleFailure(readyStep, this.state.lastError);
           return;
+        }
+
+        // Collect artifacts from agent result
+        if (result.artifacts && result.artifacts.length > 0) {
+          if (!this.state.artifacts) this.state.artifacts = [];
+          for (const artifact of result.artifacts) {
+            this.state.artifacts.push(artifact);
+            this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
+          }
         }
 
         readyStep.status = 'completed';
@@ -247,23 +404,45 @@ User message: ${trimmed}`;
   public async resetPlan(): Promise<void> {
     this.state.objective = '';
     this.state.schemaContext = '';
-    this.state.provider = this.configManager.getSettings().defaultProvider ?? 'snowflake';
+    this.state.sourceProvider = this.configManager.getSettings().defaultProvider ?? 'snowflake';
+    this.state.targetEnvironment = undefined;
     this.state.steps = [];
     this.state.mode = 'plan';
     this.state.status = 'idle';
     this.state.runningStepId = undefined;
     this.state.lastError = undefined;
+    this.state.artifacts = [];
     this.executionPaused = false;
     this.log('Hub state reset.');
     this.emitState();
   }
 
-  private buildPlanPrompt(objective: string, schemaContext: string): string {
-    const baseContext = schemaContext && schemaContext.trim().length > 0 ? `\n\nSchema and metadata context:\n${schemaContext}` : '';
-    const providerName = this.state.provider;
+  // ── Prompt Building ──
 
-    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
+  private buildPlanPrompt(objective: string, schemaContext: string): string {
+    const baseContext = schemaContext && schemaContext.trim().length > 0 ? `\n\n## Source Environment\n${schemaContext}` : '';
+    const providerName = this.state.sourceProvider;
+
+    let targetBlock = '';
+    if (this.state.targetEnvironment) {
+      const t = this.state.targetEnvironment;
+      const pc = t.platformConfig as unknown as Record<string, string>;
+      const db = pc['database'] || pc['catalog'] || pc['dataset'] || '';
+      const schema = pc['schema'] || pc['dataset'] || '';
+      targetBlock = `\n\n## Target Environment
+- Platform: ${t.platform} (${db}.${schema})
+- Profile: ${t.environmentProfile}
+- Modeling: ${t.modelingApproach}
+- Transformation: ${t.transformationTool}
+- Orchestration: ${t.orchestrationTool}
+- Naming: ${t.namingConvention}
+- Outputs: ${t.outputFormats.join(', ')}`;
+    }
+
+    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
   }
+
+  // ── LLM Calls ──
 
   private async callConfiguredLlm(prompt: string): Promise<string> {
     const settings = this.configManager.getSettings();
@@ -271,7 +450,6 @@ User message: ${trimmed}`;
     const model = settings.activeLlmModel ?? 'gpt-4o-mini';
 
     try {
-      // If Copilot is selected, route through the official VS Code Language Model API.
       if (provider === 'copilot') {
         try {
           if (!settings.copilotProgrammaticConsent) {
@@ -332,14 +510,8 @@ User message: ${trimmed}`;
         model,
         temperature: 0,
         messages: [
-          {
-            role: 'system',
-            content: 'You are a strict data engineering planner. Respond with a JSON array only.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
+          { role: 'system', content: 'You are a strict data engineering planner. Respond with a JSON array only.' },
+          { role: 'user', content: prompt }
         ]
       })
     });
@@ -349,14 +521,7 @@ User message: ${trimmed}`;
       throw new Error(`OpenAI request failed: ${response.status} ${text}`);
     }
 
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-      }>;
-    };
-
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = data.choices?.[0]?.message?.content ?? '';
     return this.extractJsonText(content);
   }
@@ -387,10 +552,7 @@ User message: ${trimmed}`;
       throw new Error(`Anthropic request failed: ${response.status} ${text}`);
     }
 
-    const data = (await response.json()) as {
-      content?: Array<{ type?: string; text?: string }>;
-    };
-
+    const data = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
     const text = data.content?.map((part) => (part.type === 'text' ? part.text ?? '' : '')).join('') ?? '';
     return this.extractJsonText(text);
   }
@@ -405,10 +567,7 @@ User message: ${trimmed}`;
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey
-      },
+      headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
       body: JSON.stringify({
         model,
         temperature: 0,
@@ -449,10 +608,7 @@ User message: ${trimmed}`;
       throw new Error(`Gemini request failed: ${response.status} ${text}`);
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
+    const data = (await response.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const content = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
     return this.extractJsonText(content);
   }
@@ -474,12 +630,7 @@ User message: ${trimmed}`;
       throw new Error(`Ollama request failed: ${response.status} ${text}`);
     }
 
-    const data = (await response.json()) as {
-      message?: {
-        content?: string;
-      };
-    };
-
+    const data = (await response.json()) as { message?: { content?: string } };
     const content = data.message?.content ?? '';
     return this.extractJsonText(content);
   }

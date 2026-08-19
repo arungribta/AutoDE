@@ -462,6 +462,86 @@ Uses a `Map<DataPlatformProvider, AdapterFactory>` for adapter registration.
 
 ---
 
+## 4.7 Target Environment Configuration (Phase 3b)
+
+### 4.7.1 Design Rationale
+
+Data engineering workflows are inherently source→target. The source is discovered via the adapter layer (Phase 3a), but the target stack — platform, modeling approach, transformation tool, orchestration tool — must be defined by the user and maintained as a stable internal structure that all sub-agents can reference.
+
+### 4.7.2 TargetEnvironment Type
+
+```typescript
+interface TargetEnvironment {
+  platform: DataPlatformProvider;
+  environmentProfile: 'development' | 'staging' | 'production';
+  modelingApproach: 'dimensional' | 'data-vault' | 'obt' | '3nf' | 'raw-pass-through';
+  namingConvention: 'snake_case' | 'camelCase' | 'PascalCase';
+  transformationTool: 'dbt' | 'sqlmesh' | 'custom-sql' | 'stored-procedures' | 'none';
+  orchestrationTool: 'airflow' | 'dagster' | 'prefect' | 'dbt-cloud' | 'manual' | 'none';
+  outputFormats: ('ddl' | 'yaml' | 'markdown' | 'python' | 'sql')[];
+  platformConfig: SnowflakeTargetConfig | DatabricksTargetConfig | BigQueryTargetConfig;
+}
+```
+
+### 4.7.3 Profile-Based Configuration
+
+Target environments support multiple profiles (dev/staging/prod) with inheritance:
+
+```yaml
+# .ai-context/target-environment.yaml
+profiles:
+  base:
+    platform: snowflake
+    modelingApproach: dimensional
+    transformationTool: dbt
+    orchestrationTool: airflow
+  development:
+    inherits: base
+    platformConfig:
+      database: DEV_DB
+      schema: DEV_ANALYTICS
+  production:
+    inherits: base
+    platformConfig:
+      database: PROD_DB
+      schema: ANALYTICS
+      warehouse: WH_L
+```
+
+### 4.7.4 Target Extraction
+
+The orchestrator uses a dedicated LLM call to extract target stack details from user messages. If critical fields are missing, it prompts the user for clarification. Once extracted, the target config is persisted to `.ai-context/target-environment.yaml` and injected into all sub-agent execution contexts.
+
+### 4.7.5 Target-Aware Prompt Assembly
+
+Plan prompts now separate source and target context:
+
+```
+## Source Environment
+Platform: Snowflake (RAW_DB.PUBLIC)
+Tables: orders, customers, products (15 total)
+
+## Target Environment
+Platform: Snowflake (CURATED_DB.ANALYTICS)
+Transformation: dbt (dimensional modeling)
+Orchestration: Airflow
+Naming: snake_case
+Output: DDL, YAML, Markdown
+```
+
+### 4.7.6 Files
+
+| File | Purpose |
+|------|---------|
+| `src/core/types.ts` | `TargetEnvironment`, `TargetProfile`, `TargetConfigFile`, `GeneratedArtifact` types |
+| `src/context/TargetConfigManager.ts` | Read/write/validate `target-environment.yaml` with profile inheritance |
+| `src/core/agentHub.ts` | `extractTargetFromMessage()`, `buildTargetFromPartial()`, target-aware prompt assembly |
+| `src/agents/build/IngestionPipelineAgent.ts` | Uses `targetEnvironment` for target-side DDL |
+| `src/agents/model/SttmMapperAgent.ts` | Uses `targetEnvironment` for mapping output |
+| `src/agents/validate/DocumentationAgent.ts` | Uses `targetEnvironment` for architecture docs |
+
+---
+
 ## 5. Agent Orchestration
 
 ### 5.1 Orchestrating Agent (DataAgentHubHub)

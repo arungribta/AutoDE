@@ -451,6 +451,34 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .palette-card-desc { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; }
 .palette-run-btn { width: 100%; }
 
+/* ── Artifact Cards (inline in chat) ── */
+.artifact-card {
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--surface-hover); margin-top: 6px; overflow: hidden;
+}
+.artifact-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px; border-bottom: 1px solid var(--border-subtle);
+  font-weight: 600; font-size: var(--font-size-sm); cursor: pointer; user-select: none;
+}
+.artifact-card-header:hover { background: var(--surface-active); }
+.artifact-card-body { padding: 0; display: none; }
+.artifact-card.expanded .artifact-card-body { display: block; }
+.artifact-card-body pre {
+  margin: 0; padding: 8px 10px; background: rgba(0,0,0,0.25);
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--vscode-editor-font-family, "Consolas", monospace);
+  font-size: var(--font-size-sm); line-height: 1.45; overflow-x: auto;
+  max-height: 300px; overflow-y: auto;
+}
+.artifact-card-body pre code { background: none; padding: 0; }
+.artifact-card-actions { display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; }
+.artifact-badge {
+  font-size: var(--font-size-sm); padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--accent-subtle); color: var(--accent); font-weight: 500;
+}
+.artifact-badge.approved { background: var(--success-subtle); color: var(--success); }
+
 /* Onboarding steps */
 .onboarding-step {
   display: flex; gap: 10px; padding: 10px; border: 1px solid var(--border-soft);
@@ -1162,6 +1190,41 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     html += '</div>';
     html += '<div class="ctx-token-bar"><div class="ctx-token-bar-fill" style="width:' + pct + '%"></div></div>';
     html += '</div></div>';
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    chatStream.appendChild(div.firstElementChild);
+    chatStream.scrollTop = chatStream.scrollHeight;
+  }
+
+  // ── Add artifact card ──
+  function addArtifactCard(artifact) {
+    if (welcomeBlock) welcomeBlock.style.display = 'none';
+    var typeIcons = {
+      'data_model': '📐',
+      'sttm_mapping': '🗺',
+      'ddl_script': '📝',
+      'pipeline_dag': '🔄',
+      'architecture_diagram': '📊',
+      'data_dictionary': '📋',
+      'sql_script': '💾'
+    };
+    var icon = typeIcons[artifact.type] || '📦';
+    var badgeClass = artifact.approved ? 'artifact-badge approved' : 'artifact-badge';
+    var badgeText = artifact.approved ? '✓ Approved' : 'Pending Review';
+
+    var html = '<div class="artifact-card" id="artifact-' + artifact.id + '">';
+    html += '<div class="artifact-card-header" onclick="this.parentElement.classList.toggle(\'expanded\')">';
+    html += '<span>' + icon + ' ' + escapeHtml(artifact.title) + '</span>';
+    html += '<span class="' + badgeClass + '">' + badgeText + '</span>';
+    html += '</div>';
+    html += '<div class="artifact-card-body">';
+    html += '<pre><code class="language-' + escapeHtml(artifact.language) + '">' + escapeHtml(artifact.content) + '</code></pre>';
+    html += '<div class="artifact-card-actions">';
+    html += '<button onclick="navigator.clipboard.writeText(\'' + artifact.content.replace(/'/g, "\\'").replace(/\n/g, '\\n') + '\')">📋 Copy</button>';
+    html += '<button onclick="this.closest(\'.artifact-card\').querySelector(\'.artifact-badge\').classList.toggle(\'approved\');this.closest(\'.artifact-card\').querySelector(\'.artifact-badge\').textContent=this.closest(\'.artifact-card\').querySelector(\'.artifact-badge\').classList.contains(\'approved\')?\'✓ Approved\':\'Pending Review\'">✅ Toggle Approval</button>';
+    html += '</div>';
+    html += '</div></div>';
+
     var div = document.createElement('div');
     div.innerHTML = html;
     chatStream.appendChild(div.firstElementChild);
