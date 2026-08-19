@@ -5,6 +5,8 @@ import { executeSttmAgent } from '../agents/model/SttmMapperAgent';
 import { executeArchitectureAgent } from '../agents/validate/DocumentationAgent';
 import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
 import { executeSourceAssessmentAgent } from '../agents/discover/SourceAssessmentAgent';
+import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
+import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
 import {
   AgentExecutionContext,
   AgentType,
@@ -16,14 +18,16 @@ import {
   GeneratedArtifact
 } from './types';
 
-const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent'];
+const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent', 'dataModelerAgent', 'transformScaffoldAgent'];
 
 const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string; artifacts?: GeneratedArtifact[] }>> = {
   ingestionAgent: executeIngestionAgent,
   sttmAgent: executeSttmAgent,
   architectureAgent: executeArchitectureAgent,
   snowflakeExecutor: executeSnowflakeAgent,
-  sourceAssessmentAgent: executeSourceAssessmentAgent
+  sourceAssessmentAgent: executeSourceAssessmentAgent,
+  dataModelerAgent: executeDataModelerAgent,
+  transformScaffoldAgent: executeTransformScaffoldAgent
 };
 
 export class DataAgentHubHub {
@@ -99,7 +103,6 @@ Message: ${message}`;
   private buildTargetFromPartial(partial: Partial<TargetEnvironment>, settings: ReturnType<ConfigurationManager['getSettings']>): TargetEnvironment {
     const platform = partial.platform ?? settings.defaultProvider ?? 'snowflake';
 
-    // Build platform-specific config
     let platformConfig: TargetEnvironment['platformConfig'];
     switch (platform) {
       case 'snowflake':
@@ -159,7 +162,6 @@ Message: ${message}`;
     const provider = settings.activeLlmProvider ?? 'copilot';
     this.log(`Sending chat to ${provider}...`);
 
-    // Try to extract target environment from the message
     if (!this.state.targetEnvironment) {
       const partial = await this.extractTargetFromMessage(trimmed);
       const hasKeyFields = partial.platform || partial.transformationTool || partial.modelingApproach;
@@ -234,7 +236,6 @@ User message: ${trimmed}`;
     this.emitState();
     this.log(`Generating execution plan via configured LLM provider for ${this.state.sourceProvider}.`);
 
-    // Try to extract target if not already set
     if (!this.state.targetEnvironment) {
       const partial = await this.extractTargetFromMessage(trimmedObjective);
       const hasKeyFields = partial.platform || partial.transformationTool || partial.modelingApproach;
@@ -360,7 +361,6 @@ User message: ${trimmed}`;
           return;
         }
 
-        // Collect artifacts from agent result
         if (result.artifacts && result.artifacts.length > 0) {
           if (!this.state.artifacts) this.state.artifacts = [];
           for (const artifact of result.artifacts) {
@@ -439,7 +439,7 @@ User message: ${trimmed}`;
 - Outputs: ${t.outputFormats.join(', ')}`;
     }
 
-    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
+    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent, dataModelerAgent, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
   }
 
   // ── LLM Calls ──

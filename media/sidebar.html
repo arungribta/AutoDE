@@ -864,13 +864,13 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
           <div class="palette-card-desc">Generate source-to-target mappings with column-level transformations. Use /plan to create a mapping workflow.</div>
           <button class="palette-run-btn">▶ Run</button>
         </div>
-        <div class="palette-card disabled" data-agent="dataModelerAgent">
+        <div class="palette-card" data-agent="dataModelerAgent">
           <div class="palette-card-header">
             <span class="palette-card-icon">🏗</span>
             <span class="palette-card-title">Data Modeler</span>
           </div>
-          <div class="palette-card-desc">Generate dimensional, Data Vault, or OBT models. (Coming in Phase 3b)</div>
-          <button class="palette-run-btn" disabled>▶ Run</button>
+          <div class="palette-card-desc">Generate dimensional, Data Vault, or OBT models based on your target environment configuration.</div>
+          <button class="palette-run-btn">▶ Run</button>
         </div>
       </div>
 
@@ -883,6 +883,14 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
             <span class="palette-card-title">Ingestion Pipeline</span>
           </div>
           <div class="palette-card-desc">Generate ingestion code (COPY, Python, Airbyte). Use /plan to create an ingestion workflow.</div>
+          <button class="palette-run-btn">▶ Run</button>
+        </div>
+        <div class="palette-card" data-agent="transformScaffoldAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">🏗</span>
+            <span class="palette-card-title">Transformation Scaffolder</span>
+          </div>
+          <div class="palette-card-desc">Generate dbt project scaffolding with models, tests, macros, and YAML configuration files.</div>
           <button class="palette-run-btn">▶ Run</button>
         </div>
         <div class="palette-card disabled" data-agent="ddlGeneratorAgent">
