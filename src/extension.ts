@@ -1,15 +1,17 @@
 import * as vscode from 'vscode';
-import { EXTENSION_ID, EXTENSION_VIEW_ID } from './core/extensionIdentity';
+import { EXTENSION_ID, EXTENSION_VIEW_ID, EXTENSION_PANEL_VIEW_ID } from './core/extensionIdentity';
 import { DataAgentHubHub } from './core/agentHub';
 import { ConfigurationManager } from './core/configManager';
 import { DataAgentHubWebviewProvider } from './core/webviewProvider';
+import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './dqm/ConnectionManager';
 import { ProjectManager } from './context/ProjectManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
   const hub = new DataAgentHubHub(configManager);
-  const provider = new DataAgentHubWebviewProvider(context, configManager, hub);
+  const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub);
+  const panelProvider = new DataAgentHubPanelProvider(context, hub);
 
   let copilotAdapter: any = undefined;
   let connectionManager: ConnectionManager | undefined;
@@ -20,9 +22,11 @@ export function activate(context: vscode.ExtensionContext): void {
     console.log(`[AutoDE Project] ${msg}`);
   });
   projectManager.initialize().then(() => {
-    provider.setProjectManager(projectManager);
+    sidebarProvider.setProjectManager(projectManager);
   });
   context.subscriptions.push(projectManager);
+
+  // ── Commands ──
 
   const openSidebar = vscode.commands.registerCommand(`${EXTENSION_ID}.openSidebar`, async () => {
     await vscode.commands.executeCommand(`workbench.view.extension.${EXTENSION_ID}`);
@@ -162,8 +166,10 @@ export function activate(context: vscode.ExtensionContext): void {
     if (project) { vscode.window.showInformationMessage(`Project created: ${project.name}`); }
   });
 
+  // ── Register all providers and commands ──
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, provider),
+    vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, sidebarProvider, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.window.registerWebviewViewProvider(EXTENSION_PANEL_VIEW_ID, panelProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     openSidebar, generatePlan, executePlan, resetSession,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
     testConnection, sourceAssessment, syncMetadata, reindex,

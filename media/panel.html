@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: var(--vscode-editor-background, #1f1f1f);
+  --surface: var(--vscode-sideBar-background, #252526);
+  --surface-hover: rgba(255,255,255,0.03);
+  --surface-active: rgba(255,255,255,0.06);
+  --border: var(--vscode-panel-border, rgba(255,255,255,0.12));
+  --border-soft: rgba(255,255,255,0.08);
+  --border-subtle: rgba(255,255,255,0.05);
+  --text: var(--vscode-foreground, #cccccc);
+  --text-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --accent: var(--vscode-button-background, #0e639c);
+  --accent-hover: var(--vscode-button-hoverBackground, #1177bb);
+  --accent-subtle: rgba(14,99,156,0.12);
+  --text-on-accent: var(--vscode-button-foreground, #ffffff);
+  --success: #2ea043; --success-subtle: rgba(46,160,67,0.12);
+  --warning: #d29922; --warning-subtle: rgba(210,153,34,0.12);
+  --error: #f85149; --error-subtle: rgba(248,81,73,0.12);
+  --info: #58a6ff; --info-subtle: rgba(88,166,255,0.1);
+  --radius: 8px; --radius-sm: 6px; --radius-xs: 4px; --radius-pill: 999px;
+  --spacing-xs: 4px; --spacing-sm: 8px; --spacing-md: 12px; --spacing-lg: 16px;
+  --font-size: 12px; --font-size-sm: 11px; --font-size-lg: 13px;
+  --transition-fast: 0.12s ease;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--text); font-family: var(--vscode-font-family, "Segoe UI", sans-serif); font-size: var(--font-size); overflow: hidden; line-height: 1.5; }
+button { appearance: none; border: 1px solid var(--border-soft); background: var(--surface-hover); color: var(--text); border-radius: var(--radius-sm); padding: 4px 8px; cursor: pointer; font-size: var(--font-size-sm); font-family: inherit; transition: background var(--transition-fast); white-space: nowrap; }
+button:hover { background: var(--surface-active); border-color: var(--border); }
+button.primary { background: var(--accent); color: var(--text-on-accent); border-color: transparent; }
+button.primary:hover { background: var(--accent-hover); }
+.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── Header ── */
+.panel-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); flex-shrink: 0; min-height: 28px; gap: 8px; }
+.panel-header .panel-title { font-weight: 600; font-size: var(--font-size-sm); color: var(--text); }
+.panel-header .panel-project { font-size: var(--font-size-sm); color: var(--text-muted); }
+.panel-tabs { display: flex; gap: 2px; }
+.panel-tab { padding: 3px 8px; border: none; background: transparent; color: var(--text-muted); font-size: var(--font-size-sm); cursor: pointer; border-radius: var(--radius-xs); }
+.panel-tab:hover { background: var(--surface-hover); color: var(--text); }
+.panel-tab.active { background: var(--surface-active); color: var(--text); }
+
+/* ── Body ── */
+.panel-body { flex: 1; overflow-y: auto; padding: var(--spacing-md); }
+
+/* ── Dashboard ── */
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-sm); }
+.dashboard-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); padding: var(--spacing-md); }
+.dashboard-card.full { grid-column: 1 / -1; }
+.dashboard-card-title { font-weight: 600; font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+/* ── Phase Progress ── */
+.phase-mini { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.phase-mini-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; }
+.phase-mini-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--border-soft); overflow: hidden; }
+.phase-mini-fill { height: 100%; border-radius: 2px; transition: width 0.3s ease; }
+.phase-mini-fill.completed { background: var(--success); }
+.phase-mini-fill.in-progress { background: var(--accent); }
+.phase-mini-fill.not-started { background: var(--border-soft); }
+.phase-mini-label { font-size: var(--font-size-sm); color: var(--text-muted); width: 60px; text-align: right; flex-shrink: 0; }
+
+/* ── Artifact List ── */
+.artifact-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--radius-xs); cursor: pointer; font-size: var(--font-size-sm); transition: background var(--transition-fast); }
+.artifact-item:hover { background: var(--surface-active); }
+.artifact-item .artifact-icon { flex-shrink: 0; font-size: 14px; }
+.artifact-item .artifact-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-item .artifact-phase { font-size: var(--font-size-sm); color: var(--text-dim); flex-shrink: 0; }
+.artifact-item .artifact-action { flex-shrink: 0; }
+
+/* ── Stats ── */
+.stat-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: var(--font-size-sm); }
+.stat-label { color: var(--text-muted); }
+.stat-value { color: var(--text); font-weight: 500; }
+
+/* ── Empty State ── */
+.empty-state { text-align: center; padding: 24px; color: var(--text-muted); font-size: var(--font-size-sm); }
+.empty-state .empty-icon { font-size: 24px; margin-bottom: 8px; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="panel-header">
+    <span class="panel-title">🔮 AutoDE Dashboard</span>
+    <span class="panel-project" id="panelProjectName">No active project</span>
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-tab="dashboard">📊 Dashboard</button>
+      <button class="panel-tab" data-tab="artifacts">📦 Artifacts</button>
+    </div>
+  </div>
+  <div class="panel-body" id="panelBody">
+    <!-- Dashboard Tab -->
+    <div id="tabDashboard">
+      <div class="dashboard-grid">
+        <!-- Phase Progress -->
+        <div class="dashboard-card full">
+          <div class="dashboard-card-title">📋 Workflow Progress</div>
+          <div id="phaseProgress"></div>
+        </div>
+        <!-- Project Stats -->
+        <div class="dashboard-card">
+          <div class="dashboard-card-title">📈 Project Stats</div>
+          <div id="projectStats">
+            <div class="empty-state"><div class="empty-icon">📁</div>No active project</div>
+          </div>
+        </div>
+        <!-- Recent Activity -->
+        <div class="dashboard-card">
+          <div class="dashboard-card-title">🕐 Recent Activity</div>
+          <div id="recentActivity">
+            <div class="empty-state"><div class="empty-icon">📋</div>No activity yet</div>
+          </div>
+        </div>
+        <!-- Quick Actions -->
+        <div class="dashboard-card full">
+          <div class="dashboard-card-title">⚡ Quick Actions</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;" id="quickActions">
+            <button id="qaConnect">🔌 Connect Database</button>
+            <button id="qaAssess">📊 Source Assessment</button>
+            <button id="qaPlan">📋 Generate Plan</button>
+            <button id="qaExecute">▶ Execute Plan</button>
+            <button id="qaPalette">🧰 Open Palette</button>
+            <button id="qaFolder">📂 Open Project</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Artifacts Tab -->
+    <div id="tabArtifacts" style="display:none;">
+      <div class="dashboard-card full">
+        <div class="dashboard-card-title">📦 Generated Artifacts</div>
+        <div id="artifactList">
+          <div class="empty-state"><div class="empty-icon">📦</div>No artifacts generated yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const vscode = acquireVsCodeApi();
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
+
+  let projects = [];
+  let activeProjectId = null;
+  let sessionStatus = 'idle';
+  let recentLogs = [];
+
+  function post(type, payload) { vscode.postMessage(Object.assign({ type: type }, payload || {})); }
+  function escapeHtml(str) { return String(str).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"'); }
+
+  // ── Tabs ──
+  var tabs = $$('.panel-tab');
+  tabs.forEach(function (tab) {
+    tab.onclick = function () {
+      tabs.forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      var tabName = tab.getAttribute('data-tab');
+      $('#tabDashboard').style.display = tabName === 'dashboard' ? '' : 'none';
+      $('#tabArtifacts').style.display = tabName === 'artifacts' ? '' : 'none';
+    };
+  });
+
+  // ── Quick Actions ──
+  $('#qaConnect').onclick = function () { post('testConnection'); };
+  $('#qaAssess').onclick = function () { post('sourceAssessment'); };
+  $('#qaPlan').onclick = function () { post('generatePlan', { objective: '' }); };
+  $('#qaExecute').onclick = function () { post('executePlan'); };
+  $('#qaPalette').onclick = function () { post('openPalette'); };
+  $('#qaFolder').onclick = function () { post('openProjectFolder'); };
+
+  // ── Render ──
+  function renderAll() {
+    var activeProject = null;
+    for (var i = 0; i < projects.length; i++) { if (projects[i].id === activeProjectId) { activeProject = projects[i]; break; } }
+
+    if (activeProject) {
+      $('#panelProjectName').textContent = '📁 ' + activeProject.name;
+      renderPhaseProgress(activeProject);
+      renderProjectStats(activeProject);
+    } else {
+      $('#panelProjectName').textContent = 'No active project';
+      $('#phaseProgress').innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>No active project. Create one from the sidebar chat.</div>';
+      $('#projectStats').innerHTML = '<div class="empty-state"><div class="empty-icon">📁</div>No active project</div>';
+    }
+    renderRecentActivity();
+    renderArtifacts(activeProject);
+  }
+
+  function renderPhaseProgress(project) {
+    var phases = [
+      { key: 'discover', label: 'Discover', icon: '🔍' },
+      { key: 'model', label: 'Model', icon: '🎨' },
+      { key: 'build', label: 'Build', icon: '🔨' },
+      { key: 'validate', label: 'Validate', icon: '✅' }
+    ];
+    var pp = project.phaseProgress || {};
+    var html = '';
+    for (var j = 0; j < phases.length; j++) {
+      var ph = phases[j];
+      var progress = pp[ph.key] || { status: 'not-started', completedSteps: 0, totalSteps: 0, artifactCount: 0 };
+      var pct = progress.totalSteps > 0 ? Math.round((progress.completedSteps / progress.totalSteps) * 100) : 0;
+      var icon = progress.status === 'completed' ? '✅' : (progress.status === 'in-progress' ? '⏳' : '○');
+      html += '<div class="phase-mini">';
+      html += '<span class="phase-mini-icon">' + icon + '</span>';
+      html += '<span style="font-size:11px;width:60px;flex-shrink:0;">' + ph.icon + ' ' + ph.label + '</span>';
+      html += '<div class="phase-mini-bar"><div class="phase-mini-fill ' + progress.status + '" style="width:' + pct + '%"></div></div>';
+      html += '<span class="phase-mini-label">' + progress.completedSteps + '/' + progress.totalSteps + '</span>';
+      html += '</div>';
+    }
+    $('#phaseProgress').innerHTML = html;
+  }
+
+  function renderProjectStats(project) {
+    var pp = project.phaseProgress || {};
+    var totalSteps = 0, completedSteps = 0, totalArtifacts = 0;
+    for (var key in pp) { totalSteps += pp[key].totalSteps; completedSteps += pp[key].completedSteps; totalArtifacts += pp[key].artifactCount; }
+    var html = '';
+    html += '<div class="stat-row"><span class="stat-label">Status</span><span class="stat-value">' + (project.status || 'active') + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">Phase</span><span class="stat-value">' + (project.currentPhase || 'discover') + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">Steps</span><span class="stat-value">' + completedSteps + ' / ' + totalSteps + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">Artifacts</span><span class="stat-value">' + totalArtifacts + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">Source</span><span class="stat-value">' + (project.sourceProvider || 'snowflake') + '</span></div>';
+    if (project.targetEnvironment) {
+      html += '<div class="stat-row"><span class="stat-label">Target</span><span class="stat-value">' + project.targetEnvironment.platform + '</span></div>';
+    }
+    html += '<div class="stat-row"><span class="stat-label">Created</span><span class="stat-value" style="font-size:10px;">' + (project.createdAt ? new Date(project.createdAt).toLocaleDateString() : 'N/A') + '</span></div>';
+    $('#projectStats').innerHTML = html;
+  }
+
+  function renderRecentActivity() {
+    if (recentLogs.length === 0) {
+      $('#recentActivity').innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>No activity yet</div>';
+      return;
+    }
+    var html = '';
+    for (var i = Math.max(0, recentLogs.length - 8); i < recentLogs.length; i++) {
+      html += '<div style="font-size:11px;color:var(--text-muted);padding:2px 0;border-bottom:1px solid var(--border-subtle);">' + escapeHtml(recentLogs[i]) + '</div>';
+    }
+    $('#recentActivity').innerHTML = html;
+  }
+
+  function renderArtifacts(project) {
+    if (!project) {
+      $('#artifactList').innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div>No artifacts generated yet</div>';
+      return;
+    }
+    var pp = project.phaseProgress || {};
+    var typeIcons = { data_model: '📐', sttm_mapping: '🗺', ddl_script: '📝', pipeline_dag: '🔄', architecture_diagram: '📊', data_dictionary: '📋', sql_script: '💾', requirements_doc: '📋', discovery_report: '📊', data_profile: '📈', knowledge_graph: '🔗', validation_report: '✅', test_suite: '🧪' };
+    var html = '';
+    var phases = ['discover', 'model', 'build', 'validate'];
+    var phaseLabels = { discover: 'Discover', model: 'Model', build: 'Build', validate: 'Validate' };
+    var hasAny = false;
+    for (var p = 0; p < phases.length; p++) {
+      var phase = phases[p];
+      var progress = pp[phase];
+      if (progress && progress.artifactCount > 0) {
+        hasAny = true;
+        html += '<div style="font-weight:600;font-size:11px;color:var(--text-muted);margin-top:6px;">' + phaseLabels[phase] + ' (' + progress.artifactCount + ')</div>';
+        html += '<div class="artifact-item" style="opacity:0.7;"><span class="artifact-icon">📂</span><span class="artifact-name">Open ' + phaseLabels[phase] + ' folder</span><button class="artifact-action" data-phase="' + phase + '">📂</button></div>';
+      }
+    }
+    if (!hasAny) {
+      html = '<div class="empty-state"><div class="empty-icon">📦</div>No artifacts generated yet. Run agents from the sidebar to generate outputs.</div>';
+    }
+    $('#artifactList').innerHTML = html;
+
+    // Bind artifact folder buttons
+    var btns = $$('#artifactList .artifact-action');
+    btns.forEach(function (btn) {
+      btn.onclick = function () { post('openPhaseFolder', { phase: btn.getAttribute('data-phase') }); };
+    });
+  }
+
+  // ── Message Handler ──
+  window.addEventListener('message', function (event) {
+    var msg = event.data; if (!msg || !msg.type) return;
+    switch (msg.type) {
+      case 'projectList':
+        projects = msg.projects || [];
+        activeProjectId = msg.activeProjectId;
+        renderAll();
+        break;
+      case 'stateUpdate':
+        if (msg.state) {
+          sessionStatus = msg.state.status || 'idle';
+          if (msg.state.projectId) { activeProjectId = msg.state.projectId; }
+          renderAll();
+        }
+        break;
+      case 'logEntry':
+        if (msg.message) {
+          recentLogs.push(new Date().toLocaleTimeString() + ' — ' + msg.message);
+          if (recentLogs.length > 50) recentLogs.shift();
+          renderRecentActivity();
+        }
+        break;
+      default: break;
+    }
+  });
+
+  // ── Initial load ──
+  post('getProjects', {});
+  post('settingsLoaded', {});
+})();
+</script>
+</body>
+</html>

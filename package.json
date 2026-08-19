@@ -1,60 +1,116 @@
 {
   "name": "auto-data-engineering-hub",
-  "displayName": "Auto Data Engineering Hub",
-  "description": "Plan and execute AI-powered data engineering workflows with Snowflake and modern data platform orchestration.",
-  "version": "0.3.0",
+  "displayName": "AutoDE — Data Engineering Workspace",
+  "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
+  "version": "0.5.0",
   "publisher": "Arun Gribta",
   "license": "MIT",
+  "icon": "media/logo.svg",
+  "galleryBanner": {
+    "color": "#1f1f1f",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/data-agent-hub"
+    "url": "https://github.com/arungribta/AutoDE"
   },
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
-    "Other",
-    "Data Science"
+    "Data Science",
+    "Other"
+  ],
+  "keywords": [
+    "data engineering",
+    "snowflake",
+    "databricks",
+    "dbt",
+    "etl",
+    "pipeline",
+    "ai",
+    "agent",
+    "workflow",
+    "orchestration"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:autoDataEngineeringHubSidebar",
+    "onView:autoDataEngineeringHubPanelView",
     "onCommand:autoDataEngineeringHub.openSidebar",
     "onCommand:autoDataEngineeringHub.generatePlan",
     "onCommand:autoDataEngineeringHub.executePlan",
-    "onCommand:autoDataEngineeringHub.resetSession"
+    "onCommand:autoDataEngineeringHub.resetSession",
+    "onCommand:autoDataEngineeringHub.newProject"
   ],
   "contributes": {
     "commands": [
       {
         "command": "autoDataEngineeringHub.openSidebar",
-        "title": "Auto Data Engineering Hub: Open Sidebar"
+        "title": "AutoDE: Open Sidebar"
       },
       {
         "command": "autoDataEngineeringHub.generatePlan",
-        "title": "Auto Data Engineering Hub: Generate Plan"
+        "title": "AutoDE: Generate Plan"
       },
       {
         "command": "autoDataEngineeringHub.executePlan",
-        "title": "Auto Data Engineering Hub: Execute Plan"
+        "title": "AutoDE: Execute Plan"
       },
       {
         "command": "autoDataEngineeringHub.resetSession",
-        "title": "Auto Data Engineering Hub: Reset Session"
+        "title": "AutoDE: Reset Session"
+      },
+      {
+        "command": "autoDataEngineeringHub.newProject",
+        "title": "AutoDE: New Project"
+      },
+      {
+        "command": "autoDataEngineeringHub.testConnection",
+        "title": "AutoDE: Test Connection"
+      },
+      {
+        "command": "autoDataEngineeringHub.sourceAssessment",
+        "title": "AutoDE: Run Source Assessment"
+      },
+      {
+        "command": "autoDataEngineeringHub.syncMetadata",
+        "title": "AutoDE: Sync Metadata"
+      },
+      {
+        "command": "autoDataEngineeringHub.reindex",
+        "title": "AutoDE: Re-index Context"
+      },
+      {
+        "command": "autoDataEngineeringHub.testCopilot",
+        "title": "AutoDE: Test Copilot"
+      },
+      {
+        "command": "autoDataEngineeringHub.listCopilotInfo",
+        "title": "AutoDE: List Copilot Info"
+      },
+      {
+        "command": "autoDataEngineeringHub.debugListExtensions",
+        "title": "AutoDE: Debug List Extensions"
+      },
+      {
+        "command": "autoDataEngineeringHub.copilotHandoff",
+        "title": "AutoDE: Copilot Handoff"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "autoDataEngineeringHub",
-          "title": "Auto Data Engineering Hub",
-          "icon": "media/logo.svg",
-          "views": [
-            {
-              "id": "autoDataEngineeringHubSidebar",
-              "name": "Hub"
-            }
-          ]
+          "title": "AutoDE",
+          "icon": "media/logo.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "autoDataEngineeringHubPanel",
+          "title": "AutoDE Dashboard",
+          "icon": "media/logo.svg"
         }
       ]
     },
@@ -62,141 +118,153 @@
       "autoDataEngineeringHub": [
         {
           "id": "autoDataEngineeringHubSidebar",
-          "name": "Auto Data Engineering Hub",
+          "name": "Workspace",
+          "type": "webview"
+        }
+      ],
+      "autoDataEngineeringHubPanel": [
+        {
+          "id": "autoDataEngineeringHubPanelView",
+          "name": "Dashboard",
           "type": "webview"
         }
       ]
     },
+    "customEditors": [
+      {
+        "viewType": "autoDE.dataModelEditor",
+        "displayName": "AutoDE Data Model",
+        "selector": [
+          { "filenamePattern": "*.sql" }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "autoDE.sttmEditor",
+        "displayName": "AutoDE STTM Mapping",
+        "selector": [
+          { "filenamePattern": "*.yaml" }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "autoDE.graphEditor",
+        "displayName": "AutoDE Knowledge Graph",
+        "selector": [
+          { "filenamePattern": "*.json" }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "autoDE.profileEditor",
+        "displayName": "AutoDE Data Profile",
+        "selector": [
+          { "filenamePattern": "*.md" }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "autoDE.docEditor",
+        "displayName": "AutoDE Architecture Doc",
+        "selector": [
+          { "filenamePattern": "*.md" }
+        ],
+        "priority": "option"
+      }
+    ],
     "configuration": {
-      "title": "Auto Data Engineering Hub",
+      "title": "AutoDE",
       "properties": {
         "autoDataEngineeringHub.defaultProvider": {
           "type": "string",
-          "enum": [
-            "snowflake",
-            "databricks",
-            "bigquery",
-            "redshift",
-            "synapse",
-            "other"
-          ],
+          "enum": ["snowflake", "databricks", "bigquery", "redshift", "synapse", "other"],
           "default": "snowflake",
           "description": "Default data platform provider."
         },
         "autoDataEngineeringHub.defaultSnowflakeAccount": {
-          "type": "string",
-          "default": "",
+          "type": "string", "default": "",
           "description": "Default Snowflake account identifier."
         },
         "autoDataEngineeringHub.defaultSnowflakeUsername": {
-          "type": "string",
-          "default": "",
-          "description": "Default Snowflake username used for login."
+          "type": "string", "default": "",
+          "description": "Default Snowflake username."
         },
         "autoDataEngineeringHub.defaultSnowflakeWarehouse": {
-          "type": "string",
-          "default": "",
+          "type": "string", "default": "",
           "description": "Default Snowflake warehouse."
         },
         "autoDataEngineeringHub.defaultSnowflakeDatabase": {
-          "type": "string",
-          "default": "",
+          "type": "string", "default": "",
           "description": "Default Snowflake database."
         },
         "autoDataEngineeringHub.defaultSnowflakeSchema": {
-          "type": "string",
-          "default": "PUBLIC",
+          "type": "string", "default": "PUBLIC",
           "description": "Default Snowflake schema."
         },
         "autoDataEngineeringHub.defaultSnowflakeRole": {
-          "type": "string",
-          "default": "SYSADMIN",
+          "type": "string", "default": "SYSADMIN",
           "description": "Default Snowflake role."
         },
         "autoDataEngineeringHub.defaultSnowflakeAuthMode": {
           "type": "string",
-          "enum": [
-            "key-pair",
-            "username-password",
-            "oauth",
-            "external-browser",
-            "mcp"
-          ],
+          "enum": ["key-pair", "username-password", "oauth", "external-browser", "mcp"],
           "default": "key-pair",
-          "description": "Snowflake authentication mode for the active provider."
+          "description": "Snowflake authentication mode."
         },
         "autoDataEngineeringHub.snowflakePrivateKeyPath": {
-          "type": "string",
-          "default": "",
-          "description": "Path to the private key used for Snowflake key-pair authentication."
+          "type": "string", "default": "",
+          "description": "Path to Snowflake private key."
         },
         "autoDataEngineeringHub.metadataCachingDurationMinutes": {
-          "type": "number",
-          "default": 15,
+          "type": "number", "default": 15,
           "description": "Metadata caching duration in minutes."
         },
         "autoDataEngineeringHub.queryTimeoutSeconds": {
-          "type": "number",
-          "default": 120,
+          "type": "number", "default": 120,
           "description": "Default query timeout in seconds."
         },
         "autoDataEngineeringHub.readOnlyMode": {
-          "type": "boolean",
-          "default": true,
-          "description": "Restrict provider operations to read-only mode when enabled."
+          "type": "boolean", "default": true,
+          "description": "Restrict to read-only mode."
         },
         "autoDataEngineeringHub.enableSessionReuse": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable provider session reuse for performance."
+          "type": "boolean", "default": true,
+          "description": "Enable session reuse."
         },
         "autoDataEngineeringHub.autoDocumentationEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically generate documentation when possible."
+          "type": "boolean", "default": true,
+          "description": "Auto-generate documentation."
         },
         "autoDataEngineeringHub.telemetryEnabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Allow telemetry for the extension."
+          "type": "boolean", "default": false,
+          "description": "Allow telemetry (opt-in)."
         },
         "autoDataEngineeringHub.activeLlmProvider": {
           "type": "string",
-          "enum": [
-            "azure-openai",
-            "openai",
-            "anthropic",
-            "gemini",
-            "ollama",
-            "copilot"
-          ],
+          "enum": ["azure-openai", "openai", "anthropic", "gemini", "ollama", "copilot"],
           "default": "copilot",
-          "description": "Active LLM provider used for planning."
+          "description": "Active LLM provider."
         },
         "autoDataEngineeringHub.activeLlmModel": {
-          "type": "string",
-          "default": "gpt-4o-mini",
-          "description": "LLM model name used by the selected provider."
+          "type": "string", "default": "gpt-4o-mini",
+          "description": "LLM model name."
         },
         "autoDataEngineeringHub.llmEndpoint": {
-          "type": "string",
-          "default": "",
-          "description": "Custom endpoint for the selected LLM provider."
+          "type": "string", "default": "",
+          "description": "Custom LLM endpoint."
         },
         "autoDataEngineeringHub.extensionDisplayName": {
-          "type": "string",
-          "default": "Auto Data Engineering Hub",
-          "description": "Custom display name shown in the extension UI."
+          "type": "string", "default": "AutoDE — Data Engineering Workspace",
+          "description": "Extension display name."
         },
         "autoDataEngineeringHub.extensionDescription": {
           "type": "string",
-          "default": "Plan and execute AI-powered data engineering workflows with Snowflake and modern data platform orchestration.",
-          "description": "Custom extension description shown in metadata and UI."
+          "default": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation.",
+          "description": "Extension description."
         },
         "autoDataEngineeringHub.copilotProgrammaticConsent": {
-          "type": "boolean",
-          "default": false,
-          "description": "Allow programmatic use of the installed GitHub Copilot extension (opt-in). When enabled, AutoDE can route LLM requests through Copilot's language model API."
+          "type": "boolean", "default": false,
+          "description": "Allow programmatic use of GitHub Copilot (opt-in)."
         }
       }
     }
@@ -204,7 +272,8 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
@@ -212,7 +281,6 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
-    "data-agent-hub": "file:",
     "snowflake-sdk": "^2.0.0"
   }
 }
