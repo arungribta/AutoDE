@@ -7,6 +7,7 @@ import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
 import { executeSourceAssessmentAgent } from '../agents/discover/SourceAssessmentAgent';
 import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
 import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
+import { ProjectManager } from '../context/ProjectManager';
 import {
   AgentExecutionContext,
   AgentType,
@@ -15,7 +16,9 @@ import {
   PlanStatus,
   SessionStatus,
   TargetEnvironment,
-  GeneratedArtifact
+  GeneratedArtifact,
+  WorkflowPhase,
+  ProjectMetadata
 } from './types';
 
 const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent', 'dataModelerAgent', 'transformScaffoldAgent'];
@@ -28,6 +31,17 @@ const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutio
   sourceAssessmentAgent: executeSourceAssessmentAgent,
   dataModelerAgent: executeDataModelerAgent,
   transformScaffoldAgent: executeTransformScaffoldAgent
+};
+
+// Agent-to-phase mapping
+const AGENT_PHASE: Partial<Record<AgentType, WorkflowPhase>> = {
+  sourceAssessmentAgent: 'discover',
+  sttmAgent: 'model',
+  dataModelerAgent: 'model',
+  ingestionAgent: 'build',
+  transformScaffoldAgent: 'build',
+  architectureAgent: 'validate',
+  snowflakeExecutor: 'build'
 };
 
 export class DataAgentHubHub {
@@ -44,6 +58,7 @@ export class DataAgentHubHub {
   private executionPaused = false;
   private stateListener?: (state: PlanState) => void;
   private logListener?: (message: string) => void;
+  private projectManager?: ProjectManager;
 
   public constructor(private readonly configManager: ConfigurationManager) {}
 
@@ -55,6 +70,10 @@ export class DataAgentHubHub {
     this.logListener = listener;
   }
 
+  public setProjectManager(pm: ProjectManager): void {
+    this.projectManager = pm;
+  }
+
   public getPlan(): PlanState {
     return {
       ...this.state,
@@ -63,11 +82,64 @@ export class DataAgentHubHub {
     };
   }
 
+  // ── Project Management ──
+
+  public getActiveProject(): ProjectMetadata | undefined {
+    return this.projectManager?.getActiveProject();
+  }
+
+  public getProjects(): ProjectMetadata[] {
+    return this.projectManager?.getProjects() ?? [];
+  }
+
+  public async setActiveProject(id: string): Promise<void> {
+    this.projectManager?.setActiveProject(id);
+    const project = this.projectManager?.getActiveProject();
+    if (project) {
+      this.state.projectId = project.id;
+      this.state.currentPhase = project.currentPhase;
+      this.state.objective = project.objective;
+      this.state.sourceProvider = project.sourceProvider;
+      if (project.targetEnvironment) {
+        this.state.targetEnvironment = project.targetEnvironment;
+      }
+      this.log(`Switched to project: ${project.name}`);
+      this.emitState();
+    }
+  }
+
+  public async createProject(objective: string): Promise<ProjectMetadata | undefined> {
+    if (!this.projectManager) return undefined;
+
+    const settings = this.configManager.getSettings();
+    const project = this.projectManager.createProject(
+      objective,
+      settings.defaultProvider ?? 'snowflake',
+      this.state.targetEnvironment
+    );
+
+    this.state.projectId = project.id;
+    this.state.currentPhase = project.currentPhase;
+    this.state.objective = objective;
+    this.state.sourceProvider = project.sourceProvider;
+    this.log(`Project created: ${project.name}`);
+    this.emitState();
+
+    return project;
+  }
+
   // ── Target Environment Management ──
 
   public setTargetEnvironment(env: TargetEnvironment): void {
     this.state.targetEnvironment = env;
     this.log(`Target environment set: ${env.platform} (${env.environmentProfile}) — ${env.modelingApproach} via ${env.transformationTool}`);
+
+    // Sync to active project
+    const project = this.projectManager?.getActiveProject();
+    if (project) {
+      this.projectManager?.updateProject(project.id, { targetEnvironment: env });
+    }
+
     this.emitState();
   }
 
@@ -161,6 +233,14 @@ Message: ${message}`;
     const settings = this.configManager.getSettings();
     const provider = settings.activeLlmProvider ?? 'copilot';
     this.log(`Sending chat to ${provider}...`);
+
+    // Auto-create project if none active
+    if (!this.state.projectId && this.projectManager) {
+      const project = await this.createProject(trimmed);
+      if (project) {
+        this.log(`Auto-created project: ${project.name}`);
+      }
+    }
 
     if (!this.state.targetEnvironment) {
       const partial = await this.extractTargetFromMessage(trimmed);
@@ -329,6 +409,10 @@ User message: ${trimmed}`;
       this.emitState();
 
       try {
+        // Determine phase for this step
+        const phase = AGENT_PHASE[readyStep.assignedAgent] || this.state.currentPhase || 'discover';
+        readyStep.phase = phase;
+
         const context: AgentExecutionContext = {
           objective: this.state.objective,
           schemaContext: this.state.schemaContext,
@@ -342,9 +426,17 @@ User message: ${trimmed}`;
           log: (message: string) => this.log(message),
           addArtifact: (artifact: GeneratedArtifact) => {
             if (!this.state.artifacts) this.state.artifacts = [];
+            artifact.phase = phase;
             this.state.artifacts.push(artifact);
             this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
-          }
+
+            // Persist to project
+            if (this.state.projectId && this.projectManager) {
+              this.projectManager.persistArtifact(this.state.projectId, phase, artifact);
+            }
+          },
+          projectId: this.state.projectId,
+          currentPhase: phase
         };
 
         const executor = AGENT_EXECUTORS[readyStep.assignedAgent];
@@ -364,8 +456,25 @@ User message: ${trimmed}`;
         if (result.artifacts && result.artifacts.length > 0) {
           if (!this.state.artifacts) this.state.artifacts = [];
           for (const artifact of result.artifacts) {
+            artifact.phase = phase;
             this.state.artifacts.push(artifact);
             this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
+
+            if (this.state.projectId && this.projectManager) {
+              this.projectManager.persistArtifact(this.state.projectId, phase, artifact);
+            }
+          }
+        }
+
+        // Update phase progress
+        if (this.state.projectId && this.projectManager) {
+          const project = this.projectManager.getProject(this.state.projectId);
+          if (project) {
+            const current = project.phaseProgress[phase];
+            this.projectManager.updatePhaseProgress(this.state.projectId, phase, {
+              completedSteps: current.completedSteps + 1,
+              totalSteps: Math.max(current.totalSteps, current.completedSteps + 1)
+            });
           }
         }
 
@@ -412,6 +521,8 @@ User message: ${trimmed}`;
     this.state.runningStepId = undefined;
     this.state.lastError = undefined;
     this.state.artifacts = [];
+    this.state.projectId = undefined;
+    this.state.currentPhase = undefined;
     this.executionPaused = false;
     this.log('Hub state reset.');
     this.emitState();
@@ -502,10 +613,7 @@ User message: ${trimmed}`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
         temperature: 0,
@@ -534,17 +642,8 @@ User message: ${trimmed}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        temperature: 0,
-        messages: [{ role: 'user', content: prompt }]
-      })
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model, max_tokens: 4096, temperature: 0, messages: [{ role: 'user', content: prompt }] })
     });
 
     if (!response.ok) {
@@ -597,10 +696,7 @@ User message: ${trimmed}`;
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0 }
-      })
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } })
     });
 
     if (!response.ok) {
@@ -617,12 +713,7 @@ User message: ${trimmed}`;
     const response = await fetch('http://localhost:11434/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [{ role: 'user', content: prompt }],
-        format: 'json'
-      })
+      body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: prompt }], format: 'json' })
     });
 
     if (!response.ok) {
@@ -636,21 +727,13 @@ User message: ${trimmed}`;
   }
 
   private extractJsonText(content: string): string {
-    const normalized = content
-      .replace(/```json\s*/gi, '')
-      .replace(/```/g, '')
-      .trim();
-
-    if (!normalized) {
-      throw new Error('The LLM returned an empty response.');
-    }
-
+    const normalized = content.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+    if (!normalized) { throw new Error('The LLM returned an empty response.'); }
     return normalized;
   }
 
   private validatePlanResponse(rawResponse: string): PlanStep[] {
     let parsed: unknown;
-
     try {
       parsed = JSON.parse(rawResponse);
     } catch (error) {
@@ -671,47 +754,28 @@ User message: ${trimmed}`;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : `step-${index + 1}`;
       const assignedAgent = typeof candidate.assignedAgent === 'string' ? candidate.assignedAgent : 'ingestionAgent';
       const taskDescription = typeof candidate.taskDescription === 'string' ? candidate.taskDescription.trim() : '';
-      const dependsOn = Array.isArray(candidate.dependsOn)
-        ? candidate.dependsOn.filter((value): value is string => typeof value === 'string')
-        : [];
-      const validationRules = Array.isArray(candidate.validationRules)
-        ? candidate.validationRules.filter((value): value is string => typeof value === 'string')
-        : [];
+      const dependsOn = Array.isArray(candidate.dependsOn) ? candidate.dependsOn.filter((value): value is string => typeof value === 'string') : [];
+      const validationRules = Array.isArray(candidate.validationRules) ? candidate.validationRules.filter((value): value is string => typeof value === 'string') : [];
 
       if (!VALID_AGENT_TYPES.includes(assignedAgent as AgentType)) {
         throw new Error(`Step ${id} contains an invalid assignedAgent value: ${assignedAgent}`);
       }
-
       if (!taskDescription) {
         throw new Error(`Step ${id} does not include a taskDescription.`);
       }
 
-      return {
-        id,
-        assignedAgent: assignedAgent as AgentType,
-        taskDescription,
-        status: 'pending' as PlanStatus,
-        dependsOn,
-        validationRules
-      };
+      return { id, assignedAgent: assignedAgent as AgentType, taskDescription, status: 'pending' as PlanStatus, dependsOn, validationRules };
     });
 
     const allIds = new Set<string>();
     for (const step of mapped) {
-      if (allIds.has(step.id)) {
-        throw new Error(`Plan contains duplicate step ID: ${step.id}`);
-      }
+      if (allIds.has(step.id)) { throw new Error(`Plan contains duplicate step ID: ${step.id}`); }
       allIds.add(step.id);
     }
-
     for (const step of mapped) {
       const missingDeps = (step.dependsOn ?? []).filter((dependencyId) => !allIds.has(dependencyId));
-      if (missingDeps.length > 0) {
-        throw new Error(`Step ${step.id} depends on missing step IDs: ${missingDeps.join(', ')}`);
-      }
-      if ((step.dependsOn ?? []).includes(step.id)) {
-        throw new Error(`Step ${step.id} cannot depend on itself.`);
-      }
+      if (missingDeps.length > 0) { throw new Error(`Step ${step.id} depends on missing step IDs: ${missingDeps.join(', ')}`); }
+      if ((step.dependsOn ?? []).includes(step.id)) { throw new Error(`Step ${step.id} cannot depend on itself.`); }
     }
 
     return mapped;
@@ -720,11 +784,8 @@ User message: ${trimmed}`;
   private async handleFailure(step: PlanStep, error: string): Promise<void> {
     const message = `Agent ${step.assignedAgent} failed while executing ${step.id}: ${error}`;
     vscode.window.showErrorMessage(message, 'Re-plan');
-
     const selection = await vscode.window.showErrorMessage(message, 'Re-plan', 'Close');
-    if (selection !== 'Re-plan') {
-      return;
-    }
+    if (selection !== 'Re-plan') { return; }
 
     const replanObjective = `The previous execution failed on step "${step.id}" (${step.assignedAgent}) with error: ${error}. Revise the plan to recover and continue the workflow.`;
     try {

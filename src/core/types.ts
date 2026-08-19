@@ -11,6 +11,54 @@ export type TransformationTool = 'dbt' | 'sqlmesh' | 'custom-sql' | 'stored-proc
 export type OrchestrationTool = 'airflow' | 'dagster' | 'prefect' | 'dbt-cloud' | 'manual' | 'none';
 export type OutputFormat = 'ddl' | 'yaml' | 'markdown' | 'python' | 'sql';
 
+// ── Project & Workflow Types ──
+
+export type WorkflowPhase = 'discover' | 'model' | 'build' | 'validate';
+
+export interface PhaseProgress {
+  status: 'not-started' | 'in-progress' | 'completed';
+  completedSteps: number;
+  totalSteps: number;
+  artifactCount: number;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface ProjectMetadata {
+  id: string;
+  name: string;
+  objective: string;
+  createdAt: string;
+  updatedAt: string;
+  status: 'active' | 'completed' | 'archived';
+  currentPhase: WorkflowPhase;
+  sourceProvider: DataPlatformProvider;
+  targetEnvironment?: TargetEnvironment;
+  phaseProgress: Record<WorkflowPhase, PhaseProgress>;
+}
+
+export interface WorkflowState {
+  projectId: string;
+  currentPhase: WorkflowPhase;
+  phases: Record<WorkflowPhase, {
+    status: 'not-started' | 'in-progress' | 'completed';
+    completedSteps: number;
+    totalSteps: number;
+    artifactCount: number;
+    artifacts: Array<{
+      id: string;
+      type: string;
+      title: string;
+      filePath: string;
+    }>;
+  }>;
+}
+
+export interface ProjectRegistry {
+  activeProjectId: string | null;
+  projects: ProjectMetadata[];
+}
+
 // ── Target Environment ──
 
 export interface SnowflakeTargetConfig {
@@ -59,7 +107,7 @@ export interface TargetConfigFile {
 
 // ── Artifact Types ──
 
-export type ArtifactType = 'data_model' | 'sttm_mapping' | 'ddl_script' | 'pipeline_dag' | 'architecture_diagram' | 'data_dictionary' | 'sql_script';
+export type ArtifactType = 'data_model' | 'sttm_mapping' | 'ddl_script' | 'pipeline_dag' | 'architecture_diagram' | 'data_dictionary' | 'sql_script' | 'requirements_doc' | 'discovery_report' | 'data_profile' | 'knowledge_graph' | 'validation_report' | 'test_suite';
 
 export interface GeneratedArtifact {
   id: string;
@@ -72,6 +120,7 @@ export interface GeneratedArtifact {
   generatedAt: string;
   approved: boolean;
   filePath?: string;
+  phase?: WorkflowPhase;
 }
 
 // ── Core Settings ──
@@ -97,7 +146,6 @@ export interface DataAgentHubSettings {
   activeLlmProvider: LlmProvider;
   activeLlmModel: string;
   llmEndpoint: string;
-  // Whether the user has consented to allow programmatic use of the installed GitHub Copilot extension
   copilotProgrammaticConsent?: boolean;
 }
 
@@ -108,6 +156,7 @@ export interface PlanStep {
   status: PlanStatus;
   dependsOn?: string[];
   validationRules?: string[];
+  phase?: WorkflowPhase;
 }
 
 export interface PlanState {
@@ -121,6 +170,8 @@ export interface PlanState {
   runningStepId?: string;
   lastError?: string;
   artifacts?: GeneratedArtifact[];
+  projectId?: string;
+  currentPhase?: WorkflowPhase;
 }
 
 export interface AgentExecutionContext {
@@ -135,6 +186,8 @@ export interface AgentExecutionContext {
   };
   log: (message: string) => void;
   addArtifact?: (artifact: GeneratedArtifact) => void;
+  projectId?: string;
+  currentPhase?: WorkflowPhase;
 }
 
 export interface AgentExecutionResult {
