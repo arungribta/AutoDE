@@ -1,5 +1,5 @@
 import * as snowflake from 'snowflake-sdk';
-import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../core/types';
 
 export async function executeSnowflakeAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const settings = context.settings;

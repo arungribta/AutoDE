@@ -2,8 +2,8 @@
   "name": "auto-data-engineering-hub",
   "displayName": "Auto Data Engineering Hub",
   "description": "Plan and execute AI-powered data engineering workflows with Snowflake and modern data platform orchestration.",
-  "version": "0.1.0",
-  "publisher": "ArunGribta",
+  "version": "0.3.0",
+  "publisher": "Arun Gribta",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -192,6 +192,11 @@
           "type": "string",
           "default": "Plan and execute AI-powered data engineering workflows with Snowflake and modern data platform orchestration.",
           "description": "Custom extension description shown in metadata and UI."
+        },
+        "autoDataEngineeringHub.copilotProgrammaticConsent": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow programmatic use of the installed GitHub Copilot extension (opt-in). When enabled, AutoDE can route LLM requests through Copilot's language model API."
         }
       }
     }

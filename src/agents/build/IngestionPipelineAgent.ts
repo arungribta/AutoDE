@@ -1,4 +1,4 @@
-import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../../core/types';
 
 export async function executeIngestionAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const task = step.taskDescription.trim();
@@ -17,7 +17,7 @@ FROM @STAGE/${step.id}
 FILE_FORMAT = (TYPE = CSV FIELD_OPTIONALLY_ENCLOSED_BY = '"')
 ON_ERROR = 'CONTINUE';`;
 
-  context.log(`Ingestion spoke for ${step.id} generated SQL statement for task: ${task}`);
+  context.log(`Ingestion agent for ${step.id} generated SQL statement for task: ${task}`);
 
   return {
     success: true,

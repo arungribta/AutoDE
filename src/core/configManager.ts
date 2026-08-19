@@ -5,6 +5,10 @@ import { DataAgentHubSettings, DataPlatformProvider, LlmProvider, SnowflakeAuthM
 export class ConfigurationManager {
   public constructor(private readonly context: vscode.ExtensionContext) {}
 
+  public getExtensionContext(): vscode.ExtensionContext {
+    return this.context;
+  }
+
   public getSettings(): DataAgentHubSettings {
     const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
 
@@ -28,7 +32,8 @@ export class ConfigurationManager {
       telemetryEnabled: config.get<boolean>('telemetryEnabled', false),
       activeLlmProvider: config.get<LlmProvider>('activeLlmProvider', 'copilot'),
       activeLlmModel: config.get<string>('activeLlmModel', 'gpt-4o-mini'),
-      llmEndpoint: config.get<string>('llmEndpoint', '')
+      llmEndpoint: config.get<string>('llmEndpoint', ''),
+      copilotProgrammaticConsent: config.get<boolean>('copilotProgrammaticConsent', false)
     };
   }
 
@@ -36,26 +41,27 @@ export class ConfigurationManager {
     const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
 
     const updates: Array<readonly [string, unknown]> = [
-      ['extensionDisplayName', settings.extensionDisplayName],
-      ['extensionDescription', settings.extensionDescription],
-      ['defaultProvider', settings.defaultProvider],
-      ['defaultSnowflakeAccount', settings.defaultSnowflakeAccount],
-      ['defaultSnowflakeUsername', settings.defaultSnowflakeUsername],
-      ['defaultSnowflakeWarehouse', settings.defaultSnowflakeWarehouse],
-      ['defaultSnowflakeDatabase', settings.defaultSnowflakeDatabase],
-      ['defaultSnowflakeSchema', settings.defaultSnowflakeSchema],
-      ['defaultSnowflakeRole', settings.defaultSnowflakeRole],
-      ['defaultSnowflakeAuthMode', settings.defaultSnowflakeAuthMode],
-      ['snowflakePrivateKeyPath', settings.snowflakePrivateKeyPath],
-      ['metadataCachingDurationMinutes', settings.metadataCachingDurationMinutes],
-      ['queryTimeoutSeconds', settings.queryTimeoutSeconds],
-      ['readOnlyMode', settings.readOnlyMode],
-      ['enableSessionReuse', settings.enableSessionReuse],
-      ['autoDocumentationEnabled', settings.autoDocumentationEnabled],
-      ['telemetryEnabled', settings.telemetryEnabled],
-      ['activeLlmProvider', settings.activeLlmProvider],
-      ['activeLlmModel', settings.activeLlmModel],
-      ['llmEndpoint', settings.llmEndpoint]
+     ['extensionDisplayName', settings.extensionDisplayName],
+     ['extensionDescription', settings.extensionDescription],
+     ['defaultProvider', settings.defaultProvider],
+     ['defaultSnowflakeAccount', settings.defaultSnowflakeAccount],
+     ['defaultSnowflakeUsername', settings.defaultSnowflakeUsername],
+     ['defaultSnowflakeWarehouse', settings.defaultSnowflakeWarehouse],
+     ['defaultSnowflakeDatabase', settings.defaultSnowflakeDatabase],
+     ['defaultSnowflakeSchema', settings.defaultSnowflakeSchema],
+     ['defaultSnowflakeRole', settings.defaultSnowflakeRole],
+     ['defaultSnowflakeAuthMode', settings.defaultSnowflakeAuthMode],
+     ['snowflakePrivateKeyPath', settings.snowflakePrivateKeyPath],
+     ['metadataCachingDurationMinutes', settings.metadataCachingDurationMinutes],
+     ['queryTimeoutSeconds', settings.queryTimeoutSeconds],
+     ['readOnlyMode', settings.readOnlyMode],
+     ['enableSessionReuse', settings.enableSessionReuse],
+     ['autoDocumentationEnabled', settings.autoDocumentationEnabled],
+     ['telemetryEnabled', settings.telemetryEnabled],
+     ['activeLlmProvider', settings.activeLlmProvider],
+     ['activeLlmModel', settings.activeLlmModel],
+     ['llmEndpoint', settings.llmEndpoint],
+     ['copilotProgrammaticConsent', settings.copilotProgrammaticConsent]
     ];
 
     for (const [name, value] of updates) {

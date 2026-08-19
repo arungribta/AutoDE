@@ -1,1008 +1,1740 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      :root {
-        color-scheme: light dark;
-        --bg: var(--vscode-editor-background, #1f1f1f);
-        --panel: var(--vscode-sideBar-background, #252526);
-        --foreground: var(--vscode-foreground, #cccccc);
-        --muted: var(--vscode-descriptionForeground, #9d9d9d);
-        --border: var(--vscode-panel-border, rgba(255,255,255,0.12));
-        --border-soft: rgba(255,255,255,0.08);
-        --surface: rgba(255,255,255,0.025);
-        --surface-strong: rgba(255,255,255,0.04);
-        --success: #2ea043;
-        --warning: #d29922;
-        --error: #f85149;
-        --primary: var(--vscode-button-background, #0e639c);
-        --secondary: var(--vscode-button-secondaryBackground, #3c3c3c);
-        --text-on-primary: var(--vscode-button-foreground, #ffffff);
-      }
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: var(--vscode-editor-background, #1f1f1f);
+  --surface: var(--vscode-sideBar-background, #252526);
+  --surface-hover: rgba(255,255,255,0.03);
+  --surface-active: rgba(255,255,255,0.06);
+  --surface-elevated: rgba(255,255,255,0.04);
+  --border: var(--vscode-panel-border, rgba(255,255,255,0.12));
+  --border-soft: rgba(255,255,255,0.08);
+  --border-subtle: rgba(255,255,255,0.05);
+  --text: var(--vscode-foreground, #cccccc);
+  --text-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --text-dim: rgba(255,255,255,0.45);
+  --accent: var(--vscode-button-background, #0e639c);
+  --accent-hover: var(--vscode-button-hoverBackground, #1177bb);
+  --accent-subtle: rgba(14,99,156,0.12);
+  --accent-border: rgba(14,99,156,0.25);
+  --text-on-accent: var(--vscode-button-foreground, #ffffff);
+  --success: #2ea043;
+  --success-subtle: rgba(46,160,67,0.12);
+  --warning: #d29922;
+  --warning-subtle: rgba(210,153,34,0.12);
+  --error: #f85149;
+  --error-subtle: rgba(248,81,73,0.12);
+  --info: #58a6ff;
+  --info-subtle: rgba(88,166,255,0.1);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --radius-pill: 999px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 20px;
+  --font-size: 12px;
+  --font-size-sm: 11px;
+  --font-size-lg: 13px;
+  --font-size-xl: 14px;
+  --transition-fast: 0.12s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+  font-size: var(--font-size);
+  overflow: hidden;
+  line-height: 1.5;
+}
+button {
+  appearance: none;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-hover);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: var(--font-size);
+  font-family: inherit;
+  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+  white-space: nowrap;
+}
+button:hover { background: var(--surface-active); border-color: var(--border); }
+button:active { opacity: 0.8; }
+button.primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: transparent;
+}
+button.primary:hover { background: var(--accent-hover); }
+button.icon-btn {
+  padding: 4px 6px;
+  font-size: 14px;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-xs);
+  min-width: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button.icon-btn:hover { background: var(--surface-active); color: var(--text); }
+button.icon-btn.danger:hover { color: var(--error); background: var(--error-subtle); }
+button.danger { color: var(--error); }
+button.danger:hover { background: var(--error-subtle); border-color: var(--error); }
+input, textarea, select {
+  width: 100%;
+  background: var(--surface-hover);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: var(--font-size);
+  transition: border-color var(--transition-fast);
+}
+input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+textarea { resize: vertical; min-height: 40px; max-height: 120px; }
+label { font-size: var(--font-size-sm); color: var(--text-muted); display: block; margin-bottom: 4px; }
 
-      * { box-sizing: border-box; }
-      html, body { height: 100%; }
-      body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--foreground);
-        font-family: "Segoe UI", sans-serif;
-      }
+/* ── App Shell ── */
+.app { display: flex; flex-direction: column; height: 100vh; position: relative; }
 
-      .workspace-shell {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        min-height: 100vh;
-        background: linear-gradient(180deg, rgba(255,255,255,0.01), transparent 28%);
-      }
+/* ── Top Status Bar ── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 10px; border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface); flex-shrink: 0; min-height: 32px;
+  gap: 8px;
+}
+.status-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--font-size-sm); flex: 1; min-width: 0; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--surface-hover); border: 1px solid var(--border-soft);
+  cursor: pointer; transition: background var(--transition-fast);
+  white-space: nowrap;
+}
+.status-pill:hover { background: var(--surface-active); }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot.ok { background: var(--success); box-shadow: 0 0 0 2px var(--success-subtle); }
+.dot.warn { background: var(--warning); box-shadow: 0 0 0 2px var(--warning-subtle); }
+.dot.err { background: var(--error); box-shadow: 0 0 0 2px var(--error-subtle); }
+.dot.pulse { animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.metric {
+  color: var(--text-muted); font-size: var(--font-size-sm);
+  display: inline-flex; align-items: center; gap: 4px;
+  cursor: pointer; padding: 2px 6px; border-radius: var(--radius-pill);
+  transition: background var(--transition-fast);
+  white-space: nowrap;
+}
+.metric:hover { background: var(--surface-hover); }
+.metric .metric-value { color: var(--text); font-weight: 500; }
+.metric .metric-bar {
+  width: 40px; height: 3px; border-radius: 2px;
+  background: var(--border-soft); overflow: hidden; flex-shrink: 0;
+}
+.metric .metric-bar-fill {
+  height: 100%; border-radius: 2px; background: var(--accent);
+  transition: width var(--transition-normal);
+}
+.topbar-actions { display: flex; gap: 2px; flex-shrink: 0; }
 
-      .topbar {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 8px 12px;
-        background: rgba(37, 37, 38, 0.92);
-        border-bottom: 1px solid var(--border-soft);
-        backdrop-filter: blur(8px);
-      }
+/* ── Main Content Area ── */
+.main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
-      .status-group {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-        font-size: 12px;
-      }
+/* ── Chat Stream ── */
+.chat-stream { flex: 1; overflow-y: auto; padding: var(--spacing-md); display: flex; flex-direction: column; gap: 10px; }
+.chat-stream:empty::after {
+  content: ''; display: block; text-align: center; padding: 24px 16px;
+  color: var(--text-muted); font-size: var(--font-size-sm);
+}
 
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 2px 0;
-        border-radius: 999px;
-        background: transparent;
-        border: none;
-        white-space: nowrap;
-        color: var(--foreground);
-      }
+/* Welcome / Empty State */
+.welcome-block {
+  text-align: center; padding: 24px 16px; color: var(--text-muted);
+  border: 1px dashed var(--border-soft); border-radius: var(--radius);
+  margin: 8px 0;
+}
+.welcome-block .welcome-icon { font-size: 28px; margin-bottom: 8px; }
+.welcome-block .welcome-title { font-size: var(--font-size-lg); font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.welcome-block .welcome-subtitle { font-size: var(--font-size-sm); margin-bottom: 12px; }
+.welcome-block .welcome-actions { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--success);
-        display: inline-block;
-        box-shadow: 0 0 0 3px rgba(46,160,67,0.15);
-      }
+/* Messages */
+.message { max-width: 90%; border-radius: var(--radius); padding: 8px 10px; font-size: var(--font-size); line-height: 1.5; animation: msgIn 0.2s ease; }
+@keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.message.user { align-self: flex-end; background: var(--accent-subtle); border: 1px solid var(--accent-border); }
+.message.ai { align-self: flex-start; background: var(--surface-elevated); border: 1px solid var(--border-soft); }
+.message .msg-label { font-size: var(--font-size-sm); font-weight: 600; margin-bottom: 4px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.message.user .msg-label { color: var(--info); }
+.message .msg-content { white-space: pre-wrap; word-break: break-word; }
+.message .msg-content code {
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+  font-family: var(--vscode-editor-font-family, "Consolas", monospace);
+  font-size: var(--font-size-sm);
+}
+.message .msg-content pre {
+  background: rgba(0,0,0,0.25); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 8px 10px; overflow-x: auto;
+  margin: 6px 0; font-family: var(--vscode-editor-font-family, "Consolas", monospace);
+  font-size: var(--font-size-sm); line-height: 1.45;
+}
+.message .msg-content pre code { background: none; padding: 0; }
+.message .msg-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
 
-      .metric {
-        padding: 2px 0;
-        border-radius: 999px;
-        background: transparent;
-        border: none;
-        color: var(--muted);
-      }
+/* Context Preview Block (inline in chat) */
+.ctx-preview {
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--surface-hover); margin-top: 6px; overflow: hidden;
+  font-size: var(--font-size-sm);
+}
+.ctx-preview-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 10px; cursor: pointer; user-select: none;
+  color: var(--text-muted);
+}
+.ctx-preview-header:hover { background: var(--surface-active); }
+.ctx-preview-header .ctx-preview-title { font-weight: 600; color: var(--text); }
+.ctx-preview-body { padding: 6px 10px 8px; border-top: 1px solid var(--border-subtle); display: none; }
+.ctx-preview.expanded .ctx-preview-body { display: block; }
+.ctx-preview .ctx-token-bar {
+  height: 3px; border-radius: 2px; background: var(--border-soft);
+  margin: 4px 0; overflow: hidden;
+}
+.ctx-preview .ctx-token-bar-fill {
+  height: 100%; border-radius: 2px; background: var(--accent);
+  transition: width var(--transition-normal);
+}
+.ctx-entity-list { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.ctx-entity { display: flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--font-size-sm); }
+.ctx-entity .ctx-entity-icon { flex-shrink: 0; }
 
-      .topbar-actions { display: flex; gap: 8px; }
+/* Plan Card (embedded in chat) */
+.plan-card {
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--surface-hover); margin-top: 6px; overflow: hidden;
+}
+.plan-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px; border-bottom: 1px solid var(--border-subtle);
+  font-weight: 600; font-size: var(--font-size-sm); cursor: pointer; user-select: none;
+}
+.plan-card-header:hover { background: var(--surface-active); }
+.plan-card-body { padding: 0; }
+.plan-step {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 10px; cursor: pointer; transition: background var(--transition-fast);
+  border-left: 3px solid transparent; position: relative;
+}
+.plan-step:hover { background: var(--surface-active); }
+.plan-step.status-completed { border-left-color: var(--success); }
+.plan-step.status-running { border-left-color: var(--accent); }
+.plan-step.status-pending { border-left-color: var(--warning); }
+.plan-step.status-failed { border-left-color: var(--error); }
+.plan-step .step-icon { width: 18px; text-align: center; flex-shrink: 0; font-size: var(--font-size); line-height: 1.4; }
+.plan-step .step-body { flex: 1; min-width: 0; }
+.plan-step .step-title { font-size: var(--font-size); font-weight: 500; }
+.plan-step .step-meta { font-size: var(--font-size-sm); color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+.plan-step .step-badge {
+  font-size: var(--font-size-sm); padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--surface-active); color: var(--text-muted);
+}
+.plan-step-detail {
+  display: none; padding: 6px 10px 8px 36px; font-size: var(--font-size-sm);
+  color: var(--text-muted); border-top: 1px solid var(--border-subtle);
+  background: rgba(0,0,0,0.08);
+}
+.plan-step.expanded + .plan-step-detail { display: block; }
+.plan-step-detail .log-line { font-family: var(--vscode-editor-font-family, "Consolas", monospace); font-size: var(--font-size-sm); padding: 1px 0; }
+.plan-card-actions { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; }
 
-      button {
-        appearance: none;
-        border: 1px solid var(--border-soft);
-        background: rgba(255,255,255,0.02);
-        color: var(--foreground);
-        border-radius: 6px;
-        padding: 7px 10px;
-        cursor: pointer;
-        font-size: 12px;
-        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-      }
+/* Execution Timeline */
+.exec-timeline {
+  display: flex; align-items: center; gap: 0; padding: 8px 10px;
+  overflow-x: auto;
+}
+.exec-timeline .timeline-step {
+  display: flex; align-items: center; gap: 0; flex-shrink: 0;
+}
+.exec-timeline .timeline-dot {
+  width: 22px; height: 22px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 10px;
+  border: 2px solid var(--border-soft); background: var(--surface);
+  color: var(--text-muted); cursor: pointer; transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+.exec-timeline .timeline-dot.completed { border-color: var(--success); background: var(--success-subtle); color: var(--success); }
+.exec-timeline .timeline-dot.running { border-color: var(--accent); background: var(--accent-subtle); color: var(--accent); animation: pulse 1.5s ease-in-out infinite; }
+.exec-timeline .timeline-dot.failed { border-color: var(--error); background: var(--error-subtle); color: var(--error); }
+.exec-timeline .timeline-line {
+  width: 20px; height: 2px; background: var(--border-soft); flex-shrink: 0;
+}
+.exec-timeline .timeline-line.done { background: var(--success); }
 
-      button:hover {
-        background: rgba(255,255,255,0.04);
-        border-color: var(--border);
-      }
+/* ── Context Drawer ── */
+.ctx-drawer {
+  border-top: 1px solid var(--border-soft); flex-shrink: 0;
+  background: var(--surface); overflow: hidden;
+  transition: max-height var(--transition-slow);
+}
+.ctx-drawer.collapsed { max-height: 32px; }
+.ctx-drawer.expanded { max-height: 260px; }
+.ctx-drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 10px; cursor: pointer; user-select: none;
+  font-size: var(--font-size-sm); color: var(--text-muted);
+  min-height: 32px;
+}
+.ctx-drawer-header:hover { background: var(--surface-hover); }
+.ctx-drawer-header .ctx-drawer-title { font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.ctx-drawer-header .ctx-drawer-stats { display: flex; gap: 10px; font-size: var(--font-size-sm); }
+.ctx-drawer-body {
+  padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 8px;
+  border-top: 1px solid var(--border-subtle); max-height: 220px; overflow-y: auto;
+}
+.ctx-drawer-body .ctx-section-title {
+  font-size: var(--font-size-sm); font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.ctx-drawer-body .ctx-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.ctx-drawer-body .ctx-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface-hover); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill); padding: 2px 8px; font-size: var(--font-size-sm);
+  color: var(--text-muted); cursor: pointer; transition: all var(--transition-fast);
+}
+.ctx-drawer-body .ctx-chip:hover { background: var(--surface-active); color: var(--text); border-color: var(--border); }
+.ctx-drawer-body .ctx-chip .chip-count { color: var(--info); font-weight: 600; }
+.ctx-drawer-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
-      button.primary {
-        background: linear-gradient(180deg, rgba(14,99,156,0.92), rgba(14,99,156,0.75));
-        color: var(--text-on-primary);
-        border-color: rgba(14,99,156,0.8);
-      }
+/* ── Chat Input Area ── */
+.chat-input-area {
+  border-top: 1px solid var(--border-soft); padding: 8px 10px;
+  flex-shrink: 0; background: var(--surface);
+}
+.chat-input-row { display: flex; gap: 6px; align-items: flex-end; }
+.chat-input-row textarea { flex: 1; min-height: 36px; max-height: 100px; }
+.chat-input-row .send-btn { flex-shrink: 0; padding: 6px 14px; }
+.chat-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
+.chat-actions .input-hint { font-size: var(--font-size-sm); color: var(--text-dim); margin-left: auto; }
 
-      .workspace-layout {
-        display: block;
-        padding: 12px;
-        min-height: 0;
-        flex: 1;
-      }
+/* @-mention suggestion dropdown */
+.mention-dropdown {
+  position: absolute; bottom: 100%; left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); max-height: 180px; overflow-y: auto;
+  display: none; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.mention-dropdown.visible { display: block; }
+.mention-item {
+  display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+  cursor: pointer; font-size: var(--font-size-sm);
+}
+.mention-item:hover, .mention-item.active { background: var(--surface-active); }
+.mention-item .mention-icon { flex-shrink: 0; }
+.mention-item .mention-label { flex: 1; }
+.mention-item .mention-type { color: var(--text-dim); font-size: var(--font-size-sm); }
 
-      .panel {
-        background: transparent;
-        border: 1px solid var(--border-soft);
-        border-radius: 10px;
-        min-height: 0;
-        overflow: hidden;
-      }
+/* ── Slide-Out Settings Panel ── */
+.slide-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  z-index: 50; opacity: 0; pointer-events: none;
+  transition: opacity var(--transition-normal);
+}
+.slide-overlay.visible { opacity: 1; pointer-events: auto; }
+.slide-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 100%;
+  max-width: 380px; background: var(--surface);
+  border-left: 1px solid var(--border); z-index: 51;
+  transform: translateX(100%); transition: transform var(--transition-slow);
+  display: flex; flex-direction: column;
+}
+.slide-panel.visible { transform: translateX(0); }
+.slide-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.slide-panel-header .slide-title { font-weight: 600; font-size: var(--font-size-lg); }
+.slide-panel-body { flex: 1; overflow-y: auto; padding: var(--spacing-md); }
+.slide-panel-body .section { margin-bottom: var(--spacing-lg); }
+.slide-panel-body .section-title {
+  font-size: var(--font-size-sm); font-weight: 600; color: var(--text-muted);
+  margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;
+}
 
-      .meta-panel {
-        display: flex;
-        flex-direction: column;
-      }
+/* Settings Cards */
+.card {
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--surface-hover); padding: var(--spacing-md); margin-bottom: var(--spacing-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+  cursor: pointer;
+}
+.card:hover { background: var(--surface-active); }
+.card.selected { border-color: var(--accent); background: var(--accent-subtle); }
+.card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.card-header .radio {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--text-muted);
+  flex-shrink: 0; transition: all var(--transition-fast);
+}
+.card.selected .radio { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface); }
+.card-title { font-weight: 600; font-size: var(--font-size); }
+.card-status { font-size: var(--font-size-sm); color: var(--text-muted); margin-left: auto; }
+.card-body { display: flex; flex-direction: column; gap: 6px; }
+.card-body.collapsed { display: none; }
+.form-row { display: flex; gap: 6px; }
+.form-row > * { flex: 1; }
+.form-row .grow-2 { flex: 2; }
+.toggle-row { display: flex; align-items: center; gap: 8px; font-size: var(--font-size); }
+.toggle-row input[type="checkbox"] { width: auto; flex: none; }
+.btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.status-row { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); color: var(--text-muted); flex-wrap: wrap; }
+.status-row .value { color: var(--text); }
 
-      .tabbar {
-        display: flex;
-        gap: 8px;
-        padding: 8px 8px 0;
-        border-bottom: 1px solid var(--border-soft);
-        background: transparent;
-      }
+/* Slide-panel inner tabs */
+.slide-tabs { display: flex; border-bottom: 1px solid var(--border-soft); flex-shrink: 0; }
+.slide-tab {
+  flex: 1; padding: 7px 4px; border: none; border-bottom: 2px solid transparent;
+  background: transparent; color: var(--text-muted); font-size: var(--font-size-sm);
+  border-radius: 0; cursor: pointer; text-align: center;
+}
+.slide-tab:hover { background: var(--surface-hover); color: var(--text); }
+.slide-tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
-      .tab-btn {
-        padding: 8px 12px;
-        border-radius: 8px 8px 0 0;
-        border: 1px solid transparent;
-        border-bottom: none;
-        background: transparent;
-        color: var(--muted);
-      }
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
 
-      .tab-btn.active {
-        background: rgba(14,99,156,0.08);
-        color: var(--foreground);
-        border-color: var(--border-soft);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
-      }
+/* Toast */
+.toast {
+  position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-pill); padding: 6px 16px; font-size: var(--font-size-sm);
+  z-index: 100; opacity: 0; pointer-events: none;
+  transition: opacity var(--transition-normal);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.toast.visible { opacity: 1; }
+.toast.success { border-color: var(--success); }
+.toast.error { border-color: var(--error); }
 
-      .tab-panels {
-        padding: 12px 12px 0;
-      }
+/* ── Workflow Palette Cards ── */
+.palette-card {
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--surface-hover); padding: var(--spacing-md); margin-bottom: var(--spacing-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.palette-card:hover { background: var(--surface-active); }
+.palette-card.disabled { opacity: 0.5; pointer-events: none; }
+.palette-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.palette-card-icon { font-size: 16px; flex-shrink: 0; }
+.palette-card-title { font-weight: 600; font-size: var(--font-size); }
+.palette-card-desc { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; }
+.palette-run-btn { width: 100%; }
 
-      .tab-panel {
-        display: none;
-      }
-
-      .tab-panel.active {
-        display: block;
-      }
-
-      .panel-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--border);
-        font-size: 12px;
-        font-weight: 600;
-        background: rgba(255,255,255,0.02);
-      }
-
-      .panel-body {
-        padding: 10px 12px 12px;
-        overflow: auto;
-      }
-
-      .collapsible-stack {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-
-      .config-section {
-        border: 1px solid var(--border-soft);
-        border-radius: 8px;
-        background: rgba(255,255,255,0.01);
-        overflow: hidden;
-      }
-
-      .config-section summary {
-        list-style: none;
-        cursor: pointer;
-        padding: 10px 12px;
-        font-size: 12px;
-        font-weight: 600;
-      }
-
-      .config-section summary::-webkit-details-marker { display: none; }
-
-      .config-content {
-        padding: 0 12px 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-
-      .empty-state {
-        padding: 10px 12px;
-        border-radius: 6px;
-        background: rgba(255,255,255,0.02);
-        border: 1px dashed var(--border-soft);
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .tree {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        font-size: 13px;
-      }
-
-      .tree-node {
-        border: 1px solid transparent;
-        border-radius: 6px;
-        padding: 4px 6px;
-        background: rgba(255,255,255,0.01);
-      }
-
-      .tree-node-label {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        cursor: pointer;
-      }
-
-      .tree-toggle {
-        display: inline-block;
-        width: 12px;
-        color: var(--muted);
-        font-size: 11px;
-      }
-
-      .tree-children {
-        margin-left: 16px;
-        margin-top: 6px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      .tree-children.collapsed { display: none; }
-
-      .agent-panel {
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-      }
-
-      .agent-body {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        padding: 12px 0 16px;
-        overflow: auto;
-      }
-
-      .config-form {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-
-      .section {
-        border: 1px solid var(--border-soft);
-        border-radius: 8px;
-        background: rgba(255,255,255,0.015);
-        padding: 10px 12px;
-      }
-
-      .label {
-        display: block;
-        font-size: 12px;
-        font-weight: 600;
-        margin-bottom: 6px;
-        color: var(--foreground);
-      }
-
-      textarea, input, select {
-        width: 100%;
-        box-sizing: border-box;
-        background: rgba(255,255,255,0.02);
-        color: var(--vscode-input-foreground, #cccccc);
-        border: 1px solid var(--vscode-input-border, var(--border-soft));
-        border-radius: 6px;
-        padding: 8px 10px;
-        font: inherit;
-      }
-
-      textarea {
-        min-height: 90px;
-        resize: vertical;
-      }
-
-      .action-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 10px;
-      }
-
-      .plan-summary {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 6px 0 10px;
-        font-size: 12px;
-      }
-
-      .chevron {
-        display: inline-block;
-        transition: transform 0.15s ease;
-      }
-
-      .plan-section[open] .chevron { transform: rotate(90deg); }
-
-      .plan-section {
-        margin-top: 8px;
-        border: 1px solid var(--border-soft);
-        border-radius: 8px;
-        background: rgba(255,255,255,0.015);
-      }
-
-      .plan-section summary {
-        list-style: none;
-        cursor: pointer;
-        padding: 10px 12px;
-        font-weight: 600;
-        font-size: 12px;
-      }
-
-      .plan-section summary::-webkit-details-marker { display: none; }
-
-      .plan-body {
-        padding: 8px 12px 12px;
-      }
-
-      .plan-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-
-      .step-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        border: 1px solid var(--border-soft);
-        border-left: 4px solid var(--muted);
-        background: rgba(255,255,255,0.015);
-        border-radius: 6px;
-        padding: 8px 10px;
-        font-size: 12px;
-      }
-
-      .step-item.status-pending { border-left-color: var(--warning); }
-      .step-item.status-running { border-left-color: var(--primary); }
-      .step-item.status-completed { border-left-color: var(--success); }
-      .step-item.status-failed { border-left-color: var(--error); }
-
-      .step-status {
-        padding: 3px 7px;
-        border-radius: 999px;
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        background: rgba(255,255,255,0.04);
-      }
-
-      .chat-box {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-
-      .message {
-        max-width: 82%;
-        border-radius: 10px;
-        padding: 8px 10px;
-        font-size: 12px;
-        line-height: 1.4;
-        border: 1px solid var(--border-soft);
-      }
-
-      .message.user {
-        align-self: flex-end;
-        background: rgba(14,99,156,0.12);
-        border-color: rgba(14,99,156,0.2);
-      }
-
-      .message.ai {
-        align-self: flex-start;
-        background: rgba(255,255,255,0.02);
-      }
-
-      .chat-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-      .muted { color: var(--muted); }
-      .hidden { display: none !important; }
-    </style>
-  </head>
-  <body>
-    <div class="workspace-shell">
-      <div class="topbar">
-        <div class="status-group">
-          <div class="status-pill" id="connectionStatus"><span class="dot"></span> Snowflake connected</div>
-          <div class="metric" id="providerLabel">Snowflake</div>
-          <div class="metric" id="contextWindow">Context 128k</div>
-          <div class="metric" id="tokensSession">Tokens 0</div>
-          <div class="metric" id="tokensPlan">Plan 0</div>
-        </div>
-        <div class="topbar-actions">
-          <button id="stopConnectionBtn">Stop</button>
-        </div>
+/* Onboarding steps */
+.onboarding-step {
+  display: flex; gap: 10px; padding: 10px; border: 1px solid var(--border-soft);
+  border-radius: var(--radius); background: var(--surface-hover);
+  align-items: flex-start;
+}
+.onboarding-step .onboard-num {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--accent);
+  color: var(--text-on-accent); display: flex; align-items: center;
+  justify-content: center; font-size: var(--font-size-sm); font-weight: 600;
+  flex-shrink: 0;
+}
+.onboarding-step .onboard-num.done { background: var(--success); }
+.onboarding-step .onboard-content { flex: 1; }
+.onboarding-step .onboard-title { font-weight: 600; font-size: var(--font-size); margin-bottom: 2px; }
+.onboarding-step .onboard-desc { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ═══ TOP STATUS BAR ═══ -->
+  <div class="topbar">
+    <div class="status-group">
+      <div class="status-pill" id="providerPill" title="Click to change LLM provider">
+        <span class="dot warn" id="providerDot"></span>
+        <span id="providerLabel">Copilot</span>
       </div>
+      <div class="status-pill" id="connPill" title="Click to manage connections">
+        <span class="dot err" id="connDot"></span>
+        <span id="connLabel">Not connected</span>
+      </div>
+      <div class="metric" id="ctxMetric" title="Click to expand context drawer">
+        <span>📊</span>
+        <span class="metric-value" id="ctxMetricText">Context 0k</span>
+        <div class="metric-bar"><div class="metric-bar-fill" id="ctxMetricBar" style="width:0%"></div></div>
+      </div>
+      <div class="metric" id="planMetric">
+        <span>📋</span>
+        <span class="metric-value" id="planMetricText">Plan —</span>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="refreshBtn" title="Refresh context index">⟳</button>
+      <button class="icon-btn danger" id="stopBtn" title="Stop execution">⏹</button>
+      <button class="icon-btn" id="paletteBtn" title="Workflow Palette">🧰</button>
+      <button class="icon-btn" id="settingsBtn" title="Settings & Connections">⚙</button>
+    </div>
+  </div>
 
-      <div class="workspace-layout">
-        <main class="panel agent-panel">
-          <div class="tabbar" role="tablist" aria-label="Workspace tabs">
-            <button class="tab-btn active" data-tab="workspace" role="tab" aria-selected="true">DE Agent Workspace</button>
-            <button class="tab-btn" data-tab="integration" role="tab" aria-selected="false">Data Integration</button>
-            <button class="tab-btn" data-tab="llm" role="tab" aria-selected="false">LLM Settings</button>
-          </div>
-
-          <div class="tab-panels">
-            <div class="tab-panel active" id="workspaceTab" role="tabpanel">
-              <div class="agent-body">
-                <section class="section">
-                  <details class="config-section" id="contextSection" open>
-                    <summary>Context</summary>
-                    <div class="config-content">
-                      <div class="empty-state hidden" id="metadataEmptyState">Connect a database provider to enable context and metadata browsing.</div>
-                      <div class="tree" id="metadataTree"></div>
-                    </div>
-                  </details>
-                </section>
-
-                <section class="section">
-                  <label class="label" for="objectiveInput">Objective</label>
-                  <textarea id="objectiveInput" placeholder="Create an ingestion pipeline from S3 to Snowflake using Snowpipe and CDC with streams and tasks."></textarea>
-                  <div class="action-row">
-                    <button id="generatePlanBtn" class="primary">Generate Plan</button>
-                    <button id="executePlanBtn">Execute</button>
-                    <button id="pausePlanBtn">Pause</button>
-                    <button id="resetPlanBtn">Reset</button>
-                  </div>
-                </section>
-
-                <section class="section" id="planContainer">
-                  <div class="plan-summary">
-                    <span id="planSummaryText">Execution Plan</span>
-                    <span class="muted" id="planCount">0 steps</span>
-                  </div>
-
-                  <details class="plan-section" open>
-                    <summary><span class="chevron">?</span> Execution Plan</summary>
-                    <div class="plan-body">
-                      <div class="plan-list" id="planList"></div>
-                    </div>
-                  </details>
-                </section>
-
-                <section class="section">
-                  <div class="label">Chat Refinement Loop</div>
-                  <div class="chat-box" id="chatBox">
-                    <div class="message ai">Context loaded. I can refine the plan using the active metadata and execution state.</div>
-                  </div>
-                  <textarea id="chatInput" style="margin-top:10px; min-height: 72px;" placeholder="Modify the pipeline to include schema drift checks."></textarea>
-                  <div class="chat-actions">
-                    <button id="sendChatBtn" class="primary">Send</button>
-                    <button id="insertFileBtn">Insert into File</button>
-                    <button id="updatePlanBtn">Update Plan</button>
-                    <button id="reExecuteBtn">Re-Execute</button>
-                  </div>
-                </section>
-              </div>
-            </div>
-
-            <div class="tab-panel" id="integrationTab" role="tabpanel">
-              <div class="agent-body">
-                <section class="section config-form">
-                  <label class="label" for="providerSelect">Provider</label>
-                  <select id="providerSelect">
-                    <option value="snowflake">Snowflake</option>
-                    <option value="databricks">Databricks</option>
-                    <option value="bigquery">BigQuery</option>
-                    <option value="redshift">Redshift</option>
-                    <option value="synapse">Synapse</option>
-                    <option value="other">Other</option>
-                  </select>
-
-                  <label class="label" for="authModeSelect">Authentication</label>
-                  <select id="authModeSelect">
-                    <option value="key-pair">Key-Pair Authentication</option>
-                    <option value="username-password">Username + Password</option>
-                    <option value="oauth">OAuth</option>
-                    <option value="external-browser">External Browser</option>
-                    <option value="mcp">Snowflake MCP</option>
-                  </select>
-
-                  <label class="label" for="accountInput">Account</label>
-                  <input id="accountInput" placeholder="Account identifier" />
-
-                  <label class="label" for="usernameInput">Username</label>
-                  <input id="usernameInput" placeholder="Username" />
-
-                  <label class="label" for="warehouseInput">Warehouse</label>
-                  <input id="warehouseInput" placeholder="Warehouse" />
-
-                  <label class="label" for="databaseInput">Database</label>
-                  <input id="databaseInput" placeholder="Database" />
-
-                  <button id="testConnectionBtn">Test Connection</button>
-                </section>
-              </div>
-            </div>
-
-            <div class="tab-panel" id="llmTab" role="tabpanel">
-              <div class="agent-body">
-                <section class="section config-form">
-                  <label class="label" for="llmProviderSelect">LLM Provider</label>
-                  <select id="llmProviderSelect">
-                    <option value="azure-openai">Azure OpenAI</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="ollama">Local LLM (Ollama)</option>
-                    <option value="copilot">GitHub Copilot</option>
-                  </select>
-
-                  <label class="label" for="llmModelInput">Model</label>
-                  <input id="llmModelInput" value="gpt-4o-mini" />
-
-                  <label class="label" for="llmApiKeyInput">API Key</label>
-                  <input id="llmApiKeyInput" type="password" placeholder="Optional for local or Copilot" />
-
-                  <button id="connectCopilotBtn">Connect GitHub Copilot</button>
-                </section>
-              </div>
-            </div>
-          </div>
-        </main>
+  <!-- ═══ MAIN CONTENT ═══ -->
+  <div class="main-content">
+    <!-- Chat Stream -->
+    <div class="chat-stream" id="chatStream">
+      <!-- Welcome / Onboarding -->
+      <div class="welcome-block" id="welcomeBlock">
+        <div class="welcome-icon">🛠️</div>
+        <div class="welcome-title">Auto Data Engineering Hub</div>
+        <div class="welcome-subtitle">Your AI-powered data engineering assistant. Describe a task, connect a database, or explore your semantic context layer.</div>
+        <div class="welcome-actions">
+          <button class="primary" id="welcomeConnectBtn">🔌 Connect Database</button>
+          <button id="welcomeSettingsBtn">⚙ Configure LLM</button>
+        </div>
       </div>
     </div>
 
-    <script>
-      const vscode = acquireVsCodeApi();
-      const elements = {
-        objectiveInput: document.getElementById('objectiveInput'),
-        planList: document.getElementById('planList'),
-        planSummaryText: document.getElementById('planSummaryText'),
-        planCount: document.getElementById('planCount'),
-        chatBox: document.getElementById('chatBox'),
-        chatInput: document.getElementById('chatInput'),
-        connectionStatus: document.getElementById('connectionStatus'),
-        providerLabel: document.getElementById('providerLabel'),
-        contextSection: document.getElementById('contextSection'),
-        metadataTree: document.getElementById('metadataTree'),
-        metadataEmptyState: document.getElementById('metadataEmptyState'),
-        providerSelect: document.getElementById('providerSelect'),
-        authModeSelect: document.getElementById('authModeSelect'),
-        accountInput: document.getElementById('accountInput'),
-        usernameInput: document.getElementById('usernameInput'),
-        warehouseInput: document.getElementById('warehouseInput'),
-        databaseInput: document.getElementById('databaseInput'),
-        llmProviderSelect: document.getElementById('llmProviderSelect'),
-        llmModelInput: document.getElementById('llmModelInput'),
-        llmApiKeyInput: document.getElementById('llmApiKeyInput'),
-        testConnectionBtn: document.getElementById('testConnectionBtn'),
-        connectCopilotBtn: document.getElementById('connectCopilotBtn'),
-        contextWindow: document.getElementById('contextWindow'),
-        tokensSession: document.getElementById('tokensSession'),
-        tokensPlan: document.getElementById('tokensPlan'),
-        tabButtons: Array.from(document.querySelectorAll('.tab-btn')),
-        workspaceTab: document.getElementById('workspaceTab'),
-        integrationTab: document.getElementById('integrationTab'),
-        llmTab: document.getElementById('llmTab')
+    <!-- Context Drawer -->
+    <div class="ctx-drawer collapsed" id="ctxDrawer">
+      <div class="ctx-drawer-header" id="ctxDrawerToggle">
+        <span class="ctx-drawer-title">
+          <span>📊</span> Semantic Context Layer
+        </span>
+        <span class="ctx-drawer-stats">
+          <span id="ctxDrawerStats">0 tables · 0 terms · 0 queries</span>
+          <span id="ctxDrawerChevron">▶</span>
+        </span>
+      </div>
+      <div class="ctx-drawer-body" id="ctxDrawerBody">
+        <div class="ctx-section-title">Database Metadata</div>
+        <div class="ctx-grid" id="ctxDbGrid">
+          <span class="ctx-chip" style="opacity:0.5">No metadata synced</span>
+        </div>
+        <div class="ctx-section-title">Business Context</div>
+        <div class="ctx-grid" id="ctxBizGrid">
+          <span class="ctx-chip" style="opacity:0.5">No business terms</span>
+        </div>
+        <div class="ctx-section-title">Verified Queries</div>
+        <div class="ctx-grid" id="ctxQueryGrid">
+          <span class="ctx-chip" style="opacity:0.5">No verified queries</span>
+        </div>
+        <div class="ctx-drawer-actions">
+          <button id="ctxReindexBtn" class="icon-btn" title="Re-index context">⟳ Re-index</button>
+          <button id="ctxOpenFolderBtn" class="icon-btn" title="Open .ai-context folder">📂 Open .ai-context</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Input -->
+    <div class="chat-input-area">
+      <div class="chat-input-row" style="position:relative;">
+        <textarea id="chatInput" placeholder="Describe a data engineering task... (Use @ to reference tables, terms, or queries)" rows="2"></textarea>
+        <button class="primary send-btn" id="sendBtn">Send</button>
+        <div class="mention-dropdown" id="mentionDropdown"></div>
+      </div>
+      <div class="chat-actions">
+        <button id="generatePlanBtn">📋 Generate Plan</button>
+        <button id="executePlanBtn">▶ Execute</button>
+        <button id="pausePlanBtn">⏸ Pause</button>
+        <button id="resetPlanBtn">↻ Reset</button>
+        <span class="input-hint">@mention · /commands</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SLIDE-OUT SETTINGS PANEL ═══ -->
+  <div class="slide-overlay" id="slideOverlay"></div>
+  <div class="slide-panel" id="slidePanel">
+    <div class="slide-panel-header">
+      <span class="slide-title">Settings & Connections</span>
+      <button class="icon-btn" id="slideCloseBtn">✕</button>
+    </div>
+    <div class="slide-tabs" id="slideTabs">
+      <button class="slide-tab active" data-slide-tab="llm">🤖 LLM Provider</button>
+      <button class="slide-tab" data-slide-tab="connect">🔌 Connections</button>
+      <button class="slide-tab" data-slide-tab="prefs">⚙ Preferences</button>
+    </div>
+    <div class="slide-panel-body" id="slideBody">
+      <!-- LLM Provider Section -->
+      <div class="section slide-section active" id="slideSectionLlm">
+        <div class="section-title">Select LLM Provider</div>
+        <div class="card selected" data-llm="copilot">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">GitHub Copilot</span>
+            <span class="card-status" id="copilotStatus">Checking...</span>
+          </div>
+          <div class="card-body">
+            <div class="toggle-row">
+              <input type="checkbox" id="copilotConsent" />
+              <span>Allow programmatic use of local Copilot (opt-in) — saves automatically</span>
+            </div>
+            <div class="btn-row">
+              <button id="testCopilotBtn">Test Copilot</button>
+              <button id="openCopilotHandoffBtn">Open Handoff</button>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-llm="openai">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">OpenAI</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Model</label><input id="openaiModel" placeholder="gpt-4o-mini" /></div>
+              <div><label>API Key</label><input id="openaiKey" type="password" placeholder="sk-..." /></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-llm="anthropic">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Anthropic</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Model</label><input id="anthropicModel" placeholder="claude-3-5-sonnet" /></div>
+              <div><label>API Key</label><input id="anthropicKey" type="password" placeholder="sk-ant-..." /></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-llm="azure-openai">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Azure OpenAI</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Endpoint</label><input id="azureEndpoint" placeholder="https://..." /></div>
+              <div><label>API Key</label><input id="azureKey" type="password" placeholder="••••" /></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-llm="gemini">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Google Gemini</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Model</label><input id="geminiModel" placeholder="gemini-1.5-pro" /></div>
+              <div><label>API Key</label><input id="geminiKey" type="password" placeholder="AIza..." /></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-llm="ollama">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Ollama (Local)</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Model</label><input id="ollamaModel" placeholder="llama3" /></div>
+              <div><label>Endpoint</label><input id="ollamaEndpoint" placeholder="http://localhost:11434" /></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connections Section -->
+      <div class="section slide-section" id="slideSectionConnect" style="display:none;">
+        <div class="section-title">Data Platform</div>
+        <div class="card selected" data-provider="snowflake">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Snowflake</span>
+            <span class="card-status" id="snowflakeStatus">Not connected</span>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div><label>Account</label><input id="sfAccount" placeholder="XYZ12345" /></div>
+              <div><label>Username</label><input id="sfUsername" placeholder="data_agent" /></div>
+            </div>
+            <div class="form-row">
+              <div><label>Warehouse</label><input id="sfWarehouse" placeholder="WH_XS" /></div>
+              <div><label>Database</label><input id="sfDatabase" placeholder="RAW_DB" /></div>
+            </div>
+            <div class="form-row">
+              <div><label>Schema</label><input id="sfSchema" placeholder="PUBLIC" /></div>
+              <div><label>Role</label><input id="sfRole" placeholder="SYSADMIN" /></div>
+            </div>
+            <div class="form-row">
+              <div><label>Auth Mode</label>
+                <select id="sfAuthMode">
+                  <option value="key-pair">Key-Pair</option>
+                  <option value="username-password">Username + Password</option>
+                  <option value="oauth">OAuth</option>
+                  <option value="external-browser">External Browser</option>
+                  <option value="mcp">MCP</option>
+                </select>
+              </div>
+              <div><label>Private Key Path</label><input id="sfKeyPath" placeholder="/path/to/key.pem" /></div>
+            </div>
+            <div class="btn-row">
+              <button id="testConnBtn" class="primary">Connect</button>
+              <button id="sourceAssessmentBtn">Source Assessment</button>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="databricks">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Databricks</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Workspace URL</label><input placeholder="https://..." /></div>
+              <div><label>Token</label><input type="password" placeholder="••••" /></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="bigquery">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">BigQuery</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Project ID</label><input placeholder="my-project" /></div>
+              <div><label>Dataset</label><input placeholder="analytics" /></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="redshift">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Redshift</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Cluster</label><input placeholder="my-cluster" /></div>
+              <div><label>Database</label><input placeholder="analytics" /></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="synapse">
+          <div class="card-header">
+            <span class="radio"></span>
+            <span class="card-title">Azure Synapse</span>
+            <span class="card-status">Not configured</span>
+          </div>
+          <div class="card-body collapsed">
+            <div class="form-row">
+              <div><label>Server</label><input placeholder="my-server" /></div>
+              <div><label>Database</label><input placeholder="analytics" /></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Preferences Section -->
+      <div class="section slide-section" id="slideSectionPrefs" style="display:none;">
+        <div class="section-title">Extension Settings</div>
+        <div class="card">
+          <div class="card-body">
+            <div class="toggle-row">
+              <input type="checkbox" id="readOnlyMode" />
+              <span>Read-only mode (prevent writes to database)</span>
+            </div>
+            <div class="toggle-row">
+              <input type="checkbox" id="autoDocEnabled" />
+              <span>Auto-documentation generation</span>
+            </div>
+            <div class="toggle-row">
+              <input type="checkbox" id="telemetryEnabled" />
+              <span>Enable telemetry (opt-in)</span>
+            </div>
+            <div class="form-row" style="margin-top:8px;">
+              <div><label>Metadata Cache (min)</label><input id="cacheDuration" type="number" value="15" /></div>
+              <div><label>Query Timeout (s)</label><input id="queryTimeout" type="number" value="120" /></div>
+            </div>
+            <div class="btn-row">
+              <button id="saveSettingsBtn" class="primary">Save Settings</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ WORKFLOW PALETTE PANEL ═══ -->
+  <div class="slide-overlay" id="paletteOverlay"></div>
+  <div class="slide-panel" id="palettePanel">
+    <div class="slide-panel-header">
+      <span class="slide-title">🧰 Workflow Palette</span>
+      <button class="icon-btn" id="paletteCloseBtn">✕</button>
+    </div>
+    <div class="slide-panel-body" id="paletteBody">
+      <!-- Discover Phase -->
+      <div class="section">
+        <div class="section-title">🔍 Discover</div>
+        <div class="palette-card" data-agent="sourceAssessmentAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">📊</span>
+            <span class="palette-card-title">Source Assessment</span>
+          </div>
+          <div class="palette-card-desc">Extract schema metadata, profile columns, and build the knowledge graph from your connected data platform.</div>
+          <button class="primary palette-run-btn">▶ Run</button>
+        </div>
+        <div class="palette-card disabled" data-agent="lineageMapperAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">🔗</span>
+            <span class="palette-card-title">Data Lineage Mapper</span>
+          </div>
+          <div class="palette-card-desc">Trace column-level lineage across views and ETL pipelines. (Coming in Phase 3b)</div>
+          <button class="palette-run-btn" disabled>▶ Run</button>
+        </div>
+        <div class="palette-card disabled" data-agent="qualityProfilerAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">✅</span>
+            <span class="palette-card-title">Data Quality Profiler</span>
+          </div>
+          <div class="palette-card-desc">Run configurable quality checks on your data. (Coming in Phase 3b)</div>
+          <button class="palette-run-btn" disabled>▶ Run</button>
+        </div>
+      </div>
+
+      <!-- Model Phase -->
+      <div class="section">
+        <div class="section-title">🎨 Model</div>
+        <div class="palette-card" data-agent="sttmAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">🗺</span>
+            <span class="palette-card-title">STTM Mapper</span>
+          </div>
+          <div class="palette-card-desc">Generate source-to-target mappings with column-level transformations. Use /plan to create a mapping workflow.</div>
+          <button class="palette-run-btn">▶ Run</button>
+        </div>
+        <div class="palette-card disabled" data-agent="dataModelerAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">🏗</span>
+            <span class="palette-card-title">Data Modeler</span>
+          </div>
+          <div class="palette-card-desc">Generate dimensional, Data Vault, or OBT models. (Coming in Phase 3b)</div>
+          <button class="palette-run-btn" disabled>▶ Run</button>
+        </div>
+      </div>
+
+      <!-- Build Phase -->
+      <div class="section">
+        <div class="section-title">🔨 Build</div>
+        <div class="palette-card" data-agent="ingestionAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">📥</span>
+            <span class="palette-card-title">Ingestion Pipeline</span>
+          </div>
+          <div class="palette-card-desc">Generate ingestion code (COPY, Python, Airbyte). Use /plan to create an ingestion workflow.</div>
+          <button class="palette-run-btn">▶ Run</button>
+        </div>
+        <div class="palette-card disabled" data-agent="ddlGeneratorAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">📝</span>
+            <span class="palette-card-title">DDL Generator</span>
+          </div>
+          <div class="palette-card-desc">Generate CREATE/ALTER statements from your data model. (Coming in Phase 3c)</div>
+          <button class="palette-run-btn" disabled>▶ Run</button>
+        </div>
+      </div>
+
+      <!-- Validate & Document Phase -->
+      <div class="section">
+        <div class="section-title">✅ Validate & Document</div>
+        <div class="palette-card" data-agent="architectureAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">📐</span>
+            <span class="palette-card-title">Documentation Generator</span>
+          </div>
+          <div class="palette-card-desc">Generate data dictionary and architecture documentation. Use /plan to create a documentation workflow.</div>
+          <button class="palette-run-btn">▶ Run</button>
+        </div>
+        <div class="palette-card disabled" data-agent="sqlValidatorAgent">
+          <div class="palette-card-header">
+            <span class="palette-card-icon">🔍</span>
+            <span class="palette-card-title">SQL Validator</span>
+          </div>
+          <div class="palette-card-desc">Validate SQL against your schema graph. (Coming in Phase 3c)</div>
+          <button class="palette-run-btn" disabled>▶ Run</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function () {
+  const vscode = acquireVsCodeApi();
+  const prevState = vscode.getState() || {};
+
+  // ── DOM refs ──
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
+
+  const chatStream = $('#chatStream');
+  const chatInput = $('#chatInput');
+  const sendBtn = $('#sendBtn');
+  const generatePlanBtn = $('#generatePlanBtn');
+  const executePlanBtn = $('#executePlanBtn');
+  const pausePlanBtn = $('#pausePlanBtn');
+  const resetPlanBtn = $('#resetPlanBtn');
+  const refreshBtn = $('#refreshBtn');
+  const stopBtn = $('#stopBtn');
+  const settingsBtn = $('#settingsBtn');
+  const welcomeBlock = $('#welcomeBlock');
+
+  // Top bar
+  const providerPill = $('#providerPill');
+  const providerDot = $('#providerDot');
+  const providerLabel = $('#providerLabel');
+  const connPill = $('#connPill');
+  const connDot = $('#connDot');
+  const connLabel = $('#connLabel');
+  const ctxMetricText = $('#ctxMetricText');
+  const ctxMetricBar = $('#ctxMetricBar');
+  const planMetricText = $('#planMetricText');
+
+  // Context drawer
+  const ctxDrawer = $('#ctxDrawer');
+  const ctxDrawerToggle = $('#ctxDrawerToggle');
+  const ctxDrawerChevron = $('#ctxDrawerChevron');
+  const ctxDrawerStats = $('#ctxDrawerStats');
+  const ctxDbGrid = $('#ctxDbGrid');
+  const ctxBizGrid = $('#ctxBizGrid');
+  const ctxQueryGrid = $('#ctxQueryGrid');
+
+  // Slide panel
+  const slideOverlay = $('#slideOverlay');
+  const slidePanel = $('#slidePanel');
+  const slideCloseBtn = $('#slideCloseBtn');
+
+  // Mention
+  const mentionDropdown = $('#mentionDropdown');
+
+  // Toast
+  const toast = $('#toast');
+  let toastTimer = null;
+
+  // ── State ──
+  let currentPlan = null;
+  let contextStats = { tables: 0, terms: 0, queries: 0, files: 0, tokens: 0, maxTokens: 4000 };
+  let mentionEntities = [];
+  let providerState = { provider: 'copilot', connected: false, model: '' };
+  let connectionState = { platform: '', connected: false, label: 'Not connected' };
+  let isExecuting = false;
+
+  // ── Toast ──
+  function showToast(msg, type) {
+    if (toastTimer) clearTimeout(toastTimer);
+    toast.textContent = msg;
+    toast.className = 'toast visible ' + (type || '');
+    toastTimer = setTimeout(function () { toast.classList.remove('visible'); }, 2500);
+  }
+
+  // ── Post message to extension ──
+  function post(type, payload) {
+    vscode.postMessage(Object.assign({ type: type }, payload || {}));
+  }
+
+  // ── Add chat message ──
+  function addMessage(role, content, label) {
+    if (welcomeBlock) welcomeBlock.style.display = 'none';
+    var div = document.createElement('div');
+    div.className = 'message ' + role;
+    var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : '';
+    div.innerHTML = labelHtml + '<div class="msg-content">' + formatContent(content) + '</div>';
+    chatStream.appendChild(div);
+    chatStream.scrollTop = chatStream.scrollHeight;
+    return div;
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"');
+  }
+
+  function formatContent(text) {
+    var escaped = escapeHtml(String(text));
+    // Basic code block handling
+    escaped = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
+      return '<pre><code class="language-' + escapeHtml(lang) + '">' + escapeHtml(code.trim()) + '</code></pre>';
+    });
+    // Inline code
+    escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
+    return escaped;
+  }
+
+  // ── Add plan card ──
+  function addPlanCard(plan) {
+    if (welcomeBlock) welcomeBlock.style.display = 'none';
+    currentPlan = plan;
+    var steps = plan.steps || [];
+    var statusIcon = { completed: '✅', running: '⏳', pending: '○', failed: '❌' };
+
+    var html = '<div class="plan-card" id="planCard">';
+    html += '<div class="plan-card-header" id="planCardToggle">📋 Execution Plan <span style="color:var(--text-muted);font-weight:400;">' + steps.length + ' steps</span><span id="planCardChevron">▼</span></div>';
+    html += '<div class="plan-card-body" id="planCardBody">';
+
+    // Timeline
+    html += '<div class="exec-timeline" id="execTimeline">';
+    for (var i = 0; i < steps.length; i++) {
+      if (i > 0) {
+        var lineDone = steps[i-1].status === 'completed' ? ' done' : '';
+        html += '<div class="timeline-line' + lineDone + '"></div>';
+      }
+      var dotClass = steps[i].status || 'pending';
+      var dotIcon = statusIcon[dotClass] || '○';
+      html += '<div class="timeline-dot ' + dotClass + '" title="' + escapeHtml(steps[i].taskDescription || '') + '">' + dotIcon + '</div>';
+    }
+    html += '</div>';
+
+    for (var j = 0; j < steps.length; j++) {
+      var step = steps[j];
+      var sClass = 'status-' + (step.status || 'pending');
+      var sIcon = statusIcon[step.status] || '○';
+      html += '<div class="plan-step ' + sClass + '" data-step-id="' + escapeHtml(step.id) + '">';
+      html += '<span class="step-icon">' + sIcon + '</span>';
+      html += '<div class="step-body">';
+      html += '<div class="step-title">' + escapeHtml(step.taskDescription || step.id) + '</div>';
+      html += '<div class="step-meta">';
+      html += '<span class="step-badge">' + escapeHtml(step.assignedAgent || '') + '</span>';
+      if (step.dependsOn && step.dependsOn.length > 0) {
+        html += '<span class="step-badge">Depends: ' + escapeHtml(step.dependsOn.join(', ')) + '</span>';
+      }
+      html += '</div></div></div>';
+      html += '<div class="plan-step-detail" id="stepDetail-' + escapeHtml(step.id) + '">';
+      if (step.validationRules && step.validationRules.length > 0) {
+        html += '<div style="margin-bottom:4px;font-weight:600;">Validation Rules:</div>';
+        for (var k = 0; k < step.validationRules.length; k++) {
+          html += '<div class="log-line">• ' + escapeHtml(step.validationRules[k]) + '</div>';
+        }
+      }
+      html += '<div class="log-line" style="color:var(--text-dim);">Click to expand details</div>';
+      html += '</div>';
+    }
+
+    html += '<div class="plan-card-actions">';
+    html += '<button class="primary" id="planExecuteBtn">▶ Execute All</button>';
+    html += '<button id="planPauseBtn">⏸ Pause</button>';
+    html += '<button id="planResetBtn">↻ Re-plan</button>';
+    html += '</div>';
+    html += '</div></div>';
+
+    var div = document.createElement('div');
+    div.className = 'message ai';
+    div.innerHTML = '<div class="msg-label">🤖 AutoDE Assistant</div><div class="msg-content">Here is the execution plan for your objective:</div>';
+    chatStream.appendChild(div);
+
+    var planDiv = document.createElement('div');
+    planDiv.innerHTML = html;
+    chatStream.appendChild(planDiv.firstElementChild);
+    chatStream.scrollTop = chatStream.scrollHeight;
+
+    // Bind plan card events
+    bindPlanCardEvents();
+    updatePlanMetric(steps);
+  }
+
+  function bindPlanCardEvents() {
+    var toggle = $('#planCardToggle');
+    var body = $('#planCardBody');
+    var chevron = $('#planCardChevron');
+    if (toggle) {
+      toggle.onclick = function () {
+        var hidden = body.style.display === 'none';
+        body.style.display = hidden ? '' : 'none';
+        if (chevron) chevron.textContent = hidden ? '▼' : '▶';
       };
+    }
 
-      let currentSettings = {
-        defaultProvider: 'snowflake',
-        defaultSnowflakeAuthMode: 'key-pair',
-        defaultSnowflakeAccount: 'my_account',
-        defaultSnowflakeUsername: 'data_agent_user',
-        defaultSnowflakeWarehouse: 'WH_XS',
-        defaultSnowflakeDatabase: 'RAW_DB',
-        defaultSnowflakeSchema: 'PUBLIC',
-        defaultSnowflakeRole: 'SYSADMIN'
+    var steps = $$('.plan-step');
+    steps.forEach(function (step) {
+      step.onclick = function () {
+        step.classList.toggle('expanded');
       };
+    });
 
-      function titleCase(value) {
-        return String(value || '').replace(/[-_]+/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
+    var execBtn = $('#planExecuteBtn');
+    var pauseBtn = $('#planPauseBtn');
+    var resetBtn = $('#planResetBtn');
+    if (execBtn) execBtn.onclick = function () { post('executePlan'); };
+    if (pauseBtn) pauseBtn.onclick = function () { post('pausePlan'); };
+    if (resetBtn) resetBtn.onclick = function () { post('resetPlan'); };
+  }
+
+  function updatePlanMetric(steps) {
+    if (!steps || steps.length === 0) {
+      planMetricText.textContent = 'Plan —';
+      return;
+    }
+    var completed = steps.filter(function (s) { return s.status === 'completed'; }).length;
+    var running = steps.filter(function (s) { return s.status === 'running'; }).length;
+    if (running > 0) {
+      planMetricText.textContent = 'Plan ' + completed + '/' + steps.length + ' ▶';
+    } else if (completed === steps.length) {
+      planMetricText.textContent = 'Plan ' + steps.length + ' ✓';
+    } else {
+      planMetricText.textContent = 'Plan ' + steps.length + ' steps';
+    }
+  }
+
+  function updatePlanStep(stepId, status, details) {
+    var stepEl = document.querySelector('.plan-step[data-step-id="' + stepId + '"]');
+    if (!stepEl) return;
+    stepEl.className = stepEl.className.replace(/status-\w+/g, 'status-' + status);
+    var iconMap = { completed: '✅', running: '⏳', pending: '○', failed: '❌' };
+    var iconEl = stepEl.querySelector('.step-icon');
+    if (iconEl) iconEl.textContent = iconMap[status] || '○';
+
+    var detailEl = $('#stepDetail-' + stepId);
+    if (detailEl && details) {
+      detailEl.innerHTML = '<div class="log-line">' + escapeHtml(details) + '</div>';
+    }
+
+    // Update timeline dot
+    var dots = $$('.timeline-dot');
+    var steps = $$('.plan-step');
+    var idx = Array.from(steps).indexOf(stepEl);
+    if (idx >= 0 && dots[idx]) {
+      dots[idx].className = 'timeline-dot ' + status;
+      dots[idx].textContent = iconMap[status] || '○';
+    }
+    // Update timeline lines
+    var lines = $$('.timeline-line');
+    for (var i = 0; i < lines.length; i++) {
+      var prevStep = steps[i];
+      if (prevStep && prevStep.classList.contains('status-completed')) {
+        lines[i].classList.add('done');
       }
+    }
 
-      function setActiveTab(tabName) {
-        elements.tabButtons.forEach((button) => {
-          const isActive = button.dataset.tab === tabName;
-          button.classList.toggle('active', isActive);
-          button.setAttribute('aria-selected', String(isActive));
-        });
+    if (currentPlan) {
+      var allSteps = currentPlan.steps || [];
+      var found = allSteps.find(function (s) { return s.id === stepId; });
+      if (found) found.status = status;
+      updatePlanMetric(allSteps);
+    }
+  }
 
-        const tabPanels = [
-          { name: 'workspace', element: elements.workspaceTab },
-          { name: 'integration', element: elements.integrationTab },
-          { name: 'llm', element: elements.llmTab }
-        ];
+  // ── Add context preview block ──
+  function addContextPreview(tables, terms, queries, tokenCount, maxTokens) {
+    var pct = maxTokens > 0 ? Math.min(100, Math.round((tokenCount / maxTokens) * 100)) : 0;
+    var html = '<div class="ctx-preview">';
+    html += '<div class="ctx-preview-header" onclick="this.parentElement.classList.toggle(\'expanded\')">';
+    html += '<span class="ctx-preview-title">📊 Context used for this response</span>';
+    html += '<span style="font-size:11px;">' + (tables||0) + ' tables · ' + (terms||0) + ' terms · ' + (queries||0) + ' queries</span>';
+    html += '</div>';
+    html += '<div class="ctx-preview-body">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
+    html += '<span>Token budget: ' + (tokenCount||0) + ' / ' + (maxTokens||4000) + '</span>';
+    html += '<span style="font-size:11px;color:var(--text-dim);">' + pct + '%</span>';
+    html += '</div>';
+    html += '<div class="ctx-token-bar"><div class="ctx-token-bar-fill" style="width:' + pct + '%"></div></div>';
+    html += '</div></div>';
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    chatStream.appendChild(div.firstElementChild);
+    chatStream.scrollTop = chatStream.scrollHeight;
+  }
 
-        tabPanels.forEach(({ name, element }) => {
-          if (element) {
-            element.classList.toggle('active', name === tabName);
+  // ── Add log entry ──
+  function addLogEntry(message) {
+    var div = document.createElement('div');
+    div.className = 'message ai';
+    div.style.fontSize = '11px';
+    div.style.opacity = '0.7';
+    div.innerHTML = '<div class="msg-content" style="color:var(--text-muted);">' + escapeHtml(message) + '</div>';
+    chatStream.appendChild(div);
+    chatStream.scrollTop = chatStream.scrollHeight;
+  }
+
+  // ── Context drawer ──
+  ctxDrawerToggle.onclick = function () {
+    var isExpanded = ctxDrawer.classList.contains('expanded');
+    if (isExpanded) {
+      ctxDrawer.classList.remove('expanded');
+      ctxDrawer.classList.add('collapsed');
+      ctxDrawerChevron.textContent = '▶';
+    } else {
+      ctxDrawer.classList.remove('collapsed');
+      ctxDrawer.classList.add('expanded');
+      ctxDrawerChevron.textContent = '▼';
+    }
+  };
+
+  $('#ctxMetric').onclick = function () {
+    ctxDrawer.classList.remove('collapsed');
+    ctxDrawer.classList.add('expanded');
+    ctxDrawerChevron.textContent = '▼';
+  };
+
+  function updateContextDrawer(stats) {
+    contextStats = stats || contextStats;
+    ctxDrawerStats.textContent = (contextStats.tables||0) + ' tables · ' + (contextStats.terms||0) + ' terms · ' + (contextStats.queries||0) + ' queries';
+    ctxMetricText.textContent = 'Context ' + (contextStats.tokens ? (contextStats.tokens >= 1000 ? (contextStats.tokens/1000).toFixed(1) + 'k' : contextStats.tokens) : '0') + ' tokens';
+    var pct = contextStats.maxTokens > 0 ? Math.min(100, Math.round(((contextStats.tokens||0) / contextStats.maxTokens) * 100)) : 0;
+    ctxMetricBar.style.width = pct + '%';
+  }
+
+  // ── Slide-out panel ──
+  function openSlidePanel(tab) {
+    slideOverlay.classList.add('visible');
+    slidePanel.classList.add('visible');
+    if (tab) switchSlideTab(tab);
+  }
+
+  function closeSlidePanel() {
+    slideOverlay.classList.remove('visible');
+    slidePanel.classList.remove('visible');
+  }
+
+  slideOverlay.onclick = closeSlidePanel;
+  slideCloseBtn.onclick = closeSlidePanel;
+  settingsBtn.onclick = function () { openSlidePanel('llm'); };
+  providerPill.onclick = function () { openSlidePanel('llm'); };
+  connPill.onclick = function () { openSlidePanel('connect'); };
+
+  // Welcome buttons
+  var welcomeConnectBtn = $('#welcomeConnectBtn');
+  var welcomeSettingsBtn = $('#welcomeSettingsBtn');
+  if (welcomeConnectBtn) welcomeConnectBtn.onclick = function () { openSlidePanel('connect'); };
+  if (welcomeSettingsBtn) welcomeSettingsBtn.onclick = function () { openSlidePanel('llm'); };
+
+  // Slide tabs
+  var slideTabs = $$('.slide-tab');
+  slideTabs.forEach(function (tab) {
+    tab.onclick = function () {
+      switchSlideTab(tab.getAttribute('data-slide-tab'));
+    };
+  });
+
+  function switchSlideTab(tabName) {
+    slideTabs.forEach(function (t) {
+      t.classList.toggle('active', t.getAttribute('data-slide-tab') === tabName);
+    });
+    var sections = {
+      llm: $('#slideSectionLlm'),
+      connect: $('#slideSectionConnect'),
+      prefs: $('#slideSectionPrefs')
+    };
+    Object.keys(sections).forEach(function (k) {
+      if (sections[k]) sections[k].style.display = k === tabName ? '' : 'none';
+    });
+  }
+
+  // ── LLM card selection ──
+  var llmCards = $$('#slideSectionLlm .card[data-llm]');
+  llmCards.forEach(function (card) {
+    card.onclick = function (e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL') return;
+      llmCards.forEach(function (c) { c.classList.remove('selected'); });
+      card.classList.add('selected');
+      // Expand body, collapse others
+      llmCards.forEach(function (c) {
+        var body = c.querySelector('.card-body');
+        if (body) body.classList.toggle('collapsed', c !== card);
+      });
+    };
+  });
+
+  // ── Provider card selection ──
+  var providerCards = $$('#slideSectionConnect .card[data-provider]');
+  providerCards.forEach(function (card) {
+    card.onclick = function (e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL') return;
+      providerCards.forEach(function (c) { c.classList.remove('selected'); });
+      card.classList.add('selected');
+      providerCards.forEach(function (c) {
+        var body = c.querySelector('.card-body');
+        if (body) body.classList.toggle('collapsed', c !== card);
+      });
+    };
+  });
+
+  // ── Buttons ──
+  sendBtn.onclick = function () { sendMessage(); };
+  chatInput.onkeydown = function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    handleMentionInput(e);
+  };
+  chatInput.oninput = function (e) { handleMentionInput(e); };
+
+  function sendMessage() {
+    var text = chatInput.value.trim();
+    if (!text) return;
+    addMessage('user', text, 'You');
+    chatInput.value = '';
+    mentionDropdown.classList.remove('visible');
+
+    // Check for slash commands
+    if (text.startsWith('/')) {
+      handleSlashCommand(text);
+      return;
+    }
+
+    // Regular chat message — send to conversational LLM
+    post('chat', { message: text, schemaContext: '' });
+  }
+
+  function handleSlashCommand(text) {
+    var cmd = text.split(' ')[0].toLowerCase();
+    switch (cmd) {
+      case '/plan': {
+        var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan';
+        addMessage('ai', 'Generating execution plan for: ' + objective + '...', 'AutoDE');
+        post('generatePlan', { objective: objective, schemaContext: '' });
+        break;
+      }
+      case '/execute': post('executePlan'); break;
+      case '/context': ctxDrawerToggle.click(); break;
+      case '/connect': openSlidePanel('connect'); break;
+      case '/settings': openSlidePanel('llm'); break;
+      case '/sync': post('syncMetadata'); break;
+      case '/reindex': post('reindex'); break;
+      case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break;
+      case '/export': showToast('Export not yet implemented', ''); break;
+      default: addMessage('ai', 'Unknown command: ' + cmd + '. Try /plan, /execute, /context, /connect, /settings, /sync, /reindex, /clear', 'AutoDE'); break;
+    }
+  }
+
+  // ── @-mention handling ──
+  var mentionItems = [];
+  function handleMentionInput(e) {
+    var val = chatInput.value;
+    var cursorPos = chatInput.selectionStart;
+    var textBeforeCursor = val.substring(0, cursorPos);
+    var mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+
+    if (mentionMatch) {
+      var query = mentionMatch[1].toLowerCase();
+      // Build mock mention items (in production, these come from the context layer)
+      mentionItems = buildMentionItems(query);
+      if (mentionItems.length > 0) {
+        renderMentionDropdown(mentionItems);
+        mentionDropdown.classList.add('visible');
+      } else {
+        mentionDropdown.classList.remove('visible');
+      }
+    } else {
+      mentionDropdown.classList.remove('visible');
+    }
+  }
+
+  function buildMentionItems(query) {
+    var all = [];
+    // Populated from the context layer via contextUpdate message
+    if (mentionEntities.length > 0) {
+      all = mentionEntities.slice();
+    } else {
+      // Fallback: use context stats to show counts
+      if (contextStats.tables > 0) {
+        all.push({ icon: '📦', label: 'tables', type: 'table', detail: contextStats.tables + ' tables indexed' });
+      }
+      if (contextStats.terms > 0) {
+        all.push({ icon: '🏷', label: 'terms', type: 'business_term', detail: contextStats.terms + ' terms defined' });
+      }
+      if (contextStats.queries > 0) {
+        all.push({ icon: '✅', label: 'queries', type: 'verified_query', detail: contextStats.queries + ' queries verified' });
+      }
+    }
+    if (!query) return all.slice(0, 8);
+    return all.filter(function (item) { return item.label.toLowerCase().includes(query); }).slice(0, 8);
+  }
+
+  function renderMentionDropdown(items) {
+    mentionDropdown.innerHTML = '';
+    items.forEach(function (item, idx) {
+      var div = document.createElement('div');
+      div.className = 'mention-item' + (idx === 0 ? ' active' : '');
+      div.innerHTML = '<span class="mention-icon">' + item.icon + '</span><span class="mention-label">' + escapeHtml(item.label) + '</span><span class="mention-type">' + escapeHtml(item.type) + '</span>';
+      div.onclick = function () {
+        insertMention(item);
+      };
+      mentionDropdown.appendChild(div);
+    });
+  }
+
+  function insertMention(item) {
+    var val = chatInput.value;
+    var cursorPos = chatInput.selectionStart;
+    var textBeforeCursor = val.substring(0, cursorPos);
+    var textAfterCursor = val.substring(cursorPos);
+    var mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+    if (mentionMatch) {
+      var newBefore = textBeforeCursor.substring(0, mentionMatch.index) + '@' + item.label + ' ';
+      chatInput.value = newBefore + textAfterCursor;
+      var newPos = newBefore.length;
+      chatInput.setSelectionRange(newPos, newPos);
+    }
+    mentionDropdown.classList.remove('visible');
+    chatInput.focus();
+  }
+
+  // ── Action buttons ──
+  generatePlanBtn.onclick = function () {
+    var text = chatInput.value.trim();
+    if (!text) { showToast('Enter an objective first', 'error'); return; }
+    post('generatePlan', { objective: text, schemaContext: '' });
+  };
+  executePlanBtn.onclick = function () { post('executePlan'); };
+  pausePlanBtn.onclick = function () { post('pausePlan'); };
+  resetPlanBtn.onclick = function () {
+    post('resetPlan');
+    chatStream.innerHTML = '';
+    if (welcomeBlock) welcomeBlock.style.display = '';
+    currentPlan = null;
+    planMetricText.textContent = 'Plan —';
+  };
+  refreshBtn.onclick = function () { post('reindex'); showToast('Re-indexing context...', ''); };
+  stopBtn.onclick = function () { post('pausePlan'); showToast('Execution stopped', ''); };
+
+  // ── Context drawer action buttons ──
+  $('#ctxReindexBtn').onclick = function () { post('reindex'); showToast('Re-indexing...', ''); };
+  $('#ctxOpenFolderBtn').onclick = function () { post('openContextFolder'); };
+
+  // ── Settings buttons ──
+  $('#testCopilotBtn').onclick = function () { post('testCopilot'); };
+  $('#openCopilotHandoffBtn').onclick = function () { post('openCopilotHandoff'); };
+  $('#testConnBtn').onclick = function () { post('testConnection'); showToast('Connecting...', ''); };
+  $('#sourceAssessmentBtn').onclick = function () {
+    post('sourceAssessment');
+    showToast('Running source assessment — building context layer...', '');
+  };
+  $('#saveSettingsBtn').onclick = function () { saveSettings(); };
+
+  // Auto-save Copilot consent immediately when toggled
+  $('#copilotConsent').onchange = function () {
+    var consent = $('#copilotConsent').checked;
+    post('updateSettings', {
+      settings: { copilotProgrammaticConsent: consent }
+    });
+    showToast(consent ? 'Copilot programmatic access enabled' : 'Copilot programmatic access disabled', consent ? 'success' : '');
+  };
+
+  function saveSettings() {
+    var settings = {
+      activeLlmProvider: getSelectedLlm(),
+      defaultProvider: getSelectedProvider(),
+      defaultSnowflakeAccount: $('#sfAccount').value,
+      defaultSnowflakeUsername: $('#sfUsername').value,
+      defaultSnowflakeWarehouse: $('#sfWarehouse').value,
+      defaultSnowflakeDatabase: $('#sfDatabase').value,
+      defaultSnowflakeSchema: $('#sfSchema').value,
+      defaultSnowflakeRole: $('#sfRole').value,
+      defaultSnowflakeAuthMode: $('#sfAuthMode').value,
+      snowflakePrivateKeyPath: $('#sfKeyPath').value,
+      activeLlmModel: $('#openaiModel').value || $('#anthropicModel').value || $('#geminiModel').value || $('#ollamaModel').value || 'gpt-4o-mini',
+      llmEndpoint: $('#azureEndpoint').value || $('#ollamaEndpoint').value || '',
+      copilotProgrammaticConsent: $('#copilotConsent').checked,
+      readOnlyMode: $('#readOnlyMode').checked,
+      autoDocumentationEnabled: $('#autoDocEnabled').checked,
+      telemetryEnabled: $('#telemetryEnabled').checked,
+      metadataCachingDurationMinutes: parseInt($('#cacheDuration').value) || 15,
+      queryTimeoutSeconds: parseInt($('#queryTimeout').value) || 120
+    };
+    post('updateSettings', { settings: settings });
+    closeSlidePanel();
+    showToast('Settings saved', 'success');
+  }
+
+  function getSelectedLlm() {
+    var card = document.querySelector('#slideSectionLlm .card.selected');
+    return card ? card.getAttribute('data-llm') : 'copilot';
+  }
+
+  function getSelectedProvider() {
+    var card = document.querySelector('#slideSectionConnect .card.selected');
+    return card ? card.getAttribute('data-provider') : 'snowflake';
+  }
+
+  // ── Handle messages from extension ──
+  window.addEventListener('message', function (event) {
+    var msg = event.data;
+    if (!msg || !msg.type) return;
+
+    switch (msg.type) {
+      case 'stateUpdate':
+        if (msg.state) {
+          if (msg.state.steps && msg.state.steps.length > 0) {
+            addPlanCard(msg.state);
           }
-        });
-      }
-
-      function updateConnectionStatus() {
-        const provider = (currentSettings.defaultProvider || 'snowflake');
-        const authMode = currentSettings.defaultSnowflakeAuthMode || 'key-pair';
-        const providerName = titleCase(provider);
-        const hasValidConnection = Boolean(
-          provider && (
-            currentSettings.defaultSnowflakeAccount ||
-            currentSettings.defaultSnowflakeDatabase ||
-            currentSettings.defaultSnowflakeWarehouse ||
-            currentSettings.defaultSnowflakeUsername
-          )
-        );
-
-        elements.connectionStatus.innerHTML = '<span class="dot"></span> ' + (hasValidConnection ? `${providerName} connected` : `${providerName} disconnected`);
-        elements.providerLabel.textContent = providerName;
-        elements.contextWindow.textContent = 'Context 128k';
-
-        if (elements.metadataEmptyState) {
-          elements.metadataEmptyState.classList.toggle('hidden', hasValidConnection);
-        }
-        if (elements.metadataTree) {
-          elements.metadataTree.classList.toggle('hidden', !hasValidConnection);
-        }
-        if (elements.contextSection) {
-          elements.contextSection.open = hasValidConnection;
-        }
-
-        if (elements.providerSelect) {
-          elements.providerSelect.value = provider;
-        }
-        if (elements.authModeSelect) {
-          elements.authModeSelect.value = authMode;
-        }
-        if (elements.accountInput) {
-          elements.accountInput.value = currentSettings.defaultSnowflakeAccount || '';
-        }
-        if (elements.usernameInput) {
-          elements.usernameInput.value = currentSettings.defaultSnowflakeUsername || '';
-        }
-        if (elements.warehouseInput) {
-          elements.warehouseInput.value = currentSettings.defaultSnowflakeWarehouse || '';
-        }
-        if (elements.databaseInput) {
-          elements.databaseInput.value = currentSettings.defaultSnowflakeDatabase || '';
-        }
-        if (elements.llmProviderSelect) {
-          const llmProvider = currentSettings.activeLlmProvider || 'copilot';
-          elements.llmProviderSelect.value = llmProvider;
-        }
-        if (elements.llmModelInput) {
-          elements.llmModelInput.value = currentSettings.activeLlmModel || 'gpt-4o-mini';
-        }
-      }
-
-      function makeTreeNode(name, children, options = {}) {
-        const node = document.createElement('div');
-        node.className = 'tree-node';
-
-        const labelRow = document.createElement('div');
-        labelRow.className = 'tree-node-label';
-        const toggle = document.createElement('span');
-        toggle.className = 'tree-toggle';
-        toggle.textContent = (children && children.length > 0) ? '?' : '�';
-
-        const label = document.createElement('span');
-        label.textContent = name;
-        labelRow.appendChild(toggle);
-        labelRow.appendChild(label);
-
-        node.appendChild(labelRow);
-
-        if (children && children.length > 0) {
-          const childContainer = document.createElement('div');
-          childContainer.className = 'tree-children';
-          for (const child of children) {
-            const nested = makeTreeNode(child.name, child.children || [], child.options || {});
-            childContainer.appendChild(nested);
+          if (msg.state.status === 'running') isExecuting = true;
+          if (msg.state.status === 'completed' || msg.state.status === 'failed') isExecuting = false;
+          if (msg.state.status === 'idle') {
+            currentPlan = null;
+            planMetricText.textContent = 'Plan —';
           }
-          node.appendChild(childContainer);
         }
+        break;
 
-        if (options.clickable) {
-          labelRow.style.cursor = 'pointer';
-          labelRow.addEventListener('click', () => {
-            const childContainer = node.querySelector('.tree-children');
-            if (childContainer) {
-              childContainer.classList.toggle('collapsed');
-              toggle.textContent = childContainer.classList.contains('collapsed') ? '?' : '?';
-            }
-          });
+      case 'planUpdated':
+        if (msg.plan && msg.plan.steps) {
+          addPlanCard(msg.plan);
         }
+        break;
 
-        return node;
-      }
-
-      function buildMetadataTree() {
-        const provider = (currentSettings.defaultProvider || 'snowflake');
-        const hasValidConnection = Boolean(
-          provider && (
-            currentSettings.defaultSnowflakeAccount ||
-            currentSettings.defaultSnowflakeDatabase ||
-            currentSettings.defaultSnowflakeWarehouse ||
-            currentSettings.defaultSnowflakeUsername
-          )
-        );
-
-        if (!hasValidConnection) {
-          elements.metadataTree.innerHTML = '';
-          return;
+      case 'logEntry':
+        if (msg.message) {
+          addLogEntry(msg.message);
         }
+        break;
 
-        const metadataMap = {
-          snowflake: [
-            { name: 'Databases', children: [
-                { name: 'RAW_DB', children: [
-                  { name: 'Schemas', children: [
-                    { name: 'PUBLIC', children: [
-                      { name: 'Tables', children: [
-                        { name: 'SALES_RAW', children: [] },
-                        { name: 'CUSTOMERS_RAW', children: [] },
-                        { name: 'ORDERS_RAW', children: [] }
-                      ] },
-                      { name: 'Views', children: [
-                        { name: 'V_SALES_DAILY', children: [] }
-                      ] }
-                    ] }
-                  ] }
-                ] }
-              ] },
-            { name: 'Semantic Objects', children: [
-                { name: 'customer_dimension', children: [] },
-                { name: 'sales_facts', children: [] }
-              ] }
-          ],
-          databricks: [
-            { name: 'Catalogs', children: [
-              { name: 'main', children: [
-                { name: 'Schemas', children: [
-                  { name: 'analytics', children: [
-                    { name: 'Tables', children: [
-                      { name: 'orders', children: [] }
-                    ] }
-                  ] }
-                ] }
-              ] }
-            ] }
-          ],
-          bigquery: [
-            { name: 'Projects', children: [
-              { name: 'analytics-prod', children: [
-                { name: 'Datasets', children: [
-                  { name: 'sales', children: [
-                    { name: 'Tables', children: [
-                      { name: 'sales_fact', children: [] }
-                    ] }
-                  ] }
-                ] }
-              ] }
-            ] }
-          ],
-          redshift: [
-            { name: 'Databases', children: [
-              { name: 'analytics', children: [
-                { name: 'Schemas', children: [
-                  { name: 'public', children: [
-                    { name: 'Tables', children: [
-                      { name: 'events', children: [] }
-                    ] }
-                  ] }
-                ] }
-              ] }
-            ] }
-          ],
-          synapse: [
-            { name: 'Serverless SQL Pool', children: [
-              { name: 'schemas', children: [
-                { name: 'dbo', children: [
-                  { name: 'Tables', children: [
-                    { name: 'fact_sales', children: [] }
-                  ] }
-                ] }
-              ] }
-            ] }
-          ],
-          other: [
-            { name: 'Custom Provider', children: [
-              { name: 'Objects', children: [
-                { name: 'Example Table', children: [] }
-              ] }
-            ] }
-          ]
-        };
+      case 'settingsLoaded':
+        applySettings(msg);
+        break;
 
-        const treeData = metadataMap[provider] || metadataMap.snowflake;
-        elements.metadataTree.innerHTML = '';
-        treeData.forEach((item) => {
-          const node = makeTreeNode(item.name, item.children || [], { clickable: true });
-          elements.metadataTree.appendChild(node);
+      case 'settingsSaved':
+        showToast('Settings saved successfully', 'success');
+        break;
+
+      case 'error':
+        showToast(msg.message || 'An error occurred', 'error');
+        break;
+
+      case 'contextUpdate':
+        if (msg.stats) {
+          updateContextDrawer(msg.stats);
+        }
+        if (msg.dbEntities) {
+          renderContextEntities(ctxDbGrid, msg.dbEntities, '📦');
+        }
+        if (msg.bizTerms) {
+          renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷');
+        }
+        if (msg.queries) {
+          renderContextEntities(ctxQueryGrid, msg.queries, '✅');
+        }
+        break;
+
+      case 'stepUpdate':
+        if (msg.stepId && msg.status) {
+          updatePlanStep(msg.stepId, msg.status, msg.details);
+        }
+        break;
+
+      case 'copilotStatus':
+        updateCopilotStatus(msg);
+        break;
+
+      case 'chatResponse':
+        if (msg.message) {
+          var label = msg.error ? '⚠ AutoDE' : '🤖 AutoDE';
+          addMessage('ai', msg.message, label);
+        }
+        break;
+
+      default:
+        break;
+    }
+  });
+
+  function applySettings(data) {
+    if (!data) return;
+    // LLM provider
+    if (data.activeLlmProvider) {
+      var llmCard = document.querySelector('#slideSectionLlm .card[data-llm="' + data.activeLlmProvider + '"]');
+      if (llmCard) {
+        llmCards.forEach(function (c) { c.classList.remove('selected'); });
+        llmCard.classList.add('selected');
+        llmCards.forEach(function (c) {
+          var body = c.querySelector('.card-body');
+          if (body) body.classList.toggle('collapsed', c !== llmCard);
         });
       }
-
-      function renderPlan(plan) {
-        const items = Array.isArray(plan) ? plan : [];
-        const count = items.length;
-        elements.planCount.textContent = `${count} step${count === 1 ? '' : 's'}`;
-        elements.planSummaryText.textContent = count > 0 ? 'Execution Plan' : 'No plan generated yet';
-        elements.planList.innerHTML = '';
-
-        if (items.length === 0) {
-          const empty = document.createElement('div');
-          empty.className = 'muted';
-          empty.textContent = 'No execution plan available yet.';
-          elements.planList.appendChild(empty);
-          return;
-        }
-
-        items.forEach((step) => {
-          const row = document.createElement('div');
-          row.className = `step-item status-${step.status || 'pending'}`;
-          const left = document.createElement('div');
-          left.textContent = `${step.id}: ${step.taskDescription || 'No description'}`;
-          const badge = document.createElement('span');
-          badge.className = 'step-status';
-          badge.textContent = step.status || 'Pending';
-          row.appendChild(left);
-          row.appendChild(badge);
-          elements.planList.appendChild(row);
-        });
+      providerLabel.textContent = data.activeLlmProvider === 'copilot' ? 'Copilot' : data.activeLlmProvider;
+    }
+    // Provider
+    if (data.defaultProvider) {
+      var pCard = document.querySelector('#slideSectionConnect .card[data-provider="' + data.defaultProvider + '"]');
+      if (pCard) {
+        providerCards.forEach(function (c) { c.classList.remove('selected'); });
+        pCard.classList.add('selected');
       }
+    }
+    // Copilot info
+    if (data.copilotInfo) {
+      updateCopilotStatus(data.copilotInfo);
+    }
+    // Toggles
+    if (typeof data.readOnlyMode === 'boolean') $('#readOnlyMode').checked = data.readOnlyMode;
+    if (typeof data.autoDocumentationEnabled === 'boolean') $('#autoDocEnabled').checked = data.autoDocumentationEnabled;
+    if (typeof data.telemetryEnabled === 'boolean') $('#telemetryEnabled').checked = data.telemetryEnabled;
+    if (typeof data.copilotProgrammaticConsent === 'boolean') $('#copilotConsent').checked = data.copilotProgrammaticConsent;
+    // Fields
+    if (data.defaultSnowflakeAccount) $('#sfAccount').value = data.defaultSnowflakeAccount;
+    if (data.defaultSnowflakeUsername) $('#sfUsername').value = data.defaultSnowflakeUsername;
+    if (data.defaultSnowflakeWarehouse) $('#sfWarehouse').value = data.defaultSnowflakeWarehouse;
+    if (data.defaultSnowflakeDatabase) $('#sfDatabase').value = data.defaultSnowflakeDatabase;
+    if (data.defaultSnowflakeSchema) $('#sfSchema').value = data.defaultSnowflakeSchema;
+    if (data.defaultSnowflakeRole) $('#sfRole').value = data.defaultSnowflakeRole;
+    if (data.defaultSnowflakeAuthMode) $('#sfAuthMode').value = data.defaultSnowflakeAuthMode;
+    if (data.snowflakePrivateKeyPath) $('#sfKeyPath').value = data.snowflakePrivateKeyPath;
+    if (data.activeLlmModel) {
+      $('#openaiModel').value = data.activeLlmModel;
+      $('#anthropicModel').value = data.activeLlmModel;
+      $('#geminiModel').value = data.activeLlmModel;
+      $('#ollamaModel').value = data.activeLlmModel;
+    }
+    if (data.llmEndpoint) {
+      $('#azureEndpoint').value = data.llmEndpoint;
+      $('#ollamaEndpoint').value = data.llmEndpoint;
+    }
+    if (typeof data.metadataCachingDurationMinutes === 'number') $('#cacheDuration').value = data.metadataCachingDurationMinutes;
+    if (typeof data.queryTimeoutSeconds === 'number') $('#queryTimeout').value = data.queryTimeoutSeconds;
+  }
 
-      function appendChatMessage(role, text) {
-        const message = document.createElement('div');
-        message.className = `message ${role}`;
-        message.textContent = text;
-        elements.chatBox.appendChild(message);
-        elements.chatBox.scrollTop = elements.chatBox.scrollHeight;
+  function updateCopilotStatus(info) {
+    var statusEl = $('#copilotStatus');
+    if (!statusEl) return;
+    if (!info) {
+      statusEl.textContent = 'Checking...';
+      return;
+    }
+    if (info.found && info.hasAccess) {
+      statusEl.textContent = 'Available (' + (info.models ? info.models.length : 0) + ' models)';
+      statusEl.style.color = 'var(--success)';
+      providerDot.className = 'dot ok';
+      providerLabel.textContent = 'Copilot';
+    } else if (info.found) {
+      statusEl.textContent = info.error || 'Sign in required';
+      statusEl.style.color = 'var(--warning)';
+    } else {
+      statusEl.textContent = 'Not installed';
+      statusEl.style.color = 'var(--text-muted)';
+    }
+  }
+
+  function renderContextEntities(container, entities, icon) {
+    if (!container) return;
+    container.innerHTML = '';
+    if (!entities || entities.length === 0) {
+      container.innerHTML = '<span class="ctx-chip" style="opacity:0.5">None</span>';
+      return;
+    }
+    entities.forEach(function (ent) {
+      var chip = document.createElement('span');
+      chip.className = 'ctx-chip';
+      chip.innerHTML = icon + ' ' + escapeHtml(typeof ent === 'string' ? ent : (ent.label || ent.name || ent));
+      chip.onclick = function () {
+        var label = typeof ent === 'string' ? ent : (ent.label || ent.name || ent);
+        chatInput.value += ' @' + label + ' ';
+        chatInput.focus();
+      };
+      container.appendChild(chip);
+    });
+  }
+
+  // ── Workflow Palette ──
+  const paletteOverlay = $('#paletteOverlay');
+  const palettePanel = $('#palettePanel');
+  const paletteBtn = $('#paletteBtn');
+  const paletteCloseBtn = $('#paletteCloseBtn');
+
+  function openPalette() {
+    paletteOverlay.classList.add('visible');
+    palettePanel.classList.add('visible');
+  }
+
+  function closePalette() {
+    paletteOverlay.classList.remove('visible');
+    palettePanel.classList.remove('visible');
+  }
+
+  paletteOverlay.onclick = closePalette;
+  paletteCloseBtn.onclick = closePalette;
+  paletteBtn.onclick = openPalette;
+
+  // Bind palette card run buttons
+  var paletteCards = $$('.palette-card:not(.disabled)');
+  paletteCards.forEach(function (card) {
+    var agent = card.getAttribute('data-agent');
+    var runBtn = card.querySelector('.palette-run-btn');
+    if (runBtn && agent) {
+      runBtn.onclick = function () {
+        closePalette();
+        if (agent === 'sourceAssessmentAgent') {
+          post('sourceAssessment');
+          showToast('Running Source Assessment...', '');
+        } else {
+          // For plan-based agents, generate a single-step plan
+          var agentNames = {
+            'sttmAgent': 'STTM Mapper',
+            'ingestionAgent': 'Ingestion Pipeline',
+            'architectureAgent': 'Documentation Generator'
+          };
+          var name = agentNames[agent] || agent;
+          addMessage('ai', 'Running ' + name + ' agent. Use /plan to create a full workflow with this agent.', 'AutoDE');
+          post('runAgent', { agent: agent });
+        }
+      };
+    }
+  });
+
+  // ── Keyboard shortcuts ──
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (slidePanel.classList.contains('visible')) {
+        closeSlidePanel();
       }
-
-      function populateSettings(settings) {
-        currentSettings = {
-          ...currentSettings,
-          ...(settings || {})
-        };
-
-        updateConnectionStatus();
-        buildMetadataTree();
+      if (palettePanel.classList.contains('visible')) {
+        closePalette();
       }
+      if (mentionDropdown.classList.contains('visible')) {
+        mentionDropdown.classList.remove('visible');
+      }
+    }
+    // Ctrl+Shift+P to open settings
+    if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+      e.preventDefault();
+      openSlidePanel('llm');
+    }
+  });
 
-      elements.providerSelect.addEventListener('change', (event) => {
-        currentSettings.defaultProvider = event.target.value;
-        updateConnectionStatus();
-        buildMetadataTree();
-      });
+  // ── Restore state ──
+  if (prevState.chatHtml) {
+    chatStream.innerHTML = prevState.chatHtml;
+    if (welcomeBlock) welcomeBlock.style.display = 'none';
+  }
 
-      elements.authModeSelect.addEventListener('change', (event) => {
-        currentSettings.defaultSnowflakeAuthMode = event.target.value;
-        updateConnectionStatus();
-      });
+  // Persist chat state periodically
+  setInterval(function () {
+    vscode.setState({ chatHtml: chatStream.innerHTML });
+  }, 3000);
 
-      elements.llmProviderSelect.addEventListener('change', (event) => {
-        currentSettings.activeLlmProvider = event.target.value;
-      });
-
-      elements.llmModelInput.addEventListener('input', (event) => {
-        currentSettings.activeLlmModel = event.target.value;
-      });
-
-      elements.testConnectionBtn.addEventListener('click', () => {
-        appendChatMessage('ai', 'Testing the selected provider connection and validating metadata access.');
-      });
-
-      elements.connectCopilotBtn.addEventListener('click', () => {
-        appendChatMessage('ai', 'GitHub Copilot linking flow is ready. Use the extension settings to complete onboarding when available.');
-      });
-
-      elements.tabButtons.forEach((button) => {
-        button.addEventListener('click', () => setActiveTab(button.dataset.tab));
-      });
-
-      document.getElementById('generatePlanBtn').addEventListener('click', () => {
-        const objective = elements.objectiveInput.value.trim();
-        if (!objective) {
-          appendChatMessage('ai', 'A clear objective is required before generating a plan.');
-          return;
-        }
-        vscode.postMessage({ type: 'generatePlan', objective, schemaContext: '' });
-      });
-
-      document.getElementById('executePlanBtn').addEventListener('click', () => {
-        vscode.postMessage({ type: 'executePlan' });
-      });
-
-      document.getElementById('pausePlanBtn').addEventListener('click', () => {
-        vscode.postMessage({ type: 'pausePlan' });
-      });
-
-      document.getElementById('resetPlanBtn').addEventListener('click', () => {
-        elements.objectiveInput.value = '';
-        elements.chatInput.value = '';
-        vscode.postMessage({ type: 'resetPlan' });
-        renderPlan([]);
-      });
-
-      document.getElementById('sendChatBtn').addEventListener('click', () => {
-        const value = elements.chatInput.value.trim();
-        if (!value) return;
-        appendChatMessage('user', value);
-        const response = `Updated plan context using: "${value}". I can incorporate the requested refinement into the current workflow.`;
-        setTimeout(() => appendChatMessage('ai', response), 150);
-        elements.chatInput.value = '';
-      });
-
-      document.getElementById('insertFileBtn').addEventListener('click', () => {
-        appendChatMessage('ai', 'Refinement prepared for insertion into the active file context.');
-      });
-
-      document.getElementById('updatePlanBtn').addEventListener('click', () => {
-        appendChatMessage('ai', 'Plan update requested and queued against the current execution state.');
-      });
-
-      document.getElementById('reExecuteBtn').addEventListener('click', () => {
-        vscode.postMessage({ type: 'executePlan' });
-      });
-
-      document.getElementById('stopConnectionBtn').addEventListener('click', () => {
-        currentSettings.defaultProvider = 'snowflake';
-        currentSettings.defaultSnowflakeAuthMode = 'key-pair';
-        updateConnectionStatus();
-        appendChatMessage('ai', 'Connection stopped. Reconnect from the integrations configuration to resume metadata grounding.');
-      });
-
-      window.addEventListener('message', (event) => {
-        const message = event.data;
-        if (!message || !message.type) return;
-
-        if (message.type === 'settingsLoaded') {
-          populateSettings(message);
-          return;
-        }
-
-        if (message.type === 'stateUpdate') {
-          if (message.state && message.state.steps) {
-            renderPlan(message.state.steps);
-          }
-          return;
-        }
-
-        if (message.type === 'planUpdated') {
-          renderPlan(message.plan || []);
-          return;
-        }
-
-        if (message.type === 'logEntry') {
-          appendChatMessage('ai', message.message || '');
-          return;
-        }
-
-        if (message.type === 'error') {
-          appendChatMessage('ai', message.message || 'An error occurred.');
-        }
-      });
-
-      setActiveTab('workspace');
-      updateConnectionStatus();
-      buildMetadataTree();
-      renderPlan([]);
-    </script>
-  </body>
+  // ── Initial load ──
+  post('settingsLoaded', {});
+})();
+</script>
+</body>
 </html>

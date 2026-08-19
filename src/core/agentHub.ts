@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
-import { executeIngestionAgent } from '../features/agents/spokes/ingestionAgent';
-import { executeSttmAgent } from '../features/agents/spokes/sttmAgent';
-import { executeArchitectureAgent } from '../features/agents/spokes/architectureAgent';
-import { executeSnowflakeAgent } from '../features/agents/spokes/snowflakeExecutor';
+import { executeIngestionAgent } from '../agents/build/IngestionPipelineAgent';
+import { executeSttmAgent } from '../agents/model/SttmMapperAgent';
+import { executeArchitectureAgent } from '../agents/validate/DocumentationAgent';
+import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
+import { executeSourceAssessmentAgent } from '../agents/discover/SourceAssessmentAgent';
 import {
   AgentExecutionContext,
   AgentType,
@@ -13,13 +14,14 @@ import {
   SessionStatus
 } from './types';
 
-const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor'];
+const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent'];
 
 const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string }>> = {
   ingestionAgent: executeIngestionAgent,
   sttmAgent: executeSttmAgent,
   architectureAgent: executeArchitectureAgent,
-  snowflakeExecutor: executeSnowflakeAgent
+  snowflakeExecutor: executeSnowflakeAgent,
+  sourceAssessmentAgent: executeSourceAssessmentAgent
 };
 
 export class DataAgentHubHub {
@@ -51,6 +53,38 @@ export class DataAgentHubHub {
       ...this.state,
       steps: this.state.steps.map((step) => ({ ...step }))
     };
+  }
+
+  public async chat(message: string, schemaContext?: string): Promise<string> {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      throw new Error('A message is required.');
+    }
+
+    const settings = this.configManager.getSettings();
+    const provider = settings.activeLlmProvider ?? 'copilot';
+    this.log(`Sending chat to ${provider}...`);
+
+    const contextBlock = schemaContext && schemaContext.trim().length > 0
+      ? `\n\nRelevant database and business context:\n${schemaContext}`
+      : '';
+
+    const prompt = `You are AutoDE, an expert data engineering assistant running inside VS Code. You help users with data engineering tasks including pipeline design, SQL authoring, schema analysis, data modeling, ETL/ELT workflows, and data platform operations.
+
+Respond conversationally and helpfully. If the user asks you to generate a plan, suggest they click the "Generate Plan" button or use the /plan command for structured execution plans.
+
+${contextBlock}
+
+User message: ${trimmed}`;
+
+    try {
+      const rawResponse = await this.callConfiguredLlm(prompt);
+      return rawResponse;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error during chat.';
+      this.log(`Chat failed: ${message}`);
+      throw new Error(message);
+    }
   }
 
   public async generatePlan(objective: string, schemaContext?: string): Promise<PlanStep[]> {
@@ -228,7 +262,7 @@ export class DataAgentHubHub {
     const baseContext = schemaContext && schemaContext.trim().length > 0 ? `\n\nSchema and metadata context:\n${schemaContext}` : '';
     const providerName = this.state.provider;
 
-    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
+    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
   }
 
   private async callConfiguredLlm(prompt: string): Promise<string> {
@@ -237,6 +271,31 @@ export class DataAgentHubHub {
     const model = settings.activeLlmModel ?? 'gpt-4o-mini';
 
     try {
+      // If Copilot is selected, route through the official VS Code Language Model API.
+      if (provider === 'copilot') {
+        try {
+          if (!settings.copilotProgrammaticConsent) {
+            throw new Error(
+              'Programmatic use of GitHub Copilot is not enabled. ' +
+              'Open Settings (⚙) → LLM Provider → check "Allow programmatic use of local Copilot" and try again.'
+            );
+          }
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { CopilotAdapter } = require('./copilotAdapter') as typeof import('./copilotAdapter');
+          const context = this.configManager.getExtensionContext();
+          const { adapter, info } = await CopilotAdapter.detect(context);
+          if (!adapter) {
+            throw new Error(info.error || 'GitHub Copilot is not available. Install the GitHub Copilot Chat extension and sign in.');
+          }
+          const out = await adapter.complete(prompt, { model, timeoutMs: 30000 });
+          return out;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.log(`Copilot request failed: ${message}`);
+          throw new Error(message);
+        }
+      }
+
       if (provider === 'azure-openai') {
         return await this.callAzureOpenAi(model, prompt, settings.llmEndpoint);
       }
@@ -248,9 +307,6 @@ export class DataAgentHubHub {
       }
       if (provider === 'gemini') {
         return await this.callGemini(model, prompt);
-      }
-      if (provider === 'copilot') {
-        return await this.callGitHubCopilot(model, prompt);
       }
 
       return await this.callOllama(model, prompt);
@@ -398,40 +454,6 @@ export class DataAgentHubHub {
     };
 
     const content = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
-    return this.extractJsonText(content);
-  }
-
-  private async callGitHubCopilot(_model: string, prompt: string): Promise<string> {
-    const token = await this.configManager.getLlmApiKey();
-    if (!token || token.trim().length === 0) {
-      throw new Error('GitHub Copilot is not linked in this environment. Connect Copilot or configure an API token in the LLM settings.');
-    }
-
-    const response = await fetch('https://api.githubcopilot.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        'Editor-Version': 'vscode',
-        'Copilot-Integration-Id': 'vscode'
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }],
-        stream: false
-      })
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`GitHub Copilot request failed: ${response.status} ${text}`);
-    }
-
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-
-    const content = data.choices?.[0]?.message?.content ?? '';
     return this.extractJsonText(content);
   }
 

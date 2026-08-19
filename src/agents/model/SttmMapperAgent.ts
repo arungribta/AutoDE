@@ -1,4 +1,4 @@
-import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../../core/types';
 
 export async function executeSttmAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const task = step.taskDescription.trim();
@@ -16,7 +16,7 @@ SELECT
   ${mappings.map((mapping) => `${mapping.sourceField} AS ${mapping.targetField}`).join(',\n  ')}
 FROM ${sourceTable};`;
 
-  context.log(`STTM spoke for ${step.id} created a transformation mapping.`);
+  context.log(`STTM agent for ${step.id} created a transformation mapping.`);
 
   return {
     success: true,

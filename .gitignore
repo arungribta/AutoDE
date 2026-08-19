@@ -3,3 +3,6 @@ dist/
 .vscode-test/
 .DS_Store
 npm-debug.log*
+*.vsix
+tmp_*.js
+mock_*.js

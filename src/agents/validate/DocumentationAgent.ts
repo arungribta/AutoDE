@@ -1,4 +1,4 @@
-import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../../core/types';
 
 export async function executeArchitectureAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const schema = context.settings.defaultSnowflakeSchema || 'PUBLIC';
@@ -15,7 +15,7 @@ export async function executeArchitectureAgent(step: PlanStep, context: AgentExe
 CREATE OR REPLACE VIEW ${database}.${schema}.${tableName}_view AS
 SELECT * FROM ${database}.${schema}.${tableName};`;
 
-  context.log(`Architecture spoke for ${step.id} produced Snowflake DDL.`);
+  context.log(`Architecture agent for ${step.id} produced Snowflake DDL.`);
 
   return {
     success: true,
