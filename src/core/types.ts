@@ -15,6 +15,29 @@ export type OutputFormat = 'ddl' | 'yaml' | 'markdown' | 'python' | 'sql';
 
 export type WorkflowPhase = 'discover' | 'model' | 'build' | 'validate';
 
+// ── Business Problem Specification ──
+
+export type SpecStatus = 'draft' | 'approved' | 'superseded';
+
+export interface BusinessProblemSpec {
+  id: string;
+  version: number;
+  status: SpecStatus;
+  problemStatement: string;
+  objectives: string[];
+  successCriteria: string[];
+  scope: { in: string[]; out: string[] };
+  constraints: string[];
+  assumptions: string[];
+  domain?: string;
+  stakeholders?: string[];
+  keyEntities?: string[];
+  createdAt: string;
+  updatedAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
+}
+
 // ── Target Environment ──
 
 export interface SnowflakeTargetConfig {
@@ -77,6 +100,8 @@ export interface GeneratedArtifact {
   approved: boolean;
   filePath?: string;
   phase?: WorkflowPhase;
+  specId?: string;
+  specVersion?: number;
 }
 
 // ── Core Settings ──
@@ -128,6 +153,8 @@ export interface PlanState {
   lastError?: string;
   artifacts?: GeneratedArtifact[];
   currentPhase?: WorkflowPhase;
+  specId?: string;
+  specVersion?: number;
 }
 
 export interface AgentExecutionContext {

@@ -8,6 +8,7 @@ import { GraphManager } from '../context/GraphManager';
 import { ContextFileManager } from '../context/ContextFileManager';
 import { SourceRegistry } from '../context/SourceRegistry';
 import { SynthesisPipeline } from '../context/SynthesisPipeline';
+import { SpecManager } from '../context/SpecManager';
 import { applyCspNonce } from './webviewSecurity';
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
@@ -18,6 +19,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private contextFileManager?: ContextFileManager;
   private sourceRegistry?: SourceRegistry;
   private synthesisPipeline?: SynthesisPipeline;
+  private specManager?: SpecManager;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -70,6 +72,15 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postSourcesList();
     } catch (err) {
       this.postLog(`Source registry initialization failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Initialize business problem specification manager
+    this.specManager = new SpecManager(workspaceRoot, (msg: string) => this.postLog(msg));
+    try {
+      await this.specManager.initialize();
+      this.postSpec();
+    } catch (err) {
+      this.postLog(`Spec manager initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Detect Copilot and include status in settings payload
@@ -234,6 +245,16 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postLog(`Synthesis produced ${result.nodes} node(s) and ${result.edges} edge(s).`);
           break;
         }
+        case 'approveSpec': {
+          if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
+          const spec = await this.specManager.approve();
+          this.postSpec();
+          if (spec) {
+            this.hub.setSpec(spec.id, spec.version);
+            this.postLog(`Business Problem Specification v${spec.version} approved.`);
+          }
+          break;
+        }
         default: this.postLog(`Unknown message type: ${String(message.type)}`); break;
       }
     } catch (error) {
@@ -268,6 +289,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private postSourcesList(): void {
     const sources = this.sourceRegistry?.getSources() ?? [];
     this.view?.webview.postMessage({ type: 'sourcesList', sources });
+  }
+
+  private postSpec(): void {
+    const spec = this.specManager?.getSpec();
+    this.view?.webview.postMessage({ type: 'specLoaded', spec });
   }
 
   private postMessage(type: string, payload: object = {}): void {

@@ -73,6 +73,12 @@ export class DataAgentHubHub {
     this.artifactWriter = writer;
   }
 
+  public setSpec(specId: string, specVersion: number): void {
+    this.state.specId = specId;
+    this.state.specVersion = specVersion;
+    this.emitState();
+  }
+
   public getPlan(): PlanState {
     return {
       ...this.state,
@@ -389,6 +395,8 @@ User message: ${trimmed}`;
           if (!this.state.artifacts) this.state.artifacts = [];
           for (const artifact of result.artifacts) {
             artifact.phase = phase;
+            artifact.specId = this.state.specId;
+            artifact.specVersion = this.state.specVersion;
             this.state.artifacts.push(artifact);
             this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
 

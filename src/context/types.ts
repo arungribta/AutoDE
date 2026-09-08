@@ -16,6 +16,8 @@ export interface Origin {
   confidence?: number;
   extractor?: string;
   extractedAt?: string;
+  specId?: string;
+  specVersion?: number;
 }
 
 export interface BaseNode {
