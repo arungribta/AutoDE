@@ -296,7 +296,57 @@ Removed (superseded by this model): `ProjectManager` / `ProjectRegistry`, the `n
 
 ---
 
-## 8. Copilot Integration Requirements
+## 8. Business Problem Specification (spec-driven system of record)
+
+AutoDE is **conversation-driven and specification-driven**. The user describes a business problem in natural language; AutoDE transforms it into a structured, reviewable, versioned **Business Problem Specification (BPS)**. The BPS — not the raw prompt — is the **system of record** for the repository and governs all subsequent activity (context creation, workflow inference, orchestration, artifact generation).
+
+### 8.1 The BPS artifact
+
+| Field | Purpose |
+|-------|---------|
+| `id`, `version` | stable identity; version increments only when an approved spec is revised |
+| `status` | `draft` → `approved` (`superseded` for archived revisions) |
+| `problemStatement` | refined, objective statement of the business problem |
+| `objectives` | measurable business outcomes the solution must achieve |
+| `successCriteria` | how success will be verified |
+| `scope.in` / `scope.out` | explicitly included / excluded boundaries |
+| `constraints`, `assumptions` | technical/regulatory limits; inferred facts the user must confirm |
+| `domain`, `stakeholders`, `keyEntities` | context hints for context-building and grounding |
+| `createdAt/updatedAt/approvedAt/approvedBy` | audit trail |
+
+Persistence: `.ai-context/spec/business-problem.yaml` (atomic temp→rename). Prior revisions are archived to `.ai-context/spec/history/`. Git is the version history.
+
+### 8.2 Spec-driven conversation routing
+
+- **No spec exists** → the user's first message IS the business problem → AutoDE drafts a BPS.
+- **Spec is a draft** → the user's next message refines it → the BPS is revised in place (same id/version).
+- **Spec is approved** → the user's messages are answered conversationally, grounded in the BPS + repository context; a change request drafts a new revision (same id, version + 1).
+
+### 8.3 Spec-driven workflow
+
+1. User describes the business problem → `AgentHub.generateSpec` (LLM) returns a structured draft BPS.
+2. Draft is presented in the chat + Workflow Palette for review; user **approves** (versioned) or replies with **revision** feedback.
+3. Approved BPS drives `generatePlanFromSpec` — plan generation is derived from the specification (objective = synthesized BPS content), not the raw prompt.
+4. All plans, artifacts, and context nodes are **traceable** to `specId`/`specVersion` (on `PlanState`, `GeneratedArtifact`, and `Origin`).
+
+### 8.4 Workflow Palette alignment
+
+- Palette shows the **current BPS summary** at the top (status badge, review/approve/revise/open actions) as a read-only window into the spec; the authoritative editable/versioned spec lives in `.ai-context/spec/business-problem.yaml`.
+- Below it, the four **workflow phases** (Discover / Model / Build / Validate & Document) render as phase rows with their agent cards.
+- Forward design (Phase 2 of the forward plan, not yet implemented): the palette becomes a **live status view** of an auto-inferred workflow (completed / in-progress / blocked / pending) rather than a manual launcher.
+
+### 8.5 Implemented
+
+- BPS types + `SpecManager` (`src/context/SpecManager.ts`): initialize/save/approve + history archive + atomic writes.
+- `AgentHub.generateSpec(userInput, previous)` + `parseSpecResponse` (LLM drafting/revising, version semantics).
+- Spec-aware chat routing in `webviewProvider`; `/spec` slash command.
+- Review/approve UI: chat spec card + palette spec section (approve / revise / open file / generate plan).
+- `AgentHub.generatePlanFromSpec(spec)` — spec-driven plan generation.
+- Traceability: `specId`/`specVersion` on `PlanState`, `GeneratedArtifact`, `Origin`.
+
+---
+
+## 9. Copilot Integration Requirements
 
 Objective: Provide a safe, user-consented way for AutoDE to use the GitHub Copilot extension a user may already have installed.
 
@@ -330,7 +380,7 @@ Limitations & Risks:
 
 ---
 
-## 9. Acceptance Criteria & Tests
+## 10. Acceptance Criteria & Tests
 
 1. Zero UI Blocking Validation (Performance):
    - Index build of 1,000 tables / 10,000 columns / 50 business terms in the background via worker threads while user types — the editor must remain responsive (no stutters). Observe performance with a synthetic dataset and worker-based indexing command.
@@ -357,20 +407,29 @@ Limitations & Risks:
 
 ---
 
-## 10. Implementation Plan & Phasing
+## 11. Implementation Plan & Phasing
 
 Phase 0 — Single-workspace model & artifacts
-- Remove `ProjectManager`/`ProjectRegistry`; fold state into `.ai-context/state.json`.
-- Add `autoDE.artifactDirectory` setting (default `auto-de`).
-- Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`, atomic writes).
+- ✅ Remove `ProjectManager`/`ProjectRegistry`; fold state into `.ai-context/state.json`.
+- ✅ Add `autoDE.artifactDirectory` setting (default `auto-de`).
+- ✅ Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`, atomic writes).
 
 Phase 1 — Context envelope & schema
-- Extend `src/context/types.ts` with the unified envelope (identity + provenance + version + ownership + `content` union).
-- Add per-kind JSON Schemas (ajv).
+- ✅ Extend `src/context/types.ts` with the unified envelope (identity + provenance + version + ownership).
+- ✅ Add per-kind JSON Schemas (`docs/schemas/context-envelope.schema.json`; `content` union deferred, `ajv` runtime wired in Phase 3).
 
 Phase 2 — Source registry & synthesis
-- Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
-- Implement `SynthesisPipeline` (rule-based + LLM-assisted extraction → derived nodes/edges with provenance).
+- ✅ Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
+- ✅ Implement `SynthesisPipeline` (rule-based extraction → derived nodes/edges with provenance; LLM-assisted extraction deferred).
+
+Phase 2.5 — Business Problem Specification (spec-driven)
+- ✅ BPS types + `SpecManager` (persistence, versioning, history archive, atomic writes).
+- ✅ `AgentHub.generateSpec` (LLM drafting/revising with version semantics) + `parseSpecResponse`.
+- ✅ Spec-aware chat routing (no-spec → draft, draft → revise, approved → grounded chat); `/spec` command.
+- ✅ Review/approve UI: chat spec card + palette spec section.
+- ✅ `AgentHub.generatePlanFromSpec` — spec-driven plan generation.
+- ✅ Traceability: `specId`/`specVersion` on `PlanState`, `GeneratedArtifact`, `Origin`.
+- ❌ Forward: spec-driven **phase inference** (BPS → which phases + dependencies) and palette-as-live-status-view.
 
 Phase 3 — Layered context loading
 - Rework `ContextFileManager` to load authoritative `context/**` + compiled `derived/graph.json`, with AJV validation.
@@ -391,7 +450,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 ---
 
-## 11. Security, Privacy & Licensing
+## 12. Security, Privacy & Licensing
 
 - Any content sent to third-party LLMs (Copilot or cloud) must be user-consented.
 - No secrets should be logged or stored in source control.
@@ -400,7 +459,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 ---
 
-## 12. Dependencies & Packaging Considerations
+## 13. Dependencies & Packaging Considerations
 
 - Embedding runtimes (Xenova/ONNX) and native vector indexes (hnswlib-node) add VSIX packaging complexity. Prefer a pure-JS fallback + optional native install; or a lightweight hosted embedding service for heavy workloads.
 - Use `ajv` for JSON Schema validation (per-kind `content` schemas).
@@ -410,10 +469,10 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 ---
 
-## 13. Files & Artifacts
+## 14. Files & Artifacts
 
 - UI webviews: `media/sidebar.html`, `media/panel.html`, `media/editors/*.html`
-- Context layer: `src/context/` — `types.ts`, `GraphManager.ts`, `ContextFileManager.ts`, `SourceRegistry.ts` (new), `SynthesisPipeline.ts` (new), `ArtifactWriter.ts` (new)
+- Context layer: `src/context/` — `types.ts`, `GraphManager.ts`, `ContextFileManager.ts`, `SourceRegistry.ts`, `SynthesisPipeline.ts`, `ArtifactWriter.ts`, `SpecManager.ts` (new)
 - Copilot adapter: `src/core/copilotAdapter.ts`
 - Webview providers: `src/core/webviewProvider.ts`, `src/core/panelProvider.ts`
 - Agent hub: `src/core/agentHub.ts`
@@ -423,7 +482,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 ---
 
-## 14. Acceptance & Review Checklist
+## 15. Acceptance & Review Checklist
 
 - [ ] UI: context section surfaces Enterprise Context Layer (layers, terms, rules, queries, relationships); source-file registration form present.
 - [x] Webview: LLM settings show Copilot status and consent checkbox; test button present.
@@ -437,23 +496,28 @@ Phase 6 — Copilot, testing, telemetry, docs
 - [ ] ContextRetriever: token-aware prompt assembler.
 - [ ] Vector/embedding engine (embedded, no server).
 - [x] CopilotAdapter: `vscode.lm` detection + adapter; agentHub respects consent.
-- [~] Documentation: this revision.
+- [~] Documentation: this revision (BPS §8 fully documented).
+- [x] BPS types + `SpecManager`: persistence/versioning/history + atomic writes.
+- [x] `AgentHub.generateSpec` + `generatePlanFromSpec`: spec drafting/refining + spec-driven plan.
+- [x] Spec-aware chat routing + `/spec` command + review/approve UI (chat card + palette).
+- [ ] Spec-driven phase inference (palette as live status view).
 
 ---
 
-## 15. Next Steps
+## 16. Next Steps
 
-1. Implement the unified envelope in `src/context/types.ts` (identity + provenance + version + ownership + `content` union).
-2. Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
-3. Implement `SynthesisPipeline` (rule-based + LLM-assisted extraction → derived nodes/edges with provenance).
-4. Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`) and remove `ProjectManager`/`ProjectRegistry`.
-5. Replace hand-rolled YAML parsers with a real parser + AJV per-kind schemas.
-6. Implement real Snowflake/Databricks adapter execution (currently stubbed).
-7. Implement `deactivate()` cleanup; add unit tests for the context layer and adapters.
+1. ✅ Implement the unified envelope in `src/context/types.ts` (identity + provenance + version + ownership; `content` union deferred).
+2. ✅ Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
+3. ✅ Implement `SynthesisPipeline` (rule-based → derived nodes/edges with provenance; LLM-assisted extraction deferred).
+4. ✅ Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`) and remove `ProjectManager`/`ProjectRegistry`.
+5. ✅ Implement the **Business Problem Specification** layer: types, `SpecManager`, `generateSpec`, review/approve UI, `generatePlanFromSpec`, traceability.
+6. Replace hand-rolled YAML parsers with a real parser + AJV per-kind schemas (Phase 3).
+7. Implement real Snowflake/Databricks adapter execution (currently stubbed).
+8. Implement `deactivate()` cleanup; add unit tests for the context layer, SpecManager, and adapters.
 
 ---
 
-## 16. Contact & Notes
+## 17. Contact & Notes
 
 If any requirement appears to conflict with project packaging constraints (e.g., native binaries in VSIX), request a tradeoff decision between shipping a pure-JS fallback vs bundling native libs.
 

@@ -46,11 +46,21 @@ export class ArtifactWriter {
   }
 
   public getArtifactDirectory(): vscode.Uri {
+    return ArtifactWriter.resolveArtifactDirectory(this.workspaceUri);
+  }
+
+  /**
+   * Resolves the configured artifact root for a workspace.
+   * Exposed statically so callers that do not own an ArtifactWriter instance
+   * (e.g. the webview provider's "open artifacts folder" action) resolve the
+   * same location without duplicating the configuration logic.
+   */
+  public static resolveArtifactDirectory(workspaceUri: vscode.Uri): vscode.Uri {
     const configured = vscode.workspace
       .getConfiguration('autoDataEngineeringHub')
       .get<string>('artifactDirectory', 'auto-de');
     const safe = (configured || 'auto-de').replace(/^[\\/]+|[\\/]+$/g, '') || 'auto-de';
-    return vscode.Uri.joinPath(this.workspaceUri, safe);
+    return vscode.Uri.joinPath(workspaceUri, safe);
   }
 
   private resolveRelativePath(artifact: GeneratedArtifact): string {

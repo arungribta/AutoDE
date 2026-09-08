@@ -97,15 +97,32 @@ export class CopilotAdapter {
 
   public async complete(
     prompt: string,
-    opts?: { model?: string; timeoutMs?: number; cancellationToken?: vscode.CancellationToken }
+    opts?: {
+      model?: string;
+      timeoutMs?: number;
+      systemPrompt?: string;
+      justification?: string;
+      cancellationToken?: vscode.CancellationToken;
+    }
   ): Promise<string> {
     const timeoutMs = opts?.timeoutMs ?? 30000;
     const model = opts?.model ? await this.selectModel(opts.model) : this.model;
 
-    const messages = [vscode.LanguageModelChatMessage.User(prompt)];
+    // The Language Model API has no "system" role. Per the VS Code guidance,
+    // system-style instructions are supplied as a leading Assistant message.
+    const messages: vscode.LanguageModelChatMessage[] = [];
+    if (opts?.systemPrompt && opts.systemPrompt.trim().length > 0) {
+      messages.push(vscode.LanguageModelChatMessage.Assistant(opts.systemPrompt.trim()));
+    }
+    messages.push(vscode.LanguageModelChatMessage.User(prompt));
+
     const request = model.sendRequest(
       messages,
-      { justification: 'Generate structured data-engineering plan JSON used by the Auto Data Engineering Hub extension.' },
+      {
+        justification:
+          opts?.justification ??
+          'Generate structured data-engineering output used by the Auto Data Engineering Hub extension.'
+      },
       opts?.cancellationToken
     );
 

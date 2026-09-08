@@ -48,21 +48,63 @@ export class SpecManager implements vscode.Disposable {
   }
 
   public async saveSpec(spec: BusinessProblemSpec): Promise<void> {
+    // Archive whatever is currently persisted before it is replaced, so that every
+    // prior draft/approved revision stays traceable in .ai-context/spec/history/.
+    await this.archive(this.spec, spec);
     this.spec = spec;
     await this.persist();
     this.log(`Saved Business Problem Specification v${spec.version} (${spec.status})`);
   }
 
+  /**
+   * Approves the current specification.
+   *
+   * Approval does NOT bump the version: a draft v1 becomes an approved v1. The
+   * version is bumped only when the business problem materially changes and a new
+   * revision is drafted (see AgentHub.generateSpec).
+   */
   public async approve(): Promise<BusinessProblemSpec | undefined> {
     if (!this.spec) return undefined;
-    this.spec.status = 'approved';
-    this.spec.approvedAt = new Date().toISOString();
-    this.spec.approvedBy = 'user';
-    this.spec.updatedAt = new Date().toISOString();
-    this.spec.version += 1;
+    if (this.spec.status === 'approved') {
+      this.log(`Business Problem Specification v${this.spec.version} is already approved.`);
+      return this.getSpec();
+    }
+    const now = new Date().toISOString();
+    const approved: BusinessProblemSpec = {
+      ...this.spec,
+      status: 'approved',
+      approvedAt: now,
+      approvedBy: 'user',
+      updatedAt: now
+    };
+    await this.archive(this.spec, approved);
+    this.spec = approved;
     await this.persist();
     this.log(`Approved Business Problem Specification v${this.spec.version}`);
     return this.getSpec();
+  }
+
+  /** Location of the persisted specification, used to open it in an editor. */
+  public getSpecUri(): vscode.Uri {
+    return this.specUri;
+  }
+
+  /** Persists the previous revision to spec/history/ when it differs from the incoming one. */
+  private async archive(previous: BusinessProblemSpec | undefined, incoming: BusinessProblemSpec): Promise<void> {
+    if (!previous) return;
+    if (this.serialize(previous) === this.serialize(incoming)) return;
+    const historyDir = vscode.Uri.joinPath(this.specDir, 'history');
+    await vscode.workspace.fs.createDirectory(historyDir);
+    const name = `business-problem.v${previous.version}.${previous.status}.yaml`;
+    const target = vscode.Uri.joinPath(historyDir, name);
+    try {
+      await vscode.workspace.fs.stat(target);
+      return; // already archived
+    } catch {
+      // not present yet — write it
+    }
+    await vscode.workspace.fs.writeFile(target, Buffer.from(this.serialize(previous), 'utf8'));
+    this.log(`Archived specification v${previous.version} (${previous.status}) → spec/history/${name}`);
   }
 
   private clone(spec: BusinessProblemSpec): BusinessProblemSpec {

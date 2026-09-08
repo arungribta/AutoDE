@@ -115,6 +115,25 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .plan-step.expanded + .plan-step-detail { display: block; }
 .plan-card-actions { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; }
 
+/* Business Problem Specification */
+.spec-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); margin-top: 6px; overflow: hidden; }
+.spec-card-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--border-subtle); font-weight: 600; font-size: var(--font-size-sm); cursor: pointer; user-select: none; }
+.spec-card-header:hover { background: var(--surface-active); }
+.spec-card-body { padding: 8px 10px; display: none; }
+.spec-card.expanded .spec-card-body { display: block; }
+.spec-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--border-soft); text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; }
+.spec-badge.draft { color: var(--warning); border-color: var(--warning); }
+.spec-badge.approved { color: var(--success); border-color: var(--success); }
+.spec-badge.superseded { color: var(--text-muted); }
+.spec-field { margin-bottom: 7px; }
+.spec-field-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.spec-field-value { font-size: var(--font-size-sm); line-height: 1.45; }
+.spec-list { margin: 0; padding-left: 16px; }
+.spec-list li { font-size: var(--font-size-sm); line-height: 1.5; }
+.spec-actions { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; }
+.spec-empty { border: 1px dashed var(--border-soft); border-radius: var(--radius); padding: var(--spacing-md); font-size: var(--font-size-sm); color: var(--text-muted); line-height: 1.5; }
+.spec-meta { font-size: 10px; color: var(--text-muted); margin-top: 6px; }
+
 /* ── Context Drawer ── */
 .ctx-drawer { border-top: 1px solid var(--border-soft); flex-shrink: 0; background: var(--surface); overflow: hidden; transition: max-height var(--transition-slow); }
 .ctx-drawer.collapsed { max-height: 32px; }
@@ -262,7 +281,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       <div class="welcome-block" id="welcomeBlock">
         <div class="welcome-icon">🛠️</div>
         <div class="welcome-title">Auto Data Engineering Hub</div>
-        <div class="welcome-subtitle">Describe your data engineering project to get started. The assistant will guide you through Discover → Model → Build → Validate.</div>
+        <div class="welcome-subtitle">Describe the business problem you need to solve. AutoDE turns it into a Business Problem Specification, then drives Discover → Model → Build → Validate to solve it.</div>
         <div class="welcome-actions">
           <button class="primary" id="welcomeConnectBtn">🔌 Connect Database</button>
           <button id="welcomeSettingsBtn">⚙ Configure LLM</button>
@@ -357,6 +376,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   <div class="slide-panel" id="palettePanel">
     <div class="slide-panel-header"><span class="slide-title">🧰 Workflow Palette</span><button class="icon-btn" id="paletteCloseBtn">✕</button></div>
     <div class="slide-panel-body" id="paletteBody">
+      <div class="section" id="paletteSpec">
+        <!-- Business Problem Specification rendered by JS -->
+      </div>
       <div class="section" id="palettePhases">
         <!-- Phase rows rendered by JS -->
       </div>
@@ -396,6 +418,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   const toast = $('#toast');
   const contextActions = $('#contextActions');
   const stopBtn = $('#stopBtn');
+  const paletteSpec = $('#paletteSpec');
   const palettePhases = $('#palettePhases');
   const paletteAgentCards = $('#paletteAgentCards');
   const paletteContinueBtn = $('#paletteContinueBtn');
@@ -405,6 +428,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   let contextStats = { tables: 0, terms: 0, queries: 0, files: 0, tokens: 0, maxTokens: 4000 };
   let mentionEntities = [];
   let sessionStatus = 'idle';
+  let currentSpec = null;
 
   // ── Toast ──
   function showToast(msg, type) { if (toastTimer) clearTimeout(toastTimer); toast.textContent = msg; toast.className = 'toast visible ' + (type || ''); toastTimer = setTimeout(function () { toast.classList.remove('visible'); }, 2500); }
@@ -424,6 +448,15 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         contextActions.innerHTML = '<button class="primary" id="ctxExecuteBtn">▶ Execute Plan</button><button id="ctxReplanBtn">↻ Re-plan</button>';
         $('#ctxExecuteBtn').onclick = function () { post('executePlan'); };
         $('#ctxReplanBtn').onclick = function () { post('resetPlan'); };
+      } else if (currentSpec && currentSpec.status === 'draft') {
+        contextActions.innerHTML = '<button class="primary" id="ctxApproveSpecBtn">✓ Approve Specification</button><button id="ctxReviewSpecBtn">🧰 Review</button><button id="ctxOpenSpecBtn">📄 Open</button>';
+        $('#ctxApproveSpecBtn').onclick = function () { post('approveSpec'); showToast('Approving specification...', ''); };
+        $('#ctxReviewSpecBtn').onclick = function () { openPalette(); };
+        $('#ctxOpenSpecBtn').onclick = function () { post('openSpecFile'); };
+      } else if (currentSpec && currentSpec.status === 'approved') {
+        contextActions.innerHTML = '<button class="primary" id="ctxPlanFromSpecBtn">📋 Generate Plan from Specification</button><button id="ctxOpenSpecBtn">📄 Specification</button>';
+        $('#ctxPlanFromSpecBtn').onclick = function () { addMessage('ai', 'Generating the workflow plan from the approved specification...', 'AutoDE'); post('generatePlanFromSpec'); };
+        $('#ctxOpenSpecBtn').onclick = function () { post('openSpecFile'); };
       }
     } else if (sessionStatus === 'running') {
       contextActions.innerHTML = '<button class="danger" id="ctxPauseBtn">⏸ Pause</button>';
@@ -437,7 +470,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     } else if (sessionStatus === 'completed') {
       contextActions.innerHTML = '<button class="primary" id="ctxNewPlanBtn">📋 New Plan</button><button id="ctxReviewBtn">📂 Review Artifacts</button>';
       $('#ctxNewPlanBtn').onclick = function () { post('resetPlan'); };
-      $('#ctxReviewBtn').onclick = function () { post('openProjectFolder'); };
+      $('#ctxReviewBtn').onclick = function () { post('openArtifactFolder'); };
       stopBtn.style.display = 'none';
     } else if (sessionStatus === 'failed') {
       contextActions.innerHTML = '<button class="primary" id="ctxReplanFailBtn">↻ Re-plan</button><button id="ctxNewPlanFailBtn">📋 New Plan</button>';
@@ -454,6 +487,110 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function addArtifactCard(artifact) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var typeIcons = { data_model: '📐', sttm_mapping: '🗺', ddl_script: '📝', pipeline_dag: '🔄', architecture_diagram: '📊', data_dictionary: '📋', sql_script: '💾', requirements_doc: '📋', discovery_report: '📊', data_profile: '📈', knowledge_graph: '🔗', validation_report: '✅', test_suite: '🧪' }; var icon = typeIcons[artifact.type] || '📦'; var badgeClass = artifact.approved ? 'artifact-badge approved' : 'artifact-badge'; var badgeText = artifact.approved ? '✓ Approved' : 'Pending Review'; var html = '<div class="artifact-card"><div class="artifact-card-header" onclick="this.parentElement.classList.toggle(\'expanded\')"><span>' + icon + ' ' + escapeHtml(artifact.title) + '</span><span class="' + badgeClass + '">' + badgeText + '</span></div><div class="artifact-card-body"><pre><code>' + escapeHtml(artifact.content) + '</code></pre><div class="artifact-card-actions"><button>📋 Copy</button></div></div></div>'; var div = document.createElement('div'); div.innerHTML = html; chatStream.appendChild(div.firstElementChild); chatStream.scrollTop = chatStream.scrollHeight; }
 
   // ── Palette Phase Rows ──
+  // ── Business Problem Specification ──
+  function specStatusBadge(spec) {
+    var st = spec.status || 'draft';
+    var label = st === 'approved' ? '✓ Approved' : (st === 'superseded' ? 'Superseded' : 'Draft');
+    return '<span class="spec-badge ' + st + '">' + label + '</span>';
+  }
+
+  function specListHtml(items) {
+    if (!items || items.length === 0) { return '<div class="spec-field-value" style="opacity:0.55">None recorded</div>'; }
+    var html = '<ul class="spec-list">';
+    for (var i = 0; i < items.length; i++) { html += '<li>' + escapeHtml(items[i]) + '</li>'; }
+    return html + '</ul>';
+  }
+
+  function specBodyHtml(spec) {
+    var scopeIn = (spec.scope && spec.scope.in) || [];
+    var scopeOut = (spec.scope && spec.scope.out) || [];
+    var html = '';
+    html += '<div class="spec-field"><div class="spec-field-label">Problem Statement</div><div class="spec-field-value">' + escapeHtml(spec.problemStatement || '') + '</div></div>';
+    html += '<div class="spec-field"><div class="spec-field-label">Objectives</div>' + specListHtml(spec.objectives) + '</div>';
+    html += '<div class="spec-field"><div class="spec-field-label">Success Criteria</div>' + specListHtml(spec.successCriteria) + '</div>';
+    html += '<div class="spec-field"><div class="spec-field-label">In Scope</div>' + specListHtml(scopeIn) + '</div>';
+    if (scopeOut.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Out of Scope</div>' + specListHtml(scopeOut) + '</div>'; }
+    if (spec.constraints && spec.constraints.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Constraints</div>' + specListHtml(spec.constraints) + '</div>'; }
+    if (spec.assumptions && spec.assumptions.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Assumptions (please confirm)</div>' + specListHtml(spec.assumptions) + '</div>'; }
+    if (spec.domain) { html += '<div class="spec-field"><div class="spec-field-label">Domain</div><div class="spec-field-value">' + escapeHtml(spec.domain) + '</div></div>'; }
+    if (spec.keyEntities && spec.keyEntities.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Key Entities</div>' + specListHtml(spec.keyEntities) + '</div>'; }
+    if (spec.stakeholders && spec.stakeholders.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Stakeholders</div>' + specListHtml(spec.stakeholders) + '</div>'; }
+    var stamp = (spec.updatedAt || '').replace('T', ' ').slice(0, 16);
+    html += '<div class="spec-meta">' + escapeHtml(spec.id || '') + (stamp ? ' · updated ' + escapeHtml(stamp) : '') + '</div>';
+    return html;
+  }
+
+  function specActionsHtml(spec) {
+    var html = '<div class="spec-actions">';
+    if (spec.status !== 'approved') { html += '<button class="primary" data-spec-action="approve">✓ Approve</button>'; }
+    html += '<button data-spec-action="revise">↻ Revise</button>';
+    html += '<button data-spec-action="open">📄 Open file</button>';
+    if (spec.status === 'approved') { html += '<button class="primary" data-spec-action="plan">📋 Generate Plan</button>'; }
+    return html + '</div>';
+  }
+
+  function wireSpecActions(container) {
+    var btns = container.querySelectorAll('[data-spec-action]');
+    btns.forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var action = btn.getAttribute('data-spec-action');
+        if (action === 'approve') { post('approveSpec'); showToast('Approving specification...', ''); }
+        else if (action === 'revise') {
+          closePalette();
+          chatInput.value = '';
+          chatInput.placeholder = 'Describe the change to the business problem...';
+          chatInput.focus();
+        }
+        else if (action === 'open') { post('openSpecFile'); }
+        else if (action === 'plan') { closePalette(); addMessage('ai', 'Generating the workflow plan from the approved specification...', 'AutoDE'); post('generatePlanFromSpec'); }
+      };
+    });
+  }
+
+  function addSpecCard(spec, revised) {
+    if (welcomeBlock) { welcomeBlock.style.display = 'none'; }
+    currentSpec = spec;
+    var title = revised ? '📋 Specification Revised' : '📋 Business Problem Specification';
+    var div = document.createElement('div');
+    div.className = 'spec-card expanded';
+    div.innerHTML =
+      '<div class="spec-card-header"><span>' + title + ' <span style="color:var(--text-muted);font-weight:400;">v' + (spec.version || 1) + '</span></span>' + specStatusBadge(spec) + '</div>' +
+      '<div class="spec-card-body">' + specBodyHtml(spec) + '</div>' +
+      specActionsHtml(spec);
+    chatStream.appendChild(div);
+    var header = div.querySelector('.spec-card-header');
+    if (header) { header.onclick = function () { div.classList.toggle('expanded'); }; }
+    wireSpecActions(div);
+    chatStream.scrollTop = chatStream.scrollHeight;
+  }
+
+  function renderPaletteSpec() {
+    if (!paletteSpec) { return; }
+    if (!currentSpec) {
+      paletteSpec.innerHTML =
+        '<div class="section-title">Business Specification</div>' +
+        '<div class="spec-empty">No Business Problem Specification yet.<br><br>' +
+        'Describe the business problem in the chat and AutoDE drafts one for your review. ' +
+        'The approved specification governs every phase below.</div>';
+      return;
+    }
+    var spec = currentSpec;
+    var statement = spec.problemStatement || '';
+    var short = statement.length > 70 ? statement.slice(0, 70) + '…' : statement;
+    paletteSpec.innerHTML =
+      '<div class="section-title">Business Specification · v' + (spec.version || 1) + '</div>' +
+      '<div class="spec-card expanded">' +
+        '<div class="spec-card-header"><span>' + escapeHtml(short) + '</span>' + specStatusBadge(spec) + '</div>' +
+        '<div class="spec-card-body">' + specBodyHtml(spec) + '</div>' +
+        specActionsHtml(spec) +
+      '</div>';
+    var card = paletteSpec.querySelector('.spec-card');
+    var header = paletteSpec.querySelector('.spec-card-header');
+    if (card && header) { header.onclick = function () { card.classList.toggle('expanded'); }; }
+    if (card) { wireSpecActions(card); }
+  }
+
   var palettePhase = 'discover';
   function renderPalettePhases() {
     var phases = [
@@ -557,7 +694,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 
   // ── Palette Panel ──
   const paletteOverlay = $('#paletteOverlay'), palettePanel = $('#palettePanel'), paletteBtn = $('#paletteBtn'), paletteCloseBtn = $('#paletteCloseBtn');
-  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); renderPalettePhases(); }
+  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); renderPaletteSpec(); renderPalettePhases(); }
   function closePalette() { paletteOverlay.classList.remove('visible'); palettePanel.classList.remove('visible'); }
   paletteOverlay.onclick = closePalette; paletteCloseBtn.onclick = closePalette; paletteBtn.onclick = openPalette;
 
@@ -572,7 +709,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   chatInput.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } handleMentionInput(e); };
   chatInput.oninput = function (e) { handleMentionInput(e); };
   function sendMessage() { var text = chatInput.value.trim(); if (!text) return; addMessage('user', text, 'You'); chatInput.value = ''; mentionDropdown.classList.remove('visible'); if (text.startsWith('/')) { handleSlashCommand(text); return; } post('chat', { message: text, schemaContext: '' }); }
-  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/plan': var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; addMessage('ai', 'Generating execution plan...', 'AutoDE'); post('generatePlan', { objective: objective, schemaContext: '' }); break; case '/execute': post('executePlan'); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
+  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } addMessage('ai', currentSpec ? 'Revising the Business Problem Specification...' : 'Drafting the Business Problem Specification...', 'AutoDE'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': if (currentSpec && currentSpec.status === 'approved') { addMessage('ai', 'Generating the workflow plan from the approved specification...', 'AutoDE'); post('generatePlanFromSpec'); break; } var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; addMessage('ai', 'Generating execution plan...', 'AutoDE'); post('generatePlan', { objective: objective, schemaContext: '' }); break; case '/execute': post('executePlan'); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
 
   // ── @-mention ──
   function handleMentionInput(e) { var val = chatInput.value; var cursorPos = chatInput.selectionStart; var textBeforeCursor = val.substring(0, cursorPos); var mentionMatch = textBeforeCursor.match(/@(\w*)$/); if (mentionMatch) { var query = mentionMatch[1].toLowerCase(); var items = buildMentionItems(query); if (items.length > 0) { renderMentionDropdown(items); mentionDropdown.classList.add('visible'); } else { mentionDropdown.classList.remove('visible'); } } else { mentionDropdown.classList.remove('visible'); } }
@@ -618,6 +755,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
       case 'sourcesList': renderSourcesList(msg.sources); break;
+      case 'specLoaded': currentSpec = msg.spec || null; renderPaletteSpec(); renderContextActions(); break;
+      case 'specDrafted': if (msg.spec) { addSpecCard(msg.spec, !!msg.revised); renderPaletteSpec(); renderContextActions(); } break;
+      case 'specApproved': if (msg.spec) { currentSpec = msg.spec; renderPaletteSpec(); renderContextActions(); showToast('Specification v' + (msg.spec.version || 1) + ' approved', 'success'); } break;
       default: break;
     }
   });

@@ -2,7 +2,13 @@
 
 **Last Updated:** 2026-09-08
 **Version:** 0.6.0
-**Status:** v0.5.1 code committed (single-workspace, context envelope, source registry, synthesis pipeline, webview fixes). In progress: **Business Problem Specification (spec-driven orchestration)** → then Phase 3+.
+**Status:** v0.5.1 code committed. Implemented:
+- Single-workspace model (`ArtifactWriter`, `autoDE.artifactDirectory`; `ProjectManager` removed)
+- Context Layer IA: unified envelope (`src/context/types.ts`, `docs/schemas/context-envelope.schema.json`), `SourceRegistry` (`sources.yaml`), `SynthesisPipeline`
+- Webview CSP nonce fix, workflow palette rework, Cline dev-host workaround in `.vscode/launch.json`
+- **Business Problem Specification (spec-driven orchestration)** — see §2. Implemented: BPS types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec` (LLM-based spec drafting/refining with version semantics), spec-aware chat routing (no-spec → draft, draft → revise, approved → grounded chat), palette + chat spec card review/approve/revise/open UI, `/spec` command, and `generatePlanFromSpec` (spec-driven plan generation).
+
+Next: **Phase 3 (context loading)** and beyond — see §10.
 
 ---
 
@@ -997,10 +1003,10 @@ AutoDE/
 
 ## 10. Implementation Phases
 
-> **Forward plan (spec-driven):** the remaining work centers on the Business Problem Specification (§2) and re-orients everything around it. Forward phases (mirroring `docs/requirements.md` §10):
-> 1. **Business Problem Specification** — spec artifact + review/approve + versioning + traceability (`specId`/`specVersion`).
-> 2. **Spec-driven phase inference + orchestration** — infer phases/dependencies from the BPS; palette becomes a status view.
-> 3. **Phase 3** — layered context loading (`context/**` + `derived/graph.json` + AJV validation).
+> **Forward plan (spec-driven):** mirroring `docs/requirements.md` §10:
+> 1. **Business Problem Specification** — ✅ DONE. Spec types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec`, spec-aware chat routing, review/approve UI, `/spec`, `generatePlanFromSpec`.
+> 2. **Spec-driven phase inference + orchestration** — ❌ PENDING. Infer phases/dependencies from the BPS; palette becomes a live status view (completed/in-progress/blocked/pending), rather than a manual launcher.
+> 3. **Phase 3** — layered context loading (`context/**` + `derived/graph.json` + AJV validation of the context envelope).
 > 4. **Phase 4** — real Snowflake/Databricks adapters (wire `snowflake-sdk`).
 > 5. **Phase 5** — ContextRetriever + vector engine (embedded, no server).
 > 6. **Phase 6** — Copilot consent UI, telemetry, unit/integration tests.

@@ -11,6 +11,7 @@ import { ArtifactWriter } from '../context/ArtifactWriter';
 import {
   AgentExecutionContext,
   AgentType,
+  BusinessProblemSpec,
   PlanState,
   PlanStep,
   PlanStatus,
@@ -84,6 +85,163 @@ export class DataAgentHubHub {
       ...this.state,
       steps: this.state.steps.map((step) => ({ ...step })),
       artifacts: this.state.artifacts ? [...this.state.artifacts] : undefined
+    };
+  }
+
+  // ── Business Problem Specification ──
+
+  /**
+   * System instruction used to turn a natural-language business problem into a
+   * structured Business Problem Specification (the repository's system of record).
+   */
+  private static readonly SPEC_SYSTEM_PROMPT = [
+    'You are a senior data engineering business analyst.',
+    'Transform the user\u2019s natural-language business problem into a structured Business Problem Specification.',
+    'Respond with a single valid JSON object only \u2014 no prose and no markdown fences.',
+    'Use exactly this shape:',
+    '{',
+    '  "problemStatement": "2-4 sentences, focused on the business outcome",',
+    '  "objectives": ["measurable outcome the solution must achieve"],',
+    '  "successCriteria": ["how success will be verified"],',
+    '  "scope": { "in": ["included"], "out": ["explicitly excluded"] },',
+    '  "constraints": ["technical, regulatory or organisational limits"],',
+    '  "assumptions": ["anything inferred that the user must confirm"],',
+    '  "domain": "business domain, e.g. finance, supply-chain, marketing",',
+    '  "stakeholders": ["role or team"],',
+    '  "keyEntities": ["business or data entities implied by the problem"]',
+    '}',
+    'Rules:',
+    '- Derive content only from what the user supplied; never invent systems, tables, vendors or metrics.',
+    '- If information is missing, record it as an explicit assumption instead of guessing.',
+    '- "problemStatement", "objectives", "successCriteria" and "scope.in" must be non-empty.',
+    '- When an existing specification is provided, revise it: keep valid content and apply the requested change.'
+  ].join('\n');
+
+  private static readonly CHAT_SYSTEM_PROMPT = [
+    'You are AutoDE, an expert data engineering assistant running inside VS Code.',
+    'You help users with pipeline design, SQL authoring, schema analysis, data modelling, ETL/ELT workflows and data platform operations.',
+    'Answer the user\u2019s question concisely and practically, using concise markdown.',
+    'Ground every answer in the supplied repository context and Business Problem Specification.',
+    'If the context is insufficient, say so and state exactly what you need.',
+    'Never fabricate table names, columns, metrics or systems.',
+    'If the user asks for an execution plan, suggest the /plan command or the Generate Plan action.',
+    'Do not wrap the whole answer in a code fence.'
+  ].join('\n');
+
+  /**
+   * Generates (or regenerates) the Business Problem Specification from natural language.
+   *
+   * Versioning semantics:
+   * - no previous spec           -> new id, version 1, status draft
+   * - previous spec is a draft   -> same id and version, status draft (in-place revision)
+   * - previous spec was approved -> same id, version + 1, status draft (new revision)
+   */
+  public async generateSpec(userInput: string, previous?: BusinessProblemSpec): Promise<BusinessProblemSpec> {
+    const trimmed = (userInput ?? '').trim();
+    if (!trimmed) {
+      throw new Error('A description of the business problem is required to generate a specification.');
+    }
+
+    const previousBlock = previous
+      ? `\n\n## Existing specification (revise it; do not discard content that is still valid)\n${JSON.stringify(this.specToJson(previous), null, 2)}`
+      : '';
+
+    const prompt = `## Business problem (from the user)\n${trimmed}${previousBlock}\n\nReturn the Business Problem Specification JSON object now.`;
+
+    this.log(previous ? 'Regenerating the Business Problem Specification\u2026' : 'Drafting the Business Problem Specification\u2026');
+    const raw = await this.callConfiguredLlm(
+      prompt,
+      DataAgentHubHub.SPEC_SYSTEM_PROMPT,
+      'Draft the Business Problem Specification that governs the Auto Data Engineering Hub workflow.'
+    );
+
+    const spec = this.parseSpecResponse(raw, previous);
+    this.state.specId = spec.id;
+    this.state.specVersion = spec.version;
+    this.state.objective = spec.problemStatement;
+    this.log(`Business Problem Specification ${spec.id} v${spec.version} drafted (${spec.objectives.length} objective(s)).`);
+    this.emitState();
+    return spec;
+  }
+
+  /** Renders a specification as the objective text used for plan generation. */
+  public buildObjectiveFromSpec(spec: BusinessProblemSpec): string {
+    const lines: string[] = [spec.problemStatement];
+    if (spec.objectives.length > 0) { lines.push(`Objectives: ${spec.objectives.join('; ')}`); }
+    if (spec.successCriteria.length > 0) { lines.push(`Success criteria: ${spec.successCriteria.join('; ')}`); }
+    if (spec.scope.in.length > 0) { lines.push(`In scope: ${spec.scope.in.join('; ')}`); }
+    if (spec.scope.out.length > 0) { lines.push(`Out of scope: ${spec.scope.out.join('; ')}`); }
+    if (spec.constraints.length > 0) { lines.push(`Constraints: ${spec.constraints.join('; ')}`); }
+    if (spec.assumptions.length > 0) { lines.push(`Assumptions: ${spec.assumptions.join('; ')}`); }
+    if (spec.domain) { lines.push(`Domain: ${spec.domain}`); }
+    if (spec.keyEntities && spec.keyEntities.length > 0) { lines.push(`Key entities: ${spec.keyEntities.join(', ')}`); }
+    return lines.join('\n');
+  }
+
+  /** Generates the execution plan from a specification (spec-driven planning). */
+  public async generatePlanFromSpec(spec: BusinessProblemSpec): Promise<void> {
+    this.state.specId = spec.id;
+    this.state.specVersion = spec.version;
+    await this.generatePlan(this.buildObjectiveFromSpec(spec), this.state.schemaContext);
+  }
+
+  private specToJson(spec: BusinessProblemSpec): Record<string, unknown> {
+    return {
+      problemStatement: spec.problemStatement,
+      objectives: spec.objectives,
+      successCriteria: spec.successCriteria,
+      scope: spec.scope,
+      constraints: spec.constraints,
+      assumptions: spec.assumptions,
+      domain: spec.domain,
+      stakeholders: spec.stakeholders,
+      keyEntities: spec.keyEntities
+    };
+  }
+
+  private parseSpecResponse(raw: string, previous?: BusinessProblemSpec): BusinessProblemSpec {
+    const parsed = this.parseJsonObject(this.extractJsonText(raw));
+    const now = new Date().toISOString();
+
+    const str = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+    const arr = (value: unknown): string[] => {
+      if (!Array.isArray(value)) { return []; }
+      return value
+        .map((item) => {
+          if (typeof item === 'string') { return item.trim(); }
+          const record = item as Record<string, unknown> | null;
+          return str(record?.name ?? record?.text ?? record?.value);
+        })
+        .filter((item) => item.length > 0);
+    };
+
+    const problemStatement = str(parsed.problemStatement);
+    if (!problemStatement) { throw new Error('The LLM did not return a problemStatement for the specification.'); }
+
+    const objectives = arr(parsed.objectives);
+    if (objectives.length === 0) { throw new Error('The LLM did not return any objectives for the specification.'); }
+
+    const rawScope = (parsed.scope && typeof parsed.scope === 'object' ? parsed.scope : {}) as Record<string, unknown>;
+    const scopeIn = arr(rawScope.in ?? rawScope.inScope);
+    if (scopeIn.length === 0) { throw new Error('The LLM did not return any in-scope items for the specification.'); }
+
+    const isRevisionOfApproved = previous?.status === 'approved';
+
+    return {
+      id: previous?.id ?? `bps-${Date.now().toString(36)}`,
+      version: isRevisionOfApproved ? (previous?.version ?? 1) + 1 : (previous?.version ?? 1),
+      status: 'draft',
+      problemStatement,
+      objectives,
+      successCriteria: arr(parsed.successCriteria),
+      scope: { in: scopeIn, out: arr(rawScope.out ?? rawScope.outOfScope) },
+      constraints: arr(parsed.constraints),
+      assumptions: arr(parsed.assumptions),
+      domain: str(parsed.domain) || previous?.domain || undefined,
+      stakeholders: arr(parsed.stakeholders),
+      keyEntities: arr(parsed.keyEntities),
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now
     };
   }
 
@@ -197,16 +355,14 @@ Message: ${message}`;
 
     const contextBlock = this.buildChatContextBlock(schemaContext);
 
-    const prompt = `You are AutoDE, an expert data engineering assistant running inside VS Code. You help users with data engineering tasks including pipeline design, SQL authoring, schema analysis, data modeling, ETL/ELT workflows, and data platform operations.
-
-Respond conversationally and helpfully. If the user asks you to generate a plan, suggest they click the "Generate Plan" button or use the /plan command for structured execution plans.
-
-${contextBlock}
-
-User message: ${trimmed}`;
+    const prompt = `${contextBlock.trim()}${contextBlock.trim().length > 0 ? '\n\n' : ''}## User message\n${trimmed}\n\nRespond now.`;
 
     try {
-      const rawResponse = await this.callConfiguredLlm(prompt);
+      const rawResponse = await this.callConfiguredLlm(
+        prompt,
+        DataAgentHubHub.CHAT_SYSTEM_PROMPT,
+        'Answer a data engineering question in the Auto Data Engineering Hub sidebar chat.'
+      );
       return rawResponse;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error during chat.';
@@ -218,8 +374,22 @@ User message: ${trimmed}`;
   private buildChatContextBlock(schemaContext?: string): string {
     const parts: string[] = [];
 
+    if (this.state.specId) {
+      parts.push(
+        `## Current Business Problem Specification (${this.state.specId} v${this.state.specVersion ?? 1})\n` +
+        `${this.state.objective || '(no problem statement recorded)'}`
+      );
+    }
+
     if (schemaContext && schemaContext.trim().length > 0) {
       parts.push(`## Source Environment\n${schemaContext}`);
+    }
+
+    if (this.state.steps.length > 0) {
+      const summary = this.state.steps
+        .map((step) => `- [${step.status}] ${step.id} (${step.assignedAgent}${step.phase ? `, ${step.phase}` : ''}): ${step.taskDescription}`)
+        .join('\n');
+      parts.push(`## Current workflow plan\n${summary}`);
     }
 
     if (this.state.targetEnvironment) {
@@ -483,10 +653,23 @@ User message: ${trimmed}`;
 
   // ── LLM Calls ──
 
-  private async callConfiguredLlm(prompt: string): Promise<string> {
+  /**
+   * Default system instruction for planning calls. Kept as the default so that
+   * existing behaviour (strict JSON array output) is unchanged for callers that
+   * do not supply their own system prompt.
+   */
+  private static readonly PLANNER_SYSTEM_PROMPT =
+    'You are a strict data engineering planner. Respond with a JSON array only.';
+
+  private async callConfiguredLlm(
+    prompt: string,
+    systemPrompt?: string,
+    justification?: string
+  ): Promise<string> {
     const settings = this.configManager.getSettings();
     const provider = settings.activeLlmProvider ?? 'copilot';
     const model = settings.activeLlmModel ?? 'gpt-4o-mini';
+    const sys = systemPrompt ?? DataAgentHubHub.PLANNER_SYSTEM_PROMPT;
 
     try {
       if (provider === 'copilot') {
@@ -504,7 +687,7 @@ User message: ${trimmed}`;
           if (!adapter) {
             throw new Error(info.error || 'GitHub Copilot is not available. Install the GitHub Copilot Chat extension and sign in.');
           }
-          const out = await adapter.complete(prompt, { model, timeoutMs: 30000 });
+          const out = await adapter.complete(prompt, { model, timeoutMs: 60000, systemPrompt: sys, justification });
           return out;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -514,26 +697,26 @@ User message: ${trimmed}`;
       }
 
       if (provider === 'azure-openai') {
-        return await this.callAzureOpenAi(model, prompt, settings.llmEndpoint);
+        return await this.callAzureOpenAi(model, prompt, settings.llmEndpoint, sys);
       }
       if (provider === 'openai') {
-        return await this.callOpenAi(model, prompt);
+        return await this.callOpenAi(model, prompt, sys);
       }
       if (provider === 'anthropic') {
-        return await this.callAnthropic(model, prompt);
+        return await this.callAnthropic(model, prompt, sys);
       }
       if (provider === 'gemini') {
-        return await this.callGemini(model, prompt);
+        return await this.callGemini(model, prompt, sys);
       }
 
-      return await this.callOllama(model, prompt);
+      return await this.callOllama(model, prompt, sys);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The selected LLM provider is unavailable.';
       throw new Error(`LLM request failed: ${message}`);
     }
   }
 
-  private async callOpenAi(model: string, prompt: string): Promise<string> {
+  private async callOpenAi(model: string, prompt: string, systemPrompt: string): Promise<string> {
     const apiKey = await this.configManager.getLlmApiKey();
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error('OpenAI API key is missing. Add it in the settings panel.');
@@ -546,7 +729,7 @@ User message: ${trimmed}`;
         model,
         temperature: 0,
         messages: [
-          { role: 'system', content: 'You are a strict data engineering planner. Respond with a JSON array only.' },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt }
         ]
       })
@@ -562,7 +745,7 @@ User message: ${trimmed}`;
     return this.extractJsonText(content);
   }
 
-  private async callAnthropic(model: string, prompt: string): Promise<string> {
+  private async callAnthropic(model: string, prompt: string, systemPrompt: string): Promise<string> {
     const apiKey = await this.configManager.getLlmApiKey();
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error('Anthropic API key is missing. Add it in the settings panel.');
@@ -571,7 +754,7 @@ User message: ${trimmed}`;
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 4096, temperature: 0, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model, max_tokens: 4096, temperature: 0, system: systemPrompt, messages: [{ role: 'user', content: prompt }] })
     });
 
     if (!response.ok) {
@@ -584,7 +767,7 @@ User message: ${trimmed}`;
     return this.extractJsonText(text);
   }
 
-  private async callAzureOpenAi(model: string, prompt: string, endpoint?: string): Promise<string> {
+  private async callAzureOpenAi(model: string, prompt: string, endpoint?: string, systemPrompt?: string): Promise<string> {
     const apiKey = await this.configManager.getLlmApiKey();
     const url = endpoint && endpoint.trim().length > 0 ? endpoint.trim() : 'https://<your-resource>.openai.azure.com/openai/deployments/' + model + '/chat/completions?api-version=2024-02-01';
 
@@ -599,7 +782,7 @@ User message: ${trimmed}`;
         model,
         temperature: 0,
         messages: [
-          { role: 'system', content: 'You are a strict data engineering planner. Respond with a JSON array only.' },
+          { role: 'system', content: systemPrompt ?? DataAgentHubHub.PLANNER_SYSTEM_PROMPT },
           { role: 'user', content: prompt }
         ]
       })
@@ -615,7 +798,7 @@ User message: ${trimmed}`;
     return this.extractJsonText(content);
   }
 
-  private async callGemini(model: string, prompt: string): Promise<string> {
+  private async callGemini(model: string, prompt: string, systemPrompt: string): Promise<string> {
     const apiKey = await this.configManager.getLlmApiKey();
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error('Gemini API key is missing. Add it in the settings panel.');
@@ -624,7 +807,11 @@ User message: ${trimmed}`;
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } })
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0 }
+      })
     });
 
     if (!response.ok) {
@@ -637,11 +824,19 @@ User message: ${trimmed}`;
     return this.extractJsonText(content);
   }
 
-  private async callOllama(model: string, prompt: string): Promise<string> {
+  private async callOllama(model: string, prompt: string, systemPrompt: string): Promise<string> {
     const response = await fetch('http://localhost:11434/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: prompt }], format: 'json' })
+      body: JSON.stringify({
+        model,
+        stream: false,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        format: 'json'
+      })
     });
 
     if (!response.ok) {
@@ -655,9 +850,33 @@ User message: ${trimmed}`;
   }
 
   private extractJsonText(content: string): string {
-    const normalized = content.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+    const trimmed = (content ?? '').trim();
+    if (!trimmed) { throw new Error('The LLM returned an empty response.'); }
+    // Only strip code fences when the payload actually looks like JSON, so that
+    // prose/markdown responses (sidebar chat) keep their formatting intact.
+    const looksLikeJson = /^```(?:json)?\s*[\[{]/i.test(trimmed) || /^[\[{]/.test(trimmed);
+    if (!looksLikeJson) { return trimmed; }
+    const normalized = trimmed.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
     if (!normalized) { throw new Error('The LLM returned an empty response.'); }
     return normalized;
+  }
+
+  private parseJsonObject(text: string): Record<string, unknown> {
+    const attempts: string[] = [text];
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start >= 0 && end > start) { attempts.push(text.slice(start, end + 1)); }
+    for (const candidate of attempts) {
+      try {
+        const value = JSON.parse(candidate) as unknown;
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          return value as Record<string, unknown>;
+        }
+      } catch {
+        // try the next candidate
+      }
+    }
+    throw new Error('The LLM did not return a valid JSON object.');
   }
 
   private validatePlanResponse(rawResponse: string): PlanStep[] {

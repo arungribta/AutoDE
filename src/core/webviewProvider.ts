@@ -9,6 +9,7 @@ import { ContextFileManager } from '../context/ContextFileManager';
 import { SourceRegistry } from '../context/SourceRegistry';
 import { SynthesisPipeline } from '../context/SynthesisPipeline';
 import { SpecManager } from '../context/SpecManager';
+import { ArtifactWriter } from '../context/ArtifactWriter';
 import { applyCspNonce } from './webviewSecurity';
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
@@ -78,6 +79,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.specManager = new SpecManager(workspaceRoot, (msg: string) => this.postLog(msg));
     try {
       await this.specManager.initialize();
+      const existingSpec = this.specManager.getSpec();
+      if (existingSpec) {
+        this.hub.setSpec(existingSpec.id, existingSpec.version);
+      }
       this.postSpec();
     } catch (err) {
       this.postLog(`Spec manager initialization failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -103,7 +108,25 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const schemaContext = typeof message.schemaContext === 'string' ? message.schemaContext : '';
           if (!chatMessage.trim()) { this.postLog('A message is required.'); return; }
           try {
-            const response = await this.hub.chat(chatMessage, schemaContext);
+            // ── Spec-driven conversation ──
+            //   no spec yet   -> the message IS the business problem -> draft a specification
+            //   draft spec    -> the message refines it              -> revise the specification
+            //   approved spec -> conversational answer grounded in the specification + repository context
+            const currentSpec = this.specManager?.getSpec();
+            if (this.specManager && !currentSpec) {
+              await this.draftSpec(chatMessage);
+              break;
+            }
+            if (this.specManager && currentSpec && currentSpec.status === 'draft') {
+              await this.reviseSpec(chatMessage);
+              break;
+            }
+
+            const repositoryContext = this.contextFileManager?.buildContextPrompt() ?? '';
+            const combinedContext = [repositoryContext, schemaContext]
+              .filter((part) => part && part.trim().length > 0)
+              .join('\n\n');
+            const response = await this.hub.chat(chatMessage, combinedContext);
             this.postMessage('chatResponse', { message: response });
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
@@ -245,14 +268,46 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postLog(`Synthesis produced ${result.nodes} node(s) and ${result.edges} edge(s).`);
           break;
         }
+        case 'generateSpec': {
+          const prompt = typeof message.prompt === 'string' ? message.prompt.trim() : '';
+          if (!prompt) { this.postLog('Describe the business problem before generating a specification.'); break; }
+          await this.draftSpec(prompt);
+          break;
+        }
+        case 'refineSpec': {
+          const refinement = typeof message.refinement === 'string' ? message.refinement.trim() : '';
+          if (!refinement) { this.postLog('Describe the change you want applied to the specification.'); break; }
+          await this.reviseSpec(refinement);
+          break;
+        }
         case 'approveSpec': {
           if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
-          const spec = await this.specManager.approve();
+          const approved = await this.specManager.approve();
           this.postSpec();
-          if (spec) {
-            this.hub.setSpec(spec.id, spec.version);
-            this.postLog(`Business Problem Specification v${spec.version} approved.`);
+          if (approved) {
+            this.hub.setSpec(approved.id, approved.version);
+            this.postMessage('specApproved', { spec: approved });
+            this.postLog(`Business Problem Specification v${approved.version} approved. Generate the workflow plan to start solving it.`);
           }
+          break;
+        }
+        case 'generatePlanFromSpec': {
+          const spec = this.specManager?.getSpec();
+          if (!spec) { this.postLog('No Business Problem Specification exists yet — describe your business problem in the chat first.'); break; }
+          if (spec.status !== 'approved') { this.postLog('Approve the Business Problem Specification before generating the workflow plan.'); break; }
+          await this.hub.generatePlanFromSpec(spec);
+          break;
+        }
+        case 'openSpecFile': {
+          if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
+          const specDoc = await vscode.workspace.openTextDocument(this.specManager.getSpecUri());
+          await vscode.window.showTextDocument(specDoc, { preview: false });
+          break;
+        }
+        case 'openArtifactFolder': {
+          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+          const artifactUri = ArtifactWriter.resolveArtifactDirectory(workspaceRoot);
+          try { await vscode.commands.executeCommand('revealFileInOS', artifactUri); } catch { await vscode.commands.executeCommand('workbench.files.action.showActiveFileInExplorer'); }
           break;
         }
         default: this.postLog(`Unknown message type: ${String(message.type)}`); break;
@@ -294,6 +349,39 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private postSpec(): void {
     const spec = this.specManager?.getSpec();
     this.view?.webview.postMessage({ type: 'specLoaded', spec });
+  }
+
+  /**
+   * Drafts a new Business Problem Specification from a natural-language description.
+   * This is the first responsibility of AutoDE in the spec-driven flow.
+   */
+  private async draftSpec(prompt: string): Promise<void> {
+    if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
+    const spec = await this.hub.generateSpec(prompt);
+    await this.specManager.saveSpec(spec);
+    this.hub.setSpec(spec.id, spec.version);
+    this.postSpec();
+    this.postMessage('specDrafted', { spec });
+    this.postLog(
+      'Draft Business Problem Specification created. Review it in the Workflow Palette (🧰) and approve it, ' +
+      'or reply with a change and I will revise the specification.'
+    );
+  }
+
+  /** Revises the current specification in response to user feedback. */
+  private async reviseSpec(refinement: string): Promise<void> {
+    if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
+    const previous = this.specManager.getSpec();
+    const spec = await this.hub.generateSpec(refinement, previous);
+    await this.specManager.saveSpec(spec);
+    this.hub.setSpec(spec.id, spec.version);
+    this.postSpec();
+    this.postMessage('specDrafted', { spec, revised: true });
+    this.postLog(
+      previous?.status === 'approved'
+        ? `Specification revised as v${spec.version} (draft). Approve it to continue.`
+        : `Specification v${spec.version} revised. Review it in the Workflow Palette (🧰).`
+    );
   }
 
   private postMessage(type: string, payload: object = {}): void {
