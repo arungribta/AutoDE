@@ -283,8 +283,20 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         <div class="ctx-grid" id="ctxBizGrid"><span class="ctx-chip" style="opacity:0.5">No business terms</span></div>
         <div class="ctx-section-title">Verified Queries</div>
         <div class="ctx-grid" id="ctxQueryGrid"><span class="ctx-chip" style="opacity:0.5">No verified queries</span></div>
+        <div class="ctx-section-title">Context Sources</div>
+        <div class="ctx-sources-form" style="display:flex;gap:4px;margin-bottom:6px;">
+          <input id="sourcePathInput" placeholder="docs/glossary.md" style="flex:1;min-width:0;" />
+          <select id="sourceKindSelect">
+            <option value="business_context">Business Context</option>
+            <option value="verified_queries">Verified Queries</option>
+            <option value="data_definitions">Data Definitions</option>
+          </select>
+          <button id="registerSourceBtn" class="icon-btn" title="Register source">+ Add</button>
+        </div>
+        <div id="sourcesList" class="ctx-grid"><span class="ctx-chip" style="opacity:0.5">No sources registered</span></div>
         <div class="ctx-drawer-actions">
           <button id="ctxReindexBtn" class="icon-btn" title="Re-index context">⟳ Re-index</button>
+          <button id="synthesizeBtn" class="icon-btn" title="Synthesize context">🔄 Synthesize</button>
           <button id="ctxOpenFolderBtn" class="icon-btn" title="Open .ai-context folder">📂 Open .ai-context</button>
         </div>
       </div>
@@ -378,6 +390,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   const ctxMetricText = $('#ctxMetricText'), ctxMetricBar = $('#ctxMetricBar');
   const ctxDrawer = $('#ctxDrawer'), ctxDrawerToggle = $('#ctxDrawerToggle'), ctxDrawerChevron = $('#ctxDrawerChevron'), ctxDrawerStats = $('#ctxDrawerStats');
   const ctxDbGrid = $('#ctxDbGrid'), ctxBizGrid = $('#ctxBizGrid'), ctxQueryGrid = $('#ctxQueryGrid');
+  const sourcePathInput = $('#sourcePathInput'), sourceKindSelect = $('#sourceKindSelect'), sourcesList = $('#sourcesList');
   const slideOverlay = $('#slideOverlay'), slidePanel = $('#slidePanel'), slideCloseBtn = $('#slideCloseBtn');
   const mentionDropdown = $('#mentionDropdown');
   const toast = $('#toast');
@@ -572,6 +585,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   stopBtn.onclick = function () { post('pausePlan'); showToast('Execution stopped', ''); };
   $('#ctxReindexBtn').onclick = function () { post('reindex'); };
   $('#ctxOpenFolderBtn').onclick = function () { post('openContextFolder'); };
+  $('#registerSourceBtn').onclick = function () { var path = sourcePathInput.value.trim(); var kind = sourceKindSelect.value; if (!path) { showToast('Enter a source file path', 'error'); return; } post('registerSource', { path: path, kind: kind }); sourcePathInput.value = ''; };
+  $('#synthesizeBtn').onclick = function () { post('synthesize'); showToast('Synthesizing context...', ''); };
   $('#testCopilotBtn').onclick = function () { post('testCopilot'); };
   $('#openCopilotHandoffBtn').onclick = function () { post('openCopilotHandoff'); };
   $('#testConnBtn').onclick = function () { post('testConnection'); showToast('Connecting...', ''); };
@@ -602,6 +617,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'error': showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
+      case 'sourcesList': renderSourcesList(msg.sources); break;
       default: break;
     }
   });
@@ -609,6 +625,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function applySettings(data) { if (!data) return; if (data.activeLlmProvider) { var llmCard = document.querySelector('#slideSectionLlm .card[data-llm="' + data.activeLlmProvider + '"]'); if (llmCard) { llmCards.forEach(function (c) { c.classList.remove('selected'); }); llmCard.classList.add('selected'); llmCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== llmCard); }); } providerLabel.textContent = data.activeLlmProvider === 'copilot' ? 'Copilot' : data.activeLlmProvider; } if (data.defaultProvider) { var pCard = document.querySelector('#slideSectionConnect .card[data-provider="' + data.defaultProvider + '"]'); if (pCard) { providerCards.forEach(function (c) { c.classList.remove('selected'); }); pCard.classList.add('selected'); } } if (data.copilotInfo) { updateCopilotStatus(data.copilotInfo); } if (typeof data.readOnlyMode === 'boolean') $('#readOnlyMode').checked = data.readOnlyMode; if (typeof data.autoDocumentationEnabled === 'boolean') $('#autoDocEnabled').checked = data.autoDocumentationEnabled; if (typeof data.telemetryEnabled === 'boolean') $('#telemetryEnabled').checked = data.telemetryEnabled; if (typeof data.copilotProgrammaticConsent === 'boolean') $('#copilotConsent').checked = data.copilotProgrammaticConsent; if (data.defaultSnowflakeAccount) $('#sfAccount').value = data.defaultSnowflakeAccount; if (data.defaultSnowflakeUsername) $('#sfUsername').value = data.defaultSnowflakeUsername; if (data.defaultSnowflakeWarehouse) $('#sfWarehouse').value = data.defaultSnowflakeWarehouse; if (data.defaultSnowflakeDatabase) $('#sfDatabase').value = data.defaultSnowflakeDatabase; if (data.defaultSnowflakeSchema) $('#sfSchema').value = data.defaultSnowflakeSchema; if (data.defaultSnowflakeRole) $('#sfRole').value = data.defaultSnowflakeRole; if (data.defaultSnowflakeAuthMode) $('#sfAuthMode').value = data.defaultSnowflakeAuthMode; if (data.snowflakePrivateKeyPath) $('#sfKeyPath').value = data.snowflakePrivateKeyPath; if (data.activeLlmModel) { $('#openaiModel').value = data.activeLlmModel; $('#anthropicModel').value = data.activeLlmModel; $('#geminiModel').value = data.activeLlmModel; $('#ollamaModel').value = data.activeLlmModel; } if (data.llmEndpoint) { $('#azureEndpoint').value = data.llmEndpoint; $('#ollamaEndpoint').value = data.llmEndpoint; } if (typeof data.metadataCachingDurationMinutes === 'number') $('#cacheDuration').value = data.metadataCachingDurationMinutes; if (typeof data.queryTimeoutSeconds === 'number') $('#queryTimeout').value = data.queryTimeoutSeconds; }
   function updateCopilotStatus(info) { var statusEl = $('#copilotStatus'); if (!statusEl) return; if (!info) { statusEl.textContent = 'Checking...'; return; } if (info.found && info.hasAccess) { statusEl.textContent = 'Available (' + (info.models ? info.models.length : 0) + ' models)'; statusEl.style.color = 'var(--success)'; providerDot.className = 'dot ok'; providerLabel.textContent = 'Copilot'; } else if (info.found) { statusEl.textContent = info.error || 'Sign in required'; statusEl.style.color = 'var(--warning)'; } else { statusEl.textContent = 'Not installed'; statusEl.style.color = 'var(--text-muted)'; } }
   function renderContextEntities(container, entities, icon) { if (!container) return; container.innerHTML = ''; if (!entities || entities.length === 0) { container.innerHTML = '<span class="ctx-chip" style="opacity:0.5">None</span>'; return; } entities.forEach(function (ent) { var chip = document.createElement('span'); chip.className = 'ctx-chip'; chip.innerHTML = icon + ' ' + escapeHtml(typeof ent === 'string' ? ent : (ent.label || ent.name || ent)); chip.onclick = function () { chatInput.value += ' @' + (typeof ent === 'string' ? ent : (ent.label || ent.name || ent)) + ' '; chatInput.focus(); }; container.appendChild(chip); }); }
+  function renderSourcesList(sources) { if (!sourcesList) return; sourcesList.innerHTML = ''; if (!sources || sources.length === 0) { sourcesList.innerHTML = '<span class="ctx-chip" style="opacity:0.5">No sources registered</span>'; return; } sources.forEach(function (s) { var chip = document.createElement('span'); chip.className = 'ctx-chip'; chip.innerHTML = '📄 ' + escapeHtml(s.path) + ' <span style="opacity:0.6">(' + escapeHtml(s.kind) + ')</span> <a style="cursor:pointer;margin-left:4px;" title="Remove">✕</a>'; chip.querySelector('a').onclick = function () { post('removeSource', { path: s.path }); }; sourcesList.appendChild(chip); }); }
 
   // ── Keyboard ──
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if (slidePanel.classList.contains('visible')) closeSlidePanel(); if (palettePanel.classList.contains('visible')) closePalette(); if (mentionDropdown.classList.contains('visible')) mentionDropdown.classList.remove('visible'); } if (e.ctrlKey && e.shiftKey && e.key === 'P') { e.preventDefault(); openSlidePanel('llm'); } });

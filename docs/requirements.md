@@ -425,11 +425,11 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 - [ ] UI: context section surfaces Enterprise Context Layer (layers, terms, rules, queries, relationships); source-file registration form present.
 - [x] Webview: LLM settings show Copilot status and consent checkbox; test button present.
-- [ ] Envelope: unified metadata envelope (identity + provenance + version + ownership) implemented in `src/context/types.ts`.
+- [x] Envelope: unified metadata envelope (identity + provenance + version + ownership) implemented in `src/context/types.ts` (per-kind `content` union deferred).
 - [x] GraphManager: in-memory graph with indexes, BFS traversal, serialization.
 - [~] ContextFileManager: watcher + loading present; AJV validation and layered (`context/` + `derived/`) loading NOT yet implemented.
-- [ ] SourceRegistry: `sources.yaml` read/write + UI form.
-- [ ] SynthesisPipeline: source ingestion → derived nodes/edges with provenance.
+- [x] SourceRegistry: `sources.yaml` read/write + UI form.
+- [x] SynthesisPipeline: rule-based source ingestion → derived nodes/edges with provenance (LLM-assisted extraction deferred).
 - [x] ArtifactWriter: artifacts persisted to `auto-de/<phase>/` (atomic writes).
 - [x] Single-workspace model: `ProjectManager`/`ProjectRegistry` removed.
 - [ ] ContextRetriever: token-aware prompt assembler.

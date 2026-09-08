@@ -66,5 +66,69 @@
     "source": { "type": "string", "description": "Edge source node id (edges only)." },
     "target": { "type": "string", "description": "Edge target node id (edges only)." },
     "weight": { "type": "number" }
+  },
+  "definitions": {
+    "tableContent": {
+      "type": "object",
+      "properties": {
+        "database": { "type": "string" },
+        "schema": { "type": "string" },
+        "fqn": { "type": "string" },
+        "isView": { "type": "boolean" }
+      }
+    },
+    "columnContent": {
+      "type": "object",
+      "properties": {
+        "dataType": { "type": "string" },
+        "isNullable": { "type": "boolean" },
+        "isPrimaryKey": { "type": "boolean" },
+        "isForeignKey": { "type": "boolean" }
+      }
+    },
+    "businessTermContent": {
+      "type": "object",
+      "properties": {
+        "formula": { "type": "string" },
+        "synonyms": { "type": "array", "items": { "type": "string" } },
+        "relatedTerms": { "type": "array", "items": { "type": "string" } },
+        "metrics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "businessRuleContent": {
+      "type": "object",
+      "properties": {
+        "ruleText": { "type": "string" },
+        "enforcementLevel": { "type": "string", "enum": ["STRICT", "RECOMMENDED"] },
+        "appliesTo": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "metricContent": {
+      "type": "object",
+      "properties": {
+        "definition": { "type": "string" },
+        "formula": { "type": "string" },
+        "grain": { "type": "string" },
+        "dimensions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "verifiedQueryContent": {
+      "type": "object",
+      "properties": {
+        "sql": { "type": "string" },
+        "dialect": { "type": "string" },
+        "tablesUsed": { "type": "array", "items": { "type": "string" } },
+        "author": { "type": "string" },
+        "parameters": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "semanticArtifactContent": {
+      "type": "object",
+      "properties": {
+        "artifactType": { "type": "string" },
+        "content": { "type": "string" },
+        "filePath": { "type": "string" }
+      }
+    }
   }
 }

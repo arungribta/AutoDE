@@ -6,6 +6,8 @@ import { WebviewMessage, PlanState, DataAgentHubSettings } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { GraphManager } from '../context/GraphManager';
 import { ContextFileManager } from '../context/ContextFileManager';
+import { SourceRegistry } from '../context/SourceRegistry';
+import { SynthesisPipeline } from '../context/SynthesisPipeline';
 import { applyCspNonce } from './webviewSecurity';
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
@@ -14,6 +16,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private graphManager: GraphManager;
   private contextFileManager?: ContextFileManager;
+  private sourceRegistry?: SourceRegistry;
+  private synthesisPipeline?: SynthesisPipeline;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -56,6 +60,16 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postContextUpdate();
     } catch (err) {
       this.postLog(`Context initialization failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Initialize source registry + synthesis pipeline
+    this.sourceRegistry = new SourceRegistry(workspaceRoot, (msg: string) => this.postLog(msg));
+    this.synthesisPipeline = new SynthesisPipeline(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg));
+    try {
+      await this.sourceRegistry.initialize();
+      this.postSourcesList();
+    } catch (err) {
+      this.postLog(`Source registry initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Detect Copilot and include status in settings payload
@@ -193,6 +207,33 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           } catch { this.postMessage('settingsLoaded', this.configManager.getSettings()); }
           break;
         }
+        case 'registerSource': {
+          const path = typeof message.path === 'string' ? message.path.trim() : '';
+          const kind = (message.kind === 'business_context' || message.kind === 'verified_queries' || message.kind === 'data_definitions') ? message.kind : 'business_context';
+          const owner = typeof message.owner === 'string' ? message.owner.trim() : undefined;
+          if (!path) { this.postLog('A source file path is required.'); break; }
+          await this.sourceRegistry?.addSource(path, kind, owner);
+          this.postSourcesList();
+          this.postLog(`Registered source: ${path} (${kind})`);
+          break;
+        }
+        case 'listSources': { this.postSourcesList(); break; }
+        case 'removeSource': {
+          const path = typeof message.path === 'string' ? message.path : '';
+          if (!path) break;
+          await this.sourceRegistry?.removeSource(path);
+          this.postSourcesList();
+          this.postLog(`Removed source: ${path}`);
+          break;
+        }
+        case 'synthesize': {
+          if (!this.sourceRegistry || !this.synthesisPipeline) { this.postLog('Context services are not initialized.'); break; }
+          this.postLog('Synthesizing context from registered sources...');
+          const result = await this.synthesisPipeline.synthesize(this.sourceRegistry.getSources());
+          this.postContextUpdate();
+          this.postLog(`Synthesis produced ${result.nodes} node(s) and ${result.edges} edge(s).`);
+          break;
+        }
         default: this.postLog(`Unknown message type: ${String(message.type)}`); break;
       }
     } catch (error) {
@@ -222,6 +263,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const bizTerms = entities.filter((e) => e.type === 'business_term').map((e) => e.label);
     const queries = entities.filter((e) => e.type === 'verified_query').map((e) => e.label);
     this.view?.webview.postMessage({ type: 'contextUpdate', stats, dbEntities, bizTerms, queries });
+  }
+
+  private postSourcesList(): void {
+    const sources = this.sourceRegistry?.getSources() ?? [];
+    this.view?.webview.postMessage({ type: 'sourcesList', sources });
   }
 
   private postMessage(type: string, payload: object = {}): void {

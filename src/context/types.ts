@@ -1,7 +1,22 @@
 import * as vscode from 'vscode';
 
-export type NodeType = 'table' | 'column' | 'semantic_view' | 'business_term' | 'business_rule' | 'verified_query';
-export type EdgeType = 'contains' | 'foreign_key' | 'maps_to' | 'uses_table' | 'constrained_by';
+export type NodeType = 'table' | 'column' | 'semantic_view' | 'business_term' | 'business_rule' | 'verified_query' | 'metric';
+export type EdgeType = 'contains' | 'foreign_key' | 'maps_to' | 'uses_table' | 'constrained_by' | 'derives_from' | 'related_to';
+export type ContextLayer = 'industry' | 'enterprise' | 'domain' | 'system' | 'definition' | 'query' | 'artifact';
+export type NodeStatus = 'active' | 'draft' | 'deprecated';
+export type OriginSource = 'user' | 'derived' | 'system' | 'llm' | 'template';
+
+/**
+ * Provenance / traceability metadata attached to every derived object.
+ * Tracks where the object came from and how it was produced.
+ */
+export interface Origin {
+  source: OriginSource;
+  sourceRef: string;
+  confidence?: number;
+  extractor?: string;
+  extractedAt?: string;
+}
 
 export interface BaseNode {
   readonly id: string;
@@ -10,6 +25,15 @@ export interface BaseNode {
   readonly description?: string;
   readonly metadata: Record<string, unknown>;
   readonly version: number;
+  // Unified envelope (see docs/requirements.md §3.4)
+  readonly layer?: ContextLayer;
+  readonly status?: NodeStatus;
+  readonly aliases?: string[];
+  readonly tags?: string[];
+  readonly origin?: Origin;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly updatedBy?: string;
 }
 
 export interface TableNode extends BaseNode {
@@ -54,6 +78,9 @@ export interface GraphEdge {
   readonly target: string;
   readonly type: EdgeType;
   readonly weight?: number;
+  readonly origin?: Origin;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
 }
 
 export interface RetrievalOptions {
