@@ -11,6 +11,7 @@ Author: AutoDE Engineering
 
 AutoDE is an AI-augmented VS Code extension for Data Engineering. Key functions:
 - Provide a focused DE Agent Workspace webview (single-column, tabbed) as the primary UX for planning, executing, and refining data engineering pipelines.
+- Transform a natural-language business problem into a structured, reviewable, versioned **Business Problem Specification (BPS)** — the system of record that governs all subsequent activity.
 - Provide an **Enterprise Context Layer** — a persistent, evolving semantic understanding of the user's data environment stored in `.ai-context/` (used to ground prompts and LLM guidance).
 - Generate data-engineering artifacts (DDL, dbt models, mappings, docs) into a visible, configurable folder (`auto-de/`) in the user's current repository.
 - Offer optional integration with GitHub Copilot such that a user who already has Copilot can opt-in to programmatically route some LLM tasks to the installed Copilot extension.
@@ -20,6 +21,7 @@ Primary non-functional requirements:
 - Strict type-safety, lifecycle / disposal, and atomic file operations for `.ai-context/` and `auto-de/` artifacts.
 - Strong privacy and opt-in consent for any third-party LLM usage (Copilot or cloud providers).
 - **Single-workspace model**: AutoDE operates on the currently open repository; there is no multi-project registry.
+- **Spec-driven**: the BPS governs phase inference, context creation, orchestration, and end-to-end traceability.
 
 ---
 

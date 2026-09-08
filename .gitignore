@@ -6,3 +6,9 @@ npm-debug.log*
 *.vsix
 tmp_*.js
 mock_*.js
+
+# Enterprise Context Layer — ignore derived/transient only
+# (context/, spec/, sources.yaml, target-environment.yaml are committed)
+.ai-context/derived/
+.ai-context/state.json
+.ai-context/*.tmp.*

@@ -1,23 +1,24 @@
 # AutoDE — Technical Design Document
 
-**Last Updated:** 2026-08-18T23:40:00-05:00
-**Version:** 0.2.0
-**Status:** v0.5.0 — Phases 0–5 committed. See §9 "Implementation Status" for an accurate per-item breakdown (several items are scaffolding/stubs, not production implementations).
+**Last Updated:** 2026-09-08
+**Version:** 0.6.0
+**Status:** v0.5.1 code committed (single-workspace, context envelope, source registry, synthesis pipeline, webview fixes). In progress: **Business Problem Specification (spec-driven orchestration)** → then Phase 3+.
 
 ---
 
 ## Table of Contents
 
 1. [Overview & Architecture Philosophy](#1-overview--architecture-philosophy)
-2. [UI Architecture](#2-ui-architecture)
-3. [Context Layer](#3-context-layer)
-4. [Multi-Platform Adapter Architecture](#4-multi-platform-adapter-architecture)
-5. [Agent Orchestration](#5-agent-orchestration)
-6. [LLM Integration](#6-llm-integration)
-7. [Extension Architecture](#7-extension-architecture)
-8. [File Structure](#8-file-structure)
-9. [Implementation Phases](#9-implementation-phases)
-10. [Design Decisions & Tradeoffs](#10-design-decisions--tradeoffs)
+2. [Business Problem Specification & Spec-Driven Architecture](#2-business-problem-specification--spec-driven-architecture)
+3. [UI Architecture](#3-ui-architecture)
+4. [Context Layer](#4-context-layer)
+5. [Multi-Platform Adapter Architecture](#5-multi-platform-adapter-architecture)
+6. [Agent Orchestration](#6-agent-orchestration)
+7. [LLM Integration](#7-llm-integration)
+8. [Extension Architecture](#8-extension-architecture)
+9. [File Structure](#9-file-structure)
+10. [Implementation Phases](#10-implementation-phases)
+11. [Design Decisions & Tradeoffs](#11-design-decisions--tradeoffs)
 
 ---
 
@@ -111,7 +112,71 @@ AutoDE is an AI-augmented VS Code extension for Data Engineering. It provides:
 
 ---
 
-## 2. UI Architecture
+## 2. Business Problem Specification & Spec-Driven Architecture
+
+> **North star.** This section defines AutoDE's governing flow. It supersedes the earlier "objective → plan" model. `docs/requirements.md` remains the authoritative requirements source.
+
+### 2.1 Principle
+
+AutoDE is **conversation-driven and specification-driven**. The user describes a business problem in natural language; AutoDE transforms it into a structured, reviewable, versioned **Business Problem Specification (BPS)**. The BPS — not the raw prompt — is the **system of record** for the repository and governs all subsequent activity.
+
+### 2.2 The Business Problem Specification artifact
+
+| Field | Purpose |
+|-------|---------|
+| `id`, `version` | stable identity; version increments on each approval |
+| `status` | `draft` → `approved` → `superseded` |
+| `problemStatement` | refined statement (from the user's prompt) |
+| `objectives` | measurable business outcomes |
+| `successCriteria` | how we know it is solved |
+| `scope.in` / `scope.out` | boundaries |
+| `constraints`, `assumptions` | guardrails |
+| `domain`, `stakeholders`, `keyEntities` | context hints for context-building |
+| `targetEnvironment` | platform + modeling + transformation tooling |
+| `createdAt/updatedAt/approvedAt/approvedBy` | audit |
+
+Persisted and versioned in `.ai-context/spec/business-problem.yaml` (git is the version history).
+
+### 2.3 Spec-driven flow
+
+```
+prompt ──(LLM analysis)──► BPS (draft)
+                            │ user reviews → approves (or regenerates)
+                            ▼
+                       BPS (approved, vN)
+                            │ (LLM assessment)
+                            ▼
+                    Phase plan (which phases + dependencies)
+                            │
+              ┌─────────────┴──────────────┐
+              ▼                            ▼
+   Continuous context creation      Orchestrated execution
+   (repo assets + sources +         (agents in dependency order)
+    platform metadata)                      │
+              └─────────────┬──────────────┘
+                            ▼
+               Palette = live status view
+```
+
+### 2.4 Traceability
+
+Every `GeneratedArtifact`, context node (`Origin`), and workflow phase carries `specId` + `specVersion`.
+
+### 2.5 Phase inference (no manual step selection)
+
+From the approved BPS, AutoDE determines which phases (discover / model / build / validate) are required and their dependencies. The user does **not** select workflow steps; the workflow is inferred and continuously adapted.
+
+### 2.6 Continuous context creation
+
+Context layers (industry / enterprise / domain / system / definitions / queries / artifacts) are built **automatically** from the BPS + repository assets + registered sources + platform metadata — not a manual step. `SourceRegistry` + `SynthesisPipeline` (Phase 2) are the foundation; the spec drives *what* to build.
+
+### 2.7 Workflow Palette as status view
+
+The palette shows (top → bottom): BPS summary (read-only + status + approve/regenerate) → phase status (completed / in-progress / blocked / pending) → next action. It is a **transparent view**, not a manual launcher.
+
+---
+
+## 3. UI Architecture
 
 ### 2.1 Layout: Single-Column, Section-Based
 
@@ -264,7 +329,7 @@ All colors use VS Code theme CSS variables for native look and feel:
 
 ---
 
-## 3. Context Layer
+## 4. Context Layer
 
 ### 3.1 Knowledge Graph (GraphManager)
 
@@ -359,7 +424,7 @@ Token budget enforcement and pruning will be implemented in a future `ContextRet
 
 ---
 
-## 4. Multi-Platform Adapter Architecture
+## 5. Multi-Platform Adapter Architecture
 
 ### 4.1 Design Rationale
 
@@ -542,7 +607,7 @@ Output: DDL, YAML, Markdown
 
 ---
 
-## 5. Agent Orchestration
+## 6. Agent Orchestration
 
 ### 5.1 Orchestrating Agent (DataAgentHubHub)
 
@@ -655,7 +720,7 @@ All steps complete → status → 'completed'
 
 ---
 
-## 6. LLM Integration
+## 7. LLM Integration
 
 ### 6.1 Multi-Provider Model
 
@@ -725,7 +790,7 @@ snowflakeExecutor. Order the DAG so each step is sequentially dependent.
 
 ---
 
-## 7. Extension Architecture
+## 8. Extension Architecture
 
 ### 7.1 Activation & Lifecycle
 
@@ -835,82 +900,112 @@ All properties are under the `autoDataEngineeringHub` section:
 
 ---
 
-## 8. File Structure
+## 9. File Structure
 
 ```
 AutoDE/
-├── .ai-context/                          # Context layer artifacts
-│   ├── schema-graph.json                 # Generated: knowledge graph snapshot
-│   ├── business-context.yaml             # Human-curated: business terms + rules
-│   ├── verified-queries.yaml             # Human-curated: reference SQL
-│   ├── sttm-mapping.yaml                 # Generated: STTM mappings
-│   └── architecture.md                   # Generated: architecture docs
+├── .ai-context/                          # Context layer (hidden, per-repo)
+│   ├── sources.yaml                      # Source registry (user-identified files)
+│   ├── context/                          # AUTHORITATIVE — human-owned, committed
+│   │   ├── industry/
+│   │   ├── enterprise/
+│   │   ├── domain/
+│   │   └── queries/
+│   ├── derived/                          # DERIVED — generated, gitignored
+│   │   ├── system/
+│   │   ├── artifacts/
+│   │   ├── graph.json                    # Compiled index (in-memory working set)
+│   │   └── embeddings/
+│   ├── spec/                             # Business Problem Specification
+│   │   └── business-problem.yaml
+│   ├── target-environment.yaml           # Target env config
+│   └── state.json                        # Workspace state (objective + phase progress)
+│
+├── auto-de/                              # Generated artifacts (visible, committed)
+│   ├── 01-discover/
+│   ├── 02-model/
+│   ├── 03-build/
+│   └── 04-validate/
 │
 ├── docs/
-│   ├── requirements.md                   # Original requirements specification
-│   └── technical-design.md               # THIS DOCUMENT
+│   ├── requirements.md                   # Authoritative requirements
+│   ├── technical-design.md               # THIS DOCUMENT
+│   └── schemas/
+│       └── context-envelope.schema.json  # Context envelope JSON Schema
 │
 ├── media/
-│   ├── logo.svg                          # Extension icon
-│   ├── architecture.drawio               # Architecture diagram source
-│   └── sidebar.html                      # Webview UI (single-file HTML+CSS+JS)
+│   ├── logo.svg
+│   ├── architecture.drawio
+│   ├── sidebar.html                      # Workspace webview
+│   ├── panel.html                        # Bottom panel dashboard
+│   └── editors/                          # Custom editor webviews
 │
 ├── src/
 │   ├── extension.ts                      # Activation, command registration
-│   │
 │   ├── core/
-│   │   ├── agentHub.ts                   # Orchestrating agent + LLM calls
-│   │   ├── configManager.ts              # VS Code settings + secrets
-│   │   ├── copilotAdapter.ts             # GitHub Copilot integration
+│   │   ├── agentHub.ts                   # Orchestrator + LLM calls
+│   │   ├── configManager.ts              # Settings + secrets
+│   │   ├── copilotAdapter.ts             # GitHub Copilot (vscode.lm)
 │   │   ├── extensionIdentity.ts          # Constants (IDs, keys)
-│   │   ├── providerRegistry.ts           # Platform + LLM provider definitions
+│   │   ├── panelProvider.ts              # Bottom panel provider
+│   │   ├── providerRegistry.ts           # Platform + LLM definitions
 │   │   ├── types.ts                      # Core type definitions
-│   │   └── webviewProvider.ts            # Webview message bridge
-│   │
+│   │   ├── webviewProvider.ts            # Webview message bridge
+│   │   └── webviewSecurity.ts            # CSP nonce helper
 │   ├── context/
+│   │   ├── ArtifactWriter.ts             # Artifacts → auto-de/<phase>/
 │   │   ├── ContextFileManager.ts         # .ai-context/ file management
 │   │   ├── GraphManager.ts               # In-memory knowledge graph
-│   │   └── types.ts                      # Context-specific types
-│   │
-│   ├── dqm/                              # Data Quality & Metadata (Phase 3a)
-│   │   ├── BaseAdapter.ts                # Abstract base adapter
-│   │   ├── ConnectionManager.ts          # Connection lifecycle
-│   │   ├── types.ts                      # Adapter-specific types
+│   │   ├── SourceRegistry.ts             # sources.yaml read/write
+│   │   ├── SynthesisPipeline.ts          # Rule-based source → graph
+│   │   ├── TargetConfigManager.ts        # Target env profiles
+│   │   └── types.ts                      # Context types + envelope
+│   ├── dqm/
+│   │   ├── BaseAdapter.ts
+│   │   ├── ConnectionManager.ts
+│   │   ├── types.ts
 │   │   └── adapters/
-│   │       ├── SnowflakeAdapter.ts       # Snowflake implementation
-│   │       └── DatabricksAdapter.ts      # Databricks implementation
-│   │
-│   ├── agents/                           # Sub-agents (Phase 3a)
-│   │   ├── discover/
-│   │   │   └── SourceAssessmentAgent.ts  # Metadata extraction
-│   │   ├── model/
-│   │   │   └── SttmMapperAgent.ts        # Source-to-target mapping
-│   │   ├── build/
-│   │   │   └── IngestionPipelineAgent.ts # Ingestion code generation
-│   │   └── validate/
-│   │       └── DocumentationAgent.ts     # Architecture documentation
-│   │
-│   ├── spokes/                           # Legacy spoke agents (to be migrated)
-│   │   ├── architectureAgent.ts
-│   │   ├── ingestionAgent.ts
-│   │   ├── snowflakeExecutor.ts
-│   │   └── sttmAgent.ts
-│   │
-│   └── features/                         # (Reserved for future use)
-│       ├── agents/
-│       └── providers/
+│   │       ├── SnowflakeAdapter.ts
+│   │       └── DatabricksAdapter.ts
+│   ├── agents/
+│   │   ├── discover/SourceAssessmentAgent.ts
+│   │   ├── model/SttmMapperAgent.ts
+│   │   ├── model/DataModelerAgent.ts
+│   │   ├── build/IngestionPipelineAgent.ts
+│   │   ├── build/TransformationScaffolderAgent.ts
+│   │   └── validate/DocumentationAgent.ts
+│   ├── editors/                          # Custom text editors
+│   │   ├── DataModelEditorProvider.ts
+│   │   ├── DocEditorProvider.ts
+│   │   ├── GraphEditorProvider.ts
+│   │   ├── ProfileEditorProvider.ts
+│   │   └── SttmEditorProvider.ts
+│   └── spokes/                           # Legacy spoke agents (to be migrated)
+│       ├── architectureAgent.ts
+│       ├── ingestionAgent.ts
+│       ├── snowflakeExecutor.ts
+│       └── sttmAgent.ts
 │
 ├── test/
-│   └── functional.test.cjs               # Functional tests
-│
-├── package.json                          # Extension manifest
-├── tsconfig.json                         # TypeScript configuration
-└── README.md                             # Project README
+│   └── functional.test.cjs
+├── package.json
+├── tsconfig.json
+└── README.md
 ```
 
 ---
 
-## 9. Implementation Phases
+## 10. Implementation Phases
+
+> **Forward plan (spec-driven):** the remaining work centers on the Business Problem Specification (§2) and re-orients everything around it. Forward phases (mirroring `docs/requirements.md` §10):
+> 1. **Business Problem Specification** — spec artifact + review/approve + versioning + traceability (`specId`/`specVersion`).
+> 2. **Spec-driven phase inference + orchestration** — infer phases/dependencies from the BPS; palette becomes a status view.
+> 3. **Phase 3** — layered context loading (`context/**` + `derived/graph.json` + AJV validation).
+> 4. **Phase 4** — real Snowflake/Databricks adapters (wire `snowflake-sdk`).
+> 5. **Phase 5** — ContextRetriever + vector engine (embedded, no server).
+> 6. **Phase 6** — Copilot consent UI, telemetry, unit/integration tests.
+
+### Historical phases (committed)
 
 ### Phase 0: UI Restructure ✅ COMPLETE
 
@@ -1018,7 +1113,7 @@ AutoDE/
 
 ---
 
-## 10. Design Decisions & Tradeoffs
+## 11. Design Decisions & Tradeoffs
 
 ### 10.1 Why Conversation-First Over Tab-Based?
 
