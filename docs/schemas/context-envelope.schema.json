@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://autode.dev/schemas/context-envelope.schema.json",
+  "title": "AutoDE Context Object Envelope",
+  "description": "Unified metadata envelope for every node and edge in the AutoDE Enterprise Context Layer (.ai-context). Per-kind 'content' schemas extend this envelope.",
+  "type": "object",
+  "required": ["id", "kind", "layer", "label", "origin", "version"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable, namespaced identifier (e.g. term:revenue, table:snowflake.RAW_DB.PUBLIC.sales).",
+      "pattern": "^[a-z_]+:.+$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "table", "column", "semantic_view",
+        "business_term", "business_rule", "metric",
+        "verified_query", "semantic_artifact", "edge"
+      ]
+    },
+    "layer": {
+      "type": "string",
+      "enum": ["industry", "enterprise", "domain", "system", "definition", "query", "artifact"]
+    },
+    "label": { "type": "string" },
+    "description": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["active", "draft", "deprecated"],
+      "default": "active"
+    },
+    "aliases": { "type": "array", "items": { "type": "string" } },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "origin": {
+      "type": "object",
+      "required": ["source", "sourceRef"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["user", "derived", "system", "llm", "template"]
+        },
+        "sourceRef": {
+          "type": "string",
+          "description": "Path/fqn/run that produced this object (traceability)."
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "extractor": { "type": "string" },
+        "extractedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "version": { "type": "integer", "minimum": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "updatedBy": { "type": "string" },
+    "content": {
+      "type": "object",
+      "description": "Layer-specific content, validated by a per-kind schema.",
+      "additionalProperties": true
+    },
+    "type": {
+      "type": "string",
+      "description": "Edge type (edges only): maps_to, contains, foreign_key, uses_table, constrained_by, derives_from, related_to.",
+      "enum": ["maps_to", "contains", "foreign_key", "uses_table", "constrained_by", "derives_from", "related_to"]
+    },
+    "source": { "type": "string", "description": "Edge source node id (edges only)." },
+    "target": { "type": "string", "description": "Edge target node id (edges only)." },
+    "weight": { "type": "number" }
+  }
+}

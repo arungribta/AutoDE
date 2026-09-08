@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-08-18T23:40:00-05:00
 **Version:** 0.2.0
-**Status:** Phase 0-2 Complete, Phase 3a In Progress
+**Status:** v0.5.0 — Phases 0–5 committed. See §9 "Implementation Status" for an accurate per-item breakdown (several items are scaffolding/stubs, not production implementations).
 
 ---
 
@@ -962,8 +962,8 @@ AutoDE/
 
 ### Phase 3b: Enhanced Sub-Agents
 
-- [ ] Data Modeler agent (dimensional + Data Vault)
-- [ ] Transformation Scaffolder agent (dbt project generation)
+- [x] Data Modeler agent (dimensional + Data Vault) — `src/agents/model/DataModelerAgent.ts`
+- [x] Transformation Scaffolder agent (dbt project generation) — `src/agents/build/TransformationScaffolderAgent.ts`
 - [ ] Data Lineage Mapper agent
 - [ ] Data Quality Profiler agent
 
@@ -983,6 +983,38 @@ AutoDE/
 - [ ] Onboarding flow for first-time users
 - [ ] Results preview for executed SQL
 - [ ] Export functionality (Markdown/YAML)
+
+### Phase 4: Project System → SUPERSEDED (see requirements §7)
+
+> The multi-project registry (`ProjectManager`, `.auto-de/projects.json`) is **superseded** by the single-workspace model: AutoDE operates on the open repository, and generated artifacts go to a visible `auto-de/` folder. See `docs/requirements.md` §7.
+
+- [x] `src/context/TargetConfigManager.ts` — target environment profiles with inheritance (kept)
+- [x] Workflow phases (discover → model → build → validate) and phase progress tracking (kept, workspace-scoped)
+- [~] `ProjectManager` / `ProjectRegistry` — to be removed (superseded)
+
+### Phase 5a: Bottom Panel Dashboard ✅ COMPLETE (v0.5.0)
+
+- [x] `src/core/panelProvider.ts` + `media/panel.html` — project progress, stats, artifacts
+
+### Phase 5b: Custom Editors ✅ COMPLETE (v0.5.1)
+
+- [x] `src/editors/` — DataModel, STTM, Graph, Profile, Doc custom text editors
+
+### Phase 6: Testing, telemetry & docs — PARTIAL
+
+- [~] Functional tests — `test/functional.test.cjs` covers the Copilot adapter only
+- [ ] Context Layer / adapter / agent unit tests
+- [~] Opt-in telemetry — config flag exists; no telemetry implementation
+- [~] Docs — synced to v0.5.0 (this revision)
+
+### Security fix (post-v0.5.1)
+
+- [x] Webview CSP nonce injection — `src/core/webviewSecurity.ts` (`applyCspNonce`) applied to the sidebar, panel, and all 5 custom editors so inline scripts run under VS Code's default CSP.
+
+> **⚠️ Implementation-status caveats (as of v0.5.0):**
+> - `SnowflakeAdapter`/`DatabricksAdapter` `connect()` and `executeQuery()` are **stubs** — they do not perform real connections or queries (empty results). Metadata extraction is therefore non-functional end-to-end.
+> - `GraphManager` is in-memory only: `isWorkerReady` is hardcoded `true`, and `traverseNeighborhood()` returns empty `formattedContext`/`tokenCount` (the ContextRetriever does not exist yet).
+> - No worker threads, no vector/embedding engine, no `js-tiktoken` token counting, no `ajv` validation, and `deactivate()` is empty.
 
 ---
 

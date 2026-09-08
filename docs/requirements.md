@@ -1,9 +1,9 @@
 # AutoDE — Requirements Specification
 
-This document collects the detailed, production-grade requirements for the AutoDE VS Code extension as discussed: UI design and UX polish, the Enterprise Context Layer (production-grade), and GitHub Copilot integration. Use this file as the authoritative reference for design, implementation, QA, and acceptance criteria.
+This document is the authoritative reference for AutoDE's design, implementation, QA, and acceptance criteria. It covers: UI/UX, the Enterprise Context Layer (information architecture), the single-workspace artifact model, and GitHub Copilot integration.
 
-Last updated: 2026-08-17T23:47:55-05:00
-Author: AutoDE Engineering (captured by Copilot CLI runtime in VS Code)
+Last updated: 2026-09-08
+Author: AutoDE Engineering
 
 ---
 
@@ -11,13 +11,15 @@ Author: AutoDE Engineering (captured by Copilot CLI runtime in VS Code)
 
 AutoDE is an AI-augmented VS Code extension for Data Engineering. Key functions:
 - Provide a focused DE Agent Workspace webview (single-column, tabbed) as the primary UX for planning, executing, and refining data engineering pipelines.
-- Provide a production-grade, high-throughput Context Layer for local knowledge graph, vector search, and token-aware retrieval (used to ground prompts and LLM guidance).
+- Provide an **Enterprise Context Layer** — a persistent, evolving semantic understanding of the user's data environment stored in `.ai-context/` (used to ground prompts and LLM guidance).
+- Generate data-engineering artifacts (DDL, dbt models, mappings, docs) into a visible, configurable folder (`auto-de/`) in the user's current repository.
 - Offer optional integration with GitHub Copilot such that a user who already has Copilot can opt-in to programmatically route some LLM tasks to the installed Copilot extension.
 
 Primary non-functional requirements:
 - Zero UI blocking (offload heavy compute to worker threads / web workers).
-- Strict type-safety, lifecycle / disposal, and atomic file operations for `.ai-context/` artifacts.
+- Strict type-safety, lifecycle / disposal, and atomic file operations for `.ai-context/` and `auto-de/` artifacts.
 - Strong privacy and opt-in consent for any third-party LLM usage (Copilot or cloud providers).
+- **Single-workspace model**: AutoDE operates on the currently open repository; there is no multi-project registry.
 
 ---
 
@@ -36,6 +38,8 @@ Specific design decisions and behavior:
 - Use responsive, accessible controls that follow VS Code font and color variables (prefers native CSS vars when available).
 - Provide empty/placeholder states for unconnected providers and metadata.
 - Provide UI elements to configure/choose LLM provider and model, and show Copilot status and consent options in the LLM tab (see Copilot integration section).
+- Provide a "Context" section that surfaces the Enterprise Context Layer (layers, business terms, rules, verified queries, relationships) read-only from `.ai-context/`.
+- Provide a "register source files" form so users can identify which repository files contain business context, verified queries, and data definitions.
 
 Accessibility & polish:
 - All controls accessible by keyboard and screen-reader friendly where practical.
@@ -47,87 +51,206 @@ Deliverables (UI):
 
 ---
 
-## 3. Context Layer: Production Requirements (High-level)
+## 3. Enterprise Context Layer — Information Architecture
 
-Purpose: Provide robust, token-efficient, local context for the AutoDE agents. Must be suitable for enterprise usage (non-PoC).
+Purpose: AutoDE maintains a persistent, evolving semantic understanding of the user's data environment in a hidden `.ai-context/` folder inside the repository. This folder holds **derived** knowledge (semantic understanding, metadata, relationships, provenance) — never raw copies of the user's source documents. It is the grounding source for LLM prompts.
 
-Non-negotiable operational constraints:
-1. Thread isolation: All heavy operations (embedding, graph traversal for large graphs, YAML/JSON parsing of large files) must run off the Extension Host main thread. Use Node `worker_threads` (or dedicated web workers for webview-hosted logic) with async IPC (MessageChannel / parentPort).
-2. Atomic file IO: Writes to `.ai-context/` must use temporary staging and atomic renames (e.g., write to `schema-graph.tmp.<hash>` then rename to `schema-graph.json`). Use `vscode.workspace.fs` methods where possible.
-3. Memory & lifecycle management: Graph and Vector Index must implement `vscode.Disposable`. Extension deactivation must dispose and free memory. Large indices may be evicted or persisted to disk when inactive.
-4. Graceful degradation: If `.ai-context` files are corrupted, locked by Git, or partial, the engine should:
-   - Log structured diagnostics
-   - Fall back to partial context and continue with degraded functionality
-   - Attempt automatic repair or recreate schema templates when safe
-5. Token budgets & context hygiene: Use tokenizers (e.g., `js-tiktoken`) to compute token counts and strictly enforce budgets when assembling prompts. Prioritize content by relevance score and graph centrality.
+### 3.1 Design principles
 
-Local workspace layout (`.ai-context/`):
-- System state (generated):
-  - `schema-graph.json` (primary serialized graph snapshot)
-  - `schema-graph.schema.json` (JSON Schema)
-- Human/team-curated (source-controlled):
-  - `business-context.yaml`
-  - `verified-queries.yaml`
+1. **Uniform envelope, layered content** — every context object shares one metadata envelope (identity, provenance, version, ownership); layer-specific detail lives in a typed `content` section.
+2. **Authoritative vs. derived are physically separated** — human-owned knowledge and machine-generated knowledge live in different folders with different versioning rules.
+3. **Sources are referenced, never copied** — `.ai-context/` holds derived understanding; original files stay where the user put them, linked via `sources.yaml` + `origin.sourceRef`.
+4. **Stable, namespaced IDs** — collision-free, human-readable, stable across renames.
+5. **Everything is schema-validated** — each `kind` maps to a JSON Schema validated with `ajv`.
+6. **Compiled index for speed, granular files for humans** — many small authoritative files + one derived `graph.json` working set.
 
-A filesystem watcher + debounce handles updates and triggers re-indexing.
+### 3.2 Storage decision
+
+Store the context graph as **derived JSON/YAML files loaded into an in-memory index**. Do **not** require a server (Postgres/Neo4j). If node count exceeds ~50k or Cypher-style querying is required, swap the in-memory store for an embedded single-file graph DB (**Kùzu**) — the envelope/file model stays unchanged. Use an embedded vector store (HNSW / SQLite-vec / LanceDB) for embeddings; never a hosted vector DB.
+
+### 3.3 Layer taxonomy
+
+| # | Layer | Contains | Owner | Source | Git |
+|---|-------|----------|-------|--------|-----|
+| 1 | **industry** | cross-vertical patterns, regulatory templates | shared/template | template library | committed |
+| 2 | **enterprise** | naming standards, governance, security rules, global KPIs | enterprise (user) | user files | committed |
+| 3 | **domain** | business concepts, metrics, relationships | domain team (user) | user files | committed |
+| 4 | **system** | databases, schemas, tables, columns, FKs, lineage | derived (AutoDE) | platform metadata | regenerable |
+| 5 | **business definitions** | glossary terms, rules, metrics, formulas | user + derived | user files + extraction | committed |
+| 6 | **verified queries** | golden SQL, approved patterns | user | user files | committed |
+| 7 | **semantic artifacts** | lineage, mappings, data models, docs | derived (AutoDE) | generated | regenerable |
+
+### 3.4 Unified metadata envelope (every object)
+
+```yaml
+id: "term:revenue"               # stable, namespaced (see 3.6)
+kind: "business_term"            # node/entity type
+layer: "domain"                  # industry|enterprise|domain|system|definition|query|artifact
+label: "Revenue"
+description: "Recognized revenue net of returns"
+status: "active"                 # active | draft | deprecated
+aliases: ["net revenue"]
+tags: ["finance", "kpi"]
+
+origin:                          # provenance / traceability
+  source: "user"                 # user | derived | system | llm | template
+  sourceRef: "docs/glossary.md#revenue"
+  confidence: 0.95               # 0..1 for derived content
+  extractor: "domain-extractor"
+  extractedAt: "2026-09-08T..."
+
+version: 3
+createdAt: "..."
+updatedAt: "..."
+updatedBy: "finance-team"        # or "autode"
+
+content:                         # layer-specific, validated by per-kind schema
+  formula: "SUM(revenue_amt) - SUM(returns_amt)"
+  grain: "day"
+  dimensions: ["region", "channel"]
+```
+
+### 3.5 Relationship model
+
+Relationships are first-class objects with the same envelope:
+
+```yaml
+id: "edge:maps_to:table:snowflake.RAW_DB.PUBLIC.sales:term:revenue"
+type: "maps_to"                  # maps_to | contains | foreign_key | uses_table |
+                                 #   constrained_by | derives_from | related_to
+source: "table:snowflake.RAW_DB.PUBLIC.sales"
+target: "term:revenue"
+weight: 0.9
+origin: { source: "llm", confidence: 0.82, extractor: "sttm-mapper" }
+```
+
+### 3.6 ID scheme
+
+```text
+term:<slug>                         # term:revenue
+rule:<namespace>.<slug>             # rule:enterprise.pii_masking
+metric:<domain>.<slug>              # metric:sales.daily_revenue
+table:<platform>.<db>.<schema>.<t>  # table:snowflake.RAW_DB.PUBLIC.sales
+column:<table-id>.<name>            # column:table:snowflake...sales:amount
+query:<namespace>.<slug>            # query:golden.monthly_revenue
+artifact:<type>.<slug>              # artifact:lineage.sales_to_finance
+edge:<type>:<src>:<tgt>             # edge:maps_to:table:...:term:revenue
+```
+
+### 3.7 File hierarchy
+
+```text
+.ai-context/
+├── sources.yaml                 # registry: source file path → {kind, layer, owner}
+├── context/                     # AUTHORITATIVE — human-owned, committed, granular
+│   ├── industry/<vertical>.yaml
+│   ├── enterprise/standards.yaml
+│   ├── enterprise/glossary.yaml
+│   ├── domain/<domain>.yaml
+│   ├── domain/metrics.yaml
+│   └── queries/<query-name>.yaml
+├── derived/                     # DERIVED — AutoDE-generated, regenerable, gitignored
+│   ├── system/<platform>.schema.yaml
+│   ├── artifacts/<type>/<name>.yaml
+│   ├── graph.json               # compiled index: all nodes + edges (in-memory working set)
+│   └── embeddings/              # vector embeddings (later)
+├── target-environment.yaml      # config
+└── state.json                   # workspace state (objective, phase progress)
+```
+
+### 3.8 Ownership & versioning
+
+| Ownership | Where | Edited by | Versioned by | Regenerated |
+|---|---|---|---|---|
+| Authoritative | `context/` | user (UI or editor) | git + per-entity `version` | no |
+| Derived | `derived/` | AutoDE | provenance (`extractor`, `extractedAt`, `sourceRef`) | yes, on source change |
+| Config/state | `target-environment.yaml`, `state.json` | user + AutoDE | git / atomic writes | no |
+
+`context/` is **committed** (team-shared); `derived/` is **gitignored** (regenerated from `sources.yaml` + platform metadata + `context/`).
+
+### 3.9 Traceability
+
+Every derived node/edge carries `origin.sourceRef` (the source file/fqn/run that produced it) and `origin.confidence`. This gives lineage-of-knowledge: a business term can be traced back to the source document it was extracted from, and stale/uncertain extractions can be flagged and re-run.
+
+### 3.10 Operational constraints (non-negotiable)
+
+1. **Thread isolation** — embedding, large-graph traversal, and large-file parsing run off the Extension Host main thread (`worker_threads` / web workers).
+2. **Atomic file IO** — writes use temp staging + atomic rename (`vscode.workspace.fs`).
+3. **Lifecycle/disposal** — graph and index implement `vscode.Disposable`; `deactivate()` disposes everything.
+4. **Graceful degradation** — corrupted/partial `.ai-context` files are logged, tolerated, and repaired when safe.
+5. **Token budgets** — tokenize (`js-tiktoken`), enforce budgets, prioritize by relevance + graph centrality.
+
+### 3.11 Scalability & evolution
+
+- **Now:** granular files + compiled `graph.json` + in-memory `GraphManager`.
+- **Growth:** >~50k nodes or complex queries → **Kùzu** (embedded graph DB) behind the same envelope.
+- **Embeddings:** `derived/embeddings/` + embedded vector store, keyed by node ID.
+- **New layer:** add a folder + a `layer` value + a per-kind `content` JSON Schema — no envelope change.
 
 ---
 
-## 4. Context Layer: Type Definitions (production-grade)
+## 4. Context Layer — Metadata Envelope & Type Definitions
 
-(Implement in `src/context/types.ts`) — include strict readonly contracts and discriminated unions. Example core types (summary):
-- NodeType: 'table' | 'column' | 'semantic_view' | 'business_term' | 'business_rule' | 'verified_query'
-- EdgeType: 'contains' | 'foreign_key' | 'maps_to' | 'uses_table' | 'constrained_by'
-- BaseNode (id, type, label, description?, metadata, version)
-- TableNode extends BaseNode (database, schema, fqn, isView)
-- ColumnNode, BusinessTermNode, BusinessRuleNode, VerifiedQueryNode (with dialect, tablesUsed, etc.)
-- GraphEdge (id, source, target, type, weight?)
-- RetrievalOptions (topKSeeds, maxHops, maxTokens, minScoreThreshold, includeVerifiedQueries)
-- SubgraphResult (nodes, edges, formattedContext, tokenCount, latencyMs)
-- ContextEngineDiagnostics (totalNodes, totalEdges, memoryUsageMB, isWorkerReady, lastIndexedAt)
+Implement in `src/context/types.ts`. Strict TypeScript, readonly where possible.
 
-Strict TypeScript and readonly where possible.
+Common envelope (every node/edge object):
+- `id` — stable namespaced ID (§3.6)
+- `kind` — node/edge type
+- `layer` — `industry | enterprise | domain | system | definition | query | artifact`
+- `label`, `description`, `status` (`active | draft | deprecated`), `aliases`, `tags`
+- `origin` — `{ source, sourceRef, confidence?, extractor?, extractedAt? }` (provenance)
+- `version`, `createdAt`, `updatedAt`, `updatedBy`
+
+Node kinds (layer-specific `content`, discriminated by `kind`):
+- `table`, `column`, `semantic_view` — database, schema, fqn, dataType, isNullable, keys
+- `business_term` — formula, synonyms, relatedTerms, metrics
+- `business_rule` — ruleText, enforcementLevel (`STRICT | RECOMMENDED`), appliesTo
+- `metric` — definition, formula, grain, dimensions
+- `verified_query` — sql, dialect, tablesUsed, author, parameters
+- `semantic_artifact` — artifactType, content, filePath
+
+Edge kinds:
+- `contains`, `foreign_key`, `maps_to`, `uses_table`, `constrained_by`, `derives_from`, `related_to`
+
+Extend the existing `BaseNode`/`TableNode`/`ColumnNode`/`BusinessTermNode`/`BusinessRuleNode`/`VerifiedQueryNode`/`GraphEdge`/`RetrievalOptions`/`SubgraphResult`/`ContextEngineDiagnostics` types with the envelope fields above (and a `content` union discriminated by `kind`).
 
 ---
 
-## 5. Core Modules & Responsibilities (src/context/)
+## 5. Context Layer — Core Modules (`src/context/`)
 
-Create modular components with clear runtime responsibilities and well-documented interfaces.
+Module A — SourceRegistry (NEW)
+- Reads/writes `sources.yaml` (source file path → `{kind, layer, owner}`).
+- Backed by the UI "register source files" form.
 
-Module A — ContextFileManager (src/context/ContextFileManager.ts)
-- FileSystemWatcher using `vscode.workspace.createFileSystemWatcher` with 300ms debounce.
-- Atomic JSON validation against `schema-graph.schema.json` using `ajv` before loading.
-- Atomic persistence via temp staging files and `vscode.workspace.fs.rename`.
-- Structured diagnostic events and repair functions.
+Module B — ContextFileManager
+- Watches `.ai-context/` with a 300ms debounce.
+- Loads authoritative `context/**` and the compiled `derived/graph.json`.
+- Validates each file against per-kind JSON Schemas (ajv) before loading.
+- Atomic writes (temp → rename) for derived artifacts.
+- Structured diagnostics + repair on corruption.
 
-Module B — GraphManager (src/context/GraphManager.ts)
-- Use `graphology` with a directed MultiGraph.
-- Fast lookup indexes for FQN, label, and node type.
-- Neighborhood traversal (personalized PageRank or seeded BFS) with decay factor:
-  Relevance(seed → node) = SeedScore × (DecayFactor)^(HopDistance)
-- Thread-safe serialization/deserialization for worker message passing.
-- Explicit `dispose()` to free memory and close resources.
+Module C — GraphManager
+- In-memory graph (Map-based indexes for FQN, label, type) — dependency-free (no `graphology`).
+- BFS/neighborhood traversal with decay scoring.
+- Snapshot serialization → `derived/graph.json`.
+- `dispose()` lifecycle.
 
-Module C — Vector Engine Worker (src/context/workers/vector.worker.ts)
-- Run embedding runtime inside a `worker_threads` worker (Xenova or external embedding service).
-- Use batched embeddings and streaming to prevent memory spikes.
-- Load quantized vectors into an HNSW or other index (prefer `hnswlib-node` or a pure JS fallback for VSIX packaging).
-- Provide IPC methods for `indexBatch`, `search`, `serializeIndex`, `loadIndex`.
+Module D — SynthesisPipeline (NEW)
+- Ingests `sources.yaml` + platform metadata → derives nodes/edges.
+- Extraction = rule-based parsing + LLM-assisted entity/relationship extraction.
+- Writes provenance (`origin.sourceRef`, `confidence`, `extractor`).
 
-Module D — ContextRetriever (src/context/ContextRetriever.ts)
-- Combine vector search + subgraph traversal + token-budget pruning.
-- Pruning policy hierarchy:
-  1. Business Rules (STRICT bypass token limit when relevant)
-  2. Direct Table/Column nodes
-  3. BusinessTerm nodes
-  4. VerifiedQuery nodes (pruned first under ceiling)
-- Use `js-tiktoken` to compute token budgets and assemble the final formatted context.
-- Return SubgraphResult with formatted Markdown and tokenCount.
+Module E — ContextRetriever (future)
+- Hybrid: graph traversal + (later) vector search + token pruning.
+- Pruning hierarchy: STRICT rules → table/column → terms → verified queries.
+- `js-tiktoken` budget enforcement → `SubgraphResult` (Markdown + tokenCount).
 
-Module E — Base DQM Adapter (src/dqm/BaseAdapter.ts)
-- Abstract class for database metadata extraction and persistence.
-- Provide `extractMetadata()` (with cancellation token) returning nodes and edges.
-- Provide `persistSchemaContext()` implementing atomic write to `.ai-context/schema-graph.json` using staging and rename.
+Module F — Vector Engine Worker (future)
+- `worker_threads` embedding (Xenova/hosted) + embedded vector index (HNSW / SQLite-vec / LanceDB).
+- IPC: `indexBatch`, `search`, `serializeIndex`, `loadIndex`.
+
+Base DQM Adapter (`src/dqm/BaseAdapter.ts`) — feeds the system layer:
+- `extractMetadata()` → nodes/edges; `persistSchemaContext()` → atomic write to `derived/system/`.
 
 ---
 
@@ -147,7 +270,31 @@ Formatting constraints:
 
 ---
 
-## 7. Copilot Integration Requirements
+## 7. Workspace Artifact Model (single workspace)
+
+AutoDE operates on the user's currently open repository. There is no multi-project registry and no project-creation flow.
+
+- **One workspace = one data-engineering effort.** The "objective" is what the user types to generate a plan; it is persisted in `.ai-context/state.json`.
+- **Generated artifacts** (DDL, dbt models, mappings, docs) are written to a **visible, configurable folder** `auto-de/` (setting `autoDE.artifactDirectory`), organized by phase:
+
+  ```text
+  auto-de/01-discover/
+  auto-de/02-model/
+  auto-de/03-build/
+  auto-de/04-validate/
+  ```
+
+- **Artifacts are committed to git** — they are deliverables, not transient state.
+- **Artifact writes are atomic** (temp staging → rename).
+- **Separating efforts** = git branches, not a project registry.
+
+Core module: ArtifactWriter (`src/context/ArtifactWriter.ts`) — persists a `GeneratedArtifact` → `auto-de/<phase>/<filename>`.
+
+Removed (superseded by this model): `ProjectManager` / `ProjectRegistry`, the `newProject` command, project-list UI, and `setActiveProject`.
+
+---
+
+## 8. Copilot Integration Requirements
 
 Objective: Provide a safe, user-consented way for AutoDE to use the GitHub Copilot extension a user may already have installed.
 
@@ -181,13 +328,13 @@ Limitations & Risks:
 
 ---
 
-## 8. Acceptance Criteria & Tests
+## 9. Acceptance Criteria & Tests
 
 1. Zero UI Blocking Validation (Performance):
    - Index build of 1,000 tables / 10,000 columns / 50 business terms in the background via worker threads while user types — the editor must remain responsive (no stutters). Observe performance with a synthetic dataset and worker-based indexing command.
 
 2. Atomic Write & Crash Resilience Test:
-   - Simulate a crash or terminate VS Code mid write during `persistSchemaContext` and verify `.ai-context/schema-graph.json` remains uncorrupted (atomic rename semantics) and engine boots using previous snapshot.
+   - Simulate a crash mid-write during context-graph persistence and artifact writing; verify `.ai-context/derived/graph.json` and `auto-de/` files remain uncorrupted (atomic rename) and the engine boots from the previous snapshot.
 
 3. Token Precision Test:
    - Request context with `maxTokens: 1500`. The returned prompt must be strictly within the token budget using js-tiktoken; tests must ensure that pruning doesn't cut code blocks or break JSON/Markdown syntax.
@@ -200,49 +347,49 @@ Limitations & Risks:
    - Deactivation must stop file watchers, terminate worker threads, dispose graphs, and release file handles within 200ms in normal conditions.
 
 6. Unit & Integration Tests:
+   - Envelope/schema validation (ajv) for each `kind` and layer.
    - Graph traversal correctness, serialization round-trip, and diagnostics.
-   - ContextRetriever token-pruning test cases (edge cases where business rules must survive pruning).
-   - Atomic write tests for persistSchemaContext.
+   - SynthesisPipeline provenance tests (sourceRef/confidence/extractor present).
+   - ArtifactWriter atomic-write tests.
+   - ContextRetriever token-pruning tests (business rules survive pruning).
 
 ---
 
-## 9. Implementation Plan & Phasing
+## 10. Implementation Plan & Phasing
 
-Phase 0 — UI polish and LLM settings
-- Finalize sidebar webview CSS and components. Drop excess frames and modernize top strip.
-- Add Copilot status & consent UI in LLM tab.
-- Add `autoDE.testCopilot` command to test adapter.
+Phase 0 — Single-workspace model & artifacts
+- Remove `ProjectManager`/`ProjectRegistry`; fold state into `.ai-context/state.json`.
+- Add `autoDE.artifactDirectory` setting (default `auto-de`).
+- Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`, atomic writes).
 
-Phase 1 — Context Layer core
-- Add `src/context/types.ts` (strict types).
-- Implement `GraphManager.ts` (graphology MultiGraph, indexes, BFS/pagerank relevance).
-- Implement `ContextFileManager.ts` (watcher, AJV validation, atomic persistence helpers).
+Phase 1 — Context envelope & schema
+- Extend `src/context/types.ts` with the unified envelope (identity + provenance + version + ownership + `content` union).
+- Add per-kind JSON Schemas (ajv).
 
-Phase 2 — Worker offload & Vector engine
-- Implement `src/context/workers/vector.worker.ts` using `worker_threads`.
-- Choose embedding runtime: hosted vs local Xenova/ONNX; evaluate packaging constraints for VSIX.
-- Implement similarity index (HNSW or fallback). Implement batched indexing.
+Phase 2 — Source registry & synthesis
+- Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
+- Implement `SynthesisPipeline` (rule-based + LLM-assisted extraction → derived nodes/edges with provenance).
 
-Phase 3 — ContextRetriever & prompt assembler
-- Implement hybrid retriever combining vector search + graph traversal + token pruning.
-- Implement prompt formatting to compact Markdown with token-safety.
+Phase 3 — Layered context loading
+- Rework `ContextFileManager` to load authoritative `context/**` + compiled `derived/graph.json`, with AJV validation.
+- Persist the compiled graph atomically.
 
-Phase 4 — DQM Base Adapter & Snowflake adapter
-- Implement `src/dqm/BaseAdapter.ts` with atomic persistSchemaContext.
-- Wire Snowflake metadata extraction to the BaseAdapter and persist to `.ai-context`.
+Phase 4 — Real data adapters
+- Wire `snowflake-sdk` into `SnowflakeAdapter` (real connect/query); same for Databricks.
+- Persist system metadata to `derived/system/`.
 
-Phase 5 — Copilot programmatic adapter & wiring
-- Implement `src/core/copilotAdapter.ts` (detect, adapt exported functions, timeouts).
-- Wire `agentHub.callConfiguredLlm()` to prefer local Copilot when selected and consented.
-- Add fallback handoff flow.
+Phase 5 — Retrieval & embeddings
+- Implement `ContextRetriever` (graph + token pruning; vector later).
+- Implement `Vector Engine Worker` (embedded, no server).
 
-Phase 6 — Testing, telemetry opt-in, and docs
-- Implement tests for acceptance criteria.
-- Add opt-in telemetry and documentation about privacy.
+Phase 6 — Copilot, testing, telemetry, docs
+- Copilot `vscode.lm` adapter (done) + consent modal in webview.
+- Unit/integration tests for context layer and adapters.
+- Opt-in telemetry + privacy docs.
 
 ---
 
-## 10. Security, Privacy & Licensing
+## 11. Security, Privacy & Licensing
 
 - Any content sent to third-party LLMs (Copilot or cloud) must be user-consented.
 - No secrets should be logged or stored in source control.
@@ -251,54 +398,60 @@ Phase 6 — Testing, telemetry opt-in, and docs
 
 ---
 
-## 11. Dependencies & Packaging Considerations
+## 12. Dependencies & Packaging Considerations
 
-- Worker-thread embedding runtimes (Xenova/ONNX) and native indexes (hnswlib-node) add packaging complexity for VSIX. Options:
-  - Bundle a pure-JS fallback (lower perf) + optional native install for power users.
-  - Use a lightweight remote embedding service (self-hosted or cloud) for heavy workloads.
-- Use ajv for JSON Schema validation.
-- Use graphology for graph engine.
-- Use js-tiktoken for token counting.
-
----
-
-## 12. Files & Artifacts (current state & where to add)
-
-- UI webview: `media/sidebar.html` (updated for modernized UI and Copilot consent controls)
-- Context types: `src/context/types.ts`
-- Graph manager: `src/context/GraphManager.ts`
-- Copilot adapter: `src/core/copilotAdapter.ts` (detect & adapter)
-- Webview provider: `src/core/webviewProvider.ts` (posts copilotInfo)
-- Agent hub: `src/core/agentHub.ts` (attempts to route to local Copilot when consented)
-- New docs: `docs/requirements.md` (this file)
+- Embedding runtimes (Xenova/ONNX) and native vector indexes (hnswlib-node) add VSIX packaging complexity. Prefer a pure-JS fallback + optional native install; or a lightweight hosted embedding service for heavy workloads.
+- Use `ajv` for JSON Schema validation (per-kind `content` schemas).
+- Use `js-tiktoken` for token counting.
+- Graph: use the in-memory `GraphManager` (dependency-free). If scale demands it, adopt **Kùzu** (embedded single-file graph DB) — no server.
+- Avoid server dependencies (Postgres, Neo4j) and hosted vector DBs; keep the extension self-contained.
 
 ---
 
-## 13. Acceptance & Review Checklist
+## 13. Files & Artifacts
 
-- [ ] UI: Top strip cleaned; "Panel" removed from table names; modern aesthetics applied.
-- [ ] Webview: LLM settings show Copilot status and consent checkbox; test button present.
-- [ ] Context Layer types implemented and exported.
-- [ ] GraphManager: concurrent-safe, serializable snapshot methods, traversal with decay scoring implemented.
-- [ ] ContextFileManager: atomic writes and AJV validation implemented.
-- [ ] Vector worker scaffolding in place (batched embedding interface).
-- [ ] ContextRetriever: token-aware prompt assembler implemented and tested.
-- [ ] CopilotAdapter: detection and safe programmatic adapter present; agentHub respects user consent.
-- [ ] Documentation: README and this requirements doc updated.
-
----
-
-## 14. Next Steps (recommended immediate actions)
-
-1. Finalize Context types and GraphManager unit tests (priority).
-2. Implement ContextFileManager atomic write tests (simulate abrupt termination).
-3. Add worker scaffolding and a debug command to populate a synthetic large graph to validate non-blocking behavior and memory usage.
-4. Surface Copilot consent modal in the webview (one-time consent text) and record choice in configuration.
-5. Choose embedding runtime strategy (local Xenova vs hosted) and document packaging implications.
+- UI webviews: `media/sidebar.html`, `media/panel.html`, `media/editors/*.html`
+- Context layer: `src/context/` — `types.ts`, `GraphManager.ts`, `ContextFileManager.ts`, `SourceRegistry.ts` (new), `SynthesisPipeline.ts` (new), `ArtifactWriter.ts` (new)
+- Copilot adapter: `src/core/copilotAdapter.ts`
+- Webview providers: `src/core/webviewProvider.ts`, `src/core/panelProvider.ts`
+- Agent hub: `src/core/agentHub.ts`
+- Data adapters: `src/dqm/` — `BaseAdapter.ts`, `ConnectionManager.ts`, `adapters/*`
+- Docs: `docs/requirements.md` (this file), `docs/technical-design.md`
+- Runtime folders: `.ai-context/` (context layer), `auto-de/` (generated artifacts)
 
 ---
 
-## 15. Contact & Notes
+## 14. Acceptance & Review Checklist
+
+- [ ] UI: context section surfaces Enterprise Context Layer (layers, terms, rules, queries, relationships); source-file registration form present.
+- [x] Webview: LLM settings show Copilot status and consent checkbox; test button present.
+- [ ] Envelope: unified metadata envelope (identity + provenance + version + ownership) implemented in `src/context/types.ts`.
+- [x] GraphManager: in-memory graph with indexes, BFS traversal, serialization.
+- [~] ContextFileManager: watcher + loading present; AJV validation and layered (`context/` + `derived/`) loading NOT yet implemented.
+- [ ] SourceRegistry: `sources.yaml` read/write + UI form.
+- [ ] SynthesisPipeline: source ingestion → derived nodes/edges with provenance.
+- [x] ArtifactWriter: artifacts persisted to `auto-de/<phase>/` (atomic writes).
+- [x] Single-workspace model: `ProjectManager`/`ProjectRegistry` removed.
+- [ ] ContextRetriever: token-aware prompt assembler.
+- [ ] Vector/embedding engine (embedded, no server).
+- [x] CopilotAdapter: `vscode.lm` detection + adapter; agentHub respects consent.
+- [~] Documentation: this revision.
+
+---
+
+## 15. Next Steps
+
+1. Implement the unified envelope in `src/context/types.ts` (identity + provenance + version + ownership + `content` union).
+2. Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
+3. Implement `SynthesisPipeline` (rule-based + LLM-assisted extraction → derived nodes/edges with provenance).
+4. Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`) and remove `ProjectManager`/`ProjectRegistry`.
+5. Replace hand-rolled YAML parsers with a real parser + AJV per-kind schemas.
+6. Implement real Snowflake/Databricks adapter execution (currently stubbed).
+7. Implement `deactivate()` cleanup; add unit tests for the context layer and adapters.
+
+---
+
+## 16. Contact & Notes
 
 If any requirement appears to conflict with project packaging constraints (e.g., native binaries in VSIX), request a tradeoff decision between shipping a pure-JS fallback vs bundling native libs.
 

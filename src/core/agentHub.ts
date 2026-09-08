@@ -7,7 +7,7 @@ import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
 import { executeSourceAssessmentAgent } from '../agents/discover/SourceAssessmentAgent';
 import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
 import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
-import { ProjectManager } from '../context/ProjectManager';
+import { ArtifactWriter } from '../context/ArtifactWriter';
 import {
   AgentExecutionContext,
   AgentType,
@@ -17,8 +17,7 @@ import {
   SessionStatus,
   TargetEnvironment,
   GeneratedArtifact,
-  WorkflowPhase,
-  ProjectMetadata
+  WorkflowPhase
 } from './types';
 
 const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent', 'dataModelerAgent', 'transformScaffoldAgent'];
@@ -58,7 +57,7 @@ export class DataAgentHubHub {
   private executionPaused = false;
   private stateListener?: (state: PlanState) => void;
   private logListener?: (message: string) => void;
-  private projectManager?: ProjectManager;
+  private artifactWriter?: ArtifactWriter;
 
   public constructor(private readonly configManager: ConfigurationManager) {}
 
@@ -70,8 +69,8 @@ export class DataAgentHubHub {
     this.logListener = listener;
   }
 
-  public setProjectManager(pm: ProjectManager): void {
-    this.projectManager = pm;
+  public setArtifactWriter(writer: ArtifactWriter): void {
+    this.artifactWriter = writer;
   }
 
   public getPlan(): PlanState {
@@ -82,64 +81,11 @@ export class DataAgentHubHub {
     };
   }
 
-  // ── Project Management ──
-
-  public getActiveProject(): ProjectMetadata | undefined {
-    return this.projectManager?.getActiveProject();
-  }
-
-  public getProjects(): ProjectMetadata[] {
-    return this.projectManager?.getProjects() ?? [];
-  }
-
-  public async setActiveProject(id: string): Promise<void> {
-    this.projectManager?.setActiveProject(id);
-    const project = this.projectManager?.getActiveProject();
-    if (project) {
-      this.state.projectId = project.id;
-      this.state.currentPhase = project.currentPhase;
-      this.state.objective = project.objective;
-      this.state.sourceProvider = project.sourceProvider;
-      if (project.targetEnvironment) {
-        this.state.targetEnvironment = project.targetEnvironment;
-      }
-      this.log(`Switched to project: ${project.name}`);
-      this.emitState();
-    }
-  }
-
-  public async createProject(objective: string): Promise<ProjectMetadata | undefined> {
-    if (!this.projectManager) return undefined;
-
-    const settings = this.configManager.getSettings();
-    const project = this.projectManager.createProject(
-      objective,
-      settings.defaultProvider ?? 'snowflake',
-      this.state.targetEnvironment
-    );
-
-    this.state.projectId = project.id;
-    this.state.currentPhase = project.currentPhase;
-    this.state.objective = objective;
-    this.state.sourceProvider = project.sourceProvider;
-    this.log(`Project created: ${project.name}`);
-    this.emitState();
-
-    return project;
-  }
-
   // ── Target Environment Management ──
 
   public setTargetEnvironment(env: TargetEnvironment): void {
     this.state.targetEnvironment = env;
     this.log(`Target environment set: ${env.platform} (${env.environmentProfile}) — ${env.modelingApproach} via ${env.transformationTool}`);
-
-    // Sync to active project
-    const project = this.projectManager?.getActiveProject();
-    if (project) {
-      this.projectManager?.updateProject(project.id, { targetEnvironment: env });
-    }
-
     this.emitState();
   }
 
@@ -233,14 +179,6 @@ Message: ${message}`;
     const settings = this.configManager.getSettings();
     const provider = settings.activeLlmProvider ?? 'copilot';
     this.log(`Sending chat to ${provider}...`);
-
-    // Auto-create project if none active
-    if (!this.state.projectId && this.projectManager) {
-      const project = await this.createProject(trimmed);
-      if (project) {
-        this.log(`Auto-created project: ${project.name}`);
-      }
-    }
 
     if (!this.state.targetEnvironment) {
       const partial = await this.extractTargetFromMessage(trimmed);
@@ -429,13 +367,7 @@ User message: ${trimmed}`;
             artifact.phase = phase;
             this.state.artifacts.push(artifact);
             this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
-
-            // Persist to project
-            if (this.state.projectId && this.projectManager) {
-              this.projectManager.persistArtifact(this.state.projectId, phase, artifact);
-            }
           },
-          projectId: this.state.projectId,
           currentPhase: phase
         };
 
@@ -460,21 +392,10 @@ User message: ${trimmed}`;
             this.state.artifacts.push(artifact);
             this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
 
-            if (this.state.projectId && this.projectManager) {
-              this.projectManager.persistArtifact(this.state.projectId, phase, artifact);
+            if (this.artifactWriter) {
+              const written = await this.artifactWriter.write(artifact);
+              artifact.filePath = written.fsPath;
             }
-          }
-        }
-
-        // Update phase progress
-        if (this.state.projectId && this.projectManager) {
-          const project = this.projectManager.getProject(this.state.projectId);
-          if (project) {
-            const current = project.phaseProgress[phase];
-            this.projectManager.updatePhaseProgress(this.state.projectId, phase, {
-              completedSteps: current.completedSteps + 1,
-              totalSteps: Math.max(current.totalSteps, current.completedSteps + 1)
-            });
           }
         }
 
@@ -521,7 +442,6 @@ User message: ${trimmed}`;
     this.state.runningStepId = undefined;
     this.state.lastError = undefined;
     this.state.artifacts = [];
-    this.state.projectId = undefined;
     this.state.currentPhase = undefined;
     this.executionPaused = false;
     this.log('Hub state reset.');

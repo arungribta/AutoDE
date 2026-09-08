@@ -7,7 +7,8 @@
       "request": "launch",
       "runtimeExecutable": "${execPath}",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-extension=saoudrizwan.claude-dev"
       ],
       "outFiles": [
         "${workspaceFolder}/dist/**/*.js"

@@ -5,7 +5,7 @@ import { ConfigurationManager } from './core/configManager';
 import { DataAgentHubWebviewProvider } from './core/webviewProvider';
 import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './dqm/ConnectionManager';
-import { ProjectManager } from './context/ProjectManager';
+import { ArtifactWriter } from './context/ArtifactWriter';
 import { DataModelEditorProvider } from './editors/DataModelEditorProvider';
 import { SttmEditorProvider } from './editors/SttmEditorProvider';
 import { GraphEditorProvider } from './editors/GraphEditorProvider';
@@ -22,15 +22,12 @@ export function activate(context: vscode.ExtensionContext): void {
   let copilotAdapter: any = undefined;
   let connectionManager: ConnectionManager | undefined;
 
-  // Initialize ProjectManager
+  // Initialize ArtifactWriter (single-workspace artifact persistence)
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? context.extensionUri;
-  const projectManager = new ProjectManager(workspaceRoot, (msg: string) => {
-    console.log(`[AutoDE Project] ${msg}`);
+  const artifactWriter = new ArtifactWriter(workspaceRoot, (msg: string) => {
+    console.log(`[AutoDE Artifact] ${msg}`);
   });
-  projectManager.initialize().then(() => {
-    sidebarProvider.setProjectManager(projectManager);
-  });
-  context.subscriptions.push(projectManager);
+  hub.setArtifactWriter(artifactWriter);
 
   // ── Commands ──
 
@@ -165,13 +162,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage('Context re-index triggered.');
   });
 
-  const newProject = vscode.commands.registerCommand(`${EXTENSION_ID}.newProject`, async () => {
-    const objective = await vscode.window.showInputBox({ prompt: 'Describe your data engineering project objective.', placeHolder: 'Build a sales analytics pipeline in Snowflake using dbt...' });
-    if (!objective || objective.trim().length === 0) { return; }
-    const project = await hub.createProject(objective.trim());
-    if (project) { vscode.window.showInformationMessage(`Project created: ${project.name}`); }
-  });
-
   // ── Register all providers and commands ──
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, sidebarProvider, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -183,8 +173,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(EDITOR_DOC, new DocEditorProvider(context)),
     openSidebar, generatePlan, executePlan, resetSession,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
-    testConnection, sourceAssessment, syncMetadata, reindex,
-    newProject
+    testConnection, sourceAssessment, syncMetadata, reindex
   );
 }
 

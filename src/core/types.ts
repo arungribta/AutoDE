@@ -15,50 +15,6 @@ export type OutputFormat = 'ddl' | 'yaml' | 'markdown' | 'python' | 'sql';
 
 export type WorkflowPhase = 'discover' | 'model' | 'build' | 'validate';
 
-export interface PhaseProgress {
-  status: 'not-started' | 'in-progress' | 'completed';
-  completedSteps: number;
-  totalSteps: number;
-  artifactCount: number;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-export interface ProjectMetadata {
-  id: string;
-  name: string;
-  objective: string;
-  createdAt: string;
-  updatedAt: string;
-  status: 'active' | 'completed' | 'archived';
-  currentPhase: WorkflowPhase;
-  sourceProvider: DataPlatformProvider;
-  targetEnvironment?: TargetEnvironment;
-  phaseProgress: Record<WorkflowPhase, PhaseProgress>;
-}
-
-export interface WorkflowState {
-  projectId: string;
-  currentPhase: WorkflowPhase;
-  phases: Record<WorkflowPhase, {
-    status: 'not-started' | 'in-progress' | 'completed';
-    completedSteps: number;
-    totalSteps: number;
-    artifactCount: number;
-    artifacts: Array<{
-      id: string;
-      type: string;
-      title: string;
-      filePath: string;
-    }>;
-  }>;
-}
-
-export interface ProjectRegistry {
-  activeProjectId: string | null;
-  projects: ProjectMetadata[];
-}
-
 // ── Target Environment ──
 
 export interface SnowflakeTargetConfig {
@@ -146,6 +102,7 @@ export interface DataAgentHubSettings {
   activeLlmProvider: LlmProvider;
   activeLlmModel: string;
   llmEndpoint: string;
+  artifactDirectory: string;
   copilotProgrammaticConsent?: boolean;
 }
 
@@ -170,7 +127,6 @@ export interface PlanState {
   runningStepId?: string;
   lastError?: string;
   artifacts?: GeneratedArtifact[];
-  projectId?: string;
   currentPhase?: WorkflowPhase;
 }
 
@@ -186,7 +142,6 @@ export interface AgentExecutionContext {
   };
   log: (message: string) => void;
   addArtifact?: (artifact: GeneratedArtifact) => void;
-  projectId?: string;
   currentPhase?: WorkflowPhase;
 }
 

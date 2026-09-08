@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
+import { applyCspNonce } from '../core/webviewSecurity';
 
 export class DataModelEditorProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = 'autoDE.dataModelEditor';
@@ -21,6 +22,6 @@ export class DataModelEditorProvider implements vscode.CustomTextEditorProvider 
     let html = fs.readFileSync(htmlPath.fsPath, 'utf8');
     html = html.replace('{{CONTENT}}', content.replace(/`/g, '\\`').replace(/\$/g, '\\$'));
     html = html.replace('{{FILENAME}}', document.fileName.split(/[/\\]/).pop() || 'data-model.sql');
-    return html;
+    return applyCspNonce(html, webview.cspSource);
   }
 }

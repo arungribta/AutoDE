@@ -3,10 +3,11 @@ import * as vscode from 'vscode';
 import { DataAgentHubHub } from './agentHub';
 import { PlanState, WebviewMessage } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
+import { applyCspNonce } from './webviewSecurity';
 
 /**
  * WebviewViewProvider for the bottom panel dashboard.
- * Provides a persistent view of project progress, stats, and artifacts.
+ * Provides a persistent view of workspace state, stats, and artifacts.
  */
 export class DataAgentHubPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoDataEngineeringHubPanelView';
@@ -38,8 +39,6 @@ export class DataAgentHubPanelProvider implements vscode.WebviewViewProvider {
       await this.handleMessage(message);
     });
 
-    // Send initial data
-    this.postProjectList();
     this.postState(this.hub.getPlan());
   }
 
@@ -62,36 +61,6 @@ export class DataAgentHubPanelProvider implements vscode.WebviewViewProvider {
           // Signal the sidebar to open the palette
           this.view?.webview.postMessage({ type: 'logEntry', message: 'Open the Workflow Palette from the sidebar (🧰 icon).' });
           break;
-        case 'openProjectFolder': {
-          const project = this.hub.getActiveProject();
-          if (project) {
-            const projectUri = vscode.Uri.joinPath(
-              vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri,
-              '.auto-de', 'projects', project.id
-            );
-            await vscode.commands.executeCommand('revealFileInOS', projectUri);
-          }
-          break;
-        }
-        case 'openPhaseFolder': {
-          const project = this.hub.getActiveProject();
-          const phase = typeof message.phase === 'string' ? message.phase : undefined;
-          if (project && phase) {
-            const phaseDirs: Record<string, string> = {
-              discover: '01-discover', model: '02-model', build: '03-build', validate: '04-validate'
-            };
-            const dir = phaseDirs[phase] || phase;
-            const phaseUri = vscode.Uri.joinPath(
-              vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri,
-              '.auto-de', 'projects', project.id, dir
-            );
-            await vscode.commands.executeCommand('revealFileInOS', phaseUri);
-          }
-          break;
-        }
-        case 'getProjects':
-          this.postProjectList();
-          break;
         case 'settingsLoaded':
           // Panel doesn't need settings, just acknowledge
           break;
@@ -112,14 +81,8 @@ export class DataAgentHubPanelProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: 'logEntry', message });
   }
 
-  private postProjectList(): void {
-    const projects = this.hub.getProjects();
-    const activeId = this.hub.getActiveProject()?.id ?? null;
-    this.view?.webview.postMessage({ type: 'projectList', projects, activeProjectId: activeId });
-  }
-
   private getHtmlForPanel(webview: vscode.Webview): string {
     const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'panel.html');
-    return fs.readFileSync(htmlPath.fsPath, 'utf8');
+    return applyCspNonce(fs.readFileSync(htmlPath.fsPath, 'utf8'), webview.cspSource);
   }
 }

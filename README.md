@@ -8,16 +8,15 @@ This repository contains the extension source code, a webview-based UI (media/si
 
 ## Features (current)
 
-- DE Agent Workspace webview (command-center):
-  - Top status strip with connection and token metrics
-  - Single main column with tabs: "DE Agent Workspace", "Data Integration", "LLM Settings"
-  - Context section (metadata) that appears when a data connection is established
-  - Objective → Plan → Execute workflow with a collapsible execution plan
-  - Chat refinement loop to iterate on plans
-- Provider abstraction foundation (Snowflake adapter hardened)
-- Snowflake key-pair authentication support in settings
-- Strong typing and a hub-and-spoke architecture for future agents and providers
-- UI visual polish toward a modern, minimal command-center aesthetic
+- **DE Agent Workspace** webview with a conversation-first flow (Objective → Plan → Execute → Refine)
+- **GitHub Copilot integration** via VS Code's Language Model API (`vscode.lm`) — no API key, opt-in consent
+- **Multi-LLM support** (OpenAI, Azure OpenAI, Anthropic, Gemini, Ollama, Copilot)
+- **Agentic sub-agents**: Source Assessment, Data Modeler (dimensional / data-vault / OBT / 3NF), Transformation Scaffolder (dbt), STTM Mapper, Ingestion, Documentation
+- **Workflow phases** (discover → model → build → validate) with artifacts written to a visible, configurable `auto-de/` folder
+- **Context Layer** (`src/context/`) — in-memory graph (GraphManager), context file loading/watching, target-environment profiles
+- **Data platform adapter layer** (`src/dqm/`) — Snowflake + Databricks adapters (see status caveats below)
+- **Bottom panel dashboard** (`src/core/panelProvider.ts`) and **5 custom editors** (DataModel, STTM, Graph, Profile, Doc)
+- **Webview CSP nonce injection** (`src/core/webviewSecurity.ts`) so inline scripts run under VS Code's default CSP
 
 ---
 
@@ -58,12 +57,15 @@ Commands (run from repository root):
 
 ## Development notes
 
-- Webview UI: `media/sidebar.html` — contains the DE Agent Workspace UI and is intentionally self-contained for easy iteration. Edits here affect the extension UI after recompiling and reloading the extension host.
+- Webview UI: `media/sidebar.html` (workspace), `media/panel.html` (dashboard), `media/editors/*.html` (custom editors) — all single-file HTML, served with a CSP nonce via `src/core/webviewSecurity.ts`.
 - Core code:
-  - `src/core/` — hub, webview provider, config manager, types
-  - `src/features/providers/` — provider adapters (Snowflake adapter currently implemented)
-  - `src/features/agents/spokes/` — agent implementations (ingestion, architecture, snowflake executor, etc.)
-- Settings are defined in `package.json` under the `contributes.configuration` section. Secrets (LLM keys, Snowflake private key passphrase) are stored via VS Code SecretStorage.
+  - `src/core/` — hub, webview/panel providers, config manager, Copilot adapter, types
+  - `src/context/` — graph manager, context/project/target config managers
+  - `src/dqm/` — data platform adapters (Snowflake, Databricks)
+  - `src/agents/` — sub-agents (discover/model/build/validate)
+  - `src/editors/` — custom text editors
+- Settings are defined in `package.json` under the `contributes.configuration` section. Secrets (LLM keys, Snowflake password/passphrase) are stored via VS Code SecretStorage.
+- **Known issue:** the Cline extension (`saoudrizwan.claude-dev`) can crash the Extension Development Host (SIGABRT / exit code 134) during startup. The F5 launch config disables it via `--disable-extension=saoudrizwan.claude-dev` to keep the dev host stable.
 
 ---
 
@@ -84,7 +86,7 @@ Commands (run from repository root):
 
 ## Context Layer Engine (implemented)
 
-A production-ready Context Layer Engine has been added under `src/context/` with a focus on non-blocking, enterprise-grade operations. Key components implemented:
+A Context Layer Engine has been added under `src/context/`. **Note:** it is currently in-memory only — the vector/embedding engine, ContextRetriever, and worker-thread offloading are not yet implemented. The target information architecture (layered context, unified metadata envelope, provenance, versioning) is specified in `docs/requirements.md` §3–§5, with the envelope JSON Schema at `docs/schemas/context-envelope.schema.json`.
 
 - `src/context/types.ts` — strict TypeScript type definitions for nodes, edges, retrieval options, and diagnostics.
 - `src/context/GraphManager.ts` — a thread-safe in-memory graph manager that provides:
@@ -101,16 +103,23 @@ A draw.io diagram depicting the Context Layer architecture and integration with 
 
 ## Changes since last update
 
-- Added the Context Layer types and GraphManager (see `src/context/`).
-- Updated the webview UX and context workflow.
-- README and architecture diagram added to explain the high-level design and operational constraints.
+- Synced docs and phase tracking to v0.5.0 (Phases 0–5 committed).
+- Added webview CSP nonce injection (`src/core/webviewSecurity.ts`) for the sidebar, panel, and custom editors.
+- Documented accurate implementation status (see caveats below).
+
+## Implementation status caveats
+
+- `SnowflakeAdapter`/`DatabricksAdapter` `connect()` and `executeQuery()` are **stubs** — no real connection/query execution (empty results); metadata extraction is non-functional end-to-end.
+- `GraphManager` is in-memory only; `isWorkerReady` is hardcoded and the ContextRetriever / vector engine / worker threads / `js-tiktoken` / `ajv` are not implemented.
+- `deactivate()` is empty (no watcher/dispose/cleanup).
 
 ## Next steps (planned)
 
-- Wire `GraphManager` into a Worker Thread implementation (vector engine + retriever) and implement `src/context/workers/*` for embedding and indexing.
-- Implement `ContextRetriever` with token-aware pruning and `js-tiktoken` integration for prompt budget enforcement.
-- Create `src/dqm/BaseAdapter.ts` and add a Snowflake concrete adapter implementing atomic persistence into `.ai-context/`.
-- Add unit and integration tests validating atomic writes, worker offloading, and token-precision behavior.
+- Implement real Snowflake/Databricks adapter execution (wire `snowflake-sdk` into the adapter layer).
+- Implement ContextRetriever + vector/worker engine (token-aware retrieval, embedding).
+- Replace hand-rolled YAML parsers with a real parser + AJV validation.
+- Implement `deactivate()` cleanup.
+- Add unit/integration tests for the context layer, adapters, and agents.
 
 ---
 

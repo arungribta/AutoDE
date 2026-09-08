@@ -256,15 +256,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     </div>
   </div>
 
-  <!-- ═══ PROJECT HEADER ═══ -->
-  <div class="project-header">
-    <span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">📁</span>
-    <select id="projectSelect">
-      <option value="">+ New Project...</option>
-    </select>
-    <button class="icon-btn" id="newProjectBtn" title="New Project">+</button>
-  </div>
-
   <!-- ═══ MAIN CONTENT ═══ -->
   <div class="main-content">
     <div class="chat-stream" id="chatStream">
@@ -354,14 +345,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   <div class="slide-panel" id="palettePanel">
     <div class="slide-panel-header"><span class="slide-title">🧰 Workflow Palette</span><button class="icon-btn" id="paletteCloseBtn">✕</button></div>
     <div class="slide-panel-body" id="paletteBody">
-      <div class="section" id="paletteProjectSection">
-        <div class="section-title">📁 Active Project</div>
-        <div style="margin-bottom:8px;">
-          <select id="paletteProjectSelect" style="width:100%;">
-            <option value="">+ New Project...</option>
-          </select>
-        </div>
-      </div>
       <div class="section" id="palettePhases">
         <!-- Phase rows rendered by JS -->
       </div>
@@ -373,7 +356,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       </div>
       <div class="section">
         <button class="primary" id="paletteContinueBtn" style="width:100%;">▶ Continue Workflow</button>
-        <button id="paletteOpenFolderBtn" style="width:100%;margin-top:6px;">📂 Open Project Folder</button>
       </div>
     </div>
   </div>
@@ -401,19 +383,14 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   const toast = $('#toast');
   const contextActions = $('#contextActions');
   const stopBtn = $('#stopBtn');
-  const projectSelect = $('#projectSelect');
-  const paletteProjectSelect = $('#paletteProjectSelect');
   const palettePhases = $('#palettePhases');
   const paletteAgentCards = $('#paletteAgentCards');
   const paletteContinueBtn = $('#paletteContinueBtn');
-  const paletteOpenFolderBtn = $('#paletteOpenFolderBtn');
 
   let toastTimer = null;
   let currentPlan = null;
   let contextStats = { tables: 0, terms: 0, queries: 0, files: 0, tokens: 0, maxTokens: 4000 };
   let mentionEntities = [];
-  let projects = [];
-  let activeProjectId = null;
   let sessionStatus = 'idle';
 
   // ── Toast ──
@@ -463,111 +440,70 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   // ── Artifact Card ──
   function addArtifactCard(artifact) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var typeIcons = { data_model: '📐', sttm_mapping: '🗺', ddl_script: '📝', pipeline_dag: '🔄', architecture_diagram: '📊', data_dictionary: '📋', sql_script: '💾', requirements_doc: '📋', discovery_report: '📊', data_profile: '📈', knowledge_graph: '🔗', validation_report: '✅', test_suite: '🧪' }; var icon = typeIcons[artifact.type] || '📦'; var badgeClass = artifact.approved ? 'artifact-badge approved' : 'artifact-badge'; var badgeText = artifact.approved ? '✓ Approved' : 'Pending Review'; var html = '<div class="artifact-card"><div class="artifact-card-header" onclick="this.parentElement.classList.toggle(\'expanded\')"><span>' + icon + ' ' + escapeHtml(artifact.title) + '</span><span class="' + badgeClass + '">' + badgeText + '</span></div><div class="artifact-card-body"><pre><code>' + escapeHtml(artifact.content) + '</code></pre><div class="artifact-card-actions"><button>📋 Copy</button></div></div></div>'; var div = document.createElement('div'); div.innerHTML = html; chatStream.appendChild(div.firstElementChild); chatStream.scrollTop = chatStream.scrollHeight; }
 
-  // ── Project Dropdown ──
-  function updateProjectDropdowns() {
-    var options = '<option value="">+ New Project...</option>';
-    for (var i = 0; i < projects.length; i++) {
-      var p = projects[i];
-      var selected = p.id === activeProjectId ? ' selected' : '';
-      options += '<option value="' + p.id + '"' + selected + '>' + escapeHtml(p.name) + '</option>';
-    }
-    projectSelect.innerHTML = options;
-    paletteProjectSelect.innerHTML = options;
-  }
-
-  projectSelect.onchange = function () {
-    var id = projectSelect.value;
-    if (!id) { post('createProject', { objective: chatInput.value.trim() || 'New data engineering project' }); return; }
-    post('switchProject', { projectId: id });
-  };
-
-  paletteProjectSelect.onchange = function () {
-    var id = paletteProjectSelect.value;
-    if (!id) { post('createProject', { objective: chatInput.value.trim() || 'New data engineering project' }); return; }
-    post('switchProject', { projectId: id });
-  };
-
-  $('#newProjectBtn').onclick = function () { post('createProject', { objective: chatInput.value.trim() || 'New data engineering project' }); };
-
   // ── Palette Phase Rows ──
+  var palettePhase = 'discover';
   function renderPalettePhases() {
-    var activeProject = null;
-    for (var i = 0; i < projects.length; i++) { if (projects[i].id === activeProjectId) { activeProject = projects[i]; break; } }
-    if (!activeProject) { palettePhases.innerHTML = '<div style="color:var(--text-muted);font-size:var(--font-size-sm);padding:8px;">No active project. Create one to see workflow phases.</div>'; paletteAgentCards.innerHTML = ''; return; }
-
     var phases = [
       { key: 'discover', label: '🔍 Discover', icon: '🔍' },
       { key: 'model', label: '🎨 Model', icon: '🎨' },
       { key: 'build', label: '🔨 Build', icon: '🔨' },
       { key: 'validate', label: '✅ Validate & Document', icon: '✅' }
     ];
-    var pp = activeProject.phaseProgress || {};
-    var currentPhase = activeProject.currentPhase || 'discover';
 
-    var html = '<div class="section-title">Workflow Progress</div>';
+    var html = '<div class="section-title">Workflow Phases</div>';
     for (var j = 0; j < phases.length; j++) {
       var ph = phases[j];
-      var progress = pp[ph.key] || { status: 'not-started', completedSteps: 0, totalSteps: 0, artifactCount: 0 };
-      var isLocked = false;
-      if (j > 0) {
-        var prevPhase = phases[j-1];
-        var prevProgress = pp[prevPhase.key] || { status: 'not-started' };
-        isLocked = prevProgress.status !== 'completed';
-      }
-      var rowClass = 'phase-row';
-      if (isLocked) rowClass += ' locked';
-      else if (progress.status === 'completed') rowClass += ' completed';
-      else if (ph.key === currentPhase) rowClass += ' active';
-
-      var statusIcon = progress.status === 'completed' ? '✅' : (progress.status === 'in-progress' ? '⏳' : (isLocked ? '🔒' : '○'));
-      var statusText = progress.status === 'completed' ? 'Complete' : (progress.status === 'in-progress' ? 'Active' : (isLocked ? 'Locked' : 'Pending'));
-      var pct = progress.totalSteps > 0 ? Math.round((progress.completedSteps / progress.totalSteps) * 100) : 0;
-
-      html += '<div class="' + rowClass + '" data-phase="' + ph.key + '">';
-      html += '<div class="phase-row-header"><span class="phase-row-title">' + statusIcon + ' ' + ph.label + '</span><span class="phase-row-status">' + statusText + '</span></div>';
-      html += '<div class="phase-progress-bar"><div class="phase-progress-fill ' + progress.status + '" style="width:' + pct + '%"></div></div>';
-      html += '<div class="phase-row-meta"><span>' + progress.completedSteps + '/' + progress.totalSteps + ' steps</span><span>' + progress.artifactCount + ' artifacts</span></div>';
-      if (!isLocked) {
-        html += '<div class="phase-row-actions"><button class="phase-open-btn" data-phase="' + ph.key + '">📂 Open Folder</button></div>';
-      }
-      html += '</div>';
+      var isActive = ph.key === palettePhase;
+      html += '<div class="phase-row' + (isActive ? ' active' : '') + '" data-phase="' + ph.key + '"><div class="phase-row-header"><span class="phase-row-title">' + ph.label + '</span></div></div>';
     }
     palettePhases.innerHTML = html;
 
-    // Bind phase open buttons
-    var openBtns = $$('.phase-open-btn');
-    openBtns.forEach(function (btn) {
-      btn.onclick = function (e) { e.stopPropagation(); post('openPhaseFolder', { phase: btn.getAttribute('data-phase') }); };
+    var phaseRows = $$('#palettePhases .phase-row');
+    phaseRows.forEach(function (row) {
+      row.onclick = function () {
+        palettePhase = row.getAttribute('data-phase');
+        renderPalettePhases();
+        renderPaletteAgentCards(palettePhase);
+      };
     });
 
-    // Render agent cards for current phase
-    renderPaletteAgentCards(currentPhase, isPhaseLocked(activeProject, currentPhase));
+    renderPaletteAgentCards(palettePhase);
   }
 
-  function isPhaseLocked(project, phase) {
-    var order = ['discover', 'model', 'build', 'validate'];
-    var idx = order.indexOf(phase);
-    if (idx <= 0) return false;
-    for (var i = 0; i < idx; i++) {
-      var pp = project.phaseProgress || {};
-      if ((pp[order[i]] || {}).status !== 'completed') return true;
-    }
-    return false;
-  }
-
-  function renderPaletteAgentCards(phase, locked) {
+  function renderPaletteAgentCards(phase) {
     var agentsByPhase = {
-      discover: [{ agent: 'sourceAssessmentAgent', icon: '📊', title: 'Source Assessment', desc: 'Extract schema metadata, profile columns, and build the knowledge graph.' }],
-      model: [{ agent: 'sttmAgent', icon: '🗺', title: 'STTM Mapper', desc: 'Generate source-to-target mappings with column-level transformations.' }, { agent: 'dataModelerAgent', icon: '🏗', title: 'Data Modeler', desc: 'Generate dimensional, Data Vault, or OBT models.' }],
-      build: [{ agent: 'ingestionAgent', icon: '📥', title: 'Ingestion Pipeline', desc: 'Generate ingestion code (COPY, Python, Airbyte).' }, { agent: 'transformScaffoldAgent', icon: '🏗', title: 'Transformation Scaffolder', desc: 'Generate dbt project scaffolding with models, tests, and macros.' }],
-      validate: [{ agent: 'architectureAgent', icon: '📐', title: 'Documentation Generator', desc: 'Generate data dictionary and architecture documentation.' }]
+      discover: [
+        { agent: 'sourceAssessmentAgent', icon: '📊', title: 'Source Assessment', desc: 'Extract schema metadata, profile columns, and build the knowledge graph.' },
+        { agent: 'dataLineageAgent', icon: '🔗', title: 'Data Lineage', desc: 'Trace column- and table-level lineage.', soon: true },
+        { agent: 'qualityProfilerAgent', icon: '📈', title: 'Quality Profiler', desc: 'Profile data quality and surface anomalies.', soon: true },
+        { agent: 'currentStateArchitecture', icon: '🗺', title: 'Current-State Architecture', desc: 'Document the as-is architecture.', soon: true }
+      ],
+      model: [
+        { agent: 'sttmAgent', icon: '🗺', title: 'STTM Mapper', desc: 'Generate source-to-target mappings with column-level transformations.' },
+        { agent: 'dataModelerAgent', icon: '🏗', title: 'Data Modeler', desc: 'Generate dimensional, Data Vault, or OBT models.' },
+        { agent: 'businessGlossary', icon: '📋', title: 'Business Glossary', desc: 'Build a business glossary from terms and metrics.', soon: true }
+      ],
+      build: [
+        { agent: 'ingestionAgent', icon: '📥', title: 'Ingestion Pipeline', desc: 'Generate ingestion code (COPY, Python, Airbyte).' },
+        { agent: 'transformScaffoldAgent', icon: '🏗', title: 'Transformation Scaffolder', desc: 'Generate dbt project scaffolding with models, tests, and macros.' },
+        { agent: 'ddlGenerator', icon: '📝', title: 'DDL Generator', desc: 'Generate DDL from data models.', soon: true },
+        { agent: 'orchestrationGenerator', icon: '🔄', title: 'Orchestration', desc: 'Generate Airflow/Dagster/Prefect orchestration.', soon: true }
+      ],
+      validate: [
+        { agent: 'architectureAgent', icon: '📐', title: 'Documentation Generator', desc: 'Generate data dictionary and architecture documentation.' },
+        { agent: 'sqlValidator', icon: '✅', title: 'SQL Validator', desc: 'Validate SQL syntax and semantics.', soon: true },
+        { agent: 'testGenerator', icon: '🧪', title: 'Test Generator', desc: 'Generate data quality and unit tests.', soon: true },
+        { agent: 'futureStateArchitecture', icon: '📊', title: 'Future-State Architecture', desc: 'Document the target-state architecture.', soon: true }
+      ]
     };
     var agents = agentsByPhase[phase] || [];
-    if (locked) { paletteAgentCards.innerHTML = '<div style="color:var(--text-muted);font-size:var(--font-size-sm);padding:8px;">Complete the previous phase to unlock agents.</div>'; return; }
     var html = '';
     for (var i = 0; i < agents.length; i++) {
       var a = agents[i];
-      html += '<div class="palette-card" data-agent="' + a.agent + '"><div class="palette-card-header"><span class="palette-card-icon">' + a.icon + '</span><span class="palette-card-title">' + a.title + '</span></div><div class="palette-card-desc">' + a.desc + '</div><button class="primary palette-run-btn">▶ Run</button></div>';
+      var runHtml = a.soon
+        ? '<button class="palette-run-btn" disabled title="Coming soon">Soon</button>'
+        : '<button class="primary palette-run-btn">▶ Run</button>';
+      html += '<div class="palette-card' + (a.soon ? ' soon' : '') + '" data-agent="' + a.agent + '"><div class="palette-card-header"><span class="palette-card-icon">' + a.icon + '</span><span class="palette-card-title">' + a.title + '</span></div><div class="palette-card-desc">' + a.desc + '</div>' + runHtml + '</div>';
     }
     paletteAgentCards.innerHTML = html;
 
@@ -575,7 +511,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     cards.forEach(function (card) {
       var agent = card.getAttribute('data-agent');
       var runBtn = card.querySelector('.palette-run-btn');
-      if (runBtn) {
+      if (runBtn && !runBtn.disabled) {
         runBtn.onclick = function () {
           closePalette();
           if (agent === 'sourceAssessmentAgent') { post('sourceAssessment'); showToast('Running Source Assessment...', ''); }
@@ -586,7 +522,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   }
 
   paletteContinueBtn.onclick = function () { post('executePlan'); closePalette(); };
-  paletteOpenFolderBtn.onclick = function () { post('openProjectFolder'); };
 
   // ── Context Drawer ──
   ctxDrawerToggle.onclick = function () { var isExpanded = ctxDrawer.classList.contains('expanded'); if (isExpanded) { ctxDrawer.classList.remove('expanded'); ctxDrawer.classList.add('collapsed'); ctxDrawerChevron.textContent = '▶'; } else { ctxDrawer.classList.remove('collapsed'); ctxDrawer.classList.add('expanded'); ctxDrawerChevron.textContent = '▼'; } };
@@ -624,7 +559,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   chatInput.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } handleMentionInput(e); };
   chatInput.oninput = function (e) { handleMentionInput(e); };
   function sendMessage() { var text = chatInput.value.trim(); if (!text) return; addMessage('user', text, 'You'); chatInput.value = ''; mentionDropdown.classList.remove('visible'); if (text.startsWith('/')) { handleSlashCommand(text); return; } post('chat', { message: text, schemaContext: '' }); }
-  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/plan': var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; addMessage('ai', 'Generating execution plan...', 'AutoDE'); post('generatePlan', { objective: objective, schemaContext: '' }); break; case '/execute': post('executePlan'); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; case '/project': post('getProjects'); break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
+  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/plan': var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; addMessage('ai', 'Generating execution plan...', 'AutoDE'); post('generatePlan', { objective: objective, schemaContext: '' }); break; case '/execute': post('executePlan'); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
 
   // ── @-mention ──
   function handleMentionInput(e) { var val = chatInput.value; var cursorPos = chatInput.selectionStart; var textBeforeCursor = val.substring(0, cursorPos); var mentionMatch = textBeforeCursor.match(/@(\w*)$/); if (mentionMatch) { var query = mentionMatch[1].toLowerCase(); var items = buildMentionItems(query); if (items.length > 0) { renderMentionDropdown(items); mentionDropdown.classList.add('visible'); } else { mentionDropdown.classList.remove('visible'); } } else { mentionDropdown.classList.remove('visible'); } }
@@ -667,12 +602,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'error': showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
-      case 'projectList':
-        projects = msg.projects || [];
-        activeProjectId = msg.activeProjectId;
-        updateProjectDropdowns();
-        renderPalettePhases();
-        break;
       default: break;
     }
   });
@@ -687,7 +616,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   if (prevState.chatHtml) { chatStream.innerHTML = prevState.chatHtml; if (welcomeBlock) welcomeBlock.style.display = 'none'; }
   setInterval(function () { vscode.setState({ chatHtml: chatStream.innerHTML }); }, 3000);
   post('settingsLoaded', {});
-  post('getProjects', {});
 })();
 </script>
 </body>

@@ -2,11 +2,11 @@ import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings, ProjectMetadata, WorkflowPhase } from './types';
+import { WebviewMessage, PlanState, DataAgentHubSettings } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { GraphManager } from '../context/GraphManager';
 import { ContextFileManager } from '../context/ContextFileManager';
-import { ProjectManager } from '../context/ProjectManager';
+import { applyCspNonce } from './webviewSecurity';
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoDataEngineeringHubSidebar';
@@ -14,7 +14,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private graphManager: GraphManager;
   private contextFileManager?: ContextFileManager;
-  private projectManager?: ProjectManager;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -24,11 +23,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.hub.setStateListener((state: PlanState) => this.postState(state));
     this.hub.setLogListener((message: string) => this.postLog(message));
     this.graphManager = new GraphManager();
-  }
-
-  public setProjectManager(pm: ProjectManager): void {
-    this.projectManager = pm;
-    this.hub.setProjectManager(pm);
   }
 
   public async resolveWebviewView(
@@ -64,9 +58,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postLog(`Context initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Send project list
-    this.postProjectList();
-
     // Detect Copilot and include status in settings payload
     try {
       const { CopilotAdapter } = require('./copilotAdapter') as typeof import('./copilotAdapter');
@@ -89,7 +80,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           try {
             const response = await this.hub.chat(chatMessage, schemaContext);
             this.postMessage('chatResponse', { message: response });
-            this.postProjectList();
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.postMessage('chatResponse', { message: errMsg, error: true });
@@ -106,7 +96,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'executePlan': { await this.hub.executePlan(); break; }
         case 'pausePlan': { await this.hub.pauseExecution(); break; }
-        case 'resetPlan': { await this.hub.resetPlan(); this.postProjectList(); break; }
+        case 'resetPlan': { await this.hub.resetPlan(); break; }
         case 'updateSettings': {
           const settings = (message.settings ?? {}) as Partial<DataAgentHubSettings>;
           const typedSettings: Partial<DataAgentHubSettings> = {
@@ -193,40 +183,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
-        // ── Project Messages ──
-        case 'createProject': {
-          const objective = typeof message.objective === 'string' ? message.objective : '';
-          if (!objective.trim()) { this.postLog('An objective is required to create a project.'); return; }
-          const project = await this.hub.createProject(objective);
-          if (project) {
-            this.postLog(`Project created: ${project.name}`);
-            this.postProjectList();
-          }
-          break;
-        }
-        case 'switchProject': {
-          const projectId = typeof message.projectId === 'string' ? message.projectId : '';
-          if (!projectId) { this.postLog('No project ID specified.'); return; }
-          await this.hub.setActiveProject(projectId);
-          this.postProjectList();
-          break;
-        }
-        case 'openProjectFolder': {
-          const projectId = typeof message.projectId === 'string' ? message.projectId : this.hub.getActiveProject()?.id;
-          if (projectId && this.projectManager) {
-            await this.projectManager.openProjectFolder(projectId);
-          }
-          break;
-        }
-        case 'openPhaseFolder': {
-          const projectId = typeof message.projectId === 'string' ? message.projectId : this.hub.getActiveProject()?.id;
-          const phase = typeof message.phase === 'string' ? message.phase as WorkflowPhase : undefined;
-          if (projectId && phase && this.projectManager) {
-            await this.projectManager.openPhaseFolder(projectId, phase);
-          }
-          break;
-        }
-        case 'getProjects': { this.postProjectList(); break; }
         case 'settingsLoaded': {
           try {
             const { CopilotAdapter } = require('./copilotAdapter') as typeof import('./copilotAdapter');
@@ -268,12 +224,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: 'contextUpdate', stats, dbEntities, bizTerms, queries });
   }
 
-  private postProjectList(): void {
-    const projects = this.hub.getProjects();
-    const activeId = this.hub.getActiveProject()?.id ?? null;
-    this.view?.webview.postMessage({ type: 'projectList', projects, activeProjectId: activeId });
-  }
-
   private postMessage(type: string, payload: object = {}): void {
     const recordPayload = payload as Record<string, unknown>;
     this.view?.webview.postMessage({ type, ...recordPayload });
@@ -281,6 +231,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   private getHtmlForSidebar(webview: vscode.Webview): string {
     const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'sidebar.html');
-    return fs.readFileSync(htmlPath.fsPath, 'utf8');
+    return applyCspNonce(fs.readFileSync(htmlPath.fsPath, 'utf8'), webview.cspSource);
   }
 }

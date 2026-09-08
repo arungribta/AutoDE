@@ -40,8 +40,7 @@
     "onCommand:autoDataEngineeringHub.openSidebar",
     "onCommand:autoDataEngineeringHub.generatePlan",
     "onCommand:autoDataEngineeringHub.executePlan",
-    "onCommand:autoDataEngineeringHub.resetSession",
-    "onCommand:autoDataEngineeringHub.newProject"
+    "onCommand:autoDataEngineeringHub.resetSession"
   ],
   "contributes": {
     "commands": [
@@ -60,10 +59,6 @@
       {
         "command": "autoDataEngineeringHub.resetSession",
         "title": "AutoDE: Reset Session"
-      },
-      {
-        "command": "autoDataEngineeringHub.newProject",
-        "title": "AutoDE: New Project"
       },
       {
         "command": "autoDataEngineeringHub.testConnection",
@@ -252,6 +247,10 @@
         "autoDataEngineeringHub.llmEndpoint": {
           "type": "string", "default": "",
           "description": "Custom LLM endpoint."
+        },
+        "autoDataEngineeringHub.artifactDirectory": {
+          "type": "string", "default": "auto-de",
+          "description": "Folder (relative to the workspace root) where AutoDE writes generated artifacts."
         },
         "autoDataEngineeringHub.extensionDisplayName": {
           "type": "string", "default": "AutoDE — Data Engineering Workspace",

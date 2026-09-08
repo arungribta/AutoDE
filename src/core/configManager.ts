@@ -33,6 +33,7 @@ export class ConfigurationManager {
       activeLlmProvider: config.get<LlmProvider>('activeLlmProvider', 'copilot'),
       activeLlmModel: config.get<string>('activeLlmModel', 'gpt-4o-mini'),
       llmEndpoint: config.get<string>('llmEndpoint', ''),
+      artifactDirectory: config.get<string>('artifactDirectory', 'auto-de'),
       copilotProgrammaticConsent: config.get<boolean>('copilotProgrammaticConsent', false)
     };
   }
@@ -61,6 +62,7 @@ export class ConfigurationManager {
      ['activeLlmProvider', settings.activeLlmProvider],
      ['activeLlmModel', settings.activeLlmModel],
      ['llmEndpoint', settings.llmEndpoint],
+     ['artifactDirectory', settings.artifactDirectory],
      ['copilotProgrammaticConsent', settings.copilotProgrammaticConsent]
     ];
 

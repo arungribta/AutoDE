@@ -22,15 +22,26 @@ function createMock(opts = {}) {
   const known = ['github.copilot-chat', 'GitHub.copilot-chat', 'github.copilot-chat-nightly', 'GitHub.copilot-chat-nightly'];
   return {
     window: { showInformationMessage: async () => {}, showErrorMessage: async () => {},
-      registerWebviewViewProvider: () => ({ dispose() {} }), createOutputChannel: () => ({ show() {}, appendLine() {} }) },
+      registerWebviewViewProvider: () => ({ dispose() {} }),
+      registerCustomEditorProvider: () => ({ dispose() {} }),
+      createOutputChannel: () => ({ show() {}, appendLine() {} }) },
     commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async () => {} },
     workspace: { getConfiguration: () => ({ get: (_k, f) => f, update: async () => {} }),
-      openTextDocument: async () => ({ lineCount: 1, lineAt: () => ({ text: '' }) }) },
+      openTextDocument: async () => ({ lineCount: 1, lineAt: () => ({ text: '' }) }),
+      fs: { createDirectory: async () => {}, readFile: async () => { throw new Error('ENOENT'); }, writeFile: async () => {}, rename: async () => {} },
+      createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }),
+      workspaceFolders: undefined },
     extensions: { getExtension: (id) => installed && known.includes(id) ? { id, isActive: true } : undefined, all: [] },
     lm: { selectChatModels: async (sel) => { if (!installed) return []; if (sel?.vendor && sel.vendor !== 'copilot') return []; return models; } },
     LanguageModelChatMessage: { User: (c) => ({ role: 1, content: c }), Assistant: (c) => ({ role: 2, content: c }) },
-    Uri: { file: (p) => ({ fsPath: p, toString: () => p }) },
-    Selection: class {}, Position: class {},
+    Uri: {
+      file: (p) => ({ fsPath: p, toString: () => p }),
+      joinPath: (...parts) => {
+        const path = parts.map((p) => (p && typeof p === 'object' && p.fsPath) ? p.fsPath : String(p)).join('/');
+        return { fsPath: path, toString: () => path };
+      }
+    },
+    Selection: class {}, Position: class {}, RelativePattern: class {},
     CancellationTokenSource: class { constructor() { this.token = {}; } cancel() {} },
     ConfigurationTarget: { Global: 1 }, EventEmitter: class {}
   };
