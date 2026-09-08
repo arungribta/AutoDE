@@ -13,6 +13,21 @@
       "outFiles": [
         "${workspaceFolder}/dist/**/*.js"
       ],
+      "preLaunchTask": "npm: compile",
+      "noDebug": true
+    },
+    {
+      "name": "Run Extension - Debug (attach inspector)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-extension=saoudrizwan.claude-dev"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ],
       "preLaunchTask": "npm: compile"
     }
   ]
