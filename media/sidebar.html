@@ -247,6 +247,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .spec-q-options { display: flex; flex-wrap: wrap; gap: 6px; }
 .spec-q-option { background: var(--surface-active); border: 1px solid var(--border-soft); border-radius: var(--radius-pill); color: var(--text-primary, inherit); padding: 4px 10px; font-size: var(--font-size-sm); cursor: pointer; }
 .spec-q-option:hover { border-color: var(--accent); color: var(--accent); }
+.spec-flow { border-left: 2px solid var(--border-soft); padding-left: 8px; margin: 4px 0; }
+.spec-flow-route { font-weight: 600; }
+.spec-flow-desc { font-size: var(--font-size-sm); color: var(--text-muted); }
+.spec-flow-meta { font-size: var(--font-size-sm); color: var(--accent); }
 
 /* ── Artifact Cards ── */
 .artifact-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); margin-top: 6px; overflow: hidden; }
@@ -553,6 +557,30 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     return html + '</ul>';
   }
 
+  function specDataFlowsHtml(flows) {
+    if (!flows || flows.length === 0) { return specListHtml([]); }
+    var html = '';
+    for (var i = 0; i < flows.length; i++) {
+      var f = flows[i];
+      html += '<div class="spec-flow"><div class="spec-flow-route">' + escapeHtml(f.source || '?') + ' → ' + escapeHtml(f.target || '?') + '</div>';
+      if (f.description) { html += '<div class="spec-flow-desc">' + escapeHtml(f.description) + '</div>'; }
+      if (f.frequency) { html += '<div class="spec-flow-meta">⏱ ' + escapeHtml(f.frequency) + '</div>'; }
+      if (f.transformations && f.transformations.length > 0) { html += specListHtml(f.transformations); }
+      html += '</div>';
+    }
+    return html;
+  }
+
+  function specSourceCatalogHtml(entries) {
+    if (!entries || entries.length === 0) { return specListHtml([]); }
+    var html = '<ul class="spec-list">';
+    for (var i = 0; i < entries.length; i++) {
+      var s = entries[i];
+      html += '<li>' + escapeHtml(s.name) + ' <span style="opacity:0.6">(' + escapeHtml(s.type) + ')</span>' + (s.description ? ' — ' + escapeHtml(s.description) : '') + '</li>';
+    }
+    return html + '</ul>';
+  }
+
   function specBodyHtml(spec) {
     var scopeIn = (spec.scope && spec.scope.in) || [];
     var scopeOut = (spec.scope && spec.scope.out) || [];
@@ -567,6 +595,13 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     if (spec.domain) { html += '<div class="spec-field"><div class="spec-field-label">Domain</div><div class="spec-field-value">' + escapeHtml(spec.domain) + '</div></div>'; }
     if (spec.keyEntities && spec.keyEntities.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Key Entities</div>' + specListHtml(spec.keyEntities) + '</div>'; }
     if (spec.stakeholders && spec.stakeholders.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Stakeholders</div>' + specListHtml(spec.stakeholders) + '</div>'; }
+    if (spec.businessRequirements && spec.businessRequirements.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Business Requirements</div>' + specListHtml(spec.businessRequirements) + '</div>'; }
+    if (spec.sourceCatalog && spec.sourceCatalog.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Source Catalog</div>' + specSourceCatalogHtml(spec.sourceCatalog) + '</div>'; }
+    if (spec.dataFlows && spec.dataFlows.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Data Flows</div>' + specDataFlowsHtml(spec.dataFlows) + '</div>'; }
+    if (spec.transformations && spec.transformations.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Transformations</div>' + specListHtml(spec.transformations) + '</div>'; }
+    if (spec.dependencies && spec.dependencies.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Dependencies</div>' + specListHtml(spec.dependencies) + '</div>'; }
+    if (spec.acceptanceCriteria && spec.acceptanceCriteria.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Acceptance Criteria</div>' + specListHtml(spec.acceptanceCriteria) + '</div>'; }
+    if (spec.implementationConsiderations && spec.implementationConsiderations.length > 0) { html += '<div class="spec-field"><div class="spec-field-label">Implementation Considerations</div>' + specListHtml(spec.implementationConsiderations) + '</div>'; }
     var stamp = (spec.updatedAt || '').replace('T', ' ').slice(0, 16);
     html += '<div class="spec-meta">' + escapeHtml(spec.id || '') + (stamp ? ' · updated ' + escapeHtml(stamp) : '') + '</div>';
     return html;

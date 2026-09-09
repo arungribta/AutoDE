@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BusinessProblemSpec, SpecStatus } from '../core/types';
+import { BusinessProblemSpec, DataFlow, SourceEntry, SpecProvenance, SpecStatus } from '../core/types';
 
 /**
  * Manages the Business Problem Specification — the versioned system of record.
@@ -116,7 +116,17 @@ export class SpecManager implements vscode.Disposable {
       constraints: [...spec.constraints],
       assumptions: [...spec.assumptions],
       stakeholders: spec.stakeholders ? [...spec.stakeholders] : undefined,
-      keyEntities: spec.keyEntities ? [...spec.keyEntities] : undefined
+      keyEntities: spec.keyEntities ? [...spec.keyEntities] : undefined,
+      businessRequirements: spec.businessRequirements ? [...spec.businessRequirements] : undefined,
+      transformations: spec.transformations ? [...spec.transformations] : undefined,
+      dependencies: spec.dependencies ? [...spec.dependencies] : undefined,
+      acceptanceCriteria: spec.acceptanceCriteria ? [...spec.acceptanceCriteria] : undefined,
+      implementationConsiderations: spec.implementationConsiderations ? [...spec.implementationConsiderations] : undefined,
+      dataFlows: spec.dataFlows
+        ? spec.dataFlows.map((flow) => ({ ...flow, transformations: flow.transformations ? [...flow.transformations] : undefined }))
+        : undefined,
+      sourceCatalog: spec.sourceCatalog ? spec.sourceCatalog.map((entry) => ({ ...entry })) : undefined,
+      provenance: spec.provenance ? spec.provenance.map((entry) => ({ ...entry })) : undefined
     };
   }
 
@@ -151,6 +161,18 @@ export class SpecManager implements vscode.Disposable {
     if (spec.domain) L.push(`domain: ${spec.domain}`);
     if (spec.stakeholders && spec.stakeholders.length > 0) { L.push('stakeholders:'); this.pushList(L, spec.stakeholders); }
     if (spec.keyEntities && spec.keyEntities.length > 0) { L.push('keyEntities:'); this.pushList(L, spec.keyEntities); }
+    const v2: Record<string, unknown> = {};
+    if (spec.businessRequirements && spec.businessRequirements.length > 0) v2.businessRequirements = spec.businessRequirements;
+    if (spec.dataFlows && spec.dataFlows.length > 0) v2.dataFlows = spec.dataFlows;
+    if (spec.transformations && spec.transformations.length > 0) v2.transformations = spec.transformations;
+    if (spec.dependencies && spec.dependencies.length > 0) v2.dependencies = spec.dependencies;
+    if (spec.acceptanceCriteria && spec.acceptanceCriteria.length > 0) v2.acceptanceCriteria = spec.acceptanceCriteria;
+    if (spec.implementationConsiderations && spec.implementationConsiderations.length > 0) v2.implementationConsiderations = spec.implementationConsiderations;
+    if (spec.sourceCatalog && spec.sourceCatalog.length > 0) v2.sourceCatalog = spec.sourceCatalog;
+    if (spec.provenance && spec.provenance.length > 0) v2.provenance = spec.provenance;
+    if (Object.keys(v2).length > 0) {
+      L.push(`comprehensive: ${JSON.stringify(v2)}`);
+    }
     L.push(`createdAt: ${spec.createdAt}`);
     L.push(`updatedAt: ${spec.updatedAt}`);
     if (spec.approvedAt) L.push(`approvedAt: ${spec.approvedAt}`);
@@ -183,7 +205,7 @@ export class SpecManager implements vscode.Disposable {
       return result;
     };
 
-    return {
+    const spec: BusinessProblemSpec = {
       id: scalar('id') || `bps-${Date.now().toString(36)}`,
       version: parseInt(scalar('version'), 10) || 1,
       status: (scalar('status') as SpecStatus) || 'draft',
@@ -201,5 +223,24 @@ export class SpecManager implements vscode.Disposable {
       approvedAt: scalar('approvedAt') || undefined,
       approvedBy: scalar('approvedBy') || undefined
     };
+
+    const comprehensiveLine = scalar('comprehensive');
+    if (comprehensiveLine) {
+      try {
+        const v2 = JSON.parse(comprehensiveLine) as Record<string, unknown>;
+        if (Array.isArray(v2.businessRequirements)) spec.businessRequirements = v2.businessRequirements as string[];
+        if (Array.isArray(v2.dataFlows)) spec.dataFlows = v2.dataFlows as DataFlow[];
+        if (Array.isArray(v2.transformations)) spec.transformations = v2.transformations as string[];
+        if (Array.isArray(v2.dependencies)) spec.dependencies = v2.dependencies as string[];
+        if (Array.isArray(v2.acceptanceCriteria)) spec.acceptanceCriteria = v2.acceptanceCriteria as string[];
+        if (Array.isArray(v2.implementationConsiderations)) spec.implementationConsiderations = v2.implementationConsiderations as string[];
+        if (Array.isArray(v2.sourceCatalog)) spec.sourceCatalog = v2.sourceCatalog as SourceEntry[];
+        if (Array.isArray(v2.provenance)) spec.provenance = v2.provenance as SpecProvenance[];
+      } catch {
+        // Ignore a malformed comprehensive block; keep the core spec intact.
+      }
+    }
+
+    return spec;
   }
 }

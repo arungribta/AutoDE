@@ -408,6 +408,53 @@ async function main() {
   });
 
 
+  await test('SpecManager round-trips comprehensive v2 fields', async () => {
+    function specManagerMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
+          }
+        }
+      };
+    }
+    const mock = specManagerMock();
+    delete require.cache[require.resolve('../dist/context/SpecManager.js')];
+    const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
+    const ws = { fsPath: '/ws' };
+    const mgr = new SpecManager(ws, () => {});
+    await withMock(mock, () => mgr.initialize());
+    const spec = {
+      id: 'bps-1', version: 1, status: 'draft', problemStatement: 'p', objectives: ['o'], successCriteria: [],
+      scope: { in: ['a'], out: [] }, constraints: [], assumptions: [], domain: 'd', stakeholders: ['s'], keyEntities: ['e'],
+      businessRequirements: ['br'],
+      dataFlows: [{ id: 'f1', source: 'src', target: 'tgt', description: 'd', frequency: 'daily' }],
+      transformations: ['x'], dependencies: ['y'], acceptanceCriteria: ['z'], implementationConsiderations: ['w'],
+      sourceCatalog: [{ name: 'n', type: 'database' }],
+      provenance: [{ field: 'dataFlows', source: 'question', questionId: 'q1' }],
+      createdAt: 'c', updatedAt: 'u'
+    };
+    await withMock(mock, () => mgr.saveSpec(spec));
+    const mgr2 = new SpecManager(ws, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    const loaded = mgr2.getSpec();
+    assert.strictEqual(loaded.businessRequirements[0], 'br');
+    assert.strictEqual(loaded.dataFlows[0].target, 'tgt');
+    assert.strictEqual(loaded.sourceCatalog[0].type, 'database');
+    assert.strictEqual(loaded.provenance[0].questionId, 'q1');
+    assert.deepStrictEqual(loaded.implementationConsiderations, ['w']);
+  });
+
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

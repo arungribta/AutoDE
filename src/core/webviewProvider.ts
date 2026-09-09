@@ -470,10 +470,25 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const engine = this.specOpsEngine;
     if (!engine) { return; }
     engine.setState('synthesizing');
-    this.postLog('Requirements collected. Synthesizing the Business Problem Specification...');
-    await this.draftSpec(composeSynthesisPrompt(engine.getSession()));
-    this.specOpsEngine = undefined;
-    this.pendingSpecQuestions = [];
+    this.postLog('Requirements collected. Synthesizing the comprehensive Business Problem Specification...');
+    try {
+      const previous = this.specManager?.getSpec();
+      const spec = await this.hub.synthesizeComprehensiveSpec(engine.getSession(), previous);
+      if (this.specManager) {
+        await this.specManager.saveSpec(spec);
+        this.hub.setSpec(spec.id, spec.version);
+        this.postSpec();
+      }
+      this.postMessage('specDrafted', { spec });
+      this.postLog('Comprehensive Business Problem Specification drafted. Review it in the Workflow Palette (🧰) and approve it.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.postLog(`Synthesis failed (${message}); falling back to a basic draft.`);
+      await this.draftSpec(composeSynthesisPrompt(engine.getSession()));
+    } finally {
+      this.specOpsEngine = undefined;
+      this.pendingSpecQuestions = [];
+    }
   }
 
   private postSpecQuestion(question: SpecIntakeQuestion): void {
