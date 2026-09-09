@@ -1,16 +1,17 @@
 # AutoDE — Technical Design Document
 
-**Last Updated:** 2026-09-08
-**Version:** 0.6.0
-**Status:** v0.7.0 code committed. Implemented:
+**Last Updated:** 2026-09-09
+**Version:** 0.8.0
+**Status:** v0.8.0 code committed. Implemented:
 - Single-workspace model (`ArtifactWriter`, `autoDE.artifactDirectory`; `ProjectManager` removed)
 - Context Layer IA: unified envelope (`src/context/types.ts`, `docs/schemas/context-envelope.schema.json`), `SourceRegistry` (`sources.yaml`), `SynthesisPipeline`
 - Webview CSP nonce fix, workflow palette rework, Cline dev-host workaround in `.vscode/launch.json`
 - **Business Problem Specification (spec-driven orchestration)** — see §2. Implemented: BPS types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec` (LLM-based spec drafting/refining with version semantics), spec-aware chat routing (no-spec → draft, draft → revise, approved → grounded chat), palette + chat spec card review/approve/revise/open UI, `/spec` command, and `generatePlanFromSpec` (spec-driven plan generation).
 - **Spec-driven phase inference + orchestration** — see §2.5/§2.7. Deterministic `inferPhases()` (keyword evidence + `scope.out` exclusions + dependency chaining) turns an approved BPS into a required-phase set; plan generation is constrained to those phases; the palette renders the live phase status view (completed / in-progress / blocked / pending / unrequired).
 - **Agentic Specification Generation (SpecOps)** — see §2.8. A Superpowers-inspired, DE-tailored requirements flow: a `SpecOpsEngine` state machine + `skills/` registry drive an adaptive questioning conversation (chat bubbles + dynamic intake forms), then synthesize the comprehensive v2 spec (business requirements, data flows, transformations, dependencies, acceptance criteria, implementation considerations, source catalog, provenance).
+- **Phase 3 (part 1) — context-loading primitives** — see §10. Real YAML parser (`yaml` dep + `src/context/Yaml.ts`), AJV envelope validator (`src/context/ContextValidator.ts`), atomic compiled-graph persistence (`src/context/GraphPersistence.ts` → `derived/graph.json`).
 
-Next: **Phase 3 (context loading)** and beyond — see §10. The remaining SpecOps polish (skills authoring guidance, intake-session persistence) is tracked in §10.
+Next: **Phase 3 (part 2 — layered context loading)** and beyond — see §10. Part 2 covers `ContextFileManager` layered loading (`context/**` + `derived/graph.json` + AJV) and migrating the remaining hand-rolled YAML parsers (`SpecManager`, `SourceRegistry`, `TargetConfigManager`). The remaining SpecOps polish (skills authoring guidance, intake-session persistence) is tracked in §10.
 
 ---
 
@@ -988,11 +989,15 @@ AutoDE/
 │   ├── context/
 │   │   ├── ArtifactWriter.ts             # Artifacts → auto-de/<phase>/
 │   │   ├── ContextFileManager.ts         # .ai-context/ file management
+│   │   ├── ContextValidator.ts           # AJV envelope validation (Phase 3 pt 1)
 │   │   ├── GraphManager.ts               # In-memory knowledge graph
+│   │   ├── GraphPersistence.ts           # Atomic derived/graph.json I/O (Phase 3 pt 1)
 │   │   ├── SourceRegistry.ts             # sources.yaml read/write
+│   │   ├── SpecManager.ts                # BPS persistence/versioning/history
 │   │   ├── SynthesisPipeline.ts          # Rule-based source → graph
 │   │   ├── TargetConfigManager.ts        # Target env profiles
-│   │   └── types.ts                      # Context types + envelope
+│   │   ├── types.ts                      # Context types + envelope
+│   │   └── Yaml.ts                       # Real YAML parse/stringify (Phase 3 pt 1)
 │   ├── dqm/
 │   │   ├── BaseAdapter.ts
 │   │   ├── ConnectionManager.ts
@@ -1034,7 +1039,7 @@ AutoDE/
 > 1. **Business Problem Specification** — ✅ DONE. Spec types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec`, spec-aware chat routing, review/approve UI, `/spec`, `generatePlanFromSpec`.
 > 2. **Spec-driven phase inference + orchestration** — ✅ DONE (v0.6.0). Deterministic `inferPhases()` in `src/core/phaseInference.ts` infers the required phases + dependencies from the approved BPS; plan generation is constrained to those phases (`buildPlanPrompt`); the palette renders the live status view (completed / in-progress / blocked / pending / unrequired), and phase statuses recompute on every state emit.
 > 2b. **Agentic Specification Generation (SpecOps)** — ✅ DONE (v0.7.0). Superpowers-inspired, DE-tailored requirements flow: `skills/` registry + `SpecOpsEngine` state machine + adaptive questioning (chat bubbles + dynamic intake forms) + comprehensive v2 synthesis with provenance. See §2.8.
-> 3. **Phase 3** — layered context loading (`context/**` + `derived/graph.json` + AJV validation of the context envelope).
+> 3. **Phase 3** — layered context loading. ✅ PART 1 (v0.8.0): real YAML parser (`src/context/Yaml.ts`), AJV envelope validation (`src/context/ContextValidator.ts`), atomic graph persistence (`src/context/GraphPersistence.ts`). ⏳ PART 2: `ContextFileManager` layered loading (`context/**` + `derived/graph.json` + AJV), migrate `SpecManager`/`SourceRegistry`/`TargetConfigManager` to the real parser, per-kind schemas.
 > 4. **Phase 4** — real Snowflake/Databricks adapters (wire `snowflake-sdk`).
 > 5. **Phase 5** — ContextRetriever + vector engine (embedded, no server).
 > 6. **Phase 6** — Copilot consent UI, telemetry, unit/integration tests.
@@ -1201,15 +1206,16 @@ AutoDE/
 - For a sidebar-sized UI, the complexity doesn't yet warrant a framework
 - Can be split later if the UI grows significantly
 
-### 10.6 Why Custom YAML Parser Over js-yaml?
+### 10.6 YAML Parsing Strategy
 
-**Decision:** Lightweight custom parser for `.ai-context/` YAML files.
+**Original decision:** Lightweight custom parser for `.ai-context/` YAML files.
 
-**Rationale:**
+**Original rationale:**
 - Avoids adding a native dependency that complicates VSIX packaging
 - The YAML structures needed (business-context.yaml, verified-queries.yaml) are simple and flat
 - A full YAML parser would be overkill for these specific file formats
-- Can be replaced with `js-yaml` later if more complex YAML structures are needed
+
+**Superseded (v0.8.0, Phase 3 part 1):** the hand-rolled parsers are being replaced with the **`yaml`** library (pure JS, no native bindings → still VSIX-safe) via `src/context/Yaml.ts` (`parseYaml`/`stringifyYaml`). Structure validation uses **`ajv`** (`src/context/ContextValidator.ts`) against `docs/schemas/context-envelope.schema.json`. Remaining migration: `SpecManager`, `SourceRegistry`, `TargetConfigManager`, `ContextFileManager` (tracked in §10 Phase 3 part 2; requirements §16 #6).
 
 ---
 

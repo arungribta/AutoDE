@@ -2,7 +2,7 @@
 
 This document is the authoritative reference for AutoDE's design, implementation, QA, and acceptance criteria. It covers: UI/UX, the Enterprise Context Layer (information architecture), the single-workspace artifact model, and GitHub Copilot integration.
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 Author: AutoDE Engineering
 
 ---
@@ -424,7 +424,7 @@ Phase 0 — Single-workspace model & artifacts
 
 Phase 1 — Context envelope & schema
 - ✅ Extend `src/context/types.ts` with the unified envelope (identity + provenance + version + ownership).
-- ✅ Add per-kind JSON Schemas (`docs/schemas/context-envelope.schema.json`; `content` union deferred, `ajv` runtime wired in Phase 3).
+- ✅ Add per-kind JSON Schemas (`docs/schemas/context-envelope.schema.json`; `content` union deferred, `ajv` runtime wired in Phase 3 part 1 via `src/context/ContextValidator.ts`).
 
 Phase 2 — Source registry & synthesis
 - ✅ Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
@@ -446,8 +446,8 @@ Phase 2.6 — Agentic Specification Generation (SpecOps)
 - ✅ Comprehensive v2 synthesis (`src/core/specSynthesis.ts` + `AgentHub.synthesizeComprehensiveSpec`) with provenance, persisted by `SpecManager` and rendered in the review card.
 
 Phase 3 — Layered context loading
-- Rework `ContextFileManager` to load authoritative `context/**` + compiled `derived/graph.json`, with AJV validation.
-- Persist the compiled graph atomically.
+- ✅ Part 1 (v0.8.0): real YAML parser (`src/context/Yaml.ts` over the `yaml` library), AJV envelope validator (`src/context/ContextValidator.ts`), atomic compiled-graph persistence (`src/context/GraphPersistence.ts` → `derived/graph.json`).
+- ⏳ Part 2: rework `ContextFileManager` to load authoritative `context/**` + compiled `derived/graph.json`, with AJV validation; wire the real parser into `SpecManager`, `SourceRegistry`, `TargetConfigManager`; add per-kind AJV schemas.
 
 Phase 4 — Real data adapters
 - Wire `snowflake-sdk` into `SnowflakeAdapter` (real connect/query); same for Databricks.
@@ -486,7 +486,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 ## 14. Files & Artifacts
 
 - UI webviews: `media/sidebar.html`, `media/panel.html`, `media/editors/*.html`
-- Context layer: `src/context/` — `types.ts`, `GraphManager.ts`, `ContextFileManager.ts`, `SourceRegistry.ts`, `SynthesisPipeline.ts`, `ArtifactWriter.ts`, `SpecManager.ts` (new)
+- Context layer: `src/context/` — `types.ts`, `Yaml.ts` (real YAML parser), `ContextValidator.ts` (AJV envelope validation), `GraphPersistence.ts` (atomic graph snapshot I/O), `GraphManager.ts`, `ContextFileManager.ts`, `SourceRegistry.ts`, `SynthesisPipeline.ts`, `ArtifactWriter.ts`, `SpecManager.ts`
 - Copilot adapter: `src/core/copilotAdapter.ts`
 - Webview providers: `src/core/webviewProvider.ts`, `src/core/panelProvider.ts`
 - Agent hub: `src/core/agentHub.ts`
@@ -503,7 +503,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 - [x] Webview: LLM settings show Copilot status and consent checkbox; test button present.
 - [x] Envelope: unified metadata envelope (identity + provenance + version + ownership) implemented in `src/context/types.ts` (per-kind `content` union deferred).
 - [x] GraphManager: in-memory graph with indexes, BFS traversal, serialization.
-- [~] ContextFileManager: watcher + loading present; AJV validation and layered (`context/` + `derived/`) loading NOT yet implemented.
+- [~] ContextFileManager: watcher + loading present; AJV envelope validation + real YAML parser + atomic graph persistence implemented (Phase 3 part 1); layered (`context/` + `derived/`) loading NOT yet wired (`ContextFileManager`/`SourceRegistry`/`TargetConfigManager` parser migration pending — Phase 3 part 2).
 - [x] SourceRegistry: `sources.yaml` read/write + UI form.
 - [x] SynthesisPipeline: rule-based source ingestion → derived nodes/edges with provenance (LLM-assisted extraction deferred).
 - [x] ArtifactWriter: artifacts persisted to `auto-de/<phase>/` (atomic writes).
@@ -527,7 +527,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 3. ✅ Implement `SynthesisPipeline` (rule-based → derived nodes/edges with provenance; LLM-assisted extraction deferred).
 4. ✅ Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`) and remove `ProjectManager`/`ProjectRegistry`.
 5. ✅ Implement the **Business Problem Specification** layer: types, `SpecManager`, `generateSpec`, review/approve UI, `generatePlanFromSpec`, traceability.
-6. Replace hand-rolled YAML parsers with a real parser + AJV per-kind schemas (Phase 3).
+6. ⏳ Replace hand-rolled YAML parsers with a real parser + AJV per-kind schemas (Phase 3). Part 1 ✅ (v0.8.0): `yaml` dep + `src/context/Yaml.ts`, `ajv` dep + `src/context/ContextValidator.ts`, `src/context/GraphPersistence.ts`. Part 2 ⏳: migrate `SpecManager`/`SourceRegistry`/`TargetConfigManager`/`ContextFileManager` to the real parser + layered loading + per-kind schemas.
 7. Implement real Snowflake/Databricks adapter execution (currently stubbed).
 8. Implement `deactivate()` cleanup; add unit tests for the context layer, SpecManager, and adapters.
 
