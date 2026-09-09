@@ -225,6 +225,20 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .phase-row-meta { font-size: var(--font-size-sm); color: var(--text-muted); display: flex; gap: 12px; }
 .phase-row-actions { display: flex; gap: 6px; margin-top: 6px; }
 
+/* ── Phase live-status (inferred workflow) ── */
+.phase-row.status-completed { border-left: 3px solid var(--success); }
+.phase-row.status-in-progress { border-left: 3px solid var(--accent); }
+.phase-row.status-blocked { border-left: 3px solid var(--warning); }
+.phase-row.status-pending { border-left: 3px solid var(--border-soft); }
+.phase-row.status-unrequired { opacity: 0.55; }
+.phase-row.unrequired:hover { background: var(--surface-hover); cursor: default; }
+.phase-badge { font-size: var(--font-size-sm); padding: 1px 8px; border-radius: var(--radius-pill); font-weight: 500; white-space: nowrap; }
+.phase-badge.completed { background: var(--success-subtle); color: var(--success); }
+.phase-badge.in-progress { background: var(--accent-subtle); color: var(--accent); }
+.phase-badge.blocked { background: rgba(255, 193, 7, 0.15); color: var(--warning); }
+.phase-badge.pending { background: var(--border-subtle); color: var(--text-muted); }
+.phase-badge.unrequired { background: transparent; color: var(--text-muted); }
+
 /* ── Artifact Cards ── */
 .artifact-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); margin-top: 6px; overflow: hidden; }
 .artifact-card-header { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--border-subtle); font-weight: 600; font-size: var(--font-size-sm); cursor: pointer; user-select: none; }
@@ -429,6 +443,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   let mentionEntities = [];
   let sessionStatus = 'idle';
   let currentSpec = null;
+  let inferredPhases = null;
 
   // ── Toast ──
   function showToast(msg, type) { if (toastTimer) clearTimeout(toastTimer); toast.textContent = msg; toast.className = 'toast visible ' + (type || ''); toastTimer = setTimeout(function () { toast.classList.remove('visible'); }, 2500); }
@@ -592,7 +607,31 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   }
 
   var palettePhase = 'discover';
+  function getPhaseInfo(key) {
+    if (!inferredPhases) { return null; }
+    for (var i = 0; i < inferredPhases.length; i++) { if (inferredPhases[i].phase === key) { return inferredPhases[i]; } }
+    return null;
+  }
+  function updatePaletteContinue() {
+    if (!paletteContinueBtn) { return; }
+    var hasPlan = currentPlan && currentPlan.steps && currentPlan.steps.length > 0;
+    var approvedNoPlan = currentSpec && currentSpec.status === 'approved' && !hasPlan;
+    if (approvedNoPlan) {
+      paletteContinueBtn.textContent = '📋 Generate Plan from Specification';
+      paletteContinueBtn.disabled = false;
+    } else if (hasPlan) {
+      paletteContinueBtn.textContent = '▶ Continue Workflow';
+      paletteContinueBtn.disabled = false;
+    } else {
+      paletteContinueBtn.textContent = '▶ Continue Workflow';
+      paletteContinueBtn.disabled = true;
+    }
+  }
+  function phaseStatusText(status) {
+    return { completed: '✓ Completed', 'in-progress': '⏳ In Progress', blocked: '⛔ Blocked', pending: '○ Pending', unrequired: 'Not required' }[status] || '○ Pending';
+  }
   function renderPalettePhases() {
+    if (!palettePhases) { return; }
     var phases = [
       { key: 'discover', label: '🔍 Discover', icon: '🔍' },
       { key: 'model', label: '🎨 Model', icon: '🎨' },
@@ -600,11 +639,31 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       { key: 'validate', label: '✅ Validate & Document', icon: '✅' }
     ];
 
-    var html = '<div class="section-title">Workflow Phases</div>';
+    // Keep the selected phase on a phase that is still required/available.
+    var firstRequired = null;
+    for (var f = 0; f < phases.length; f++) {
+      var fi = getPhaseInfo(phases[f].key);
+      if (fi && fi.required && !firstRequired) { firstRequired = phases[f].key; }
+    }
+    if (firstRequired) {
+      var currentInfo = getPhaseInfo(palettePhase);
+      if (!currentInfo || !currentInfo.required) { palettePhase = firstRequired; }
+    }
+
+    var html = '<div class="section-title">Workflow Phases <span style="opacity:0.6;font-weight:400;font-size:11px;">(inferred from the Business Specification)</span></div>';
     for (var j = 0; j < phases.length; j++) {
       var ph = phases[j];
+      var info = getPhaseInfo(ph.key);
+      var status = info ? info.status : 'pending';
+      var required = info ? info.required : true;
+      var reason = info ? info.reason : 'Approve the specification to infer the workflow.';
       var isActive = ph.key === palettePhase;
-      html += '<div class="phase-row' + (isActive ? ' active' : '') + '" data-phase="' + ph.key + '"><div class="phase-row-header"><span class="phase-row-title">' + ph.label + '</span></div></div>';
+      var dependsOn = info && info.dependsOn && info.dependsOn.length > 0 ? info.dependsOn.join(' → ') : '';
+      html += '<div class="phase-row status-' + status + (required ? '' : ' unrequired') + (isActive ? ' active' : '') + '" data-phase="' + ph.key + '">' +
+        '<div class="phase-row-header"><span class="phase-row-title">' + ph.label + '</span><span class="phase-badge ' + status + '">' + phaseStatusText(status) + '</span></div>' +
+        '<div class="phase-row-meta">' + escapeHtml(reason) + '</div>' +
+        (dependsOn ? '<div class="phase-row-meta">after: ' + escapeHtml(dependsOn) + '</div>' : '') +
+        '</div>';
     }
     palettePhases.innerHTML = html;
 
@@ -618,6 +677,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     });
 
     renderPaletteAgentCards(palettePhase);
+    updatePaletteContinue();
   }
 
   function renderPaletteAgentCards(phase) {
@@ -647,12 +707,24 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       ]
     };
     var agents = agentsByPhase[phase] || [];
+    var info = getPhaseInfo(phase);
+    var phaseNotRequired = info && !info.required;
+    var phaseCompleted = info && info.status === 'completed';
+    if (phaseNotRequired) {
+      paletteAgentCards.innerHTML = '<div class="spec-empty">No agents are required for this phase under the current Business Problem Specification.</div>';
+      return;
+    }
     var html = '';
     for (var i = 0; i < agents.length; i++) {
       var a = agents[i];
-      var runHtml = a.soon
-        ? '<button class="palette-run-btn" disabled title="Coming soon">Soon</button>'
-        : '<button class="primary palette-run-btn">▶ Run</button>';
+      var runHtml;
+      if (a.soon) {
+        runHtml = '<button class="palette-run-btn" disabled title="Coming soon">Soon</button>';
+      } else if (phaseCompleted) {
+        runHtml = '<button class="palette-run-btn" disabled title="Phase completed for the current specification">✓ Completed</button>';
+      } else {
+        runHtml = '<button class="primary palette-run-btn">▶ Run</button>';
+      }
       html += '<div class="palette-card' + (a.soon ? ' soon' : '') + '" data-agent="' + a.agent + '"><div class="palette-card-header"><span class="palette-card-icon">' + a.icon + '</span><span class="palette-card-title">' + a.title + '</span></div><div class="palette-card-desc">' + a.desc + '</div>' + runHtml + '</div>';
     }
     paletteAgentCards.innerHTML = html;
@@ -671,7 +743,17 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     });
   }
 
-  paletteContinueBtn.onclick = function () { post('executePlan'); closePalette(); };
+  paletteContinueBtn.onclick = function () {
+    closePalette();
+    if (currentPlan && currentPlan.steps && currentPlan.steps.length > 0) {
+      post('executePlan');
+    } else if (currentSpec && currentSpec.status === 'approved') {
+      addMessage('ai', 'Generating the workflow plan from the approved specification...', 'AutoDE');
+      post('generatePlanFromSpec');
+    } else {
+      post('executePlan');
+    }
+  };
 
   // ── Context Drawer ──
   ctxDrawerToggle.onclick = function () { var isExpanded = ctxDrawer.classList.contains('expanded'); if (isExpanded) { ctxDrawer.classList.remove('expanded'); ctxDrawer.classList.add('collapsed'); ctxDrawerChevron.textContent = '▶'; } else { ctxDrawer.classList.remove('collapsed'); ctxDrawer.classList.add('expanded'); ctxDrawerChevron.textContent = '▼'; } };
@@ -742,6 +824,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'stateUpdate':
         if (msg.state) {
           sessionStatus = msg.state.status || 'idle';
+          if (msg.state.inferredPhases) { inferredPhases = msg.state.inferredPhases; renderPalettePhases(); }
           if (msg.state.steps && msg.state.steps.length > 0) { addPlanCard(msg.state); }
           if (msg.state.artifacts && msg.state.artifacts.length > 0) { for (var i = 0; i < msg.state.artifacts.length; i++) { addArtifactCard(msg.state.artifacts[i]); } }
           renderContextActions();
@@ -755,9 +838,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
       case 'sourcesList': renderSourcesList(msg.sources); break;
-      case 'specLoaded': currentSpec = msg.spec || null; renderPaletteSpec(); renderContextActions(); break;
-      case 'specDrafted': if (msg.spec) { addSpecCard(msg.spec, !!msg.revised); renderPaletteSpec(); renderContextActions(); } break;
-      case 'specApproved': if (msg.spec) { currentSpec = msg.spec; renderPaletteSpec(); renderContextActions(); showToast('Specification v' + (msg.spec.version || 1) + ' approved', 'success'); } break;
+      case 'specLoaded': currentSpec = msg.spec || null; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); break;
+      case 'specDrafted': if (msg.spec) { addSpecCard(msg.spec, !!msg.revised); renderPaletteSpec(); renderPalettePhases(); renderContextActions(); } break;
+      case 'specApproved': if (msg.spec) { currentSpec = msg.spec; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); showToast('Specification v' + (msg.spec.version || 1) + ' approved', 'success'); } break;
       default: break;
     }
   });

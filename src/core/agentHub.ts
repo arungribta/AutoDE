@@ -8,10 +8,12 @@ import { executeSourceAssessmentAgent } from '../agents/discover/SourceAssessmen
 import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
 import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
 import { ArtifactWriter } from '../context/ArtifactWriter';
+import { inferPhases, computePhaseStatuses, PHASE_ORDER } from './phaseInference';
 import {
   AgentExecutionContext,
   AgentType,
   BusinessProblemSpec,
+  InferredPhase,
   PlanState,
   PlanStep,
   PlanStatus,
@@ -84,7 +86,10 @@ export class DataAgentHubHub {
     return {
       ...this.state,
       steps: this.state.steps.map((step) => ({ ...step })),
-      artifacts: this.state.artifacts ? [...this.state.artifacts] : undefined
+      artifacts: this.state.artifacts ? [...this.state.artifacts] : undefined,
+      inferredPhases: this.state.inferredPhases
+        ? this.state.inferredPhases.map((phase) => ({ ...phase, dependsOn: [...(phase.dependsOn ?? [])] }))
+        : undefined
     };
   }
 
@@ -178,10 +183,32 @@ export class DataAgentHubHub {
     return lines.join('\n');
   }
 
+  /**
+   * Infers the required workflow phases (discover/model/build/validate) and their
+   * dependencies from the approved Business Problem Specification. This is
+   * deterministic — no LLM call — so the palette can show a live status view
+   * immediately after approval.
+   */
+  public inferPhasesFromSpec(spec: BusinessProblemSpec): InferredPhase[] {
+    this.state.inferredPhases = inferPhases(spec);
+    const required = this.state.inferredPhases.filter((phase) => phase.required).map((phase) => phase.phase);
+    this.log(`Inferred workflow phases from specification: ${required.join(', ')}`);
+    this.emitState();
+    return this.getInferredPhases();
+  }
+
+  public getInferredPhases(): InferredPhase[] {
+    return (this.state.inferredPhases ?? []).map((phase) => ({
+      ...phase,
+      dependsOn: [...(phase.dependsOn ?? [])]
+    }));
+  }
+
   /** Generates the execution plan from a specification (spec-driven planning). */
   public async generatePlanFromSpec(spec: BusinessProblemSpec): Promise<void> {
     this.state.specId = spec.id;
     this.state.specVersion = spec.version;
+    this.inferPhasesFromSpec(spec);
     await this.generatePlan(this.buildObjectiveFromSpec(spec), this.state.schemaContext);
   }
 
@@ -440,13 +467,20 @@ Message: ${message}`;
     }
 
     try {
-      const prompt = this.buildPlanPrompt(trimmedObjective, this.state.schemaContext);
+      const requiredPhases = (this.state.inferredPhases ?? [])
+        .filter((phase) => phase.required)
+        .map((phase) => phase.phase);
+      const prompt = this.buildPlanPrompt(trimmedObjective, this.state.schemaContext, requiredPhases);
       const rawResponse = await this.callConfiguredLlm(prompt);
       const validatedPlan = this.validatePlanResponse(rawResponse);
+      for (const step of validatedPlan) {
+        step.phase = AGENT_PHASE[step.assignedAgent] ?? 'discover';
+      }
       this.state.steps = validatedPlan;
+      this.state.currentPhase = PHASE_ORDER.find((phase) => validatedPlan.some((step) => step.phase === phase));
       this.state.status = 'ready';
       this.state.runningStepId = undefined;
-      this.log(`Plan generated with ${validatedPlan.length} steps.`);
+      this.log(`Plan generated with ${validatedPlan.length} steps (phases: ${requiredPhases.join(', ') || 'all'}).`);
       this.emitState();
       return this.state.steps.map((step) => ({ ...step }));
     } catch (error) {
@@ -526,6 +560,7 @@ Message: ${message}`;
         // Determine phase for this step
         const phase = AGENT_PHASE[readyStep.assignedAgent] || this.state.currentPhase || 'discover';
         readyStep.phase = phase;
+        this.state.currentPhase = phase;
 
         const context: AgentExecutionContext = {
           objective: this.state.objective,
@@ -628,9 +663,14 @@ Message: ${message}`;
 
   // ── Prompt Building ──
 
-  private buildPlanPrompt(objective: string, schemaContext: string): string {
+  private buildPlanPrompt(objective: string, schemaContext: string, requiredPhases: WorkflowPhase[] = []): string {
     const baseContext = schemaContext && schemaContext.trim().length > 0 ? `\n\n## Source Environment\n${schemaContext}` : '';
     const providerName = this.state.sourceProvider;
+
+    let phaseBlock = '';
+    if (requiredPhases.length > 0) {
+      phaseBlock = `\n\n## Required workflow phases (inferred from the approved business specification)\n${requiredPhases.join(', ')}\n\nCreate steps ONLY for the phases listed above. Do not create steps that belong to an unlisted phase.`;
+    }
 
     let targetBlock = '';
     if (this.state.targetEnvironment) {
@@ -648,7 +688,7 @@ Message: ${message}`;
 - Outputs: ${t.outputFormats.join(', ')}`;
     }
 
-    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent, dataModelerAgent, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
+    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${phaseBlock}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent, dataModelerAgent, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
   }
 
   // ── LLM Calls ──
@@ -949,6 +989,10 @@ Message: ${message}`;
   }
 
   private emitState(): void {
+    const recomputed = computePhaseStatuses(this.state.inferredPhases, this.state.steps, this.state.currentPhase);
+    if (recomputed) {
+      this.state.inferredPhases = recomputed;
+    }
     if (this.stateListener) {
       this.stateListener(this.getPlan());
     }

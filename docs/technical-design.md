@@ -2,11 +2,12 @@
 
 **Last Updated:** 2026-09-08
 **Version:** 0.6.0
-**Status:** v0.5.1 code committed. Implemented:
+**Status:** v0.6.0 code committed. Implemented:
 - Single-workspace model (`ArtifactWriter`, `autoDE.artifactDirectory`; `ProjectManager` removed)
 - Context Layer IA: unified envelope (`src/context/types.ts`, `docs/schemas/context-envelope.schema.json`), `SourceRegistry` (`sources.yaml`), `SynthesisPipeline`
 - Webview CSP nonce fix, workflow palette rework, Cline dev-host workaround in `.vscode/launch.json`
 - **Business Problem Specification (spec-driven orchestration)** — see §2. Implemented: BPS types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec` (LLM-based spec drafting/refining with version semantics), spec-aware chat routing (no-spec → draft, draft → revise, approved → grounded chat), palette + chat spec card review/approve/revise/open UI, `/spec` command, and `generatePlanFromSpec` (spec-driven plan generation).
+- **Spec-driven phase inference + orchestration** — see §2.5/§2.7. Deterministic `inferPhases()` (keyword evidence + `scope.out` exclusions + dependency chaining) turns an approved BPS into a required-phase set; plan generation is constrained to those phases; the palette renders the live phase status view (completed / in-progress / blocked / pending / unrequired).
 
 Next: **Phase 3 (context loading)** and beyond — see §10.
 
@@ -172,6 +173,12 @@ Every `GeneratedArtifact`, context node (`Origin`), and workflow phase carries `
 
 From the approved BPS, AutoDE determines which phases (discover / model / build / validate) are required and their dependencies. The user does **not** select workflow steps; the workflow is inferred and continuously adapted.
 
+**Implemented (v0.6.0).** `src/core/phaseInference.ts` is a pure, deterministic module:
+- `inferPhases(spec)` — keyword evidence across the problem statement / objectives / success criteria / scope / constraints / assumptions / domain / key entities marks a phase required; `scope.out` exclusions veto a phase; an underspecified-but-approved spec defaults to the full workflow; a build (transformation) phase implies discovery when source evidence exists.
+- `buildPhaseDependencies(required)` — the natural predecessor chain (discover → model → build → validate) is pruned to the required set, so a phase depends only on required predecessors.
+- `computePhaseStatuses(phases, steps, currentPhase)` — derives live status per phase from the plan: `completed`, `in-progress` (running or partially done), `blocked` (a dependency is unsatisfied or a step failed), `pending`, or `unrequired`.
+- Orchestration integration in `AgentHub`: `inferPhasesFromSpec()` is invoked on spec approval, on work-space load with an approved spec, and on reset; `buildPlanPrompt` receives the required phases so the LLM only plans steps for those phases; every step is tagged with its phase at plan time; every state emit recomputes phase statuses.
+
 ### 2.6 Continuous context creation
 
 Context layers (industry / enterprise / domain / system / definitions / queries / artifacts) are built **automatically** from the BPS + repository assets + registered sources + platform metadata — not a manual step. `SourceRegistry` + `SynthesisPipeline` (Phase 2) are the foundation; the spec drives *what* to build.
@@ -179,6 +186,8 @@ Context layers (industry / enterprise / domain / system / definitions / queries 
 ### 2.7 Workflow Palette as status view
 
 The palette shows (top → bottom): BPS summary (read-only + status + approve/regenerate) → phase status (completed / in-progress / blocked / pending) → next action. It is a **transparent view**, not a manual launcher.
+
+**Implemented (v0.6.0).** The palette's four phase rows are driven by `PlanState.inferredPhases` on every `stateUpdate`: each row shows a status badge, the deterministic inference reason, and the dependency chain; unrequired phases are dimmed and show no run buttons; completed phases disable their run buttons; the surfaced agents are read from the selected phase only.
 
 ---
 
@@ -953,6 +962,7 @@ AutoDE/
 │   │   ├── configManager.ts              # Settings + secrets
 │   │   ├── copilotAdapter.ts             # GitHub Copilot (vscode.lm)
 │   │   ├── extensionIdentity.ts          # Constants (IDs, keys)
+│   │   ├── phaseInference.ts             # Spec-driven phase inference + live status (pure module)
 │   │   ├── panelProvider.ts              # Bottom panel provider
 │   │   ├── providerRegistry.ts           # Platform + LLM definitions
 │   │   ├── types.ts                      # Core type definitions
@@ -1005,7 +1015,7 @@ AutoDE/
 
 > **Forward plan (spec-driven):** mirroring `docs/requirements.md` §10:
 > 1. **Business Problem Specification** — ✅ DONE. Spec types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec`, spec-aware chat routing, review/approve UI, `/spec`, `generatePlanFromSpec`.
-> 2. **Spec-driven phase inference + orchestration** — ❌ PENDING. Infer phases/dependencies from the BPS; palette becomes a live status view (completed/in-progress/blocked/pending), rather than a manual launcher.
+> 2. **Spec-driven phase inference + orchestration** — ✅ DONE (v0.6.0). Deterministic `inferPhases()` in `src/core/phaseInference.ts` infers the required phases + dependencies from the approved BPS; plan generation is constrained to those phases (`buildPlanPrompt`); the palette renders the live status view (completed / in-progress / blocked / pending / unrequired), and phase statuses recompute on every state emit.
 > 3. **Phase 3** — layered context loading (`context/**` + `derived/graph.json` + AJV validation of the context envelope).
 > 4. **Phase 4** — real Snowflake/Databricks adapters (wire `snowflake-sdk`).
 > 5. **Phase 5** — ContextRetriever + vector engine (embedded, no server).

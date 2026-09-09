@@ -142,6 +142,101 @@ async function main() {
     });
   });
 
+  // ── Spec-driven phase inference (pure module) ──
+  await test('inferPhases() flags discover/model/build for an ingestion+modeling spec', () => {
+    const { inferPhases } = require('../dist/core/phaseInference.js');
+    const phases = inferPhases({
+      id: 'bps-1', version: 1, status: 'approved',
+      problemStatement: 'Load raw sales events from our source systems into Snowflake and build dbt pipelines.',
+      objectives: ['ingest ordering events', 'build curated marts'],
+      successCriteria: ['pipeline runs daily'],
+      scope: { in: ['source assessment'], out: [] },
+      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    });
+    const required = phases.filter((p) => p.required).map((p) => p.phase);
+    assert.deepStrictEqual(required, ['discover', 'model', 'build']);
+    assert.strictEqual(phases.find((p) => p.phase === 'discover').reason.includes('source'), true);
+  });
+
+  await test('inferPhases() honors scope.out exclusions that veto evidence', () => {
+    const { inferPhases } = require('../dist/core/phaseInference.js');
+    const phases = inferPhases({
+      id: 'bps-2', version: 1, status: 'approved',
+      problemStatement: 'Design a dimensional star schema for the analytics team.',
+      objectives: ['create star schema marts'],
+      successCriteria: ['model approved'],
+      scope: { in: [], out: ['no pipelines', 'no documentation'] },
+      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    });
+    const required = phases.filter((p) => p.required).map((p) => p.phase);
+    assert.deepStrictEqual(required, ['model']);
+  });
+
+  await test('inferPhases() defaults to the full workflow when nothing matches', () => {
+    const { inferPhases } = require('../dist/core/phaseInference.js');
+    const phases = inferPhases({
+      id: 'bps-3', version: 1, status: 'approved',
+      problemStatement: 'We need to understand our data better.',
+      objectives: ['review the landscape'],
+      successCriteria: ['walkthrough complete'],
+      scope: { in: [], out: [] },
+      constraints: [], assumptions: [], domain: 'general', createdAt: '', updatedAt: ''
+    });
+    assert.deepStrictEqual(phases.filter((p) => p.required).map((p) => p.phase), ['discover', 'model', 'build', 'validate']);
+  });
+
+  await test('computePhaseStatuses() tracks live status across the phase chain', () => {
+    const { inferPhases, computePhaseStatuses } = require('../dist/core/phaseInference.js');
+    const base = inferPhases({
+      id: 'bps-4', version: 1, status: 'approved',
+      problemStatement: 'Ingest raw source data, transform it into dimensional marts, build dbt pipelines, and add validation tests and documentation.',
+      objectives: [], successCriteria: [], scope: { in: [], out: [] },
+      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    });
+    const pendingAll = computePhaseStatuses(base, [], 'discover');
+    assert.ok(pendingAll.every((p) => (p.required ? p.status === 'pending' : p.status === 'unrequired')));
+
+    const plan = [
+      { id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'x', status: 'completed', phase: 'discover' },
+      { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'x', status: 'completed', phase: 'model' },
+      { id: 's3', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending', phase: 'build' },
+      { id: 's4', assignedAgent: 'architectureAgent', taskDescription: 'x', status: 'pending', phase: 'validate' }
+    ];
+    const live = computePhaseStatuses(base, plan, 'build');
+    const byPhase = (ph) => live.find((p) => p.phase === ph).status;
+    assert.strictEqual(byPhase('discover'), 'completed');
+    assert.strictEqual(byPhase('model'), 'completed');
+    assert.strictEqual(byPhase('build'), 'pending');
+    assert.strictEqual(byPhase('validate'), 'blocked');
+  });
+
+  await test('generatePlanFromSpec() infers phases and tags plan steps', async () => {
+    const plan = JSON.stringify([
+      { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'build ingestion pipeline', dependsOn: [], validationRules: [] },
+      { id: 's2', assignedAgent: 'architectureAgent', taskDescription: 'document the data dictionary', dependsOn: ['s1'], validationRules: [] }
+    ]);
+    const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
+      sendRequest: async () => ({ text: textIter(plan) }) };
+    const mock = createMock({ models: [model] });
+    delete require.cache[require.resolve('../dist/core/agentHub.js')];
+    delete require.cache[require.resolve('../dist/core/copilotAdapter.js')];
+    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', copilotProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+    const spec = {
+      id: 'bps-it', version: 3, status: 'approved',
+      problemStatement: 'Ingest raw sales channel source data and load dbt pipelines, then document the results.',
+      objectives: ['ingest channel data'], successCriteria: ['pipeline runs'],
+      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    };
+    await withMock(mock, () => hub.generatePlanFromSpec(spec));
+    const state = hub.getPlan();
+    assert.ok(state.inferredPhases.length === 4, 'all four phases present');
+    assert.strictEqual(state.inferredPhases.find((p) => p.phase === 'build').required, true);
+    assert.strictEqual(state.steps[0].phase, 'build');
+    assert.strictEqual(state.steps[1].phase, 'validate');
+    assert.strictEqual(state.specVersion, 3);
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

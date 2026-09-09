@@ -15,6 +15,24 @@ export type OutputFormat = 'ddl' | 'yaml' | 'markdown' | 'python' | 'sql';
 
 export type WorkflowPhase = 'discover' | 'model' | 'build' | 'validate';
 
+/** Live status of an inferred workflow phase. `unrequired` means the approved BPS does not include this phase. */
+export type PhaseStatus = 'pending' | 'in-progress' | 'completed' | 'blocked' | 'unrequired';
+
+/**
+ * A workflow phase inferred from the approved Business Problem Specification.
+ * Carries the deterministic reason, ownership of the generated plan, and live status.
+ */
+export interface InferredPhase {
+  phase: WorkflowPhase;
+  label: string;
+  required: boolean;
+  status: PhaseStatus;
+  /** Short, human-readable justification produced by the inference rules. */
+  reason: string;
+  /** Phases that must be completed before this one can start (only required phases appear here). */
+  dependsOn: WorkflowPhase[];
+}
+
 // ── Business Problem Specification ──
 
 export type SpecStatus = 'draft' | 'approved' | 'superseded';
@@ -155,6 +173,8 @@ export interface PlanState {
   currentPhase?: WorkflowPhase;
   specId?: string;
   specVersion?: number;
+  /** Phases inferred from the approved Business Problem Specification (live status view). */
+  inferredPhases?: InferredPhase[];
 }
 
 export interface AgentExecutionContext {

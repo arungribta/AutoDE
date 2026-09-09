@@ -82,6 +82,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       const existingSpec = this.specManager.getSpec();
       if (existingSpec) {
         this.hub.setSpec(existingSpec.id, existingSpec.version);
+        if (existingSpec.status === 'approved') {
+          this.hub.inferPhasesFromSpec(existingSpec);
+        }
       }
       this.postSpec();
     } catch (err) {
@@ -144,7 +147,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'executePlan': { await this.hub.executePlan(); break; }
         case 'pausePlan': { await this.hub.pauseExecution(); break; }
-        case 'resetPlan': { await this.hub.resetPlan(); break; }
+        case 'resetPlan': {
+          await this.hub.resetPlan();
+          const existingSpec = this.specManager?.getSpec();
+          if (existingSpec && existingSpec.status === 'approved') {
+            this.hub.inferPhasesFromSpec(existingSpec);
+          }
+          break;
+        }
         case 'updateSettings': {
           const settings = (message.settings ?? {}) as Partial<DataAgentHubSettings>;
           const typedSettings: Partial<DataAgentHubSettings> = {
@@ -286,6 +296,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postSpec();
           if (approved) {
             this.hub.setSpec(approved.id, approved.version);
+            this.hub.inferPhasesFromSpec(approved);
             this.postMessage('specApproved', { spec: approved });
             this.postLog(`Business Problem Specification v${approved.version} approved. Generate the workflow plan to start solving it.`);
           }

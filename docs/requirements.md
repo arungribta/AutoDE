@@ -333,7 +333,7 @@ Persistence: `.ai-context/spec/business-problem.yaml` (atomic temp→rename). Pr
 
 - Palette shows the **current BPS summary** at the top (status badge, review/approve/revise/open actions) as a read-only window into the spec; the authoritative editable/versioned spec lives in `.ai-context/spec/business-problem.yaml`.
 - Below it, the four **workflow phases** (Discover / Model / Build / Validate & Document) render as phase rows with their agent cards.
-- Forward design (Phase 2 of the forward plan, not yet implemented): the palette becomes a **live status view** of an auto-inferred workflow (completed / in-progress / blocked / pending) rather than a manual launcher.
+- ✅ **Implemented (v0.6.0):** the palette is a **live status view** of the auto-inferred workflow — each phase row shows completed / in-progress / blocked / pending / unrequired, the deterministic inference reason, and the dependency chain. Unrequired phases are dimmed and completed phases disable manual agent runs; the palette surfaces the agents of the selected (required) phase only.
 
 ### 8.5 Implemented
 
@@ -429,7 +429,7 @@ Phase 2.5 — Business Problem Specification (spec-driven)
 - ✅ Review/approve UI: chat spec card + palette spec section.
 - ✅ `AgentHub.generatePlanFromSpec` — spec-driven plan generation.
 - ✅ Traceability: `specId`/`specVersion` on `PlanState`, `GeneratedArtifact`, `Origin`.
-- ❌ Forward: spec-driven **phase inference** (BPS → which phases + dependencies) and palette-as-live-status-view.
+- ✅ Spec-driven **phase inference** + orchestration: deterministic `inferPhases()` (keyword evidence + `scope.out` exclusions + dependency chaining) in `src/core/phaseInference.ts`; `AgentHub.inferPhasesFromSpec`; plan prompt constrained to required phases; palette-as-live-status-view (completed / in-progress / blocked / pending / unrequired).
 
 Phase 3 — Layered context loading
 - Rework `ContextFileManager` to load authoritative `context/**` + compiled `derived/graph.json`, with AJV validation.
@@ -476,6 +476,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 - Copilot adapter: `src/core/copilotAdapter.ts`
 - Webview providers: `src/core/webviewProvider.ts`, `src/core/panelProvider.ts`
 - Agent hub: `src/core/agentHub.ts`
+- Phase inference: `src/core/phaseInference.ts` (spec-driven inference + live phase status, pure module)
 - Data adapters: `src/dqm/` — `BaseAdapter.ts`, `ConnectionManager.ts`, `adapters/*`
 - Docs: `docs/requirements.md` (this file), `docs/technical-design.md`
 - Runtime folders: `.ai-context/` (context layer), `auto-de/` (generated artifacts)
@@ -500,7 +501,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 - [x] BPS types + `SpecManager`: persistence/versioning/history + atomic writes.
 - [x] `AgentHub.generateSpec` + `generatePlanFromSpec`: spec drafting/refining + spec-driven plan.
 - [x] Spec-aware chat routing + `/spec` command + review/approve UI (chat card + palette).
-- [ ] Spec-driven phase inference (palette as live status view).
+- [x] Spec-driven phase inference (palette as live status view): `inferPhases()` + `AgentHub.inferPhasesFromSpec` + phase-constrained plan prompt + live phase rows.
 
 ---
 
