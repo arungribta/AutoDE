@@ -344,6 +344,14 @@ Persistence: `.ai-context/spec/business-problem.yaml` (atomic temp→rename). Pr
 - `AgentHub.generatePlanFromSpec(spec)` — spec-driven plan generation.
 - Traceability: `specId`/`specVersion` on `PlanState`, `GeneratedArtifact`, `Origin`.
 
+### 8.6 Agentic Specification Generation (SpecOps)
+
+The draft BPS is produced by an **agentic, DE-tailored requirements flow** (Superpowers-inspired) rather than a single-shot prompt:
+
+- **Skills** — `skills/*.json` define composable DE skills (Requirements Discovery, Source Catalog, Data Flow, Transformations, Quality & Acceptance, Constraints & Assumptions, Synthesis); `SkillRegistry` loads bundled skills plus optional `.ai-context/skills/` overrides.
+- **Adaptive questioning** — `SpecOpsEngine` drives a `discovery → synthesizing → draft → refining → approved` state machine with per-field coverage and a turn budget; each turn the LLM returns a validated action (`ask` / `ask_many` / `synthesize` / `done`). Single questions render as chat bubbles; batches render as a dynamic multi-field intake form.
+- **Comprehensive synthesis** — `AgentHub.synthesizeComprehensiveSpec` assembles the v2 spec (businessRequirements, dataFlows, transformations, dependencies, acceptanceCriteria, implementationConsiderations, sourceCatalog) with per-field provenance, persisted by `SpecManager`.
+
 ---
 
 ## 9. Copilot Integration Requirements
@@ -431,6 +439,12 @@ Phase 2.5 — Business Problem Specification (spec-driven)
 - ✅ Traceability: `specId`/`specVersion` on `PlanState`, `GeneratedArtifact`, `Origin`.
 - ✅ Spec-driven **phase inference** + orchestration: deterministic `inferPhases()` (keyword evidence + `scope.out` exclusions + dependency chaining) in `src/core/phaseInference.ts`; `AgentHub.inferPhasesFromSpec`; plan prompt constrained to required phases; palette-as-live-status-view (completed / in-progress / blocked / pending / unrequired).
 
+Phase 2.6 — Agentic Specification Generation (SpecOps)
+- ✅ Skills registry: `skills/*.json` + `src/core/skillRegistry.ts` (bundled + `.ai-context/skills/` overrides).
+- ✅ `SpecOpsEngine` state machine + prompt-schema action validation (`src/core/specOps.ts`).
+- ✅ Adaptive questioning: `AgentHub.discoverNextAction` + chat-bubble questions + dynamic batch intake forms (`specQuestions` / `submitSpecAnswers`).
+- ✅ Comprehensive v2 synthesis (`src/core/specSynthesis.ts` + `AgentHub.synthesizeComprehensiveSpec`) with provenance, persisted by `SpecManager` and rendered in the review card.
+
 Phase 3 — Layered context loading
 - Rework `ContextFileManager` to load authoritative `context/**` + compiled `derived/graph.json`, with AJV validation.
 - Persist the compiled graph atomically.
@@ -502,6 +516,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 - [x] `AgentHub.generateSpec` + `generatePlanFromSpec`: spec drafting/refining + spec-driven plan.
 - [x] Spec-aware chat routing + `/spec` command + review/approve UI (chat card + palette).
 - [x] Spec-driven phase inference (palette as live status view): `inferPhases()` + `AgentHub.inferPhasesFromSpec` + phase-constrained plan prompt + live phase rows.
+- [x] Agentic spec generation: `skills/` registry + `SpecOpsEngine` state machine + adaptive questioning (chat bubbles + dynamic intake forms) + comprehensive v2 synthesis (`specSynthesis.ts`) with provenance, persisted and rendered in the review card.
 
 ---
 

@@ -2,14 +2,15 @@
 
 **Last Updated:** 2026-09-08
 **Version:** 0.6.0
-**Status:** v0.6.0 code committed. Implemented:
+**Status:** v0.7.0 code committed. Implemented:
 - Single-workspace model (`ArtifactWriter`, `autoDE.artifactDirectory`; `ProjectManager` removed)
 - Context Layer IA: unified envelope (`src/context/types.ts`, `docs/schemas/context-envelope.schema.json`), `SourceRegistry` (`sources.yaml`), `SynthesisPipeline`
 - Webview CSP nonce fix, workflow palette rework, Cline dev-host workaround in `.vscode/launch.json`
 - **Business Problem Specification (spec-driven orchestration)** — see §2. Implemented: BPS types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec` (LLM-based spec drafting/refining with version semantics), spec-aware chat routing (no-spec → draft, draft → revise, approved → grounded chat), palette + chat spec card review/approve/revise/open UI, `/spec` command, and `generatePlanFromSpec` (spec-driven plan generation).
 - **Spec-driven phase inference + orchestration** — see §2.5/§2.7. Deterministic `inferPhases()` (keyword evidence + `scope.out` exclusions + dependency chaining) turns an approved BPS into a required-phase set; plan generation is constrained to those phases; the palette renders the live phase status view (completed / in-progress / blocked / pending / unrequired).
+- **Agentic Specification Generation (SpecOps)** — see §2.8. A Superpowers-inspired, DE-tailored requirements flow: a `SpecOpsEngine` state machine + `skills/` registry drive an adaptive questioning conversation (chat bubbles + dynamic intake forms), then synthesize the comprehensive v2 spec (business requirements, data flows, transformations, dependencies, acceptance criteria, implementation considerations, source catalog, provenance).
 
-Next: **Phase 3 (context loading)** and beyond — see §10.
+Next: **Phase 3 (context loading)** and beyond — see §10. The remaining SpecOps polish (skills authoring guidance, intake-session persistence) is tracked in §10.
 
 ---
 
@@ -188,6 +189,16 @@ Context layers (industry / enterprise / domain / system / definitions / queries 
 The palette shows (top → bottom): BPS summary (read-only + status + approve/regenerate) → phase status (completed / in-progress / blocked / pending) → next action. It is a **transparent view**, not a manual launcher.
 
 **Implemented (v0.6.0).** The palette's four phase rows are driven by `PlanState.inferredPhases` on every `stateUpdate`: each row shows a status badge, the deterministic inference reason, and the dependency chain; unrequired phases are dimmed and show no run buttons; completed phases disable their run buttons; the surfaced agents are read from the selected phase only.
+
+### 2.8 Agentic Specification Generation (SpecOps)
+
+The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspired by the Superpowers SDLC (skills + explicit phases + review gates), rather than a single-shot prompt.
+
+**Skills.** `skills/*.json` define composable DE skills — Requirements Discovery, Source Catalog, Data Flow, Transformations, Quality & Acceptance, Constraints & Assumptions, and Synthesis. Each carries a system prompt, question guidance, and the spec fields it owns. `SkillRegistry` (`src/core/skillRegistry.ts`) loads bundled skills plus optional user overrides in `.ai-context/skills/` (later entries win).
+
+**Engine.** `SpecOpsEngine` (`src/core/specOps.ts`) is a deterministic state machine (`discovery → synthesizing → draft → refining → approved`) that tracks per-field coverage and a turn budget, and validates the prompt-schema **actions** the LLM returns each turn (`ask` / `ask_many` / `synthesize` / `done`). No native tool-calling is used — actions are JSON, validated deterministically, so the loop works on Copilot's `vscode.lm` as well as OpenAI/Anthropic/Ollama.
+
+**Loop.** `AgentHub.discoverNextAction` renders the discovery prompt (`specOpsPrompts.ts`) and returns a validated action. The webview renders a single question as a chat bubble or a batch (`ask_many` with 2+) as a dynamic multi-field intake form (`specQuestions` / `submitSpecAnswers`). When coverage is complete or the turn budget is exhausted, `AgentHub.synthesizeComprehensiveSpec` assembles the comprehensive v2 spec (business requirements, data flows, transformations, dependencies, acceptance criteria, implementation considerations, source catalog) with per-field provenance, which is persisted by `SpecManager` and shown in the review card.
 
 ---
 
@@ -955,6 +966,8 @@ AutoDE/
 │   ├── panel.html                        # Bottom panel dashboard
 │   └── editors/                          # Custom editor webviews
 │
+├── skills/                               # DE spec-generation skills (JSON, user-overridable)
+│
 ├── src/
 │   ├── extension.ts                      # Activation, command registration
 │   ├── core/
@@ -963,6 +976,10 @@ AutoDE/
 │   │   ├── copilotAdapter.ts             # GitHub Copilot (vscode.lm)
 │   │   ├── extensionIdentity.ts          # Constants (IDs, keys)
 │   │   ├── phaseInference.ts             # Spec-driven phase inference + live status (pure module)
+│   │   ├── skillRegistry.ts              # Spec skills registry + directory loader
+│   │   ├── specOps.ts                    # SpecOpsEngine state machine + action validation
+│   │   ├── specOpsPrompts.ts             # Discovery + synthesis prompt assembly
+│   │   ├── specSynthesis.ts              # Comprehensive v2 spec parsing/validation
 │   │   ├── panelProvider.ts              # Bottom panel provider
 │   │   ├── providerRegistry.ts           # Platform + LLM definitions
 │   │   ├── types.ts                      # Core type definitions
@@ -1016,6 +1033,7 @@ AutoDE/
 > **Forward plan (spec-driven):** mirroring `docs/requirements.md` §10:
 > 1. **Business Problem Specification** — ✅ DONE. Spec types + `SpecManager` persistence/versioning/history, `AgentHub.generateSpec`, spec-aware chat routing, review/approve UI, `/spec`, `generatePlanFromSpec`.
 > 2. **Spec-driven phase inference + orchestration** — ✅ DONE (v0.6.0). Deterministic `inferPhases()` in `src/core/phaseInference.ts` infers the required phases + dependencies from the approved BPS; plan generation is constrained to those phases (`buildPlanPrompt`); the palette renders the live status view (completed / in-progress / blocked / pending / unrequired), and phase statuses recompute on every state emit.
+> 2b. **Agentic Specification Generation (SpecOps)** — ✅ DONE (v0.7.0). Superpowers-inspired, DE-tailored requirements flow: `skills/` registry + `SpecOpsEngine` state machine + adaptive questioning (chat bubbles + dynamic intake forms) + comprehensive v2 synthesis with provenance. See §2.8.
 > 3. **Phase 3** — layered context loading (`context/**` + `derived/graph.json` + AJV validation of the context envelope).
 > 4. **Phase 4** — real Snowflake/Databricks adapters (wire `snowflake-sdk`).
 > 5. **Phase 5** — ContextRetriever + vector engine (embedded, no server).
