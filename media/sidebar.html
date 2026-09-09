@@ -251,6 +251,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .spec-flow-route { font-weight: 600; }
 .spec-flow-desc { font-size: var(--font-size-sm); color: var(--text-muted); }
 .spec-flow-meta { font-size: var(--font-size-sm); color: var(--accent); }
+.spec-q-field { margin-bottom: 10px; }
+.spec-q-input { width: 100%; box-sizing: border-box; background: var(--surface-active); border: 1px solid var(--border-soft); border-radius: var(--radius); color: inherit; padding: 6px 8px; font-size: var(--font-size-sm); font-family: inherit; }
+.spec-q-input:focus { border-color: var(--accent); outline: none; }
+.spec-q-submit { margin-top: 4px; width: 100%; }
 
 /* ── Artifact Cards ── */
 .artifact-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); margin-top: 6px; overflow: hidden; }
@@ -494,6 +498,47 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         sendMessage();
       };
     });
+  }
+
+  function addSpecQuestionsForm(questions) {
+    if (welcomeBlock) { welcomeBlock.style.display = 'none'; }
+    var html = '<div class="spec-question spec-question-form">';
+    html += '<div class="spec-q-label">🔎 A few clarifying questions</div>';
+    for (var i = 0; i < questions.length; i++) {
+      var q = questions[i];
+      html += '<div class="spec-q-field" data-qid="' + escapeHtml(q.id) + '">';
+      html += '<div class="spec-q-prompt">' + escapeHtml(q.prompt || '') + '</div>';
+      if (q.kind === 'single-select' && q.options && q.options.length > 0) {
+        html += '<select class="spec-q-input"><option value="">— select —</option>';
+        for (var j = 0; j < q.options.length; j++) { html += '<option value="' + escapeHtml(q.options[j]) + '">' + escapeHtml(q.options[j]) + '</option>'; }
+        html += '</select>';
+      } else if (q.kind === 'boolean') {
+        html += '<select class="spec-q-input"><option value="">— select —</option><option value="yes">Yes</option><option value="no">No</option></select>';
+      } else {
+        html += '<input class="spec-q-input" type="text" placeholder="Type your answer…" />';
+      }
+      html += '</div>';
+    }
+    html += '<button class="primary spec-q-submit">✓ Submit answers</button>';
+    html += '</div>';
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    chatStream.appendChild(div.firstElementChild);
+    chatStream.scrollTop = chatStream.scrollHeight;
+    div.querySelector('.spec-q-submit').onclick = function () {
+      var answers = [];
+      var fields = div.querySelectorAll('.spec-q-field');
+      fields.forEach(function (field) {
+        var qid = field.getAttribute('data-qid');
+        var input = field.querySelector('.spec-q-input');
+        if (input && input.value.trim()) { answers.push({ questionId: qid, value: input.value.trim() }); }
+      });
+      if (answers.length === 0) { showToast('Answer at least one question', ''); return; }
+      var submitBtn = div.querySelector('.spec-q-submit');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting…';
+      post('submitSpecAnswers', { answers: answers });
+    };
   }
 
   // ── Contextual Actions ──
@@ -911,6 +956,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'chatResponse': if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
       case 'sourcesList': renderSourcesList(msg.sources); break;
       case 'specQuestion': if (msg.question) { addSpecQuestion(msg.question); } break;
+      case 'specQuestions': if (msg.questions && msg.questions.length) { addSpecQuestionsForm(msg.questions); } break;
       case 'specLoaded': currentSpec = msg.spec || null; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); break;
       case 'specDrafted': if (msg.spec) { addSpecCard(msg.spec, !!msg.revised); renderPaletteSpec(); renderPalettePhases(); renderContextActions(); } break;
       case 'specApproved': if (msg.spec) { currentSpec = msg.spec; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); showToast('Specification v' + (msg.spec.version || 1) + ' approved', 'success'); } break;

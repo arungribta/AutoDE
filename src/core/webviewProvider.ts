@@ -315,6 +315,24 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           await this.hub.generatePlanFromSpec(spec);
           break;
         }
+        case 'submitSpecAnswers': {
+          const answers = Array.isArray(message.answers) ? message.answers : [];
+          if (!this.specOpsEngine || answers.length === 0) { break; }
+          const session = this.specOpsEngine.getSession();
+          for (const item of answers) {
+            if (!item || typeof item !== 'object') { continue; }
+            const record = item as Record<string, unknown>;
+            const questionId = typeof record.questionId === 'string' ? record.questionId : '';
+            const value = typeof record.value === 'string' ? record.value.trim() : '';
+            if (!questionId || !value) { continue; }
+            const question = session.questions.find((candidate) => candidate.id === questionId);
+            const field = question?.field ?? 'scope';
+            this.specOpsEngine.answer({ questionId, field, value, answeredAt: new Date().toISOString() });
+          }
+          this.pendingSpecQuestions = [];
+          await this.runDiscoveryTurn();
+          break;
+        }
         case 'openSpecFile': {
           if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
           const specDoc = await vscode.workspace.openTextDocument(this.specManager.getSpecUri());
@@ -453,7 +471,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       if (action.action === 'ask' || action.action === 'ask_many') {
         const ids = engine.applyAction(action);
         this.pendingSpecQuestions = engine.getSession().questions.filter((question) => ids.includes(question.id));
-        if (this.pendingSpecQuestions.length > 0) {
+        if (this.pendingSpecQuestions.length > 1) {
+          this.postMessage('specQuestions', { questions: this.pendingSpecQuestions });
+        } else if (this.pendingSpecQuestions.length === 1) {
           this.postSpecQuestion(this.pendingSpecQuestions[0]);
         }
       } else {
