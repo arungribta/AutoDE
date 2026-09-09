@@ -500,6 +500,318 @@ async function main() {
   });
 
 
+  
+
+  // ── Phase 3 (part 2): real YAML parser wired into the context layer ──
+  await test('SpecManager reads legacy flat-format (scopeIn/scopeOut) files', async () => {
+    function specManagerMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      const legacy = [
+        '# AutoDE Business Problem Specification',
+        'id: bps-legacy',
+        'version: 2',
+        'status: approved',
+        'problemStatement: Legacy flat-format spec.',
+        'objectives:',
+        '  - obj1',
+        'successCriteria:',
+        '  - sc1',
+        'scopeIn:',
+        '  - in1',
+        'scopeOut:',
+        '  - out1',
+        'constraints:',
+        '  - c1',
+        'assumptions:',
+        '  - a1',
+        'domain: data engineering',
+        'stakeholders:',
+        '  - eng',
+        'keyEntities:',
+        '  - sales',
+        'createdAt: 2026-01-01T00:00:00.000Z',
+        'updatedAt: 2026-01-02T00:00:00.000Z',
+        'approvedAt: 2026-01-02T00:00:00.000Z',
+        'approvedBy: user'
+      ].join('\n') + '\n';
+      store.set('/ws/.ai-context/spec/business-problem.yaml', legacy);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+            stat: async () => { throw new Error('ENOENT'); }
+          }
+        }
+      };
+    }
+    const mock = specManagerMock();
+    delete require.cache[require.resolve('../dist/context/SpecManager.js')];
+    const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
+    const mgr = new SpecManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    const spec = mgr.getSpec();
+    assert.strictEqual(spec.id, 'bps-legacy');
+    assert.strictEqual(spec.version, 2);
+    assert.strictEqual(spec.status, 'approved');
+    assert.deepStrictEqual(spec.scope.in, ['in1']);
+    assert.deepStrictEqual(spec.scope.out, ['out1']);
+    assert.deepStrictEqual(spec.constraints, ['c1']);
+    assert.strictEqual(spec.domain, 'data engineering');
+  });
+
+  await test('SpecManager reads legacy comprehensive: JSON block', async () => {
+    function specManagerMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      const v2 = JSON.stringify({ businessRequirements: ['br1'], transformations: ['x'] });
+      const legacy = [
+        '# AutoDE Business Problem Specification',
+        'id: bps-v2legacy',
+        'version: 1',
+        'status: draft',
+        'problemStatement: Has a comprehensive block.',
+        'objectives:',
+        '  - o1',
+        'successCriteria:',
+        '  - s1',
+        'scopeIn:',
+        '  - in1',
+        'scopeOut:',
+        '  - out1',
+        'constraints:',
+        '  - c1',
+        'assumptions:',
+        '  - a1',
+        `comprehensive: ${v2}`,
+        'createdAt: 2026-01-01T00:00:00.000Z',
+        'updatedAt: 2026-01-01T00:00:00.000Z'
+      ].join('\n') + '\n';
+      store.set('/ws/.ai-context/spec/business-problem.yaml', legacy);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+            stat: async () => { throw new Error('ENOENT'); }
+          }
+        }
+      };
+    }
+    const mock = specManagerMock();
+    delete require.cache[require.resolve('../dist/context/SpecManager.js')];
+    const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
+    const mgr = new SpecManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    const spec = mgr.getSpec();
+    assert.deepStrictEqual(spec.businessRequirements, ['br1']);
+    assert.deepStrictEqual(spec.transformations, ['x']);
+  });
+
+  await test('SpecManager writes native YAML (scope nested, no comprehensive JSON)', async () => {
+    function specManagerMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+            stat: async () => { throw new Error('ENOENT'); }
+          }
+        }
+      };
+    }
+    const mock = specManagerMock();
+    delete require.cache[require.resolve('../dist/context/SpecManager.js')];
+    const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
+    const mgr = new SpecManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    const spec = {
+      id: 'bps-native', version: 1, status: 'draft', problemStatement: 'Native YAML spec.',
+      objectives: ['o1'], successCriteria: ['s1'], scope: { in: ['in1'], out: ['out1'] },
+      constraints: ['c1'], assumptions: ['a1'], domain: 'de', stakeholders: ['eng'], keyEntities: ['sales'],
+      businessRequirements: ['br1'], dataFlows: [{ id: 'f1', source: 'src', target: 'tgt', description: 'd', frequency: 'daily' }],
+      transformations: ['x'], dependencies: ['y'], acceptanceCriteria: ['z'], implementationConsiderations: ['w'],
+      sourceCatalog: [{ name: 'n', type: 'database' }], provenance: [{ field: 'dataFlows', source: 'question', questionId: 'q1' }],
+      createdAt: 'c', updatedAt: 'u'
+    };
+    await withMock(mock, () => mgr.saveSpec(spec));
+    let raw = null;
+    await mock.workspace.fs.readFile({ fsPath: '/ws/.ai-context/spec/business-problem.yaml' }).then((b) => { raw = b.toString('utf8'); });
+    assert.ok(!raw.includes('comprehensive:'), 'should not emit the JSON comprehensive block');
+    assert.ok(raw.includes('scope:'), 'should emit nested scope');
+    assert.ok(raw.includes('businessRequirements:'), 'v2 field emitted natively');
+    const mgr2 = new SpecManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    const loaded = mgr2.getSpec();
+    assert.deepStrictEqual(loaded.scope.in, ['in1']);
+    assert.deepStrictEqual(loaded.dataFlows[0].target, 'tgt');
+    assert.deepStrictEqual(loaded.businessRequirements, ['br1']);
+  });
+
+  await test('SourceRegistry round-trips sources through real YAML', async () => {
+    function regMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+            stat: async () => { throw new Error('ENOENT'); }
+          }
+        }
+      };
+    }
+    const mock = regMock();
+    delete require.cache[require.resolve('../dist/context/SourceRegistry.js')];
+    const { SourceRegistry } = withMock(mock, () => require('../dist/context/SourceRegistry.js'));
+    const reg = new SourceRegistry({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => reg.initialize());
+    await withMock(mock, () => reg.addSource('docs/reqs.md', 'business_context', 'alice'));
+    const sources = reg.getSources();
+    assert.strictEqual(sources.length, 1);
+    assert.strictEqual(sources[0].path, 'docs/reqs.md');
+    assert.strictEqual(sources[0].owner, 'alice');
+    const reg2 = new SourceRegistry({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => reg2.initialize());
+    const reloaded = reg2.getSources();
+    assert.strictEqual(reloaded.length, 1);
+    assert.strictEqual(reloaded[0].path, 'docs/reqs.md');
+    assert.strictEqual(reloaded[0].owner, 'alice');
+  });
+
+  await test('TargetConfigManager round-trips profiles through real YAML', async () => {
+    function tcmMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+            stat: async () => { throw new Error('ENOENT'); }
+          },
+          createFileSystemWatcher: () => ({ onDidChange: () => {}, dispose: () => {} })
+        },
+        RelativePattern: class { constructor(_base, _pattern) {} }
+      };
+    }
+    const mock = tcmMock();
+    delete require.cache[require.resolve('../dist/context/TargetConfigManager.js')];
+    const { TargetConfigManager } = withMock(mock, () => require('../dist/context/TargetConfigManager.js'));
+    const tcm = new TargetConfigManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => tcm.initialize());
+    const active = tcm.getActiveEnvironment();
+    assert.ok(active, 'default active environment present');
+    assert.strictEqual(active.platform, 'snowflake');
+    assert.deepStrictEqual(active.outputFormats, ['ddl', 'yaml', 'markdown']);
+    await withMock(mock, () => tcm.upsertProfile({
+      name: 'staging', inherits: 'base',
+      environment: {
+        platform: 'snowflake', environmentProfile: 'staging', modelingApproach: 'dimensional',
+        namingConvention: 'snake_case', transformationTool: 'dbt', orchestrationTool: 'airflow',
+        outputFormats: ['ddl'], platformConfig: { account: 'acct', database: 'DB', schema: 'S', warehouse: 'W', role: 'R' }
+      }
+    }));
+    const tcm2 = new TargetConfigManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => tcm2.initialize());
+    const profiles = tcm2.getAllProfiles();
+    const staging = profiles.find((p) => p.name === 'staging');
+    assert.ok(staging, 'staging profile persisted');
+    assert.strictEqual(staging.inherits, 'base');
+    assert.strictEqual(staging.environment.platformConfig.database, 'DB');
+  });
+
+  await test('ContextFileManager loads authoritative context + persists compiled graph atomically', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-cfm-'));
+    const ctxDir = path.join(dir, '.ai-context');
+    const authDir = path.join(ctxDir, 'context');
+    fs.mkdirSync(authDir, { recursive: true });
+    const bizCtx = [
+      'business_terms:',
+      '  - term: revenue',
+      '    description: net sales',
+      '    mapped_tables:',
+      '      - orders'
+    ].join('\n') + '\n';
+    fs.writeFileSync(path.join(authDir, 'business-context.yaml'), bizCtx);
+
+    function cfmMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); },
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v) return Buffer.from(v, 'utf8'); if (fs.existsSync(uri.fsPath)) return fs.readFileSync(uri.fsPath); throw new Error('ENOENT'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); fs.writeFileSync(uri.fsPath, buf); },
+            rename: async (a, b) => { const v = store.get(keyOf(a)) ?? (fs.existsSync(a.fsPath) ? fs.readFileSync(a.fsPath, 'utf8') : null); if (v != null) { store.set(keyOf(b), v); fs.writeFileSync(b.fsPath, v); } store.delete(keyOf(a)); try { fs.unlinkSync(a.fsPath); } catch {} },
+            stat: async () => { throw new Error('ENOENT'); }
+          },
+          createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} })
+        },
+        RelativePattern: class { constructor(_base, _pattern) {} }
+      };
+    }
+    const mock = cfmMock();
+    delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+    delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    const graph = new GraphManager();
+    const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+    await withMock(mock, () => cfm.initialize());
+    const terms = graph.getNodesByType('business_term');
+    assert.strictEqual(terms.length, 1, 'loaded business_term from authoritative context/');
+    assert.strictEqual(terms[0].label, 'revenue');
+    const graphPath = path.join(ctxDir, 'derived', 'graph.json');
+    assert.ok(fs.existsSync(graphPath), 'derived/graph.json written atomically');
+    const persisted = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
+    assert.strictEqual(persisted.nodes.length, 1);
+    assert.strictEqual(persisted.nodes[0].label, 'revenue');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

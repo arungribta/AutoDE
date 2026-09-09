@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { TargetEnvironment, TargetConfigFile, TargetProfile } from '../core/types';
+import { parseYaml, stringifyYaml } from './Yaml';
 
 /**
  * Manages the .ai-context/target-environment.yaml file.
@@ -191,111 +192,53 @@ export class TargetConfigManager implements vscode.Disposable {
     };
   }
 
-  // ── Lightweight YAML Parser ──
+  // ── YAML Parsing (real `yaml` library) ──
 
   private parseYaml(yaml: string): TargetConfigFile {
-    const result: TargetConfigFile = { profiles: [], activeProfile: 'development' };
-    const lines = yaml.split('\n');
-    let currentProfile: Partial<TargetProfile> | null = null;
-    let currentEnv: Partial<TargetEnvironment> | null = null;
-    let inPlatformConfig = false;
-    let platformConfigObj: Record<string, string> = {};
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      // Top-level keys
-      if (trimmed.startsWith('activeProfile:')) {
-        result.activeProfile = trimmed.split(':')[1].trim();
-        continue;
-      }
-
-      if (trimmed === 'profiles:') continue;
-
-      // Profile entry
-      const profileMatch = trimmed.match(/^-\s+name:\s*(.+)$/);
-      if (profileMatch) {
-        if (currentProfile && currentEnv) {
-          currentProfile.environment = currentEnv as TargetEnvironment;
-          result.profiles.push(currentProfile as TargetProfile);
-        }
-        currentProfile = { name: profileMatch[1].trim() };
-        currentEnv = null;
-        inPlatformConfig = false;
-        platformConfigObj = {};
-        continue;
-      }
-
-      if (!currentProfile) continue;
-
-      if (trimmed.startsWith('inherits:')) {
-        currentProfile.inherits = trimmed.split(':')[1].trim();
-        continue;
-      }
-
-      if (trimmed === 'environment:') {
-        currentEnv = {};
-        inPlatformConfig = false;
-        continue;
-      }
-
-      if (!currentEnv) continue;
-
-      if (trimmed === 'platformConfig:') {
-        inPlatformConfig = true;
-        continue;
-      }
-
-      if (inPlatformConfig) {
-        const kvMatch = trimmed.match(/^(\w+):\s*(.+)$/);
-        if (kvMatch) {
-          platformConfigObj[kvMatch[1]] = kvMatch[2].trim();
-        }
-        continue;
-      }
-
-      // Environment fields
-      const envMatch = trimmed.match(/^(\w+):\s*(.+)$/);
-      if (envMatch) {
-        const key = envMatch[1];
-        const value = envMatch[2].trim();
-
-        switch (key) {
-          case 'platform':
-            (currentEnv as Record<string, unknown>)['platform'] = value;
-            break;
-          case 'environmentProfile':
-            (currentEnv as Record<string, unknown>)['environmentProfile'] = value;
-            break;
-          case 'modelingApproach':
-            (currentEnv as Record<string, unknown>)['modelingApproach'] = value;
-            break;
-          case 'namingConvention':
-            (currentEnv as Record<string, unknown>)['namingConvention'] = value;
-            break;
-          case 'transformationTool':
-            (currentEnv as Record<string, unknown>)['transformationTool'] = value;
-            break;
-          case 'orchestrationTool':
-            (currentEnv as Record<string, unknown>)['orchestrationTool'] = value;
-            break;
-          case 'outputFormats':
-            (currentEnv as Record<string, unknown>)['outputFormats'] = value
-              .replace(/[\[\]]/g, '')
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean);
-            break;
-        }
-      }
+    const raw = parseYaml(yaml);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('Invalid target environment YAML: root must be an object.');
     }
+    const doc = raw as Record<string, unknown>;
+    const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
-    // Save last profile
-    if (currentProfile && currentEnv) {
-      currentEnv.platformConfig = platformConfigObj as unknown as TargetEnvironment['platformConfig'];
-      currentProfile.environment = currentEnv as TargetEnvironment;
-      result.profiles.push(currentProfile as TargetProfile);
+    const result: TargetConfigFile = {
+      profiles: [],
+      activeProfile: str(doc.activeProfile) || 'development'
+    };
+
+    const profilesRaw = doc.profiles;
+    if (Array.isArray(profilesRaw)) {
+      for (const entry of profilesRaw) {
+        if (!entry || typeof entry !== 'object') continue;
+        const p = entry as Record<string, unknown>;
+        const envRaw = (p.environment && typeof p.environment === 'object' && !Array.isArray(p.environment))
+          ? p.environment as Record<string, unknown>
+          : {};
+        const platformConfigRaw = (envRaw.platformConfig && typeof envRaw.platformConfig === 'object' && !Array.isArray(envRaw.platformConfig))
+          ? envRaw.platformConfig as Record<string, string>
+          : {} as Record<string, string>;
+        const outputFormats = Array.isArray(envRaw.outputFormats)
+          ? envRaw.outputFormats.filter((x) => typeof x === 'string')
+          : [];
+
+        const profile: TargetProfile = {
+          name: str(p.name),
+          environment: {
+            platform: str(envRaw.platform) as TargetEnvironment['platform'],
+            environmentProfile: str(envRaw.environmentProfile) as TargetEnvironment['environmentProfile'],
+            modelingApproach: str(envRaw.modelingApproach) as TargetEnvironment['modelingApproach'],
+            namingConvention: str(envRaw.namingConvention) as TargetEnvironment['namingConvention'],
+            transformationTool: str(envRaw.transformationTool) as TargetEnvironment['transformationTool'],
+            orchestrationTool: str(envRaw.orchestrationTool) as TargetEnvironment['orchestrationTool'],
+            outputFormats: outputFormats as TargetEnvironment['outputFormats'],
+            platformConfig: platformConfigRaw as unknown as TargetEnvironment['platformConfig']
+          }
+        };
+        const inherits = str(p.inherits);
+        if (inherits) profile.inherits = inherits;
+        result.profiles.push(profile);
+      }
     }
 
     return result;
@@ -304,38 +247,12 @@ export class TargetConfigManager implements vscode.Disposable {
   // ── YAML Serialization ──
 
   private serializeYaml(): string {
-    const lines: string[] = [
+    const lines = [
       '# AutoDE Target Environment Configuration',
       '# Edit this file to define your target data platform and toolchain.',
-      '# Profiles support inheritance via the "inherits" field.',
-      '',
-      `activeProfile: ${this.config.activeProfile}`,
-      '',
-      'profiles:'
+      '# Profiles support inheritance via the "inherits" field.'
     ];
-
-    for (const profile of this.config.profiles) {
-      lines.push(`  - name: ${profile.name}`);
-      if (profile.inherits) {
-        lines.push(`    inherits: ${profile.inherits}`);
-      }
-      lines.push('    environment:');
-      const env = profile.environment;
-      lines.push(`      platform: ${env.platform}`);
-      lines.push(`      environmentProfile: ${env.environmentProfile}`);
-      lines.push(`      modelingApproach: ${env.modelingApproach}`);
-      lines.push(`      namingConvention: ${env.namingConvention}`);
-      lines.push(`      transformationTool: ${env.transformationTool}`);
-      lines.push(`      orchestrationTool: ${env.orchestrationTool}`);
-      lines.push(`      outputFormats: [${env.outputFormats.join(', ')}]`);
-      lines.push('      platformConfig:');
-      const pc = env.platformConfig as unknown as Record<string, string>;
-      for (const [key, value] of Object.entries(pc)) {
-        lines.push(`        ${key}: ${value}`);
-      }
-    }
-
-    return lines.join('\n') + '\n';
+    return lines.join('\n') + '\n' + stringifyYaml(this.config);
   }
 
   private async save(): Promise<void> {

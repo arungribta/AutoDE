@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ContextLayer } from './types';
+import { parseYaml, stringifyYaml } from './Yaml';
 
 export type SourceKind = 'business_context' | 'verified_queries' | 'data_definitions';
 
@@ -89,51 +90,32 @@ export class SourceRegistry implements vscode.Disposable {
   }
 
   private serialize(): string {
-    const lines = ['# AutoDE Source Registry', '# User-identified files that feed the Enterprise Context Layer.', 'sources:'];
-    for (const s of this.sources) {
-      lines.push(`  - path: ${s.path}`);
-      lines.push(`    kind: ${s.kind}`);
-      lines.push(`    layer: ${s.layer}`);
-      if (s.owner) lines.push(`    owner: ${s.owner}`);
-      lines.push(`    addedAt: ${s.addedAt}`);
-    }
-    return lines.join('\n') + '\n';
+    const doc: Record<string, unknown> = { sources: this.sources };
+    return '# AutoDE Source Registry\n# User-identified files that feed the Enterprise Context Layer.\n' + stringifyYaml(doc);
   }
 
   private parseYaml(content: string): RegisteredSource[] {
+    const raw = parseYaml(content);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const sources = (raw as Record<string, unknown>).sources;
+    if (!Array.isArray(sources)) return [];
+
     const result: RegisteredSource[] = [];
-    let current: Partial<RegisteredSource> | null = null;
-
-    const flush = () => {
-      if (current && current.path) {
-        result.push(current as RegisteredSource);
-      }
-      current = null;
-    };
-
-    for (const line of content.split(/\r?\n/)) {
-      const pathMatch = line.match(/^\s+-\s+path:\s*(.+)$/);
-      if (pathMatch) {
-        flush();
-        current = { path: pathMatch[1].trim(), kind: 'business_context', layer: 'definition', addedAt: '' };
-        continue;
-      }
-      if (current) {
-        const kindMatch = line.match(/^\s+kind:\s*(.+)$/);
-        if (kindMatch) {
-          current.kind = kindMatch[1].trim() as SourceKind;
-          current.layer = KIND_TO_LAYER[current.kind] ?? 'definition';
-          continue;
-        }
-        const layerMatch = line.match(/^\s+layer:\s*(.+)$/);
-        if (layerMatch) { current.layer = layerMatch[1].trim() as ContextLayer; continue; }
-        const ownerMatch = line.match(/^\s+owner:\s*(.+)$/);
-        if (ownerMatch) { current.owner = ownerMatch[1].trim(); continue; }
-        const addedAtMatch = line.match(/^\s+addedAt:\s*(.+)$/);
-        if (addedAtMatch) { current.addedAt = addedAtMatch[1].trim(); continue; }
-      }
+    for (const entry of sources) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+      const path = str(e.path);
+      if (!path) continue;
+      const kind = (str(e.kind) as SourceKind) || 'business_context';
+      result.push({
+        path,
+        kind,
+        layer: (str(e.layer) as ContextLayer) || KIND_TO_LAYER[kind],
+        owner: str(e.owner) || undefined,
+        addedAt: str(e.addedAt)
+      });
     }
-    flush();
     return result;
   }
 }

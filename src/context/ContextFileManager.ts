@@ -2,6 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { GraphManager } from './GraphManager';
+import { parseYaml } from './Yaml';
+import { readGraphSnapshot, writeGraphSnapshot } from './GraphPersistence';
+import { ContextValidator } from './ContextValidator';
 import {
   BaseNode,
   BusinessTermNode,
@@ -50,7 +53,8 @@ export class ContextFileManager implements vscode.Disposable {
   constructor(
     private readonly workspaceRoot: vscode.Uri,
     private readonly graphManager: GraphManager,
-    private readonly log: (msg: string) => void
+    private readonly log: (msg: string) => void,
+    private readonly validator?: ContextValidator
   ) {}
 
   public dispose(): void {
@@ -100,49 +104,118 @@ export class ContextFileManager implements vscode.Disposable {
   private async loadAllFiles(): Promise<void> {
     const contextDir = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context');
     const contextPath = contextDir.fsPath;
+    const authoritativeDir = path.join(contextPath, 'context');
 
     // Clear existing business context nodes (keep schema nodes if any)
     this.removeBusinessContextNodes();
 
-    // Load business-context.yaml
-    const bizCtxPath = path.join(contextPath, 'business-context.yaml');
-    if (fs.existsSync(bizCtxPath)) {
+    // ── Authoritative layer (`context/**` first, then legacy `.ai-context/` root) ──
+    const bizCtxPath = this.firstExisting([
+      path.join(authoritativeDir, 'business-context.yaml'),
+      path.join(contextPath, 'business-context.yaml')
+    ]);
+    if (bizCtxPath) {
       try {
         const content = fs.readFileSync(bizCtxPath, 'utf8');
-        const parsed = this.parseYamlSimple(content) as BusinessContextFile;
+        const parsed = parseYaml(content) as BusinessContextFile;
+        this.validateDoc('business-context.yaml', parsed);
         await this.loadBusinessContext(parsed);
-        this.log(`Loaded business context from business-context.yaml`);
+        this.log(`Loaded business context from ${path.relative(contextPath, bizCtxPath)}`);
       } catch (err) {
         this.log(`Failed to parse business-context.yaml: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     // Load verified-queries.yaml
-    const queriesPath = path.join(contextPath, 'verified-queries.yaml');
-    if (fs.existsSync(queriesPath)) {
+    const queriesPath = this.firstExisting([
+      path.join(authoritativeDir, 'verified-queries.yaml'),
+      path.join(contextPath, 'verified-queries.yaml')
+    ]);
+    if (queriesPath) {
       try {
         const content = fs.readFileSync(queriesPath, 'utf8');
-        const parsed = this.parseYamlSimple(content) as VerifiedQueriesFile;
+        const parsed = parseYaml(content) as VerifiedQueriesFile;
+        this.validateDoc('verified-queries.yaml', parsed);
         await this.loadVerifiedQueries(parsed);
-        this.log(`Loaded verified queries from verified-queries.yaml`);
+        this.log(`Loaded verified queries from ${path.relative(contextPath, queriesPath)}`);
       } catch (err) {
         this.log(`Failed to parse verified-queries.yaml: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
-    // Load schema-graph.json if it exists
-    const schemaPath = path.join(contextPath, 'schema-graph.json');
-    if (fs.existsSync(schemaPath)) {
+    // ── Derived layer: compiled `derived/graph.json` (atomic I/O), legacy `schema-graph.json` fallback ──
+    const graphPath = path.join(contextPath, 'derived', 'graph.json');
+    if (fs.existsSync(graphPath)) {
       try {
-        const content = fs.readFileSync(schemaPath, 'utf8');
-        const snapshot = JSON.parse(content);
-        if (snapshot.nodes && snapshot.edges) {
-          await this.graphManager.loadSnapshot(snapshot);
-          this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges`);
+        const snapshot = readGraphSnapshot(graphPath);
+        if (snapshot && Array.isArray(snapshot.nodes) && Array.isArray(snapshot.edges)) {
+          await this.graphManager.loadSnapshot(snapshot as { nodes: BaseNode[]; edges: GraphEdge[] });
+          this.log(`Loaded compiled graph from derived/graph.json (${snapshot.nodes.length} nodes, ${snapshot.edges.length} edges)`);
         }
       } catch (err) {
-        this.log(`Failed to load schema-graph.json: ${err instanceof Error ? err.message : String(err)}`);
+        this.log(`Failed to load derived/graph.json: ${err instanceof Error ? err.message : String(err)}`);
       }
+    } else {
+      const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
+      if (fs.existsSync(legacySchemaPath)) {
+        try {
+          const content = fs.readFileSync(legacySchemaPath, 'utf8');
+          const snapshot = JSON.parse(content);
+          if (snapshot.nodes && snapshot.edges) {
+            await this.graphManager.loadSnapshot(snapshot);
+            this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges`);
+          }
+        } catch (err) {
+          this.log(`Failed to load schema-graph.json: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    // ── Persist the compiled graph atomically to derived/graph.json ──
+    await this.persistCompiledGraph();
+  }
+
+  /** Returns the first path that exists, or null. */
+  private firstExisting(candidates: string[]): string | null {
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  /** Best-effort AJV envelope validation of an authoritative context document. */
+  private validateDoc(label: string, data: unknown): void {
+    if (!this.validator || !data || typeof data !== 'object') return;
+    // Validate only envelope-shaped documents (authoritative `context/**` files).
+    // Legacy list-of-entry formats (business_terms/queries) are normalized by the loaders.
+    const candidates: unknown[] = Array.isArray(data)
+      ? data.filter((x) => x && typeof x === 'object')
+      : [data];
+    for (const candidate of candidates) {
+      const record = candidate as Record<string, unknown>;
+      if (!record || typeof record.id !== 'string' || typeof record.kind !== 'string') continue;
+      const result = this.validator.validateEnvelope(record);
+      if (!result.valid) {
+        this.log(`Context validation (${label}): ${result.errors.slice(0, 5).join('; ')}`);
+      }
+    }
+  }
+
+  /** Persists the current in-memory graph to derived/graph.json (atomic temp + rename). */
+  private async persistCompiledGraph(): Promise<void> {
+    try {
+      const contextPath = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath;
+      const derivedDir = path.join(contextPath, 'derived');
+      fs.mkdirSync(derivedDir, { recursive: true });
+      const snapshot = this.graphManager.serializeSnapshot();
+      writeGraphSnapshot(path.join(derivedDir, 'graph.json'), {
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        compiledAt: snapshot.generatedAt
+      });
+      this.log(`Compiled graph persisted to derived/graph.json (${snapshot.nodes.length} nodes)`);
+    } catch (err) {
+      this.log(`Failed to persist derived/graph.json: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -281,119 +354,6 @@ export class ContextFileManager implements vscode.Disposable {
         }
       }
     }
-  }
-
-  /**
-   * Simple YAML parser for flat structures.
-   * Handles the subset of YAML needed for business-context.yaml and verified-queries.yaml.
-   * In production, replace with a proper YAML library like `js-yaml`.
-   */
-  private parseYamlSimple(content: string): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    const lines = content.split('\n');
-    let currentKey: string | null = null;
-    let currentArray: unknown[] = [];
-    let currentObj: Record<string, unknown> | null = null;
-    let inArray = false;
-    let inObject = false;
-    let indentLevel = 0;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      const indent = line.search(/\S/);
-      const isListItem = trimmed.startsWith('- ');
-
-      // Top-level key
-      if (!trimmed.startsWith('-') && trimmed.includes(':') && indent === 0) {
-        // Flush previous
-        if (currentKey && currentArray.length > 0) {
-          result[currentKey] = currentArray;
-        }
-        const colonIdx = trimmed.indexOf(':');
-        currentKey = trimmed.substring(0, colonIdx).trim();
-        const value = trimmed.substring(colonIdx + 1).trim();
-        if (value) {
-          result[currentKey] = value;
-          currentKey = null;
-        } else {
-          currentArray = [];
-          inArray = false;
-          inObject = false;
-        }
-        continue;
-      }
-
-      // List item start
-      if (isListItem && currentKey) {
-        const itemContent = trimmed.substring(2).trim();
-        if (itemContent.includes(':') && !itemContent.startsWith('"')) {
-          // Object in list
-          currentObj = {};
-          const colonIdx = itemContent.indexOf(':');
-          const objKey = itemContent.substring(0, colonIdx).trim();
-          const objValue = itemContent.substring(colonIdx + 1).trim();
-          if (objValue) {
-            currentObj[objKey] = objValue;
-          }
-          inObject = true;
-          inArray = true;
-          currentArray.push(currentObj);
-        } else {
-          // Simple value in list
-          if (inObject && currentObj) {
-            // This is a continuation of the object
-            const colonIdx = itemContent.indexOf(':');
-            if (colonIdx > 0) {
-              const objKey = itemContent.substring(0, colonIdx).trim();
-              const objValue = itemContent.substring(colonIdx + 1).trim();
-              currentObj[objKey] = objValue;
-            }
-          } else {
-            inArray = true;
-            inObject = false;
-            currentArray.push(itemContent);
-          }
-        }
-        continue;
-      }
-
-      // Continuation of object property (indented)
-      if (inObject && currentObj && indent > 0) {
-        const colonIdx = trimmed.indexOf(':');
-        if (colonIdx > 0) {
-          const objKey = trimmed.substring(0, colonIdx).trim();
-          const objValue = trimmed.substring(colonIdx + 1).trim();
-          if (objKey === 'mapped_tables' || objKey === 'tables_used' || objKey === 'applies_to') {
-            // Next line(s) will be list items
-            currentObj[objKey] = [];
-            (currentObj as Record<string, unknown>)[`_nextArrayKey`] = objKey;
-          } else {
-            currentObj[objKey] = objValue;
-          }
-        }
-        continue;
-      }
-
-      // Nested list item (for arrays like mapped_tables)
-      if (isListItem && inObject && currentObj) {
-        const arrayKey = (currentObj as Record<string, unknown>)['_nextArrayKey'] as string;
-        if (arrayKey) {
-          const arr = (currentObj[arrayKey] as unknown[]) || [];
-          arr.push(trimmed.substring(2).trim());
-          currentObj[arrayKey] = arr;
-        }
-        continue;
-      }
-    }
-
-    // Flush final
-    if (currentKey && currentArray.length > 0) {
-      result[currentKey] = currentArray;
-    }
-
-    return result;
   }
 
   /**

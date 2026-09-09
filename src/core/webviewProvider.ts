@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
@@ -9,6 +10,7 @@ import { SkillRegistry, loadSkillsFromDirectory } from './skillRegistry';
 import { composeSynthesisPrompt } from './specOpsPrompts';
 import { GraphManager } from '../context/GraphManager';
 import { ContextFileManager } from '../context/ContextFileManager';
+import { ContextValidator } from '../context/ContextValidator';
 import { SourceRegistry } from '../context/SourceRegistry';
 import { SynthesisPipeline } from '../context/SynthesisPipeline';
 import { SpecManager } from '../context/SpecManager';
@@ -38,6 +40,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.graphManager = new GraphManager();
   }
 
+  /** Builds an AJV envelope validator from the bundled context-envelope JSON Schema. */
+  private createContextValidator(): ContextValidator | undefined {
+    try {
+      const schemaPath = path.join(this.context.extensionUri.fsPath, 'docs', 'schemas', 'context-envelope.schema.json');
+      const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8')) as object;
+      return new ContextValidator(schema);
+    } catch {
+      return undefined;
+    }
+  }
+
   public async resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
@@ -62,7 +75,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.contextFileManager = new ContextFileManager(
       workspaceRoot,
       this.graphManager,
-      (msg: string) => this.postLog(msg)
+      (msg: string) => this.postLog(msg),
+      this.createContextValidator()
     );
     try {
       await this.contextFileManager.initialize();
@@ -209,7 +223,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             if (this.contextFileManager) {
               const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
               this.contextFileManager.dispose();
-              this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg));
+              this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator());
               await this.contextFileManager.initialize();
               this.postContextUpdate();
               this.postLog('Source assessment complete.');
