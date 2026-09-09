@@ -82,3 +82,40 @@ export function composeSynthesisPrompt(session: IntakeSession): string {
   }
   return lines.join('\n');
 }
+
+export const SYNTHESIS_SYSTEM_PROMPT = [
+  'You are a senior data engineering business analyst producing a comprehensive Business Problem Specification.',
+  'Respond with a single valid JSON object only — no prose and no markdown fences.',
+  'Use exactly this shape:',
+  '{',
+  '  "problemStatement": "...",',
+  '  "objectives": ["..."],',
+  '  "successCriteria": ["..."],',
+  '  "scope": { "in": ["..."], "out": ["..."] },',
+  '  "constraints": ["..."],',
+  '  "assumptions": ["..."],',
+  '  "domain": "...",',
+  '  "stakeholders": ["..."],',
+  '  "keyEntities": ["..."],',
+  '  "businessRequirements": ["..."],',
+  '  "dataFlows": [{ "id": "f1", "source": "...", "target": "...", "description": "...", "transformations": ["..."], "frequency": "daily" }],',
+  '  "transformations": ["..."],',
+  '  "dependencies": ["..."],',
+  '  "acceptanceCriteria": ["..."],',
+  '  "implementationConsiderations": ["..."],',
+  '  "sourceCatalog": [{ "name": "...", "type": "database|api|file|stream|saas|other", "description": "...", "availability": "..." }]',
+  '}',
+  'Rules:',
+  '- Derive every statement from the collected Q&A; never invent systems, tables, vendors, or metrics.',
+  '- Record anything unresolved as an explicit assumption.',
+  '- "problemStatement", "objectives" and "scope.in" must be non-empty.',
+  '- Include dataFlows, transformations, dependencies, acceptanceCriteria, and implementationConsiderations as comprehensively as the collected answers support.'
+].join('\n');
+
+/** Builds the comprehensive-synthesis turn from the collected Q&A. */
+export function buildSynthesisPrompt(session: IntakeSession): { system: string; user: string } {
+  return {
+    system: SYNTHESIS_SYSTEM_PROMPT,
+    user: `${composeSynthesisPrompt(session)}\n\nProduce the comprehensive Business Problem Specification JSON now.`
+  };
+}

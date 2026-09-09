@@ -10,7 +10,8 @@ import { executeTransformScaffoldAgent } from '../agents/build/TransformationSca
 import { ArtifactWriter } from '../context/ArtifactWriter';
 import { inferPhases, computePhaseStatuses, PHASE_ORDER } from './phaseInference';
 import { SpecOpsEngine } from './specOps';
-import { buildDiscoveryTurnPrompt } from './specOpsPrompts';
+import { buildDiscoveryTurnPrompt, buildSynthesisPrompt } from './specOpsPrompts';
+import { parseComprehensiveSpec } from './specSynthesis';
 import {
   AgentExecutionContext,
   AgentType,
@@ -188,6 +189,21 @@ export class DataAgentHubHub {
     );
     const parsed = this.parseJsonObject(this.extractJsonText(raw));
     return SpecOpsEngine.validateAction(parsed);
+  }
+
+  /**
+   * Synthesizes the comprehensive (v2) Business Problem Specification from the
+   * collected intake session, including data flows, transformations, dependencies,
+   * acceptance criteria, and implementation considerations.
+   */
+  public async synthesizeComprehensiveSpec(session: IntakeSession, previous?: BusinessProblemSpec): Promise<BusinessProblemSpec> {
+    const { system, user } = buildSynthesisPrompt(session);
+    const raw = await this.callConfiguredLlm(
+      user,
+      system,
+      'Synthesize the comprehensive Business Problem Specification from the collected requirements.'
+    );
+    return parseComprehensiveSpec(this.parseJsonObject(this.extractJsonText(raw)), { previous, session });
   }
 
   /** Renders a specification as the objective text used for plan generation. */

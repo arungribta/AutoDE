@@ -345,6 +345,69 @@ async function main() {
   });
 
 
+  await test('parseComprehensiveSpec() produces v2 fields and provenance', () => {
+    const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const session = createIntakeSession('Load sales into a mart', { fields: ['dataFlows'], now: '2026-01-01T00:00:00.000Z' });
+    session.questions.push({ id: 'q1', field: 'dataFlows', prompt: 'Which flow?', kind: 'text', askedAt: 't' });
+    session.answers.push({ questionId: 'q1', field: 'dataFlows', value: 'orders to facts', answeredAt: 't' });
+    const spec = parseComprehensiveSpec({
+      problemStatement: 'Load sales into a mart',
+      objectives: ['analyze revenue'],
+      scope: { in: ['orders'], out: [] },
+      businessRequirements: ['daily mart'],
+      dataFlows: [{ source: 'orders', target: 'fact_sales', description: 'raw to fact', frequency: 'daily' }],
+      transformations: ['dedupe'],
+      dependencies: ['source extract'],
+      acceptanceCriteria: ['row counts reconcile'],
+      implementationConsiderations: ['incremental'],
+      sourceCatalog: [{ name: 'orders_db', type: 'database' }]
+    }, { session });
+    assert.strictEqual(spec.status, 'draft');
+    assert.deepStrictEqual(spec.businessRequirements, ['daily mart']);
+    assert.strictEqual(spec.dataFlows[0].id, 'f1');
+    assert.strictEqual(spec.dataFlows[0].target, 'fact_sales');
+    assert.strictEqual(spec.sourceCatalog[0].type, 'database');
+    assert.deepStrictEqual(spec.acceptanceCriteria, ['row counts reconcile']);
+    const prov = spec.provenance.find((p) => p.field === 'dataFlows');
+    assert.strictEqual(prov.source, 'question');
+    assert.strictEqual(prov.questionId, 'q1');
+    const synthProv = spec.provenance.find((p) => p.field === 'businessRequirements');
+    assert.strictEqual(synthProv.source, 'synthesis');
+  });
+
+  await test('parseComprehensiveSpec() rejects invalid payloads', () => {
+    const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
+    assert.throws(() => parseComprehensiveSpec(null), /JSON object/);
+    assert.throws(() => parseComprehensiveSpec({ objectives: ['x'], scope: { in: ['a'] } }), /problemStatement/);
+    assert.throws(() => parseComprehensiveSpec({ problemStatement: 'x', scope: { in: ['a'] } }), /objectives/);
+    assert.throws(() => parseComprehensiveSpec({ problemStatement: 'x', objectives: ['a'], scope: { in: [] } }), /in-scope/);
+  });
+
+  await test('synthesizeComprehensiveSpec() returns a v2 spec via the LLM', async () => {
+    const payload = JSON.stringify({
+      problemStatement: 'Load sales into a mart',
+      objectives: ['analyze revenue'],
+      scope: { in: ['orders'], out: [] },
+      businessRequirements: ['daily mart'],
+      dataFlows: [{ source: 'orders', target: 'fact_sales', description: 'raw to fact' }],
+      acceptanceCriteria: ['reconcile counts']
+    });
+    const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
+      sendRequest: async () => ({ text: textIter(payload) }) };
+    const mock = createMock({ models: [model] });
+    delete require.cache[require.resolve('../dist/core/agentHub.js')];
+    delete require.cache[require.resolve('../dist/core/copilotAdapter.js')];
+    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', copilotProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const spec = await withMock(mock, () => hub.synthesizeComprehensiveSpec(createIntakeSession('Load sales', { fields: [] })));
+    assert.strictEqual(spec.status, 'draft');
+    assert.strictEqual(spec.dataFlows[0].target, 'fact_sales');
+    assert.deepStrictEqual(spec.businessRequirements, ['daily mart']);
+  });
+
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);
