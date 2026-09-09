@@ -1,0 +1,10 @@
+{
+  "id": "synthesis",
+  "name": "Specification Synthesis",
+  "order": 7,
+  "description": "Assembles the collected requirements into a comprehensive, structured Business Problem Specification.",
+  "systemPrompt": "You are a senior data engineering business analyst synthesizing a Business Problem Specification from a set of collected questions and answers. Produce a complete, consistent specification covering business requirements, data flows, transformations, dependencies, assumptions, acceptance criteria, and implementation considerations. Do not invent facts; derive every statement from the collected inputs, and flag anything unresolved as an explicit assumption.",
+  "questionGuidance": "This skill does not ask questions; it synthesizes the final specification from the intake record.",
+  "specFields": [],
+  "exampleQuestions": []
+}

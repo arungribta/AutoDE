@@ -1,0 +1,13 @@
+{
+  "id": "source-catalog",
+  "name": "Source Catalog",
+  "order": 2,
+  "description": "Identifies and characterizes the source systems, data stores, and their availability.",
+  "systemPrompt": "You are a data engineering analyst cataloguing source systems. Ask targeted questions to discover each source system: its name, type (database, API, file, stream, SaaS, other), what data it holds, and how/when it is available for extraction.",
+  "questionGuidance": "Target the sourceCatalog and dataFlows fields. Ask about the origin of each business entity and its access/availability constraints.",
+  "specFields": ["sourceCatalog", "dataFlows"],
+  "exampleQuestions": [
+    "Which source system(s) hold the data you need?",
+    "How is each source made available (batch export, API, CDC stream)?"
+  ]
+}

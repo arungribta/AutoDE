@@ -237,6 +237,85 @@ async function main() {
     assert.strictEqual(state.specVersion, 3);
   });
 
+  // ── Agentic spec generation (Phase A: skills registry + SpecOps engine) ──
+  const nodePath = require('node:path');
+
+  await test('parseSkillDefinition() normalizes and validates', () => {
+    const { parseSkillDefinition } = require('../dist/core/skillRegistry.js');
+    const skill = parseSkillDefinition({ id: 'x', name: 'X', systemPrompt: 'p', specFields: ['a', 'b', 1, ''] });
+    assert.strictEqual(skill.id, 'x');
+    assert.deepStrictEqual(skill.specFields, ['a', 'b']);
+    assert.strictEqual(skill.order, 0);
+    assert.throws(() => parseSkillDefinition({ name: 'No id' }), /requires an "id"/);
+    assert.throws(() => parseSkillDefinition({ id: 'y', name: 'Y' }), /systemPrompt/);
+  });
+
+  await test('SkillRegistry orders skills and maps fields', () => {
+    const { SkillRegistry } = require('../dist/core/skillRegistry.js');
+    const reg = new SkillRegistry([
+      { id: 'b', name: 'B', order: 2, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['dataFlows'] },
+      { id: 'a', name: 'A', order: 1, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['objectives', 'dataFlows'] }
+    ]);
+    assert.deepStrictEqual(reg.list().map((s) => s.id), ['a', 'b']);
+    assert.deepStrictEqual(reg.skillsForField('dataFlows').map((s) => s.id), ['a', 'b']);
+    assert.deepStrictEqual(reg.allSpecFields().sort(), ['dataFlows', 'objectives']);
+    assert.strictEqual(reg.questionSkills().length, 2);
+  });
+
+  await test('loadSkillsFromDirectory() loads bundled skills', () => {
+    const { loadSkillsFromDirectory } = require('../dist/core/skillRegistry.js');
+    const skills = loadSkillsFromDirectory(nodePath.join(__dirname, '..', 'skills'));
+    assert.ok(skills.length >= 6, `expected >=6 bundled skills, got ${skills.length}`);
+    assert.ok(skills.some((s) => s.id === 'synthesis'));
+    assert.ok(skills.every((s) => s.id && s.systemPrompt));
+  });
+
+  await test('createIntakeSession() seeds coverage and budget', () => {
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const session = createIntakeSession('Build a marts pipeline', { fields: ['dataFlows', 'objectives'], turnBudget: 5, now: '2026-01-01T00:00:00.000Z' });
+    assert.strictEqual(session.state, 'discovery');
+    assert.strictEqual(session.turnBudget, 5);
+    assert.deepStrictEqual(session.coverage, { dataFlows: 'missing', objectives: 'missing' });
+    assert.throws(() => createIntakeSession('   '), /problem statement/i);
+  });
+
+  await test('SpecOpsEngine tracks coverage and stop condition', () => {
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const engine = new SpecOpsEngine(createIntakeSession('x', { fields: ['objectives', 'dataFlows'], turnBudget: 2, now: '2026-01-01T00:00:00.000Z' }));
+    assert.strictEqual(engine.shouldSynthesize(), false);
+    engine.ask([{ id: 'q1', field: 'objectives', prompt: 'What objective?', kind: 'text', askedAt: 't' }]);
+    engine.answer({ questionId: 'q1', field: 'objectives', value: 'revenue', answeredAt: 't' });
+    assert.strictEqual(engine.getCoverage().objectives, 'partial');
+    engine.completeFields(['dataFlows']);
+    assert.strictEqual(engine.coverageComplete(), true);
+    assert.strictEqual(engine.shouldSynthesize(), true);
+  });
+
+  await test('SpecOpsEngine budget alone triggers synthesis', () => {
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const engine = new SpecOpsEngine(createIntakeSession('x', { fields: ['objectives'], turnBudget: 1 }));
+    engine.ask([{ id: 'q1', field: 'objectives', prompt: 'p?', kind: 'text', askedAt: 't' }]);
+    assert.strictEqual(engine.shouldSynthesize(), true);
+  });
+
+  await test('validateAction() accepts valid actions and rejects invalid ones', () => {
+    const { SpecOpsEngine } = require('../dist/core/specOps.js');
+    const a = SpecOpsEngine.validateAction({ action: 'ask', question: { field: 'objectives', prompt: 'What?', kind: 'text' } });
+    assert.strictEqual(a.action, 'ask');
+    assert.strictEqual(a.question.field, 'objectives');
+    const b = SpecOpsEngine.validateAction({ action: 'ask_many', questions: [{ field: 'dataFlows', prompt: 'p', kind: 'single-select', options: ['a', 'b'] }] });
+    assert.strictEqual(b.action, 'ask_many');
+    assert.strictEqual(b.questions[0].options.length, 2);
+    assert.strictEqual(SpecOpsEngine.validateAction({ action: 'synthesize' }).action, 'synthesize');
+    assert.strictEqual(SpecOpsEngine.validateAction({ action: 'done' }).action, 'done');
+    assert.throws(() => SpecOpsEngine.validateAction({ action: 'ask', question: { field: '', prompt: 'x', kind: 'text' } }), /field/);
+    assert.throws(() => SpecOpsEngine.validateAction({ action: 'ask', question: { field: 'x', prompt: '', kind: 'text' } }), /prompt/);
+    assert.throws(() => SpecOpsEngine.validateAction({ action: 'ask', question: { field: 'x', prompt: 'p', kind: 'weird' } }), /kind/);
+    assert.throws(() => SpecOpsEngine.validateAction({ action: 'ask_many', questions: [] }), /non-empty/);
+    assert.throws(() => SpecOpsEngine.validateAction({ action: 'fly' }), /Unknown/);
+  });
+
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

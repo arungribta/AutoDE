@@ -1,0 +1,13 @@
+{
+  "id": "transformations",
+  "name": "Transformations",
+  "order": 4,
+  "description": "Captures the business transformation rules applied between source and target.",
+  "systemPrompt": "You are a data engineering analyst capturing transformation requirements. Ask about the business rules, joins, aggregations, cleansing, and enrichment applied to each data flow. Clarify anything ambiguous before accepting it.",
+  "questionGuidance": "Target the transformations field. Ask about business rules, calculations, lookups, and data-quality corrections applied to each flow.",
+  "specFields": ["transformations"],
+  "exampleQuestions": [
+    "What business rules or calculations transform this flow's source data?",
+    "Are there joins, lookups, or aggregations the target must apply?"
+  ]
+}

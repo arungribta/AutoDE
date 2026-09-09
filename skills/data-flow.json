@@ -1,0 +1,13 @@
+{
+  "id": "data-flow",
+  "name": "Data Flow",
+  "order": 3,
+  "description": "Maps the business data flows from source to target, including frequency and grain.",
+  "systemPrompt": "You are a data engineering analyst mapping data flows. For each flow, establish the source, the target model/entity, the business meaning, the expected frequency, and the grain (one row per what?). Ask one flow at a time.",
+  "questionGuidance": "Target the dataFlows field. Ask about source-to-target movements, frequency, grain, and ordering/dependencies between flows.",
+  "specFields": ["dataFlows", "dependencies"],
+  "exampleQuestions": [
+    "What is the first data flow, from which source to which target model?",
+    "How frequently should this flow run, and what is its grain?"
+  ]
+}

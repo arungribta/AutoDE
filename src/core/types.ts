@@ -54,6 +54,115 @@ export interface BusinessProblemSpec {
   updatedAt: string;
   approvedAt?: string;
   approvedBy?: string;
+
+  // ── Comprehensive (v2) fields — populated by agentic spec synthesis ──
+  businessRequirements?: string[];
+  dataFlows?: DataFlow[];
+  transformations?: string[];
+  dependencies?: string[];
+  /** Verifiable pass/fail conditions, distinct from business `successCriteria`. */
+  acceptanceCriteria?: string[];
+  implementationConsiderations?: string[];
+  sourceCatalog?: SourceEntry[];
+  /** Traceability: which question/skill/assumption produced each spec field. */
+  provenance?: SpecProvenance[];
+}
+
+// ── Agentic Specification Generation (SpecOps) ──
+
+/** A named data movement from a source to a target (business flow, not physical DDL). */
+export interface DataFlow {
+  id: string;
+  source: string;
+  target: string;
+  description: string;
+  transformations?: string[];
+  frequency?: string;
+}
+
+/** A candidate source system/entity surfaced during requirements discovery. */
+export interface SourceEntry {
+  name: string;
+  type: 'database' | 'api' | 'file' | 'stream' | 'saas' | 'other';
+  description?: string;
+  availability?: string;
+}
+
+/** Links a spec field to the question/skill/assumption that produced it. */
+export interface SpecProvenance {
+  /** Dotted path, e.g. 'dataFlows' or 'objectives.0'. */
+  field: string;
+  source: 'user' | 'question' | 'assumption' | 'synthesis' | 'skill';
+  questionId?: string;
+  skill?: string;
+}
+
+export type SpecQuestionKind = 'text' | 'single-select' | 'multi-select' | 'boolean';
+
+export interface SpecIntakeQuestion {
+  id: string;
+  /** Primary spec field this question informs (dotted path, e.g. 'dataFlows'). */
+  field: string;
+  prompt: string;
+  kind: SpecQuestionKind;
+  options?: string[];
+  rationale?: string;
+  skill?: string;
+  askedAt: string;
+}
+
+export interface IntakeAnswer {
+  questionId: string;
+  field: string;
+  value: string;
+  answeredAt: string;
+}
+
+export type SpecEngineState = 'discovery' | 'synthesizing' | 'draft' | 'refining' | 'approved';
+
+export type SpecCoverageStatus = 'complete' | 'partial' | 'missing';
+
+/** Persisted record of an in-progress (or completed) agentic specification conversation. */
+export interface IntakeSession {
+  id: string;
+  specId?: string;
+  problemStatement: string;
+  state: SpecEngineState;
+  questions: SpecIntakeQuestion[];
+  answers: IntakeAnswer[];
+  /** Derived observations from the conversation (LLM-produced). */
+  insights: string[];
+  /** Per spec-field coverage used by the stop condition. */
+  coverage: Record<string, SpecCoverageStatus>;
+  turnCount: number;
+  turnBudget: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The prompt-schema "action" an LLM returns each turn. Validated deterministically.
+ * (No native tool-calling: Copilot's vscode.lm is text-in/text-out only.)
+ */
+export type SpecEngineAction =
+  | { action: 'ask'; question: Omit<SpecIntakeQuestion, 'id' | 'askedAt'> }
+  | { action: 'ask_many'; questions: Array<Omit<SpecIntakeQuestion, 'id' | 'askedAt'>> }
+  | { action: 'synthesize' }
+  | { action: 'done' };
+
+/** A composable DE spec-generation skill (Superpowers-inspired, user-editable). */
+export interface SkillDefinition {
+  id: string;
+  name: string;
+  order: number;
+  description: string;
+  /** System prompt fragment loaded for this skill. */
+  systemPrompt: string;
+  /** Guidance for the LLM on what questions this skill asks. */
+  questionGuidance: string;
+  /** Spec fields this skill is responsible for filling (empty = non-question skill, e.g. synthesis). */
+  specFields: string[];
+  exampleQuestions?: string[];
 }
 
 // ── Target Environment ──

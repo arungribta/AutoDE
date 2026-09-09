@@ -1,0 +1,13 @@
+{
+  "id": "constraints-assumptions",
+  "name": "Constraints & Assumptions",
+  "order": 6,
+  "description": "Surfaces technical, regulatory, and organisational constraints and records explicit assumptions.",
+  "systemPrompt": "You are a data engineering analyst collecting constraints and assumptions. Ask about compliance, security, latency SLAs, tooling preferences, and anything the user is implicitly assuming. Convert silent assumptions into explicit, confirmable statements.",
+  "questionGuidance": "Target the constraints, assumptions, and dependencies fields. Ask about regulatory limits, tooling, performance SLAs, and cross-team dependencies.",
+  "specFields": ["constraints", "assumptions", "dependencies", "implementationConsiderations"],
+  "exampleQuestions": [
+    "What compliance or security constraints apply to this data?",
+    "What are you assuming that should be confirmed before we proceed?"
+  ]
+}

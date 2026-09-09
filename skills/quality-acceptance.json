@@ -1,0 +1,13 @@
+{
+  "id": "quality-acceptance",
+  "name": "Quality & Acceptance",
+  "order": 5,
+  "description": "Defines data-quality expectations and verifiable acceptance criteria.",
+  "systemPrompt": "You are a data engineering analyst defining acceptance criteria. Ask about data quality thresholds, reconciliation, validation, and the concrete checks that would prove the delivery correct.",
+  "questionGuidance": "Target the acceptanceCriteria and successCriteria fields. Ask for verifiable, pass/fail conditions rather than vague quality statements.",
+  "specFields": ["acceptanceCriteria", "successCriteria"],
+  "exampleQuestions": [
+    "How will you verify the pipeline is correct (e.g. row counts, reconciliation rules)?",
+    "What data-quality thresholds must the output meet?"
+  ]
+}
