@@ -138,6 +138,38 @@ export class SpecOpsEngine {
     return this.session.turnCount >= this.session.turnBudget || this.coverageComplete();
   }
 
+  /**
+   * Applies a validated engine action to the session, mutating state.
+   * Returns the ids of any newly-asked questions (empty for synthesize/done).
+   */
+  public applyAction(action: SpecEngineAction, now?: string): string[] {
+    const stamp = now ?? new Date().toISOString();
+    switch (action.action) {
+      case 'ask':
+      case 'ask_many': {
+        const rawQuestions = action.action === 'ask' ? [action.question] : action.questions;
+        const asked: SpecIntakeQuestion[] = rawQuestions.map((question, index) => ({
+          id: `q-${this.session.questions.length + index + 1}`,
+          field: question.field,
+          prompt: question.prompt,
+          kind: question.kind,
+          options: question.options ? [...question.options] : undefined,
+          rationale: question.rationale,
+          skill: question.skill,
+          askedAt: stamp
+        }));
+        this.ask(asked);
+        return asked.map((question) => question.id);
+      }
+      case 'synthesize':
+        this.setState('synthesizing');
+        return [];
+      case 'done':
+        this.setState('approved');
+        return [];
+    }
+  }
+
   // ── Prompt-schema action validation (deterministic) ──
 
   public static validateQuestion(raw: unknown, label = 'question'): Omit<SpecIntakeQuestion, 'id' | 'askedAt'> {

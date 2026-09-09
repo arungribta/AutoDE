@@ -239,6 +239,15 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .phase-badge.pending { background: var(--border-subtle); color: var(--text-muted); }
 .phase-badge.unrequired { background: transparent; color: var(--text-muted); }
 
+/* ── Spec Discovery Question ── */
+.spec-question { border: 1px solid var(--border-soft); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--surface-hover); padding: var(--spacing-md); margin-top: 8px; }
+.spec-q-label { font-size: var(--font-size-sm); color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.spec-q-prompt { font-size: var(--font-size); margin-bottom: 6px; line-height: 1.45; }
+.spec-q-rationale { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: 8px; }
+.spec-q-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.spec-q-option { background: var(--surface-active); border: 1px solid var(--border-soft); border-radius: var(--radius-pill); color: var(--text-primary, inherit); padding: 4px 10px; font-size: var(--font-size-sm); cursor: pointer; }
+.spec-q-option:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ── Artifact Cards ── */
 .artifact-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); margin-top: 6px; overflow: hidden; }
 .artifact-card-header { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--border-subtle); font-weight: 600; font-size: var(--font-size-sm); cursor: pointer; user-select: none; }
@@ -454,6 +463,34 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function addMessage(role, content, label) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + formatContent(content) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
   function formatContent(text) { var escaped = escapeHtml(String(text)); escaped = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) { return '<pre><code>' + escapeHtml(code.trim()) + '</code></pre>'; }); escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>'); return escaped; }
   function addLogEntry(message) { var div = document.createElement('div'); div.className = 'message ai'; div.style.fontSize = '11px'; div.style.opacity = '0.7'; div.innerHTML = '<div class="msg-content" style="color:var(--text-muted);">' + escapeHtml(message) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; }
+
+  // ── Spec Discovery Question ──
+  function addSpecQuestion(question) {
+    if (welcomeBlock) { welcomeBlock.style.display = 'none'; }
+    var html = '<div class="spec-question">';
+    html += '<div class="spec-q-label">🔎 Clarifying requirements</div>';
+    html += '<div class="spec-q-prompt">' + escapeHtml(question.prompt || '') + '</div>';
+    if (question.rationale) { html += '<div class="spec-q-rationale">' + escapeHtml(question.rationale) + '</div>'; }
+    if (question.options && question.options.length > 0) {
+      html += '<div class="spec-q-options">';
+      for (var i = 0; i < question.options.length; i++) {
+        html += '<button class="spec-q-option" data-value="' + escapeHtml(question.options[i]) + '">' + escapeHtml(question.options[i]) + '</button>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    chatStream.appendChild(div.firstElementChild);
+    chatStream.scrollTop = chatStream.scrollHeight;
+    var options = div.querySelectorAll('.spec-q-option');
+    options.forEach(function (btn) {
+      btn.onclick = function () {
+        chatInput.value = btn.getAttribute('data-value');
+        sendMessage();
+      };
+    });
+  }
 
   // ── Contextual Actions ──
   function renderContextActions() {
@@ -838,6 +875,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
       case 'sourcesList': renderSourcesList(msg.sources); break;
+      case 'specQuestion': if (msg.question) { addSpecQuestion(msg.question); } break;
       case 'specLoaded': currentSpec = msg.spec || null; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); break;
       case 'specDrafted': if (msg.spec) { addSpecCard(msg.spec, !!msg.revised); renderPaletteSpec(); renderPalettePhases(); renderContextActions(); } break;
       case 'specApproved': if (msg.spec) { currentSpec = msg.spec; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); showToast('Specification v' + (msg.spec.version || 1) + ' approved', 'success'); } break;

@@ -316,6 +316,35 @@ async function main() {
   });
 
 
+  await test('applyAction() asks questions, assigns ids, and transitions state', () => {
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const engine = new SpecOpsEngine(createIntakeSession('x', { fields: ['objectives'], now: '2026-01-01T00:00:00.000Z' }));
+    const ids = engine.applyAction({ action: 'ask', question: { field: 'objectives', prompt: 'What?', kind: 'text' } }, '2026-01-01T00:00:01.000Z');
+    assert.deepStrictEqual(ids, ['q-1']);
+    assert.strictEqual(engine.getSession().questions[0].id, 'q-1');
+    assert.strictEqual(engine.getSession().turnCount, 1);
+    const ids2 = engine.applyAction({ action: 'ask_many', questions: [{ field: 'objectives', prompt: 'a', kind: 'text' }, { field: 'dataFlows', prompt: 'b', kind: 'text' }] });
+    assert.deepStrictEqual(ids2, ['q-2', 'q-3']);
+    assert.strictEqual(engine.getSession().turnCount, 3);
+    engine.applyAction({ action: 'synthesize' });
+    assert.strictEqual(engine.getState(), 'synthesizing');
+    engine.applyAction({ action: 'done' });
+    assert.strictEqual(engine.getState(), 'approved');
+  });
+
+  await test('buildDiscoveryTurnPrompt() includes problem, gaps, and skills', () => {
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { buildDiscoveryTurnPrompt } = require('../dist/core/specOpsPrompts.js');
+    const session = createIntakeSession('Load sales into a mart', { fields: ['dataFlows', 'objectives'] });
+    const skills = [{ id: 'data-flow', name: 'Data Flow', order: 1, description: '', systemPrompt: 'p', questionGuidance: 'map flows', specFields: ['dataFlows'], exampleQuestions: ['Which flow?'] }];
+    const { system, user } = buildDiscoveryTurnPrompt(session, skills);
+    assert.ok(system.includes('single valid JSON object'), 'system prompt instructs JSON-only');
+    assert.ok(user.includes('Load sales into a mart'), 'user prompt includes problem statement');
+    assert.ok(user.includes('dataFlows (missing)'), 'user prompt includes coverage gaps');
+    assert.ok(user.includes('data-flow'), 'user prompt includes skill guidance');
+  });
+
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

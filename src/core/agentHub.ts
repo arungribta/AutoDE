@@ -9,15 +9,20 @@ import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
 import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
 import { ArtifactWriter } from '../context/ArtifactWriter';
 import { inferPhases, computePhaseStatuses, PHASE_ORDER } from './phaseInference';
+import { SpecOpsEngine } from './specOps';
+import { buildDiscoveryTurnPrompt } from './specOpsPrompts';
 import {
   AgentExecutionContext,
   AgentType,
   BusinessProblemSpec,
   InferredPhase,
+  IntakeSession,
   PlanState,
   PlanStep,
   PlanStatus,
   SessionStatus,
+  SkillDefinition,
+  SpecEngineAction,
   TargetEnvironment,
   GeneratedArtifact,
   WorkflowPhase
@@ -167,6 +172,22 @@ export class DataAgentHubHub {
     this.log(`Business Problem Specification ${spec.id} v${spec.version} drafted (${spec.objectives.length} objective(s)).`);
     this.emitState();
     return spec;
+  }
+
+  /**
+   * Runs one turn of the agentic requirements-discovery loop: builds the
+   * discovery prompt from the current intake session + skills, asks the
+   * configured LLM for its next action, and validates the result.
+   */
+  public async discoverNextAction(session: IntakeSession, skills: SkillDefinition[]): Promise<SpecEngineAction> {
+    const { system, user } = buildDiscoveryTurnPrompt(session, skills);
+    const raw = await this.callConfiguredLlm(
+      user,
+      system,
+      'Decide the next step in the data engineering requirements-discovery conversation.'
+    );
+    const parsed = this.parseJsonObject(this.extractJsonText(raw));
+    return SpecOpsEngine.validateAction(parsed);
   }
 
   /** Renders a specification as the objective text used for plan generation. */

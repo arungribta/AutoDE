@@ -2,8 +2,11 @@ import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings } from './types';
+import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
+import { SpecOpsEngine, createIntakeSession } from './specOps';
+import { SkillRegistry, loadSkillsFromDirectory } from './skillRegistry';
+import { composeSynthesisPrompt } from './specOpsPrompts';
 import { GraphManager } from '../context/GraphManager';
 import { ContextFileManager } from '../context/ContextFileManager';
 import { SourceRegistry } from '../context/SourceRegistry';
@@ -21,6 +24,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private sourceRegistry?: SourceRegistry;
   private synthesisPipeline?: SynthesisPipeline;
   private specManager?: SpecManager;
+  private specOpsEngine?: SpecOpsEngine;
+  private skillRegistry?: SkillRegistry;
+  private pendingSpecQuestions: SpecIntakeQuestion[] = [];
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -112,12 +118,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (!chatMessage.trim()) { this.postLog('A message is required.'); return; }
           try {
             // ── Spec-driven conversation ──
-            //   no spec yet   -> the message IS the business problem -> draft a specification
+            //   no spec yet   -> agentic requirements discovery (adaptive questioning)
             //   draft spec    -> the message refines it              -> revise the specification
             //   approved spec -> conversational answer grounded in the specification + repository context
             const currentSpec = this.specManager?.getSpec();
             if (this.specManager && !currentSpec) {
-              await this.draftSpec(chatMessage);
+              await this.handleSpecDiscovery(chatMessage);
               break;
             }
             if (this.specManager && currentSpec && currentSpec.status === 'draft') {
@@ -393,6 +399,85 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         ? `Specification revised as v${spec.version} (draft). Approve it to continue.`
         : `Specification v${spec.version} revised. Review it in the Workflow Palette (🧰).`
     );
+  }
+
+  // ── Agentic Specification Discovery (SpecOps) ──
+
+  /** Lazily loads bundled + workspace skill definitions into a registry. */
+  private ensureSkills(): SkillDefinition[] {
+    if (this.skillRegistry) {
+      return this.skillRegistry.list();
+    }
+    const bundledDir = vscode.Uri.joinPath(this.context.extensionUri, 'skills').fsPath;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+    const overrideDir = vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'skills').fsPath;
+    const bundled = loadSkillsFromDirectory(bundledDir);
+    const overrides = loadSkillsFromDirectory(overrideDir);
+    this.skillRegistry = new SkillRegistry([...bundled, ...overrides]);
+    return this.skillRegistry.list();
+  }
+
+  /** Handles a user message during the no-spec (discovery) phase. */
+  private async handleSpecDiscovery(message: string): Promise<void> {
+    const trimmed = message.trim();
+    if (!trimmed) { return; }
+
+    if (!this.specOpsEngine) {
+      const fields = new SkillRegistry(this.ensureSkills()).allSpecFields();
+      this.specOpsEngine = new SpecOpsEngine(createIntakeSession(trimmed, { fields }));
+      this.postLog('Starting agentic requirements discovery — answer the questions to refine the specification.');
+    } else if (this.pendingSpecQuestions.length > 0) {
+      const current = this.pendingSpecQuestions[0];
+      this.specOpsEngine.answer({ questionId: current.id, field: current.field, value: trimmed, answeredAt: new Date().toISOString() });
+      this.pendingSpecQuestions.shift();
+      if (this.pendingSpecQuestions.length > 0) {
+        this.postSpecQuestion(this.pendingSpecQuestions[0]);
+        return;
+      }
+    }
+
+    await this.runDiscoveryTurn();
+  }
+
+  private async runDiscoveryTurn(): Promise<void> {
+    const engine = this.specOpsEngine;
+    if (!engine) { return; }
+
+    if (engine.shouldSynthesize()) {
+      await this.synthesizeFromSession();
+      return;
+    }
+
+    try {
+      const action: SpecEngineAction = await this.hub.discoverNextAction(engine.getSession(), this.ensureSkills());
+      if (action.action === 'ask' || action.action === 'ask_many') {
+        const ids = engine.applyAction(action);
+        this.pendingSpecQuestions = engine.getSession().questions.filter((question) => ids.includes(question.id));
+        if (this.pendingSpecQuestions.length > 0) {
+          this.postSpecQuestion(this.pendingSpecQuestions[0]);
+        }
+      } else {
+        await this.synthesizeFromSession();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.postLog(`Requirements discovery failed (${message}); synthesizing from what was collected.`);
+      await this.synthesizeFromSession();
+    }
+  }
+
+  private async synthesizeFromSession(): Promise<void> {
+    const engine = this.specOpsEngine;
+    if (!engine) { return; }
+    engine.setState('synthesizing');
+    this.postLog('Requirements collected. Synthesizing the Business Problem Specification...');
+    await this.draftSpec(composeSynthesisPrompt(engine.getSession()));
+    this.specOpsEngine = undefined;
+    this.pendingSpecQuestions = [];
+  }
+
+  private postSpecQuestion(question: SpecIntakeQuestion): void {
+    this.postMessage('specQuestion', { question });
   }
 
   private postMessage(type: string, payload: object = {}): void {
