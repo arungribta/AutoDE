@@ -455,6 +455,51 @@ async function main() {
   });
 
 
+  // ── Phase 3 primitives: YAML, AJV validation, atomic graph persistence ──
+  await test('parseYaml/stringifyYaml round-trips nested structures', () => {
+    const { parseYaml, stringifyYaml } = require('../dist/context/Yaml.js');
+    const input = { business_terms: [{ term: 'revenue', description: 'net sales' }], flags: { enabled: true, n: 3 } };
+    const parsed = parseYaml(stringifyYaml(input));
+    assert.deepStrictEqual(parsed, input);
+    assert.deepStrictEqual(parseYaml('a: 1\nb:\n  - x\n  - y'), { a: 1, b: ['x', 'y'] });
+  });
+
+  await test('ContextValidator validates the envelope schema', () => {
+    const { ContextValidator } = require('../dist/context/ContextValidator.js');
+    const schema = require('../docs/schemas/context-envelope.schema.json');
+    const validator = new ContextValidator(schema);
+    const valid = validator.validateEnvelope({
+      id: 'term:revenue', kind: 'business_term', layer: 'definition', label: 'Revenue',
+      origin: { source: 'user', sourceRef: 'me' }, version: 1, content: { formula: 'net' }
+    });
+    assert.strictEqual(valid.valid, true, valid.errors.join('; '));
+
+    const invalid = validator.validateEnvelope({ id: 'nope', kind: 'unknown_kind', layer: 'nope', label: 'x', origin: { source: 'user', sourceRef: 'me' }, version: 1 });
+    assert.strictEqual(invalid.valid, false);
+    assert.ok(invalid.errors.length > 0);
+
+    const missing = validator.validateEnvelope({ kind: 'business_term', label: 'x' });
+    assert.strictEqual(missing.valid, false);
+  });
+
+  await test('GraphPersistence writes and reads snapshots atomically', () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const { writeGraphSnapshot, readGraphSnapshot } = require('../dist/context/GraphPersistence.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-graph-'));
+    const file = path.join(dir, 'derived', 'graph.json');
+    const snapshot = { nodes: [{ id: 'term:x', type: 'business_term', label: 'x' }], edges: [], compiledAt: '2026-01-01T00:00:00.000Z' };
+    writeGraphSnapshot(file, snapshot);
+    const loaded = readGraphSnapshot(file);
+    assert.strictEqual(loaded.nodes.length, 1);
+    assert.strictEqual(loaded.nodes[0].id, 'term:x');
+    assert.strictEqual(loaded.compiledAt, '2026-01-01T00:00:00.000Z');
+    assert.strictEqual(fs.readdirSync(path.join(dir, 'derived')).length, 1, 'no temp files left behind');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);
