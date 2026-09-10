@@ -520,16 +520,117 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 ---
 
-## 16. Next Steps
+## 16. Pending Tasks Backlog
 
-1. ✅ Implement the unified envelope in `src/context/types.ts` (identity + provenance + version + ownership; `content` union deferred).
-2. ✅ Implement `SourceRegistry` (`sources.yaml`) + the source-registration UI form.
-3. ✅ Implement `SynthesisPipeline` (rule-based → derived nodes/edges with provenance; LLM-assisted extraction deferred).
-4. ✅ Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`) and remove `ProjectManager`/`ProjectRegistry`.
-5. ✅ Implement the **Business Problem Specification** layer: types, `SpecManager`, `generateSpec`, review/approve UI, `generatePlanFromSpec`, traceability.
-6. ✅ Replace hand-rolled YAML parsers with a real parser + AJV per-kind schemas (Phase 3). Part 1 ✅: `yaml` dep + `src/context/Yaml.ts`, `ajv` dep + `src/context/ContextValidator.ts`, `src/context/GraphPersistence.ts`. Part 2 ✅: `SpecManager`/`SourceRegistry`/`TargetConfigManager`/`ContextFileManager` migrated to the real `yaml` library + layered `context/**` + `derived/graph.json` loading + AJV envelope validation. Per-kind AJV content schemas remain deferred (envelope-level validation is in place).
-7. Implement real Snowflake/Databricks adapter execution (currently stubbed).
-8. Implement `deactivate()` cleanup; add unit tests for the context layer, SpecManager, and adapters.
+> **Last updated:** 2026-09-09 (v0.8.0). Phases 0–3 of the implementation plan (§11) are complete.
+> This section captures **all remaining work** with enough context (file pointers, current state,
+> acceptance criteria) to be picked up independently without re-reading the whole codebase.
+> Items are grouped by phase; within each group, order reflects suggested sequencing.
+
+### 16.1 Phase 4 — Real Data Adapters
+
+- **Wire `snowflake-sdk` into `SnowflakeAdapter`.**
+  - *Files:* `src/dqm/adapters/SnowflakeAdapter.ts` (`connect()`, `executeQuery()`), `src/dqm/BaseAdapter.ts`.
+  - *Current state:* `connect()` builds connection params but never opens a real connection; `executeQuery()` returns empty results. The `snowflake-sdk` package is already a declared dependency (`package.json`) but not imported.
+  - *What to do:* Import `snowflake-sdk`, implement real `connect()` (account/username/warehouse/database/schema/role + auth-mode handling — key-pair path, OAuth, password) and real `executeQuery()` (with timeout + cancellation). `extractMetadata()` should then return live tables/views.
+  - *Acceptance:* `ConnectionManager.connect('snowflake', creds)` returns live `ConnectionInfo`; `extractMetadata({ includeProfiling })` returns real tables/views; `persistSchemaContext()` writes a valid `derived/system/snowflake.schema.yaml`.
+
+- **Wire Databricks SDK into `DatabricksAdapter`.**
+  - *Files:* `src/dqm/adapters/DatabricksAdapter.ts`.
+  - *Current state:* `connect()` sets `this.conn` to a plain object but performs no real connection; query execution is stubbed.
+  - *What to do:* Wire the Databricks SQL connector (workspace URL + token + catalog/schema) for real connect/query.
+  - *Acceptance:* Real connect + query; live metadata extraction.
+
+- **Persist system metadata to `derived/system/`.**
+  - *Files:* `src/dqm/BaseAdapter.ts` (`persistSchemaContext()`).
+  - *Current state:* Writes only to `.ai-context/schema-graph.json`.
+  - *What to do:* Additionally persist platform metadata snapshots under `.ai-context/derived/system/<platform>.schema.yaml` (authoritative layering per requirements §3).
+
+### 16.2 Phase 5 — Retrieval & Embeddings
+
+- **Implement `ContextRetriever`.**
+  - *Files:* new `src/context/ContextRetriever.ts`; consumed by `ContextFileManager.buildContextPrompt()` and `AgentHub`.
+  - *Current state:* No `ContextRetriever` class exists. `buildContextPrompt()` in `ContextFileManager.ts` does a naive string concat with a rough `tokens = nodes * 50` estimate.
+  - *What to do:* Build a token-aware prompt assembler that loads the compiled graph + business context and assembles a prompt within a `maxTokens` budget. Implement token pruning with the rule that **business rules (STRICT) survive pruning** (req §10.6). Use `js-tiktoken` for accurate counting.
+  - *Acceptance:* `buildContextPrompt(maxTokens)` returns a prompt strictly within budget; pruning never drops a STRICT rule; token count is accurate.
+
+- **Implement Vector Engine Worker.**
+  - *Files:* new `src/context/VectorEngine.ts` (or worker).
+  - *Current state:* No implementation. `GraphManager.isWorkerReady` is hardcoded `true`.
+  - *What to do:* Embedded vector/embedding engine with **no server**. Pure-JS fallback (cosine similarity over JSON-stored embeddings keyed by node ID, written to `derived/embeddings/`); optional native accelerator. Keep the extension self-contained (requirements §13).
+  - *Acceptance:* Nodes can be embedded and similarity-searched without an external service.
+
+### 16.3 Phase 3b / 3c / 3d — Agents & Orchestrator Intelligence
+
+- **Phase 3b — Enhanced Sub-Agents** (tech-design §10):
+  - Data Lineage Mapper agent (`src/agents/legacy` → migrate to `src/agents/discover/`).
+  - Data Quality Profiler agent.
+  - *(DataModeler + TransformationScaffolder already done.)*
+
+- **Phase 3c — New Sub-Agents:**
+  - DDL Generator agent.
+  - Orchestration Generator agent (Airflow/Dagster/Prefect).
+  - SQL Validator agent.
+  - Test Generator agent.
+  - Business Glossary Builder agent.
+
+- **Phase 3d — Orchestrator Intelligence:**
+  - Context-aware action suggestions in chat.
+  - Auto-invocation of sub-agents based on intent.
+  - Plan diff & iteration.
+  - First-run onboarding flow.
+  - Results preview for executed SQL.
+  - Export functionality (Markdown/YAML).
+
+### 16.4 Phase 6 — Copilot, Testing, Telemetry, Docs
+
+- **Copilot consent modal.**
+  - *Files:* `media/sidebar.html`, `src/core/webviewProvider.ts`.
+  - *Current state:* Only an opt-in toggle (`copilotProgrammaticConsent`) in LLM Settings; no modal/dialog.
+  - *What to do:* Add a one-time consent modal when the user first enables programmatic Copilot (requirements §9).
+
+- **Opt-in telemetry implementation + privacy docs.**
+  - *Files:* config flag `autoDataEngineeringHub.telemetryEnabled` exists (`package.json`, default `false`); no telemetry code.
+  - *Current state:* Flag is read but nothing reports.
+  - *What to do:* Implement opt-in telemetry (respect the flag) + a privacy/data-flow note in README.
+
+- **`deactivate()` cleanup.**
+  - *Files:* `src/extension.ts:181`.
+  - *Current state:* `deactivate()` is `// Intentionally empty`.
+  - *What to do:* Stop file watchers, dispose `GraphManager`/`ContextFileManager`/`SourceRegistry`/`SynthesisPipeline`/`SpecManager`/`TargetConfigManager`, terminate workers, release handles within 200ms (req §10.6 #5).
+
+- **Unit & integration tests** (req §10.6). Only 34 functional tests exist today. Missing coverage:
+  - GraphManager traversal correctness + serialization round-trip + diagnostics.
+  - SynthesisPipeline provenance (`sourceRef`/`confidence`/`extractor` present).
+  - ArtifactWriter atomic-write tests.
+  - SpecManager versioning/history.
+  - ContextRetriever token-pruning (business rules survive).
+  - Adapter connect/query (Snowflake/Databricks).
+  - AJV per-kind/per-layer validation (see 16.6).
+
+### 16.5 Deferred SpecOps Polish
+
+- **Intake-session persistence.**
+  - *Files:* `src/core/specOps.ts` (`SpecOpsEngine`), new `.ai-context/spec/intake.yaml`.
+  - *Current state:* Intake session state (questions, answers, coverage) is in-memory only; lost on reload.
+  - *What to do:* Persist to `.ai-context/spec/intake.yaml` so a conversation survives reload/resume.
+
+- **Skills authoring guidance.**
+  - *Files:* `skills/*.json` (bundled), `.ai-context/skills/` (user overrides).
+  - *Current state:* No docs on how to author/override skills.
+  - *What to do:* Document the skill JSON schema + override mechanism.
+
+### 16.6 Cross-cutting / Infrastructure
+
+- **Per-kind AJV content schemas** (req §16 #6).
+  - *Files:* `docs/schemas/context-envelope.schema.json` (has `definitions` for per-kind content), `src/context/ContextValidator.ts`.
+  - *Current state:* Envelope-level validation is wired; the per-kind `content` union is deferred.
+  - *What to do:* Add AJV schemas for each `kind` (table, column, business_term, business_rule, metric, verified_query, semantic_artifact) and validate `content` on load.
+
+- **UI context section surfaces Enterprise Context Layer.**
+  - *Files:* `media/sidebar.html`.
+  - *Current state:* Context section exists but does not fully surface layers/terms/rules/queries/relationships read-only (checklist §15, first item, still `[ ]`).
+  - *What to do:* Render the context layer read-only in the webview context section.
 
 ---
 
