@@ -1,7 +1,7 @@
-export type LlmProvider = 'azure-openai' | 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'copilot';
+export type LlmProvider = 'azure-openai' | 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'copilot' | 'claude';
 export type DataPlatformProvider = 'snowflake' | 'databricks' | 'bigquery' | 'redshift' | 'synapse' | 'other';
 export type SnowflakeAuthMode = 'username-password' | 'oauth' | 'key-pair' | 'external-browser' | 'mcp';
-export type AgentType = 'ingestionAgent' | 'sttmAgent' | 'architectureAgent' | 'snowflakeExecutor' | 'sourceAssessmentAgent' | 'dataModelerAgent' | 'transformScaffoldAgent';
+export type AgentType = 'ingestionAgent' | 'sttmAgent' | 'architectureAgent' | 'snowflakeExecutor' | 'sourceAssessmentAgent' | 'dataModelerAgent' | 'transformScaffoldAgent' | 'toolSkillAgent';
 export type PlanStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type SessionStatus = 'idle' | 'planning' | 'ready' | 'running' | 'paused' | 'failed' | 'completed';
 export type EnvironmentProfile = 'development' | 'staging' | 'production';
@@ -122,6 +122,13 @@ export type SpecEngineState = 'discovery' | 'synthesizing' | 'draft' | 'refining
 
 export type SpecCoverageStatus = 'complete' | 'partial' | 'missing';
 
+/** A file the user attached as supplementary reference material for a spec conversation. */
+export interface IntakeAttachment {
+  path: string;
+  content: string;
+  attachedAt: string;
+}
+
 /** Persisted record of an in-progress (or completed) agentic specification conversation. */
 export interface IntakeSession {
   id: string;
@@ -138,6 +145,17 @@ export interface IntakeSession {
   turnBudget: number;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Set when this session is *revising* an already-approved specification rather
+   * than starting fresh. A snapshot taken when the session was created — used to
+   * show the LLM what already exists so it only asks about what the change
+   * affects, and to carry forward anything the revision doesn't touch.
+   */
+  previousSpec?: BusinessProblemSpec;
+  /** The user's description of the requested change, when `previousSpec` is set. */
+  changeRequest?: string;
+  /** Ad-hoc reference files the user attached during the conversation. */
+  attachments?: IntakeAttachment[];
 }
 
 /**
@@ -255,6 +273,11 @@ export interface DataAgentHubSettings {
   activeLlmModel: string;
   llmEndpoint: string;
   artifactDirectory: string;
+  /** Consent to use a locally-installed language model programmatically (VS Code Copilot, or the Claude Code CLI). */
+  languageModelProgrammaticConsent?: boolean;
+  /** Optional explicit path to the Claude Code CLI (`claude` / `claude.exe`). Empty = auto-detect. */
+  claudeCodePath?: string;
+  /** @deprecated Superseded by `languageModelProgrammaticConsent`; still read as a fallback. */
   copilotProgrammaticConsent?: boolean;
 }
 
@@ -266,6 +289,39 @@ export interface PlanStep {
   dependsOn?: string[];
   validationRules?: string[];
   phase?: WorkflowPhase;
+  /** Which imported tool skill to run — required when `assignedAgent === 'toolSkillAgent'`. */
+  skillId?: string;
+}
+
+// ── Tool-executing Skills (Phase D) ──
+
+/** A Claude Agent Skill (SKILL.md + resources) imported into AutoDE. Distinct from the
+ * interview-only `SkillDefinition` (skills/*.json) — this one can carry real tool access. */
+export interface ToolSkillDefinition {
+  id: string;
+  name: string;
+  description: string;
+  /** The SKILL.md body — instructions injected into the model's system prompt. */
+  instructions: string;
+  /** Tool names the skill's own frontmatter declared it needs, if any (informational — the
+   * actual tool surface granted at run time is still capped by the execution mode). */
+  declaredTools?: string[];
+  /** Absolute path to the imported skill's directory (contains SKILL.md + any resources). */
+  sourceDir: string;
+  /** Relative paths of bundled resource files alongside SKILL.md. */
+  resourceFiles: string[];
+}
+
+export type ToolExecutionMode = 'none' | 'read-only' | 'full';
+
+/** One tool invocation, for the audit log a tool-skill run produces. */
+export interface ToolCallAuditEntry {
+  tool: string;
+  input: Record<string, unknown>;
+  /** 'approved' | 'denied' | 'error' | 'ok' */
+  outcome: string;
+  detail?: string;
+  at: string;
 }
 
 export interface PlanState {
@@ -299,6 +355,20 @@ export interface AgentExecutionContext {
   log: (message: string) => void;
   addArtifact?: (artifact: GeneratedArtifact) => void;
   currentPhase?: WorkflowPhase;
+  /** Only populated for `toolSkillAgent` — the workspace root, for sandboxing tool execution. */
+  workspaceRoot?: string;
+  /**
+   * Only populated for `toolSkillAgent` — the real `vscode.ExtensionContext`, needed for
+   * `vscode.lm` access-information checks. Left untyped here so this pure type file keeps
+   * its no-`vscode`-import rule; the executor that reads it casts back to the real type.
+   * This is the one sub-agent that breaks the "agents import only core/types" convention,
+   * because it does real tool execution (file I/O, process spawn, approval dialogs) rather
+   * than deterministic templating — see `src/agents/build/ToolSkillAgent.ts`.
+   */
+  extensionContext?: unknown;
+  /** Which skill to run + the user's instruction — populated by the caller (plan step or chat). */
+  skillId?: string;
+  skillInstruction?: string;
 }
 
 export interface AgentExecutionResult {

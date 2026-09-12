@@ -1,5 +1,7 @@
 import {
+  BusinessProblemSpec,
   IntakeAnswer,
+  IntakeAttachment,
   IntakeSession,
   SpecCoverageStatus,
   SpecEngineAction,
@@ -16,14 +18,24 @@ const QUESTION_KINDS = new Set<SpecQuestionKind>(['text', 'single-select', 'mult
  * Creates a fresh intake session for an agentic specification conversation.
  * The coverage map is seeded with every field the registered skills own, so the
  * engine's stop condition can observe which areas remain unexplored.
+ *
+ * When `opts.previousSpec` is supplied, this session *revises* an already-approved
+ * specification instead of starting one from scratch: the `problemStatement`
+ * argument is treated as the change request (stored as `changeRequest`), and the
+ * session's own `problemStatement` falls back to the previous spec's, so prompts
+ * built from this session can render "what already exists" alongside "what changed."
  */
 export function createIntakeSession(
   problemStatement: string,
-  opts: { id?: string; turnBudget?: number; fields?: string[]; now?: string } = {}
+  opts: { id?: string; turnBudget?: number; fields?: string[]; now?: string; previousSpec?: BusinessProblemSpec } = {}
 ): IntakeSession {
   const trimmed = (problemStatement ?? '').trim();
   if (!trimmed) {
-    throw new Error('A problem statement is required to start a specification conversation.');
+    throw new Error(
+      opts.previousSpec
+        ? 'A description of the requested change is required to start a specification revision.'
+        : 'A problem statement is required to start a specification conversation.'
+    );
   }
   const now = opts.now ?? new Date().toISOString();
   const coverage: Record<string, SpecCoverageStatus> = {};
@@ -32,7 +44,10 @@ export function createIntakeSession(
   }
   return {
     id: opts.id ?? `intake-${Date.now().toString(36)}`,
-    problemStatement: trimmed,
+    specId: opts.previousSpec?.id,
+    problemStatement: opts.previousSpec ? opts.previousSpec.problemStatement : trimmed,
+    changeRequest: opts.previousSpec ? trimmed : undefined,
+    previousSpec: opts.previousSpec,
     state: 'discovery',
     questions: [],
     answers: [],
@@ -51,8 +66,18 @@ function cloneSession(session: IntakeSession): IntakeSession {
     questions: session.questions.map((q) => ({ ...q, options: q.options ? [...q.options] : undefined })),
     answers: session.answers.map((a) => ({ ...a })),
     insights: [...session.insights],
-    coverage: { ...session.coverage }
+    coverage: { ...session.coverage },
+    attachments: session.attachments ? session.attachments.map((a) => ({ ...a })) : undefined
   };
+}
+
+/** Appends an ad-hoc reference file to the session (does not count against the turn budget). */
+export function addAttachment(session: IntakeSession, attachment: IntakeAttachment): void {
+  if (!session.attachments) {
+    session.attachments = [];
+  }
+  session.attachments.push({ ...attachment });
+  session.updatedAt = new Date().toISOString();
 }
 
 /**
@@ -126,6 +151,11 @@ export class SpecOpsEngine {
     const trimmed = (insight ?? '').trim();
     if (trimmed) this.session.insights.push(trimmed);
     this.touch();
+  }
+
+  /** Records an ad-hoc reference file the user attached mid-conversation. */
+  public addAttachment(attachment: IntakeAttachment): void {
+    addAttachment(this.session, attachment);
   }
 
   public coverageComplete(): boolean {

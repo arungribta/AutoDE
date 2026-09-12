@@ -26,14 +26,29 @@ function createMock(opts = {}) {
       registerCustomEditorProvider: () => ({ dispose() {} }),
       createOutputChannel: () => ({ show() {}, appendLine() {} }) },
     commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async () => {} },
-    workspace: { getConfiguration: () => ({ get: (_k, f) => f, update: async () => {} }),
+    workspace: { getConfiguration: () => ({ get: (_k, f) => (opts.config && (_k in opts.config)) ? opts.config[_k] : f, update: async () => {} }),
       openTextDocument: async () => ({ lineCount: 1, lineAt: () => ({ text: '' }) }),
-      fs: { createDirectory: async () => {}, readFile: async () => { throw new Error('ENOENT'); }, writeFile: async () => {}, rename: async () => {} },
+      fs: {
+        createDirectory: async () => {},
+        readFile: async () => { throw new Error('ENOENT'); },
+        writeFile: async () => {},
+        rename: async () => {},
+        // Backed by the real filesystem when a test needs to scan an actual directory tree
+        // (e.g. artifact-staleness scanning); otherwise behaves like an empty/missing dir.
+        readDirectory: async (uri) => {
+          const nodeFs = require('node:fs');
+          let entries;
+          try { entries = nodeFs.readdirSync(uri.fsPath, { withFileTypes: true }); }
+          catch { throw new Error('ENOENT'); }
+          return entries.map((e) => [e.name, e.isDirectory() ? 2 : 1]);
+        }
+      },
       createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }),
       workspaceFolders: undefined },
     extensions: { getExtension: (id) => installed && known.includes(id) ? { id, isActive: true } : undefined, all: [] },
     lm: { selectChatModels: async (sel) => { if (!installed) return []; if (sel?.vendor && sel.vendor !== 'copilot') return []; return models; } },
     LanguageModelChatMessage: { User: (c) => ({ role: 1, content: c }), Assistant: (c) => ({ role: 2, content: c }) },
+    FileType: { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 },
     Uri: {
       file: (p) => ({ fsPath: p, toString: () => p }),
       joinPath: (...parts) => {
@@ -50,7 +65,12 @@ function createMock(opts = {}) {
 // ---------- mock loader ----------
 const origLoad = Module._load;
 let active = null;
-Module._load = function (req) { return req === 'vscode' ? (active || throw_('no mock')) : origLoad.apply(this, arguments); };
+Module._load = function (req) {
+  if (req === 'vscode') { return active || throw_('no mock'); }
+  if ((req === 'child_process' || req === 'node:child_process') && active && active.__childProcess) { return active.__childProcess; }
+  if ((req === 'fs' || req === 'node:fs') && active && active.__fs) { return active.__fs; }
+  return origLoad.apply(this, arguments);
+};
 function throw_(m) { throw new Error(m); }
 
 function withMock(mock, fn) { const p = active; active = mock; try { return fn(); } finally { active = p; } }
@@ -67,6 +87,60 @@ function fakeCm(settings) {
 
 function fresh(modulePath) { delete require.cache[require.resolve(modulePath)]; return require(modulePath); }
 
+// The language model adapter captures the `vscode` mock at load time, so its
+// cache must be cleared whenever a test swaps in a new mock.
+function clearAdapterCache() {
+  for (const p of ['../dist/core/languageModelAdapter.js', '../dist/core/copilotAdapter.js', '../dist/core/claudeCodeAdapter.js']) {
+    try { delete require.cache[require.resolve(p)]; } catch { /* not loaded yet */ }
+  }
+}
+function freshAdapter(mock) { clearAdapterCache(); return withMock(mock, () => require('../dist/core/languageModelAdapter.js')); }
+
+// ---------- Claude Code CLI mock ----------
+const EventEmitter = require('node:events');
+
+const MOCK_PATH_CLI = process.platform === 'win32' ? 'C:\\mock\\claude.exe' : '/mock/bin/claude';
+
+function claudeCodeMock(opts = {}) {
+  const versionOut = opts.versionOut;             // string | null  (null => nothing runnable)
+  const explicitPaths = opts.existsPaths || [];   // string[] that fs.existsSync should accept
+  const onPath = versionOut != null && opts.onPath !== false; // resolvable via where/which
+  const spawnResult = opts.spawnResult || { result: 'PONG', subtype: 'success' };
+  const base = createMock();
+  const existsPaths = onPath ? explicitPaths.concat([MOCK_PATH_CLI]) : explicitPaths;
+  base.__fs = {
+    existsSync: (p) => existsPaths.includes(p)
+  };
+  base.__childProcess = {
+    spawnSync: (bin, args) => {
+      if (bin === 'where' || bin === 'which') {
+        return onPath ? { status: 0, stdout: MOCK_PATH_CLI + '\n' } : { status: 1, stdout: '' };
+      }
+      // treated as a `<cli> --version` probe
+      return versionOut != null ? { status: 0, stdout: versionOut } : { status: 1, stdout: '' };
+    },
+    spawn: (cmd, args) => {
+      base.__lastSpawn = { cmd, args };
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = { write: () => {}, end: () => {}, on: () => {} };
+      child.kill = () => {};
+      setImmediate(() => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify(spawnResult)));
+        child.emit('close', 0);
+      });
+      return child;
+    }
+  };
+  return base;
+}
+
+function freshClaude(mock) {
+  try { delete require.cache[require.resolve('../dist/core/claudeCodeAdapter.js')]; } catch { /* not loaded */ }
+  return withMock(mock, () => require('../dist/core/claudeCodeAdapter.js'));
+}
+
 // ---------- runner ----------
 const results = [];
 async function test(name, fn) {
@@ -78,43 +152,127 @@ async function test(name, fn) {
 async function main() {
   console.log('Running Copilot functional tests...\n');
 
-  await test('copilotAdapter loads and exports class', () => {
-    const lib = withMock(createMock(), () => fresh('../dist/core/copilotAdapter.js'));
+  await test('languageModelAdapter loads and exports classes', () => {
+    const lib = freshAdapter(createMock());
+    assert.strictEqual(typeof lib.LanguageModelAdapter, 'function');
     assert.strictEqual(typeof lib.CopilotAdapter, 'function');
+    // Back-compat shim re-exports the same class.
+    const shim = withMock(createMock(), () => fresh('../dist/core/copilotAdapter.js'));
+    assert.strictEqual(shim.CopilotAdapter, lib.LanguageModelAdapter);
   });
 
   await test('detect() finds Copilot Chat', async () => {
     const mock = createMock();
-    const lib = withMock(mock, () => fresh('../dist/core/copilotAdapter.js'));
-    const { info } = await withMock(mock, () => lib.CopilotAdapter.detect(mockContext()));
+    const lib = freshAdapter(mock);
+    const { info } = await withMock(mock, () => lib.LanguageModelAdapter.detect(mockContext(), { provider: 'copilot' }));
     assert.strictEqual(info.found, true);
     assert.strictEqual(info.hasAccess, true);
+    assert.strictEqual(info.provider, 'copilot');
     assert.strictEqual(info.models[0].vendor, 'copilot');
   });
 
   await test('detect() not installed', async () => {
     const mock = createMock({ chatInstalled: false });
-    const lib = withMock(mock, () => fresh('../dist/core/copilotAdapter.js'));
-    const { info } = await withMock(mock, () => lib.CopilotAdapter.detect(mockContext()));
+    const lib = freshAdapter(mock);
+    const { info } = await withMock(mock, () => lib.LanguageModelAdapter.detect(mockContext(), { provider: 'copilot' }));
     assert.strictEqual(info.found, false);
+  });
+
+  await test('ClaudeCodeAdapter.resolve() honors an explicit valid claudeCodePath', () => {
+    const mock = claudeCodeMock({ versionOut: '2.1.0 (Claude Code)', existsPaths: ['C:\\tools\\claude.exe'] });
+    const lib = freshClaude(mock);
+    const r = withMock(mock, () => lib.ClaudeCodeAdapter.resolve('C:\\tools\\claude.exe'));
+    assert.strictEqual(r.source, 'setting');
+    assert.strictEqual(r.cliPath, 'C:\\tools\\claude.exe');
+  });
+
+  await test('ClaudeCodeAdapter.resolve() falls back to PATH', () => {
+    const mock = claudeCodeMock({ versionOut: '2.1.0 (Claude Code)', existsPaths: [] });
+    const lib = freshClaude(mock);
+    const r = withMock(mock, () => lib.ClaudeCodeAdapter.resolve(''));
+    assert.strictEqual(r.source, 'path');
+  });
+
+  await test('ClaudeCodeAdapter.resolve() reports not-found with guidance', () => {
+    const mock = claudeCodeMock({ versionOut: null, existsPaths: [] });
+    const lib = freshClaude(mock);
+    const r = withMock(mock, () => lib.ClaudeCodeAdapter.resolve(''));
+    assert.strictEqual(r.source, 'none');
+    assert.match(r.error || '', /Claude Code CLI not found/i);
+  });
+
+  await test('ClaudeCodeAdapter.complete() spawns the CLI and parses JSON result', async () => {
+    const mock = claudeCodeMock({ versionOut: '2.1.0', spawnResult: { result: '[{"id":"step-1"}]', subtype: 'success' } });
+    const lib = freshClaude(mock);
+    const { adapter } = await withMock(mock, () => lib.ClaudeCodeAdapter.detect(''));
+    assert.ok(adapter, 'expected an adapter');
+    const out = await withMock(mock, () => adapter.complete('do it', { model: 'sonnet' }));
+    assert.strictEqual(out, '[{"id":"step-1"}]');
+    // -p headless + json + no tools for a non-chat call
+    assert.ok(mock.__lastSpawn.args.includes('-p') && mock.__lastSpawn.args.includes('--output-format'));
+    assert.ok(mock.__lastSpawn.args.includes('--max-turns'));
+  });
+
+  await test('ClaudeCodeAdapter.complete() surfaces CLI errors', async () => {
+    const mock = claudeCodeMock({ versionOut: '2.1.0', spawnResult: { subtype: 'error_max_turns', is_error: true, result: 'ran out of turns' } });
+    const lib = freshClaude(mock);
+    const { adapter } = await withMock(mock, () => lib.ClaudeCodeAdapter.detect(''));
+    await assert.rejects(() => withMock(mock, () => adapter.complete('x')), /ran out of turns/i);
+  });
+
+  await test('getLlmAdapter() dispatches by provider id and falls back to ollama for an unrecognized provider', () => {
+    const mock = createMock();
+    const { LLM_ADAPTERS, getLlmAdapter } = withMock(mock, () => require('../dist/core/llmProviders.js'));
+    assert.strictEqual(getLlmAdapter('openai').id, 'openai');
+    assert.strictEqual(getLlmAdapter('not-a-real-provider').id, 'ollama', 'unrecognized provider falls back to ollama, matching the old if/else chain\'s implicit default');
+    assert.strictEqual(LLM_ADAPTERS.claude.displayName, 'Claude Code');
+    assert.strictEqual(LLM_ADAPTERS.copilot.requiresApiKey, false);
+    assert.strictEqual(LLM_ADAPTERS['azure-openai'].supportsCustomEndpoint, true);
+  });
+
+  await test('OpenAI adapter builds the expected request and extracts JSON out of the response', async () => {
+    const mock = createMock();
+    const { getLlmAdapter } = withMock(mock, () => require('../dist/core/llmProviders.js'));
+    const origFetch = global.fetch;
+    let capturedUrl, capturedInit;
+    global.fetch = async (url, init) => {
+      capturedUrl = url; capturedInit = init;
+      return { ok: true, json: async () => ({ choices: [{ message: { content: '```json\n[{"id":"s1"}]\n```' } }] }) };
+    };
+    try {
+      const ctx = { getSettings: () => ({}), getLlmApiKey: async () => 'sk-test', getExtensionContext: () => undefined, getWorkspaceRoot: () => undefined, log: () => {} };
+      const out = await getLlmAdapter('openai').complete('do it', { model: 'gpt-4o-mini', systemPrompt: 'sys' }, ctx);
+      assert.strictEqual(out, '[{"id":"s1"}]');
+      assert.strictEqual(capturedUrl, 'https://api.openai.com/v1/chat/completions');
+      assert.ok(capturedInit.headers.Authorization.includes('sk-test'));
+      assert.strictEqual(JSON.parse(capturedInit.body).messages[0].content, 'sys');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('A fetch-based adapter surfaces a clear error when the API key is missing', async () => {
+    const mock = createMock();
+    const { getLlmAdapter } = withMock(mock, () => require('../dist/core/llmProviders.js'));
+    const ctx = { getSettings: () => ({}), getLlmApiKey: async () => undefined, getExtensionContext: () => undefined, getWorkspaceRoot: () => undefined, log: () => {} };
+    await assert.rejects(() => getLlmAdapter('anthropic').complete('x', { model: 'claude-x', systemPrompt: 'sys' }, ctx), /API key is missing/i);
   });
 
   await test('complete() streams text', async () => {
     const model = { id: 'm', family: 'gpt', vendor: 'copilot', version: '1', name: 'm', maxInputTokens: 100,
       sendRequest: async (msgs) => { assert.strictEqual(msgs.length, 1); return { text: textIter('[{"id":"step-1"}]') }; } };
     const mock = createMock({ models: [model] });
-    const lib = withMock(mock, () => fresh('../dist/core/copilotAdapter.js'));
-    const { adapter } = await withMock(mock, () => lib.CopilotAdapter.detect(mockContext()));
+    const lib = freshAdapter(mock);
+    const { adapter } = await withMock(mock, () => lib.LanguageModelAdapter.detect(mockContext(), { provider: 'copilot' }));
     const t = await withMock(mock, () => adapter.complete('prompt', { timeoutMs: 500 }));
     assert.strictEqual(t, '[{"id":"step-1"}]');
   });
 
   await test('generatePlan() blocks without consent', async () => {
     const mock = createMock();
+    clearAdapterCache();
     const { DataAgentHubHub } = withMock(mock, () => fresh('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', copilotProgrammaticConsent: false, defaultProvider: 'snowflake' }));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: false, copilotProgrammaticConsent: false, defaultProvider: 'snowflake' }));
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')),
-      /programmatic use of GitHub Copilot is not enabled/i);
+      /programmatic use of a local language model is not enabled/i);
   });
 
   await test('generatePlan() with consent', async () => {
@@ -122,11 +280,11 @@ async function main() {
     const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
       sendRequest: async () => ({ text: textIter(plan) }) };
     const mock = createMock({ models: [model] });
-    // Clear both agentHub and copilotAdapter caches so the new mock is used.
+    // Clear both agentHub and adapter caches so the new mock is used.
     delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    delete require.cache[require.resolve('../dist/core/copilotAdapter.js')];
+    clearAdapterCache();
     const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', copilotProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
     const steps = await withMock(mock, () => hub.generatePlan('build'));
     assert.strictEqual(steps.length, 1);
     assert.strictEqual(steps[0].id, 's');
@@ -219,9 +377,9 @@ async function main() {
       sendRequest: async () => ({ text: textIter(plan) }) };
     const mock = createMock({ models: [model] });
     delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    delete require.cache[require.resolve('../dist/core/copilotAdapter.js')];
+    clearAdapterCache();
     const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', copilotProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
     const spec = {
       id: 'bps-it', version: 3, status: 'approved',
       problemStatement: 'Ingest raw sales channel source data and load dbt pipelines, then document the results.',
@@ -277,6 +435,21 @@ async function main() {
     assert.strictEqual(session.turnBudget, 5);
     assert.deepStrictEqual(session.coverage, { dataFlows: 'missing', objectives: 'missing' });
     assert.throws(() => createIntakeSession('   '), /problem statement/i);
+  });
+
+  await test('createIntakeSession() seeds a revision from a previous approved spec', () => {
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const previousSpec = {
+      id: 'bps-1', version: 2, status: 'approved', problemStatement: 'Original problem',
+      objectives: ['grow revenue'], successCriteria: [], scope: { in: ['orders'], out: [] },
+      constraints: [], assumptions: [], createdAt: 't', updatedAt: 't'
+    };
+    const session = createIntakeSession('Also include returns data', { fields: ['dataFlows'], previousSpec });
+    assert.strictEqual(session.problemStatement, 'Original problem', 'problemStatement carries the previous spec, not the change text');
+    assert.strictEqual(session.changeRequest, 'Also include returns data');
+    assert.strictEqual(session.specId, 'bps-1');
+    assert.strictEqual(session.previousSpec, previousSpec);
+    assert.throws(() => createIntakeSession('  ', { previousSpec }), /requested change/i);
   });
 
   await test('SpecOpsEngine tracks coverage and stop condition', () => {
@@ -344,6 +517,26 @@ async function main() {
     assert.ok(user.includes('data-flow'), 'user prompt includes skill guidance');
   });
 
+  await test('buildDiscoveryTurnPrompt() renders the previous spec + change request for a revision, plus registered context and attachments', () => {
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const { buildDiscoveryTurnPrompt } = require('../dist/core/specOpsPrompts.js');
+    const previousSpec = {
+      id: 'bps-1', version: 3, status: 'approved', problemStatement: 'Original problem',
+      objectives: ['grow revenue'], successCriteria: [], scope: { in: ['orders'], out: [] },
+      constraints: [], assumptions: [], dataFlows: [{ id: 'f1', source: 'orders', target: 'fact_sales', description: 'raw to fact' }],
+      createdAt: 't', updatedAt: 't'
+    };
+    const engine = new SpecOpsEngine(createIntakeSession('Add returns data', { fields: ['dataFlows'], previousSpec }));
+    engine.addAttachment({ path: 'docs/returns-schema.md', content: 'returns table has order_id, refund_amount', attachedAt: 't' });
+    const { system, user } = buildDiscoveryTurnPrompt(engine.getSession(), [], 'Registered term: "Return" = a reversed order');
+    assert.ok(system.includes('REVISING'), 'system prompt carries the revision rules');
+    assert.ok(user.includes('Add returns data'), 'user prompt includes the requested change');
+    assert.ok(user.includes('Original problem'), 'user prompt includes the previous spec snapshot');
+    assert.ok(user.includes('orders -> fact_sales'), 'user prompt includes previous data flows');
+    assert.ok(user.includes('Registered term'), 'user prompt includes registered repository context');
+    assert.ok(user.includes('returns-schema.md') && user.includes('refund_amount'), 'user prompt includes the attached file');
+  });
+
 
   await test('parseComprehensiveSpec() produces v2 fields and provenance', () => {
     const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
@@ -376,6 +569,69 @@ async function main() {
     assert.strictEqual(synthProv.source, 'synthesis');
   });
 
+  await test('parseComprehensiveSpec() revision: carries forward untouched fields, bumps version, preserves provenance', () => {
+    const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const previous = {
+      id: 'bps-1', version: 2, status: 'approved', problemStatement: 'Original problem',
+      objectives: ['grow revenue'], successCriteria: ['NPS up'], scope: { in: ['orders'], out: ['returns'] },
+      constraints: ['must use existing warehouse'], assumptions: [], domain: 'retail',
+      businessRequirements: ['daily refresh'], dataFlows: [{ id: 'f1', source: 'orders', target: 'fact_sales', description: 'raw to fact' }],
+      sourceCatalog: [{ name: 'orders_db', type: 'database' }],
+      provenance: [{ field: 'objectives', source: 'question', questionId: 'orig-q1' }],
+      createdAt: 't0', updatedAt: 't0'
+    };
+    const session = createIntakeSession('Also bring in returns data', { fields: ['scope'], previousSpec: previous, now: '2026-02-01T00:00:00.000Z' });
+    session.questions.push({ id: 'q1', field: 'scope', prompt: 'What changes to scope?', kind: 'text', askedAt: 't' });
+    session.answers.push({ questionId: 'q1', field: 'scope', value: 'include returns', answeredAt: 't' });
+    // The revision's own synthesis output only addresses scope — everything else
+    // must be carried forward from `previous`, not dropped.
+    const spec = parseComprehensiveSpec({
+      problemStatement: 'Original problem',
+      objectives: [],
+      scope: { in: ['orders', 'returns'], out: [] }
+    }, { previous, session });
+    assert.strictEqual(spec.id, 'bps-1', 'id is preserved across a revision');
+    assert.strictEqual(spec.version, 3, 'version bumps only because the previous spec was approved');
+    assert.strictEqual(spec.status, 'draft');
+    assert.deepStrictEqual(spec.objectives, ['grow revenue'], 'empty objectives fall back to the previous spec, not an error');
+    assert.deepStrictEqual(spec.scope.in, ['orders', 'returns'], 'fields the revision addressed are NOT overridden by the fallback');
+    assert.deepStrictEqual(spec.successCriteria, ['NPS up'], 'untouched optional field is carried forward');
+    assert.deepStrictEqual(spec.constraints, ['must use existing warehouse']);
+    assert.deepStrictEqual(spec.businessRequirements, ['daily refresh']);
+    assert.strictEqual(spec.dataFlows[0].target, 'fact_sales');
+    assert.strictEqual(spec.domain, 'retail');
+    const objProv = spec.provenance.find((p) => p.field === 'objectives');
+    assert.strictEqual(objProv.source, 'question', 'provenance for an untouched field is carried forward from the previous spec, not marked "synthesis"');
+    assert.strictEqual(objProv.questionId, 'orig-q1');
+    const scopeProv = spec.provenance.find((p) => p.field === 'scope');
+    assert.strictEqual(scopeProv.source, 'question', 'provenance for a field this session answered points at the new question');
+    assert.strictEqual(scopeProv.questionId, 'q1');
+  });
+
+  await test('parseComprehensiveSpec() does not bump version when the previous spec was only a draft', () => {
+    const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
+    const previous = { id: 'bps-1', version: 1, status: 'draft', problemStatement: 'x', objectives: ['a'], scope: { in: ['a'] }, createdAt: 't', updatedAt: 't' };
+    const spec = parseComprehensiveSpec({ problemStatement: 'y', objectives: ['b'], scope: { in: ['b'] } }, { previous });
+    assert.strictEqual(spec.version, 1);
+  });
+
+  await test('buildSynthesisPrompt() includes the previous spec + change request for a revision', () => {
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { buildSynthesisPrompt } = require('../dist/core/specOpsPrompts.js');
+    const previousSpec = {
+      id: 'bps-1', version: 4, status: 'approved', problemStatement: 'Original problem',
+      objectives: ['grow revenue'], successCriteria: [], scope: { in: ['orders'], out: [] },
+      constraints: [], assumptions: [], createdAt: 't', updatedAt: 't'
+    };
+    const session = createIntakeSession('Add returns data', { previousSpec });
+    const { system, user } = buildSynthesisPrompt(session, 'Verified query: returns_by_month');
+    assert.ok(system.includes('REVISION'), 'system prompt carries the revision synthesis rules');
+    assert.ok(user.includes('Add returns data'));
+    assert.ok(user.includes('Original problem'));
+    assert.ok(user.includes('Verified query'), 'registered context reaches the synthesis prompt too');
+  });
+
   await test('parseComprehensiveSpec() rejects invalid payloads', () => {
     const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
     assert.throws(() => parseComprehensiveSpec(null), /JSON object/);
@@ -397,9 +653,9 @@ async function main() {
       sendRequest: async () => ({ text: textIter(payload) }) };
     const mock = createMock({ models: [model] });
     delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    delete require.cache[require.resolve('../dist/core/copilotAdapter.js')];
+    clearAdapterCache();
     const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', copilotProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
     const { createIntakeSession } = require('../dist/core/specOps.js');
     const spec = await withMock(mock, () => hub.synthesizeComprehensiveSpec(createIntakeSession('Load sales', { fields: [] })));
     assert.strictEqual(spec.status, 'draft');
@@ -810,6 +1066,111 @@ async function main() {
     assert.strictEqual(persisted.nodes.length, 1);
     assert.strictEqual(persisted.nodes[0].label, 'revenue');
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  await test('ArtifactWriter writes under a <specId>.v<version> folder; scanArtifactStaleness classifies current/stale/untagged', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-artifacts-'));
+    const workspaceRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
+    const mock = createMock();
+    // createMock()'s default fs.* are no-ops (fine for adapter tests); this test
+    // needs real writes so scanArtifactStaleness can walk an actual tree.
+    mock.workspace.fs.createDirectory = async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); };
+    mock.workspace.fs.writeFile = async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); };
+    mock.workspace.fs.rename = async (a, b) => { fs.renameSync(a.fsPath, b.fsPath); };
+
+    clearAdapterCache();
+    for (const p of ['../dist/context/ArtifactWriter.js', '../dist/context/ArtifactStalenessScanner.js']) {
+      try { delete require.cache[require.resolve(p)]; } catch { /* not loaded */ }
+    }
+    const { ArtifactWriter } = withMock(mock, () => require('../dist/context/ArtifactWriter.js'));
+    const { scanArtifactStaleness } = withMock(mock, () => require('../dist/context/ArtifactStalenessScanner.js'));
+
+    const writer = new ArtifactWriter(workspaceRoot, () => {});
+    const makeArtifact = (id, specId, specVersion) => ({
+      id, type: 'ddl', title: id, description: '', content: 'select 1', language: 'sql',
+      generatedBy: 'dataModelerAgent', generatedAt: 't', approved: false, phase: 'build', specId, specVersion
+    });
+
+    await withMock(mock, async () => {
+      await writer.write(makeArtifact('a1', 'bps-1', 1));   // superseded revision
+      await writer.write(makeArtifact('a2', 'bps-1', 2));   // current revision
+      await writer.write({ ...makeArtifact('legacy', undefined, undefined) }); // pre-Phase-B / no spec
+    });
+
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'auto-de', '03-build', 'bps-1.v1', 'a1.sql')), 'v1 artifact under its spec-tagged folder');
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'auto-de', '03-build', 'bps-1.v2', 'a2.sql')), 'v2 artifact under its spec-tagged folder');
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'auto-de', '03-build', 'legacy.sql')), 'unstamped artifact has no version folder');
+
+    const report = await withMock(mock, () => scanArtifactStaleness(workspaceRoot, { id: 'bps-1', version: 2 }));
+    const stale = report.groups.find((g) => g.specVersion === 1);
+    const current = report.groups.find((g) => g.specVersion === 2);
+    assert.ok(stale, 'v1 group detected');
+    assert.strictEqual(stale.status, 'stale');
+    assert.ok(current, 'v2 group detected');
+    assert.strictEqual(current.status, 'current');
+    assert.strictEqual(report.untaggedFileCount, 1, 'the unstamped artifact counts as untagged, not stale');
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  await test('parseSkillMarkdown() splits YAML frontmatter from the instruction body, leniently', () => {
+    const mock = createMock();
+    const { parseSkillMarkdown } = withMock(mock, () => require('../dist/core/toolSkills.js'));
+    const withFrontmatter = [
+      '---',
+      'name: PDF Filler',
+      'description: Fills out PDF forms',
+      'allowed-tools: [Read, Write, Bash]',
+      '---',
+      '',
+      '# Instructions',
+      'Do the thing.'
+    ].join('\n');
+    const parsed = parseSkillMarkdown(withFrontmatter);
+    assert.strictEqual(parsed.name, 'PDF Filler');
+    assert.strictEqual(parsed.description, 'Fills out PDF forms');
+    assert.deepStrictEqual(parsed.allowedTools, ['Read', 'Write', 'Bash']);
+    assert.ok(parsed.body.startsWith('# Instructions'));
+
+    const noFrontmatter = 'Just plain instructions, no frontmatter.';
+    const parsed2 = parseSkillMarkdown(noFrontmatter);
+    assert.strictEqual(parsed2.name, undefined);
+    assert.strictEqual(parsed2.body, noFrontmatter);
+  });
+
+  await test('loadToolSkillsFromDirectory() loads imported skills and lists bundled resource files', () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-skills-'));
+    const skillDir = path.join(tmpRoot, 'pdf-filler');
+    fs.mkdirSync(path.join(skillDir, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
+      '---', 'name: PDF Filler', 'description: Fills PDF forms', '---', '', 'Use fill.py to fill the form.'
+    ].join('\n'));
+    fs.writeFileSync(path.join(skillDir, 'scripts', 'fill.py'), 'print("fill")');
+    // A directory without SKILL.md should be skipped rather than failing the whole load.
+    fs.mkdirSync(path.join(tmpRoot, 'not-a-skill'), { recursive: true });
+
+    const mock = createMock();
+    const { loadToolSkillsFromDirectory } = withMock(mock, () => require('../dist/core/toolSkills.js'));
+    const skills = loadToolSkillsFromDirectory(tmpRoot);
+    assert.strictEqual(skills.length, 1);
+    assert.strictEqual(skills[0].id, 'pdf-filler');
+    assert.strictEqual(skills[0].name, 'PDF Filler');
+    assert.ok(skills[0].instructions.includes('fill.py'));
+    assert.deepStrictEqual(skills[0].resourceFiles.sort(), ['scripts/fill.py']);
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  await test('loadToolSkillsFromDirectory() returns an empty list when the directory does not exist', () => {
+    const mock = createMock();
+    const { loadToolSkillsFromDirectory } = withMock(mock, () => require('../dist/core/toolSkills.js'));
+    assert.deepStrictEqual(loadToolSkillsFromDirectory('/no/such/directory/at/all'), []);
   });
 
   const failed = results.filter(r => !r.ok);

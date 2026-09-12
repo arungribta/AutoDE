@@ -24,8 +24,17 @@ export class ArtifactWriter {
     const relativePath = this.resolveRelativePath(artifact);
     const segments = relativePath.split(/[\\/]+/).filter(Boolean);
     const fileName = segments.pop() || this.defaultFileName(artifact);
+    // A spec-tagged subfolder (not a filename prefix) so multi-file artifacts —
+    // e.g. a dbt project's `dbt_project.yml` — keep the exact filenames external
+    // tooling expects, while still recording which spec revision produced them
+    // (needed for stale-artifact detection: PlanState.artifacts is in-memory only
+    // and doesn't survive a reload, so the filesystem path is the only durable
+    // record of specId/specVersion).
+    const versionTag = ArtifactWriter.specTag(artifact);
 
-    const dirUri = vscode.Uri.joinPath(this.getArtifactDirectory(), phaseDir, ...segments);
+    const dirUri = versionTag
+      ? vscode.Uri.joinPath(this.getArtifactDirectory(), phaseDir, versionTag, ...segments)
+      : vscode.Uri.joinPath(this.getArtifactDirectory(), phaseDir, ...segments);
     const targetUri = vscode.Uri.joinPath(dirUri, fileName);
     const tempUri = vscode.Uri.joinPath(dirUri, `.${fileName}.tmp.${Date.now()}`);
 
@@ -33,8 +42,14 @@ export class ArtifactWriter {
     await vscode.workspace.fs.writeFile(tempUri, Buffer.from(artifact.content, 'utf8'));
     await vscode.workspace.fs.rename(tempUri, targetUri, { overwrite: true });
 
-    this.log(`Artifact written: ${phaseDir}/${[...segments, fileName].join('/')}`);
+    const loggedPath = [phaseDir, versionTag, ...segments, fileName].filter(Boolean).join('/');
+    this.log(`Artifact written: ${loggedPath}`);
     return targetUri;
+  }
+
+  /** The `<specId>.v<version>` folder name an artifact is written under, or `undefined` when it carries no spec stamp. */
+  public static specTag(artifact: Pick<GeneratedArtifact, 'specId' | 'specVersion'>): string | undefined {
+    return artifact.specId ? `${artifact.specId}.v${artifact.specVersion ?? 1}` : undefined;
   }
 
   public async writeAll(artifacts: GeneratedArtifact[]): Promise<vscode.Uri[]> {

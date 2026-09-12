@@ -1,4 +1,4 @@
-import { IntakeSession, SkillDefinition } from './types';
+import { BusinessProblemSpec, IntakeAttachment, IntakeSession, SkillDefinition } from './types';
 
 /**
  * Prompt assembly for the agentic spec-discovery loop. Pure functions only —
@@ -25,11 +25,65 @@ export const DISCOVERY_SYSTEM_PROMPT = [
   '- Include "options" only for single-select and multi-select questions.'
 ].join('\n');
 
-/** Renders the discovery turn prompt from the current intake session + skills. */
-export function buildDiscoveryTurnPrompt(session: IntakeSession, skills: SkillDefinition[]): { system: string; user: string } {
-  const lines: string[] = [];
+/** Extra discovery-turn rules that apply only when revising an already-approved specification. */
+export const REVISION_DISCOVERY_RULES = [
+  'This conversation is REVISING an already-approved specification, shown below as "Existing approved specification".',
+  'Treat every field already populated there as already answered — do not re-ask about it.',
+  'Only ask about: (a) fields the requested change plausibly affects, or (b) fields that are empty/missing below and still needed for a complete specification.',
+  'Once the requested change and any newly-relevant fields are sufficiently clarified, choose "synthesize" promptly rather than re-verifying unaffected fields.'
+].join('\n');
 
-  lines.push(`## Business problem (from the user)\n${session.problemStatement}`);
+/** Renders a compact, complete textual snapshot of a spec for LLM consumption. */
+export function renderSpecSnapshot(spec: BusinessProblemSpec): string {
+  const lines: string[] = [];
+  const field = (label: string, value: string | undefined) => { if (value) lines.push(`${label}: ${value}`); };
+  const list = (label: string, values: string[] | undefined) => { if (values && values.length > 0) lines.push(`${label}: ${values.join('; ')}`); };
+
+  field('Problem statement', spec.problemStatement);
+  list('Objectives', spec.objectives);
+  list('Success criteria', spec.successCriteria);
+  list('In scope', spec.scope?.in);
+  list('Out of scope', spec.scope?.out);
+  list('Constraints', spec.constraints);
+  list('Assumptions', spec.assumptions);
+  field('Domain', spec.domain);
+  list('Stakeholders', spec.stakeholders);
+  list('Key entities', spec.keyEntities);
+  list('Business requirements', spec.businessRequirements);
+  if (spec.sourceCatalog && spec.sourceCatalog.length > 0) {
+    lines.push(`Source catalog: ${spec.sourceCatalog.map((s) => `${s.name} (${s.type})`).join('; ')}`);
+  }
+  if (spec.dataFlows && spec.dataFlows.length > 0) {
+    lines.push(`Data flows: ${spec.dataFlows.map((f) => `${f.source} -> ${f.target}: ${f.description}`).join('; ')}`);
+  }
+  list('Transformations', spec.transformations);
+  list('Dependencies', spec.dependencies);
+  list('Acceptance criteria', spec.acceptanceCriteria);
+  list('Implementation considerations', spec.implementationConsiderations);
+  return lines.join('\n');
+}
+
+function renderAttachments(attachments?: IntakeAttachment[]): string {
+  if (!attachments || attachments.length === 0) return '';
+  const parts = attachments.map((a) => `--- ${a.path} ---\n${a.content}`);
+  return `\n## Attached reference material (user-supplied)\n${parts.join('\n\n')}`;
+}
+
+/** Renders the discovery turn prompt from the current intake session + skills. */
+export function buildDiscoveryTurnPrompt(
+  session: IntakeSession,
+  skills: SkillDefinition[],
+  extraContext?: string
+): { system: string; user: string } {
+  const lines: string[] = [];
+  const isRevision = !!session.previousSpec;
+
+  if (isRevision) {
+    lines.push(`## Requested change (from the user)\n${session.changeRequest ?? ''}`);
+    lines.push(`\n## Existing approved specification (v${session.previousSpec!.version}) — revise, don't restart\n${renderSpecSnapshot(session.previousSpec!)}`);
+  } else {
+    lines.push(`## Business problem (from the user)\n${session.problemStatement}`);
+  }
 
   lines.push(`\n## Conversation so far (${session.turnCount}/${session.turnBudget} turns used)`);
   if (session.questions.length === 0) {
@@ -58,9 +112,15 @@ export function buildDiscoveryTurnPrompt(session: IntakeSession, skills: SkillDe
     }
   }
 
+  if (extraContext && extraContext.trim().length > 0) {
+    lines.push(`\n## Registered repository context\n${extraContext.trim()}`);
+  }
+  lines.push(renderAttachments(session.attachments));
+
   lines.push('\nReturn your next action as a single JSON object now.');
 
-  return { system: DISCOVERY_SYSTEM_PROMPT, user: lines.join('\n') };
+  const system = isRevision ? `${DISCOVERY_SYSTEM_PROMPT}\n\n${REVISION_DISCOVERY_RULES}` : DISCOVERY_SYSTEM_PROMPT;
+  return { system, user: lines.join('\n') };
 }
 
 /**
@@ -68,8 +128,14 @@ export function buildDiscoveryTurnPrompt(session: IntakeSession, skills: SkillDe
  * spec generator produces a draft from the accumulated conversation. (The full v2
  * comprehensive synthesis lands in a later phase.)
  */
-export function composeSynthesisPrompt(session: IntakeSession): string {
-  const lines: string[] = [session.problemStatement];
+export function composeSynthesisPrompt(session: IntakeSession, extraContext?: string): string {
+  const lines: string[] = [];
+  if (session.previousSpec) {
+    lines.push(`Requested change: ${session.changeRequest ?? ''}`);
+    lines.push(`\nExisting approved specification (v${session.previousSpec.version}):\n${renderSpecSnapshot(session.previousSpec)}`);
+  } else {
+    lines.push(session.problemStatement);
+  }
   const answered = new Map(session.answers.map((answer) => [answer.questionId, answer.value]));
   for (const question of session.questions) {
     const value = answered.get(question.id);
@@ -80,6 +146,11 @@ export function composeSynthesisPrompt(session: IntakeSession): string {
   for (const insight of session.insights) {
     lines.push(`Insight: ${insight}`);
   }
+  if (extraContext && extraContext.trim().length > 0) {
+    lines.push(`\nRegistered repository context:\n${extraContext.trim()}`);
+  }
+  const attachmentBlock = renderAttachments(session.attachments);
+  if (attachmentBlock) lines.push(attachmentBlock);
   return lines.join('\n');
 }
 
@@ -112,10 +183,18 @@ export const SYNTHESIS_SYSTEM_PROMPT = [
   '- Include dataFlows, transformations, dependencies, acceptanceCriteria, and implementationConsiderations as comprehensively as the collected answers support.'
 ].join('\n');
 
+/** Extra synthesis rules that apply only when revising an already-approved specification. */
+export const REVISION_SYNTHESIS_RULES = [
+  'This is a REVISION of the existing approved specification supplied above, applying the stated requested change.',
+  'Your output MUST be the FULL specification, not a diff: carry forward every field from the existing specification unchanged unless the requested change or the Q&A above says otherwise.',
+  'Only fields the requested change actually affects should differ from the existing specification.'
+].join('\n');
+
 /** Builds the comprehensive-synthesis turn from the collected Q&A. */
-export function buildSynthesisPrompt(session: IntakeSession): { system: string; user: string } {
+export function buildSynthesisPrompt(session: IntakeSession, extraContext?: string): { system: string; user: string } {
+  const system = session.previousSpec ? `${SYNTHESIS_SYSTEM_PROMPT}\n\n${REVISION_SYNTHESIS_RULES}` : SYNTHESIS_SYSTEM_PROMPT;
   return {
-    system: SYNTHESIS_SYSTEM_PROMPT,
-    user: `${composeSynthesisPrompt(session)}\n\nProduce the comprehensive Business Problem Specification JSON now.`
+    system,
+    user: `${composeSynthesisPrompt(session, extraContext)}\n\nProduce the comprehensive Business Problem Specification JSON now.`
   };
 }

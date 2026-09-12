@@ -1,9 +1,10 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition } from './types';
+import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
 import { SkillRegistry, loadSkillsFromDirectory } from './skillRegistry';
@@ -15,6 +16,7 @@ import { SourceRegistry } from '../context/SourceRegistry';
 import { SynthesisPipeline } from '../context/SynthesisPipeline';
 import { SpecManager } from '../context/SpecManager';
 import { ArtifactWriter } from '../context/ArtifactWriter';
+import { scanArtifactStaleness } from '../context/ArtifactStalenessScanner';
 import { applyCspNonce } from './webviewSecurity';
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
@@ -29,6 +31,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private specOpsEngine?: SpecOpsEngine;
   private skillRegistry?: SkillRegistry;
   private pendingSpecQuestions: SpecIntakeQuestion[] = [];
+  /** Armed by the spec card's "Revise" action; consumed by the next chat message. */
+  private pendingRevision = false;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -111,16 +115,37 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postLog(`Spec manager initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Detect Copilot and include status in settings payload
+    // Detect the active local-LLM provider (Copilot / Claude Code) and include
+    // its status in the settings payload.
     try {
-      const { CopilotAdapter } = require('./copilotAdapter') as typeof import('./copilotAdapter');
-      const { info } = await CopilotAdapter.detect(this.context);
+      const info = await this.detectLanguageModel();
       const settings = this.configManager.getSettings();
-      const merged = Object.assign({}, settings, { copilotInfo: info });
+      const merged = Object.assign({}, settings, info ? { copilotInfo: info, languageModelInfo: info } : {});
       this.postMessage('settingsLoaded', merged);
     } catch {
       this.postMessage('settingsLoaded', this.configManager.getSettings());
     }
+  }
+
+  /**
+   * Detect status for the active provider — only Copilot (`vscode.lm`) and
+   * Claude Code (CLI) have a detectable local status; every other provider is
+   * API-key based and returns `undefined` here.
+   */
+  private async detectLanguageModel(provider?: string): Promise<unknown> {
+    const settings = this.configManager.getSettings();
+    const active = provider ?? settings.activeLlmProvider;
+    if (active === 'claude') {
+      const { ClaudeCodeAdapter } = require('./claudeCodeAdapter') as typeof import('./claudeCodeAdapter');
+      const { info } = await ClaudeCodeAdapter.detect(settings.claudeCodePath);
+      return info;
+    }
+    if (active === 'copilot') {
+      const { LanguageModelAdapter } = require('./languageModelAdapter') as typeof import('./languageModelAdapter');
+      const { info } = await LanguageModelAdapter.detect(this.context, { provider: 'copilot', model: settings.activeLlmModel });
+      return info;
+    }
+    return undefined;
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
@@ -132,16 +157,30 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (!chatMessage.trim()) { this.postLog('A message is required.'); return; }
           try {
             // ── Spec-driven conversation ──
-            //   no spec yet   -> agentic requirements discovery (adaptive questioning)
-            //   draft spec    -> the message refines it              -> revise the specification
-            //   approved spec -> conversational answer grounded in the specification + repository context
+            //   discovery/revision in progress -> this message continues it (an answer, or the
+            //                                      opening change-request message)
+            //   no spec yet                    -> agentic requirements discovery (adaptive questioning)
+            //   draft spec                     -> the message refines it in place (quick single-shot edit)
+            //   approved spec + "Revise" armed -> start a full revision interview (same rigor as
+            //                                      the original: agentic discovery, seeded with the
+            //                                      approved spec, ending in re-approval)
+            //   approved spec, otherwise       -> conversational answer grounded in the specification
             const currentSpec = this.specManager?.getSpec();
+            if (this.specOpsEngine) {
+              await this.handleSpecDiscovery(chatMessage);
+              break;
+            }
             if (this.specManager && !currentSpec) {
               await this.handleSpecDiscovery(chatMessage);
               break;
             }
             if (this.specManager && currentSpec && currentSpec.status === 'draft') {
               await this.reviseSpec(chatMessage);
+              break;
+            }
+            if (this.specManager && currentSpec && currentSpec.status === 'approved' && this.pendingRevision) {
+              this.pendingRevision = false;
+              await this.handleSpecDiscovery(chatMessage, currentSpec);
               break;
             }
 
@@ -195,10 +234,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             enableSessionReuse: typeof settings.enableSessionReuse === 'boolean' ? settings.enableSessionReuse : undefined,
             autoDocumentationEnabled: typeof settings.autoDocumentationEnabled === 'boolean' ? settings.autoDocumentationEnabled : undefined,
             telemetryEnabled: typeof settings.telemetryEnabled === 'boolean' ? settings.telemetryEnabled : undefined,
-            activeLlmProvider: settings.activeLlmProvider === 'azure-openai' || settings.activeLlmProvider === 'openai' || settings.activeLlmProvider === 'anthropic' || settings.activeLlmProvider === 'gemini' || settings.activeLlmProvider === 'ollama' || settings.activeLlmProvider === 'copilot' ? settings.activeLlmProvider : undefined,
+            activeLlmProvider: settings.activeLlmProvider === 'azure-openai' || settings.activeLlmProvider === 'openai' || settings.activeLlmProvider === 'anthropic' || settings.activeLlmProvider === 'gemini' || settings.activeLlmProvider === 'ollama' || settings.activeLlmProvider === 'copilot' || settings.activeLlmProvider === 'claude' ? settings.activeLlmProvider : undefined,
             activeLlmModel: typeof settings.activeLlmModel === 'string' ? settings.activeLlmModel : undefined,
             llmEndpoint: typeof settings.llmEndpoint === 'string' ? settings.llmEndpoint : undefined,
-            copilotProgrammaticConsent: typeof settings.copilotProgrammaticConsent === 'boolean' ? settings.copilotProgrammaticConsent : undefined
+            languageModelProgrammaticConsent: typeof settings.languageModelProgrammaticConsent === 'boolean' ? settings.languageModelProgrammaticConsent : undefined,
+            copilotProgrammaticConsent: typeof settings.copilotProgrammaticConsent === 'boolean' ? settings.copilotProgrammaticConsent : undefined,
+            claudeCodePath: typeof settings.claudeCodePath === 'string' ? settings.claudeCodePath : undefined
           };
           await this.configManager.updateSettings(typedSettings);
           if (typeof message.llmApiKey === 'string') { await this.configManager.setLlmApiKey(message.llmApiKey); }
@@ -206,9 +247,24 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (typeof message.snowflakePrivateKeyPassphrase === 'string') { await this.configManager.setSnowflakePrivateKeyPassphrase(message.snowflakePrivateKeyPassphrase); }
           this.postMessage('settingsSaved', { success: true });
           this.postLog('Settings saved securely to VS Code secrets.');
+          // Refresh the active-provider status pill (e.g. after switching LLM card).
+          try {
+            const info = await this.detectLanguageModel();
+            if (info) { this.postMessage('languageModelStatus', { info }); }
+          } catch { /* non-fatal */ }
           break;
         }
-        case 'testCopilot': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testCopilot`); } catch { this.postLog('Failed to execute Copilot test command.'); } break; }
+        case 'testCopilot':
+        case 'testLanguageModel': {
+          const p = message.provider === 'claude' || message.provider === 'copilot' ? message.provider : undefined;
+          try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testLanguageModel`, p); } catch { this.postLog('Failed to execute language model test command.'); }
+          break;
+        }
+        case 'listLanguageModels': {
+          const p = message.provider === 'claude' || message.provider === 'copilot' ? message.provider : undefined;
+          try { await vscode.commands.executeCommand(`${EXTENSION_ID}.listLanguageModels`, p); } catch { this.postLog('Failed to execute list language models command.'); }
+          break;
+        }
         case 'openCopilotHandoff': { try { const prompt = typeof (message.prompt) === 'string' ? message.prompt : undefined; await vscode.commands.executeCommand(`${EXTENSION_ID}.copilotHandoff`, prompt); } catch { this.postLog('Failed to open Copilot handoff editor.'); } break; }
         case 'reindex': { this.postLog('Re-index requested from webview.'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.reindex`); } catch { this.postLog('Re-index command not yet registered.'); } break; }
         case 'openContextFolder': {
@@ -237,6 +293,20 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'syncMetadata': { this.postLog('Syncing database metadata...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.syncMetadata`); } catch { this.postLog('Sync metadata command not yet registered.'); } break; }
+        case 'runToolSkill': {
+          const skillId = typeof message.skillId === 'string' ? message.skillId.trim() : '';
+          const instruction = typeof message.instruction === 'string' ? message.instruction.trim() : '';
+          if (!skillId || !instruction) { this.postLog('Usage: /skill <skillId> <instruction>'); break; }
+          this.postLog(`Running skill "${skillId}"…`);
+          try {
+            const result = await this.hub.runToolSkill(skillId, instruction);
+            this.postMessage('chatResponse', { message: result.success ? result.message : `Skill failed: ${result.error || result.message}`, error: !result.success });
+          } catch (err) {
+            const message2 = err instanceof Error ? err.message : String(err);
+            this.postMessage('chatResponse', { message: `Skill failed: ${message2}`, error: true });
+          }
+          break;
+        }
         case 'runAgent': {
           const agentType = typeof message.agent === 'string' ? message.agent : '';
           if (!agentType) { this.postLog('No agent specified for runAgent.'); return; }
@@ -263,10 +333,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'settingsLoaded': {
           try {
-            const { CopilotAdapter } = require('./copilotAdapter') as typeof import('./copilotAdapter');
-            const { info } = await CopilotAdapter.detect(this.context);
+            const info = await this.detectLanguageModel();
             const settings = this.configManager.getSettings();
-            const merged = Object.assign({}, settings, { copilotInfo: info });
+            const merged = Object.assign({}, settings, info ? { copilotInfo: info, languageModelInfo: info } : {});
             this.postMessage('settingsLoaded', merged);
           } catch { this.postMessage('settingsLoaded', this.configManager.getSettings()); }
           break;
@@ -307,7 +376,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'refineSpec': {
           const refinement = typeof message.refinement === 'string' ? message.refinement.trim() : '';
           if (!refinement) { this.postLog('Describe the change you want applied to the specification.'); break; }
-          await this.reviseSpec(refinement);
+          const spec = this.specManager?.getSpec();
+          if (spec && spec.status === 'approved') {
+            // Same rule as chat: an approved spec is never edited in place — this
+            // starts a full revision interview instead of the old single-shot rewrite.
+            await this.handleSpecDiscovery(refinement, spec);
+          } else {
+            await this.reviseSpec(refinement);
+          }
           break;
         }
         case 'approveSpec': {
@@ -353,10 +429,62 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           await vscode.window.showTextDocument(specDoc, { preview: false });
           break;
         }
+        case 'startRevision': {
+          const spec = this.specManager?.getSpec();
+          if (spec && spec.status === 'approved') {
+            this.pendingRevision = true;
+            this.postLog('Describe the requested change — your next message starts a specification revision (same review/approval cycle as the original).');
+          }
+          // A draft spec is already revisable via the next chat message; nothing to arm.
+          break;
+        }
+        case 'attachSpecFile': {
+          if (!this.specOpsEngine) {
+            this.postLog('Start a specification conversation (or a revision) before attaching a file.');
+            break;
+          }
+          try {
+            const picked = await vscode.window.showOpenDialog({
+              canSelectMany: false,
+              openLabel: 'Attach as reference material',
+              title: 'Attach supplementary information'
+            });
+            const fileUri = picked?.[0];
+            if (!fileUri) { break; }
+            const bytes = await vscode.workspace.fs.readFile(fileUri);
+            const MAX_ATTACHMENT_BYTES = 200_000; // keep prompts bounded
+            const content = Buffer.from(bytes).toString('utf8').slice(0, MAX_ATTACHMENT_BYTES);
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+            const displayPath = workspaceRoot ? path.relative(workspaceRoot.fsPath, fileUri.fsPath) : fileUri.fsPath;
+            this.specOpsEngine.addAttachment({ path: displayPath, content, attachedAt: new Date().toISOString() });
+            this.postLog(`Attached ${displayPath} as reference material for this conversation.`);
+          } catch (err) {
+            this.postLog(`Failed to attach file: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          break;
+        }
         case 'openArtifactFolder': {
           const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
           const artifactUri = ArtifactWriter.resolveArtifactDirectory(workspaceRoot);
           try { await vscode.commands.executeCommand('revealFileInOS', artifactUri); } catch { await vscode.commands.executeCommand('workbench.files.action.showActiveFileInExplorer'); }
+          break;
+        }
+        case 'checkArtifactStaleness': {
+          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+          if (!workspaceRoot) { break; }
+          const spec = this.specManager?.getSpec();
+          const report = await scanArtifactStaleness(workspaceRoot, spec ? { id: spec.id, version: spec.version } : undefined);
+          this.postMessage('artifactStaleness', { report });
+          break;
+        }
+        case 'viewSpecHistory': {
+          if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
+          try {
+            const text = await this.getSpecGitHistory();
+            this.postMessage('specHistory', { text });
+          } catch (err) {
+            this.postMessage('specHistory', { error: err instanceof Error ? err.message : String(err) });
+          }
           break;
         }
         default: this.postLog(`Unknown message type: ${String(message.type)}`); break;
@@ -401,19 +529,44 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Renders the spec file's git history as readable text — AutoDE leans on git
+   * as the version/audit log (`.ai-context/spec/` is meant to be committed)
+   * rather than maintaining a parallel in-app version store.
+   */
+  private getSpecGitHistory(): Promise<string> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!workspaceRoot || !this.specManager) {
+      return Promise.reject(new Error('No workspace or specification is open.'));
+    }
+    const specPath = this.specManager.getSpecUri().fsPath;
+    const args = ['log', '--follow', '--date=short', '--pretty=format:%C(auto)%h %ad %d %s', '-p', '--', specPath];
+    return new Promise((resolve, reject) => {
+      execFile('git', args, { cwd: workspaceRoot.fsPath, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(stderr?.trim() || err.message || 'git log failed. Is this workspace a git repository?'));
+          return;
+        }
+        resolve(stdout);
+      });
+    });
+  }
+
+  /**
    * Drafts a new Business Problem Specification from a natural-language description.
    * This is the first responsibility of AutoDE in the spec-driven flow.
    */
-  private async draftSpec(prompt: string): Promise<void> {
+  private async draftSpec(prompt: string, previous?: BusinessProblemSpec): Promise<void> {
     if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
-    const spec = await this.hub.generateSpec(prompt);
+    const spec = await this.hub.generateSpec(prompt, previous);
     await this.specManager.saveSpec(spec);
     this.hub.setSpec(spec.id, spec.version);
     this.postSpec();
-    this.postMessage('specDrafted', { spec });
+    this.postMessage('specDrafted', { spec, revised: previous?.status === 'approved' });
     this.postLog(
-      'Draft Business Problem Specification created. Review it in the Workflow Palette (🧰) and approve it, ' +
-      'or reply with a change and I will revise the specification.'
+      previous
+        ? `Draft revision v${spec.version} created. Review it in the Workflow Palette (🧰) and approve it, or reply with a further change.`
+        : 'Draft Business Problem Specification created. Review it in the Workflow Palette (🧰) and approve it, ' +
+          'or reply with a change and I will revise the specification.'
     );
   }
 
@@ -449,15 +602,21 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return this.skillRegistry.list();
   }
 
-  /** Handles a user message during the no-spec (discovery) phase. */
-  private async handleSpecDiscovery(message: string): Promise<void> {
+  /**
+   * Handles a user message during an agentic specification conversation — either
+   * starting fresh (no spec exists yet) or revising an approved one when
+   * `previousSpec` is supplied (armed via the spec card's "Revise" action).
+   */
+  private async handleSpecDiscovery(message: string, previousSpec?: BusinessProblemSpec): Promise<void> {
     const trimmed = message.trim();
     if (!trimmed) { return; }
 
     if (!this.specOpsEngine) {
       const fields = new SkillRegistry(this.ensureSkills()).allSpecFields();
-      this.specOpsEngine = new SpecOpsEngine(createIntakeSession(trimmed, { fields }));
-      this.postLog('Starting agentic requirements discovery — answer the questions to refine the specification.');
+      this.specOpsEngine = new SpecOpsEngine(createIntakeSession(trimmed, { fields, previousSpec }));
+      this.postLog(previousSpec
+        ? `Starting a revision of specification v${previousSpec.version} — answer the questions to refine the change.`
+        : 'Starting agentic requirements discovery — answer the questions to refine the specification.');
     } else if (this.pendingSpecQuestions.length > 0) {
       const current = this.pendingSpecQuestions[0];
       this.specOpsEngine.answer({ questionId: current.id, field: current.field, value: trimmed, answeredAt: new Date().toISOString() });
@@ -481,7 +640,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      const action: SpecEngineAction = await this.hub.discoverNextAction(engine.getSession(), this.ensureSkills());
+      const extraContext = this.contextFileManager?.buildContextPrompt();
+      const action: SpecEngineAction = await this.hub.discoverNextAction(engine.getSession(), this.ensureSkills(), extraContext);
       if (action.action === 'ask' || action.action === 'ask_many') {
         const ids = engine.applyAction(action);
         this.pendingSpecQuestions = engine.getSession().questions.filter((question) => ids.includes(question.id));
@@ -503,22 +663,33 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private async synthesizeFromSession(): Promise<void> {
     const engine = this.specOpsEngine;
     if (!engine) { return; }
+    const isRevision = !!engine.getSession().previousSpec;
     engine.setState('synthesizing');
-    this.postLog('Requirements collected. Synthesizing the comprehensive Business Problem Specification...');
+    this.postLog(isRevision
+      ? 'Change clarified. Synthesizing the revised Business Problem Specification...'
+      : 'Requirements collected. Synthesizing the comprehensive Business Problem Specification...');
     try {
       const previous = this.specManager?.getSpec();
-      const spec = await this.hub.synthesizeComprehensiveSpec(engine.getSession(), previous);
+      const extraContext = this.contextFileManager?.buildContextPrompt();
+      const spec = await this.hub.synthesizeComprehensiveSpec(engine.getSession(), previous, extraContext);
       if (this.specManager) {
         await this.specManager.saveSpec(spec);
         this.hub.setSpec(spec.id, spec.version);
         this.postSpec();
       }
-      this.postMessage('specDrafted', { spec });
-      this.postLog('Comprehensive Business Problem Specification drafted. Review it in the Workflow Palette (🧰) and approve it.');
+      this.postMessage('specDrafted', { spec, revised: isRevision });
+      this.postLog(isRevision
+        ? `Specification revised as v${spec.version} (draft). Review it in the Workflow Palette (🧰) and approve it to continue.`
+        : 'Comprehensive Business Problem Specification drafted. Review it in the Workflow Palette (🧰) and approve it.');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.postLog(`Synthesis failed (${message}); falling back to a basic draft.`);
-      await this.draftSpec(composeSynthesisPrompt(engine.getSession()));
+      // Known limitation: this emergency fallback uses the older single-shot
+      // generateSpec()/parseSpecResponse(), which only knows the v1 field shape.
+      // `previous` still carries id/version/status correctly through it, but v2
+      // fields (dataFlows, businessRequirements, etc.) are NOT preserved here —
+      // only the primary path above (parseComprehensiveSpec) guarantees that.
+      await this.draftSpec(composeSynthesisPrompt(engine.getSession()), engine.getSession().previousSpec);
     } finally {
       this.specOpsEngine = undefined;
       this.pendingSpecQuestions = [];

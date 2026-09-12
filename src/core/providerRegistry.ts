@@ -1,4 +1,5 @@
 import { DataPlatformProvider, LlmProvider, SnowflakeAuthMode } from './types';
+import { LLM_ADAPTERS } from './llmProviders';
 
 export interface ProviderDefinition {
   displayName: string;
@@ -46,27 +47,29 @@ export const PROVIDER_REGISTRY: Record<DataPlatformProvider, ProviderDefinition>
   }
 };
 
-export const LLM_PROVIDER_REGISTRY: Record<LlmProvider, { displayName: string; supportsCustomEndpoint: boolean; requiresApiKey: boolean }> = {
-  'azure-openai': { displayName: 'Azure OpenAI', supportsCustomEndpoint: true, requiresApiKey: true },
-  openai: { displayName: 'OpenAI', supportsCustomEndpoint: false, requiresApiKey: true },
-  anthropic: { displayName: 'Anthropic', supportsCustomEndpoint: false, requiresApiKey: true },
-  gemini: { displayName: 'Google Gemini', supportsCustomEndpoint: false, requiresApiKey: true },
-  ollama: { displayName: 'Ollama', supportsCustomEndpoint: false, requiresApiKey: false },
-  copilot: { displayName: 'GitHub Copilot', supportsCustomEndpoint: false, requiresApiKey: false }
-};
-
 export function getSupportedProviders(): DataPlatformProvider[] {
   return Object.keys(PROVIDER_REGISTRY) as DataPlatformProvider[];
 }
 
+/**
+ * @deprecated (Phase C, v0.9.0) LLM provider metadata now lives on the adapters
+ * themselves in `src/core/llmProviders.ts` (`LLM_ADAPTERS`) — that is the single
+ * source of truth `callConfiguredLlm` actually dispatches through. This function
+ * is kept only so any pre-existing caller of the old `LLM_PROVIDER_REGISTRY`
+ * still resolves correctly; it was previously a second, disconnected copy of
+ * this metadata that had already drifted stale (e.g. still labeling `claude`
+ * "Claude (VS Code)" after that provider became the Claude Code CLI).
+ */
 export function getSupportedLlmProviders(): LlmProvider[] {
-  return Object.keys(LLM_PROVIDER_REGISTRY) as LlmProvider[];
+  return Object.keys(LLM_ADAPTERS) as LlmProvider[];
 }
 
 export function getProviderDefinition(provider: DataPlatformProvider): ProviderDefinition {
   return PROVIDER_REGISTRY[provider] ?? PROVIDER_REGISTRY.other;
 }
 
+/** @deprecated See the note on `getSupportedLlmProviders` — reads from `LLM_ADAPTERS` now. */
 export function getLlmProviderDefinition(provider: LlmProvider): { displayName: string; supportsCustomEndpoint: boolean; requiresApiKey: boolean } {
-  return LLM_PROVIDER_REGISTRY[provider] ?? LLM_PROVIDER_REGISTRY.openai;
+  const adapter = LLM_ADAPTERS[provider] ?? LLM_ADAPTERS.openai;
+  return { displayName: adapter.displayName, supportsCustomEndpoint: adapter.supportsCustomEndpoint, requiresApiKey: adapter.requiresApiKey };
 }

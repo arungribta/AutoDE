@@ -77,6 +77,18 @@
         "title": "AutoDE: Re-index Context"
       },
       {
+        "command": "autoDataEngineeringHub.testLanguageModel",
+        "title": "AutoDE: Test Language Model (Copilot / Claude)"
+      },
+      {
+        "command": "autoDataEngineeringHub.listLanguageModelInfo",
+        "title": "AutoDE: Show Active Language Model Status"
+      },
+      {
+        "command": "autoDataEngineeringHub.listLanguageModels",
+        "title": "AutoDE: List Language Models"
+      },
+      {
         "command": "autoDataEngineeringHub.testCopilot",
         "title": "AutoDE: Test Copilot"
       },
@@ -91,6 +103,14 @@
       {
         "command": "autoDataEngineeringHub.copilotHandoff",
         "title": "AutoDE: Copilot Handoff"
+      },
+      {
+        "command": "autoDataEngineeringHub.importToolSkill",
+        "title": "AutoDE: Import Tool Skill"
+      },
+      {
+        "command": "autoDataEngineeringHub.runToolSkill",
+        "title": "AutoDE: Run Tool Skill"
       }
     ],
     "viewsContainers": {
@@ -236,13 +256,26 @@
         },
         "autoDataEngineeringHub.activeLlmProvider": {
           "type": "string",
-          "enum": ["azure-openai", "openai", "anthropic", "gemini", "ollama", "copilot"],
+          "enum": ["azure-openai", "openai", "anthropic", "gemini", "ollama", "copilot", "claude"],
+          "enumDescriptions": [
+            "Azure OpenAI (API key)",
+            "OpenAI (API key)",
+            "Anthropic Claude via api.anthropic.com (API key)",
+            "Google Gemini (API key)",
+            "Ollama (local server)",
+            "GitHub Copilot via the VS Code Language Model API (no API key)",
+            "Claude Code CLI, headless (no API key; uses your existing Claude Code login). Auto-detected, or set claudeCodePath."
+          ],
           "default": "copilot",
           "description": "Active LLM provider."
         },
         "autoDataEngineeringHub.activeLlmModel": {
           "type": "string", "default": "gpt-4o-mini",
-          "description": "LLM model name."
+          "description": "LLM model name. For the 'claude' provider this is passed to 'claude --model' when it looks like a Claude model (e.g. 'sonnet', 'opus', 'claude-sonnet-4'); otherwise Claude Code's default model is used."
+        },
+        "autoDataEngineeringHub.claudeCodePath": {
+          "type": "string", "default": "",
+          "description": "Path to the Claude Code CLI ('claude' / 'claude.exe'). Leave empty to auto-detect: PATH, then the binary bundled with the 'Claude Code for VS Code' extension. Only used when activeLlmProvider is 'claude'."
         },
         "autoDataEngineeringHub.llmEndpoint": {
           "type": "string", "default": "",
@@ -261,9 +294,13 @@
           "default": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation.",
           "description": "Extension description."
         },
+        "autoDataEngineeringHub.languageModelProgrammaticConsent": {
+          "type": "boolean", "default": false,
+          "description": "Allow AutoDE to programmatically use a locally-installed language model for its LLM calls (opt-in): GitHub Copilot via the VS Code Language Model API, or the Claude Code CLI."
+        },
         "autoDataEngineeringHub.copilotProgrammaticConsent": {
           "type": "boolean", "default": false,
-          "description": "Allow programmatic use of GitHub Copilot (opt-in)."
+          "markdownDescription": "_Deprecated — use `#autoDataEngineeringHub.languageModelProgrammaticConsent#`._ Still honored as a fallback for existing setups."
         }
       }
     }

@@ -34,7 +34,9 @@ export class ConfigurationManager {
       activeLlmModel: config.get<string>('activeLlmModel', 'gpt-4o-mini'),
       llmEndpoint: config.get<string>('llmEndpoint', ''),
       artifactDirectory: config.get<string>('artifactDirectory', 'auto-de'),
-      copilotProgrammaticConsent: config.get<boolean>('copilotProgrammaticConsent', false)
+      languageModelProgrammaticConsent: config.get<boolean>('languageModelProgrammaticConsent', false),
+      copilotProgrammaticConsent: config.get<boolean>('copilotProgrammaticConsent', false),
+      claudeCodePath: config.get<string>('claudeCodePath', '')
     };
   }
 
@@ -63,7 +65,9 @@ export class ConfigurationManager {
      ['activeLlmModel', settings.activeLlmModel],
      ['llmEndpoint', settings.llmEndpoint],
      ['artifactDirectory', settings.artifactDirectory],
-     ['copilotProgrammaticConsent', settings.copilotProgrammaticConsent]
+     ['languageModelProgrammaticConsent', settings.languageModelProgrammaticConsent],
+     ['copilotProgrammaticConsent', settings.copilotProgrammaticConsent],
+     ['claudeCodePath', settings.claudeCodePath]
     ];
 
     for (const [name, value] of updates) {

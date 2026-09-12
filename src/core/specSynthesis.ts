@@ -77,19 +77,26 @@ function parseSourceCatalog(raw: unknown): SourceEntry[] {
 }
 
 /** Builds field→question traceability from the intake session. */
-function buildProvenance(session?: IntakeSession): SpecProvenance[] {
+function buildProvenance(session?: IntakeSession, previous?: BusinessProblemSpec): SpecProvenance[] {
   if (!session) return [];
+  const previousByField = new Map((previous?.provenance ?? []).map((p) => [p.field, p]));
   return PROVENANCE_FIELDS.map((field) => {
     const question = session.questions.find(
       (candidate) => candidate.field === field && session.answers.some((answer) => answer.questionId === candidate.id)
     );
-    return {
-      field,
-      source: question ? ('question' as const) : ('synthesis' as const),
-      questionId: question?.id,
-      skill: question?.skill
-    };
+    if (question) {
+      return { field, source: 'question' as const, questionId: question.id, skill: question.skill };
+    }
+    // Not addressed by this session — if it was carried forward from a previous
+    // revision, keep its original provenance rather than mislabeling it "synthesis".
+    const carriedForward = previousByField.get(field);
+    return carriedForward ? { ...carriedForward, field } : { field, source: 'synthesis' as const };
   });
+}
+
+/** Returns `fallback` when `value` is empty (empty array / blank string / undefined). */
+function orFallback<T>(value: T[], fallback: T[] | undefined): T[] {
+  return value.length > 0 ? value : (fallback ?? []);
 }
 
 export interface ComprehensiveSpecOptions {
@@ -105,41 +112,49 @@ export function parseComprehensiveSpec(raw: unknown, opts: ComprehensiveSpecOpti
   }
   const record = raw as Record<string, unknown>;
   const now = opts.now ?? new Date().toISOString();
+  const previous = opts.previous;
 
-  const problemStatement = str(record.problemStatement);
+  // A revision's synthesis call is instructed to always return the full spec, but
+  // fall back to the previous approved content for any field the LLM's output
+  // left empty — a defensive net so an under-specified revision turn can never
+  // silently wipe previously-approved content.
+  const problemStatement = str(record.problemStatement) || previous?.problemStatement || '';
   if (!problemStatement) throw new Error('The LLM did not return a problemStatement.');
 
-  const objectives = asStringArray(record.objectives);
+  const objectives = orFallback(asStringArray(record.objectives), previous?.objectives);
   if (objectives.length === 0) throw new Error('The LLM did not return any objectives.');
 
   const scopeRaw = (record.scope && typeof record.scope === 'object' ? record.scope : {}) as Record<string, unknown>;
-  const scopeIn = asStringArray(scopeRaw.in ?? scopeRaw.inScope);
+  const scopeIn = orFallback(asStringArray(scopeRaw.in ?? scopeRaw.inScope), previous?.scope?.in);
   if (scopeIn.length === 0) throw new Error('The LLM did not return any in-scope items.');
 
-  const isRevisionOfApproved = opts.previous?.status === 'approved';
+  const isRevisionOfApproved = previous?.status === 'approved';
 
   return {
-    id: opts.previous?.id ?? `bps-${Date.now().toString(36)}`,
-    version: isRevisionOfApproved ? (opts.previous?.version ?? 1) + 1 : (opts.previous?.version ?? 1),
+    id: previous?.id ?? `bps-${Date.now().toString(36)}`,
+    version: isRevisionOfApproved ? (previous?.version ?? 1) + 1 : (previous?.version ?? 1),
     status: 'draft',
     problemStatement,
     objectives,
-    successCriteria: asStringArray(record.successCriteria),
-    scope: { in: scopeIn, out: asStringArray(scopeRaw.out ?? scopeRaw.outOfScope) },
-    constraints: asStringArray(record.constraints),
-    assumptions: asStringArray(record.assumptions),
-    domain: str(record.domain) || opts.previous?.domain || undefined,
-    stakeholders: asStringArray(record.stakeholders),
-    keyEntities: asStringArray(record.keyEntities),
-    businessRequirements: asStringArray(record.businessRequirements),
-    dataFlows: parseDataFlows(record.dataFlows),
-    transformations: asStringArray(record.transformations),
-    dependencies: asStringArray(record.dependencies),
-    acceptanceCriteria: asStringArray(record.acceptanceCriteria),
-    implementationConsiderations: asStringArray(record.implementationConsiderations),
-    sourceCatalog: parseSourceCatalog(record.sourceCatalog),
-    provenance: buildProvenance(opts.session),
-    createdAt: opts.previous?.createdAt ?? now,
+    successCriteria: orFallback(asStringArray(record.successCriteria), previous?.successCriteria),
+    scope: {
+      in: scopeIn,
+      out: orFallback(asStringArray(scopeRaw.out ?? scopeRaw.outOfScope), previous?.scope?.out)
+    },
+    constraints: orFallback(asStringArray(record.constraints), previous?.constraints),
+    assumptions: orFallback(asStringArray(record.assumptions), previous?.assumptions),
+    domain: str(record.domain) || previous?.domain || undefined,
+    stakeholders: orFallback(asStringArray(record.stakeholders), previous?.stakeholders),
+    keyEntities: orFallback(asStringArray(record.keyEntities), previous?.keyEntities),
+    businessRequirements: orFallback(asStringArray(record.businessRequirements), previous?.businessRequirements),
+    dataFlows: orFallback(parseDataFlows(record.dataFlows), previous?.dataFlows),
+    transformations: orFallback(asStringArray(record.transformations), previous?.transformations),
+    dependencies: orFallback(asStringArray(record.dependencies), previous?.dependencies),
+    acceptanceCriteria: orFallback(asStringArray(record.acceptanceCriteria), previous?.acceptanceCriteria),
+    implementationConsiderations: orFallback(asStringArray(record.implementationConsiderations), previous?.implementationConsiderations),
+    sourceCatalog: orFallback(parseSourceCatalog(record.sourceCatalog), previous?.sourceCatalog),
+    provenance: buildProvenance(opts.session, previous),
+    createdAt: previous?.createdAt ?? now,
     updatedAt: now
   };
 }

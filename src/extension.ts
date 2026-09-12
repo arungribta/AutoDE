@@ -13,14 +13,35 @@ import { ProfileEditorProvider } from './editors/ProfileEditorProvider';
 import { DocEditorProvider } from './editors/DocEditorProvider';
 import { EDITOR_DATA_MODEL, EDITOR_STTM, EDITOR_GRAPH, EDITOR_PROFILE, EDITOR_DOC } from './core/extensionIdentity';
 
+/** Recursively copies a directory via vscode.workspace.fs (used to import a skill folder). */
+async function copyDirectoryRecursive(source: vscode.Uri, target: vscode.Uri): Promise<void> {
+  await vscode.workspace.fs.createDirectory(target);
+  const entries = await vscode.workspace.fs.readDirectory(source);
+  for (const [name, type] of entries) {
+    const sourceChild = vscode.Uri.joinPath(source, name);
+    const targetChild = vscode.Uri.joinPath(target, name);
+    if (type === vscode.FileType.Directory) {
+      await copyDirectoryRecursive(sourceChild, targetChild);
+    } else if (type === vscode.FileType.File) {
+      const bytes = await vscode.workspace.fs.readFile(sourceChild);
+      await vscode.workspace.fs.writeFile(targetChild, bytes);
+    }
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
   const hub = new DataAgentHubHub(configManager);
   const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub);
   const panelProvider = new DataAgentHubPanelProvider(context, hub);
 
-  let copilotAdapter: any = undefined;
   let connectionManager: ConnectionManager | undefined;
+
+  // Which VS Code Language Model provider the user has selected (Copilot or
+  // Claude). Any other provider is API-key based and not exercised by these
+  // detection/test commands; we fall back to 'copilot' for detection.
+  const activeLmProvider = (): 'copilot' | 'claude' =>
+    configManager.getSettings().activeLlmProvider === 'claude' ? 'claude' : 'copilot';
 
   // Initialize ArtifactWriter (single-workspace artifact persistence)
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? context.extensionUri;
@@ -52,46 +73,99 @@ export function activate(context: vscode.ExtensionContext): void {
     await hub.resetPlan();
   });
 
-  const testCopilot = vscode.commands.registerCommand(`${EXTENSION_ID}.testCopilot`, async () => {
+  const asLmProvider = (v: unknown): 'copilot' | 'claude' | undefined =>
+    v === 'claude' || v === 'copilot' ? v : undefined;
+
+  const testLanguageModelHandler = async (providerArg?: unknown) => {
+    const provider = asLmProvider(providerArg) ?? activeLmProvider();
     try {
-      if (!copilotAdapter) {
-        try {
-          const { CopilotAdapter } = require('./core/copilotAdapter') as typeof import('./core/copilotAdapter');
-          const { info, adapter } = await CopilotAdapter.detect(context);
-          copilotAdapter = adapter;
-          if (!info.found) { vscode.window.showInformationMessage('GitHub Copilot Chat extension not found.'); return; }
-          if (!info.hasAccess) { vscode.window.showInformationMessage(info.error || 'GitHub Copilot not available. Sign in and try again.'); return; }
-          if (info.consentRequired) {
-            const choice = await vscode.window.showInformationMessage('Copilot available. Open handoff editor?', 'Open Handoff', 'Cancel');
-            if (choice === 'Open Handoff') { await vscode.commands.executeCommand(`${EXTENSION_ID}.copilotHandoff`); }
-            return;
-          }
-        } catch (detErr) {
-          vscode.window.showErrorMessage('Error detecting Copilot: ' + (detErr instanceof Error ? detErr.message : String(detErr)));
+      if (provider === 'claude') {
+        const { ClaudeCodeAdapter } = require('./core/claudeCodeAdapter') as typeof import('./core/claudeCodeAdapter');
+        const { info, adapter } = await ClaudeCodeAdapter.detect(configManager.getSettings().claudeCodePath);
+        if (!adapter) {
+          vscode.window.showErrorMessage(info.error || 'Claude Code CLI not found.');
           return;
         }
+        vscode.window.showInformationMessage(`Claude Code found (${info.cliSource}${info.version ? `, ${info.version}` : ''}). Testing…`);
+        const out = await adapter.testCall();
+        if (out.ok) { vscode.window.showInformationMessage('Claude Code test succeeded: ' + (out.text ? out.text.slice(0, 120) : '[no-text]')); }
+        else { vscode.window.showErrorMessage('Claude Code test failed: ' + (out.error ?? 'unknown')); }
+        return;
       }
-      if (!copilotAdapter) { vscode.window.showInformationMessage('GitHub Copilot not available.'); return; }
-      if (typeof copilotAdapter.testCall !== 'function') { vscode.window.showInformationMessage('Copilot adapter has no test capability.'); return; }
-      const out = await copilotAdapter.testCall();
-      if (out.ok) { vscode.window.showInformationMessage('Copilot test succeeded: ' + (out.text ? out.text.slice(0, 120) : '[no-text]')); }
-      else { vscode.window.showErrorMessage('Copilot test failed: ' + (out.error ?? 'unknown')); }
+
+      const { LanguageModelAdapter } = require('./core/languageModelAdapter') as typeof import('./core/languageModelAdapter');
+      const model = configManager.getSettings().activeLlmModel;
+      const { info, adapter } = await LanguageModelAdapter.detect(context, { provider: 'copilot', model });
+      if (!info.found || !info.hasAccess || !adapter) {
+        vscode.window.showInformationMessage(info.error || 'GitHub Copilot is not available. Sign in and try again.');
+        return;
+      }
+      if (info.consentRequired) {
+        const choice = await vscode.window.showInformationMessage('Copilot available. Open handoff editor?', 'Open Handoff', 'Cancel');
+        if (choice === 'Open Handoff') { await vscode.commands.executeCommand(`${EXTENSION_ID}.copilotHandoff`); }
+        return;
+      }
+      const out = await adapter.testCall();
+      if (out.ok) { vscode.window.showInformationMessage('GitHub Copilot test succeeded: ' + (out.text ? out.text.slice(0, 120) : '[no-text]')); }
+      else { vscode.window.showErrorMessage('GitHub Copilot test failed: ' + (out.error ?? 'unknown')); }
     } catch (err) {
-      vscode.window.showErrorMessage('Copilot test error: ' + (err instanceof Error ? err.message : String(err)));
+      vscode.window.showErrorMessage('Language model test error: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const listLanguageModelInfoHandler = async (providerArg?: unknown) => {
+    const provider = asLmProvider(providerArg) ?? activeLmProvider();
+    try {
+      if (provider === 'claude') {
+        const { ClaudeCodeAdapter } = require('./core/claudeCodeAdapter') as typeof import('./core/claudeCodeAdapter');
+        const { info } = await ClaudeCodeAdapter.detect(configManager.getSettings().claudeCodePath);
+        const msg = info.error
+          ? `Claude Code: ${info.error}`
+          : `Claude Code: found via ${info.cliSource}${info.version ? ` (${info.version})` : ''} at ${info.cliPath}`;
+        vscode.window.showInformationMessage(msg);
+        return;
+      }
+      const { LanguageModelAdapter } = require('./core/languageModelAdapter') as typeof import('./core/languageModelAdapter');
+      const { info } = await LanguageModelAdapter.detect(context, { provider: 'copilot', model: configManager.getSettings().activeLlmModel });
+      const modelSummary = info.models.slice(0, 5).map((m) => `${m.family} (${m.name})`).join(', ');
+      const msg = info.error || `Copilot: found=${info.found} hasAccess=${info.hasAccess} vendors=[${info.vendors.join(', ')}] models=${info.models.length}${modelSummary ? ` [${modelSummary}]` : ''}${info.consentRequired ? ' consent required' : ''}`;
+      vscode.window.showInformationMessage(msg);
+    } catch (err) {
+      vscode.window.showErrorMessage('Error listing language model info: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  // Enumerate every chat model exposed through vscode.lm (across all vendors),
+  // and report where the Claude Code CLI resolves from — the fastest way to see
+  // what each provider will actually use.
+  const listLanguageModels = vscode.commands.registerCommand(`${EXTENSION_ID}.listLanguageModels`, async () => {
+    const out = vscode.window.createOutputChannel('autoDE:language-models');
+    out.show(true);
+    try {
+      const { LanguageModelAdapter } = require('./core/languageModelAdapter') as typeof import('./core/languageModelAdapter');
+      const models = await LanguageModelAdapter.listAll();
+      out.appendLine(`vscode.lm exposes ${models.length} chat model(s):`);
+      for (const m of models) {
+        out.appendLine(`- vendor=${m.vendor} family=${m.family} id=${m.id} name="${m.name}" maxInputTokens=${m.maxInputTokens}`);
+      }
+      out.appendLine('');
+      const { ClaudeCodeAdapter } = require('./core/claudeCodeAdapter') as typeof import('./core/claudeCodeAdapter');
+      const r = ClaudeCodeAdapter.resolve(configManager.getSettings().claudeCodePath);
+      out.appendLine(
+        r.cliPath
+          ? `Claude Code CLI: ${r.cliPath} (via ${r.source}${r.version ? `, ${r.version}` : ''}) — used by the "claude" provider.`
+          : `Claude Code CLI: NOT FOUND. ${r.error ?? ''}`
+      );
+    } catch (err) {
+      out.appendLine('Error: ' + (err instanceof Error ? err.message : String(err)));
     }
   });
 
-  const listCopilotInfo = vscode.commands.registerCommand(`${EXTENSION_ID}.listCopilotInfo`, async () => {
-    try {
-      const { CopilotAdapter } = require('./core/copilotAdapter') as typeof import('./core/copilotAdapter');
-      const { info } = await CopilotAdapter.detect(context);
-      const modelSummary = info.models.slice(0, 5).map((m) => `${m.family} (${m.name})`).join(', ');
-      const msg = info.error || `Copilot Chat installed=${info.found} hasAccess=${info.hasAccess} models=${info.models.length}${modelSummary ? ` [${modelSummary}]` : ''}${info.consentRequired ? ' consent required' : ''}`;
-      vscode.window.showInformationMessage(msg);
-    } catch (err) {
-      vscode.window.showErrorMessage('Error listing Copilot info: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  });
+  const testLanguageModel = vscode.commands.registerCommand(`${EXTENSION_ID}.testLanguageModel`, testLanguageModelHandler);
+  const listLanguageModelInfo = vscode.commands.registerCommand(`${EXTENSION_ID}.listLanguageModelInfo`, listLanguageModelInfoHandler);
+  // Back-compat command ids — now generalized to the active LM provider.
+  const testCopilot = vscode.commands.registerCommand(`${EXTENSION_ID}.testCopilot`, testLanguageModelHandler);
+  const listCopilotInfo = vscode.commands.registerCommand(`${EXTENSION_ID}.listCopilotInfo`, listLanguageModelInfoHandler);
 
   const debugListExtensions = vscode.commands.registerCommand(`${EXTENSION_ID}.debugListExtensions`, async () => {
     const out = vscode.window.createOutputChannel('autoDE:extensions-debug');
@@ -162,6 +236,56 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage('Context re-index triggered.');
   });
 
+  // Imports a Claude Agent Skill (a folder containing SKILL.md + optional
+  // resources) into .ai-context/skills/tool-skills/<id>/ — Phase D.
+  const importToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.importToolSkill`, async () => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFiles: false, canSelectFolders: true, canSelectMany: false,
+      openLabel: 'Import as a tool skill', title: 'Select a skill folder (must contain SKILL.md)'
+    });
+    const sourceUri = picked?.[0];
+    if (!sourceUri) { return; }
+    try {
+      const skillMdUri = vscode.Uri.joinPath(sourceUri, 'SKILL.md');
+      await vscode.workspace.fs.stat(skillMdUri); // throws if missing
+      const id = sourceUri.fsPath.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^a-zA-Z0-9_-]+/g, '_') || `skill-${Date.now().toString(36)}`;
+      const targetDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills', id);
+      await copyDirectoryRecursive(sourceUri, targetDir);
+      const { loadToolSkill } = require('./core/toolSkills') as typeof import('./core/toolSkills');
+      const skill = loadToolSkill(targetDir.fsPath, id);
+      const toolsNote = skill.declaredTools?.length ? ` Declares tools: ${skill.declaredTools.join(', ')}.` : '';
+      vscode.window.showInformationMessage(
+        `Imported skill "${skill.name}" (id: ${id}, ${skill.resourceFiles.length} resource file(s)).${toolsNote} Run it with the "▶ Run Skill" action or /skill ${id} <instruction> in chat.`
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(`Import failed: ${err instanceof Error ? err.message : String(err)}. Make sure the folder contains a SKILL.md file.`);
+    }
+  });
+
+  // Lists imported tool skills and runs the chosen one with real tool access
+  // (file write / command execution, gated by consent + approval dialogs).
+  const runToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.runToolSkill`, async () => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
+    const { loadToolSkillsFromDirectory } = require('./core/toolSkills') as typeof import('./core/toolSkills');
+    const toolSkillsDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills').fsPath;
+    const skills = loadToolSkillsFromDirectory(toolSkillsDir);
+    if (skills.length === 0) { vscode.window.showInformationMessage('No tool skills imported yet. Run "AutoDE: Import Tool Skill" first.'); return; }
+    const picked = await vscode.window.showQuickPick(
+      skills.map((s) => ({ label: s.name, description: s.id, detail: s.description })),
+      { title: 'Run a tool-executing skill', placeHolder: 'Choose a skill' }
+    );
+    if (!picked) { return; }
+    const instruction = await vscode.window.showInputBox({ title: `Instruction for "${picked.label}"`, placeHolder: 'What should this run do?' });
+    if (!instruction || !instruction.trim()) { return; }
+    vscode.window.showInformationMessage(`Running skill "${picked.label}"…`);
+    const result = await hub.runToolSkill(picked.description!, instruction.trim());
+    if (result.success) { vscode.window.showInformationMessage(`Skill "${picked.label}" completed: ${result.message.slice(0, 200)}`); }
+    else { vscode.window.showErrorMessage(`Skill "${picked.label}" failed: ${result.error || result.message}`); }
+  });
+
   // ── Register all providers and commands ──
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, sidebarProvider, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -172,8 +296,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(EDITOR_PROFILE, new ProfileEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_DOC, new DocEditorProvider(context)),
     openSidebar, generatePlan, executePlan, resetSession,
+    testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
-    testConnection, sourceAssessment, syncMetadata, reindex
+    testConnection, sourceAssessment, syncMetadata, reindex,
+    importToolSkill, runToolSkill
   );
 }
 

@@ -133,6 +133,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .spec-actions { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; }
 .spec-empty { border: 1px dashed var(--border-soft); border-radius: var(--radius); padding: var(--spacing-md); font-size: var(--font-size-sm); color: var(--text-muted); line-height: 1.5; }
 .spec-meta { font-size: 10px; color: var(--text-muted); margin-top: 6px; }
+.artifact-stale-banner { background: var(--warning-bg, rgba(230,160,20,0.12)); border: 1px solid var(--warning, #e6a014); border-radius: var(--radius); padding: 6px 8px; font-size: var(--font-size-sm); margin-bottom: 6px; }
+.artifact-group { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+.artifact-group.stale { color: var(--warning, #e6a014); }
+.artifact-group.current { color: var(--success, #2ea043); }
 
 /* ── Context Drawer ── */
 .ctx-drawer { border-top: 1px solid var(--border-soft); flex-shrink: 0; background: var(--surface); overflow: hidden; transition: max-height var(--transition-slow); }
@@ -356,6 +360,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     <div class="chat-input-area">
       <div class="chat-input-row" style="position:relative;">
         <textarea id="chatInput" placeholder="Describe a data engineering task... (Use @ to reference tables, terms, or queries)" rows="2"></textarea>
+        <button class="send-btn" id="attachSpecFileBtn" title="Attach a file as supplementary information for the current spec conversation">📎</button>
         <button class="primary send-btn" id="sendBtn">Send</button>
         <div class="mention-dropdown" id="mentionDropdown"></div>
       </div>
@@ -381,6 +386,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       <div class="section slide-section active" id="slideSectionLlm">
         <div class="section-title">Select LLM Provider</div>
         <div class="card selected" data-llm="copilot"><div class="card-header"><span class="radio"></span><span class="card-title">GitHub Copilot</span><span class="card-status" id="copilotStatus">Checking...</span></div><div class="card-body"><div class="toggle-row"><input type="checkbox" id="copilotConsent" /><span>Allow programmatic use (auto-saves)</span></div><div class="btn-row"><button id="testCopilotBtn">Test</button><button id="openCopilotHandoffBtn">Handoff</button></div></div></div>
+        <div class="card" data-llm="claude"><div class="card-header"><span class="radio"></span><span class="card-title">Claude Code (CLI)</span><span class="card-status" id="claudeStatus">Not checked</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model (optional)</label><input id="claudeModel" placeholder="sonnet / opus / auto" /></div></div><div class="form-row"><div><label>CLI path (optional — auto-detected)</label><input id="claudeCodePath" placeholder="claude / C:\\path\\to\\claude.exe" /></div></div><div class="toggle-row"><input type="checkbox" id="claudeConsent" /><span>Allow programmatic use (auto-saves)</span></div><div class="btn-row"><button id="testClaudeBtn">Test</button><button id="listLmBtn">Detect</button></div></div></div>
         <div class="card" data-llm="openai"><div class="card-header"><span class="radio"></span><span class="card-title">OpenAI</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model</label><input id="openaiModel" placeholder="gpt-4o-mini" /></div><div><label>API Key</label><input id="openaiKey" type="password" placeholder="sk-..." /></div></div></div></div>
         <div class="card" data-llm="anthropic"><div class="card-header"><span class="radio"></span><span class="card-title">Anthropic</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model</label><input id="anthropicModel" placeholder="claude-3-5-sonnet" /></div><div><label>API Key</label><input id="anthropicKey" type="password" placeholder="sk-ant-..." /></div></div></div></div>
         <div class="card" data-llm="azure-openai"><div class="card-header"><span class="radio"></span><span class="card-title">Azure OpenAI</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Endpoint</label><input id="azureEndpoint" placeholder="https://..." /></div><div><label>API Key</label><input id="azureKey" type="password" placeholder="••••" /></div></div></div></div>
@@ -412,6 +418,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       </div>
       <div class="section" id="palettePhases">
         <!-- Phase rows rendered by JS -->
+      </div>
+      <div class="section" id="paletteArtifacts">
+        <!-- Artifact staleness summary rendered by JS -->
       </div>
       <div class="section" id="paletteAgents">
         <div class="section-title">Available Agents</div>
@@ -451,6 +460,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   const stopBtn = $('#stopBtn');
   const paletteSpec = $('#paletteSpec');
   const palettePhases = $('#palettePhases');
+  const paletteArtifacts = $('#paletteArtifacts');
   const paletteAgentCards = $('#paletteAgentCards');
   const paletteContinueBtn = $('#paletteContinueBtn');
 
@@ -470,6 +480,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   // ── Chat ──
   function addMessage(role, content, label) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + formatContent(content) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
   function formatContent(text) { var escaped = escapeHtml(String(text)); escaped = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) { return '<pre><code>' + escapeHtml(code.trim()) + '</code></pre>'; }); escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>'); return escaped; }
+  function showSpecHistory(text, error) {
+    if (error) { showToast(error, 'error'); return; }
+    closePalette();
+    addMessage('ai', '**Specification history (git log)**\n```\n' + (text || '(no history — the spec file has not been committed yet)') + '\n```', 'AutoDE');
+  }
   function addLogEntry(message) { var div = document.createElement('div'); div.className = 'message ai'; div.style.fontSize = '11px'; div.style.opacity = '0.7'; div.innerHTML = '<div class="msg-content" style="color:var(--text-muted);">' + escapeHtml(message) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; }
 
   // ── Spec Discovery Question ──
@@ -657,6 +672,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     if (spec.status !== 'approved') { html += '<button class="primary" data-spec-action="approve">✓ Approve</button>'; }
     html += '<button data-spec-action="revise">↻ Revise</button>';
     html += '<button data-spec-action="open">📄 Open file</button>';
+    html += '<button data-spec-action="history">🕓 History</button>';
     if (spec.status === 'approved') { html += '<button class="primary" data-spec-action="plan">📋 Generate Plan</button>'; }
     return html + '</div>';
   }
@@ -673,8 +689,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
           chatInput.value = '';
           chatInput.placeholder = 'Describe the change to the business problem...';
           chatInput.focus();
+          post('startRevision');
+          showToast('Describe the change — it will start a full revision (same review/approval cycle as the original).', '');
         }
         else if (action === 'open') { post('openSpecFile'); }
+        else if (action === 'history') { showToast('Loading spec history from git...', ''); post('viewSpecHistory'); }
         else if (action === 'plan') { closePalette(); addMessage('ai', 'Generating the workflow plan from the approved specification...', 'AutoDE'); post('generatePlanFromSpec'); }
       };
     });
@@ -721,6 +740,41 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var header = paletteSpec.querySelector('.spec-card-header');
     if (card && header) { header.onclick = function () { card.classList.toggle('expanded'); }; }
     if (card) { wireSpecActions(card); }
+  }
+
+  function renderPaletteArtifacts(report) {
+    if (!paletteArtifacts) { return; }
+    if (!report || (!report.groups.length && !report.untaggedFileCount)) {
+      paletteArtifacts.innerHTML = '';
+      return;
+    }
+    var stale = report.groups.filter(function (g) { return g.status === 'stale'; });
+    var current = report.groups.filter(function (g) { return g.status === 'current'; });
+    var unknown = report.groups.filter(function (g) { return g.status === 'unknown-spec'; });
+    var html = '<div class="section-title">Generated Artifacts</div>';
+    if (stale.length > 0) {
+      html += '<div class="artifact-stale-banner">⚠ ' + stale.length + ' artifact set' + (stale.length > 1 ? 's' : '') +
+        ' generated from a superseded specification version — review before trusting them.</div>';
+      stale.forEach(function (g) {
+        html += '<div class="artifact-group stale">' + escapeHtml(g.phaseDir) + ': <b>' + escapeHtml(g.specId) + ' v' + g.specVersion +
+          '</b> (' + g.fileCount + ' file' + (g.fileCount === 1 ? '' : 's') + ') — current is v' + (report.currentSpecVersion || '?') + '</div>';
+      });
+    }
+    if (current.length > 0) {
+      current.forEach(function (g) {
+        html += '<div class="artifact-group current">✓ ' + escapeHtml(g.phaseDir) + ': ' + escapeHtml(g.specId) + ' v' + g.specVersion +
+          ' (' + g.fileCount + ' file' + (g.fileCount === 1 ? '' : 's') + ', current)</div>';
+      });
+    }
+    if (unknown.length > 0) {
+      html += '<div class="artifact-group" style="opacity:0.7;">' + unknown.length + ' artifact set' + (unknown.length > 1 ? 's' : '') +
+        ' from a different or unrecognized specification.</div>';
+    }
+    if (report.untaggedFileCount > 0) {
+      html += '<div class="artifact-group" style="opacity:0.6;">' + report.untaggedFileCount + ' file' + (report.untaggedFileCount === 1 ? '' : 's') +
+        ' with no recorded spec version (written before staleness tracking, or with no spec at the time).</div>';
+    }
+    paletteArtifacts.innerHTML = html;
   }
 
   var palettePhase = 'discover';
@@ -893,22 +947,30 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 
   // ── Palette Panel ──
   const paletteOverlay = $('#paletteOverlay'), palettePanel = $('#palettePanel'), paletteBtn = $('#paletteBtn'), paletteCloseBtn = $('#paletteCloseBtn');
-  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); renderPaletteSpec(); renderPalettePhases(); }
+  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); renderPaletteSpec(); renderPalettePhases(); post('checkArtifactStaleness'); }
   function closePalette() { paletteOverlay.classList.remove('visible'); palettePanel.classList.remove('visible'); }
   paletteOverlay.onclick = closePalette; paletteCloseBtn.onclick = closePalette; paletteBtn.onclick = openPalette;
 
   // ── LLM/Provider Cards ──
+  function llmDisplayName(llm) { return llm === 'copilot' ? 'Copilot' : llm === 'claude' ? 'Claude Code' : llm === 'azure-openai' ? 'Azure OpenAI' : llm === 'openai' ? 'OpenAI' : llm === 'gemini' ? 'Gemini' : llm === 'ollama' ? 'Ollama' : llm === 'anthropic' ? 'Anthropic' : (llm || 'LLM'); }
   var llmCards = $$('#slideSectionLlm .card[data-llm]');
-  llmCards.forEach(function (card) { card.onclick = function (e) { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL') return; llmCards.forEach(function (c) { c.classList.remove('selected'); }); card.classList.add('selected'); llmCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== card); }); }; });
+  llmCards.forEach(function (card) { card.onclick = function (e) { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL') return; var alreadySelected = card.classList.contains('selected'); llmCards.forEach(function (c) { c.classList.remove('selected'); }); card.classList.add('selected'); llmCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== card); });
+    if (alreadySelected) return;
+    var llm = card.getAttribute('data-llm');
+    if (providerLabel) providerLabel.textContent = llmDisplayName(llm);
+    if (providerDot) providerDot.className = 'dot warn';
+    post('updateSettings', { settings: { activeLlmProvider: llm } });   // auto-save, like the consent toggle
+  }; });
   var providerCards = $$('#slideSectionConnect .card[data-provider]');
   providerCards.forEach(function (card) { card.onclick = function (e) { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL') return; providerCards.forEach(function (c) { c.classList.remove('selected'); }); card.classList.add('selected'); providerCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== card); }); }; });
 
   // ── Send Message ──
   sendBtn.onclick = function () { sendMessage(); };
+  if ($('#attachSpecFileBtn')) { $('#attachSpecFileBtn').onclick = function () { post('attachSpecFile'); }; }
   chatInput.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } handleMentionInput(e); };
   chatInput.oninput = function (e) { handleMentionInput(e); };
   function sendMessage() { var text = chatInput.value.trim(); if (!text) return; addMessage('user', text, 'You'); chatInput.value = ''; mentionDropdown.classList.remove('visible'); if (text.startsWith('/')) { handleSlashCommand(text); return; } post('chat', { message: text, schemaContext: '' }); }
-  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } addMessage('ai', currentSpec ? 'Revising the Business Problem Specification...' : 'Drafting the Business Problem Specification...', 'AutoDE'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': if (currentSpec && currentSpec.status === 'approved') { addMessage('ai', 'Generating the workflow plan from the approved specification...', 'AutoDE'); post('generatePlanFromSpec'); break; } var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; addMessage('ai', 'Generating execution plan...', 'AutoDE'); post('generatePlan', { objective: objective, schemaContext: '' }); break; case '/execute': post('executePlan'); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
+  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } addMessage('ai', currentSpec ? 'Revising the Business Problem Specification...' : 'Drafting the Business Problem Specification...', 'AutoDE'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': if (currentSpec && currentSpec.status === 'approved') { addMessage('ai', 'Generating the workflow plan from the approved specification...', 'AutoDE'); post('generatePlanFromSpec'); break; } var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; addMessage('ai', 'Generating execution plan...', 'AutoDE'); post('generatePlan', { objective: objective, schemaContext: '' }); break; case '/execute': post('executePlan'); break; case '/skill': var skillArgs = text.replace('/skill', '').trim(); var skillMatch = skillArgs.match(/^(\S+)\s+([\s\S]+)$/); if (!skillMatch) { addMessage('ai', 'Usage: /skill <skillId> <instruction> — import a skill first via "AutoDE: Import Tool Skill".', 'AutoDE'); break; } addMessage('ai', 'Running skill "' + escapeHtml(skillMatch[1]) + '"… this may write files or run commands, and will ask for your approval.', 'AutoDE'); post('runToolSkill', { skillId: skillMatch[1], instruction: skillMatch[2] }); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
 
   // ── @-mention ──
   function handleMentionInput(e) { var val = chatInput.value; var cursorPos = chatInput.selectionStart; var textBeforeCursor = val.substring(0, cursorPos); var mentionMatch = textBeforeCursor.match(/@(\w*)$/); if (mentionMatch) { var query = mentionMatch[1].toLowerCase(); var items = buildMentionItems(query); if (items.length > 0) { renderMentionDropdown(items); mentionDropdown.classList.add('visible'); } else { mentionDropdown.classList.remove('visible'); } } else { mentionDropdown.classList.remove('visible'); } }
@@ -923,14 +985,18 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   $('#ctxOpenFolderBtn').onclick = function () { post('openContextFolder'); };
   $('#registerSourceBtn').onclick = function () { var path = sourcePathInput.value.trim(); var kind = sourceKindSelect.value; if (!path) { showToast('Enter a source file path', 'error'); return; } post('registerSource', { path: path, kind: kind }); sourcePathInput.value = ''; };
   $('#synthesizeBtn').onclick = function () { post('synthesize'); showToast('Synthesizing context...', ''); };
-  $('#testCopilotBtn').onclick = function () { post('testCopilot'); };
+  $('#testCopilotBtn').onclick = function () { post('testLanguageModel', { provider: 'copilot' }); };
   $('#openCopilotHandoffBtn').onclick = function () { post('openCopilotHandoff'); };
+  if ($('#testClaudeBtn')) $('#testClaudeBtn').onclick = function () { post('testLanguageModel', { provider: 'claude' }); };
+  if ($('#listLmBtn')) $('#listLmBtn').onclick = function () { post('listLanguageModels', { provider: 'claude' }); };
+  if ($('#claudeConsent')) $('#claudeConsent').onchange = function () { post('updateSettings', { settings: { languageModelProgrammaticConsent: $('#claudeConsent').checked } }); };
+  if ($('#claudeCodePath')) $('#claudeCodePath').onchange = function () { post('updateSettings', { settings: { claudeCodePath: $('#claudeCodePath').value.trim() } }); };
   $('#testConnBtn').onclick = function () { post('testConnection'); showToast('Connecting...', ''); };
   $('#sourceAssessmentBtn').onclick = function () { post('sourceAssessment'); showToast('Running source assessment...', ''); };
   $('#saveSettingsBtn').onclick = function () { saveSettings(); };
-  $('#copilotConsent').onchange = function () { post('updateSettings', { settings: { copilotProgrammaticConsent: $('#copilotConsent').checked } }); };
+  $('#copilotConsent').onchange = function () { post('updateSettings', { settings: { languageModelProgrammaticConsent: $('#copilotConsent').checked } }); };
 
-  function saveSettings() { var settings = { activeLlmProvider: getSelectedLlm(), defaultProvider: getSelectedProvider(), defaultSnowflakeAccount: $('#sfAccount').value, defaultSnowflakeUsername: $('#sfUsername').value, defaultSnowflakeWarehouse: $('#sfWarehouse').value, defaultSnowflakeDatabase: $('#sfDatabase').value, defaultSnowflakeSchema: $('#sfSchema').value, defaultSnowflakeRole: $('#sfRole').value, defaultSnowflakeAuthMode: $('#sfAuthMode').value, snowflakePrivateKeyPath: $('#sfKeyPath').value, activeLlmModel: $('#openaiModel').value || $('#anthropicModel').value || $('#geminiModel').value || $('#ollamaModel').value || 'gpt-4o-mini', llmEndpoint: $('#azureEndpoint').value || $('#ollamaEndpoint').value || '', copilotProgrammaticConsent: $('#copilotConsent').checked, readOnlyMode: $('#readOnlyMode').checked, autoDocumentationEnabled: $('#autoDocEnabled').checked, telemetryEnabled: $('#telemetryEnabled').checked, metadataCachingDurationMinutes: parseInt($('#cacheDuration').value) || 15, queryTimeoutSeconds: parseInt($('#queryTimeout').value) || 120 }; post('updateSettings', { settings: settings }); closeSlidePanel(); showToast('Settings saved', 'success'); }
+  function saveSettings() { var settings = { activeLlmProvider: getSelectedLlm(), defaultProvider: getSelectedProvider(), defaultSnowflakeAccount: $('#sfAccount').value, defaultSnowflakeUsername: $('#sfUsername').value, defaultSnowflakeWarehouse: $('#sfWarehouse').value, defaultSnowflakeDatabase: $('#sfDatabase').value, defaultSnowflakeSchema: $('#sfSchema').value, defaultSnowflakeRole: $('#sfRole').value, defaultSnowflakeAuthMode: $('#sfAuthMode').value, snowflakePrivateKeyPath: $('#sfKeyPath').value, activeLlmModel: (getSelectedLlm() === 'claude' && $('#claudeModel') ? $('#claudeModel').value : '') || $('#openaiModel').value || $('#anthropicModel').value || $('#geminiModel').value || $('#ollamaModel').value || 'gpt-4o-mini', llmEndpoint: $('#azureEndpoint').value || $('#ollamaEndpoint').value || '', claudeCodePath: $('#claudeCodePath') ? $('#claudeCodePath').value.trim() : '', languageModelProgrammaticConsent: $('#copilotConsent').checked || ($('#claudeConsent') ? $('#claudeConsent').checked : false), readOnlyMode: $('#readOnlyMode').checked, autoDocumentationEnabled: $('#autoDocEnabled').checked, telemetryEnabled: $('#telemetryEnabled').checked, metadataCachingDurationMinutes: parseInt($('#cacheDuration').value) || 15, queryTimeoutSeconds: parseInt($('#queryTimeout').value) || 120 }; post('updateSettings', { settings: settings }); closeSlidePanel(); showToast('Settings saved', 'success'); }
   function getSelectedLlm() { var card = document.querySelector('#slideSectionLlm .card.selected'); return card ? card.getAttribute('data-llm') : 'copilot'; }
   function getSelectedProvider() { var card = document.querySelector('#slideSectionConnect .card.selected'); return card ? card.getAttribute('data-provider') : 'snowflake'; }
 
@@ -950,6 +1016,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'planUpdated': if (msg.plan && msg.plan.steps) { addPlanCard(msg.plan); } break;
       case 'logEntry': if (msg.message) { addLogEntry(msg.message); } break;
       case 'settingsLoaded': applySettings(msg); break;
+      case 'languageModelStatus': if (msg.info) { updateCopilotStatus(msg.info); } break;
       case 'settingsSaved': showToast('Settings saved', 'success'); break;
       case 'error': showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
@@ -960,12 +1027,20 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'specLoaded': currentSpec = msg.spec || null; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); break;
       case 'specDrafted': if (msg.spec) { addSpecCard(msg.spec, !!msg.revised); renderPaletteSpec(); renderPalettePhases(); renderContextActions(); } break;
       case 'specApproved': if (msg.spec) { currentSpec = msg.spec; renderPaletteSpec(); renderPalettePhases(); renderContextActions(); showToast('Specification v' + (msg.spec.version || 1) + ' approved', 'success'); } break;
+      case 'artifactStaleness': renderPaletteArtifacts(msg.report); break;
+      case 'specHistory': showSpecHistory(msg.text, msg.error); break;
       default: break;
     }
   });
 
-  function applySettings(data) { if (!data) return; if (data.activeLlmProvider) { var llmCard = document.querySelector('#slideSectionLlm .card[data-llm="' + data.activeLlmProvider + '"]'); if (llmCard) { llmCards.forEach(function (c) { c.classList.remove('selected'); }); llmCard.classList.add('selected'); llmCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== llmCard); }); } providerLabel.textContent = data.activeLlmProvider === 'copilot' ? 'Copilot' : data.activeLlmProvider; } if (data.defaultProvider) { var pCard = document.querySelector('#slideSectionConnect .card[data-provider="' + data.defaultProvider + '"]'); if (pCard) { providerCards.forEach(function (c) { c.classList.remove('selected'); }); pCard.classList.add('selected'); } } if (data.copilotInfo) { updateCopilotStatus(data.copilotInfo); } if (typeof data.readOnlyMode === 'boolean') $('#readOnlyMode').checked = data.readOnlyMode; if (typeof data.autoDocumentationEnabled === 'boolean') $('#autoDocEnabled').checked = data.autoDocumentationEnabled; if (typeof data.telemetryEnabled === 'boolean') $('#telemetryEnabled').checked = data.telemetryEnabled; if (typeof data.copilotProgrammaticConsent === 'boolean') $('#copilotConsent').checked = data.copilotProgrammaticConsent; if (data.defaultSnowflakeAccount) $('#sfAccount').value = data.defaultSnowflakeAccount; if (data.defaultSnowflakeUsername) $('#sfUsername').value = data.defaultSnowflakeUsername; if (data.defaultSnowflakeWarehouse) $('#sfWarehouse').value = data.defaultSnowflakeWarehouse; if (data.defaultSnowflakeDatabase) $('#sfDatabase').value = data.defaultSnowflakeDatabase; if (data.defaultSnowflakeSchema) $('#sfSchema').value = data.defaultSnowflakeSchema; if (data.defaultSnowflakeRole) $('#sfRole').value = data.defaultSnowflakeRole; if (data.defaultSnowflakeAuthMode) $('#sfAuthMode').value = data.defaultSnowflakeAuthMode; if (data.snowflakePrivateKeyPath) $('#sfKeyPath').value = data.snowflakePrivateKeyPath; if (data.activeLlmModel) { $('#openaiModel').value = data.activeLlmModel; $('#anthropicModel').value = data.activeLlmModel; $('#geminiModel').value = data.activeLlmModel; $('#ollamaModel').value = data.activeLlmModel; } if (data.llmEndpoint) { $('#azureEndpoint').value = data.llmEndpoint; $('#ollamaEndpoint').value = data.llmEndpoint; } if (typeof data.metadataCachingDurationMinutes === 'number') $('#cacheDuration').value = data.metadataCachingDurationMinutes; if (typeof data.queryTimeoutSeconds === 'number') $('#queryTimeout').value = data.queryTimeoutSeconds; }
-  function updateCopilotStatus(info) { var statusEl = $('#copilotStatus'); if (!statusEl) return; if (!info) { statusEl.textContent = 'Checking...'; return; } if (info.found && info.hasAccess) { statusEl.textContent = 'Available (' + (info.models ? info.models.length : 0) + ' models)'; statusEl.style.color = 'var(--success)'; providerDot.className = 'dot ok'; providerLabel.textContent = 'Copilot'; } else if (info.found) { statusEl.textContent = info.error || 'Sign in required'; statusEl.style.color = 'var(--warning)'; } else { statusEl.textContent = 'Not installed'; statusEl.style.color = 'var(--text-muted)'; } }
+  function applySettings(data) { if (!data) return; if (data.activeLlmProvider) { var llmCard = document.querySelector('#slideSectionLlm .card[data-llm="' + data.activeLlmProvider + '"]'); if (llmCard) { llmCards.forEach(function (c) { c.classList.remove('selected'); }); llmCard.classList.add('selected'); llmCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== llmCard); }); } providerLabel.textContent = llmDisplayName(data.activeLlmProvider); } if (data.defaultProvider) { var pCard = document.querySelector('#slideSectionConnect .card[data-provider="' + data.defaultProvider + '"]'); if (pCard) { providerCards.forEach(function (c) { c.classList.remove('selected'); }); pCard.classList.add('selected'); } } if (data.languageModelInfo || data.copilotInfo) { updateCopilotStatus(data.languageModelInfo || data.copilotInfo); } if (typeof data.readOnlyMode === 'boolean') $('#readOnlyMode').checked = data.readOnlyMode; if (typeof data.autoDocumentationEnabled === 'boolean') $('#autoDocEnabled').checked = data.autoDocumentationEnabled; if (typeof data.telemetryEnabled === 'boolean') $('#telemetryEnabled').checked = data.telemetryEnabled; var lmConsent = (typeof data.languageModelProgrammaticConsent === 'boolean') ? data.languageModelProgrammaticConsent : (typeof data.copilotProgrammaticConsent === 'boolean' ? data.copilotProgrammaticConsent : undefined); if (typeof lmConsent === 'boolean') { $('#copilotConsent').checked = lmConsent; if ($('#claudeConsent')) $('#claudeConsent').checked = lmConsent; } if (data.defaultSnowflakeAccount) $('#sfAccount').value = data.defaultSnowflakeAccount; if (data.defaultSnowflakeUsername) $('#sfUsername').value = data.defaultSnowflakeUsername; if (data.defaultSnowflakeWarehouse) $('#sfWarehouse').value = data.defaultSnowflakeWarehouse; if (data.defaultSnowflakeDatabase) $('#sfDatabase').value = data.defaultSnowflakeDatabase; if (data.defaultSnowflakeSchema) $('#sfSchema').value = data.defaultSnowflakeSchema; if (data.defaultSnowflakeRole) $('#sfRole').value = data.defaultSnowflakeRole; if (data.defaultSnowflakeAuthMode) $('#sfAuthMode').value = data.defaultSnowflakeAuthMode; if (data.snowflakePrivateKeyPath) $('#sfKeyPath').value = data.snowflakePrivateKeyPath; if (data.activeLlmModel) { $('#openaiModel').value = data.activeLlmModel; $('#anthropicModel').value = data.activeLlmModel; $('#geminiModel').value = data.activeLlmModel; $('#ollamaModel').value = data.activeLlmModel; if ($('#claudeModel')) $('#claudeModel').value = data.activeLlmModel; } if (data.llmEndpoint) { $('#azureEndpoint').value = data.llmEndpoint; $('#ollamaEndpoint').value = data.llmEndpoint; } if (typeof data.claudeCodePath === 'string' && $('#claudeCodePath')) { $('#claudeCodePath').value = data.claudeCodePath; } if (typeof data.metadataCachingDurationMinutes === 'number') $('#cacheDuration').value = data.metadataCachingDurationMinutes; if (typeof data.queryTimeoutSeconds === 'number') $('#queryTimeout').value = data.queryTimeoutSeconds; }
+  function updateCopilotStatus(info) { if (!info) return; var isClaude = info.provider === 'claude'; var statusEl = $(isClaude ? '#claudeStatus' : '#copilotStatus'); if (!statusEl) return; var label = isClaude ? 'Claude Code' : 'Copilot';
+    if (isClaude) {
+      if (info.hasAccess) { statusEl.textContent = 'Ready — ' + (info.cliSource || 'found') + (info.version ? ' (' + info.version + ')' : ''); statusEl.style.color = 'var(--success)'; providerDot.className = 'dot ok'; providerLabel.textContent = label; }
+      else { statusEl.textContent = info.error ? String(info.error).slice(0, 80) : 'CLI not found'; statusEl.style.color = 'var(--warning)'; }
+      return;
+    }
+    if (info.found && info.hasAccess) { var vendors = (info.vendors && info.vendors.length) ? ' via ' + info.vendors.join('/') : ''; statusEl.textContent = 'Available (' + (info.models ? info.models.length : 0) + ' models' + vendors + ')'; statusEl.style.color = 'var(--success)'; providerDot.className = 'dot ok'; providerLabel.textContent = label; } else if (info.found) { statusEl.textContent = info.error || 'Sign in required'; statusEl.style.color = 'var(--warning)'; } else { statusEl.textContent = 'Not installed'; statusEl.style.color = 'var(--text-muted)'; } }
   function renderContextEntities(container, entities, icon) { if (!container) return; container.innerHTML = ''; if (!entities || entities.length === 0) { container.innerHTML = '<span class="ctx-chip" style="opacity:0.5">None</span>'; return; } entities.forEach(function (ent) { var chip = document.createElement('span'); chip.className = 'ctx-chip'; chip.innerHTML = icon + ' ' + escapeHtml(typeof ent === 'string' ? ent : (ent.label || ent.name || ent)); chip.onclick = function () { chatInput.value += ' @' + (typeof ent === 'string' ? ent : (ent.label || ent.name || ent)) + ' '; chatInput.focus(); }; container.appendChild(chip); }); }
   function renderSourcesList(sources) { if (!sourcesList) return; sourcesList.innerHTML = ''; if (!sources || sources.length === 0) { sourcesList.innerHTML = '<span class="ctx-chip" style="opacity:0.5">No sources registered</span>'; return; } sources.forEach(function (s) { var chip = document.createElement('span'); chip.className = 'ctx-chip'; chip.innerHTML = '📄 ' + escapeHtml(s.path) + ' <span style="opacity:0.6">(' + escapeHtml(s.kind) + ')</span> <a style="cursor:pointer;margin-left:4px;" title="Remove">✕</a>'; chip.querySelector('a').onclick = function () { post('removeSource', { path: s.path }); }; sourcesList.appendChild(chip); }); }
 

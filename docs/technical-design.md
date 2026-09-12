@@ -68,7 +68,7 @@ AutoDE is an AI-augmented VS Code extension for Data Engineering. It provides:
 │  ┌──────┴─────────────────┴───────────────────┴──────────┐  │
 │  │                  Core Services                         │  │
 │  │  ┌──────────────┐ ┌──────────────┐ ┌───────────────┐  │  │
-│  │  │ ConfigManager│ │CopilotAdapter│ │ProviderRegistry│  │  │
+│  │  │ ConfigManager│ │ LM Adapter   │ │ProviderRegistry│  │  │
 │  │  └──────────────┘ └──────────────┘ └───────────────┘  │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                              │
@@ -197,9 +197,39 @@ The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspi
 
 **Skills.** `skills/*.json` define composable DE skills — Requirements Discovery, Source Catalog, Data Flow, Transformations, Quality & Acceptance, Constraints & Assumptions, and Synthesis. Each carries a system prompt, question guidance, and the spec fields it owns. `SkillRegistry` (`src/core/skillRegistry.ts`) loads bundled skills plus optional user overrides in `.ai-context/skills/` (later entries win).
 
-**Engine.** `SpecOpsEngine` (`src/core/specOps.ts`) is a deterministic state machine (`discovery → synthesizing → draft → refining → approved`) that tracks per-field coverage and a turn budget, and validates the prompt-schema **actions** the LLM returns each turn (`ask` / `ask_many` / `synthesize` / `done`). No native tool-calling is used — actions are JSON, validated deterministically, so the loop works on Copilot's `vscode.lm` as well as OpenAI/Anthropic/Ollama.
+**Engine.** `SpecOpsEngine` (`src/core/specOps.ts`) is a deterministic state machine (`discovery → synthesizing → draft → refining → approved`) that tracks per-field coverage and a turn budget, and validates the prompt-schema **actions** the LLM returns each turn (`ask` / `ask_many` / `synthesize` / `done`). No native tool-calling is used — actions are JSON, validated deterministically, so the loop works on Copilot's `vscode.lm` and the Claude Code CLI as well as OpenAI/Anthropic/Ollama.
 
 **Loop.** `AgentHub.discoverNextAction` renders the discovery prompt (`specOpsPrompts.ts`) and returns a validated action. The webview renders a single question as a chat bubble or a batch (`ask_many` with 2+) as a dynamic multi-field intake form (`specQuestions` / `submitSpecAnswers`). When coverage is complete or the turn budget is exhausted, `AgentHub.synthesizeComprehensiveSpec` assembles the comprehensive v2 spec (business requirements, data flows, transformations, dependencies, acceptance criteria, implementation considerations, source catalog) with per-field provenance, which is persisted by `SpecManager` and shown in the review card.
+
+### 2.9 Revising an approved specification
+
+**Implemented (v0.9.0, Phase A).** An approved spec is never mutated in place — every revision runs through the *same* SpecOps engine used for a brand-new spec, seeded with the approved content, and always produces a new draft `version + 1` that must be reviewed and re-approved.
+
+**Entry points.**
+- Spec card "↻ Revise" → webview posts `startRevision` → `DataAgentHubWebviewProvider` sets a one-shot `pendingRevision` flag (only when the current spec's `status === 'approved'`; a draft spec doesn't need it — its next message already revises in place, unchanged).
+- The next `chat` message, while `pendingRevision` is set, calls `handleSpecDiscovery(message, previousSpec)` instead of `hub.chat()` — same function the fresh-discovery path uses, now revision-aware via an optional second argument.
+- `/spec <change>` while the spec is `approved` routes through the same path (`case 'refineSpec'` in `webviewProvider.ts`) rather than the older single-shot `reviseSpec()`/`generateSpec()`, closing a second entry point into the same bug (see below).
+
+**Session seeding (`createIntakeSession`, `src/core/specOps.ts`).** When `previousSpec` is supplied: the `problemStatement` argument is reinterpreted as `changeRequest`; the session's own `problemStatement` falls back to the previous spec's; `specId` is set from the previous spec. Coverage still starts all-`'missing'` (deliberately — see rationale below), so the LLM, not a coverage shortcut, decides how much to ask.
+
+**Prompt visibility (`specOpsPrompts.ts`).** `renderSpecSnapshot(spec)` renders a compact textual snapshot of every populated field. `buildDiscoveryTurnPrompt`/`buildSynthesisPrompt` prepend it (plus the change request) when `session.previousSpec` is set, and append extra system-prompt rules (`REVISION_DISCOVERY_RULES` / `REVISION_SYNTHESIS_RULES`): only ask about what the change affects or what's still empty; the synthesis output must be the **full** spec, carrying forward everything untouched. Both prompt builders also accept an optional `extraContext` string — `AgentHub.discoverNextAction`/`synthesizeComprehensiveSpec` thread through `ContextFileManager.buildContextPrompt()` (registered sources) and `session.attachments` (ad-hoc files, see below) automatically.
+
+*Why coverage isn't pre-seeded from the previous spec:* `SpecOpsEngine.shouldSynthesize()` treats "no field is `'missing'`" as license to skip straight to synthesis without ever asking the LLM. Seeding every populated field as `'partial'`/`'complete'` at session creation would trip that circuit-breaker on the very first turn, skipping discovery entirely. The turn-budget/coverage map stays a deterministic safety net; the *actual* "don't re-ask what's unchanged" behavior is a prompt instruction the LLM (already trusted to decide ask-vs-synthesize each turn) follows.
+
+**Field-preservation safety net (`parseComprehensiveSpec`, `src/core/specSynthesis.ts`).** Independent of whether the prompt instruction is followed: every optional array/string field falls back to the previous spec's value when the new synthesis output leaves it empty (`orFallback`); the three required fields (`problemStatement`, `objectives`, `scope.in`) fall back the same way *before* their empty-value validation throws, so an under-specified revision turn can't spuriously fail. `buildProvenance` carries forward a field's *original* provenance entry (question id / skill) when the current session didn't address it, rather than relabeling it `'synthesis'`.
+
+**Supplementary information.** A 📎 button next to the chat input posts `attachSpecFile`; the extension host shows `vscode.window.showOpenDialog`, reads the picked file via `vscode.workspace.fs` (capped at 200,000 bytes), and calls `SpecOpsEngine.addAttachment({path, content, attachedAt})` — rendered by both prompt builders as "Attached reference material." Works for any active `SpecOpsEngine` session (fresh discovery or revision), not revision-only.
+
+**Known gaps (tracked in `requirements.md` §16.5):** `IntakeSession` (including the new `previousSpec`/`changeRequest`/`attachments` fields) is still in-memory only — lost on reload. The emergency fallback on a comprehensive-synthesis failure still re-drafts via the older v1-only `generateSpec`, which doesn't carry v2 fields.
+
+### 2.10 Versioning & governance (Phase B, v0.9.0)
+
+**Design choice:** lean on git as the version/audit log rather than build a parallel in-app version store — `.ai-context/spec/` is already meant to be committed, so a second source of version truth would only drift from it.
+
+- **`src/context/ArtifactWriter.ts`** now writes every spec-stamped artifact under a `<specId>.v<version>` folder (`ArtifactWriter.specTag(artifact)`), inserted **above** the artifact's own relative path — so a multi-file artifact (e.g. the dbt scaffold) keeps every filename a tool like dbt expects (`dbt_project.yml` stays `dbt_project.yml`); only a folder is added, never a filename prefix. Artifacts with no `specId` (legacy pre-Phase-B writes, or generated with no spec set) land directly under the phase directory as before.
+- **`src/context/ArtifactStalenessScanner.ts`** (`scanArtifactStaleness(workspaceRoot, currentSpec?)`) walks `auto-de/<phase>/*`, recognizes `<specId>.v<version>` folder names via regex, and classifies each as `current` (matches the approved spec's id+version), `stale` (same id, older version), or `unknown-spec` (different id, or no spec currently approved). Files sitting directly under a phase dir (no version folder) are counted separately as `untaggedFileCount` — this is *why* the folder scheme exists: `PlanState.artifacts` (which also carries `specId`/`specVersion`) is in-memory only and gone after a reload, so the filesystem path is the only durable record.
+- **UI:** opening the Workflow Palette posts `checkArtifactStaleness`; the response renders a small "Generated Artifacts" section above the phase rows — a warning banner + list for `stale` groups, a quiet green line per `current` group, and a note for untagged/unknown files. Nothing is deleted or regenerated automatically.
+- **"🕓 History"** on the spec card posts `viewSpecHistory` → `git log --follow -p -- <spec path>` (via `child_process.execFile`, `cwd` = workspace root) rendered as a chat message. Not a git repo, or no history yet → a clear message, not a crash.
 
 ---
 
@@ -234,7 +264,7 @@ The UI uses a single scrollable workspace with distinct sections. A thin, icon-b
 
 | Element | ID | Description |
 |---------|-----|-------------|
-| **Provider pill** | `providerPill` | Shows active LLM (e.g., "Copilot" with green dot). Clicking opens LLM settings. |
+| **Provider pill** | `providerPill` | Shows active LLM (e.g., "Copilot" or "Claude" with green dot). Clicking opens LLM settings. |
 | **Connection pill** | `connPill` | Shows data platform connection status. Clicking opens connection settings. |
 | **Context meter** | `ctxMetric` | Token/entity counter with mini progress bar. Clicking expands context drawer. |
 | **Plan status** | `planMetric` | Shows plan step count and execution status. |
@@ -291,7 +321,7 @@ A persistent, collapsible panel between the chat stream and input area:
 Accessible via the ⚙ icon. Slides in from the right with a semi-transparent overlay.
 
 **Inner tabs:**
-- 🤖 **LLM Provider**: Card-based selection (Copilot, OpenAI, Anthropic, Azure OpenAI, Gemini, Ollama). Copilot card includes consent toggle (auto-saves) and Test/Handoff buttons.
+- 🤖 **LLM Provider**: Card-based selection (Copilot, Claude Code, OpenAI, Anthropic, Azure OpenAI, Gemini, Ollama). Selecting a card auto-saves `activeLlmProvider` and updates the header pill immediately. The Copilot (`vscode.lm`) and Claude Code (CLI) cards are both no-API-key and share a consent toggle (auto-saves `languageModelProgrammaticConsent`); each card's **Test** button tests *that* provider regardless of which is active. Copilot adds Handoff; Claude Code adds a Detect button and an optional CLI-path field.
 - 🔌 **Connections**: Platform cards (Snowflake, Databricks, BigQuery, Redshift, Synapse) with credential fields, Connect button, and Source Assessment button.
 - ⚙ **Preferences**: Read-only mode, auto-documentation, telemetry, cache duration, query timeout.
 
@@ -703,6 +733,11 @@ interface AgentExecutionContext {
     getSettings: () => DataAgentHubSettings;
   };
   log: (message: string) => void;
+  // toolSkillAgent-only (Phase D, v0.9.0) — every other executor ignores these:
+  workspaceRoot?: string;
+  extensionContext?: unknown;   // real vscode.ExtensionContext, cast where needed
+  skillId?: string;
+  skillInstruction?: string;
 }
 ```
 
@@ -745,35 +780,96 @@ DAG execution: for each ready step:
 All steps complete → status → 'completed'
 ```
 
+### 5.6 Tool-Executing Skills (`toolSkillAgent`, Phase D, v0.9.0)
+
+Two loops, nested, not parallel — the design settled on during the architecture review. The DAG/orchestrator loop above is **unchanged**; `toolSkillAgent` is one more entry in `AGENT_EXECUTORS` whose internals happen to run a multi-turn agentic conversation instead of a template render, exactly the way `snowflakeExecutor` already does something structurally different (real async DB I/O) without the outer loop needing to know or care:
+
+```
+ORCHESTRATOR LOOP (unchanged)
+  for each ready step: AGENT_EXECUTORS[step.assignedAgent](step, context)
+     ├─ 6 template agents + snowflakeExecutor → plain fn call (unchanged)
+     └─ toolSkillAgent (NEW) → runs the loop below, returns ONE
+                                AgentExecutionResult, same contract as any other agent
+                                     │
+                                     ▼ (only for a toolSkillAgent step)
+TOOL-USE LOOP (src/agents/build/ToolSkillAgent.ts)
+  claude  → Claude Code's own loop, opaque to AutoDE (ClaudeCodeAdapter, toolMode:'full')
+  copilot → AutoDE-run: sendRequest(tools) → ToolCallPart → execute (sandboxed,
+            approved, audited) → ToolResultPart → sendRequest again → ... (≤12 turns)
+```
+
+**Not reachable from the auto-planner.** `toolSkillAgent` is a full `AGENT_EXECUTORS` entry (so `hub.runToolSkill()` can invoke it) but is **excluded** from `VALID_AGENT_TYPES` and the planner's prompt allow-list — `generatePlan()`'s LLM has no visibility into which skills are imported and could hallucinate a `skillId`. The only entry points are `/skill <id> <instruction>` in chat and the `AutoDE: Run Tool Skill` command, both calling `AgentHub.runToolSkill(skillId, instruction)` directly — a one-off step built and executed outside the DAG, not queued into `PlanState.steps`.
+
+**`AgentExecutionContext` gained four fields** for this one agent (every other executor ignores them):
+```typescript
+interface AgentExecutionContext {
+  // ...unchanged fields...
+  workspaceRoot?: string;        // sandbox boundary
+  extensionContext?: unknown;    // real vscode.ExtensionContext, cast at the one call site that needs it
+  skillId?: string;
+  skillInstruction?: string;
+}
+```
+`extensionContext` is typed `unknown` in the pure `core/types.ts` deliberately — importing `vscode` there would break the file's no-`vscode`-import rule; `ToolSkillAgent.ts` casts it back. That file is also the **one exception** to "sub-agents import only `core/types`" (§ Extension Guide) — it imports `vscode` and `node:child_process` directly, because it does real file I/O and process spawning, not deterministic templating.
+
+**Import & storage:** `src/core/toolSkills.ts` (pure, mirrors `skillRegistry.ts`'s loading pattern) parses a `SKILL.md` (lenient YAML frontmatter + Markdown body) into a `ToolSkillDefinition`. `AutoDE: Import Tool Skill` copies a user-picked folder into `.ai-context/skills/tool-skills/<id>/`; `loadToolSkillsFromDirectory()` scans that directory at run time (no separate index file).
+
+**Execution paths — see `requirements.md` §9a.2 for the full detail, verified findings, and what was deliberately not built** (native Claude Code plugin loading, per-call approval on the Claude path, and a hard OS-level sandbox on either path are all explicitly out of scope for this pass). In short: `claude` gets Claude Code's own tool loop (one whole-run confirmation, `--permission-mode acceptEdits` — verified against the real CLI to be required and sufficient for Read/Grep/Glob/Edit/Write; Bash unverified); `copilot` gets a real loop AutoDE owns against the documented `vscode.lm` tool-calling API (`LanguageModelChatRequestOptions.tools`, `LanguageModelToolCallPart`/`LanguageModelToolResultPart` — types confirmed against the installed `@types/vscode` before writing code), with true per-call approval + an audit log, but not exercised against a live Copilot session in this environment.
+
 ---
 
 ## 7. LLM Integration
 
+### 6.0 Adapter Registry (Phase C, v0.9.0)
+
+**Problem this replaced:** adding or changing an LLM provider used to mean editing an if/else chain in `agentHub.callConfiguredLlm` (~90 lines mixing dispatch, consent-gating, and per-provider request shaping) *and* keeping a separate, already-drifted-stale metadata table (`providerRegistry.ts`'s `LLM_PROVIDER_REGISTRY` — still said `claude: 'Claude (VS Code)'` after that provider became the Claude Code CLI) in sync by hand.
+
+**What's there now:**
+- **`src/core/llmAdapter.ts`** — the `LlmAdapter` interface (`id`, `displayName`, `requiresApiKey`, `supportsCustomEndpoint`, optional `supportsToolExecution`, and `complete(prompt, opts, ctx)`), the `LlmAdapterContext` interface (the narrow slice of extension-host services an adapter needs — `getSettings`/`getLlmApiKey`/`getExtensionContext`/`getWorkspaceRoot`/`log` — decoupled from `DataAgentHubHub` so adapters are constructible/testable standalone), and the shared `extractJsonText()` helper (moved out of `agentHub.ts`, still used by both the adapters and by `agentHub`'s own JSON-parsing call sites for discovery/synthesis actions).
+- **`src/core/llmProviders.ts`** — one small class per provider implementing `LlmAdapter`. `CopilotLlmAdapter`/`ClaudeLlmAdapter` delegate to `languageModelAdapter.ts`/`claudeCodeAdapter.ts` (unchanged internals — this refactor only touched the *dispatch*, not the transports); the five `fetch()`-based providers were moved verbatim out of `agentHub.ts`. `LLM_ADAPTERS: Record<LlmProvider, LlmAdapter>` + `getLlmAdapter(provider)` (falls back to `ollama` for an unrecognized provider — preserving the old chain's implicit default) are the **single source of truth** for "which LLM providers exist."
+- **`agentHub.callConfiguredLlm`** is now: resolve settings → `getLlmAdapter(provider).complete(prompt, {model, systemPrompt, justification, allowTools}, this.buildLlmContext())` — a lookup, not a branch. `providerRegistry.ts`'s LLM-facing functions are now thin deprecated wrappers reading `LLM_ADAPTERS` (nothing in `src/` actually calls them — flagged, not removed, in case a future caller wants that shape).
+- **Deliberately not done** (per the scoping decision): the UI (`media/sidebar.html`'s hand-authored provider cards), the `package.json` settings-schema enum, and `webviewProvider`'s settings-validation guard were **not** unified into this registry — adding a provider still touches those three by hand (§17.2). Also not attempted: a fully config-driven "describe a new REST provider in JSON, zero code" mechanism — `copilot`/`claude` fundamentally need code (in-process API / subprocess), so a generic template would only cover a subset of providers while adding its own abstraction cost.
+
 ### 6.1 Multi-Provider Model
 
-**File:** `src/core/agentHub.ts` (`callConfiguredLlm`)
+**File:** `src/core/llmProviders.ts` (`LLM_ADAPTERS`), dispatched from `src/core/agentHub.ts` (`callConfiguredLlm`)
 
 | Provider | Key | Implementation |
 |----------|-----|---------------|
-| GitHub Copilot | `copilot` | VS Code Language Model API via `CopilotAdapter` |
+| GitHub Copilot | `copilot` | VS Code Language Model API via `LanguageModelAdapter` (vendor `copilot`) — no API key |
+| Claude Code | `claude` | Spawns the Claude Code CLI headless via `ClaudeCodeAdapter` (`claude -p --output-format json`) — no API key, uses the user's Claude Code login. **Not** `vscode.lm`. |
 | OpenAI | `openai` | `fetch()` to `api.openai.com/v1/chat/completions` |
-| Anthropic | `anthropic` | `fetch()` to `api.anthropic.com/v1/messages` |
+| Anthropic | `anthropic` | `fetch()` to `api.anthropic.com/v1/messages` (direct API key) |
 | Azure OpenAI | `azure-openai` | `fetch()` to custom endpoint |
 | Google Gemini | `gemini` | `fetch()` to `generativelanguage.googleapis.com` |
 | Ollama (Local) | `ollama` | `fetch()` to `localhost:11434/api/chat` |
 
-### 6.2 CopilotAdapter
+### 6.2a LanguageModelAdapter (provider `copilot`)
 
-**File:** `src/core/copilotAdapter.ts`
+**File:** `src/core/languageModelAdapter.ts` (`src/core/copilotAdapter.ts` = re-export shim; `CopilotAdapter` is a back-compat alias)
 
 | Feature | Implementation |
 |---------|---------------|
-| Detection | Searches for `github.copilot-chat` extension |
-| Model selection | `vscode.lm.selectChatModels({ vendor: 'copilot' })` |
-| Consent gate | Checks `copilotProgrammaticConsent` setting |
-| Request | `model.sendRequest(messages, { justification })` |
-| Timeout | Configurable (default 30s) via `Promise.race` |
-| Test | `testCall()` sends a simple prompt and checks response |
+| Detection | Searches for the `github.copilot-chat` extension |
+| Model selection | `vscode.lm.selectChatModels({ vendor: 'copilot' })`; preferred model matched loosely against `activeLlmModel` |
+| Consent gate | `languageModelProgrammaticConsent` (legacy `copilotProgrammaticConsent` honored as fallback) |
+| Request | `model.sendRequest(messages, { justification })`; system prompt sent as a leading Assistant message |
+| Timeout | 30s default / 60s from `callConfiguredLlm` via `Promise.race` |
+| Enumerate | `listAll()` → every `vscode.lm` model + vendor (used by `listLanguageModels`) |
+
+### 6.2b ClaudeCodeAdapter (provider `claude`)
+
+**File:** `src/core/claudeCodeAdapter.ts`
+
+| Feature | Implementation |
+|---------|---------------|
+| CLI discovery | `resolve()`: `claudeCodePath` setting → `claude`/`claude.exe` on `PATH` → `resources/native-binary/claude(.exe)` in the `Anthropic.claude-code` extension. `--version` probe. No hard-coded version. |
+| Consent gate | Same as Copilot: `languageModelProgrammaticConsent` (legacy fallback) |
+| Request | `spawn(cli, ['-p','--output-format','json', ...])`; prompt piped on **stdin**; `--append-system-prompt <sys>`; `--model <m>` only when `m` matches `/^(claude|sonnet|opus|haiku)/i` |
+| Tools | JSON/orchestrator calls: `--tools "" --max-turns 1`. Grounded chat (`allowTools`): `--tools Read Grep Glob --permission-mode default --max-turns 16`, run in the workspace root. Never write/exec tools. |
+| Output | Parses the JSON envelope; returns `.result`; treats `is_error` / non-`success` `subtype` as failure |
+| Timeout | 90s (no tools) / 180s (tools); subprocess killed on timeout or cancellation |
+| Test | `testCall()` → `"Reply with exactly the word: PONG"` |
 
 ### 6.3 Chat vs. Plan Routing
 
@@ -834,8 +930,9 @@ activate(context)
   │   ├── generatePlan
   │   ├── executePlan
   │   ├── resetSession
-  │   ├── testCopilot
-  │   ├── listCopilotInfo
+  │   ├── testLanguageModel  (alias: testCopilot)
+  │   ├── listLanguageModelInfo  (alias: listCopilotInfo)
+  │   ├── listLanguageModels
   │   ├── debugListExtensions
   │   ├── copilotHandoff
   │   ├── testConnection (Phase 3a)
@@ -858,7 +955,8 @@ deactivate()
 | `pausePlan` | `hub.pauseExecution()` | Pause execution |
 | `resetPlan` | `hub.resetPlan()` | Reset session |
 | `updateSettings` | `configManager.updateSettings()` | Save settings |
-| `testCopilot` | Command proxy | Test Copilot connection |
+| `testLanguageModel` / `testCopilot` | Command proxy | Test the active local LLM (Copilot model, or Claude Code CLI) |
+| `listLanguageModels` | Command proxy | Enumerate all `vscode.lm` models + report where the Claude Code CLI resolves from |
 | `openCopilotHandoff` | Command proxy | Open handoff editor |
 | `reindex` | Command proxy | Rebuild context index |
 | `openContextFolder` | File system | Open .ai-context in OS |
@@ -872,7 +970,7 @@ deactivate()
 | `stateUpdate` | Push plan state changes |
 | `planUpdated` | Push new plan |
 | `logEntry` | Push log message |
-| `settingsLoaded` | Push settings + Copilot info |
+| `settingsLoaded` | Push settings + active language model info (`languageModelInfo`, plus `copilotInfo` alias) |
 | `settingsSaved` | Confirm settings saved |
 | `error` | Push error message |
 | `contextUpdate` | Push context stats + entities |
@@ -918,10 +1016,12 @@ All properties are under the `autoDataEngineeringHub` section:
 | `enableSessionReuse` | boolean | `true` | Session reuse |
 | `autoDocumentationEnabled` | boolean | `true` | Auto-documentation |
 | `telemetryEnabled` | boolean | `false` | Telemetry opt-in |
-| `activeLlmProvider` | enum | `copilot` | Active LLM provider |
+| `activeLlmProvider` | enum | `copilot` | Active LLM provider (`copilot`, `claude`, `openai`, `anthropic`, `azure-openai`, `gemini`, `ollama`) |
 | `activeLlmModel` | string | `gpt-4o-mini` | LLM model name |
 | `llmEndpoint` | string | `""` | Custom LLM endpoint |
-| `copilotProgrammaticConsent` | boolean | `false` | Copilot consent |
+| `languageModelProgrammaticConsent` | boolean | `false` | Consent to use a local LLM (Copilot via `vscode.lm`, or the Claude Code CLI) programmatically |
+| `claudeCodePath` | string | `""` | Explicit path to the `claude` CLI for provider `claude`; empty = auto-detect |
+| `copilotProgrammaticConsent` | boolean | `false` | _Deprecated_ — legacy consent flag, still honored as a fallback |
 | `extensionDisplayName` | string | `Auto Data Engineering Hub` | Display name |
 | `extensionDescription` | string | `...` | Description |
 
@@ -974,10 +1074,15 @@ AutoDE/
 │   ├── core/
 │   │   ├── agentHub.ts                   # Orchestrator + LLM calls
 │   │   ├── configManager.ts              # Settings + secrets
-│   │   ├── copilotAdapter.ts             # GitHub Copilot (vscode.lm)
+│   │   ├── languageModelAdapter.ts       # GitHub Copilot via vscode.lm
+│   │   ├── claudeCodeAdapter.ts          # provider 'claude' → Claude Code CLI (claude -p)
+│   │   ├── copilotAdapter.ts             # re-export shim (back-compat)
 │   │   ├── extensionIdentity.ts          # Constants (IDs, keys)
 │   │   ├── phaseInference.ts             # Spec-driven phase inference + live status (pure module)
 │   │   ├── skillRegistry.ts              # Spec skills registry + directory loader
+│   │   ├── toolSkills.ts                 # Imported Claude Agent Skill (SKILL.md) parser — Phase D
+│   │   ├── llmAdapter.ts                 # LlmAdapter/LlmAdapterContext interfaces + extractJsonText — Phase C
+│   │   ├── llmProviders.ts               # LLM_ADAPTERS registry (one class per provider) — Phase C
 │   │   ├── specOps.ts                    # SpecOpsEngine state machine + action validation
 │   │   ├── specOpsPrompts.ts             # Discovery + synthesis prompt assembly
 │   │   ├── specSynthesis.ts              # Comprehensive v2 spec parsing/validation
@@ -987,7 +1092,8 @@ AutoDE/
 │   │   ├── webviewProvider.ts            # Webview message bridge
 │   │   └── webviewSecurity.ts            # CSP nonce helper
 │   ├── context/
-│   │   ├── ArtifactWriter.ts             # Artifacts → auto-de/<phase>/
+│   │   ├── ArtifactWriter.ts             # Artifacts → auto-de/<phase>/[<specId>.v<version>/]
+│   │   ├── ArtifactStalenessScanner.ts   # Scans auto-de/ for <specId>.v<version> folders vs. the current approved spec
 │   │   ├── ContextFileManager.ts         # .ai-context/ file management
 │   │   ├── ContextValidator.ts           # AJV envelope validation (Phase 3 pt 1)
 │   │   ├── GraphManager.ts               # In-memory knowledge graph
@@ -1011,6 +1117,7 @@ AutoDE/
 │   │   ├── model/DataModelerAgent.ts
 │   │   ├── build/IngestionPipelineAgent.ts
 │   │   ├── build/TransformationScaffolderAgent.ts
+│   │   ├── build/ToolSkillAgent.ts        # toolSkillAgent — Phase D; the one agent that imports vscode directly
 │   │   └── validate/DocumentationAgent.ts
 │   ├── editors/                          # Custom text editors
 │   │   ├── DataModelEditorProvider.ts
@@ -1042,7 +1149,7 @@ AutoDE/
 > 3. **Phase 3** — layered context loading. ✅ PART 1 (v0.8.0): real YAML parser (`src/context/Yaml.ts`), AJV envelope validation (`src/context/ContextValidator.ts`), atomic graph persistence (`src/context/GraphPersistence.ts`). ✅ PART 2 (v0.8.0): `ContextFileManager` layered loading (`context/**` + `derived/graph.json` via `GraphPersistence`, legacy fallbacks), AJV envelope validation wired through `ContextValidator`; `SpecManager`/`SourceRegistry`/`TargetConfigManager` migrated to the real `yaml` library (legacy flat-format files still parse). Per-kind AJV content schemas remain deferred.
 > 4. **Phase 4** — real Snowflake/Databricks adapters (wire `snowflake-sdk`).
 > 5. **Phase 5** — ContextRetriever + vector engine (embedded, no server).
-> 6. **Phase 6** — Copilot consent UI, telemetry, unit/integration tests.
+> 6. **Phase 6** — Local LLM (Copilot + Claude Code) consent UI, telemetry, unit/integration tests.
 
 ### Historical phases (committed)
 
@@ -1060,8 +1167,8 @@ AutoDE/
 - [x] Add conversational `chat()` method to agentHub
 - [x] Route regular messages to `chat` instead of `generatePlan`
 - [x] Add `chatResponse` handler in webview
-- [x] Auto-save Copilot consent toggle
-- [x] Register `copilotProgrammaticConsent` configuration property
+- [x] Auto-save language model consent toggle (Copilot + Claude Code cards)
+- [x] Register `languageModelProgrammaticConsent` configuration property (legacy `copilotProgrammaticConsent` kept as fallback)
 - [x] Remove stale duplicate re-export files (`src/agentHub.ts`, etc.)
 - [x] Fix broken imports in spoke agents
 - [x] Add slash command support (`/plan`, `/execute`, `/context`, etc.)
@@ -1136,7 +1243,7 @@ AutoDE/
 
 ### Phase 6: Testing, telemetry & docs — PARTIAL
 
-- [~] Functional tests — `test/functional.test.cjs` covers the Copilot adapter only
+- [~] Functional tests — `test/functional.test.cjs` covers the Copilot `vscode.lm` adapter, the Claude Code CLI adapter (mocked `child_process`), plus the pure modules
 - [ ] Context Layer / adapter / agent unit tests
 - [~] Opt-in telemetry — config flag exists; no telemetry implementation
 - [~] Docs — synced to v0.5.0 (this revision)
@@ -1231,7 +1338,8 @@ AutoDE/
 | `pausePlan` | `{}` | `hub.pauseExecution()` |
 | `resetPlan` | `{}` | `hub.resetPlan()` |
 | `updateSettings` | `{ settings: Partial<DataAgentHubSettings> }` | `configManager.updateSettings()` |
-| `testCopilot` | `{}` | Command proxy |
+| `testCopilot` / `testLanguageModel` | `{}` | Command proxy |
+| `listLanguageModels` | `{}` | Command proxy |
 | `openCopilotHandoff` | `{ prompt?: string }` | Command proxy |
 | `reindex` | `{}` | Command proxy |
 | `openContextFolder` | `{}` | File system |
@@ -1239,6 +1347,12 @@ AutoDE/
 | `sourceAssessment` | `{}` | `ConnectionManager.extractMetadata()` |
 | `runAgent` | `{ agent: string }` | Agent routing |
 | `settingsLoaded` | `{}` | Re-send settings |
+| `startRevision` | `{}` | Arms `pendingRevision` (only if the current spec is `approved`); the next `chat` message becomes the change request (§2.9) |
+| `attachSpecFile` | `{}` | Opens a file picker; attaches the picked file to the active `SpecOpsEngine` session as reference material (§2.9) |
+| `refineSpec` | `{ refinement: string }` | Approved spec → full revision interview (§2.9); draft spec → single-shot `reviseSpec()` |
+| `checkArtifactStaleness` | `{}` | `scanArtifactStaleness()` → responds with `artifactStaleness` (§2.10) |
+| `runToolSkill` | `{ skillId: string, instruction: string }` | `hub.runToolSkill(skillId, instruction)` → responds with `chatResponse` (§5.6, Phase D) |
+| `viewSpecHistory` | `{}` | `git log --follow -p` on the spec file → responds with `specHistory` (§2.10) |
 
 ### Extension → Webview
 
@@ -1247,7 +1361,7 @@ AutoDE/
 | `stateUpdate` | `{ state: PlanState }` | Plan state changes |
 | `planUpdated` | `{ plan: PlanStep[] }` | New plan generated |
 | `logEntry` | `{ message: string }` | Log message |
-| `settingsLoaded` | `{ ...DataAgentHubSettings, copilotInfo }` | Initial settings |
+| `settingsLoaded` | `{ ...DataAgentHubSettings, languageModelInfo, copilotInfo }` | Initial settings |
 | `settingsSaved` | `{ success: boolean }` | Settings confirmation |
 | `error` | `{ message: string }` | Error notification |
 | `contextUpdate` | `{ stats, dbEntities, bizTerms, queries }` | Context data |

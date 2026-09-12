@@ -7,11 +7,14 @@ import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
 import { executeSourceAssessmentAgent } from '../agents/discover/SourceAssessmentAgent';
 import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
 import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
+import { executeToolSkillAgent } from '../agents/build/ToolSkillAgent';
 import { ArtifactWriter } from '../context/ArtifactWriter';
 import { inferPhases, computePhaseStatuses, PHASE_ORDER } from './phaseInference';
 import { SpecOpsEngine } from './specOps';
 import { buildDiscoveryTurnPrompt, buildSynthesisPrompt } from './specOpsPrompts';
 import { parseComprehensiveSpec } from './specSynthesis';
+import { LlmAdapterContext, extractJsonText } from './llmAdapter';
+import { getLlmAdapter } from './llmProviders';
 import {
   AgentExecutionContext,
   AgentType,
@@ -29,6 +32,12 @@ import {
   WorkflowPhase
 } from './types';
 
+// NOTE: 'toolSkillAgent' is deliberately NOT in this allow-list. The auto-planner
+// LLM has no visibility into which skills are imported and could hallucinate a
+// skillId; tool-executing skill runs are only reachable via an explicit "Run
+// Skill" action that builds the PlanStep itself with a real skillId — never
+// auto-assigned by generatePlan(). It's still a full AGENT_EXECUTORS entry so
+// that explicit path can execute it like any other step.
 const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent', 'dataModelerAgent', 'transformScaffoldAgent'];
 
 const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string; artifacts?: GeneratedArtifact[] }>> = {
@@ -38,7 +47,8 @@ const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutio
   snowflakeExecutor: executeSnowflakeAgent,
   sourceAssessmentAgent: executeSourceAssessmentAgent,
   dataModelerAgent: executeDataModelerAgent,
-  transformScaffoldAgent: executeTransformScaffoldAgent
+  transformScaffoldAgent: executeTransformScaffoldAgent,
+  toolSkillAgent: executeToolSkillAgent
 };
 
 // Agent-to-phase mapping
@@ -49,7 +59,8 @@ const AGENT_PHASE: Partial<Record<AgentType, WorkflowPhase>> = {
   ingestionAgent: 'build',
   transformScaffoldAgent: 'build',
   architectureAgent: 'validate',
-  snowflakeExecutor: 'build'
+  snowflakeExecutor: 'build',
+  toolSkillAgent: 'build'
 };
 
 export class DataAgentHubHub {
@@ -80,6 +91,10 @@ export class DataAgentHubHub {
 
   public setArtifactWriter(writer: ArtifactWriter): void {
     this.artifactWriter = writer;
+  }
+
+  private getWorkspaceRoot(): string | undefined {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   }
 
   public setSpec(specId: string, specVersion: number): void {
@@ -180,14 +195,14 @@ export class DataAgentHubHub {
    * discovery prompt from the current intake session + skills, asks the
    * configured LLM for its next action, and validates the result.
    */
-  public async discoverNextAction(session: IntakeSession, skills: SkillDefinition[]): Promise<SpecEngineAction> {
-    const { system, user } = buildDiscoveryTurnPrompt(session, skills);
+  public async discoverNextAction(session: IntakeSession, skills: SkillDefinition[], extraContext?: string): Promise<SpecEngineAction> {
+    const { system, user } = buildDiscoveryTurnPrompt(session, skills, extraContext);
     const raw = await this.callConfiguredLlm(
       user,
       system,
       'Decide the next step in the data engineering requirements-discovery conversation.'
     );
-    const parsed = this.parseJsonObject(this.extractJsonText(raw));
+    const parsed = this.parseJsonObject(extractJsonText(raw));
     return SpecOpsEngine.validateAction(parsed);
   }
 
@@ -196,14 +211,14 @@ export class DataAgentHubHub {
    * collected intake session, including data flows, transformations, dependencies,
    * acceptance criteria, and implementation considerations.
    */
-  public async synthesizeComprehensiveSpec(session: IntakeSession, previous?: BusinessProblemSpec): Promise<BusinessProblemSpec> {
-    const { system, user } = buildSynthesisPrompt(session);
+  public async synthesizeComprehensiveSpec(session: IntakeSession, previous?: BusinessProblemSpec, extraContext?: string): Promise<BusinessProblemSpec> {
+    const { system, user } = buildSynthesisPrompt(session, extraContext);
     const raw = await this.callConfiguredLlm(
       user,
       system,
       'Synthesize the comprehensive Business Problem Specification from the collected requirements.'
     );
-    return parseComprehensiveSpec(this.parseJsonObject(this.extractJsonText(raw)), { previous, session });
+    return parseComprehensiveSpec(this.parseJsonObject(extractJsonText(raw)), { previous, session });
   }
 
   /** Renders a specification as the objective text used for plan generation. */
@@ -241,6 +256,47 @@ export class DataAgentHubHub {
     }));
   }
 
+  /**
+   * Runs one imported tool-executing skill directly (Phase D) — from chat
+   * (`/skill <id> <instruction>`) or a dedicated "Run Skill" UI action, never
+   * from the auto-planner (see the note on `VALID_AGENT_TYPES`). Bypasses the
+   * DAG: this is a single, immediate step, not a queued plan step.
+   */
+  public async runToolSkill(skillId: string, instruction: string): Promise<{ success: boolean; message: string; error?: string }> {
+    const step: PlanStep = {
+      id: `skill-${Date.now().toString(36)}`,
+      assignedAgent: 'toolSkillAgent',
+      taskDescription: instruction,
+      status: 'running',
+      skillId
+    };
+    const context: AgentExecutionContext = {
+      objective: this.state.objective,
+      schemaContext: this.state.schemaContext,
+      sourceProvider: this.state.sourceProvider,
+      targetEnvironment: this.state.targetEnvironment,
+      settings: this.configManager.getSettings(),
+      configManager: {
+        getSecret: async (secretKey: string) => this.configManager.getSecret(secretKey),
+        getSettings: () => this.configManager.getSettings()
+      },
+      log: (message: string) => this.log(message),
+      addArtifact: (artifact: GeneratedArtifact) => {
+        if (!this.state.artifacts) this.state.artifacts = [];
+        artifact.phase = 'build';
+        this.state.artifacts.push(artifact);
+        this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
+      },
+      currentPhase: 'build',
+      workspaceRoot: this.getWorkspaceRoot(),
+      extensionContext: this.configManager.getExtensionContext(),
+      skillId,
+      skillInstruction: instruction
+    };
+    const result = await AGENT_EXECUTORS.toolSkillAgent(step, context);
+    return { success: result.success, message: result.message, error: result.error };
+  }
+
   /** Generates the execution plan from a specification (spec-driven planning). */
   public async generatePlanFromSpec(spec: BusinessProblemSpec): Promise<void> {
     this.state.specId = spec.id;
@@ -264,7 +320,7 @@ export class DataAgentHubHub {
   }
 
   private parseSpecResponse(raw: string, previous?: BusinessProblemSpec): BusinessProblemSpec {
-    const parsed = this.parseJsonObject(this.extractJsonText(raw));
+    const parsed = this.parseJsonObject(extractJsonText(raw));
     const now = new Date().toISOString();
 
     const str = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
@@ -425,7 +481,10 @@ Message: ${message}`;
       const rawResponse = await this.callConfiguredLlm(
         prompt,
         DataAgentHubHub.CHAT_SYSTEM_PROMPT,
-        'Answer a data engineering question in the Auto Data Engineering Hub sidebar chat.'
+        'Answer a data engineering question in the Auto Data Engineering Hub sidebar chat.',
+        // Grounded chat: let the Claude Code provider use read-only tools to
+        // inspect the workspace. Ignored by every other provider.
+        { allowTools: true }
       );
       return rawResponse;
     } catch (error) {
@@ -616,7 +675,11 @@ Message: ${message}`;
             this.state.artifacts.push(artifact);
             this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
           },
-          currentPhase: phase
+          currentPhase: phase,
+          workspaceRoot: this.getWorkspaceRoot(),
+          extensionContext: this.configManager.getExtensionContext(),
+          skillId: readyStep.skillId,
+          skillInstruction: readyStep.taskDescription
         };
 
         const executor = AGENT_EXECUTORS[readyStep.assignedAgent];
@@ -738,10 +801,22 @@ Message: ${message}`;
   private static readonly PLANNER_SYSTEM_PROMPT =
     'You are a strict data engineering planner. Respond with a JSON array only.';
 
+  /** Builds the narrow context object LLM adapters receive — see `LlmAdapterContext`. */
+  private buildLlmContext(): LlmAdapterContext {
+    return {
+      getSettings: () => this.configManager.getSettings(),
+      getLlmApiKey: () => this.configManager.getLlmApiKey(),
+      getExtensionContext: () => this.configManager.getExtensionContext(),
+      getWorkspaceRoot: () => this.getWorkspaceRoot(),
+      log: (message: string) => this.log(message)
+    };
+  }
+
   private async callConfiguredLlm(
     prompt: string,
     systemPrompt?: string,
-    justification?: string
+    justification?: string,
+    opts?: { allowTools?: boolean }
   ): Promise<string> {
     const settings = this.configManager.getSettings();
     const provider = settings.activeLlmProvider ?? 'copilot';
@@ -749,193 +824,16 @@ Message: ${message}`;
     const sys = systemPrompt ?? DataAgentHubHub.PLANNER_SYSTEM_PROMPT;
 
     try {
-      if (provider === 'copilot') {
-        try {
-          if (!settings.copilotProgrammaticConsent) {
-            throw new Error(
-              'Programmatic use of GitHub Copilot is not enabled. ' +
-              'Open Settings (⚙) → LLM Provider → check "Allow programmatic use of local Copilot" and try again.'
-            );
-          }
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const { CopilotAdapter } = require('./copilotAdapter') as typeof import('./copilotAdapter');
-          const context = this.configManager.getExtensionContext();
-          const { adapter, info } = await CopilotAdapter.detect(context);
-          if (!adapter) {
-            throw new Error(info.error || 'GitHub Copilot is not available. Install the GitHub Copilot Chat extension and sign in.');
-          }
-          const out = await adapter.complete(prompt, { model, timeoutMs: 60000, systemPrompt: sys, justification });
-          return out;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.log(`Copilot request failed: ${message}`);
-          throw new Error(message);
-        }
-      }
-
-      if (provider === 'azure-openai') {
-        return await this.callAzureOpenAi(model, prompt, settings.llmEndpoint, sys);
-      }
-      if (provider === 'openai') {
-        return await this.callOpenAi(model, prompt, sys);
-      }
-      if (provider === 'anthropic') {
-        return await this.callAnthropic(model, prompt, sys);
-      }
-      if (provider === 'gemini') {
-        return await this.callGemini(model, prompt, sys);
-      }
-
-      return await this.callOllama(model, prompt, sys);
+      const adapter = getLlmAdapter(provider);
+      return await adapter.complete(
+        prompt,
+        { model, systemPrompt: sys, justification, allowTools: opts?.allowTools },
+        this.buildLlmContext()
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The selected LLM provider is unavailable.';
       throw new Error(`LLM request failed: ${message}`);
     }
-  }
-
-  private async callOpenAi(model: string, prompt: string, systemPrompt: string): Promise<string> {
-    const apiKey = await this.configManager.getLlmApiKey();
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error('OpenAI API key is missing. Add it in the settings panel.');
-    }
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`OpenAI request failed: ${response.status} ${text}`);
-    }
-
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content ?? '';
-    return this.extractJsonText(content);
-  }
-
-  private async callAnthropic(model: string, prompt: string, systemPrompt: string): Promise<string> {
-    const apiKey = await this.configManager.getLlmApiKey();
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error('Anthropic API key is missing. Add it in the settings panel.');
-    }
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 4096, temperature: 0, system: systemPrompt, messages: [{ role: 'user', content: prompt }] })
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Anthropic request failed: ${response.status} ${text}`);
-    }
-
-    const data = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
-    const text = data.content?.map((part) => (part.type === 'text' ? part.text ?? '' : '')).join('') ?? '';
-    return this.extractJsonText(text);
-  }
-
-  private async callAzureOpenAi(model: string, prompt: string, endpoint?: string, systemPrompt?: string): Promise<string> {
-    const apiKey = await this.configManager.getLlmApiKey();
-    const url = endpoint && endpoint.trim().length > 0 ? endpoint.trim() : 'https://<your-resource>.openai.azure.com/openai/deployments/' + model + '/chat/completions?api-version=2024-02-01';
-
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error('Azure OpenAI API key is missing. Add it in the settings panel.');
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        messages: [
-          { role: 'system', content: systemPrompt ?? DataAgentHubHub.PLANNER_SYSTEM_PROMPT },
-          { role: 'user', content: prompt }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Azure OpenAI request failed: ${response.status} ${text}`);
-    }
-
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content ?? '';
-    return this.extractJsonText(content);
-  }
-
-  private async callGemini(model: string, prompt: string, systemPrompt: string): Promise<string> {
-    const apiKey = await this.configManager.getLlmApiKey();
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error('Gemini API key is missing. Add it in the settings panel.');
-    }
-
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0 }
-      })
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Gemini request failed: ${response.status} ${text}`);
-    }
-
-    const data = (await response.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const content = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
-    return this.extractJsonText(content);
-  }
-
-  private async callOllama(model: string, prompt: string, systemPrompt: string): Promise<string> {
-    const response = await fetch('http://localhost:11434/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
-        format: 'json'
-      })
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Ollama request failed: ${response.status} ${text}`);
-    }
-
-    const data = (await response.json()) as { message?: { content?: string } };
-    const content = data.message?.content ?? '';
-    return this.extractJsonText(content);
-  }
-
-  private extractJsonText(content: string): string {
-    const trimmed = (content ?? '').trim();
-    if (!trimmed) { throw new Error('The LLM returned an empty response.'); }
-    // Only strip code fences when the payload actually looks like JSON, so that
-    // prose/markdown responses (sidebar chat) keep their formatting intact.
-    const looksLikeJson = /^```(?:json)?\s*[\[{]/i.test(trimmed) || /^[\[{]/.test(trimmed);
-    if (!looksLikeJson) { return trimmed; }
-    const normalized = trimmed.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
-    if (!normalized) { throw new Error('The LLM returned an empty response.'); }
-    return normalized;
   }
 
   private parseJsonObject(text: string): Record<string, unknown> {

@@ -1,6 +1,6 @@
 # AutoDE — Requirements Specification
 
-This document is the authoritative reference for AutoDE's design, implementation, QA, and acceptance criteria. It covers: UI/UX, the Enterprise Context Layer (information architecture), the single-workspace artifact model, and GitHub Copilot integration.
+This document is the authoritative reference for AutoDE's design, implementation, QA, and acceptance criteria. It covers: UI/UX, the Enterprise Context Layer (information architecture), the single-workspace artifact model, and local language model integration (GitHub Copilot via `vscode.lm`, and Claude Code via its CLI).
 
 Last updated: 2026-09-09
 Author: AutoDE Engineering
@@ -14,7 +14,7 @@ AutoDE is an AI-augmented VS Code extension for Data Engineering. Key functions:
 - Transform a natural-language business problem into a structured, reviewable, versioned **Business Problem Specification (BPS)** — the system of record that governs all subsequent activity.
 - Provide an **Enterprise Context Layer** — a persistent, evolving semantic understanding of the user's data environment stored in `.ai-context/` (used to ground prompts and LLM guidance).
 - Generate data-engineering artifacts (DDL, dbt models, mappings, docs) into a visible, configurable folder (`auto-de/`) in the user's current repository.
-- Offer optional integration with GitHub Copilot such that a user who already has Copilot can opt-in to programmatically route some LLM tasks to the installed Copilot extension.
+- Offer optional integration with a locally-installed language model (GitHub Copilot via `vscode.lm`, or the Claude Code CLI) such that a user who already has one can opt-in to programmatically route LLM tasks to it with no API key.
 
 Primary non-functional requirements:
 - Zero UI blocking (offload heavy compute to worker threads / web workers).
@@ -39,7 +39,7 @@ Specific design decisions and behavior:
 - Use pill-style status indicators (connected/disconnected) and token counters; avoid verbose text.
 - Use responsive, accessible controls that follow VS Code font and color variables (prefers native CSS vars when available).
 - Provide empty/placeholder states for unconnected providers and metadata.
-- Provide UI elements to configure/choose LLM provider and model, and show Copilot status and consent options in the LLM tab (see Copilot integration section).
+- Provide UI elements to configure/choose LLM provider and model, and show local-LLM status (Copilot models / Claude Code CLI) and consent options in the LLM tab (see §9).
 - Provide a "Context" section that surfaces the Enterprise Context Layer (layers, business terms, rules, verified queries, relationships) read-only from `.ai-context/`.
 - Provide a "register source files" form so users can identify which repository files contain business context, verified queries, and data definitions.
 
@@ -277,20 +277,25 @@ Formatting constraints:
 AutoDE operates on the user's currently open repository. There is no multi-project registry and no project-creation flow.
 
 - **One workspace = one data-engineering effort.** The "objective" is what the user types to generate a plan; it is persisted in `.ai-context/state.json`.
-- **Generated artifacts** (DDL, dbt models, mappings, docs) are written to a **visible, configurable folder** `auto-de/` (setting `autoDE.artifactDirectory`), organized by phase:
+- **Generated artifacts** (DDL, dbt models, mappings, docs) are written to a **visible, configurable folder** `auto-de/` (setting `autoDE.artifactDirectory`), organized by phase, and — since Phase B (v0.9.0) — by the specification revision that produced them:
 
   ```text
   auto-de/01-discover/
   auto-de/02-model/
   auto-de/03-build/
+    <specId>.v<version>/        ← artifacts stamped with a spec (the common case)
+      dbt_project.yml           ← filenames are untouched (dbt/tool conventions preserved);
+      models/staging/...           only a folder is inserted, not a filename prefix
+    <filename without a folder> ← artifacts with no spec stamp (legacy, or generated with no spec set)
   auto-de/04-validate/
   ```
 
 - **Artifacts are committed to git** — they are deliverables, not transient state.
 - **Artifact writes are atomic** (temp staging → rename).
 - **Separating efforts** = git branches, not a project registry.
+- **Stale-artifact detection** (Phase B): because `PlanState.artifacts` is in-memory only and doesn't survive a reload, the `<specId>.v<version>` folder name is the durable record of which spec revision produced a set of artifacts. The Workflow Palette scans this on open (`scanArtifactStaleness`, `src/context/ArtifactStalenessScanner.ts`) and flags any folder whose version doesn't match the currently approved spec — **it flags, it never auto-touches** the files.
 
-Core module: ArtifactWriter (`src/context/ArtifactWriter.ts`) — persists a `GeneratedArtifact` → `auto-de/<phase>/<filename>`.
+Core module: ArtifactWriter (`src/context/ArtifactWriter.ts`) — persists a `GeneratedArtifact` → `auto-de/<phase>/[<specId>.v<version>/]<filename>`.
 
 Removed (superseded by this model): `ProjectManager` / `ProjectRegistry`, the `newProject` command, project-list UI, and `setActiveProject`.
 
@@ -318,9 +323,32 @@ Persistence: `.ai-context/spec/business-problem.yaml` (atomic temp→rename). Pr
 
 ### 8.2 Spec-driven conversation routing
 
-- **No spec exists** → the user's first message IS the business problem → AutoDE drafts a BPS.
-- **Spec is a draft** → the user's next message refines it → the BPS is revised in place (same id/version).
-- **Spec is approved** → the user's messages are answered conversationally, grounded in the BPS + repository context; a change request drafts a new revision (same id, version + 1).
+- **No spec exists** → the user's first message IS the business problem → the agentic discovery interview (§8.6) starts.
+- **Spec is a draft** → the user's next message refines it → the BPS is revised in place (same id/version) via the single-shot `AgentHub.generateSpec`.
+- **Spec is approved, no revision armed** → the user's messages are answered conversationally, grounded in the BPS + repository context.
+- **Spec is approved, revision armed** (user clicked "↻ Revise", or used `/spec <change>`) → the user's next message is treated as a change request and **starts a full agentic revision interview** — same engine, same rigor as the original (§8.6.1). The approved spec is never mutated in place; a revision always produces a new draft `version + 1` that must be reviewed and re-approved.
+
+### 8.6.1 Revising an approved specification
+
+Implemented (v0.9.0). Clicking "↻ Revise" (or `/spec <change>` while approved) arms a one-shot flag; the next chat message becomes the `changeRequest` and seeds a new `IntakeSession` with `previousSpec` set to the current approved BPS (`SpecOpsEngine`/`createIntakeSession`, `src/core/specOps.ts`). From there it's the identical discovery→synthesis loop used for a brand-new spec (§8.6), with three differences:
+
+- **The discovery and synthesis prompts render the existing approved specification** (`renderSpecSnapshot`, `src/core/specOpsPrompts.ts`) alongside the requested change, with explicit rules: only ask about fields the change plausibly affects or that are still empty; never re-ask about unaffected fields; the synthesis output must be the **full** specification (not a diff), carrying forward everything the conversation didn't touch.
+- **`parseComprehensiveSpec` falls back to the previous spec's value for any optional/required field the LLM's synthesis output leaves empty** — a defensive guarantee (independent of prompt-following) that a revision can never silently wipe previously-approved content. Provenance for a carried-forward field keeps its original question/skill attribution instead of being relabeled "synthesis".
+- **Supplementary information**: registered context sources (`ContextFileManager.buildContextPrompt()`) are threaded into both prompts automatically; the user can also attach an ad-hoc file mid-conversation (📎 button → `attachSpecFile` message → read via `vscode.workspace.fs`, capped at 200KB, stored on the session and rendered as "Attached reference material").
+
+Version/id continuity (already correct pre-revision-fix): `id` is preserved, `version` increments only when `previous.status === 'approved'` (`parseComprehensiveSpec`, `src/core/specSynthesis.ts`).
+
+**Known limitation:** if the comprehensive-synthesis LLM call itself throws (malformed JSON, provider error), the emergency fallback still uses the older single-shot `generateSpec`/`parseSpecResponse`, which only knows the v1 field shape — `id`/`version`/`status` continuity is preserved through it, but v2 fields (`dataFlows`, `businessRequirements`, etc.) are not. Flagged in code at the fallback call site; not yet fixed.
+
+**Not yet implemented:** `IntakeSession` (the in-progress interview) is still in-memory only — a multi-turn revision spanning a VS Code reload loses progress, same pre-existing gap as the original discovery flow (§16.5).
+
+### 8.7 Versioning & governance (Phase B, v0.9.0)
+
+Per the decision to lean on git rather than build a parallel version store: `.ai-context/spec/business-problem.yaml` is meant to be committed, and git's own history **is** the audit trail. AutoDE adds one convenience on top rather than reimplementing it:
+
+- **"🕓 History" action** on the spec card (palette and chat) posts `viewSpecHistory` → the extension host runs `git log --follow -p -- .ai-context/spec/business-problem.yaml` in the workspace root and renders the output as a chat message. If the workspace isn't a git repository, or the file has no commits yet, this surfaces as a clear error/empty-history message rather than failing silently.
+- No in-app version-compare/diff UI was built — `git diff`/`git log -p` (via this action, or the user's own git tooling) is the comparison mechanism. `.ai-context/spec/history/` (already existed pre-Phase-B) remains as a filesystem-level archive independent of git.
+- Artifact traceability to a spec version is now durable across reloads, not just in-memory — see §7's `<specId>.v<version>` folder scheme and the stale-artifact flagging in the palette.
 
 ### 8.3 Spec-driven workflow
 
@@ -341,6 +369,7 @@ Persistence: `.ai-context/spec/business-problem.yaml` (atomic temp→rename). Pr
 - `AgentHub.generateSpec(userInput, previous)` + `parseSpecResponse` (LLM drafting/revising, version semantics).
 - Spec-aware chat routing in `webviewProvider`; `/spec` slash command.
 - Review/approve UI: chat spec card + palette spec section (approve / revise / open file / generate plan).
+- Revising an **approved** spec starts a full agentic revision interview (§8.6.1) rather than being edited in place — a "↻ Revise" click or `/spec <change>` arms it, the next message is the change request.
 - `AgentHub.generatePlanFromSpec(spec)` — spec-driven plan generation.
 - Traceability: `specId`/`specVersion` on `PlanState`, `GeneratedArtifact`, `Origin`.
 
@@ -352,39 +381,98 @@ The draft BPS is produced by an **agentic, DE-tailored requirements flow** (Supe
 - **Adaptive questioning** — `SpecOpsEngine` drives a `discovery → synthesizing → draft → refining → approved` state machine with per-field coverage and a turn budget; each turn the LLM returns a validated action (`ask` / `ask_many` / `synthesize` / `done`). Single questions render as chat bubbles; batches render as a dynamic multi-field intake form.
 - **Comprehensive synthesis** — `AgentHub.synthesizeComprehensiveSpec` assembles the v2 spec (businessRequirements, dataFlows, transformations, dependencies, acceptanceCriteria, implementationConsiderations, sourceCatalog) with per-field provenance, persisted by `SpecManager`.
 
+This same engine also drives **revising an already-approved specification** — see §8.6.1.
+
 ---
 
-## 9. Copilot Integration Requirements
+## 9. Local Language Model Integration Requirements (Copilot & Claude Code)
 
-Objective: Provide a safe, user-consented way for AutoDE to use the GitHub Copilot extension a user may already have installed.
+Objective: Provide a safe, user-consented way for AutoDE to use a language model a user already has installed locally — **GitHub Copilot** (via the VS Code Language Model API, `vscode.lm`) or **Claude Code** (the `claude` CLI) — with no API key.
+
+> Dispatch note (Phase C, v0.9.0): both providers below, plus the 5 API-key providers, are now registered in one place — `src/core/llmProviders.ts` (`LLM_ADAPTERS`) — behind a shared `LlmAdapter` interface. See requirements around Topic 1 of the architecture review (LLM provider extensibility) and `technical-design.md` §6.0. This section describes provider *behavior*; the dispatch mechanism moved out of `agentHub.ts`.
+
+Two adapters, selected by `activeLlmProvider`:
+- `copilot` → `LanguageModelAdapter` (`src/core/languageModelAdapter.ts`) → `vscode.lm.selectChatModels({ vendor: 'copilot' })`. `src/core/copilotAdapter.ts` is a re-export shim; `CopilotAdapter` is a back-compat alias.
+- `claude` → `ClaudeCodeAdapter` (`src/core/claudeCodeAdapter.ts`) → spawns the **Claude Code CLI** headless (`claude -p --output-format json`). This deliberately does **not** use `vscode.lm` — the Claude Code extension registers no LM provider, and `vscode.lm`'s "Claude" models are GitHub Copilot's, which is what we want to avoid routing through.
+
+CLI discovery for `claude` (`ClaudeCodeAdapter.resolve()`), in order:
+1. the `autoDataEngineeringHub.claudeCodePath` setting;
+2. `claude` / `claude.exe` on `PATH`;
+3. the binary bundled with the installed `Anthropic.claude-code` extension (`resources/native-binary/claude(.exe)`).
+Not found → a clear, actionable error (no silent fallback to Copilot).
 
 Functional modes:
-1. Detect & Surface (Phase 0):
-   - Detect Copilot by searching known extension IDs (`github.copilot`, `GitHub.copilot`, `github.copilot-nightly`, `github.copilot-enterprise`).
-   - Post `copilotInfo` into the webview settings payload (found, isActive, hasExports, exportsKeys).
-   - Show a Copilot status indicator and an opt-in checkbox in LLM Settings: "Allow programmatic use of local Copilot (opt-in)".
-   - Provide a "Test Copilot" button that invokes a safe, best-effort test call via the adapter.
+1. Detect & Surface:
+   - `copilot`: detect the Copilot Chat extension by known IDs; list models via `vscode.lm`.
+   - `claude`: resolve the CLI and probe `--version`.
+   - Post `languageModelInfo` (and, for back-compat, `copilotInfo`) into the webview settings payload. For `claude` it carries `provider`, `found`, `hasAccess`, `cliSource`, `cliPath`, `version`, `error`.
+   - Show a per-provider status indicator and an opt-in checkbox in LLM Settings ("Allow programmatic use"). The checkbox writes `languageModelProgrammaticConsent` and applies to both providers. The Claude card also has an optional CLI-path field.
+   - Selecting an LLM card auto-saves `activeLlmProvider` and re-detects, so the header provider pill always reflects the current choice (contextualised: "Copilot" / "Claude Code" / …).
+   - `testLanguageModel` accepts an optional provider argument so each card's **Test** button tests *its own* provider (not just whichever is active); `listLanguageModels` enumerates every `vscode.lm` model **and** reports where the Claude Code CLI resolves from.
 
-2. Programmatic Adapter (Phase 1):
-   - If the Copilot extension exports a callable API (detected at runtime), expose a thin adapter `CopilotAdapter` that normalizes `complete(prompt, opts)` and `testCall()`.
-   - Adapter calls must be:
-     - Best-effort only (never assume stability of internals)
-     - Timeboxed (configurable default timeout, e.g., 15s)
-     - Respect cancellation tokens
-   - Only enable programmatic Copilot usage when the user has explicitly given consent via the LLM settings toggle (`copilotProgrammaticConsent`).
+2. Programmatic Adapters:
+   - `LanguageModelAdapter`: `detect()`, `complete()`, `testCall()`; timeboxed via `Promise.race`; system prompt as a leading Assistant message.
+   - `ClaudeCodeAdapter`: `resolve()` / `detect()` / `complete(prompt, { systemPrompt, model, allowTools, timeoutMs, cwd })` / `testCall()`. Prompt piped on **stdin**; system prompt via `--append-system-prompt`; `--model` only when the configured model looks like a Claude model. Timeboxed (90s no-tools / 180s with tools) with the subprocess killed on timeout or cancellation.
+   - Tool policy: orchestrator/JSON calls run with **no tools** (`--tools "" --max-turns 1`). Grounded chat passes `allowTools` → `--tools Read Grep Glob --permission-mode default`, run in the workspace root so Claude Code can inspect the repo. No write/exec tools are ever enabled.
+   - Both providers are gated on `languageModelProgrammaticConsent` (legacy `copilotProgrammaticConsent` honored as a fallback).
 
-3. UI Handoff Fallback (Phase 2):
-   - If no programmatic API exists or user declines consent, provide a non-programmatic handoff flow: seed an untitled editor with a prompt and trigger inline suggestions such that the user can accept suggestions interactively.
+3. UI Handoff Fallback (Copilot only):
+   - If the user declines consent, seed an untitled editor with a prompt and trigger inline suggestions. (Not applicable to `claude`.)
 
 Security & Privacy:
-- Programmatic Copilot usage must be opt-in.
-- Document exactly what workspace content may be sent to Copilot in the consent modal. Obtain explicit one-time consent before sending content.
-- Do not store Copilot tokens or secrets in logs or repository.
-- Telemetry for Copilot usage must be opt-in and scrub PII.
+- Programmatic use of either local model must be opt-in.
+- Document what workspace content may be sent. The Claude Code subprocess runs with read-only tools at most, and never write/exec tools.
+- Do not store provider tokens or secrets in logs or the repository. Claude Code auth is the user's own (managed by the Claude Code CLI/extension); AutoDE never handles it.
+- Telemetry for language model usage must be opt-in and scrub PII.
 
 Limitations & Risks:
-- Copilot extension exports are not a documented stable API — this is a brittle integration and needs defensive coding and fallbacks.
-- Rely on best-effort detection and never attempt to use internal or private extension internals.
+- `claude` depends on a working Claude Code CLI + an authenticated session; detection must degrade gracefully with install/sign-in/`claudeCodePath` guidance.
+- Shelling out to a subprocess: guard against hangs (timeouts + kill), large prompts (piped on stdin, not argv), and partial/garbled stdout (tolerant JSON parsing).
+- The bundled-binary path is version-stamped in the extension folder name; resolution must not hard-code a version.
+
+---
+
+## 9a. Tool-Executing Skills (Phase D, v0.9.0)
+
+Objective: let a user import a **Claude Agent Skill** (a `SKILL.md` manifest + optional bundled resources — the tool-oriented format used by Claude Code, structurally different from AutoDE's own interview-only `skills/*.json`) and run it with real tool access (read/write files, run commands), scoped to the current workspace.
+
+**Status: implemented as a narrower, more conservative slice than originally scoped in the architecture discussion — read this section before assuming parity with that discussion.**
+
+### 9a.1 Import
+
+- `AutoDE: Import Tool Skill` command → folder picker → validates a `SKILL.md` is present → copies the folder into `.ai-context/skills/tool-skills/<id>/` (a subfolder of the existing interview-skill override directory, kept separate since these are a different concept) → parses it (`src/core/toolSkills.ts`, pure/filesystem-only, mirrors `skillRegistry.ts`'s loading pattern) and reports what was found.
+- `SKILL.md` parsing is deliberately lenient (optional YAML frontmatter for `name`/`description`/`allowed-tools`, the Markdown body becomes the skill's instructions) — there is no official machine-checkable schema for this format, so the parser degrades gracefully rather than rejecting anything unexpected.
+- `declaredTools` (from frontmatter) is **informational only** — it does not by itself grant tool access; the actual tool surface is capped by the execution mode below regardless of what a skill's own manifest claims to need.
+
+### 9a.2 Execution — two paths, deliberately different in capability
+
+Only `copilot` and `claude` support running a tool skill at all (the five API-key `fetch()` providers have no execution sandbox and this doesn't attempt to build one for them — attempting to run a skill on another provider fails with a clear error). Gated by the same consent flag as ordinary LLM calls (`languageModelProgrammaticConsent`), plus the approval dialog(s) below.
+
+**`claude`** — routes to the Claude Code CLI's own tool loop (`ClaudeCodeAdapter`, `toolMode: 'full'`). AutoDE does not intercept individual tool calls; Claude Code runs its own multi-turn loop opaquely and returns a final result.
+- The skill's instructions are injected via `--append-system-prompt` (a proven, tested flag) — **this is not native Claude Code plugin/skill loading via `--plugin-dir`**, which would require a plugin manifest format that isn't documented anywhere AutoDE could verify; guessing at it risked silently not working, so it was not attempted.
+- Tool surface: `Read Grep Glob Edit Write Bash`, with `--permission-mode acceptEdits`. **Verified against the real CLI:** the default permission mode silently blocks Edit/Write in headless (`-p`) runs (no interactive session exists to answer the prompt) — `acceptEdits` was required and confirmed, end-to-end, to actually write a file. **Not verified:** Bash/command execution under `acceptEdits` — in local testing the model described a requested command as text rather than invoking the tool; treat command execution via this path as best-effort until observed working, not a guarantee.
+- Approval: **one confirmation dialog for the whole run** ("Run skill X with file write and command execution access, scoped to this workspace?"), not per individual tool call. Claude Code does have its own permission-prompt callback mechanism (`--permission-prompts host` + an external tool, per its `--help`) but the callback's expected schema isn't documented anywhere accessible, so it isn't wired up — this is a **known, deliberate scope reduction** from true per-call approval on this path.
+- Sandbox: Claude Code's tools operate relative to the `cwd` passed to the subprocess (the workspace root) — not independently hardened by AutoDE beyond that.
+
+**`copilot`** — AutoDE owns a real multi-turn tool-calling loop, built on the documented `vscode.lm` tool-calling API (`LanguageModelChatRequestOptions.tools`, `LanguageModelToolCallPart` / `LanguageModelToolResultPart`, verified against the installed `@types/vscode` definitions before writing any code — not guessed). Four private tools (not registered via `vscode.lm.registerTool`, so not visible to other extensions): `autode_read_file`, `autode_list_dir`, `autode_write_file`, `autode_run_command`.
+- Approval: **every** `autode_write_file` / `autode_run_command` call shows its own `vscode.window.showWarningMessage` confirmation before executing — true per-call approval, the thing the Claude path can't do.
+- Sandbox: every path argument is resolved against the workspace root and rejected if it would escape it (`resolveSandboxedPath` in `ToolSkillAgent.ts`); `autode_run_command` runs via `child_process.exec` with `cwd` set to the workspace root (no independent process sandboxing beyond that — a sufficiently adversarial command run from an approved call could still, e.g., read files elsewhere on disk; approval is the operative control, not a hard OS-level jail).
+- Audit: every tool call (name, input, outcome: `ok`/`approved`/`denied`/`error`) is logged and returned in the result's `details.audit`.
+- **Not verified against a live Copilot session** — this environment has no way to run an actual VS Code host with Copilot attached; the loop's logic is correct against the documented API and compiles, but has not been observed running end-to-end the way the Claude path was.
+
+### 9a.3 Invocation
+
+- Chat: `/skill <skillId> <instruction>` (mirrors the existing `/spec`, `/plan` slash-command convention).
+- Command: `AutoDE: Run Tool Skill` → quick-pick over imported skills → input box for the instruction.
+- **Not** reachable from the auto-generated plan DAG: `toolSkillAgent` is a full `AGENT_EXECUTORS` entry (so an explicit run can execute it) but is deliberately **excluded** from `VALID_AGENT_TYPES` / the planner's prompt allow-list — the planning LLM has no visibility into which skills are imported and could otherwise hallucinate a `skillId`. A future "reference an imported skill inside a generated plan" feature would need a different mechanism (e.g., listing imported skills in the plan prompt) — not built.
+
+### 9a.4 Deliberately not built (from the original architecture-review scope)
+
+- Native Claude Code plugin/skill loading (`--plugin-dir`) — see 9a.2.
+- Per-call approval on the Claude path — see 9a.2.
+- A hard OS-level sandbox (container, restricted user, etc.) for either path — the sandbox is a path-prefix check plus, for Copilot, per-call approval; for Claude, whatever Claude Code's own tool implementations do.
+- Any tool surface beyond read/write/exec (no network-restricted fetch tool, no code-execution-specific tool distinct from `autode_run_command`).
+- Making an imported skill's own deterministic capability (if any) callable as a "tool" by the other 6 template agents, or vice versa — the two systems (deterministic `AGENT_EXECUTORS` vs. agentic tool-skill runs) remain separate, nested (one new agent slot runs a tool loop internally; the outer DAG loop is unchanged), not merged.
 
 ---
 
@@ -399,9 +487,9 @@ Limitations & Risks:
 3. Token Precision Test:
    - Request context with `maxTokens: 1500`. The returned prompt must be strictly within the token budget using js-tiktoken; tests must ensure that pruning doesn't cut code blocks or break JSON/Markdown syntax.
 
-4. Copilot Consent & Safety Test:
-   - When user enables programmatic Copilot usage and Copilot exports are available, calling `testCopilot` returns a result and agentHub will route LLM calls to the adapter.
-   - If user declines consent or adapter is not available, programmatic calls are not made; fallback handoff works.
+4. Local LLM Consent & Safety Test:
+   - With `languageModelProgrammaticConsent` enabled and the active provider available (a Copilot `vscode.lm` model, or a resolvable Claude Code CLI), `testLanguageModel` returns a result and agentHub routes LLM calls through the matching adapter.
+   - If the user declines consent, or the provider is unavailable (no Copilot model / no `claude` CLI found), programmatic calls are not made and the error names the fix; the Copilot handoff fallback still works for `copilot`.
 
 5. Clean Extension Deactivation:
    - Deactivation must stop file watchers, terminate worker threads, dispose graphs, and release file handles within 200ms in normal conditions.
@@ -457,10 +545,16 @@ Phase 5 — Retrieval & embeddings
 - Implement `ContextRetriever` (graph + token pruning; vector later).
 - Implement `Vector Engine Worker` (embedded, no server).
 
-Phase 6 — Copilot, testing, telemetry, docs
-- Copilot `vscode.lm` adapter (done) + consent modal in webview.
+Phase 6 — Local LLMs (Copilot & Claude Code), testing, telemetry, docs
+- `vscode.lm` adapter for Copilot + Claude Code CLI adapter for `claude` (done) + consent modal in webview.
 - Unit/integration tests for context layer and adapters.
 - Opt-in telemetry + privacy docs.
+
+Phase 7 — Architecture review follow-through (v0.9.0)
+- ✅ **Phase A — Spec revision.** Approved specs are never edited in place; "↻ Revise" (and `/spec <change>` on an approved spec) starts a full agentic revision interview seeded with the approved spec, ending in a new draft `version+1`. Field-preservation safety net + provenance carry-forward in `parseComprehensiveSpec`. Supplementary information (registered sources + ad-hoc file attachment) wired into the interview. §8.6.1.
+- ✅ **Phase B — Versioning & governance.** Git is the version/audit log (a "🕓 History" action, not a parallel version store); `ArtifactWriter` stamps every artifact's folder with `<specId>.v<version>`; the palette flags artifact sets superseded by a newer approved spec. §8.7, §7.
+- ✅ **Phase C — LLM adapter registry.** `callConfiguredLlm`'s if/else chain + the stale, disconnected `LLM_PROVIDER_REGISTRY` replaced by one `LlmAdapter` registry (`src/core/llmProviders.ts`) — adding a provider is one class + one line, not an edited branch. UI/settings-schema deliberately left hand-authored (backend-only scope). `technical-design.md` §6.0.
+- ✅ **Phase D — Tool-executing Skills**, scoped down from the original discussion (see §9a for exactly what and why): import via `SKILL.md`; Claude runs via its own CLI tool loop (one confirmation, not per-call; `--permission-mode acceptEdits` required and verified against the real CLI; Bash execution unverified); Copilot runs via a real, AutoDE-owned `vscode.lm` tool-calling loop (true per-call approval + audit log; logic verified, not exercised against a live Copilot session). Not native Claude Code plugin loading; not per-call approval on the Claude path; not a hard OS sandbox on either path.
 
 ---
 
@@ -487,7 +581,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 - UI webviews: `media/sidebar.html`, `media/panel.html`, `media/editors/*.html`
 - Context layer: `src/context/` — `types.ts`, `Yaml.ts` (real YAML parser), `ContextValidator.ts` (AJV envelope validation), `GraphPersistence.ts` (atomic graph snapshot I/O), `GraphManager.ts`, `ContextFileManager.ts`, `SourceRegistry.ts`, `SynthesisPipeline.ts`, `ArtifactWriter.ts`, `SpecManager.ts`
-- Copilot adapter: `src/core/copilotAdapter.ts`
+- Language model adapters: `src/core/languageModelAdapter.ts` (Copilot; `copilotAdapter.ts` = re-export shim) and `src/core/claudeCodeAdapter.ts` (Claude Code CLI)
 - Webview providers: `src/core/webviewProvider.ts`, `src/core/panelProvider.ts`
 - Agent hub: `src/core/agentHub.ts`
 - Phase inference: `src/core/phaseInference.ts` (spec-driven inference + live phase status, pure module)
@@ -500,7 +594,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 ## 15. Acceptance & Review Checklist
 
 - [ ] UI: context section surfaces Enterprise Context Layer (layers, terms, rules, queries, relationships); source-file registration form present.
-- [x] Webview: LLM settings show Copilot status and consent checkbox; test button present.
+- [x] Webview: LLM settings show provider status (Copilot models / Claude Code CLI path+version) and consent checkbox; Test + Detect buttons present.
 - [x] Envelope: unified metadata envelope (identity + provenance + version + ownership) implemented in `src/context/types.ts` (per-kind `content` union deferred).
 - [x] GraphManager: in-memory graph with indexes, BFS traversal, serialization.
 - [~] ContextFileManager: watcher + loading present; AJV envelope validation + real YAML parser + atomic graph persistence + layered (`context/**` + `derived/graph.json`) loading wired with `ContextValidator` (Phase 3 parts 1 & 2 ✅); per-kind AJV content schemas deferred.
@@ -510,7 +604,7 @@ Phase 6 — Copilot, testing, telemetry, docs
 - [x] Single-workspace model: `ProjectManager`/`ProjectRegistry` removed.
 - [ ] ContextRetriever: token-aware prompt assembler.
 - [ ] Vector/embedding engine (embedded, no server).
-- [x] CopilotAdapter: `vscode.lm` detection + adapter; agentHub respects consent.
+- [x] LanguageModelAdapter (`vscode.lm`, `copilot`) + ClaudeCodeAdapter (`claude -p`, `claude`); agentHub respects consent for both.
 - [~] Documentation: this revision (BPS §8 fully documented).
 - [x] BPS types + `SpecManager`: persistence/versioning/history + atomic writes.
 - [x] `AgentHub.generateSpec` + `generatePlanFromSpec`: spec drafting/refining + spec-driven plan.
@@ -582,12 +676,12 @@ Phase 6 — Copilot, testing, telemetry, docs
   - Results preview for executed SQL.
   - Export functionality (Markdown/YAML).
 
-### 16.4 Phase 6 — Copilot, Testing, Telemetry, Docs
+### 16.4 Phase 6 — Local LLMs (Copilot & Claude Code), Testing, Telemetry, Docs
 
-- **Copilot consent modal.**
+- **Language model consent modal.**
   - *Files:* `media/sidebar.html`, `src/core/webviewProvider.ts`.
-  - *Current state:* Only an opt-in toggle (`copilotProgrammaticConsent`) in LLM Settings; no modal/dialog.
-  - *What to do:* Add a one-time consent modal when the user first enables programmatic Copilot (requirements §9).
+  - *Current state:* Only an opt-in toggle (`languageModelProgrammaticConsent`, legacy `copilotProgrammaticConsent`) in LLM Settings; no modal/dialog.
+  - *What to do:* Add a one-time consent modal when the user first enables programmatic use of a local LLM (Copilot or Claude Code) — requirements §9.
 
 - **Opt-in telemetry implementation + privacy docs.**
   - *Files:* config flag `autoDataEngineeringHub.telemetryEnabled` exists (`package.json`, default `false`); no telemetry code.
@@ -612,8 +706,13 @@ Phase 6 — Copilot, testing, telemetry, docs
 
 - **Intake-session persistence.**
   - *Files:* `src/core/specOps.ts` (`SpecOpsEngine`), new `.ai-context/spec/intake.yaml`.
-  - *Current state:* Intake session state (questions, answers, coverage) is in-memory only; lost on reload.
+  - *Current state:* Intake session state (questions, answers, coverage, and — since the revision fix (§8.6.1) — `previousSpec`/`changeRequest`/`attachments`) is in-memory only; lost on reload. This now affects revision interviews too, not just the original discovery flow.
   - *What to do:* Persist to `.ai-context/spec/intake.yaml` so a conversation survives reload/resume.
+
+- **Revision emergency-fallback loses v2 fields.**
+  - *Files:* `src/core/webviewProvider.ts` (`synthesizeFromSession` catch block), `src/core/agentHub.ts` (`generateSpec`/`parseSpecResponse`).
+  - *Current state:* If the comprehensive-synthesis LLM call throws, the fallback re-drafts via the older v1-only `generateSpec`, which doesn't know about `dataFlows`/`businessRequirements`/etc. — those are dropped in this (rare, error-path-only) case even though the primary revision path preserves them.
+  - *What to do:* Either give `parseSpecResponse` the same previous-value fallback treatment as `parseComprehensiveSpec`, or retry the comprehensive path before falling back to v1.
 
 - **Skills authoring guidance.**
   - *Files:* `skills/*.json` (bundled), `.ai-context/skills/` (user overrides).
