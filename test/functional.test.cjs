@@ -2142,6 +2142,26 @@ async function main() {
     assert.strictEqual(skillNameForField('unownedField', skills), undefined);
   });
 
+  await test('createDisposableRegistry() disposes every registered disposable, in reverse registration order', () => {
+    const { createDisposableRegistry } = require('../dist/core/disposables.js');
+    const order = [];
+    const registry = createDisposableRegistry();
+    registry.register({ dispose: () => order.push('first') });
+    registry.register({ dispose: () => order.push('second') });
+    registry.disposeAll();
+    assert.deepStrictEqual(order, ['second', 'first']);
+  });
+
+  await test('createDisposableRegistry() keeps disposing the rest even if one dispose() throws', () => {
+    const { createDisposableRegistry } = require('../dist/core/disposables.js');
+    let secondDisposed = false;
+    const registry = createDisposableRegistry();
+    registry.register({ dispose: () => { secondDisposed = true; } });
+    registry.register({ dispose: () => { throw new Error('boom'); } });
+    registry.disposeAll();
+    assert.strictEqual(secondDisposed, true);
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

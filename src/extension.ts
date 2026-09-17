@@ -14,6 +14,15 @@ import { GraphEditorProvider } from './editors/GraphEditorProvider';
 import { ProfileEditorProvider } from './editors/ProfileEditorProvider';
 import { DocEditorProvider } from './editors/DocEditorProvider';
 import { EDITOR_DATA_MODEL, EDITOR_STTM, EDITOR_GRAPH, EDITOR_PROFILE, EDITOR_DOC } from './core/extensionIdentity';
+import { createDisposableRegistry } from './core/disposables';
+
+/**
+ * Resources that outlive a single command (e.g. `connectionManager` below,
+ * reassigned across "Test Connection" calls) live in `activate()`'s closure,
+ * which `deactivate()` cannot see. Register anything here that needs to be
+ * torn down on extension shutdown instead of relying on GC.
+ */
+const disposableRegistry = createDisposableRegistry();
 
 /** Recursively copies a directory via vscode.workspace.fs (used to import a skill folder). */
 async function copyDirectoryRecursive(source: vscode.Uri, target: vscode.Uri): Promise<void> {
@@ -82,6 +91,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const panelProvider = new DataAgentHubPanelProvider(context, hub);
 
   let connectionManager: ConnectionManager | undefined;
+  disposableRegistry.register({ dispose: () => connectionManager?.dispose() });
 
   // Initialize TargetConfigManager (.ai-context/target-environment.yaml, profile
   // inheritance) — kept instantiated for future dev/staging/prod profile
@@ -408,5 +418,5 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  // Intentionally empty.
+  disposableRegistry.disposeAll();
 }
