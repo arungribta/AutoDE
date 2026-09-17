@@ -1,5 +1,7 @@
 import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
 import { generateWithLlm } from '../llmCodegen';
+import { generateViaPrimitiveOrFallback } from '../llmParamSelector';
+import { platformToDialect } from '../../core/transforms/platformDialect';
 
 export async function executeSttmAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const task = step.taskDescription.trim();
@@ -13,26 +15,36 @@ export async function executeSttmAgent(step: PlanStep, context: AgentExecutionCo
   const targetDb = pc?.['database'] || context.settings.defaultSnowflakeDatabase || 'CURATED_DB';
   const targetSchema = pc?.['schema'] || context.settings.defaultSnowflakeSchema || 'ANALYTICS';
   const namingConvention = target?.namingConvention || 'snake_case';
+  const platform = target?.platform || 'snowflake';
+  const fullyQualifiedTargetView = `${targetDb}.${targetSchema}.${targetView}`;
 
-  const llmSql = await generateWithLlm(context, step, {
-    role: 'a data integration engineer producing a source-to-target mapping (STTM)',
-    fence: 'sql',
-    instructions: [
-      `Write a CREATE OR REPLACE VIEW ${targetDb}.${targetSchema}.${targetView} AS SELECT ... FROM ${sourceTable} statement.`,
-      `Map real source fields named in the task/context above to meaningful target field names (${namingConvention}) — never generic placeholders like "mapped_1".`,
-      'If specific source columns are not named anywhere in the context, infer plausible field names from the business entities described, and note that assumption is being made via a SQL comment at the top.'
-    ].join(' ')
-  });
+  const generated = await generateViaPrimitiveOrFallback(
+    context,
+    step,
+    ['rename_cast'],
+    { platform, database: targetDb, schema: targetSchema },
+    platformToDialect(platform),
+    () => generateWithLlm(context, step, {
+      role: 'a data integration engineer producing a source-to-target mapping (STTM)',
+      fence: 'sql',
+      instructions: [
+        `Write a CREATE OR REPLACE VIEW ${fullyQualifiedTargetView} AS SELECT ... FROM ${sourceTable} statement.`,
+        `Map real source fields named in the task/context above to meaningful target field names (${namingConvention}) — never generic placeholders like "mapped_1".`,
+        'If specific source columns are not named anywhere in the context, infer plausible field names from the business entities described, and note that assumption is being made via a SQL comment at the top.'
+      ].join(' ')
+    }),
+    () => templateSql(sourceTable, targetDb, targetSchema, targetView, task),
+    { sourceObject: sourceTable, targetObject: fullyQualifiedTargetView, objectKind: 'view' }
+  );
 
-  const sql = llmSql ?? templateSql(sourceTable, targetDb, targetSchema, targetView, task);
-  context.log(`STTM agent for ${step.id} created ${llmSql ? 'LLM-derived' : 'template'} mapping (${namingConvention}) → ${targetDb}.${targetSchema}.${targetView}`);
+  context.log(`STTM agent for ${step.id} created ${generated.source} mapping (${namingConvention}) → ${fullyQualifiedTargetView}`);
 
   const artifact: GeneratedArtifact = {
     id: `sttm-${step.id}-${Date.now()}`,
     type: 'sttm_mapping',
     title: `STTM Mapping: ${targetView}`,
-    description: `Source-to-target mapping from ${sourceTable} to ${targetDb}.${targetSchema}.${targetView}`,
-    content: sql,
+    description: `Source-to-target mapping from ${sourceTable} to ${fullyQualifiedTargetView}`,
+    content: generated.content,
     language: 'sql',
     generatedBy: 'sttmAgent',
     generatedAt: new Date().toISOString(),
@@ -45,13 +57,14 @@ export async function executeSttmAgent(step: PlanStep, context: AgentExecutionCo
 
   return {
     success: true,
-    message: `STTM step ${step.id} calculated a source-to-target mapping for ${targetDb}.${targetSchema}.${targetView}.`,
+    message: `STTM step ${step.id} calculated a source-to-target mapping for ${fullyQualifiedTargetView}.`,
     details: {
-      sql,
+      sql: generated.content,
       targetView,
       targetDb,
       targetSchema,
-      namingConvention
+      namingConvention,
+      transformSpecSource: generated.source
     },
     artifacts: [artifact]
   };

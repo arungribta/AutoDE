@@ -1,3 +1,5 @@
+import { TransformSpec } from './transforms/types';
+
 export type LlmProvider = 'azure-openai' | 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'copilot' | 'claude';
 export type DataPlatformProvider = 'snowflake' | 'databricks' | 'bigquery' | 'redshift' | 'synapse' | 'other';
 export type SnowflakeAuthMode = 'username-password' | 'oauth' | 'key-pair' | 'external-browser' | 'mcp';
@@ -607,6 +609,14 @@ export interface AgentExecutionContext {
   /** Which skill to run + the user's instruction — populated by the caller (plan step or chat). */
   skillId?: string;
   skillInstruction?: string;
+  /**
+   * Lets a caller (a future spec/UI authoring flow) supply a transform
+   * primitive spec directly, bypassing the LLM's own primitive-selection
+   * step entirely (Phase 2, see core/transforms/). When set, a codegen
+   * agent's "try primitive first" branch compiles this instead of asking
+   * the LLM to choose one.
+   */
+  transformSpec?: TransformSpec;
 }
 
 export interface AgentExecutionResult {

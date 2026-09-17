@@ -1,5 +1,7 @@
 import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
 import { generateWithLlm } from '../llmCodegen';
+import { generateViaPrimitiveOrFallback } from '../llmParamSelector';
+import { platformToDialect } from '../../core/transforms/platformDialect';
 
 /**
  * Transformation Scaffolder Agent
@@ -21,6 +23,7 @@ export async function executeTransformScaffoldAgent(
   const targetDb = pc?.['database'] || 'CURATED_DB';
   const targetSchema = pc?.['schema'] || 'ANALYTICS';
   const namingConvention = target?.namingConvention || 'snake_case';
+  const platform = target?.platform || 'snowflake';
 
   context.log(`Transformation Scaffolder generating dbt project for ${targetDb}.${targetSchema}...`);
 
@@ -31,14 +34,25 @@ export async function executeTransformScaffoldAgent(
   const dbtProjectYml = generateDbtProjectYml(projectName, targetDb, targetSchema);
   artifacts.push(createArtifact(step, 'dbt_project.yml', dbtProjectYml, 'yaml', 'dbt project configuration'));
 
-  // 2. Staging model — LLM-grounded in the actual source entities, falls back to the sales example.
-  const llmStaging = await generateWithLlm(context, step, {
-    role: 'a dbt analytics engineer writing a staging model',
-    fence: 'sql',
-    instructions: `Write a dbt staging model (models/staging/) for ${targetDb}.${targetSchema} using ${namingConvention} naming — a {{ source(...) }} reference, light typing/renaming, a not-null filter on the primary key. Base the source and column names on the actual entities named in the task/context above, not a generic sales example, unless nothing more specific is available.`
-  });
-  const stagingModel = llmStaging ?? generateStagingModel(targetDb, targetSchema, namingConvention);
-  artifacts.push(createArtifact(step, `models/staging/${applyNaming('stg_source', namingConvention)}.sql`, stagingModel, 'sql', 'staging model'));
+  // 2. Staging model — a deterministic rename_cast primitive first (tier 0), grounded via the
+  // LLM's column choices only; falls back to freehand LLM generation, then the sales example.
+  const stagingModelName = applyNaming('stg_source', namingConvention);
+  const stagingGenerated = await generateViaPrimitiveOrFallback(
+    context,
+    step,
+    ['rename_cast'],
+    { platform, database: targetDb, schema: targetSchema },
+    platformToDialect(platform),
+    () => generateWithLlm(context, step, {
+      role: 'a dbt analytics engineer writing a staging model',
+      fence: 'sql',
+      instructions: `Write a dbt staging model (models/staging/) for ${targetDb}.${targetSchema} using ${namingConvention} naming — a {{ source(...) }} reference, light typing/renaming, a not-null filter on the primary key. Base the source and column names on the actual entities named in the task/context above, not a generic sales example, unless nothing more specific is available.`
+    }),
+    () => generateStagingModel(targetDb, targetSchema, namingConvention),
+    { sourceObject: `${targetSchema.toLowerCase()}.raw_source`, targetObject: stagingModelName, objectKind: 'dbt_model' }
+  );
+  const stagingModel = stagingGenerated.content;
+  artifacts.push(createArtifact(step, `models/staging/${stagingModelName}.sql`, stagingModel, 'sql', 'staging model'));
 
   // 3. Intermediate model (templated — a generic aggregation step is a reasonable placeholder regardless of domain).
   const intermediateModel = generateIntermediateModel(targetDb, targetSchema, namingConvention);
@@ -52,7 +66,7 @@ export async function executeTransformScaffoldAgent(
   });
   const martsModel = llmMarts ?? generateMartsModel(targetDb, targetSchema, namingConvention);
   artifacts.push(createArtifact(step, `models/marts/${applyNaming('fct_main', namingConvention)}.sql`, martsModel, 'sql', 'marts model'));
-  context.log(`Transformation Scaffolder used ${llmStaging ? 'LLM-derived' : 'template'} staging and ${llmMarts ? 'LLM-derived' : 'template'} marts models.`);
+  context.log(`Transformation Scaffolder used ${stagingGenerated.source} staging and ${llmMarts ? 'LLM-derived' : 'template'} marts models.`);
 
   // 5. Schema YML with tests
   const schemaYml = generateSchemaYml(targetDb, targetSchema, namingConvention);
@@ -81,7 +95,8 @@ export async function executeTransformScaffoldAgent(
       targetDb,
       targetSchema,
       fileCount: artifacts.length,
-      files: artifacts.map((a) => a.title)
+      files: artifacts.map((a) => a.title),
+      transformSpecSource: stagingGenerated.source
     },
     artifacts
   };

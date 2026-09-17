@@ -2142,6 +2142,147 @@ async function main() {
     assert.strictEqual(skillNameForField('unownedField', skills), undefined);
   });
 
+  // ── Phase 2: deterministic transform primitives ──
+
+  await test('renameCastPrimitive.compile() produces exact, deterministic SQL for a view target', () => {
+    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const spec = {
+      sourceObject: 'RAW_DB.PUBLIC.raw_customers',
+      targetObject: 'CURATED_DB.STAGING.stg_customers',
+      objectKind: 'view',
+      columns: [
+        { source: 'cust_id', target: 'customer_id', type: 'STRING' },
+        { source: 'cust_name', target: 'customer_name' }
+      ]
+    };
+    const compiled = TRANSFORM_PRIMITIVES.rename_cast.compile(spec, { platform: 'snowflake', database: 'CURATED_DB', schema: 'STAGING' }, 'snowflake');
+    assert.strictEqual(compiled.content, 'CREATE OR REPLACE VIEW CURATED_DB.STAGING.stg_customers AS\nSELECT\n  cust_id::STRING AS customer_id,\n  cust_name AS customer_name\nFROM RAW_DB.PUBLIC.raw_customers;\n');
+    const secondRun = TRANSFORM_PRIMITIVES.rename_cast.compile(spec, { platform: 'snowflake', database: 'CURATED_DB', schema: 'STAGING' }, 'snowflake');
+    assert.strictEqual(secondRun.content, compiled.content, 'compiling the same spec twice is byte-identical (pure function, no LLM involved)');
+  });
+
+  await test('renameCastPrimitive.compile() produces a dbt staging model when objectKind is "dbt_model"', () => {
+    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const compiled = TRANSFORM_PRIMITIVES.rename_cast.compile({
+      sourceObject: 'staging.raw_orders',
+      targetObject: 'stg_orders',
+      objectKind: 'dbt_model',
+      columns: [{ source: 'order_id', target: 'order_id' }]
+    }, { platform: 'databricks', database: 'db', schema: 'staging' }, 'spark_sql');
+    assert.ok(compiled.content.includes("{{ source('staging', 'raw_orders') }}"), 'builds a dbt source() reference from the schema.table source object');
+    assert.ok(!compiled.content.includes('CREATE OR REPLACE'), 'a dbt model body has no DDL wrapper — dbt owns materialization');
+  });
+
+  await test('dedupPrimitive.compile() uses EXCLUDE on Snowflake and EXCEPT on every other dialect', () => {
+    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const spec = {
+      sourceObject: 'src.customers',
+      targetObject: 'tgt.customers_dedup',
+      partitionByColumns: ['customer_id'],
+      orderByColumn: 'updated_at'
+    };
+    const snowflakeSql = TRANSFORM_PRIMITIVES.dedup.compile(spec, { platform: 'snowflake', database: 'd', schema: 's' }, 'snowflake');
+    const sparkSql = TRANSFORM_PRIMITIVES.dedup.compile(spec, { platform: 'databricks', database: 'd', schema: 's' }, 'spark_sql');
+    assert.ok(snowflakeSql.content.includes('EXCLUDE (__dedup_rn)'));
+    assert.ok(sparkSql.content.includes('EXCEPT (__dedup_rn)'));
+    assert.ok(snowflakeSql.content.includes('ORDER BY updated_at DESC'), 'defaults to DESC (latest wins) when orderDirection is omitted');
+  });
+
+  await test('incrementalLoadPrimitive.compile() produces a deterministic MERGE keyed on keyColumns', () => {
+    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const compiled = TRANSFORM_PRIMITIVES.incremental_load.compile({
+      sourceObject: 'src.orders_cdc',
+      targetObject: 'tgt.orders',
+      keyColumns: ['order_id'],
+      updateColumns: ['status', 'total']
+    }, { platform: 'snowflake', database: 'd', schema: 's' }, 'snowflake');
+    assert.ok(compiled.content.includes('MERGE INTO tgt.orders AS tgt'));
+    assert.ok(compiled.content.includes('ON tgt.order_id = src.order_id'));
+    assert.ok(compiled.content.includes('tgt.status = src.status'));
+    assert.ok(compiled.content.includes('INSERT (order_id, status, total)'));
+  });
+
+  await test('validateTransformSpec() rejects params missing a required field, and an unknown primitive kind', () => {
+    const { validateTransformSpec } = require('../dist/core/transforms/registry.js');
+    const missingField = validateTransformSpec({ kind: 'dedup', params: { sourceObject: 's', targetObject: 't', partitionByColumns: ['id'] } });
+    assert.strictEqual(missingField.valid, false, 'orderByColumn is required and was omitted');
+    const unknownKind = validateTransformSpec({ kind: 'not_a_real_primitive', params: {} });
+    assert.strictEqual(unknownKind.valid, false);
+    assert.ok(unknownKind.errors[0].includes('Unknown primitive kind'));
+  });
+
+  function baseAgentContext(callLlm) {
+    return { objective: 'obj', schemaContext: 'ctx', sourceProvider: 'snowflake', settings: {}, configManager: { getSecret: async () => undefined, getSettings: () => ({}) }, log: () => {}, callLlm };
+  }
+
+  await test('selectTransformSpec() returns a validated spec for a well-formed fenced JSON response, merging in fixedParams last', async () => {
+    const { selectTransformSpec } = require('../dist/agents/llmParamSelector.js');
+    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Dedup customers by id', status: 'pending' };
+    const context = baseAgentContext(async () => '```json\n{"kind": "dedup", "params": {"sourceObject": "src.c", "targetObject": "IGNORED", "partitionByColumns": ["customer_id"], "orderByColumn": "updated_at"}}\n```');
+    const spec = await selectTransformSpec(context, step, ['dedup'], { targetObject: 'tgt.c_dedup' });
+    assert.strictEqual(spec.kind, 'dedup');
+    assert.strictEqual(spec.params.targetObject, 'tgt.c_dedup', 'fixedParams overrides whatever the LLM put in that field');
+  });
+
+  await test('selectTransformSpec() returns undefined (never throws) for malformed JSON, an out-of-candidate kind, or invalid params', async () => {
+    const { selectTransformSpec } = require('../dist/agents/llmParamSelector.js');
+    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
+
+    const notJson = await selectTransformSpec(baseAgentContext(async () => 'Sure! Here is some SQL: SELECT 1;'), step, ['dedup']);
+    assert.strictEqual(notJson, undefined);
+
+    const wrongKind = await selectTransformSpec(baseAgentContext(async () => '```json\n{"kind": "incremental_load", "params": {}}\n```'), step, ['dedup']);
+    assert.strictEqual(wrongKind, undefined, 'incremental_load was not in the candidate list');
+
+    const missingParams = await selectTransformSpec(baseAgentContext(async () => '```json\n{"kind": "dedup", "params": {"sourceObject": "s"}}\n```'), step, ['dedup']);
+    assert.strictEqual(missingParams, undefined, 'dedup requires targetObject/partitionByColumns/orderByColumn');
+
+    const throwing = await selectTransformSpec(baseAgentContext(async () => { throw new Error('LLM down'); }), step, ['dedup']);
+    assert.strictEqual(throwing, undefined);
+
+    const noLlm = await selectTransformSpec(baseAgentContext(undefined), step, ['dedup']);
+    assert.strictEqual(noLlm, undefined);
+  });
+
+  await test('generateViaPrimitiveOrFallback() compiles byte-identical SQL across two separate calls given the same LLM response', async () => {
+    const { generateViaPrimitiveOrFallback } = require('../dist/agents/llmParamSelector.js');
+    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Dedup customers by id, latest wins', status: 'pending' };
+    const context = baseAgentContext(async () => '```json\n{"kind": "dedup", "params": {"sourceObject": "src.c", "targetObject": "tgt.c", "partitionByColumns": ["customer_id"], "orderByColumn": "updated_at"}}\n```');
+    const target = { platform: 'snowflake', database: 'd', schema: 's' };
+
+    const first = await generateViaPrimitiveOrFallback(context, step, ['dedup'], target, 'snowflake', async () => 'FREEHAND FALLBACK', () => 'TEMPLATE FALLBACK');
+    const second = await generateViaPrimitiveOrFallback(context, step, ['dedup'], target, 'snowflake', async () => 'FREEHAND FALLBACK', () => 'TEMPLATE FALLBACK');
+
+    assert.strictEqual(first.source, 'primitive');
+    assert.strictEqual(second.source, 'primitive');
+    assert.strictEqual(first.content, second.content, 'the LLM only chose kind+params — the compiler produced identical SQL both times');
+  });
+
+  await test('generateViaPrimitiveOrFallback() falls back to the freehand tier, then the template tier, when primitive selection fails', async () => {
+    const { generateViaPrimitiveOrFallback } = require('../dist/agents/llmParamSelector.js');
+    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
+    const target = { platform: 'snowflake', database: 'd', schema: 's' };
+
+    const noValidSpec = baseAgentContext(async () => 'not json at all');
+    const freehandResult = await generateViaPrimitiveOrFallback(noValidSpec, step, ['dedup'], target, 'snowflake', async () => 'FREEHAND SQL', () => 'TEMPLATE SQL');
+    assert.deepStrictEqual(freehandResult, { content: 'FREEHAND SQL', source: 'freehand' });
+
+    const templateResult = await generateViaPrimitiveOrFallback(noValidSpec, step, ['dedup'], target, 'snowflake', async () => undefined, () => 'TEMPLATE SQL');
+    assert.deepStrictEqual(templateResult, { content: 'TEMPLATE SQL', source: 'template' });
+  });
+
+  await test('generateViaPrimitiveOrFallback() honors context.transformSpec as a direct bypass of LLM selection', async () => {
+    const { generateViaPrimitiveOrFallback } = require('../dist/agents/llmParamSelector.js');
+    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
+    const target = { platform: 'snowflake', database: 'd', schema: 's' };
+    const context = { ...baseAgentContext(async () => { throw new Error('should never be called'); }),
+      transformSpec: { kind: 'rename_cast', params: { sourceObject: 's.raw', targetObject: 't.clean', columns: [{ source: 'a', target: 'b' }] } } };
+
+    const result = await generateViaPrimitiveOrFallback(context, step, ['rename_cast'], target, 'snowflake', async () => 'FREEHAND', () => 'TEMPLATE');
+    assert.strictEqual(result.source, 'primitive');
+    assert.ok(result.content.includes('t.clean'));
+  });
+
   await test('createDisposableRegistry() disposes every registered disposable, in reverse registration order', () => {
     const { createDisposableRegistry } = require('../dist/core/disposables.js');
     const order = [];
