@@ -1,10 +1,16 @@
 import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
+import { generateWithLlm } from '../llmCodegen';
 
 /**
  * Transformation Scaffolder Agent
  *
- * Generates dbt project scaffolding including models, tests, macros,
- * and YAML configuration files based on the target environment.
+ * Generates dbt project scaffolding including models, tests, macros, and YAML
+ * configuration files. The two models a reader actually looks at first —
+ * staging (what comes in) and marts (what ships) — are LLM-generated,
+ * grounded in the task/objective/context, since those are where a generic
+ * "sales/customer/product" placeholder is most obviously wrong for a
+ * different domain. Project config, intermediate model, tests, and macros
+ * stay templated — genuinely boilerplate regardless of domain.
  */
 export async function executeTransformScaffoldAgent(
   step: PlanStep,
@@ -25,25 +31,38 @@ export async function executeTransformScaffoldAgent(
   const dbtProjectYml = generateDbtProjectYml(projectName, targetDb, targetSchema);
   artifacts.push(createArtifact(step, 'dbt_project.yml', dbtProjectYml, 'yaml', 'dbt project configuration'));
 
-  // 2. Model SQL files
-  const stagingModel = generateStagingModel(targetDb, targetSchema, namingConvention);
-  artifacts.push(createArtifact(step, `models/staging/${applyNaming('stg_sales', namingConvention)}.sql`, stagingModel, 'sql', 'staging model'));
+  // 2. Staging model — LLM-grounded in the actual source entities, falls back to the sales example.
+  const llmStaging = await generateWithLlm(context, step, {
+    role: 'a dbt analytics engineer writing a staging model',
+    fence: 'sql',
+    instructions: `Write a dbt staging model (models/staging/) for ${targetDb}.${targetSchema} using ${namingConvention} naming — a {{ source(...) }} reference, light typing/renaming, a not-null filter on the primary key. Base the source and column names on the actual entities named in the task/context above, not a generic sales example, unless nothing more specific is available.`
+  });
+  const stagingModel = llmStaging ?? generateStagingModel(targetDb, targetSchema, namingConvention);
+  artifacts.push(createArtifact(step, `models/staging/${applyNaming('stg_source', namingConvention)}.sql`, stagingModel, 'sql', 'staging model'));
 
+  // 3. Intermediate model (templated — a generic aggregation step is a reasonable placeholder regardless of domain).
   const intermediateModel = generateIntermediateModel(targetDb, targetSchema, namingConvention);
   artifacts.push(createArtifact(step, `models/intermediate/${applyNaming('int_sales_aggregated', namingConvention)}.sql`, intermediateModel, 'sql', 'intermediate model'));
 
-  const martsModel = generateMartsModel(targetDb, targetSchema, namingConvention);
-  artifacts.push(createArtifact(step, `models/marts/${applyNaming('fct_sales', namingConvention)}.sql`, martsModel, 'sql', 'marts model'));
+  // 4. Marts model — LLM-grounded, the artifact most likely to actually be reviewed/shipped.
+  const llmMarts = await generateWithLlm(context, step, {
+    role: 'a dbt analytics engineer writing a marts (final, business-facing) model',
+    fence: 'sql',
+    instructions: `Write the final dbt marts model (models/marts/) for ${targetDb}.${targetSchema} using ${namingConvention} naming, referencing upstream models with {{ ref(...) }}. Base grain, columns, and joins on the actual business entities/metrics named in the task/context above, not a generic sales-fact example, unless nothing more specific is available.`
+  });
+  const martsModel = llmMarts ?? generateMartsModel(targetDb, targetSchema, namingConvention);
+  artifacts.push(createArtifact(step, `models/marts/${applyNaming('fct_main', namingConvention)}.sql`, martsModel, 'sql', 'marts model'));
+  context.log(`Transformation Scaffolder used ${llmStaging ? 'LLM-derived' : 'template'} staging and ${llmMarts ? 'LLM-derived' : 'template'} marts models.`);
 
-  // 3. Schema YML with tests
+  // 5. Schema YML with tests
   const schemaYml = generateSchemaYml(targetDb, targetSchema, namingConvention);
   artifacts.push(createArtifact(step, `models/marts/${applyNaming('schema', namingConvention)}.yml`, schemaYml, 'yaml', 'schema tests'));
 
-  // 4. Generic tests
+  // 6. Generic tests
   const genericTests = generateGenericTests(targetDb, targetSchema, namingConvention);
   artifacts.push(createArtifact(step, 'tests/generic/assert_positive_amounts.sql', genericTests, 'sql', 'generic test'));
 
-  // 5. Macros
+  // 7. Macros
   const macros = generateMacros(namingConvention);
   artifacts.push(createArtifact(step, `macros/${applyNaming('generate_schema_name', namingConvention)}.sql`, macros, 'sql', 'custom macro'));
 

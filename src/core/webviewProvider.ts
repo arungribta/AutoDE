@@ -4,11 +4,12 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec } from './types';
+import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, ContextQuestion, TargetContext, SourceContext, DataPlatformProvider, ToolExecutionMode } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
 import { SkillRegistry, loadSkillsFromDirectory } from './skillRegistry';
 import { composeSynthesisPrompt } from './specOpsPrompts';
+import { buildDiscoveryProgress as buildDiscoveryProgressPure, skillNameForField, DiscoveryProgress } from './discoveryProgress';
 import { GraphManager } from '../context/GraphManager';
 import { ContextFileManager } from '../context/ContextFileManager';
 import { ContextValidator } from '../context/ContextValidator';
@@ -17,7 +18,16 @@ import { SynthesisPipeline } from '../context/SynthesisPipeline';
 import { SpecManager } from '../context/SpecManager';
 import { ArtifactWriter } from '../context/ArtifactWriter';
 import { scanArtifactStaleness } from '../context/ArtifactStalenessScanner';
+import { ChatSessionManager } from '../context/ChatSessionManager';
+import { TargetContextManager } from '../context/TargetContextManager';
+import { SourceContextManager } from '../context/SourceContextManager';
+import { ActiveProblemManager } from '../context/ActiveProblemManager';
+import { generateProblemSlug } from './problemSlug';
+import { ConnectionManager } from '../dqm/ConnectionManager';
 import { applyCspNonce } from './webviewSecurity';
+import { classifyImplementationType } from './implementationType';
+import { buildTargetContextQuestions } from './targetContextQuestions';
+import { buildSourceContextQuestions } from './sourceContextQuestions';
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoDataEngineeringHubSidebar';
@@ -33,15 +43,36 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private pendingSpecQuestions: SpecIntakeQuestion[] = [];
   /** Armed by the spec card's "Revise" action; consumed by the next chat message. */
   private pendingRevision = false;
+  private chatSessionManager?: ChatSessionManager;
+  /** The chat session currently receiving persisted messages (Phase F) — independent of spec identity. */
+  private activeChatId?: string;
+  private targetContextManager?: TargetContextManager;
+  private sourceContextManager?: SourceContextManager;
+  private activeProblemManager?: ActiveProblemManager;
+  /** `undefined` = no active business problem yet (fresh workspace, or "Start New" before the first draft). */
+  private activeProblemId?: string;
+  private workspaceRoot?: vscode.Uri;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly configManager: ConfigurationManager,
-    private readonly hub: DataAgentHubHub
+    private readonly hub: DataAgentHubHub,
+    /** Re-points `hub`'s `PlanManager`/`ArtifactWriter` at a context root — owned by `extension.ts` so command-palette entry points keep working without the sidebar ever resolving. See `extension.ts#applyProblemRoot`. */
+    private readonly applyProblemRoot: (contextRoot: vscode.Uri) => Promise<void>
   ) {
     this.hub.setStateListener((state: PlanState) => this.postState(state));
     this.hub.setLogListener((message: string) => this.postLog(message));
     this.graphManager = new GraphManager();
+  }
+
+  /** For command-driven chat-session management (`extension.ts`) — undefined until the sidebar has resolved at least once. */
+  public getChatSessionManager(): ChatSessionManager | undefined {
+    return this.chatSessionManager;
+  }
+
+  /** "AutoDE: New Chat" command proxy. */
+  public async triggerNewChat(): Promise<void> {
+    await this.startNewChat();
   }
 
   /** Builds an AJV envelope validator from the bundled context-envelope JSON Schema. */
@@ -76,6 +107,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
     // Initialize context layer
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+    this.workspaceRoot = workspaceRoot;
+    this.activeProblemManager = new ActiveProblemManager(workspaceRoot, (msg: string) => this.postLog(msg));
     this.contextFileManager = new ContextFileManager(
       workspaceRoot,
       this.graphManager,
@@ -99,20 +132,39 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postLog(`Source registry initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Initialize business problem specification manager
-    this.specManager = new SpecManager(workspaceRoot, (msg: string) => this.postLog(msg));
+    // Activate whichever business problem is current (v0.12.0) — resolves the
+    // active-problem pointer and constructs every problem-scoped manager
+    // pointed at that folder, or leaves them unset for a true "no active
+    // problem" state. See `activateProblem` for the full sequence.
+    const initialProblemId = await this.activeProblemManager.getActiveProblemId();
+    await this.activateProblem(initialProblemId);
+
+    // Initialize chat sessions (Phase F) — independent of spec identity.
+    // v0.13.0 follow-up: a reload/restart no longer silently resumes the previous
+    // conversation into view — dev-host testing found this confusing alongside the
+    // "always reconstruct explicitly, never rely on residual session memory"
+    // principle from the multi-business-problem work (§8.11/§9). Instead, any
+    // session with actual content is folded (archived, never discarded — exactly
+    // what an explicit "New Chat" already does) and a fresh empty one takes its
+    // place; the folded session is resumable on demand via the sidebar's chat
+    // history picker (`openChatSession`, now a real resume rather than a read-only
+    // view — see §8a.4).
+    this.chatSessionManager = new ChatSessionManager(workspaceRoot, (msg: string) => this.postLog(msg));
     try {
-      await this.specManager.initialize();
-      const existingSpec = this.specManager.getSpec();
-      if (existingSpec) {
-        this.hub.setSpec(existingSpec.id, existingSpec.version);
-        if (existingSpec.status === 'approved') {
-          this.hub.inferPhasesFromSpec(existingSpec);
-        }
+      await this.chatSessionManager.initialize();
+      let active = await this.chatSessionManager.getActiveSession();
+      if (!active) {
+        active = await this.chatSessionManager.createSession({ llmProvider: this.configManager.getSettings().activeLlmProvider });
       }
-      this.postSpec();
+      this.activeChatId = active.id;
+      const transcript = await this.chatSessionManager.loadTranscript(active.id);
+      if (transcript.length > 0) {
+        await this.startNewChat();
+      } else {
+        this.postMessage('chatSessionLoaded', { meta: active, transcript });
+      }
     } catch (err) {
-      this.postLog(`Spec manager initialization failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.postLog(`Chat session initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Detect the active local-LLM provider (Copilot / Claude Code) and include
@@ -125,6 +177,90 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     } catch {
       this.postMessage('settingsLoaded', this.configManager.getSettings());
     }
+  }
+
+  /**
+   * (Re)activates a business problem (v0.12.0) — used at startup and
+   * whenever the user starts a new business problem or switches to an
+   * existing one. Always runs `hub.resetForNewProblem()` first so nothing
+   * from whichever problem was previously active can leak into this one
+   * (the stale-state bug from requirements.md §8/§9's audit). Also swaps the
+   * *shared* Context Layer graph's spec-derived layer (§10.2 of the audit):
+   * removes the previously-active spec's nodes, then re-synthesizes the
+   * newly-active one's — without this, switching problems would leak one
+   * business problem's objectives/constraints into another's prompts, the
+   * same class of bug this whole feature exists to close.
+   */
+  private async activateProblem(problemId: string | undefined): Promise<void> {
+    if (!this.workspaceRoot || !this.activeProblemManager) return;
+    const previousSpecId = this.hub.getPlan().specId;
+    this.activeProblemId = problemId;
+    this.hub.resetForNewProblem();
+    if (previousSpecId) {
+      await this.graphManager.removeNodesBySourceRef(`spec:${previousSpecId}`);
+    }
+
+    if (!problemId) {
+      this.specManager = undefined;
+      this.targetContextManager = undefined;
+      this.sourceContextManager = undefined;
+      this.postSpec();
+      this.postContextGateStatus();
+      this.postContextUpdate();
+      this.postMessage('activeProblemChanged', { problemId: undefined });
+      return;
+    }
+
+    const contextRoot = this.activeProblemManager.problemRoot(problemId);
+    await this.applyProblemRoot(contextRoot);
+
+    this.specManager = new SpecManager(contextRoot, (msg: string) => this.postLog(msg));
+    this.targetContextManager = new TargetContextManager(contextRoot, (msg: string) => this.postLog(msg));
+    this.sourceContextManager = new SourceContextManager(contextRoot, (msg: string) => this.postLog(msg));
+    try {
+      await this.specManager.initialize();
+      await this.targetContextManager.initialize();
+      await this.sourceContextManager.initialize();
+      const existingSpec = this.specManager.getSpec();
+      if (existingSpec) {
+        this.hub.setSpec(existingSpec.id, existingSpec.version);
+        if (existingSpec.status === 'approved') {
+          if (this.synthesisPipeline) { await this.synthesisPipeline.synthesizeFromSpec(existingSpec); }
+          this.hub.inferPhasesFromSpec(existingSpec, this.contextFileManager?.buildContextPrompt());
+          // A previously-approved Target Context becomes the plan's live target
+          // environment again — closes the gap where a generic
+          // TargetConfigManager default silently seeded it instead.
+          const tc = this.targetContextManager.getContext();
+          if (tc && this.targetContextManager.isApprovedFor(existingSpec.id, existingSpec.version)) {
+            this.hub.setTargetEnvironment(this.targetContextToEnvironment(tc));
+          }
+        }
+      }
+      this.postSpec();
+      this.postContextGateStatus();
+      this.postContextUpdate();
+      this.postMessage('activeProblemChanged', { problemId, spec: existingSpec });
+    } catch (err) {
+      this.postLog(`Spec manager initialization failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Ensures a business problem is active before the first spec draft for it
+   * is saved (v0.12.0). If one is already active, this is a revision of the
+   * same problem and nothing happens. Otherwise a slug is derived from the
+   * problem statement now that one finally exists, the folder is created,
+   * recorded as active, and the problem-scoped managers are constructed —
+   * this is the lazy, deferred half of "Start New Business Problem" (§10.3
+   * of the audit): the folder can't be named before there's a problem
+   * statement to name it from.
+   */
+  private async ensureActiveProblem(problemStatement: string): Promise<void> {
+    if (this.activeProblemId || !this.activeProblemManager) return;
+    const existing = await this.activeProblemManager.listProblems();
+    const slug = generateProblemSlug(problemStatement, existing.map((p) => p.id));
+    await this.activeProblemManager.setActiveProblemId(slug);
+    await this.activateProblem(slug);
   }
 
   /**
@@ -154,7 +290,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'chat': {
           const chatMessage = typeof message.message === 'string' ? message.message : '';
           const schemaContext = typeof message.schemaContext === 'string' ? message.schemaContext : '';
+          const toolMode: ToolExecutionMode = message.toolMode === 'full' ? 'full' : 'read-only';
           if (!chatMessage.trim()) { this.postLog('A message is required.'); return; }
+          const priorHistory = this.chatSessionManager && this.activeChatId
+            ? await this.chatSessionManager.loadTranscript(this.activeChatId)
+            : [];
+          const priorMeta = this.chatSessionManager && this.activeChatId
+            ? await this.chatSessionManager.getSessionMeta(this.activeChatId)
+            : undefined;
+          if (this.chatSessionManager && this.activeChatId) {
+            this.chatSessionManager.appendMessage(this.activeChatId, { role: 'user', content: chatMessage, at: new Date().toISOString() }).catch(() => { /* best-effort */ });
+          }
           try {
             // ── Spec-driven conversation ──
             //   discovery/revision in progress -> this message continues it (an answer, or the
@@ -188,8 +334,18 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const combinedContext = [repositoryContext, schemaContext]
               .filter((part) => part && part.trim().length > 0)
               .join('\n\n');
-            const response = await this.hub.chat(chatMessage, combinedContext);
-            this.postMessage('chatResponse', { message: response });
+            const result = await this.hub.chat(chatMessage, combinedContext, toolMode, {
+              history: priorHistory,
+              priorSummary: priorMeta?.summary,
+              claudeSessionId: priorMeta?.claudeSessionId
+            });
+            if (this.chatSessionManager && this.activeChatId && (result.updatedSummary !== undefined || result.newClaudeSessionId)) {
+              const patch: { summary?: string; claudeSessionId?: string } = {};
+              if (result.updatedSummary !== undefined) { patch.summary = result.updatedSummary; }
+              if (result.newClaudeSessionId) { patch.claudeSessionId = result.newClaudeSessionId; }
+              this.chatSessionManager.updateMeta(this.activeChatId, patch).catch(() => { /* best-effort */ });
+            }
+            this.postMessage('chatResponse', { message: result.message });
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.postMessage('chatResponse', { message: errMsg, error: true });
@@ -200,11 +356,25 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const objective = typeof message.objective === 'string' ? message.objective : '';
           const schemaContext = typeof message.schemaContext === 'string' ? message.schemaContext : '';
           if (!objective.trim()) { this.postLog('A plan requires a user objective.'); return; }
-          const plan = await this.hub.generatePlan(objective, schemaContext);
+          const repositoryContext = this.contextFileManager?.buildContextPrompt() ?? '';
+          const combinedContext = [repositoryContext, schemaContext]
+            .filter((part) => part && part.trim().length > 0)
+            .join('\n\n');
+          const plan = await this.hub.generatePlan(objective, combinedContext);
           this.postPlan(plan);
           break;
         }
         case 'executePlan': { await this.hub.executePlan(); break; }
+        case 'approvePlan': {
+          this.hub.approvePlan();
+          this.postLog('Plan approved. Confirm the applicable stages, then generate artifacts.');
+          break;
+        }
+        case 'confirmStages': {
+          this.hub.confirmStages();
+          this.postLog('Applicable stages confirmed. Ready to generate artifacts.');
+          break;
+        }
         case 'pausePlan': { await this.hub.pauseExecution(); break; }
         case 'resetPlan': {
           await this.hub.resetPlan();
@@ -386,23 +556,214 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+        case 'startNewBusinessProblem': {
+          await this.activeProblemManager?.clearActiveProblem();
+          await this.activateProblem(undefined);
+          await this.startNewChat();
+          this.postLog('Started a new business problem. Describe it in the chat to begin.');
+          break;
+        }
+        case 'listBusinessProblems': {
+          const problems = (await this.activeProblemManager?.listProblems()) ?? [];
+          this.postMessage('businessProblemsList', { problems });
+          break;
+        }
+        case 'switchBusinessProblem': {
+          const problemId = typeof message.problemId === 'string' ? message.problemId : '';
+          if (!problemId) { this.postLog('A business problem id is required.'); break; }
+          if (problemId === this.activeProblemId) { break; }
+          await this.activeProblemManager?.setActiveProblemId(problemId);
+          await this.activateProblem(problemId);
+          await this.startNewChat();
+          this.postLog(`Switched to business problem "${problemId}".`);
+          break;
+        }
+        case 'approveBusinessProblem': {
+          if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
+          const spec = this.specManager.getSpec();
+          if (!spec) { this.postMessage('error', { message: 'No Business Problem Specification exists yet.' }); break; }
+          spec.problemStatementApproved = true;
+          await this.specManager.saveSpec(spec);
+          this.postSpec();
+          this.postLog('Business problem confirmed. Review the full specification below and approve it to continue.');
+          break;
+        }
         case 'approveSpec': {
           if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
+          const draft = this.specManager.getSpec();
+          if (draft && !draft.problemStatementApproved) {
+            this.postMessage('error', { message: 'Confirm the inferred business problem before approving the full specification.' });
+            break;
+          }
           const approved = await this.specManager.approve();
           this.postSpec();
           if (approved) {
             this.hub.setSpec(approved.id, approved.version);
-            this.hub.inferPhasesFromSpec(approved);
+            await this.syncContextFromApprovedSpec(approved);
+            const contextSummary = this.contextFileManager?.buildContextPrompt();
+            this.hub.inferPhasesFromSpec(approved, contextSummary);
+            await this.initializeContextForApprovedSpec(approved);
             this.postMessage('specApproved', { spec: approved });
-            this.postLog(`Business Problem Specification v${approved.version} approved. Generate the workflow plan to start solving it.`);
+            this.postLog(approved.implementationType === 'brownfield'
+              ? `Business Problem Specification v${approved.version} approved. Build the Target Context and Source Context before generating the workflow plan.`
+              : `Business Problem Specification v${approved.version} approved. Build the Target Context before generating the workflow plan (no source system — Greenfield).`);
+            this.postContextGateStatus();
           }
+          break;
+        }
+        case 'setImplementationType': {
+          const value = message.value === 'brownfield' ? 'brownfield' : message.value === 'greenfield' ? 'greenfield' : undefined;
+          if (!value) { this.postLog('Implementation type must be "greenfield" or "brownfield".'); break; }
+          const spec = this.specManager?.getSpec();
+          if (!spec) { this.postMessage('error', { message: 'No Business Problem Specification exists yet.' }); break; }
+          spec.implementationType = value;
+          spec.implementationTypeReason = 'Manually set by user.';
+          spec.implementationTypeOverridden = true;
+          await this.specManager!.saveSpec(spec);
+          this.postSpec();
+          if (spec.status === 'approved') {
+            this.hub.inferPhasesFromSpec(spec, this.contextFileManager?.buildContextPrompt());
+            await this.initializeContextForApprovedSpec(spec);
+          }
+          this.postLog(`Implementation type set to ${value}.`);
+          this.postContextGateStatus();
+          break;
+        }
+        case 'startTargetContext': {
+          const spec = this.specManager?.getSpec();
+          if (!spec || spec.status !== 'approved' || !this.targetContextManager) { this.postMessage('error', { message: 'Approve the specification before building Target Context.' }); break; }
+          const existing = this.targetContextManager.getContext();
+          const sameVersion = !!existing && existing.specId === spec.id && existing.specVersion === spec.version;
+          if (!sameVersion) { await this.targetContextManager.reset(spec.id, spec.version); }
+          const questions = buildTargetContextQuestions(spec);
+          this.postMessage('targetContextQuestions', { questions, answers: sameVersion ? existing!.answers : {} });
+          break;
+        }
+        case 'submitTargetContextAnswers': {
+          const spec = this.specManager?.getSpec();
+          if (!spec || !this.targetContextManager) break;
+          const rawAnswers = Array.isArray(message.answers) ? message.answers as Array<{ questionId: string; value: string }> : [];
+          const questions = buildTargetContextQuestions(spec);
+          const answerMap: Record<string, string> = {};
+          const record: Record<string, unknown> = { specId: spec.id, specVersion: spec.version, status: 'built', builtAt: new Date().toISOString() };
+          for (const a of rawAnswers) {
+            const q = questions.find((qq) => qq.id === a.questionId);
+            if (!q || !a.value) continue;
+            answerMap[q.id] = a.value;
+            this.applyAnswerToField(record, q.field, a.value);
+          }
+          record.answers = answerMap;
+          await this.targetContextManager.save(record as unknown as TargetContext);
+          this.postMessage('targetContextBuilt', { context: this.targetContextManager.getContext() });
+          this.postLog('Target Context built — review it and approve to unlock Generate Plan.');
+          this.postContextGateStatus();
+          break;
+        }
+        case 'approveTargetContext': {
+          const spec = this.specManager?.getSpec();
+          const tc = this.targetContextManager?.getContext();
+          if (!spec || !tc || !this.targetContextManager) break;
+          if (tc.specId !== spec.id || tc.specVersion !== spec.version) { this.postMessage('error', { message: 'Target Context is out of date — rebuild it for the current specification version.' }); break; }
+          const approved: TargetContext = { ...tc, status: 'approved', approvedAt: new Date().toISOString() };
+          await this.targetContextManager.save(approved);
+          this.hub.setTargetEnvironment(this.targetContextToEnvironment(approved));
+          this.postMessage('targetContextApproved', { context: approved });
+          this.postLog('Target Context approved.');
+          this.postContextGateStatus();
+          break;
+        }
+        case 'reviseTargetContext': {
+          const spec = this.specManager?.getSpec();
+          if (!spec || !this.targetContextManager) break;
+          const existing = this.targetContextManager.getContext();
+          const questions = buildTargetContextQuestions(spec);
+          this.postMessage('targetContextQuestions', { questions, answers: existing?.answers ?? {} });
+          break;
+        }
+        case 'chooseSourceContextMethod': {
+          const spec = this.specManager?.getSpec();
+          if (!spec || spec.status !== 'approved' || !this.sourceContextManager) { this.postMessage('error', { message: 'Approve the specification before building Source Context.' }); break; }
+          const method = message.method === 'connected' ? 'connected' : message.method === 'described' ? 'described' : undefined;
+          if (!method) break;
+          if (method === 'described') {
+            const existing = this.sourceContextManager.getContext();
+            const sameVersion = !!existing && existing.specId === spec.id && existing.specVersion === spec.version;
+            if (!sameVersion) { await this.sourceContextManager.reset(spec.id, spec.version); }
+            const questions = buildSourceContextQuestions(spec);
+            this.postMessage('sourceContextQuestions', { questions, answers: sameVersion ? existing!.answers : {} });
+          } else {
+            await this.runSourceConnectionCheck(spec);
+          }
+          break;
+        }
+        case 'runSourceConnectionCheck': {
+          const spec = this.specManager?.getSpec();
+          if (!spec || spec.status !== 'approved') { this.postMessage('error', { message: 'Approve the specification before building Source Context.' }); break; }
+          await this.runSourceConnectionCheck(spec);
+          break;
+        }
+        case 'submitSourceContextAnswers': {
+          const spec = this.specManager?.getSpec();
+          if (!spec || !this.sourceContextManager) break;
+          const rawAnswers = Array.isArray(message.answers) ? message.answers as Array<{ questionId: string; value: string }> : [];
+          const answerMap: Record<string, string> = {};
+          for (const a of rawAnswers) { if (a.value) answerMap[a.questionId] = a.value; }
+          const description = [answerMap.description, answerMap.dataContract ? `Data contract / interface notes: ${answerMap.dataContract}` : '']
+            .filter((part) => part && part.trim().length > 0)
+            .join('\n\n');
+          const record: SourceContext = {
+            specId: spec.id, specVersion: spec.version, status: 'built', method: 'described',
+            sourceType: (answerMap.sourceType as SourceContext['sourceType']) || undefined,
+            description: description || undefined,
+            answers: answerMap, builtAt: new Date().toISOString()
+          };
+          await this.sourceContextManager.save(record);
+          this.postMessage('sourceContextBuilt', { context: this.sourceContextManager.getContext() });
+          this.postLog('Source Context built — review it and approve to unlock Generate Plan.');
+          this.postContextGateStatus();
+          break;
+        }
+        case 'approveSourceContext': {
+          const spec = this.specManager?.getSpec();
+          const sc = this.sourceContextManager?.getContext();
+          if (!spec || !sc || !this.sourceContextManager) break;
+          if (sc.specId !== spec.id || sc.specVersion !== spec.version) { this.postMessage('error', { message: 'Source Context is out of date — rebuild it for the current specification version.' }); break; }
+          const approved: SourceContext = { ...sc, status: 'approved', approvedAt: new Date().toISOString() };
+          await this.sourceContextManager.save(approved);
+          this.postMessage('sourceContextApproved', { context: approved });
+          this.postLog('Source Context approved.');
+          this.postContextGateStatus();
+          break;
+        }
+        case 'reviseSourceContext': {
+          const spec = this.specManager?.getSpec();
+          if (!spec || !this.sourceContextManager) break;
+          const existing = this.sourceContextManager.getContext();
+          if (existing?.method === 'connected') { await this.runSourceConnectionCheck(spec); break; }
+          const questions = buildSourceContextQuestions(spec);
+          this.postMessage('sourceContextQuestions', { questions, answers: existing?.answers ?? {} });
+          break;
+        }
+        case 'setPhaseRequired': {
+          const phase = typeof message.phase === 'string' ? message.phase : '';
+          const required = message.required === true;
+          if (phase !== 'discover' && phase !== 'model' && phase !== 'build' && phase !== 'validate') {
+            this.postLog('A valid phase (discover/model/build/validate) is required.');
+            break;
+          }
+          this.hub.setPhaseOverride(phase, required);
           break;
         }
         case 'generatePlanFromSpec': {
           const spec = this.specManager?.getSpec();
-          if (!spec) { this.postLog('No Business Problem Specification exists yet — describe your business problem in the chat first.'); break; }
-          if (spec.status !== 'approved') { this.postLog('Approve the Business Problem Specification before generating the workflow plan.'); break; }
-          await this.hub.generatePlanFromSpec(spec);
+          if (!spec) { this.postMessage('error', { message: 'No Business Problem Specification exists yet — describe your business problem in the chat first.' }); break; }
+          if (spec.status !== 'approved') { this.postMessage('error', { message: 'Approve the Business Problem Specification before generating the workflow plan.' }); break; }
+          const gate = this.computeContextGateStatus(spec);
+          if (!gate.canGeneratePlan) {
+            this.postMessage('error', { message: `Generate Plan is blocked until context is ready: ${gate.blockingReasons.join(' ')}` });
+            break;
+          }
+          await this.hub.generatePlanFromSpec(spec, this.buildContextSummaryForPlan(spec));
           break;
         }
         case 'submitSpecAnswers': {
@@ -418,6 +779,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const question = session.questions.find((candidate) => candidate.id === questionId);
             const field = question?.field ?? 'scope';
             this.specOpsEngine.answer({ questionId, field, value, answeredAt: new Date().toISOString() });
+            if (this.chatSessionManager && this.activeChatId) {
+              this.chatSessionManager.appendMessage(this.activeChatId, { role: 'user', content: `[Answer: ${field}] ${value}`, at: new Date().toISOString() }).catch(() => { /* best-effort */ });
+            }
           }
           this.pendingSpecQuestions = [];
           await this.runDiscoveryTurn();
@@ -427,6 +791,60 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
           const specDoc = await vscode.workspace.openTextDocument(this.specManager.getSpecUri());
           await vscode.window.showTextDocument(specDoc, { preview: false });
+          break;
+        }
+        case 'newChat': {
+          await this.startNewChat();
+          break;
+        }
+        case 'listChatSessions': {
+          const sessions = (await this.chatSessionManager?.listSessions()) ?? [];
+          this.postMessage('chatSessionsList', { sessions, activeChatId: this.activeChatId });
+          break;
+        }
+        case 'openChatSession': {
+          // Resumes a past chat session as the live, active one (v0.13.0 follow-up
+          // to §8.11/§9's "reconstruct explicitly" principle) — the on-screen
+          // counterpart to the startup fold above. Not a read-only preview: the
+          // resumed session becomes exactly what "New Chat" would have started,
+          // except pre-loaded with this transcript, and new messages append to it.
+          const chatId = typeof message.chatId === 'string' ? message.chatId : '';
+          if (!chatId || !this.chatSessionManager) { break; }
+          if (chatId !== this.activeChatId) {
+            if (this.activeChatId) {
+              // Fold whatever's currently active rather than losing it — the same
+              // "archive, never discard" rule the startup fold and New Chat follow.
+              await this.chatSessionManager.archiveSession(this.activeChatId);
+            }
+            await this.chatSessionManager.updateMeta(chatId, { status: 'active' });
+            this.activeChatId = chatId;
+          }
+          const [transcript, sessions] = await Promise.all([
+            this.chatSessionManager.loadTranscript(chatId),
+            this.chatSessionManager.listSessions()
+          ]);
+          const meta = sessions.find((s) => s.id === chatId);
+          this.postMessage('chatSessionLoaded', { meta, transcript });
+          this.postLog('Resumed chat session.');
+          break;
+        }
+        case 'discardChat': {
+          const chatId = typeof message.chatId === 'string' ? message.chatId : '';
+          if (!chatId || !this.chatSessionManager) { break; }
+          const choice = await vscode.window.showWarningMessage(
+            'Permanently discard this chat? This cannot be undone.',
+            { modal: true },
+            'Discard'
+          );
+          if (choice !== 'Discard') { break; }
+          await this.chatSessionManager.discardSession(chatId);
+          if (chatId === this.activeChatId) {
+            // The active chat can't discard itself out from under the open view — start a fresh one.
+            await this.startNewChat();
+          }
+          const sessions = await this.chatSessionManager.listSessions();
+          this.postMessage('chatSessionsList', { sessions, activeChatId: this.activeChatId });
+          this.postLog('Chat discarded.');
           break;
         }
         case 'startRevision': {
@@ -529,6 +947,70 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * "New Chat" (Phase F). Archives the current chat session (never discards —
+   * only an explicit `discardChat` action deletes anything) and starts a fresh
+   * one. Any in-progress discovery/revision interview is not resumed as a live
+   * Q&A later — its partial answers are folded into context instead, so the
+   * information isn't lost even though the specific conversation is done.
+   */
+  private async startNewChat(): Promise<void> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!this.chatSessionManager || !workspaceRoot) { this.postLog('Chat sessions are not initialized.'); return; }
+
+    if (this.specOpsEngine) {
+      await this.carryOverPartialInterview(this.specOpsEngine.getSession(), workspaceRoot);
+      this.specOpsEngine = undefined;
+      this.pendingSpecQuestions = [];
+    }
+    this.pendingRevision = false;
+
+    if (this.activeChatId) {
+      await this.chatSessionManager.archiveSession(this.activeChatId);
+    }
+    const spec = this.specManager?.getSpec();
+    const newSession = await this.chatSessionManager.createSession({
+      specId: spec?.id,
+      specVersion: spec?.version,
+      llmProvider: this.configManager.getSettings().activeLlmProvider
+    });
+    this.activeChatId = newSession.id;
+    this.postMessage('chatSessionLoaded', { meta: newSession, transcript: [] });
+    this.postLog('Started a new chat.');
+  }
+
+  /**
+   * Deterministic (no LLM call) — the answers are already validated Q&A pairs,
+   * not freeform text needing judgment to extract — so this runs unconditionally
+   * on New Chat rather than being gated behind the user-initiated "distill this
+   * chat" action (requirements.md §9b), which is for freeform chat content.
+   * Reuses the existing SourceRegistry/SynthesisPipeline machinery (registers a
+   * `business_context`-shaped note) instead of a parallel extraction path.
+   */
+  private async carryOverPartialInterview(session: IntakeSession, workspaceRoot: vscode.Uri): Promise<void> {
+    if (!this.sourceRegistry || !this.synthesisPipeline) { return; }
+    if (session.answers.length === 0 && session.insights.length === 0) { return; }
+
+    const lines: string[] = [
+      `# Partial answers carried over from an abandoned specification conversation (${session.id})`,
+      `# ${session.changeRequest ? 'Change request' : 'Business problem'}: ${session.changeRequest || session.problemStatement}`
+    ];
+    for (const answer of session.answers) { lines.push(`- ${answer.field}: ${answer.value}`); }
+    for (const insight of session.insights) { lines.push(`- note: ${insight}`); }
+
+    const relativePath = `.ai-context/chats/carryover/${session.id}.md`;
+    try {
+      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'chats', 'carryover'));
+      await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(workspaceRoot, relativePath), Buffer.from(lines.join('\n') + '\n', 'utf8'));
+      await this.sourceRegistry.addSource(relativePath, 'business_context', 'autode');
+      const result = await this.synthesisPipeline.synthesize(this.sourceRegistry.getSources());
+      this.postContextUpdate();
+      this.postLog(`Carried forward ${session.answers.length} partial answer(s) into context (${result.nodes} node(s)).`);
+    } catch (err) {
+      this.postLog(`Failed to carry over partial interview data: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
    * Renders the spec file's git history as readable text — AutoDE leans on git
    * as the version/audit log (`.ai-context/spec/` is meant to be committed)
    * rather than maintaining a parallel in-app version store.
@@ -551,13 +1033,285 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  // ── Source & Target Context (v0.11.0) ──
+
+  /**
+   * Called after every spec approval (and every implementationType change on
+   * an approved spec) to keep Target/Source Context aligned with the current
+   * spec version: Target Context resets to `pending` for a genuinely new
+   * version; Source Context resets to `pending` for Brownfield or is
+   * auto-marked `not_applicable` for Greenfield — never left stale from a
+   * prior spec version or a prior implementation type.
+   */
+  private async initializeContextForApprovedSpec(spec: BusinessProblemSpec): Promise<void> {
+    if (this.targetContextManager) {
+      const tc = this.targetContextManager.getContext();
+      const sameVersion = !!tc && tc.specId === spec.id && tc.specVersion === spec.version;
+      if (!sameVersion) { await this.targetContextManager.reset(spec.id, spec.version); }
+    }
+    if (this.sourceContextManager) {
+      const sc = this.sourceContextManager.getContext();
+      const sameVersion = !!sc && sc.specId === spec.id && sc.specVersion === spec.version;
+      if (spec.implementationType === 'brownfield') {
+        if (!sameVersion) { await this.sourceContextManager.reset(spec.id, spec.version); }
+      } else if (!sameVersion || sc!.status !== 'not_applicable') {
+        await this.sourceContextManager.markNotApplicable(spec.id, spec.version);
+      }
+    }
+  }
+
+  /** The single source of truth for whether Generate Plan is allowed to run — computed fresh, never cached. */
+  private computeContextGateStatus(spec: BusinessProblemSpec | undefined): {
+    targetStatus: string; sourceApplicable: boolean; sourceStatus: string; canGeneratePlan: boolean; blockingReasons: string[];
+  } {
+    if (!spec || spec.status !== 'approved') {
+      return { targetStatus: 'none', sourceApplicable: false, sourceStatus: 'none', canGeneratePlan: false, blockingReasons: ['Approve the specification first.'] };
+    }
+    const tc = this.targetContextManager?.getContext();
+    const targetForThisVersion = !!tc && tc.specId === spec.id && tc.specVersion === spec.version;
+    const targetReady = !!this.targetContextManager?.isApprovedFor(spec.id, spec.version);
+    const sourceApplicable = spec.implementationType === 'brownfield';
+    const sc = this.sourceContextManager?.getContext();
+    const sourceForThisVersion = !!sc && sc.specId === spec.id && sc.specVersion === spec.version;
+    const sourceReady = !sourceApplicable || !!this.sourceContextManager?.isReadyFor(spec.id, spec.version);
+    const reasons: string[] = [];
+    // Business Problem checkpoint (v0.13.0, §8.12) — approveSpec already requires this, but
+    // it's included here too so the palette's gate messaging always matches what the
+    // orchestrator will actually enforce, in case a spec somehow reaches 'approved' status
+    // without it (e.g. an older persisted spec from before this field existed).
+    if (!spec.problemStatementApproved) reasons.push('Confirm the inferred business problem.');
+    if (!targetReady) reasons.push('Target Context needs to be built and approved.');
+    if (sourceApplicable && !sourceReady) reasons.push('Source Context needs to be built and approved (or marked Not Applicable).');
+    return {
+      targetStatus: targetForThisVersion ? tc!.status : 'none',
+      sourceApplicable,
+      sourceStatus: sourceForThisVersion ? sc!.status : 'none',
+      canGeneratePlan: !!spec.problemStatementApproved && targetReady && sourceReady,
+      blockingReasons: reasons
+    };
+  }
+
+  private postContextGateStatus(): void {
+    const status = this.computeContextGateStatus(this.specManager?.getSpec());
+    // Pushes the same readiness signal into the orchestrator (AgentHub) so plan
+    // generation is gated at its actual enforcement point, not just in the UI
+    // that happens to call this method (v0.13.0, requirements.md §8.12/§11).
+    this.hub.setContextGateReady(status.canGeneratePlan);
+    this.postMessage('contextGateStatus', {
+      ...status,
+      targetContext: this.targetContextManager?.getContext(),
+      sourceContext: this.sourceContextManager?.getContext()
+    });
+  }
+
+  /** Merges the Context Layer, Source Context, and approved Target Context into one prompt block for plan generation. */
+  private buildContextSummaryForPlan(spec: BusinessProblemSpec): string {
+    const parts: string[] = [];
+    const base = this.contextFileManager?.buildContextPrompt();
+    if (base) parts.push(base);
+    const sc = this.sourceContextManager?.getContext();
+    if (sc && sc.specId === spec.id && sc.specVersion === spec.version && sc.status !== 'not_applicable') {
+      const lines = ['## Source Context'];
+      if (sc.description) lines.push(sc.description);
+      if (sc.connectionSummary) {
+        lines.push(`Live connection: ${sc.connectionSummary.platform} — ${sc.connectionSummary.database}.${sc.connectionSummary.schema} (${sc.connectionSummary.tableCount} tables, ${sc.connectionSummary.viewCount} views)`);
+      }
+      if (lines.length > 1) parts.push(lines.join('\n'));
+    }
+    const tc = this.targetContextManager?.getContext();
+    if (tc && tc.specId === spec.id && tc.specVersion === spec.version && tc.status === 'approved') {
+      const pc = tc.platformConfig ?? {};
+      parts.push([
+        '## Target Context',
+        `Platform: ${tc.platform}. Environment: ${tc.environmentProfile}.`,
+        `Modeling approach: ${tc.modelingApproach}. Naming convention: ${tc.namingConvention}.`,
+        `Transformation tool: ${tc.transformationTool}. Orchestration tool: ${tc.orchestrationTool}.`,
+        pc.database || pc.schema ? `Target location: ${pc.database ?? ''}${pc.schema ? '.' + pc.schema : ''}` : ''
+      ].filter((line) => line.trim().length > 0).join('\n'));
+    }
+    return parts.join('\n\n');
+  }
+
+  /** Converts an approved Target Context into the `TargetEnvironment` shape `AgentHub` expects, filling reasonable defaults for anything left blank. */
+  private targetContextToEnvironment(tc: TargetContext): import('./types').TargetEnvironment {
+    const platform: DataPlatformProvider = tc.platform ?? 'snowflake';
+    const pc = tc.platformConfig ?? {};
+    let platformConfig: import('./types').TargetEnvironment['platformConfig'];
+    switch (platform) {
+      case 'databricks':
+        platformConfig = { workspaceUrl: pc.workspaceUrl ?? '', catalog: pc.database ?? 'main', schema: pc.schema ?? 'default' };
+        break;
+      case 'bigquery':
+        platformConfig = { projectId: pc.projectId ?? '', dataset: pc.database ?? pc.schema ?? 'analytics', region: pc.region ?? 'us-central1' };
+        break;
+      default:
+        platformConfig = {
+          account: pc.account ?? '',
+          database: pc.database ?? 'CURATED_DB',
+          schema: pc.schema ?? 'ANALYTICS',
+          warehouse: pc.warehouse ?? 'WH_XS',
+          role: pc.role ?? 'SYSADMIN'
+        };
+    }
+    return {
+      platform,
+      environmentProfile: tc.environmentProfile ?? 'development',
+      modelingApproach: tc.modelingApproach ?? 'dimensional',
+      namingConvention: tc.namingConvention ?? 'snake_case',
+      transformationTool: tc.transformationTool ?? 'dbt',
+      orchestrationTool: tc.orchestrationTool ?? 'airflow',
+      outputFormats: tc.outputFormats && tc.outputFormats.length > 0 ? tc.outputFormats : ['ddl', 'yaml', 'markdown'],
+      platformConfig
+    };
+  }
+
+  /** Assigns `value` onto a (possibly dotted, e.g. `platformConfig.database`) field path. */
+  private applyAnswerToField(target: Record<string, unknown>, field: string, value: string): void {
+    const parts = field.split('.');
+    let obj = target;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const key = parts[i];
+      if (!obj[key] || typeof obj[key] !== 'object') { obj[key] = {}; }
+      obj = obj[key] as Record<string, unknown>;
+    }
+    obj[parts[parts.length - 1]] = value;
+  }
+
+  /** Runs a live connection check + lightweight metadata extraction to build Source Context from an actual connection, instead of a guided description. */
+  private async runSourceConnectionCheck(spec: BusinessProblemSpec): Promise<void> {
+    if (!this.sourceContextManager) return;
+    const settings = this.configManager.getSettings();
+    const platform: DataPlatformProvider = settings.defaultProvider ?? 'snowflake';
+    const credentials = ConnectionManager.getCredentialsFromSettings(platform, settings as unknown as Record<string, unknown>);
+    try {
+      if (platform === 'snowflake') {
+        const password = await this.configManager.getSecret('autoDataEngineeringHub.snowflakePassword');
+        if (password) credentials['password'] = password;
+      } else if (platform === 'databricks') {
+        const token = await this.configManager.getSecret('autoDataEngineeringHub.databricksToken');
+        if (token) credentials['token'] = token;
+      }
+    } catch { /* best-effort — connect() will surface a clear error if a required secret is missing */ }
+
+    const missing: string[] = [];
+    if (platform === 'snowflake') {
+      if (!credentials['account']) missing.push('Account');
+      if (!credentials['username']) missing.push('Username');
+      if (!credentials['warehouse']) missing.push('Warehouse');
+      if (!credentials['database']) missing.push('Database');
+    } else if (platform === 'databricks') {
+      if (!credentials['workspaceUrl']) missing.push('Workspace URL');
+      if (!credentials['catalog']) missing.push('Catalog');
+    }
+    if (missing.length > 0) {
+      this.postMessage('error', { message: `Missing connection settings for ${platform}: ${missing.join(', ')}. Configure them in Settings → Connections, or choose "Describe source" instead.` });
+      return;
+    }
+
+    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg));
+    try {
+      this.postLog(`Connecting to ${platform} to build Source Context…`);
+      const info = await connectionManager.connect(platform, credentials);
+      const snapshot = await connectionManager.extractMetadata({ includeProfiling: false });
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+      if (workspaceRoot) { await connectionManager.persistSchemaContext(snapshot, workspaceRoot); }
+      const record: SourceContext = {
+        specId: spec.id, specVersion: spec.version, status: 'built', method: 'connected',
+        connectionSummary: { platform, database: info.databaseName, schema: info.schemaName, tableCount: snapshot.tables.length, viewCount: snapshot.views.length },
+        answers: {}, builtAt: new Date().toISOString()
+      };
+      await this.sourceContextManager.save(record);
+      this.postMessage('sourceContextBuilt', { context: this.sourceContextManager.getContext() });
+      this.postLog(`Source Context built from a live connection: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`);
+      this.postContextGateStatus();
+    } catch (err) {
+      this.postMessage('error', { message: `Could not connect to build Source Context: ${err instanceof Error ? err.message : String(err)}. You can choose "Describe source" instead.` });
+    } finally {
+      connectionManager.dispose();
+    }
+  }
+
+  /**
+   * Classifies Greenfield vs. Brownfield on `spec` (mutating it in place, before
+   * it's saved). A prior explicit user override (`implementationTypeOverridden`)
+   * is carried forward unchanged across revisions rather than being silently
+   * reclassified out from under the user.
+   */
+  private applyImplementationType(spec: BusinessProblemSpec, previous?: BusinessProblemSpec): void {
+    // Every caller of this method just (re)synthesized a draft — a new or changed
+    // business problem statement that needs its own Business Problem checkpoint
+    // confirmation again (v0.13.0, requirements.md §8.12), regardless of whether
+    // a prior version had already been confirmed.
+    spec.problemStatementApproved = false;
+    if (previous?.implementationTypeOverridden) {
+      spec.implementationType = previous.implementationType;
+      spec.implementationTypeReason = previous.implementationTypeReason;
+      spec.implementationTypeOverridden = true;
+      return;
+    }
+    const classification = classifyImplementationType(spec);
+    spec.implementationType = classification.implementationType;
+    spec.implementationTypeReason = classification.reason;
+    spec.implementationTypeOverridden = false;
+  }
+
+  /**
+   * Syncs the Context Layer from a newly-approved specification, then writes a
+   * durable snapshot of it. Runs automatically inside `approveSpec` — Generate
+   * Plan only becomes reachable after this, so the Context Layer is always
+   * current for the spec version a plan is about to be generated from.
+   */
+  private async syncContextFromApprovedSpec(spec: BusinessProblemSpec): Promise<void> {
+    if (!this.synthesisPipeline) { return; }
+    try {
+      const result = await this.synthesisPipeline.synthesizeFromSpec(spec);
+      this.postContextUpdate();
+      this.postLog(`Context Layer synced from approved specification v${spec.version} (${result.nodes} node(s)).`);
+      await this.writeContextSnapshot(spec);
+    } catch (err) {
+      this.postLog(`Context sync failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Writes a durable, human-readable record of the Context Layer content that
+   * fed (or will feed) plan generation for this spec version, to
+   * `.ai-context/context/snapshots/<specId>.v<version>.md` — committed
+   * alongside the spec, unlike the transient compiled graph
+   * (`.ai-context/derived/graph.json`, gitignored).
+   */
+  private async writeContextSnapshot(spec: BusinessProblemSpec): Promise<void> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+    const snapshotDir = vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'context', 'snapshots');
+    const fileName = `${spec.id}.v${spec.version}.md`;
+    const target = vscode.Uri.joinPath(snapshotDir, fileName);
+    const contextBody = this.contextFileManager?.buildContextPrompt() || '_No context nodes were derived._';
+    const lines = [
+      `# Context Snapshot — ${spec.id} v${spec.version}`,
+      '',
+      `Generated: ${new Date().toISOString()}`,
+      `Implementation type: ${spec.implementationType ?? 'unclassified'}${spec.implementationTypeReason ? ` — ${spec.implementationTypeReason}` : ''}`,
+      '',
+      'This is the durable record of what the Context Layer contained when this specification version was approved — the same content injected into plan generation prompts.',
+      '',
+      contextBody
+    ];
+    await vscode.workspace.fs.createDirectory(snapshotDir);
+    const tempUri = vscode.Uri.joinPath(snapshotDir, `.${fileName}.tmp.${Date.now()}`);
+    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(lines.join('\n') + '\n', 'utf8'));
+    await vscode.workspace.fs.rename(tempUri, target, { overwrite: true });
+    this.postLog(`Context snapshot written: .ai-context/context/snapshots/${fileName}`);
+  }
+
   /**
    * Drafts a new Business Problem Specification from a natural-language description.
    * This is the first responsibility of AutoDE in the spec-driven flow.
    */
   private async draftSpec(prompt: string, previous?: BusinessProblemSpec): Promise<void> {
-    if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
     const spec = await this.hub.generateSpec(prompt, previous);
+    await this.ensureActiveProblem(spec.problemStatement);
+    if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
+    this.applyImplementationType(spec, previous);
     await this.specManager.saveSpec(spec);
     this.hub.setSpec(spec.id, spec.version);
     this.postSpec();
@@ -575,6 +1329,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
     const previous = this.specManager.getSpec();
     const spec = await this.hub.generateSpec(refinement, previous);
+    this.applyImplementationType(spec, previous);
     await this.specManager.saveSpec(spec);
     this.hub.setSpec(spec.id, spec.version);
     this.postSpec();
@@ -600,6 +1355,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const overrides = loadSkillsFromDirectory(overrideDir);
     this.skillRegistry = new SkillRegistry([...bundled, ...overrides]);
     return this.skillRegistry.list();
+  }
+
+  /** A live snapshot of discovery progress (v0.13.0 follow-up) — see `discoveryProgress.ts`. */
+  private buildDiscoveryProgress(): DiscoveryProgress | undefined {
+    const engine = this.specOpsEngine;
+    if (!engine) { return undefined; }
+    return buildDiscoveryProgressPure(engine.getSession(), this.ensureSkills());
   }
 
   /**
@@ -646,7 +1408,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         const ids = engine.applyAction(action);
         this.pendingSpecQuestions = engine.getSession().questions.filter((question) => ids.includes(question.id));
         if (this.pendingSpecQuestions.length > 1) {
-          this.postMessage('specQuestions', { questions: this.pendingSpecQuestions });
+          this.postMessage('specQuestions', {
+            questions: this.pendingSpecQuestions.map((q) => ({ ...q, skillLabel: skillNameForField(q.field, this.ensureSkills()) })),
+            progress: this.buildDiscoveryProgress()
+          });
         } else if (this.pendingSpecQuestions.length === 1) {
           this.postSpecQuestion(this.pendingSpecQuestions[0]);
         }
@@ -672,6 +1437,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       const previous = this.specManager?.getSpec();
       const extraContext = this.contextFileManager?.buildContextPrompt();
       const spec = await this.hub.synthesizeComprehensiveSpec(engine.getSession(), previous, extraContext);
+      await this.ensureActiveProblem(spec.problemStatement);
+      this.applyImplementationType(spec, previous);
       if (this.specManager) {
         await this.specManager.saveSpec(spec);
         this.hub.setSpec(spec.id, spec.version);
@@ -697,12 +1464,40 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private postSpecQuestion(question: SpecIntakeQuestion): void {
-    this.postMessage('specQuestion', { question });
+    this.postMessage('specQuestion', {
+      question: { ...question, skillLabel: skillNameForField(question.field, this.ensureSkills()) },
+      progress: this.buildDiscoveryProgress()
+    });
   }
 
   private postMessage(type: string, payload: object = {}): void {
     const recordPayload = payload as Record<string, unknown>;
+    this.recordAssistantMessage(type, recordPayload);
     this.view?.webview.postMessage({ type, ...recordPayload });
+  }
+
+  /**
+   * Persists the assistant-visible content of select outbound message types
+   * into the active chat session's transcript (Phase F). Fire-and-forget —
+   * `postMessage` itself stays synchronous so no call site needs to change.
+   */
+  private recordAssistantMessage(type: string, payload: Record<string, unknown>): void {
+    if (!this.chatSessionManager || !this.activeChatId) { return; }
+    let content: string | undefined;
+    if (type === 'chatResponse' && typeof payload.message === 'string') {
+      content = payload.message;
+    } else if (type === 'specDrafted' && payload.spec) {
+      const spec = payload.spec as BusinessProblemSpec;
+      content = `[Specification ${payload.revised ? 'revised' : 'drafted'} — v${spec.version}] ${spec.problemStatement}`;
+    } else if (type === 'specApproved' && payload.spec) {
+      content = `[Specification v${(payload.spec as BusinessProblemSpec).version} approved]`;
+    } else if (type === 'specQuestion' && payload.question) {
+      content = `[Question] ${(payload.question as SpecIntakeQuestion).prompt}`;
+    } else if (type === 'specQuestions' && Array.isArray(payload.questions)) {
+      content = `[Questions] ${(payload.questions as SpecIntakeQuestion[]).map((q) => q.prompt).join(' / ')}`;
+    }
+    if (!content) { return; }
+    this.chatSessionManager.appendMessage(this.activeChatId, { role: 'ai', content, at: new Date().toISOString() }).catch(() => { /* best-effort */ });
   }
 
   private getHtmlForSidebar(webview: vscode.Webview): string {

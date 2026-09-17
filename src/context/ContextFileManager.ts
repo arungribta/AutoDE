@@ -418,8 +418,14 @@ export class ContextFileManager implements vscode.Disposable {
     columns: number;
     tokens: number;
     maxTokens: number;
+    sourceEnvironmentNodes: number;
   } {
     const diag = this.graphManager.getDiagnostics();
+    const allTyped = ['table', 'column', 'semantic_view', 'business_term', 'business_rule', 'verified_query', 'metric'] as const;
+    const sourceEnvironmentNodes = allTyped.reduce(
+      (count, type) => count + this.graphManager.getNodesByType(type).filter((n) => n.origin?.environment === 'source').length,
+      0
+    );
     return {
       tables: this.graphManager.getNodesByType('table').length,
       terms: this.graphManager.getNodesByType('business_term').length,
@@ -427,7 +433,9 @@ export class ContextFileManager implements vscode.Disposable {
       rules: this.graphManager.getNodesByType('business_rule').length,
       columns: this.graphManager.getNodesByType('column').length,
       tokens: diag.totalNodes * 50, // rough estimate: ~50 tokens per node
-      maxTokens: 4000
+      maxTokens: 4000,
+      /** Nodes tagged `origin.environment === 'source'` — introspected schema + registered source-side context (§8.8 / §16.3a). */
+      sourceEnvironmentNodes
     };
   }
 

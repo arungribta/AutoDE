@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DataAgentHubSettings, LlmProvider } from './types';
+import { DataAgentHubSettings, LlmProvider, ToolExecutionMode } from './types';
 
 /**
  * The provider-agnostic contract every LLM provider implements (Phase C).
@@ -25,12 +25,30 @@ export interface LlmAdapter {
   complete(prompt: string, opts: LlmCompleteOptions, ctx: LlmAdapterContext): Promise<string>;
 }
 
+export interface LlmHistoryTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface LlmCompleteOptions {
   model: string;
   systemPrompt: string;
   justification?: string;
-  /** Grounded chat only; ignored by adapters that don't support tool execution. */
-  allowTools?: boolean;
+  /** 'none' (default when omitted), 'read-only' (file read/list/search), or 'full'
+   *  (also write/exec, gated by per-call or whole-run approval). Ignored by
+   *  adapters that don't support tool execution (`supportsToolExecution` false). */
+  toolExecutionMode?: ToolExecutionMode;
+  /** Prior conversation turns, oldest first, already windowed to the caller's token budget
+   *  (see `core/tokenBudget.ts`). Adapters thread this into their own native message format —
+   *  ignored by the Claude adapter when `claudeSessionId` is set, since the CLI's own resumed
+   *  session already carries this server-side. */
+  history?: LlmHistoryTurn[];
+  /** Claude-only: Claude Code CLI's own session id for this chat. When set, the adapter passes
+   *  `--session-id` (new session) or `--resume` (continuing one) instead of relying on `history`. */
+  claudeSessionId?: string;
+  /** Claude-only: true when `claudeSessionId` was just minted and hasn't been used yet (first
+   *  call for this chat) — selects `--session-id` over `--resume`. */
+  isNewClaudeSession?: boolean;
 }
 
 /**

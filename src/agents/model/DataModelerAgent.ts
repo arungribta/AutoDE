@@ -1,10 +1,15 @@
 import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
+import { generateWithLlm } from '../llmCodegen';
 
 /**
  * Data Modeler Agent
  *
- * Generates dimensional (star/snowflake), Data Vault, or OBT data models
- * based on the target environment configuration and source schema context.
+ * Generates dimensional (star/snowflake), Data Vault, or OBT data models.
+ * Tries an LLM call first — grounded in the task, objective, and Context
+ * Layer (source entities, semantic terms, business rules), so the model
+ * reflects the actual domain instead of a generic customer/product/sales
+ * skeleton. Falls back to the fixed-schema template generators below when no
+ * LLM is available or the call fails.
  */
 export async function executeDataModelerAgent(
   step: PlanStep,
@@ -19,24 +24,38 @@ export async function executeDataModelerAgent(
 
   context.log(`Data Modeler agent generating ${approach} model for ${targetDb}.${targetSchema}...`);
 
-  let ddl = '';
+  const llmDdl = await generateWithLlm(context, step, {
+    role: 'a data modeler',
+    fence: 'sql',
+    instructions: [
+      `Design a ${approach} model (CREATE TABLE DDL) for ${targetDb}.${targetSchema}, using ${namingConvention} naming.`,
+      'Base the tables, columns, and relationships on the actual entities named in the task/context above (tables, business terms, source catalog entries) rather than a generic customer/product/sales example — only fall back to a generic e-commerce-style schema if truly nothing domain-specific is available.',
+      'Include primary/foreign keys appropriate to the chosen modeling approach.'
+    ].join(' ')
+  });
+
+  let ddl = llmDdl ?? '';
   let modelDescription = '';
 
-  switch (approach) {
-    case 'dimensional':
-      ({ ddl, modelDescription } = generateDimensionalModel(targetDb, targetSchema, namingConvention));
-      break;
-    case 'data-vault':
-      ({ ddl, modelDescription } = generateDataVaultModel(targetDb, targetSchema, namingConvention));
-      break;
-    case 'obt':
-      ({ ddl, modelDescription } = generateObtModel(targetDb, targetSchema, namingConvention));
-      break;
-    case '3nf':
-      ({ ddl, modelDescription } = generate3nfModel(targetDb, targetSchema, namingConvention));
-      break;
-    default:
-      ({ ddl, modelDescription } = generateDimensionalModel(targetDb, targetSchema, namingConvention));
+  if (!llmDdl) {
+    switch (approach) {
+      case 'dimensional':
+        ({ ddl, modelDescription } = generateDimensionalModel(targetDb, targetSchema, namingConvention));
+        break;
+      case 'data-vault':
+        ({ ddl, modelDescription } = generateDataVaultModel(targetDb, targetSchema, namingConvention));
+        break;
+      case 'obt':
+        ({ ddl, modelDescription } = generateObtModel(targetDb, targetSchema, namingConvention));
+        break;
+      case '3nf':
+        ({ ddl, modelDescription } = generate3nfModel(targetDb, targetSchema, namingConvention));
+        break;
+      default:
+        ({ ddl, modelDescription } = generateDimensionalModel(targetDb, targetSchema, namingConvention));
+    }
+  } else {
+    modelDescription = `LLM-generated ${approach} model for ${targetDb}.${targetSchema}, grounded in the step's task and available context.`;
   }
 
   const artifact: GeneratedArtifact = {

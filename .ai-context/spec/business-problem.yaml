@@ -1,0 +1,29 @@
+# AutoDE Business Problem Specification
+id: bps-mtt49hwy
+version: 1
+status: approved
+problemStatement: The business needs to demonstrate an ETL pipeline that integrates data from product, customer, and transaction tables to provide insights into sales performance. This will help in understanding customer behavior and product performance.
+objectives:
+  - Successfully extract, transform, and load data from the specified tables into a data warehouse.
+successCriteria:
+  - The ETL pipeline runs without errors and produces accurate and timely data in the data warehouse.
+scopeIn:
+  - ETL pipeline development for product, customer, and transaction tables
+scopeOut:
+  - Data analysis and reporting beyond the ETL process
+constraints:
+  - Data privacy regulations must be adhered to during the ETL process.
+assumptions:
+  - The user has access to the necessary data sources and tools for ETL development.
+domain: data engineering
+stakeholders:
+  - data engineers
+  - business analysts
+keyEntities:
+  - product
+  - customer
+  - transaction
+createdAt: 2026-09-08T20:22:58.546Z
+updatedAt: 2026-09-08T20:23:43.571Z
+approvedAt: 2026-09-08T20:23:43.571Z
+approvedBy: user

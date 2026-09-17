@@ -127,7 +127,7 @@ button.primary:hover { background: var(--accent-hover); }
             <button id="qaConnect">🔌 Connect Database</button>
             <button id="qaAssess">📊 Source Assessment</button>
             <button id="qaPlan">📋 Generate Plan</button>
-            <button id="qaExecute">▶ Execute Plan</button>
+            <button id="qaExecute">🏗 Generate Artifacts</button>
             <button id="qaPalette">🧰 Open Palette</button>
             <button id="qaFolder">📂 Open Project</button>
           </div>
@@ -175,7 +175,7 @@ button.primary:hover { background: var(--accent-hover); }
   // ── Quick Actions ──
   $('#qaConnect').onclick = function () { post('testConnection'); };
   $('#qaAssess').onclick = function () { post('sourceAssessment'); };
-  $('#qaPlan').onclick = function () { post('generatePlan', { objective: '' }); };
+  $('#qaPlan').onclick = function () { post('generatePlan'); };
   $('#qaExecute').onclick = function () { post('executePlan'); };
   $('#qaPalette').onclick = function () { post('openPalette'); };
   $('#qaFolder').onclick = function () { post('openProjectFolder'); };

@@ -15,8 +15,21 @@ export type OutputFormat = 'ddl' | 'yaml' | 'markdown' | 'python' | 'sql';
 
 export type WorkflowPhase = 'discover' | 'model' | 'build' | 'validate';
 
-/** Live status of an inferred workflow phase. `unrequired` means the approved BPS does not include this phase. */
-export type PhaseStatus = 'pending' | 'in-progress' | 'completed' | 'blocked' | 'unrequired';
+/**
+ * Whether the project is building on an existing system (`brownfield`) or
+ * starting without one (`greenfield`). Classified deterministically from the
+ * approved specification (keyword evidence, mirroring phase inference), with
+ * an explicit user override always available — see `implementationType.ts`.
+ */
+export type ImplementationType = 'greenfield' | 'brownfield';
+
+/**
+ * Live status of an inferred workflow phase.
+ * `unrequired` means the phase is Non-Applicable (excluded by the spec, or by a user override).
+ * `pending-review` means a plan exists but hasn't been run yet — the phase is awaiting the
+ * user's confirmation on the Workflow Palette before "Generate Artifacts" is clicked.
+ */
+export type PhaseStatus = 'pending-review' | 'pending' | 'in-progress' | 'completed' | 'blocked' | 'unrequired';
 
 /**
  * A workflow phase inferred from the approved Business Problem Specification.
@@ -36,6 +49,28 @@ export interface InferredPhase {
 // ── Business Problem Specification ──
 
 export type SpecStatus = 'draft' | 'approved' | 'superseded';
+
+// ── Multi-Problem Workspace (v0.12.0) ──
+//
+// A single workspace can hold several business problems, each with its own
+// spec/plan/context/artifacts subtree under `.ai-context/problems/<id>/`.
+// See requirements.md §8.11.
+
+/** Identifies which business problem is currently active — `.ai-context/active-problem.json`. */
+export interface ActiveProblemPointer {
+  problemId: string;
+  activatedAt: string;
+}
+
+/** One row in the business-problem picker — summarized from `<id>/spec/business-problem.yaml` without loading the full spec. */
+export interface BusinessProblemSummary {
+  id: string;
+  problemStatement: string;
+  status: SpecStatus;
+  specVersion: number;
+  updatedAt: string;
+  isActive: boolean;
+}
 
 export interface BusinessProblemSpec {
   id: string;
@@ -66,6 +101,26 @@ export interface BusinessProblemSpec {
   sourceCatalog?: SourceEntry[];
   /** Traceability: which question/skill/assumption produced each spec field. */
   provenance?: SpecProvenance[];
+
+  // ── Implementation type classification ──
+  implementationType?: ImplementationType;
+  /** Human-readable justification produced by `classifyImplementationType`, or "Manually set by user." */
+  implementationTypeReason?: string;
+  /** True once the user has explicitly overridden the deterministic classification — preserved across revisions. */
+  implementationTypeOverridden?: boolean;
+
+  // ── Business Problem checkpoint (v0.13.0) ──
+  /**
+   * True once the user has reviewed and explicitly confirmed the inferred
+   * business problem statement produced by discovery — a lightweight gate
+   * ahead of the full specification review, required before `approveSpec`
+   * will accept this spec. See requirements.md §8.12. Not reset by in-place
+   * spec edits (`reviseSpec`/refinement of a still-draft spec); reset to
+   * `false` only when a *new* draft is synthesized (a fresh discovery pass
+   * or a revision of an already-approved spec), since that's the point a
+   * new business-problem understanding needs re-confirming.
+   */
+  problemStatementApproved?: boolean;
 }
 
 // ── Agentic Specification Generation (SpecOps) ──
@@ -229,6 +284,83 @@ export interface TargetConfigFile {
   activeProfile: string;
 }
 
+// ── Source & Target Context (v0.11.0) ──
+//
+// Distinct from TargetEnvironment/TargetConfigFile above (which are a flat,
+// generic, user-editable tool-preference profile) and from the Context Layer
+// graph (which only ever re-derives what the spec already says). These are
+// spec-tied, reviewed, gating records: built via a structured Q&A after spec
+// approval, explicitly approved by the user, and required before a plan can
+// be generated. See requirements.md §8.10.
+
+/** `not_applicable` only ever applies to Source Context (Greenfield — no source system). Target Context is always required. */
+export type ContextStatus = 'not_applicable' | 'pending' | 'built' | 'approved';
+
+export type ContextQuestionKind = 'text' | 'single-select' | 'boolean';
+
+/** One deterministic (non-adaptive) question in a Target/Source Context Q&A flow. */
+export interface ContextQuestion {
+  id: string;
+  /** Field on TargetContext/SourceContext this answer populates — dotted for nested fields, e.g. 'platformConfig.database'. */
+  field: string;
+  prompt: string;
+  kind: ContextQuestionKind;
+  options?: string[];
+  rationale?: string;
+  /** Deterministic, keyword-evidence-derived suggestion — pre-fills the form field, never silently assumed. */
+  suggestedDefault?: string;
+}
+
+/**
+ * The reviewed, approved target-platform decision for one spec version.
+ * Once approved, its fields become the plan's live `TargetEnvironment`
+ * (`AgentHub.setTargetEnvironment`) — replacing the generic
+ * `TargetConfigManager` default that previously seeded it silently.
+ */
+export interface TargetContext {
+  specId: string;
+  specVersion: number;
+  status: ContextStatus;
+  platform?: DataPlatformProvider;
+  environmentProfile?: EnvironmentProfile;
+  modelingApproach?: ModelingApproach;
+  namingConvention?: NamingConvention;
+  transformationTool?: TransformationTool;
+  orchestrationTool?: OrchestrationTool;
+  outputFormats?: OutputFormat[];
+  platformConfig?: Record<string, string>;
+  /** Raw Q&A record (question id → answer) for traceability and re-display when revising. */
+  answers: Record<string, string>;
+  builtAt?: string;
+  approvedAt?: string;
+}
+
+/**
+ * The reviewed source-system context for one spec version — `not_applicable`
+ * for Greenfield, otherwise built via either a live connection check
+ * (`method: 'connected'`) or a guided description (`method: 'described'`,
+ * for data-push/no-connectivity cases). Its `description`/`connectionSummary`
+ * feed the Context Layer prompt alongside the spec once approved.
+ */
+export interface SourceContext {
+  specId: string;
+  specVersion: number;
+  status: ContextStatus;
+  method?: 'connected' | 'described';
+  sourceType?: 'database' | 'api' | 'file' | 'stream' | 'saas' | 'other';
+  description?: string;
+  connectionSummary?: {
+    platform: string;
+    database: string;
+    schema: string;
+    tableCount: number;
+    viewCount: number;
+  };
+  answers: Record<string, string>;
+  builtAt?: string;
+  approvedAt?: string;
+}
+
 // ── Artifact Types ──
 
 export type ArtifactType = 'data_model' | 'sttm_mapping' | 'ddl_script' | 'pipeline_dag' | 'architecture_diagram' | 'data_dictionary' | 'sql_script' | 'requirements_doc' | 'discovery_report' | 'data_profile' | 'knowledge_graph' | 'validation_report' | 'test_suite';
@@ -324,6 +456,40 @@ export interface ToolCallAuditEntry {
   at: string;
 }
 
+// ── Chat sessions (Phase F) ──
+
+export type ChatSessionStatus = 'active' | 'archived' | 'discarded';
+
+/**
+ * Metadata for one chat session. Independent of Business Problem Specification
+ * identity (a chat is a transcript, not a spec container) — `specId`/`specVersion`
+ * are just "what was approved when this chat was active," for traceability, not
+ * a container relationship.
+ */
+export interface ChatSessionMeta {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: ChatSessionStatus;
+  specId?: string;
+  specVersion?: number;
+  llmProvider?: LlmProvider;
+  /** A short, human-readable label — the first user message, truncated, when available. */
+  title?: string;
+  /** Claude Code CLI's own session id for this chat (`--session-id` on first use, `--resume` after).
+   *  Set only while `llmProvider === 'claude'`; a provider switch leaves it stale and unused. */
+  claudeSessionId?: string;
+  /** Rolling compressed account of turns that have aged out of the token-budget window (Phase 3). */
+  summary?: string;
+}
+
+/** One persisted line of a chat session's transcript (`.ai-context/chats/<id>.jsonl`). */
+export interface ChatMessage {
+  role: 'user' | 'ai' | 'log';
+  content: string;
+  at: string;
+}
+
 export interface PlanState {
   objective: string;
   schemaContext: string;
@@ -340,6 +506,71 @@ export interface PlanState {
   specVersion?: number;
   /** Phases inferred from the approved Business Problem Specification (live status view). */
   inferredPhases?: InferredPhase[];
+  /** Carried over from the spec that produced this plan — see `BusinessProblemSpec.implementationType`. */
+  implementationType?: ImplementationType;
+  /**
+   * Explicit user overrides of a phase's applicability (Applicable/Non-Applicable),
+   * layered on top of whatever `inferPhases()` computed. Survives a subsequent
+   * re-plan (re-applied after each `inferPhases()` call) and is cleared by
+   * `resetPlan()`. Does not retroactively edit an already-generated plan's
+   * steps — the palette flags the plan as possibly stale instead (see
+   * `requirements.md` §8.8 follow-up).
+   */
+  phaseOverrides?: Partial<Record<WorkflowPhase, boolean>>;
+  /**
+   * Live mirror of `webviewProvider.computeContextGateStatus().canGeneratePlan` (v0.13.0) —
+   * pushed into the hub whenever context/spec state changes so the orchestrator (`AgentHub`)
+   * can enforce the same precondition on plan generation itself, not just at the UI call site.
+   * Not persisted — recomputed and re-pushed on every activation/context change.
+   */
+  contextGateReady?: boolean;
+  /**
+   * Explicit Plan Approval gate (v0.13.0, requirements.md §8.12) — required before
+   * `executePlan()` will run. Set by `AgentHub.approvePlan()`; reset to `false` whenever
+   * a new plan is generated, since a regenerated plan needs its own approval.
+   */
+  planApproved?: boolean;
+  planApprovedAt?: string;
+  /**
+   * Explicit "confirm applicable stages" gate (v0.13.0, requirements.md §8.12) — required
+   * before `executePlan()` will run, alongside `planApproved`. Set by `AgentHub.confirmStages()`;
+   * reset to `false` whenever the inferred/overridden phase set changes (`inferPhasesFromSpec`,
+   * `setPhaseOverride`) or a new plan is generated, since either invalidates a prior confirmation.
+   */
+  stagesConfirmed?: boolean;
+  stagesConfirmedAt?: string;
+}
+
+/**
+ * The durable, on-disk record of a generated plan — persisted by `PlanManager` to
+ * `.ai-context/plan/plan.yaml`, with every prior version archived to `plan/history/`
+ * (mirrors `SpecManager`'s pattern exactly). Unlike `PlanState`, which is the live,
+ * in-memory working copy `AgentHub` mutates step-by-step during execution, this is
+ * the governed artifact: one row written per generation or re-plan.
+ */
+export interface PersistedPlan {
+  /** Stable across versions of the same plan lineage; a fresh objective/spec starts a new id. */
+  id: string;
+  version: number;
+  specId?: string;
+  specVersion?: number;
+  implementationType?: ImplementationType;
+  objective: string;
+  schemaContext: string;
+  status: SessionStatus;
+  steps: PlanStep[];
+  inferredPhases?: InferredPhase[];
+  targetEnvironment?: TargetEnvironment;
+  phaseOverrides?: Partial<Record<WorkflowPhase, boolean>>;
+  /** Why this version was written — the initial generation, or a failure-triggered re-plan. */
+  generationReason: 'initial' | 're-plan';
+  /** Plan Approval + Stage Confirmation gates (v0.13.0) — see `PlanState`. */
+  planApproved?: boolean;
+  planApprovedAt?: string;
+  stagesConfirmed?: boolean;
+  stagesConfirmedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AgentExecutionContext {
@@ -355,6 +586,13 @@ export interface AgentExecutionContext {
   log: (message: string) => void;
   addArtifact?: (artifact: GeneratedArtifact) => void;
   currentPhase?: WorkflowPhase;
+  /**
+   * Calls the configured LLM provider (v0.11.0) — lets a codegen agent produce
+   * genuinely context-aware content instead of a fixed string template.
+   * Delegates to `AgentHub.callConfiguredLlm`; errors propagate as a rejected
+   * promise, same as any other LLM call in the hub.
+   */
+  callLlm?: (prompt: string, systemPrompt?: string) => Promise<string>;
   /** Only populated for `toolSkillAgent` — the workspace root, for sandboxing tool execution. */
   workspaceRoot?: string;
   /**

@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { exec as execCb } from 'node:child_process';
-import { AgentExecutionContext, AgentExecutionResult, PlanStep, ToolCallAuditEntry, ToolSkillDefinition } from '../../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep, ToolSkillDefinition } from '../../core/types';
 import { loadToolSkillsFromDirectory } from '../../core/toolSkills';
 
 /**
@@ -17,12 +16,17 @@ import { loadToolSkillsFromDirectory } from '../../core/toolSkills';
  *               AutoDE does not intercept individual tool calls here — Claude Code
  *               runs its own loop opaquely. Gated by ONE invocation-level
  *               confirmation dialog (not per-call — see the design note below).
- * - `copilot` → a real tool-calling loop AutoDE owns, built on `vscode.lm`'s
- *               documented tool-calling API (`LanguageModelChatRequestOptions.tools`,
- *               `LanguageModelToolCallPart`/`LanguageModelToolResultPart`). Every
- *               write/exec call is gated by its own approval dialog and logged.
- * - anything else → unsupported; the 5 `fetch()`-based providers have no tool
- *               execution sandbox and this doesn't attempt to build one for them.
+ * - `copilot` → `LanguageModelAdapter.completeWithTools()`, a tool-calling loop
+ *               AutoDE owns, built on `vscode.lm`'s documented tool-calling API
+ *               (`LanguageModelChatRequestOptions.tools`,
+ *               `LanguageModelToolCallPart`/`LanguageModelToolResultPart`) and the
+ *               shared tool set in `core/agenticTools.ts`. Every write/exec call is
+ *               gated by its own approval dialog and logged.
+ * - anything else → unsupported *for tool-executing Skills specifically* (this
+ *               agent stays scoped to the two providers with a real Skill-shaped
+ *               tool loop). Grounded chat (`AgentHub.chat`) is not this restricted —
+ *               it wires the same `core/agenticTools.ts` tool set into every
+ *               provider's own native function-calling API; see `core/llmProviders.ts`.
  *
  * Design note on approval granularity: Claude Code's own permission-prompt
  * callback mechanism (`--permission-prompts host` + an external tool) is not
@@ -43,9 +47,6 @@ import { loadToolSkillsFromDirectory } from '../../core/toolSkills';
  * choice, not fully diagnosed) — treat command execution via the Claude path
  * as best-effort, not guaranteed, until observed working.
  */
-
-const MAX_COPILOT_TURNS = 12;
-const MAX_TOOL_OUTPUT_CHARS = 20_000;
 
 export async function executeToolSkillAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const skillId = step.skillId ?? context.skillId;
@@ -133,7 +134,7 @@ async function runOnClaude(skill: ToolSkillDefinition, instruction: string, cont
   }
 }
 
-// ── Copilot execution path (AutoDE-owned tool loop) ──
+// ── Copilot execution path (AutoDE-owned tool loop, shared with chat — see `core/agenticTools.ts`) ──
 
 async function runOnCopilot(skill: ToolSkillDefinition, instruction: string, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const workspaceRoot = context.workspaceRoot!;
@@ -145,61 +146,19 @@ async function runOnCopilot(skill: ToolSkillDefinition, instruction: string, con
     if (!adapter) {
       return { success: false, message: info.error || 'GitHub Copilot is not available through the VS Code Language Model API.', error: info.error };
     }
-    const model = adapter.getModel();
 
-    const tools: vscode.LanguageModelChatTool[] = [
-      { name: 'autode_read_file', description: 'Read a UTF-8 text file at a path relative to the workspace root.',
-        inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
-      { name: 'autode_list_dir', description: 'List files and directories at a path relative to the workspace root.',
-        inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
-      { name: 'autode_write_file', description: 'Write (create or overwrite) a UTF-8 text file at a path relative to the workspace root. Requires user approval.',
-        inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } },
-      { name: 'autode_run_command', description: 'Run a shell command in the workspace root. Requires user approval.',
-        inputSchema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } }
-    ];
-
-    const messages: vscode.LanguageModelChatMessage[] = [
-      vscode.LanguageModelChatMessage.Assistant(buildSkillSystemPrompt(skill)),
-      vscode.LanguageModelChatMessage.User(instruction)
-    ];
-
-    const audit: ToolCallAuditEntry[] = [];
-    let finalText = '';
-
-    for (let turn = 0; turn < MAX_COPILOT_TURNS; turn++) {
-      const response = await model.sendRequest(messages, { justification: `Run imported skill "${skill.name}"`, tools });
-
-      const assistantParts: Array<vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart> = [];
-      const toolCalls: vscode.LanguageModelToolCallPart[] = [];
-      let turnText = '';
-      for await (const part of response.stream) {
-        if (part instanceof vscode.LanguageModelToolCallPart) {
-          toolCalls.push(part);
-          assistantParts.push(part);
-        } else if (part instanceof vscode.LanguageModelTextPart) {
-          turnText += part.value;
-          assistantParts.push(part);
-        }
-      }
-      finalText += turnText;
-
-      if (toolCalls.length === 0) {
-        break; // the model is done — no more tools requested
-      }
-
-      messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
-      const resultParts: vscode.LanguageModelToolResultPart[] = [];
-      for (const call of toolCalls) {
-        const outcome = await executeCopilotTool(call, workspaceRoot, audit);
-        resultParts.push(new vscode.LanguageModelToolResultPart(call.callId, [new vscode.LanguageModelTextPart(outcome)]));
-      }
-      messages.push(vscode.LanguageModelChatMessage.User(resultParts));
-    }
+    const { text, audit } = await adapter.completeWithTools(instruction, {
+      model: context.settings.activeLlmModel,
+      systemPrompt: buildSkillSystemPrompt(skill),
+      justification: `Run imported skill "${skill.name}"`,
+      mode: 'full',
+      workspaceRoot
+    });
 
     context.log(`Skill "${skill.name}" completed via Copilot after ${audit.length} tool call(s). Audit: ${JSON.stringify(audit).slice(0, 500)}`);
     return {
       success: true,
-      message: finalText.trim() || `Skill "${skill.name}" completed (${audit.length} tool call(s), no final text).`,
+      message: text || `Skill "${skill.name}" completed (${audit.length} tool call(s), no final text).`,
       details: { provider: 'copilot', skillId: skill.id, audit: audit as unknown as Record<string, unknown> }
     };
   } catch (err) {
@@ -207,84 +166,4 @@ async function runOnCopilot(skill: ToolSkillDefinition, instruction: string, con
     context.log(`Skill "${skill.name}" failed via Copilot: ${message}`);
     return { success: false, message: `Skill run failed: ${message}`, error: message };
   }
-}
-
-async function executeCopilotTool(
-  call: vscode.LanguageModelToolCallPart,
-  workspaceRoot: string,
-  audit: ToolCallAuditEntry[]
-): Promise<string> {
-  const input = (call.input ?? {}) as Record<string, unknown>;
-  const at = new Date().toISOString();
-  try {
-    switch (call.name) {
-      case 'autode_read_file': {
-        const resolved = resolveSandboxedPath(workspaceRoot, String(input.path ?? ''));
-        const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(resolved));
-        audit.push({ tool: call.name, input, outcome: 'ok', at });
-        return Buffer.from(bytes).toString('utf8').slice(0, MAX_TOOL_OUTPUT_CHARS);
-      }
-      case 'autode_list_dir': {
-        const resolved = resolveSandboxedPath(workspaceRoot, String(input.path ?? '.'));
-        const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(resolved));
-        audit.push({ tool: call.name, input, outcome: 'ok', at });
-        return entries.map(([name, type]) => `${type === vscode.FileType.Directory ? 'dir ' : 'file'} ${name}`).join('\n') || '(empty directory)';
-      }
-      case 'autode_write_file': {
-        const targetPath = String(input.path ?? '');
-        const approved = await confirmToolCall(`Allow the skill to write "${targetPath}"?`);
-        if (!approved) {
-          audit.push({ tool: call.name, input: { path: targetPath }, outcome: 'denied', at });
-          return 'The user denied this file write.';
-        }
-        const resolved = resolveSandboxedPath(workspaceRoot, targetPath);
-        await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(resolved)));
-        await vscode.workspace.fs.writeFile(vscode.Uri.file(resolved), Buffer.from(String(input.content ?? ''), 'utf8'));
-        audit.push({ tool: call.name, input: { path: targetPath }, outcome: 'approved', at });
-        return `Wrote ${targetPath}.`;
-      }
-      case 'autode_run_command': {
-        const command = String(input.command ?? '');
-        const approved = await confirmToolCall(`Allow the skill to run this command in the workspace?\n\n${command}`);
-        if (!approved) {
-          audit.push({ tool: call.name, input, outcome: 'denied', at });
-          return 'The user denied this command.';
-        }
-        const output = await runShellCommand(command, workspaceRoot);
-        audit.push({ tool: call.name, input, outcome: 'approved', detail: output.slice(0, 500), at });
-        return output.slice(0, MAX_TOOL_OUTPUT_CHARS);
-      }
-      default:
-        audit.push({ tool: call.name, input, outcome: 'error', detail: 'unknown tool', at });
-        return `Unknown tool: ${call.name}`;
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    audit.push({ tool: call.name, input, outcome: 'error', detail: message, at });
-    return `Error: ${message}`;
-  }
-}
-
-/** Resolves a model-supplied relative path against the workspace root, rejecting any escape (`..`, absolute paths elsewhere). */
-function resolveSandboxedPath(workspaceRoot: string, requestedPath: string): string {
-  const root = path.resolve(workspaceRoot);
-  const resolved = path.resolve(root, requestedPath);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    throw new Error(`Path "${requestedPath}" escapes the workspace root — denied.`);
-  }
-  return resolved;
-}
-
-async function confirmToolCall(message: string): Promise<boolean> {
-  const choice = await vscode.window.showWarningMessage(message, { modal: true }, 'Approve');
-  return choice === 'Approve';
-}
-
-function runShellCommand(command: string, cwd: string): Promise<string> {
-  return new Promise((resolve) => {
-    execCb(command, { cwd, timeout: 60_000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
-      const exitNote = err ? `\n[command exited with an error: ${err.message}]` : '';
-      resolve(`${stdout}${stderr}${exitNote}`);
-    });
-  });
 }

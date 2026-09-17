@@ -2,7 +2,7 @@
 
 This document is the authoritative reference for AutoDE's design, implementation, QA, and acceptance criteria. It covers: UI/UX, the Enterprise Context Layer (information architecture), the single-workspace artifact model, and local language model integration (GitHub Copilot via `vscode.lm`, and Claude Code via its CLI).
 
-Last updated: 2026-09-09
+Last updated: 2026-09-16
 Author: AutoDE Engineering
 
 ---
@@ -13,12 +13,12 @@ AutoDE is an AI-augmented VS Code extension for Data Engineering. Key functions:
 - Provide a focused DE Agent Workspace webview (single-column, tabbed) as the primary UX for planning, executing, and refining data engineering pipelines.
 - Transform a natural-language business problem into a structured, reviewable, versioned **Business Problem Specification (BPS)** — the system of record that governs all subsequent activity.
 - Provide an **Enterprise Context Layer** — a persistent, evolving semantic understanding of the user's data environment stored in `.ai-context/` (used to ground prompts and LLM guidance).
-- Generate data-engineering artifacts (DDL, dbt models, mappings, docs) into a visible, configurable folder (`auto-de/`) in the user's current repository.
+- Generate data-engineering artifacts (DDL, dbt models, mappings, docs) into a visible, configurable folder (`.ai-context/artifacts/`) in the user's current repository.
 - Offer optional integration with a locally-installed language model (GitHub Copilot via `vscode.lm`, or the Claude Code CLI) such that a user who already has one can opt-in to programmatically route LLM tasks to it with no API key.
 
 Primary non-functional requirements:
 - Zero UI blocking (offload heavy compute to worker threads / web workers).
-- Strict type-safety, lifecycle / disposal, and atomic file operations for `.ai-context/` and `auto-de/` artifacts.
+- Strict type-safety, lifecycle / disposal, and atomic file operations for everything under `.ai-context/` (context layer and generated artifacts alike).
 - Strong privacy and opt-in consent for any third-party LLM usage (Copilot or cloud providers).
 - **Single-workspace model**: AutoDE operates on the currently open repository; there is no multi-project registry.
 - **Spec-driven**: the BPS governs phase inference, context creation, orchestration, and end-to-end traceability.
@@ -42,6 +42,8 @@ Specific design decisions and behavior:
 - Provide UI elements to configure/choose LLM provider and model, and show local-LLM status (Copilot models / Claude Code CLI) and consent options in the LLM tab (see §9).
 - Provide a "Context" section that surfaces the Enterprise Context Layer (layers, business terms, rules, verified queries, relationships) read-only from `.ai-context/`.
 - Provide a "register source files" form so users can identify which repository files contain business context, verified queries, and data definitions.
+- **Processing feedback (Phase E, v0.9.0).** Every chat-initiated request (plain chat, discovery/revision turns, `/plan`, `/skill`) shows a single evolving "pending" bubble (spinner + a context-derived opening line — e.g. "Starting requirements discovery…", "Continuing the requirements conversation…", "Building implementation plan…" — picked from what's actually about to run, not a canned rotation) from send until the terminal response arrives; existing backend `logEntry` checkpoints update that one bubble in place instead of appending separate static lines. The send control is disabled while a request is pending, closing a real reentrancy gap (the discovery engine isn't safe against two overlapping turns).
+- **Chat sessions & lifecycle (Phase F, v0.9.0).** Chat is now a persisted, first-class session, independent of BPS identity (a session may span multiple specs; a spec may span multiple sessions). "🗨 New Chat" (topbar icon, and command palette `AutoDE: New Chat`) archives the current session — never discards it silently — and starts a fresh one. If an agentic discovery/revision interview is in flight, its partial answers are folded into the Enterprise Context Layer as a registered `business_context` source (never resumed as a live Q&A, per explicit product decision) before the session is archived. `AutoDE: Chat History` (Command Palette) lists archived + active sessions and opens a read-only transcript; `AutoDE: Discard Chat` permanently deletes one, gated by a modal confirmation, and only ever on explicit user request. See §8a.
 
 Accessibility & polish:
 - All controls accessible by keyboard and screen-reader friendly where practical.
@@ -277,17 +279,17 @@ Formatting constraints:
 AutoDE operates on the user's currently open repository. There is no multi-project registry and no project-creation flow.
 
 - **One workspace = one data-engineering effort.** The "objective" is what the user types to generate a plan; it is persisted in `.ai-context/state.json`.
-- **Generated artifacts** (DDL, dbt models, mappings, docs) are written to a **visible, configurable folder** `auto-de/` (setting `autoDE.artifactDirectory`), organized by phase, and — since Phase B (v0.9.0) — by the specification revision that produced them:
+- **Generated artifacts** (DDL, dbt models, mappings, docs) are written to a **visible, configurable folder** `.ai-context/artifacts/` (setting `autoDE.artifactDirectory`), organized by phase, and — since Phase B (v0.9.0) — by the specification revision that produced them:
 
   ```text
-  auto-de/01-discover/
-  auto-de/02-model/
-  auto-de/03-build/
+  .ai-context/artifacts/01-discover/
+  .ai-context/artifacts/02-model/
+  .ai-context/artifacts/03-build/
     <specId>.v<version>/        ← artifacts stamped with a spec (the common case)
       dbt_project.yml           ← filenames are untouched (dbt/tool conventions preserved);
       models/staging/...           only a folder is inserted, not a filename prefix
     <filename without a folder> ← artifacts with no spec stamp (legacy, or generated with no spec set)
-  auto-de/04-validate/
+  .ai-context/artifacts/04-validate/
   ```
 
 - **Artifacts are committed to git** — they are deliverables, not transient state.
@@ -295,7 +297,7 @@ AutoDE operates on the user's currently open repository. There is no multi-proje
 - **Separating efforts** = git branches, not a project registry.
 - **Stale-artifact detection** (Phase B): because `PlanState.artifacts` is in-memory only and doesn't survive a reload, the `<specId>.v<version>` folder name is the durable record of which spec revision produced a set of artifacts. The Workflow Palette scans this on open (`scanArtifactStaleness`, `src/context/ArtifactStalenessScanner.ts`) and flags any folder whose version doesn't match the currently approved spec — **it flags, it never auto-touches** the files.
 
-Core module: ArtifactWriter (`src/context/ArtifactWriter.ts`) — persists a `GeneratedArtifact` → `auto-de/<phase>/[<specId>.v<version>/]<filename>`.
+Core module: ArtifactWriter (`src/context/ArtifactWriter.ts`) — persists a `GeneratedArtifact` → `.ai-context/artifacts/<phase>/[<specId>.v<version>/]<filename>`.
 
 Removed (superseded by this model): `ProjectManager` / `ProjectRegistry`, the `newProject` command, project-list UI, and `setActiveProject`.
 
@@ -372,6 +374,7 @@ Per the decision to lean on git rather than build a parallel version store: `.ai
 - Revising an **approved** spec starts a full agentic revision interview (§8.6.1) rather than being edited in place — a "↻ Revise" click or `/spec <change>` arms it, the next message is the change request.
 - `AgentHub.generatePlanFromSpec(spec)` — spec-driven plan generation.
 - Traceability: `specId`/`specVersion` on `PlanState`, `GeneratedArtifact`, `Origin`.
+- **(v0.10.0)** Context Layer synced from the approved spec before Generate Plan is reachable; deterministic Greenfield/Brownfield classification with user override; plan persistence; artifact-level version history — see §8.8.
 
 ### 8.6 Agentic Specification Generation (SpecOps)
 
@@ -382,6 +385,127 @@ The draft BPS is produced by an **agentic, DE-tailored requirements flow** (Supe
 - **Comprehensive synthesis** — `AgentHub.synthesizeComprehensiveSpec` assembles the v2 spec (businessRequirements, dataFlows, transformations, dependencies, acceptanceCriteria, implementationConsiderations, sourceCatalog) with per-field provenance, persisted by `SpecManager`.
 
 This same engine also drives **revising an already-approved specification** — see §8.6.1.
+
+### 8.8 Context Sync, Implementation Type & Plan Governance (v0.10.0)
+
+Follow-up to a review of the Generate Plan workflow, which surfaced three gaps: the Context Layer was never updated from the approved spec before planning, there was no Greenfield/Brownfield classification, and generated plans had no durable, governed record. All three build on existing patterns rather than introducing new ones.
+
+- **Context sync before planning.** Approving a spec (`approveSpec`) now automatically runs `SynthesisPipeline.synthesizeFromSpec(spec)` — objectives/business requirements/dependencies become `business_term` nodes, constraints/assumptions become `business_rule` nodes, all stamped with `Origin.specId`/`specVersion`. Re-synthesizing on a later revision replaces the prior version's nodes rather than accumulating them. A durable, committed markdown record lands at `.ai-context/context/snapshots/<specId>.v<version>.md`. `generatePlan`'s own prompt now also merges in the Context Layer (`contextFileManager.buildContextPrompt()`), which it previously did not.
+- **Greenfield/Brownfield classification** (`src/core/implementationType.ts`): deterministic keyword evidence (mirroring phase inference), computed at every spec draft/revision, always user-overridable (`setImplementationType`, preserved across later revisions). Displayed in the chat spec card and the Workflow Palette. Feeds phase inference: a Brownfield classification forces `discover` required by default unless `scope.out` explicitly excludes it.
+- **Plan governance.** `PlanManager` (`src/context/PlanManager.ts`) persists the generated plan — steps, status, inferred phases, implementation type — to `.ai-context/plan/plan.yaml`, archiving every prior version to `plan/history/` on each re-plan, mirroring `SpecManager` exactly. Previously `PlanState` had no on-disk representation at all; it now survives a VS Code reload. `ArtifactWriter` additionally archives a file's previous revision to a `history/` subfolder before a rerun overwrites it within the same spec version.
+- **Plan validation hardening.** `validatePlanResponse` now runs a topological-sort cycle check (previously only direct self-dependency was rejected; multi-node cycles surfaced later as a "blocked DAG" at execution time) and rejects any returned step whose agent maps to a phase outside the inferred required-phase set (previously a prompt-only instruction with no enforcement).
+- **(v0.11.0)** Source and Target Context are now first-class, reviewed, gating objects, required before Generate Plan — see §8.10.
+
+### 8.9 Plan-Completion UX, Stage Review, and Resilient Artifact Generation (v0.10.0)
+
+Follow-up to hands-on testing of the workflow, which surfaced a real bug and three product gaps:
+
+- **Fixed: the "still generating" bug.** `generatePlanFromSpec` left `state.status` at whatever a *previous* plan had left it (often a stale `'ready'`); `inferPhasesFromSpec`'s own internal state broadcast then carried that stale status out to the UI, which read it as "done" and cleared the pending indicator seconds before the actual plan LLM call had even started — then gave no further signal when the real completion happened later. `generatePlanFromSpec` now sets `state.status = 'planning'` before phase inference runs, so the premature broadcast can't happen.
+- **Explicit plan-ready confirmation.** Once a plan actually finishes, the chat now shows a clear "✅ Plan generated — N steps across M phases" message with **View Plan** (scrolls to and highlights the plan card) and **Review Stages** (opens the Workflow Palette) actions — mirroring the spec-approval confirmation pattern.
+- **Stage review as an explicit checkpoint.** New `PhaseStatus` value `pending-review`: once a plan exists but hasn't been executed yet (`PlanState.status === 'ready'`), required phases read "📝 Pending Review" instead of a bare "Pending" — signaling the palette is a deliberate review step, not just a status board. Each phase row now has **Applicable**/**Non-Applicable** override buttons (`AgentHub.setPhaseOverride`, webview message `setPhaseRequired`) — a manual override survives a subsequent re-plan (re-applied after every `inferPhases()` call) and is cleared by `resetPlan()`. Per product decision (2026-09-15): an override does **not** auto-regenerate an already-generated plan — the palette shows a "may not reflect your latest stage changes" banner with a one-click Re-plan instead, so overriding never triggers a surprise LLM call.
+- **"🏗 Generate Artifacts"** is now the label everywhere the plan-execution action appears (palette, chat contextual actions, panel dashboard) — previously "▶ Execute Plan"/"▶ Continue Workflow" in different places, inconsistent with how the workflow was actually being described, and — on the Workflow Palette specifically — not labeled as an execution action at all (it existed, just read as "▶ Continue Workflow").
+- **Artifact generation no longer stops at the first failure.** `executePlan`'s DAG loop used to `return` immediately on any step failure, silently abandoning every other independent, unrelated step — so a Snowflake connectivity failure (`snowflakeExecutor`) blocked artifacts that had nothing to do with Snowflake. The loop now marks the failing step `failed` and continues running everything else that's still ready; only steps that are genuinely blocked by a failed dependency are marked failed in turn. The plan's overall status still ends `'failed'` if anything failed, but only after everything that *could* run has run — directly addressing "artifact generation should not be blocked solely because a target platform connection is unavailable."
+- **Fixed:** the Panel dashboard's "🏗 Generate Artifacts" quick action (and the `autoDE.executePlan` command generally) had no error handling — a failure (e.g. no plan generated yet) surfaced as an unhandled rejection instead of a clear message. Now wrapped in try/catch like `autoDE.generatePlan` already was.
+- **Artifact storage moved under `.ai-context/`** (was a sibling `auto-de/` folder): `autoDataEngineeringHub.artifactDirectory` now defaults to `.ai-context/artifacts`, keeping spec, context, plan, and generated artifacts in one logical location per product direction (2026-09-15) — folder naming may be revisited later (git/repo-management considerations), but the "one root" principle is the durable part of this decision.
+
+### 8.10 Source & Target Context: Mandatory, Reviewed, Gating (v0.11.0)
+
+Follow-up to a hands-on finding: even after §8.8's spec→graph sync, neither source nor target platform context was actually being *established* — the graph sync only re-expressed spec text already visible on the spec card, and `TargetConfigManager`'s generic defaults (Snowflake/dimensional/dbt/Airflow) silently seeded every workspace regardless of the business problem, with no review step. This section closes that gap: Target Context is now always required, Source Context is required for Brownfield (auto-marked Non-Applicable for Greenfield), and **Generate Plan is blocked until both are built and approved.**
+
+- **New types** (`src/core/types.ts`): `ContextStatus` (`not_applicable | pending | built | approved`), `ContextQuestion` (one deterministic Q&A field), `TargetContext`, `SourceContext` — both spec-tied (`specId`/`specVersion`) and distinct from the existing generic `TargetEnvironment`/`TargetConfigFile` (a user-editable tool-preference profile, now no longer auto-seeded into the hub — see below) and from the Context Layer graph (which only ever re-derives what the spec says).
+- **New managers** (`src/context/TargetContextManager.ts`, `SourceContextManager.ts`): mirror `SpecManager`'s atomic-write pattern, single current record per spec version (no version history — recomputed fresh per spec version), persisted to `.ai-context/context/target-context.yaml` / `source-context.yaml` (committed, alongside `business-context.yaml`).
+- **Structured Q&A, not adaptive.** Per product decision (2026-09-15), Target/Source Context are built through a **fixed, deterministic question sequence** (`src/core/targetContextQuestions.ts`, `sourceContextQuestions.ts`) — not an LLM-adaptive conversation like SpecOps. Each question carries a keyword-evidence `suggestedDefault` (same technique as `phaseInference`/`classifyImplementationType`) so the form isn't blank, but every field is explicitly confirmed or changed by the user, never silently assumed.
+- **Target Context flow:** `startTargetContext` → 8 fixed questions (platform, modeling approach, transformation/orchestration tool, naming convention, environment profile, database, schema) → `submitTargetContextAnswers` (status `built`) → `approveTargetContext` (status `approved`, pushes the result into `AgentHub.setTargetEnvironment()` — now the **sole** source of the plan's target environment).
+- **Source Context flow, Brownfield only:** user picks one of two methods (`chooseSourceContextMethod`), per product decision (2026-09-15):
+  - **Connect** — a live connection check (`webviewProvider.runSourceConnectionCheck`, reusing `ConnectionManager`) that extracts lightweight metadata and records a `connectionSummary` (table/view counts).
+  - **Describe** — 3 fixed questions (source type, free-text description, optional data-contract notes) for data-push/no-connectivity cases, composing into `SourceContext.description`.
+  - Either way: `submitSourceContextAnswers`/the connection check → status `built` → `approveSourceContext` → status `approved`.
+- **Greenfield:** `initializeContextForApprovedSpec` auto-calls `SourceContextManager.markNotApplicable()` — no user action, immediately gate-ready.
+- **The gate.** `webviewProvider.computeContextGateStatus(spec)` is the single source of truth: `canGeneratePlan = targetContext.approved && (sourceNotApplicable || sourceContext.ready)`. Enforced server-side in the `generatePlanFromSpec` handler (a blocked attempt returns a clear `error` naming exactly what's missing) — not just a UI affordance. The Workflow Palette's new "Source & Target Context" section (above the phase rows) shows both as status-badged cards with Build/Approve/Revise actions; "Generate Plan"/"Generate Artifacts" buttons across the palette and chat contextual actions read "🧰 Build Context First" (disabled) until the gate passes.
+- **Context reaches generation.** `buildContextSummaryForPlan(spec)` merges the Context Layer, the approved Source Context's description/connection summary, and the approved Target Context's platform/tooling summary into the `schemaContext` passed to `generatePlanFromSpec` — closing the last mile from "context exists" to "context is actually in the prompt."
+- **Fixed a self-inflicted regression from v0.10.0.** Wiring `TargetConfigManager` into `extension.ts` had made every workspace silently start with generic target defaults and permanently short-circuited the `extractTargetFromMessage` fallback. `TargetConfigManager` stays instantiated (for future dev/staging/prod profile switching) but its default profile is **no longer auto-seeded** into the hub — Target Context is now the sole, spec-aware source of `state.targetEnvironment`.
+- **Agents now actually consume context — the other half of the fix.** Per product decision (2026-09-15), the 5 previously-pure-template codegen agents (`ingestionAgent`, `dataModelerAgent`, `sttmAgent`, `architectureAgent`, `transformScaffoldAgent`) now try an LLM call first (`src/agents/llmCodegen.ts#generateWithLlm`, using the new `AgentExecutionContext.callLlm`), grounded in `step.taskDescription` + `context.objective` + `context.schemaContext` (which now includes source/target context) + the target environment — falling back to the original fixed-schema templates when no LLM is available or the call fails. `TransformationScaffolderAgent` LLM-generates only its two most-visible models (staging, marts); project config/intermediate model/tests/macros stay templated as genuinely domain-independent boilerplate. **Correctness note:** `generateWithLlm` only accepts a response wrapped in the requested fenced code block — an unfenced response (prose, a stray error message, anything the model didn't format as asked) is treated as a failed generation and falls back to the template, never shipped as artifact content. This was caught by a test during development: the shared LLM mock in the connectivity-degradation test returns raw plan JSON for every call, and an earlier, looser version of `generateWithLlm` was shipping that JSON as "generated SQL" before the fence requirement was tightened.
+- **Not yet done:** `SchemaSnapshot.lineage` still isn't converted into graph `derives_from` edges (§8.9's carryover note). No profile-switcher UI for `TargetConfigManager`. Source/Target Context have no version history (single current record, unlike the spec) — a deliberate scope cut given they're recomputed fresh per spec version rather than incrementally revised.
+
+### 8.11 Multi-Business-Problem Workspace (v0.12.0)
+
+Follow-up to a hands-on finding: clearing chat history and deleting `.ai-context/` by hand did not produce a clean slate — the previously approved spec was still visible in the Workflow Palette, and a new business problem typed into chat jumped straight toward artifact generation instead of the full spec → approve → context → plan → artifacts lifecycle. Root cause: nothing in the extension ever re-derived its in-memory state from disk — `hub`, `SpecManager`, `TargetContextManager`, and `SourceContextManager` all held state that only a VS Code reload (not a UI action) would discard. Confirmed product principle (2026-09-15): **the extension should always start from a clean in-memory state and reconstruct whatever context it needs explicitly from what's persisted, never rely on residual session memory.** The fix generalizes further: a single workspace can now hold **more than one business problem**, each with its own fully isolated spec/plan/context/artifacts, with an explicit "active" one at a time.
+
+- **Folder layout.** Each business problem lives at `.ai-context/problems/<id>/{spec,plan,context,artifacts}/`, mirroring the single-problem layout used before this change (per problem, not shared). `.ai-context/active-problem.json` is a pointer (`ActiveProblemPointer`: `problemId`, `activatedAt`) naming which one is currently active; absent = no active problem (a genuinely clean slate, distinct from "the first problem"). Global/shared state that doesn't belong to any one problem — the source registry (`sources.yaml`), the compiled Context Layer graph (`context/business-context.yaml`, `derived/graph.json`), and chat sessions (`chats/`) — stays at the workspace-level `.ai-context/` root, unchanged.
+- **Identity.** A problem's folder name is an auto-generated slug (`src/core/problemSlug.ts#generateProblemSlug`) — first 5 non-stop-words of the problem statement, kebab-cased, truncated to 48 chars, plus a 4-char random suffix for uniqueness (collision-checked against existing slugs, never surfaced to or chosen by the user). Deliberately **lazy**: the folder can't be named before a problem statement exists, so it's created on the first spec draft, not when the user clicks "New."
+- **`ActiveProblemManager`** (`src/context/ActiveProblemManager.ts`): owns the pointer file (atomic temp→rename write, same pattern as every other manager) and `listProblems()` — a lightweight scan of every `problems/<id>/spec/business-problem.yaml` (id, problemStatement, status, specVersion, updatedAt, isActive) for the picker, sorted newest-first, skipping unreadable folders rather than failing.
+- **Context-root re-scoping.** `SpecManager`, `PlanManager`, `TargetContextManager`, `SourceContextManager`, and `ArtifactWriter` no longer hardcode `.ai-context/<thing>` off the workspace root; their constructors now take an already-resolved `contextRoot: vscode.Uri`, and the caller decides what that root is — a business problem's folder for these five, or the workspace root for the shared managers above. `artifactDirectory` (setting, default `artifacts`) is now resolved relative to that `contextRoot` rather than always under `.ai-context/`.
+- **Activation sequence** (`webviewProvider.activateProblem`, called at startup with whatever `active-problem.json` names, and whenever the user starts or switches problems): runs `hub.resetForNewProblem()` first — a fuller reset than the existing `resetPlan()` (used for same-spec re-plans), additionally clearing spec identity, inferred phases, and implementation type, none of which should carry over across *different* business problems. Then swaps the *shared* Context Layer graph's spec-derived layer: removes the previous problem's spec-derived nodes (`GraphManager.removeNodesBySourceRef`) before re-synthesizing the newly active problem's (`SynthesisPipeline.synthesizeFromSpec`) — without this, one problem's objectives/constraints would keep leaking into another's prompts after a switch, the exact class of bug this feature exists to close. Only then are `SpecManager`/`TargetContextManager`/`SourceContextManager` (re)constructed against the new `contextRoot` and initialized; `extension.ts`'s `PlanManager`/`ArtifactWriter` are kept in sync via an `applyProblemRoot` callback the webview provider invokes on every activation, since those two are also needed by command-palette actions that don't go through the webview.
+- **New webview actions:** `startNewBusinessProblem` (clears the active pointer, fully resets, archives the current chat, starts a new one — the "genuinely clean slate" workflow) and `switchBusinessProblem` (activates a different existing problem, same reset sequence, also starts a fresh chat since a chat session's content belongs to whichever problem was active when it was written). `listBusinessProblems` → `businessProblemsList` feeds the Workflow Palette's new "Business Problem" section (current active problem, "＋ New", and a "⇄ Switch" list of every saved problem with status/updated-at, current one disabled).
+- **Not yet done:** no explicit "delete a business problem" action (folders can still be removed by hand); no renaming of a problem's auto-generated slug; switching problems does not warn about unsaved in-progress spec-interview state (carried over the same way "New Chat" already handles it — folded into context rather than lost, not a special case for this feature).
+
+### 8.12 Lifecycle Orchestration: Closing the Ungated Path (v0.13.0)
+
+Follow-up to fresh testing: "the solution is not consistently following a grounded execution workflow." Traced to a concrete, structural cause (audit Revision 6, §11): the gated lifecycle (spec → approve → context → approve → plan) was real, but coexisted with a second, older, fully ungated path — `AgentHub.generatePlan()`/`executePlan()`, predating the spec-driven architecture — that at least seven live UI entry points could still reach. Product decision (2026-09-16): the **orchestrator** (`AgentHub`) enforces the lifecycle's stage transitions and approval gates; the LLM retains full reasoning latitude *within* each stage. Three specific decisions from that interview:
+
+- **Stage Inference ordering: kept as-is, plus a formal gate.** Phase inference still runs at spec-approval time (before Context Building) and continues to scope the plan-generation prompt to only the inferred phases — re-sequencing it to run after Plan Generation (as one literal reading of the request would have it) was explicitly declined, since scoping the prompt up front is valuable and phases stay reviewable/overridable throughout regardless of when they were first computed. What was missing — a *discrete, one-time* confirmation before Artifact Generation, rather than only continuous editability — is what this section adds (Stage Confirmation, below).
+- **Plan Approval: an explicit action**, mirroring `approveSpec`/`approveTargetContext` exactly rather than upgrading the existing "plan ready" toast into a hard block.
+- **Business Problem checkpoint: lightweight.** A boolean field (`problemStatementApproved`) on the spec itself, not a separate governed artifact/manager — proportionate to what's usually one or two sentences, promotable to a full artifact later if it ever needs its own version history.
+
+**The orchestrator guard, concretely** (`src/core/agentHub.ts`):
+- `AgentHub.generatePlan(objective, schemaContext)` — the method every ungated caller reaches — now requires `state.specId` and `state.contextGateReady` before doing anything else, throwing a clear error otherwise. Its previous body moved to a private `generatePlanInternal()`, which `generatePlanFromSpec()` calls directly (it validates its own, stricter preconditions — spec approved, business problem confirmed, context gate ready — and doesn't need the raw-objective guard on top of that). This one check is what actually closes the "seven ungated entry points" finding from the audit: the Command Palette's "Generate Plan"/"Execute Plan" commands, the AutoDE Dashboard panel's Quick Actions (which route through those same commands), the `/plan` slash command with no approved spec, and the sidebar's re-plan buttons all now hit the same rule, without any of those call sites needing to know the rule exists.
+- `AgentHub.executePlan()` now requires `state.planApproved` **and** `state.stagesConfirmed`, both freshly reset to `false` whenever a new plan is generated (`generatePlanInternal`), whenever the inferred phase set changes (`inferPhasesFromSpec`), or whenever a phase is manually overridden (`setPhaseOverride`) — any of those invalidate a prior approval/confirmation.
+- New `AgentHub.approvePlan()` / `AgentHub.confirmStages()` — explicit, distinct actions (mirroring `SpecManager.approve()`), each persisted via a new `PlanManager.patchGates()` (in-place, like `patchInferredPhases` — a status change on the existing plan version, not a new generation).
+- **The AutoDE Dashboard panel is explicitly parked**, per product decision (2026-09-16) — its Quick Actions route through the now-gated Command Palette commands, so they're automatically covered by the guard above, but the panel's own broken multi-project UI (`projectList`/`getProjects`, which nothing in `panelProvider.ts` ever populates — see audit §11.1) was left untouched. Revisiting it is future work.
+
+**The Business Problem checkpoint** (`BusinessProblemSpec.problemStatementApproved`, new field): every draft/revision synthesis (`applyImplementationType`, called from `draftSpec`/`reviseSpec`/`synthesizeFromSession`) resets it to `false` — a new or changed business problem always needs re-confirmation. A new `approveBusinessProblem` webview action sets it `true`; `approveSpec` now rejects with a clear error if it's still `false`. UI: the spec card (`specActionsHtml`) shows "✓ Confirm Business Problem" in place of "✓ Approve" until confirmed, and a small "Needs confirmation" / "✓ Confirmed" badge next to the Problem Statement field — refining it is just the existing draft-revision chat flow (`reviseSpec`), no new mechanism needed.
+
+**UI for the two new plan gates**: the Workflow Palette's bottom action button and the chat's contextual actions both now walk through "✓ Approve Plan" → "✓ Confirm Applicable Stages" → "🏗 Generate Artifacts" as `PlanState.planApproved`/`stagesConfirmed` change, instead of jumping straight from "plan exists" to "Generate Artifacts."
+
+**A bug found and fixed along the way:** `SpecManager` never actually persisted `implementationType`/`implementationTypeReason`/`implementationTypeOverridden` to YAML (present on the in-memory spec object, silently dropped by `serialize()`) — a user's Greenfield/Brownfield classification, including any manual override, was reclassified from scratch on every reload. Fixed in the same pass as adding `problemStatementApproved` persistence, since it's the same code path.
+
+**Not yet done:** no "delete a business problem" UI (carried over from §8.11); the AutoDE Dashboard panel remains unaddressed (parked, above); no UI warning when re-planning discards a still-valid prior approval/confirmation (the gates simply reset silently — acceptable per the "no confirmation dialogs, everything is reversible" precedent from §10.4, since nothing is destroyed, just re-required).
+
+### 8.13 Discovery Progress Surfacing (v0.13.0, same day)
+
+Follow-up to dev-host testing: "the chat interaction with the LLM seems totally ungrounded — AutoDE is asking valid questions, but I'm not seeing the cohesive, grounded, controlled orchestrator I expected." Root cause, confirmed against the code rather than assumed: the discovery interview's real structure was never a UX problem so much as a **UI-opacity** problem. `SpecOpsEngine`/`IntakeSession` already track per-field coverage, turn budget, and (once resolved) which of the 7 skills owns a given question — but the webview payload for a question was always just `{question}`, and the Workflow Palette showed nothing at all ("No Business Problem Specification yet") for the entire discovery phase, only populating once the draft spec was synthesized at the end. So a genuinely deterministic, coverage-tracked, bounded process read as unstructured chat, because none of that structure ever reached the screen.
+
+- **New pure module** (`src/core/discoveryProgress.ts`): `buildDiscoveryProgress(session, skills)` → `{turnCount, turnBudget, coveredFields, totalFields, skills: [{id, name, status}]}`; `skillNameForField(field, skills)` resolves a question's owning skill deterministically from `SkillDefinition.specFields`, rather than trusting the LLM's own optional `question.skill` string. Coverage only ever reaches `'complete'` at synthesis time (`SpecOpsEngine.completeFields`), so "addressed" here means "not missing" — matching `coverageComplete()`'s own stop-condition definition, not waiting for a status that never occurs mid-interview.
+- **Wired into both question-posting paths** (`webviewProvider.postSpecQuestion`, and the `ask_many` branch in `runDiscoveryTurn`): every `specQuestion`/`specQuestions` message now also carries a `progress` snapshot and a `skillLabel` per question.
+- **UI (`media/sidebar.html`):** each question bubble now shows its topic (e.g. "🔎 Clarifying requirements · Data Flow") and a compact progress readout (bar + "N/M areas addressed · turn X of up to Y"), via a shared `discoveryProgressLineHtml()` helper. The Workflow Palette's Business Specification section — previously blank during discovery — now shows a live "🔎 Requirements discovery in progress" card with the same progress bar and a per-skill checklist (✓ addressed / ~ partial / ○ not started) whenever a spec hasn't been drafted yet but discovery is active.
+- **Not a change to grounding itself** — this surfaces existing orchestration state, it doesn't add new context to the LLM prompts. A secondary, expected-behavior factor noted during the investigation: for a genuinely fresh business problem with nothing registered yet, `ContextFileManager.buildContextPrompt()` legitimately returns empty, so early in a brand-new test the interview has only the user's own answers to reason from — correct, not a bug, but it compounds the "ungrounded" feel on top of the UI-opacity issue this section fixes.
+
+---
+
+## 8a. Chat Sessions & Lifecycle Management (Phase F, v0.9.0)
+
+Prompted by usability feedback: chat had no persisted identity — reloading the sidebar lost history, there was no way to deliberately start over, and an abandoned mid-interview conversation had no defined fate. Chat session identity is **independent of BPS identity** (confirmed via clarifying question — a session may touch several specs over its life, and a spec may be discussed across several sessions), independent of Phase F's related "processing feedback" work (Phase E) and orthogonal to Context Memory curation (deferred — see §16).
+
+### 8a.1 Session model
+
+- `ChatSessionMeta`: `id`, `createdAt`, `updatedAt`, `status` (`active | archived | discarded`), optional `specId`/`specVersion` (recorded at creation time, not kept in sync afterward — a lightweight breadcrumb, not a live link), `llmProvider`, `title` (back-filled from the first user message).
+- `ChatMessage`: `role` (`user | ai | log`), `content`, `at` (ISO timestamp).
+- Exactly one session is `active` at a time. Every assistant-facing response the webview posts (`chatResponse`, `specDrafted`, `specApproved`, `specQuestion(s)`) and every user message is appended to the active session's transcript as it happens — chat is durable by default, not opt-in.
+
+### 8a.2 Persistence
+
+- `.ai-context/chats/<id>.meta.json` (atomic temp→rename write, mirroring `SpecManager`/`SourceRegistry`) + `.ai-context/chats/<id>.jsonl` (one JSON object per line; read-modify-write, not a true append, since `vscode.workspace.fs` has no append primitive — an accepted cost at realistic chat lengths, not engineered around).
+- **Gitignored** (`.ai-context/chats/`), per explicit decision: transcripts are local/exploratory, unlike the curated, committed BPS. Confirmed via clarifying question ("Gitignored (Recommended)").
+- Core module: `ChatSessionManager` (`src/context/ChatSessionManager.ts`) — `initialize`, `listSessions`, `getActiveSession`, `createSession`, `appendMessage`, `loadTranscript`, `archiveSession`, `discardSession`, `updateMeta`.
+
+### 8a.3 New Chat
+
+- "🗨 New Chat" (sidebar topbar icon) or Command Palette `AutoDE: New Chat` **archives** the current session (never a silent discard) and starts a fresh `active` one.
+- If an agentic discovery/revision interview (§8.6) is in flight, its partial answers and insights are **never resumed as live Q&A** and **never silently discarded** — they are folded into the Enterprise Context Layer first: written as a `business_context` source file under `.ai-context/chats/carryover/<sessionId>.md`, registered via `SourceRegistry.addSource`, and run through `SynthesisPipeline.synthesize` so the partial answers become graph nodes before the interview state is torn down. This is the exact behavior specified by the user in response to a clarifying question that rejected three alternative designs (resumable / blocked / silently abandoned).
+- The webview's client-side session state (pending bubble, `discoveryActive`, `discoveryProgress`, `revisionArmed`) resets on every `chatSessionLoaded` message, whether that message arrives from a fresh New Chat, a resumed history session, or the sidebar resolving/reloading.
+- **Changed (v0.13.0):** activation itself no longer just "picks up the existing active session" silently — see §8a.4.
+
+### 8a.4 Chat History, Resume & Discard
+
+- **Startup no longer auto-resumes a conversation into view (v0.13.0).** Prompted by dev-host testing feedback ("restarting shows the previous chat loaded — the window should be empty as if it's a new session"). On `resolveWebviewView()`, if the resolved active session already has transcript content, it is **folded** — archived via the same `startNewChat()` path New Chat already uses (never discarded), with a fresh empty session taking its place — before anything is posted to the client. An already-empty active session (nothing to fold) is left as-is, so a genuinely fresh workspace or an already-folded state doesn't churn out an empty archived session on every reload.
+- **`openChatSession` now resumes a session live, not a read-only preview (v0.13.0).** Archives whatever's currently active (folding it in turn — nothing is ever lost), reactivates the chosen session (`ChatSessionManager.updateMeta(chatId, {status:'active'})`), and responds with `chatSessionLoaded` (the same message type New Chat and the startup fold use) so the resumed transcript renders exactly like any other active session — new messages append to it normally. The old read-only `chatSessionViewed` response is retired.
+- **New sidebar UI: "🕓" Chat History icon** (topbar, next to "🗨 New Chat") — the "on need basis" counterpart to the startup fold. Opens a dropdown (`listChatSessions` → `chatSessionsList`) listing every session (title, active/updated-at), clicking a row resumes it. This is the in-sidebar browser that §8a.4 previously described as scoped-out future work — the server-side plumbing (`listChatSessions`/`openChatSession`) already existed with no client-side consumer; this closes that gap, deliberately scoped to "list + resume" rather than the fuller search/tag/export browser still not built.
+- `AutoDE: Chat History` (Command Palette) is unchanged and remains a **read-only** peek (`QuickPick` + `vscode.workspace.openTextDocument`) — distinct from the sidebar's resume-capable picker above; kept for quickly eyeballing a transcript without switching the active session.
+- `AutoDE: Discard Chat` (Command Palette) lists sessions, requires the user to pick one, then a **modal confirmation** (`vscode.window.showWarningMessage`) before permanently deleting its meta + transcript files — irreversible, and only ever reachable through this explicit, two-step confirmation flow. Never triggered automatically.
+
+### 8a.5 Explicitly deferred
+
+- **Context Memory curation** (a "Distill this chat" action that runs an LLM extraction pass over a transcript into graph nodes with `origin.source: 'chat'` provenance) is a distinct concern from session persistence/lifecycle and has not been built — see the Pending Tasks Backlog (§16).
 
 ---
 
@@ -482,7 +606,7 @@ Only `copilot` and `claude` support running a tool skill at all (the five API-ke
    - Index build of 1,000 tables / 10,000 columns / 50 business terms in the background via worker threads while user types — the editor must remain responsive (no stutters). Observe performance with a synthetic dataset and worker-based indexing command.
 
 2. Atomic Write & Crash Resilience Test:
-   - Simulate a crash mid-write during context-graph persistence and artifact writing; verify `.ai-context/derived/graph.json` and `auto-de/` files remain uncorrupted (atomic rename) and the engine boots from the previous snapshot.
+   - Simulate a crash mid-write during context-graph persistence and artifact writing; verify `.ai-context/derived/graph.json` and `.ai-context/artifacts/` files remain uncorrupted (atomic rename) and the engine boots from the previous snapshot.
 
 3. Token Precision Test:
    - Request context with `maxTokens: 1500`. The returned prompt must be strictly within the token budget using js-tiktoken; tests must ensure that pruning doesn't cut code blocks or break JSON/Markdown syntax.
@@ -501,14 +625,21 @@ Only `copilot` and `claude` support running a tool skill at all (the five API-ke
    - ArtifactWriter atomic-write tests.
    - ContextRetriever token-pruning tests (business rules survive pruning).
 
+7. Generate Plan Validity & Governance Test (v0.10.0):
+   - A malformed, non-array, or otherwise structurally invalid LLM plan response is rejected by `validatePlanResponse` with a specific, user-facing error — including a step assigned to an invalid agent, a duplicate step ID, a dangling or self-referential dependency, and (test added this pass) a multi-step circular dependency, which must be rejected at generation time rather than surfacing later as a "blocked DAG" during execution.
+   - A plan step whose agent maps to a phase outside the specification's inferred required-phase set is rejected, not silently accepted.
+   - Approving a specification must synchronize the Context Layer (`SynthesisPipeline.synthesizeFromSpec`) before `generatePlanFromSpec` becomes reachable; re-approving a later revision must replace, not duplicate, the prior version's derived context nodes.
+   - A generated plan (steps, status, inferred phases, implementation type) must be recoverable after a simulated reload via `PlanManager`, with every prior version preserved in `plan/history/`.
+   - Every approved specification must carry an `implementationType` of `greenfield` or `brownfield`, deterministically classified and independently user-overridable; the override must survive a subsequent spec revision.
+
 ---
 
 ## 11. Implementation Plan & Phasing
 
 Phase 0 — Single-workspace model & artifacts
 - ✅ Remove `ProjectManager`/`ProjectRegistry`; fold state into `.ai-context/state.json`.
-- ✅ Add `autoDE.artifactDirectory` setting (default `auto-de`).
-- ✅ Implement `ArtifactWriter` (artifacts → `auto-de/<phase>/`, atomic writes).
+- ✅ Add `autoDE.artifactDirectory` setting (default `.ai-context/artifacts`).
+- ✅ Implement `ArtifactWriter` (artifacts → `.ai-context/artifacts/<phase>/`, atomic writes).
 
 Phase 1 — Context envelope & schema
 - ✅ Extend `src/context/types.ts` with the unified envelope (identity + provenance + version + ownership).
@@ -556,6 +687,11 @@ Phase 7 — Architecture review follow-through (v0.9.0)
 - ✅ **Phase C — LLM adapter registry.** `callConfiguredLlm`'s if/else chain + the stale, disconnected `LLM_PROVIDER_REGISTRY` replaced by one `LlmAdapter` registry (`src/core/llmProviders.ts`) — adding a provider is one class + one line, not an edited branch. UI/settings-schema deliberately left hand-authored (backend-only scope). `technical-design.md` §6.0.
 - ✅ **Phase D — Tool-executing Skills**, scoped down from the original discussion (see §9a for exactly what and why): import via `SKILL.md`; Claude runs via its own CLI tool loop (one confirmation, not per-call; `--permission-mode acceptEdits` required and verified against the real CLI; Bash execution unverified); Copilot runs via a real, AutoDE-owned `vscode.lm` tool-calling loop (true per-call approval + audit log; logic verified, not exercised against a live Copilot session). Not native Claude Code plugin loading; not per-call approval on the Claude path; not a hard OS sandbox on either path.
 
+Phase 8 — Usability follow-through (v0.9.0)
+- ✅ **Phase E — Processing feedback.** A single evolving "pending" chat bubble (spinner + context-derived opening line) replaces static append-only log lines for every chat-initiated request; send is disabled while a request is in flight. §2.
+- ✅ **Phase F — Chat sessions & lifecycle.** `ChatSessionManager` persists chat as first-class, BPS-identity-independent sessions (`.ai-context/chats/`, gitignored); "🗨 New Chat" archives (never silently discards) the current session, folding any in-flight interview's partial answers into the Context Layer first; `AutoDE: Chat History` / `AutoDE: Discard Chat` (Command Palette, user-initiated) round out the lifecycle. §8a.
+- ⏳ **Phase G — Context Memory curation** ("distill this chat" into graph nodes with `origin.source: 'chat'`) — deferred, not started. See §16.
+
 ---
 
 ## 12. Security, Privacy & Licensing
@@ -587,7 +723,7 @@ Phase 7 — Architecture review follow-through (v0.9.0)
 - Phase inference: `src/core/phaseInference.ts` (spec-driven inference + live phase status, pure module)
 - Data adapters: `src/dqm/` — `BaseAdapter.ts`, `ConnectionManager.ts`, `adapters/*`
 - Docs: `docs/requirements.md` (this file), `docs/technical-design.md`
-- Runtime folders: `.ai-context/` (context layer), `auto-de/` (generated artifacts)
+- Runtime folder: `.ai-context/` — spec, context, plan, and generated artifacts (`.ai-context/artifacts/`) all live under one root (v0.10.0 — previously artifacts were a sibling `auto-de/` folder). Since v0.12.0, per-business-problem state (spec/plan/context/artifacts) nests under `.ai-context/problems/<id>/`, with `active-problem.json` and the shared source registry/Context Layer graph/chat sessions staying at the `.ai-context/` root — see §8.11.
 
 ---
 
@@ -600,7 +736,7 @@ Phase 7 — Architecture review follow-through (v0.9.0)
 - [~] ContextFileManager: watcher + loading present; AJV envelope validation + real YAML parser + atomic graph persistence + layered (`context/**` + `derived/graph.json`) loading wired with `ContextValidator` (Phase 3 parts 1 & 2 ✅); per-kind AJV content schemas deferred.
 - [x] SourceRegistry: `sources.yaml` read/write + UI form.
 - [x] SynthesisPipeline: rule-based source ingestion → derived nodes/edges with provenance (LLM-assisted extraction deferred).
-- [x] ArtifactWriter: artifacts persisted to `auto-de/<phase>/` (atomic writes).
+- [x] ArtifactWriter: artifacts persisted to `.ai-context/artifacts/<phase>/` (atomic writes).
 - [x] Single-workspace model: `ProjectManager`/`ProjectRegistry` removed.
 - [ ] ContextRetriever: token-aware prompt assembler.
 - [ ] Vector/embedding engine (embedded, no server).
@@ -616,7 +752,7 @@ Phase 7 — Architecture review follow-through (v0.9.0)
 
 ## 16. Pending Tasks Backlog
 
-> **Last updated:** 2026-09-09 (v0.8.0). Phases 0–3 of the implementation plan (§11) are complete.
+> **Last updated:** 2026-09-13 (v0.9.0). Phases 0–3 of the implementation plan (§11) are complete, plus the Phase 7 architecture-review follow-through (A–D) and Phase 8 usability follow-through (E–F, §8a/§2).
 > This section captures **all remaining work** with enough context (file pointers, current state,
 > acceptance criteria) to be picked up independently without re-reading the whole codebase.
 > Items are grouped by phase; within each group, order reflects suggested sequencing.
@@ -676,6 +812,15 @@ Phase 7 — Architecture review follow-through (v0.9.0)
   - Results preview for executed SQL.
   - Export functionality (Markdown/YAML).
 
+### 16.3a Source & Target Environment Context (v0.10.0)
+
+Follow-up to R11 (`TargetConfigManager` orphaned) — clarified 2026-09-14 that the original intent was broader than target-only configuration, then implemented the same day:
+
+- **Target side** (platform/tool/modeling *choices*): `TargetConfigManager` (`.ai-context/target-environment.yaml`, profile inheritance) is now wired — instantiated in `extension.ts`, its active profile seeds `hub`'s target environment at activation; the ad-hoc `extractTargetFromMessage` LLM extraction is now only a fallback for a workspace with no persisted profile.
+- **Source side** (*facts about what exists*, not choices): implemented as a tagged extension of the existing Context Layer rather than a parallel store, per the decision below. `Origin.environment?: 'source' | 'target'` (`src/context/types.ts`) marks a node as environment-specific; nodes with no tag (e.g. spec-derived objectives/constraints) apply regardless. Tagged `'source'` automatically: live schema introspection (`BaseAdapter.snapshotToGraph` — tables/columns/views from `sourceAssessmentAgent`/`ConnectionManager`) and registered-source-derived nodes (`SynthesisPipeline`'s business-context/verified-queries/data-definitions extractors — the last of these is already the "data contract" ingestion path for push-style integrations with no direct connectivity). `ContextFileManager.getContextStats().sourceEnvironmentNodes` exposes the count; the sidebar's Context Drawer shows a "Source Environment Context" note, marked Non-Applicable for Greenfield (reusing the phase-applicability pattern, not a second one).
+- **Decisions made (2026-09-14):** tag the existing Context Layer rather than build a separate manager (reuse over parallel infrastructure); wire `TargetConfigManager` in the same pass rather than defer it; registering source context for Brownfield is an **optional enrichment**, not a blocking gate before Generate Plan (consistent with the earlier decision against a plan-approval gate).
+- **Still open / not yet built:** no UI to switch or edit target profiles (dev/staging/prod) — `target-environment.yaml` is currently file-edit-only. `SchemaSnapshot.lineage` (extracted by `sourceAssessmentAgent`, logged) is not yet converted into graph `derives_from` edges — lineage data is discarded after logging rather than persisted. Data-pull vs. data-push is implicit (whichever `SourceRegistry` kind or live connection the user actually uses) rather than an explicit, modeled distinction.
+
 ### 16.4 Phase 6 — Local LLMs (Copilot & Claude Code), Testing, Telemetry, Docs
 
 - **Language model consent modal.**
@@ -693,7 +838,7 @@ Phase 7 — Architecture review follow-through (v0.9.0)
   - *Current state:* `deactivate()` is `// Intentionally empty`.
   - *What to do:* Stop file watchers, dispose `GraphManager`/`ContextFileManager`/`SourceRegistry`/`SynthesisPipeline`/`SpecManager`/`TargetConfigManager`, terminate workers, release handles within 200ms (req §10.6 #5).
 
-- **Unit & integration tests** (req §10.6). Only 34 functional tests exist today. Missing coverage:
+- **Unit & integration tests** (req §10.6). 52 functional tests exist today (`test/functional.test.cjs`). Missing coverage:
   - GraphManager traversal correctness + serialization round-trip + diagnostics.
   - SynthesisPipeline provenance (`sourceRef`/`confidence`/`extractor` present).
   - ArtifactWriter atomic-write tests.
@@ -718,6 +863,19 @@ Phase 7 — Architecture review follow-through (v0.9.0)
   - *Files:* `skills/*.json` (bundled), `.ai-context/skills/` (user overrides).
   - *Current state:* No docs on how to author/override skills.
   - *What to do:* Document the skill JSON schema + override mechanism.
+
+### 16.7 Phase G — Context Memory Curation (not started)
+
+- **"Distill this chat" → Context Memory.**
+  - *Files:* new work in `src/context/SynthesisPipeline.ts` (new `chat_history` source kind), `src/context/ChatSessionManager.ts` (read-only consumer), `media/sidebar.html`/`webviewProvider.ts` (new user-initiated action).
+  - *Current state:* Phase F persists full conversation transcripts (§8a) but has no curation layer on top — a transcript is either kept whole or discarded whole. The interview-carryover path (`carryOverPartialInterview`) is a narrow, automatic special case (partial spec-intake answers only), not a general mechanism.
+  - *What to do:* A user-initiated "Distill this chat" action that runs an LLM extraction pass over a chosen transcript and writes graph nodes/edges tagged `origin.source: 'chat'` (plus `sourceRef` back to the chat id) into the derived context graph, following the existing `SynthesisPipeline` provenance conventions.
+  - *Acceptance:* Distilling a transcript with clear factual statements produces graph nodes with correct provenance; distilling an empty/trivial transcript produces nothing (no hallucinated nodes).
+
+- **Fuller in-sidebar chat browser** (optional follow-up, explicitly scoped out of Phase F).
+  - *Files:* `media/sidebar.html` (client-side rendering only — `webviewProvider.ts` already posts `chatSessionsList`/`chatSessionViewed` and handles `listChatSessions`/`openChatSession`, unused by any UI yet).
+  - *Current state:* Chat History/Discard are Command-Palette-only (§8a.4); per clarifying-question answer, this was accepted as sufficient for this pass ("User-initiated (Recommended)" did not require it to live in the sidebar).
+  - *What to do, if picked up:* Render a session list/search/tag UI directly in the sidebar, wire it to the existing message types, and add reopen-into-active-chat + export/import.
 
 ### 16.6 Cross-cutting / Infrastructure
 

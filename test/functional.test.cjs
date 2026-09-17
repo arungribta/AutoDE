@@ -96,6 +96,26 @@ function clearAdapterCache() {
 }
 function freshAdapter(mock) { clearAdapterCache(); return withMock(mock, () => require('../dist/core/languageModelAdapter.js')); }
 
+/**
+ * Builds a fresh, consented DataAgentHubHub whose configured LLM always returns `responseText`.
+ * Pre-satisfies the v0.13.0 orchestrator gate (an active spec + approved context) so tests that
+ * call the raw `hub.generatePlan()` to exercise plan-generation/validation logic directly don't
+ * also have to stand up a full spec-approval/context-approval fixture just to get past the gate —
+ * that gate itself is covered separately (see the "generatePlan() orchestrator gate" tests).
+ */
+function hubForPlanResponse(responseText) {
+  const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
+    sendRequest: async () => ({ text: textIter(responseText) }) };
+  const mock = createMock({ models: [model] });
+  delete require.cache[require.resolve('../dist/core/agentHub.js')];
+  clearAdapterCache();
+  const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
+  const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+  hub.setSpec('bps-test', 1);
+  hub.setContextGateReady(true);
+  return { hub, mock };
+}
+
 // ---------- Claude Code CLI mock ----------
 const EventEmitter = require('node:events');
 
@@ -256,6 +276,29 @@ async function main() {
     await assert.rejects(() => getLlmAdapter('anthropic').complete('x', { model: 'claude-x', systemPrompt: 'sys' }, ctx), /API key is missing/i);
   });
 
+  await test('A fetch-based adapter surfaces a clear timeout error instead of hanging on an unreachable endpoint', async () => {
+    const mock = createMock();
+    const { getLlmAdapter } = withMock(mock, () => require('../dist/core/llmProviders.js'));
+    const origFetch = global.fetch;
+    // Simulates what a real AbortController-driven timeout looks like to the caller
+    // (fetch() rejecting with a DOMException-style AbortError) without waiting out a
+    // real multi-second timer — the timeout duration itself isn't what's under test,
+    // just that an AbortError gets mapped to a clear, bounded message.
+    global.fetch = async () => {
+      const err = new Error('The operation was aborted.');
+      err.name = 'AbortError';
+      throw err;
+    };
+    try {
+      const ctx = { getSettings: () => ({}), getLlmApiKey: async () => 'sk-test', getExtensionContext: () => undefined, getWorkspaceRoot: () => undefined, log: () => {} };
+      await assert.rejects(
+        () => getLlmAdapter('openai').complete('x', { model: 'gpt-4o-mini', systemPrompt: 'sys' }, ctx),
+        /timed out after/i,
+        'a hung request should reject with a bounded, clear timeout message rather than never resolving'
+      );
+    } finally { global.fetch = origFetch; }
+  });
+
   await test('complete() streams text', async () => {
     const model = { id: 'm', family: 'gpt', vendor: 'copilot', version: '1', name: 'm', maxInputTokens: 100,
       sendRequest: async (msgs) => { assert.strictEqual(msgs.length, 1); return { text: textIter('[{"id":"step-1"}]') }; } };
@@ -271,6 +314,8 @@ async function main() {
     clearAdapterCache();
     const { DataAgentHubHub } = withMock(mock, () => fresh('../dist/core/agentHub.js'));
     const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: false, copilotProgrammaticConsent: false, defaultProvider: 'snowflake' }));
+    hub.setSpec('bps-test', 1);
+    hub.setContextGateReady(true);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')),
       /programmatic use of a local language model is not enabled/i);
   });
@@ -285,6 +330,8 @@ async function main() {
     clearAdapterCache();
     const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
     const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+    hub.setSpec('bps-test', 1);
+    hub.setContextGateReady(true);
     const steps = await withMock(mock, () => hub.generatePlan('build'));
     assert.strictEqual(steps.length, 1);
     assert.strictEqual(steps[0].id, 's');
@@ -381,11 +428,12 @@ async function main() {
     const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
     const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
     const spec = {
-      id: 'bps-it', version: 3, status: 'approved',
+      id: 'bps-it', version: 3, status: 'approved', problemStatementApproved: true,
       problemStatement: 'Ingest raw sales channel source data and load dbt pipelines, then document the results.',
       objectives: ['ingest channel data'], successCriteria: ['pipeline runs'],
       scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
     };
+    hub.setContextGateReady(true);
     await withMock(mock, () => hub.generatePlanFromSpec(spec));
     const state = hub.getPlan();
     assert.ok(state.inferredPhases.length === 4, 'all four phases present');
@@ -811,7 +859,7 @@ async function main() {
     const mock = specManagerMock();
     delete require.cache[require.resolve('../dist/context/SpecManager.js')];
     const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
-    const mgr = new SpecManager({ fsPath: '/ws' }, () => {});
+    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
     await withMock(mock, () => mgr.initialize());
     const spec = mgr.getSpec();
     assert.strictEqual(spec.id, 'bps-legacy');
@@ -870,7 +918,7 @@ async function main() {
     const mock = specManagerMock();
     delete require.cache[require.resolve('../dist/context/SpecManager.js')];
     const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
-    const mgr = new SpecManager({ fsPath: '/ws' }, () => {});
+    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
     await withMock(mock, () => mgr.initialize());
     const spec = mgr.getSpec();
     assert.deepStrictEqual(spec.businessRequirements, ['br1']);
@@ -900,7 +948,7 @@ async function main() {
     const mock = specManagerMock();
     delete require.cache[require.resolve('../dist/context/SpecManager.js')];
     const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
-    const mgr = new SpecManager({ fsPath: '/ws' }, () => {});
+    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
     await withMock(mock, () => mgr.initialize());
     const spec = {
       id: 'bps-native', version: 1, status: 'draft', problemStatement: 'Native YAML spec.',
@@ -917,7 +965,7 @@ async function main() {
     assert.ok(!raw.includes('comprehensive:'), 'should not emit the JSON comprehensive block');
     assert.ok(raw.includes('scope:'), 'should emit nested scope');
     assert.ok(raw.includes('businessRequirements:'), 'v2 field emitted natively');
-    const mgr2 = new SpecManager({ fsPath: '/ws' }, () => {});
+    const mgr2 = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
     await withMock(mock, () => mgr2.initialize());
     const loaded = mgr2.getSpec();
     assert.deepStrictEqual(loaded.scope.in, ['in1']);
@@ -1100,9 +1148,9 @@ async function main() {
       await writer.write({ ...makeArtifact('legacy', undefined, undefined) }); // pre-Phase-B / no spec
     });
 
-    assert.ok(fs.existsSync(path.join(tmpRoot, 'auto-de', '03-build', 'bps-1.v1', 'a1.sql')), 'v1 artifact under its spec-tagged folder');
-    assert.ok(fs.existsSync(path.join(tmpRoot, 'auto-de', '03-build', 'bps-1.v2', 'a2.sql')), 'v2 artifact under its spec-tagged folder');
-    assert.ok(fs.existsSync(path.join(tmpRoot, 'auto-de', '03-build', 'legacy.sql')), 'unstamped artifact has no version folder');
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v1', 'a1.sql')), 'v1 artifact under its spec-tagged folder');
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v2', 'a2.sql')), 'v2 artifact under its spec-tagged folder');
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'artifacts', '03-build', 'legacy.sql')), 'unstamped artifact has no version folder');
 
     const report = await withMock(mock, () => scanArtifactStaleness(workspaceRoot, { id: 'bps-1', version: 2 }));
     const stale = report.groups.find((g) => g.specVersion === 1);
@@ -1171,6 +1219,927 @@ async function main() {
     const mock = createMock();
     const { loadToolSkillsFromDirectory } = withMock(mock, () => require('../dist/core/toolSkills.js'));
     assert.deepStrictEqual(loadToolSkillsFromDirectory('/no/such/directory/at/all'), []);
+  });
+
+  function realFsMock() {
+    const fs = require('node:fs');
+    const mock = createMock();
+    mock.workspace.fs.createDirectory = async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); };
+    mock.workspace.fs.writeFile = async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); };
+    mock.workspace.fs.readFile = async (uri) => { try { return fs.readFileSync(uri.fsPath); } catch { throw new Error('ENOENT'); } };
+    mock.workspace.fs.rename = async (a, b) => { fs.renameSync(a.fsPath, b.fsPath); };
+    mock.workspace.fs.delete = async (uri) => { fs.unlinkSync(uri.fsPath); };
+    return mock;
+  }
+
+  await test('ChatSessionManager creates, appends, lists, archives, and discards sessions', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-chats-'));
+    const workspaceRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
+    const mock = realFsMock();
+
+    clearAdapterCache();
+    try { delete require.cache[require.resolve('../dist/context/ChatSessionManager.js')]; } catch { /* not loaded */ }
+    const { ChatSessionManager } = withMock(mock, () => require('../dist/context/ChatSessionManager.js'));
+
+    const logs = [];
+    const manager = withMock(mock, () => new ChatSessionManager(workspaceRoot, (m) => logs.push(m)));
+
+    await withMock(mock, () => manager.initialize());
+    assert.ok(fs.existsSync(path.join(tmpRoot, '.ai-context', 'chats')), 'chats directory created');
+
+    const session = await withMock(mock, () => manager.createSession({ specId: 'bps-1', specVersion: 2, llmProvider: 'claude' }));
+    assert.strictEqual(session.status, 'active');
+    assert.strictEqual(session.specId, 'bps-1');
+
+    const active = await withMock(mock, () => manager.getActiveSession());
+    assert.strictEqual(active.id, session.id, 'the freshly created session is the active one');
+
+    await withMock(mock, () => manager.appendMessage(session.id, { role: 'user', content: 'Hello there, this is my question', at: new Date().toISOString() }));
+    await withMock(mock, () => manager.appendMessage(session.id, { role: 'ai', content: 'Sure, here is an answer', at: new Date().toISOString() }));
+
+    const transcript = await withMock(mock, () => manager.loadTranscript(session.id));
+    assert.strictEqual(transcript.length, 2);
+    assert.strictEqual(transcript[0].role, 'user');
+    assert.strictEqual(transcript[1].content, 'Sure, here is an answer');
+
+    const metaAfterAppend = (await withMock(mock, () => manager.listSessions()))[0];
+    assert.strictEqual(metaAfterAppend.title, 'Hello there, this is my question', 'title backfilled from the first user message');
+
+    await withMock(mock, () => manager.archiveSession(session.id));
+    const afterArchive = await withMock(mock, () => manager.getActiveSession());
+    assert.strictEqual(afterArchive, undefined, 'no active session once archived');
+    const sessions = await withMock(mock, () => manager.listSessions());
+    assert.strictEqual(sessions.length, 1);
+    assert.strictEqual(sessions[0].status, 'archived');
+
+    await withMock(mock, () => manager.discardSession(session.id));
+    assert.ok(!fs.existsSync(path.join(tmpRoot, '.ai-context', 'chats', `${session.id}.meta.json`)), 'meta file removed');
+    assert.ok(!fs.existsSync(path.join(tmpRoot, '.ai-context', 'chats', `${session.id}.jsonl`)), 'transcript file removed');
+    const sessionsAfterDiscard = await withMock(mock, () => manager.listSessions());
+    assert.strictEqual(sessionsAfterDiscard.length, 0);
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  await test('ChatSessionManager: an archived session can be resumed by setting its status back to active (the primitive the v0.13.0 chat-resume feature relies on)', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-chats-resume-'));
+    const workspaceRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
+    const mock = realFsMock();
+
+    clearAdapterCache();
+    try { delete require.cache[require.resolve('../dist/context/ChatSessionManager.js')]; } catch { /* not loaded */ }
+    const { ChatSessionManager } = withMock(mock, () => require('../dist/context/ChatSessionManager.js'));
+    const manager = withMock(mock, () => new ChatSessionManager(workspaceRoot, () => {}));
+    await withMock(mock, () => manager.initialize());
+
+    // Simulate the startup fold: an old session with real content gets archived,
+    // a fresh one takes its place as active.
+    const old = await withMock(mock, () => manager.createSession({ llmProvider: 'claude' }));
+    await withMock(mock, () => manager.appendMessage(old.id, { role: 'user', content: 'What did we decide about the pipeline?', at: new Date().toISOString() }));
+    await withMock(mock, () => manager.archiveSession(old.id));
+    const fresh = await withMock(mock, () => manager.createSession({ llmProvider: 'claude' }));
+    assert.strictEqual((await withMock(mock, () => manager.getActiveSession())).id, fresh.id);
+
+    // Resume: fold the fresh (empty) one, reactivate the old one.
+    await withMock(mock, () => manager.archiveSession(fresh.id));
+    await withMock(mock, () => manager.updateMeta(old.id, { status: 'active' }));
+    const reactivated = await withMock(mock, () => manager.getActiveSession());
+    assert.strictEqual(reactivated.id, old.id, 'the folded session is active again');
+    const transcript = await withMock(mock, () => manager.loadTranscript(old.id));
+    assert.strictEqual(transcript.length, 1, 'its transcript survived the fold/resume round-trip');
+    assert.strictEqual(transcript[0].content, 'What did we decide about the pipeline?');
+
+    const sessions = await withMock(mock, () => manager.listSessions());
+    assert.strictEqual(sessions.filter((s) => s.status === 'active').length, 1, 'exactly one session is active at a time');
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  // ── Generate Plan hardening + expectation-driven capabilities ──
+
+  await test('classifyImplementationType() detects brownfield/greenfield/mixed evidence', () => {
+    const { classifyImplementationType } = require('../dist/core/implementationType.js');
+    const base = { id: 'b', version: 1, status: 'approved', problemStatement: '', objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: '' };
+
+    const brownfield = classifyImplementationType({ ...base, problemStatement: 'Migrate our existing legacy warehouse, replacing the current system.' });
+    assert.strictEqual(brownfield.implementationType, 'brownfield');
+
+    const greenfield = classifyImplementationType({ ...base, problemStatement: 'Build a brand new analytics platform from scratch.' });
+    assert.strictEqual(greenfield.implementationType, 'greenfield');
+
+    const unspecified = classifyImplementationType({ ...base, problemStatement: 'Load daily sales events into a curated model.' });
+    assert.strictEqual(unspecified.implementationType, 'greenfield');
+    assert.ok(/defaulted to greenfield/i.test(unspecified.reason));
+
+    const mixed = classifyImplementationType({ ...base, problemStatement: 'Build a brand new reporting layer on our existing legacy warehouse.' });
+    assert.strictEqual(mixed.implementationType, 'brownfield');
+    assert.ok(/mixed evidence/i.test(mixed.reason));
+  });
+
+  await test('inferPhases() forces discover for brownfield unless excluded by scope.out', () => {
+    const { inferPhases } = require('../dist/core/phaseInference.js');
+    const base = { id: 'b', version: 1, status: 'approved', problemStatement: 'Build dbt models and orchestrate them with Airflow.', objectives: ['Transform data into star schema marts.'], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: '' };
+
+    const withoutType = inferPhases(base);
+    assert.strictEqual(withoutType.find((p) => p.phase === 'discover').required, false);
+
+    const brownfield = inferPhases(base, 'brownfield');
+    const discoverPhase = brownfield.find((p) => p.phase === 'discover');
+    assert.strictEqual(discoverPhase.required, true);
+    assert.ok(/brownfield implementation/i.test(discoverPhase.reason));
+
+    const excluded = inferPhases({ ...base, scope: { in: [], out: ['no source assessment'] } }, 'brownfield');
+    assert.strictEqual(excluded.find((p) => p.phase === 'discover').required, false, 'explicit scope.out exclusion still wins over the brownfield default');
+  });
+
+  await test('validatePlanResponse() rejects malformed JSON', async () => {
+    const { hub, mock } = hubForPlanResponse('not json at all');
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /LLM returned invalid JSON/i);
+  });
+
+  await test('validatePlanResponse() rejects a JSON object instead of an array', async () => {
+    const { hub, mock } = hubForPlanResponse(JSON.stringify({ id: 's' }));
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /did not produce a JSON array/i);
+  });
+
+  await test('validatePlanResponse() rejects an invalid assignedAgent', async () => {
+    const bad = JSON.stringify([{ id: 's', assignedAgent: 'notARealAgent', taskDescription: 'x', dependsOn: [] }]);
+    const { hub, mock } = hubForPlanResponse(bad);
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /invalid assignedAgent/i);
+  });
+
+  await test('validatePlanResponse() rejects a step with no taskDescription', async () => {
+    const bad = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: '   ', dependsOn: [] }]);
+    const { hub, mock } = hubForPlanResponse(bad);
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /does not include a taskDescription/i);
+  });
+
+  await test('validatePlanResponse() rejects duplicate step IDs', async () => {
+    const bad = JSON.stringify([
+      { id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: [] },
+      { id: 's', assignedAgent: 'sttmAgent', taskDescription: 'b', dependsOn: [] }
+    ]);
+    const { hub, mock } = hubForPlanResponse(bad);
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /duplicate step ID/i);
+  });
+
+  await test('validatePlanResponse() rejects a dependency on a missing step ID', async () => {
+    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['ghost'] }]);
+    const { hub, mock } = hubForPlanResponse(bad);
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /depends on missing step IDs/i);
+  });
+
+  await test('validatePlanResponse() rejects a step that depends on itself', async () => {
+    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['s1'] }]);
+    const { hub, mock } = hubForPlanResponse(bad);
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /cannot depend on itself/i);
+  });
+
+  await test('validatePlanResponse() rejects a multi-step circular dependency', async () => {
+    const bad = JSON.stringify([
+      { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['s2'] },
+      { id: 's2', assignedAgent: 'sttmAgent', taskDescription: 'b', dependsOn: ['s1'] }
+    ]);
+    const { hub, mock } = hubForPlanResponse(bad);
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /circular dependency/i);
+  });
+
+  await test('validatePlanResponse() tolerates a markdown-fenced JSON array', async () => {
+    const plan = '```json\n' + JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [] }]) + '\n```';
+    const { hub, mock } = hubForPlanResponse(plan);
+    const steps = await withMock(mock, () => hub.generatePlan('build'));
+    assert.strictEqual(steps.length, 1);
+    assert.strictEqual(steps[0].id, 's1');
+  });
+
+  await test('validatePlanResponse() rejects a step outside the required phases', async () => {
+    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'assess sources', dependsOn: [] }]);
+    const { hub, mock } = hubForPlanResponse(outOfPhase);
+    const spec = {
+      id: 'bps-1', version: 1, status: 'approved', problemStatementApproved: true,
+      problemStatement: 'Build dbt pipelines and load into the warehouse.',
+      objectives: ['Build a dbt pipeline.'], successCriteria: [], scope: { in: [], out: [] },
+      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    };
+    await assert.rejects(() => withMock(mock, () => hub.generatePlanFromSpec(spec)), /not among the required phases/i);
+  });
+
+  await test('computePhaseStatuses() shows pending-review for a freshly generated, not-yet-run plan', () => {
+    const { computePhaseStatuses } = require('../dist/core/phaseInference.js');
+    const phases = [
+      { phase: 'discover', label: 'Discover', required: true, status: 'pending', reason: 'r', dependsOn: [] },
+      { phase: 'build', label: 'Build', required: true, status: 'pending', reason: 'r', dependsOn: ['discover'] },
+      { phase: 'validate', label: 'Validate', required: false, status: 'pending', reason: 'r', dependsOn: [] }
+    ];
+    const steps = [
+      { id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'x', status: 'pending', phase: 'discover' },
+      { id: 's2', assignedAgent: 'ingestionAgent', taskDescription: 'y', status: 'pending', phase: 'build', dependsOn: ['s1'] }
+    ];
+    const readyResult = computePhaseStatuses(phases, steps, undefined, 'ready');
+    assert.strictEqual(readyResult.find((p) => p.phase === 'discover').status, 'pending-review', 'required phase awaits review before anything has run');
+    assert.strictEqual(readyResult.find((p) => p.phase === 'build').status, 'pending-review', 'even a dependency-blocked phase reads as review-pending, not blocked, before execution starts');
+    assert.strictEqual(readyResult.find((p) => p.phase === 'validate').status, 'unrequired');
+
+    const runningResult = computePhaseStatuses(phases, steps, undefined, 'running');
+    assert.strictEqual(runningResult.find((p) => p.phase === 'discover').status, 'pending', 'once execution has started, phases use the normal pending/blocked lifecycle');
+    assert.strictEqual(runningResult.find((p) => p.phase === 'build').status, 'blocked', 'build genuinely is blocked on discover mid-execution');
+  });
+
+  await test('generateWithLlm() only accepts a properly fenced response, falling back to undefined otherwise', async () => {
+    const { generateWithLlm } = require('../dist/agents/llmCodegen.js');
+    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Load orders', status: 'pending' };
+    const baseContext = { objective: 'obj', schemaContext: 'ctx', sourceProvider: 'snowflake', settings: {}, configManager: { getSecret: async () => undefined, getSettings: () => ({}) }, log: () => {} };
+
+    const fenced = await generateWithLlm({ ...baseContext, callLlm: async () => '```sql\nSELECT 1;\n```' }, step, { role: 'x', instructions: 'y', fence: 'sql' });
+    assert.strictEqual(fenced, 'SELECT 1;', 'extracts the fenced content verbatim');
+
+    const unfenced = await generateWithLlm({ ...baseContext, callLlm: async () => 'Sure, here is the SQL: SELECT 1;' }, step, { role: 'x', instructions: 'y', fence: 'sql' });
+    assert.strictEqual(unfenced, undefined, 'an unfenced response is not treated as valid content — never risk shipping prose as an artifact');
+
+    const throwing = await generateWithLlm({ ...baseContext, callLlm: async () => { throw new Error('LLM unavailable'); } }, step, { role: 'x', instructions: 'y', fence: 'sql' });
+    assert.strictEqual(throwing, undefined, 'a failed LLM call falls back cleanly, never throws out of generateWithLlm');
+
+    const noLlm = await generateWithLlm(baseContext, step, { role: 'x', instructions: 'y', fence: 'sql' });
+    assert.strictEqual(noLlm, undefined, 'no callLlm on the context at all falls back the same way');
+  });
+
+  await test('sourceAssessmentAgent and snowflakeExecutor degrade gracefully instead of failing when there is no target connection', async () => {
+    const plan = JSON.stringify([
+      { id: 'assess', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'Assess the source landscape', dependsOn: [], validationRules: [] },
+      { id: 'ingest', assignedAgent: 'ingestionAgent', taskDescription: 'Generate ingestion DDL', dependsOn: [], validationRules: [] },
+      { id: 'snowflake-check', assignedAgent: 'snowflakeExecutor', taskDescription: 'Validate against Snowflake', dependsOn: [], validationRules: [] }
+    ]);
+    const { hub, mock } = hubForPlanResponse(plan);
+    hub.inferPhasesFromSpec({
+      id: 'bps-test', version: 1, status: 'approved', implementationType: 'brownfield',
+      problemStatement: 'Assess the existing source system and build an ingestion pipeline.', objectives: [], successCriteria: [],
+      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    });
+    await withMock(mock, () => hub.generatePlan('build a pipeline', 'Known: three source tables from the registered data contract.'));
+    hub.approvePlan();
+    hub.confirmStages();
+
+    await withMock(mock, () => hub.executePlan());
+
+    const finalState = hub.getPlan();
+    const assessStep = finalState.steps.find((s) => s.id === 'assess');
+    const ingestStep = finalState.steps.find((s) => s.id === 'ingest');
+    const snowflakeStep = finalState.steps.find((s) => s.id === 'snowflake-check');
+    assert.strictEqual(assessStep.status, 'completed', 'source assessment degrades to a context-derived report instead of failing with no connection');
+    assert.strictEqual(ingestStep.status, 'completed');
+    assert.strictEqual(snowflakeStep.status, 'completed', 'snowflake validation is skipped, not failed, when there is no connection');
+    assert.strictEqual(finalState.status, 'completed', 'the plan completes even though nothing could actually reach Snowflake');
+
+    const artifacts = finalState.artifacts || [];
+    const assessArtifact = artifacts.find((a) => a.generatedBy === 'sourceAssessmentAgent');
+    const snowflakeArtifact = artifacts.find((a) => a.generatedBy === 'snowflakeExecutor');
+    const ingestArtifact = artifacts.find((a) => a.generatedBy === 'ingestionAgent');
+    assert.ok(assessArtifact, 'a context-derived assessment artifact was produced');
+    assert.ok(/registered data contract/.test(assessArtifact.content), 'the report actually surfaces the known context, not just a generic placeholder');
+    assert.ok(snowflakeArtifact, 'the unexecuted validation query was saved as an artifact for manual review');
+    assert.ok(/not executed/i.test(snowflakeArtifact.content));
+    // The mocked LLM (shared across every call in this test) returns the plan
+    // JSON text, not a fenced SQL block — ingestionAgent's LLM attempt must
+    // therefore fall back to its real template, not ship that JSON as "SQL".
+    assert.ok(ingestArtifact, 'ingestion produced an artifact');
+    assert.ok(/CREATE OR REPLACE TABLE/.test(ingestArtifact.content), 'falls back to the real template SQL rather than an unfenced LLM response');
+    assert.ok(!/assignedAgent/.test(ingestArtifact.content), 'the raw plan JSON was never mistaken for generated SQL content');
+  });
+
+  await test('setPhaseOverride() flips a phase and survives a subsequent re-inference', async () => {
+    const mock = createMock();
+    delete require.cache[require.resolve('../dist/core/agentHub.js')];
+    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+
+    const spec = {
+      id: 'bps-1', version: 1, status: 'approved',
+      problemStatement: 'Build dbt pipelines and load into the warehouse.',
+      objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [],
+      createdAt: '', updatedAt: ''
+    };
+    hub.inferPhasesFromSpec(spec);
+    assert.strictEqual(hub.getInferredPhases().find((p) => p.phase === 'discover').required, false, 'discover is not inferred as required from this spec');
+
+    const overridden = hub.setPhaseOverride('discover', true);
+    assert.strictEqual(overridden.find((p) => p.phase === 'discover').required, true);
+    assert.strictEqual(overridden.find((p) => p.phase === 'discover').reason, 'Manually set by user.');
+
+    // Re-running inference (e.g. after a spec revision) must not silently drop the override.
+    hub.inferPhasesFromSpec(spec);
+    assert.strictEqual(hub.getInferredPhases().find((p) => p.phase === 'discover').required, true, 'override survives a subsequent re-inference');
+  });
+
+  await test('buildTargetContextQuestions() suggests defaults from spec text and flags when nothing matched', () => {
+    const { buildTargetContextQuestions } = require('../dist/core/targetContextQuestions.js');
+    const base = { id: 'b', version: 1, status: 'approved', problemStatement: '', objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: '' };
+
+    const withHints = buildTargetContextQuestions({ ...base, problemStatement: 'Build a dbt project on Databricks using a data vault model, orchestrated with Dagster.' });
+    const platformQ = withHints.find((q) => q.id === 'platform');
+    const modelingQ = withHints.find((q) => q.id === 'modelingApproach');
+    const orchestrationQ = withHints.find((q) => q.id === 'orchestrationTool');
+    assert.strictEqual(platformQ.suggestedDefault, 'databricks');
+    assert.ok(/mentions "databricks"/.test(platformQ.rationale));
+    assert.strictEqual(modelingQ.suggestedDefault, 'data-vault');
+    assert.strictEqual(orchestrationQ.suggestedDefault, 'dagster');
+
+    const noHints = buildTargetContextQuestions(base);
+    const platformNone = noHints.find((q) => q.id === 'platform');
+    assert.strictEqual(platformNone.suggestedDefault, 'snowflake', 'falls back to a sensible default rather than leaving the field blank');
+    assert.ok(/not mentioned/i.test(platformNone.rationale), 'is explicit that this is a default, not evidence, so the user knows to check it');
+  });
+
+  await test('buildSourceContextQuestions() suggests a source type from the spec catalog and text', () => {
+    const { buildSourceContextQuestions } = require('../dist/core/sourceContextQuestions.js');
+    const spec = {
+      id: 'b', version: 1, status: 'approved', problemStatement: 'Ingest events from a Kafka stream.',
+      objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: '',
+      sourceCatalog: [{ name: 'orders_db', type: 'database' }]
+    };
+    const questions = buildSourceContextQuestions(spec);
+    const typeQ = questions.find((q) => q.id === 'sourceType');
+    assert.strictEqual(typeQ.suggestedDefault, 'stream', 'keyword evidence ("Kafka stream") wins over the catalog default');
+    assert.ok(/orders_db/.test(questions.find((q) => q.id === 'description').rationale), 'the description question references what the spec already cataloged');
+  });
+
+  await test('TargetContextManager persists, round-trips, and tracks approval per spec version', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
+        } }
+      };
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/TargetContextManager.js')]; } catch { /* not loaded */ }
+    const { TargetContextManager } = withMock(mock, () => require('../dist/context/TargetContextManager.js'));
+    const mgr = new TargetContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    assert.strictEqual(mgr.getContext(), undefined);
+
+    await withMock(mock, () => mgr.reset('bps-1', 1));
+    assert.strictEqual(mgr.getContext().status, 'pending');
+    assert.strictEqual(mgr.isApprovedFor('bps-1', 1), false);
+
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'built', platform: 'snowflake', modelingApproach: 'dimensional', answers: { platform: 'snowflake' } }));
+    assert.strictEqual(mgr.isApprovedFor('bps-1', 1), false, 'built is not yet approved');
+
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'approved', platform: 'snowflake', modelingApproach: 'dimensional', answers: { platform: 'snowflake' } }));
+    assert.strictEqual(mgr.isApprovedFor('bps-1', 1), true);
+    assert.strictEqual(mgr.isApprovedFor('bps-1', 2), false, 'a new spec version invalidates the old approval');
+
+    const mgr2 = new TargetContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    assert.strictEqual(mgr2.getContext().status, 'approved', 'reloads the persisted record');
+  });
+
+  await test('SourceContextManager tracks Not Applicable (Greenfield) vs. built/approved (Brownfield) readiness', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
+        } }
+      };
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/SourceContextManager.js')]; } catch { /* not loaded */ }
+    const { SourceContextManager } = withMock(mock, () => require('../dist/context/SourceContextManager.js'));
+    const mgr = new SourceContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+
+    await withMock(mock, () => mgr.markNotApplicable('bps-1', 1));
+    assert.strictEqual(mgr.getContext().status, 'not_applicable');
+    assert.strictEqual(mgr.isReadyFor('bps-1', 1), true, 'Not Applicable already satisfies the gate — Greenfield needs no further action');
+
+    await withMock(mock, () => mgr.reset('bps-1', 2));
+    assert.strictEqual(mgr.isReadyFor('bps-1', 2), false, 'freshly reset (Brownfield) is not ready until built + approved');
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 2, status: 'built', method: 'described', description: 'A Postgres orders database.', answers: {} }));
+    assert.strictEqual(mgr.isReadyFor('bps-1', 2), false, 'built is not yet approved');
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 2, status: 'approved', method: 'described', description: 'A Postgres orders database.', answers: {} }));
+    assert.strictEqual(mgr.isReadyFor('bps-1', 2), true);
+  });
+
+  await test('PlanManager persists plans with version history across versions and reloads', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      const m = {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
+          }
+        }
+      };
+      m.__store = store;
+      return m;
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/PlanManager.js')]; } catch { /* not loaded */ }
+    const { PlanManager } = withMock(mock, () => require('../dist/context/PlanManager.js'));
+    const ws = { fsPath: '/ws' };
+    const mgr = new PlanManager(ws, () => {});
+    await withMock(mock, () => mgr.initialize());
+    assert.strictEqual(mgr.getPlan(), undefined, 'nothing persisted yet');
+
+    const base = {
+      id: 'plan-1', specId: 'bps-1', specVersion: 1, implementationType: 'greenfield',
+      objective: 'do the thing', schemaContext: '', status: 'ready',
+      steps: [{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 't', status: 'pending', dependsOn: [], validationRules: [] }],
+      inferredPhases: undefined, targetEnvironment: undefined, generationReason: 'initial'
+    };
+    const saved1 = await withMock(mock, () => mgr.savePlan(base));
+    assert.strictEqual(saved1.version, 1);
+
+    const saved2 = await withMock(mock, () => mgr.savePlan(Object.assign({}, base, { status: 'failed', generationReason: 're-plan' })));
+    assert.strictEqual(saved2.version, 2);
+    assert.strictEqual(saved2.createdAt, saved1.createdAt, 'createdAt is preserved across versions of the same lineage');
+
+    const mgr2 = new PlanManager(ws, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    const loaded = mgr2.getPlan();
+    assert.strictEqual(loaded.version, 2);
+    assert.strictEqual(loaded.status, 'failed');
+    assert.strictEqual(loaded.steps[0].id, 's1');
+
+    const historyKeys = Array.from(mock.__store.keys()).filter((k) => k.includes('/plan/history/'));
+    assert.strictEqual(historyKeys.length, 1);
+    assert.ok(historyKeys[0].endsWith('plan.v1.ready.yaml'), historyKeys[0]);
+  });
+
+  await test('SynthesisPipeline.synthesizeFromSpec() derives graph nodes with spec provenance and re-syncs cleanly', async () => {
+    const mock = createMock();
+    for (const p of ['../dist/context/GraphManager.js', '../dist/context/SynthesisPipeline.js']) {
+      try { delete require.cache[require.resolve(p)]; } catch { /* not loaded */ }
+    }
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    const { SynthesisPipeline } = withMock(mock, () => require('../dist/context/SynthesisPipeline.js'));
+    const graph = new GraphManager();
+    const pipeline = new SynthesisPipeline({ fsPath: '/ws' }, graph, () => {});
+
+    const specV1 = {
+      id: 'bps-1', version: 1, status: 'approved',
+      problemStatement: 'p', objectives: ['Reduce reporting latency'], successCriteria: [],
+      scope: { in: [], out: [] }, constraints: ['Must use existing Snowflake account'],
+      assumptions: ['Source data arrives daily'], createdAt: '', updatedAt: ''
+    };
+    const result1 = await withMock(mock, () => pipeline.synthesizeFromSpec(specV1));
+    assert.strictEqual(result1.nodes, 3, '1 objective + 1 constraint + 1 assumption');
+    const terms = graph.getNodesByType('business_term');
+    assert.strictEqual(terms.length, 1);
+    assert.strictEqual(terms[0].origin.specId, 'bps-1');
+    assert.strictEqual(terms[0].origin.specVersion, 1);
+    const rules = graph.getNodesByType('business_rule');
+    assert.strictEqual(rules.length, 2);
+    const strict = rules.find((r) => r.enforcementLevel === 'STRICT');
+    assert.ok(strict && /existing Snowflake account/.test(strict.ruleText));
+
+    // Re-synthesizing from a later version replaces v1's nodes rather than accumulating them.
+    const specV2 = Object.assign({}, specV1, { version: 2, objectives: ['Reduce reporting latency', 'Add self-serve dashboards'] });
+    const result2 = await withMock(mock, () => pipeline.synthesizeFromSpec(specV2));
+    assert.strictEqual(result2.nodes, 4, '2 objectives + 1 constraint + 1 assumption');
+    const termsAfter = graph.getNodesByType('business_term');
+    assert.strictEqual(termsAfter.length, 2, 'v1 objective node was replaced, not duplicated alongside v2');
+    assert.ok(termsAfter.every((t) => t.origin.specVersion === 2));
+  });
+
+  await test('ContextFileManager.getContextStats() counts source-environment-tagged nodes', async () => {
+    const mock = createMock();
+    for (const p of ['../dist/context/GraphManager.js', '../dist/context/ContextFileManager.js']) {
+      try { delete require.cache[require.resolve(p)]; } catch { /* not loaded */ }
+    }
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const graph = new GraphManager();
+    const cfm = new ContextFileManager({ fsPath: '/ws' }, graph, () => {});
+
+    await withMock(mock, () => graph.addNode({
+      id: 'table-src', type: 'table', label: 'orders', database: 'db', schema: 's', fqn: 'db.s.orders', isView: false,
+      metadata: {}, version: 1, origin: { source: 'derived', sourceRef: 'snowflake', extractor: 'source-assessment', extractedAt: 't', environment: 'source' }
+    }));
+    await withMock(mock, () => graph.addNode({
+      id: 'term-objective', type: 'business_term', label: 'Reduce latency', metadata: {}, version: 1, mappedNodeIds: [],
+      origin: { source: 'derived', sourceRef: 'spec:bps-1', extractor: 'spec-sync', extractedAt: 't' } // no environment tag — spec-level, not source/target
+    }));
+    await withMock(mock, () => graph.addNode({
+      id: 'rule-contract', type: 'business_rule', label: 'Must match data contract', ruleText: 'x', enforcementLevel: 'STRICT',
+      metadata: {}, version: 1, origin: { source: 'derived', sourceRef: 'docs/contract.md', extractor: 'synthesis-pipeline', extractedAt: 't', environment: 'source' }
+    }));
+
+    const stats = cfm.getContextStats();
+    assert.strictEqual(stats.sourceEnvironmentNodes, 2, 'the table and the registered data-contract rule are source-tagged; the spec-derived term is not');
+  });
+
+  await test('ArtifactWriter archives the previous revision to history/ before overwriting', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-artifact-history-'));
+    const workspaceRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
+    const mock = createMock();
+    mock.workspace.fs.createDirectory = async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); };
+    mock.workspace.fs.writeFile = async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); };
+    mock.workspace.fs.rename = async (a, b) => { fs.renameSync(a.fsPath, b.fsPath); };
+    mock.workspace.fs.readFile = async (uri) => {
+      try { return fs.readFileSync(uri.fsPath); } catch { throw new Error('ENOENT'); }
+    };
+
+    try { delete require.cache[require.resolve('../dist/context/ArtifactWriter.js')]; } catch { /* not loaded */ }
+    const { ArtifactWriter } = withMock(mock, () => require('../dist/context/ArtifactWriter.js'));
+    const writer = new ArtifactWriter(workspaceRoot, () => {});
+    const artifact = (content) => ({
+      id: 'ddl-1', type: 'ddl', title: 'ddl-1', description: '', content, language: 'sql',
+      generatedBy: 'dataModelerAgent', generatedAt: 't', approved: false, phase: 'build', specId: 'bps-1', specVersion: 1
+    });
+
+    await withMock(mock, () => writer.write(artifact('select 1')));
+    await withMock(mock, () => writer.write(artifact('select 2 -- rerun')));
+
+    const targetPath = path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v1', 'ddl-1.sql');
+    assert.strictEqual(fs.readFileSync(targetPath, 'utf8'), 'select 2 -- rerun', 'the file itself reflects the latest rerun');
+
+    const historyDir = path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v1', 'history');
+    const historyFiles = fs.readdirSync(historyDir);
+    assert.strictEqual(historyFiles.length, 1, 'exactly one prior revision archived');
+    assert.ok(historyFiles[0].endsWith('.ddl-1.sql'), historyFiles[0]);
+    assert.strictEqual(fs.readFileSync(path.join(historyDir, historyFiles[0]), 'utf8'), 'select 1', 'the archived copy is the original content');
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  // ── Multi-business-problem workspace (v0.12.0) ──
+  await test('generateProblemSlug() filters stop-words, truncates, and falls back for an empty statement', () => {
+    const { generateProblemSlug } = require('../dist/core/problemSlug.js');
+    const slug = generateProblemSlug('We need to reduce checkout latency for mobile users');
+    assert.ok(/^reduce-checkout-latency-mobile-users-[a-z0-9]{4}$/.test(slug), slug);
+
+    const empty = generateProblemSlug('');
+    assert.ok(/^business-problem-[a-z0-9]{4}$/.test(empty), empty);
+
+    const long = generateProblemSlug('This one two three four five six seven eight nine ten eleven twelve');
+    // Only the first 5 non-stop-words are kept.
+    assert.ok(long.startsWith('one-two-three-four-five-'), long);
+  });
+
+  await test('generateProblemSlug() never returns a slug already present in existingSlugs', () => {
+    const { generateProblemSlug } = require('../dist/core/problemSlug.js');
+    const origRandom = Math.random;
+    // First call: RNG yields 0.111111 once -> some suffix S1.
+    // Second call (with existingSlugs=[first]): RNG repeats 0.111111 for the
+    // initial candidate (reproducing S1, an intentional collision), then
+    // yields 0.222222 on retry -> must produce a different suffix.
+    const queue = [0.111111, 0.111111, 0.222222];
+    let idx = 0;
+    Math.random = () => queue[Math.min(idx++, queue.length - 1)];
+    try {
+      const first = generateProblemSlug('Reduce checkout latency for mobile users');
+      const second = generateProblemSlug('Reduce checkout latency for mobile users', [first]);
+      assert.notStrictEqual(second, first, 'must retry rather than return a colliding slug');
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
+  await test('ActiveProblemManager round-trips the active-problem pointer and lists problem summaries', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-active-problem-'));
+    const workspaceUri = { fsPath: tmpRoot, toString: () => tmpRoot };
+
+    const mock = createMock();
+    mock.workspace.fs.createDirectory = async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); };
+    mock.workspace.fs.writeFile = async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); };
+    mock.workspace.fs.rename = async (a, b) => { fs.renameSync(a.fsPath, b.fsPath); };
+    mock.workspace.fs.readFile = async (uri) => { try { return fs.readFileSync(uri.fsPath); } catch { throw new Error('ENOENT'); } };
+    mock.workspace.fs.delete = async (uri) => { try { fs.unlinkSync(uri.fsPath); } catch { /* already absent */ } };
+
+    delete require.cache[require.resolve('../dist/context/ActiveProblemManager.js')];
+    const { ActiveProblemManager } = withMock(mock, () => require('../dist/context/ActiveProblemManager.js'));
+    const mgr = new ActiveProblemManager(workspaceUri, () => {});
+
+    assert.strictEqual(await withMock(mock, () => mgr.getActiveProblemId()), undefined, 'no pointer yet');
+
+    await withMock(mock, () => mgr.setActiveProblemId('problem-a'));
+    assert.strictEqual(await withMock(mock, () => mgr.getActiveProblemId()), 'problem-a');
+
+    // Seed two problem folders directly on disk.
+    const seedSpec = (id, statement, status, updatedAt) => {
+      const specDir = path.join(tmpRoot, '.ai-context', 'problems', id, 'spec');
+      fs.mkdirSync(specDir, { recursive: true });
+      const yaml = [
+        `id: ${id}`, 'version: 1', `status: ${status}`, `problemStatement: ${statement}`,
+        `updatedAt: ${updatedAt}`
+      ].join('\n') + '\n';
+      fs.writeFileSync(path.join(specDir, 'business-problem.yaml'), yaml);
+    };
+    seedSpec('problem-a', 'Older problem', 'approved', '2026-01-01T00:00:00.000Z');
+    seedSpec('problem-b', 'Newer problem', 'draft', '2026-02-01T00:00:00.000Z');
+    // A folder with no readable spec yet must be skipped, not throw.
+    fs.mkdirSync(path.join(tmpRoot, '.ai-context', 'problems', 'problem-c', 'spec'), { recursive: true });
+
+    const problems = await withMock(mock, () => mgr.listProblems());
+    assert.strictEqual(problems.length, 2, 'the unreadable folder is skipped');
+    assert.strictEqual(problems[0].id, 'problem-b', 'sorted by updatedAt descending');
+    assert.strictEqual(problems[0].status, 'draft');
+    assert.strictEqual(problems[1].id, 'problem-a');
+    assert.strictEqual(problems[1].isActive, true, 'matches the active pointer');
+    assert.strictEqual(problems[0].isActive, false);
+
+    await withMock(mock, () => mgr.clearActiveProblem());
+    assert.strictEqual(await withMock(mock, () => mgr.getActiveProblemId()), undefined);
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  await test('resetForNewProblem() fully clears spec identity and phase/implementation state (not just plan state)', () => {
+    const { hub } = hubForPlanResponse('irrelevant');
+    hub.setSpec('bps-old', 3);
+    const spec = {
+      id: 'bps-old', version: 3, status: 'approved',
+      problemStatement: 'Build dbt pipelines and load into the warehouse.',
+      objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [],
+      implementationType: 'greenfield',
+      createdAt: '', updatedAt: ''
+    };
+    hub.inferPhasesFromSpec(spec);
+    hub.setTargetEnvironment({ platform: 'snowflake' });
+
+    let plan = hub.getPlan();
+    assert.strictEqual(plan.specId, 'bps-old');
+    assert.ok(plan.inferredPhases && plan.inferredPhases.length > 0);
+    assert.strictEqual(plan.implementationType, 'greenfield');
+
+    hub.resetForNewProblem();
+    plan = hub.getPlan();
+    assert.strictEqual(plan.specId, undefined, 'spec identity must not leak into the next business problem');
+    assert.strictEqual(plan.specVersion, undefined);
+    assert.strictEqual(plan.inferredPhases, undefined, 'inferred phases must not leak');
+    assert.strictEqual(plan.implementationType, undefined, 'implementation type must not leak');
+    assert.strictEqual(plan.targetEnvironment, undefined, 'target environment must not leak');
+    assert.strictEqual(plan.status, 'idle');
+    assert.deepStrictEqual(plan.steps, []);
+  });
+
+  // ── Lifecycle Orchestration (v0.13.0) — requirements.md §8.12 ──
+  await test('generatePlan() orchestrator gate blocks a caller with no active, context-ready business problem', async () => {
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
+      sendRequest: async () => ({ text: textIter(plan) }) };
+    const mock = createMock({ models: [model] });
+    delete require.cache[require.resolve('../dist/core/agentHub.js')];
+    clearAdapterCache();
+    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+
+    // No spec, no context-gate signal — this is the state every one of the legacy
+    // ungated entry points (Command Palette, AutoDE Dashboard panel, /plan with no
+    // spec, re-plan buttons) left the hub in before v0.13.0.
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build a pipeline')),
+      /requires an approved Business Problem Specification/i);
+
+    // Spec identity alone isn't enough — context still has to be ready.
+    hub.setSpec('bps-1', 1);
+    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build a pipeline')),
+      /requires an approved Business Problem Specification/i);
+
+    // Once both are satisfied, the same call succeeds — this is the orchestrator's
+    // one enforcement point, not a per-caller check the UI has to remember to run.
+    hub.setContextGateReady(true);
+    const steps = await withMock(mock, () => hub.generatePlan('build a pipeline'));
+    assert.strictEqual(steps.length, 1);
+  });
+
+  await test('generatePlanFromSpec() enforces spec approval, business-problem confirmation, and context readiness independently', async () => {
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const { hub, mock } = hubForPlanResponse(plan);
+    const baseSpec = {
+      id: 'bps-1', version: 1, problemStatement: 'Build a dbt pipeline.',
+      objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    };
+
+    hub.setContextGateReady(true);
+    await assert.rejects(
+      () => withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'draft', problemStatementApproved: true })),
+      /Approve the Business Problem Specification/i,
+      'an unapproved spec is rejected even with context ready'
+    );
+    await assert.rejects(
+      () => withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'approved', problemStatementApproved: false })),
+      /Confirm the inferred business problem/i,
+      'an approved spec whose business-problem checkpoint was never confirmed is rejected'
+    );
+
+    hub.setContextGateReady(false);
+    await assert.rejects(
+      () => withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'approved', problemStatementApproved: true })),
+      /blocked until Source\/Target Context/i,
+      'an otherwise-ready spec is still rejected while Source/Target Context is not'
+    );
+
+    hub.setContextGateReady(true);
+    await withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'approved', problemStatementApproved: true }));
+    assert.strictEqual(hub.getPlan().steps.length, 1, 'succeeds once all three preconditions hold');
+  });
+
+  await test('executePlan() requires an explicit Plan Approval and Stage Confirmation, independently of each other', async () => {
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const { hub, mock } = hubForPlanResponse(plan);
+    hub.inferPhasesFromSpec({
+      id: 'bps-test', version: 1, status: 'approved', implementationType: 'greenfield',
+      problemStatement: 'Build a dbt pipeline.', objectives: [], successCriteria: [],
+      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    });
+    await withMock(mock, () => hub.generatePlan('build a pipeline'));
+
+    await assert.rejects(() => withMock(mock, () => hub.executePlan()), /Approve the plan/i, 'neither gate satisfied yet');
+
+    hub.approvePlan();
+    await assert.rejects(() => withMock(mock, () => hub.executePlan()), /Confirm the applicable stages/i, 'plan approved but stages not confirmed');
+
+    hub.confirmStages();
+    await withMock(mock, () => hub.executePlan());
+    assert.strictEqual(hub.getPlan().status, 'completed', 'runs once both gates are satisfied');
+
+    // Re-planning invalidates both — a regenerated plan needs its own approval/confirmation.
+    await withMock(mock, () => hub.generatePlan('build a different pipeline'));
+    assert.strictEqual(hub.getPlan().planApproved, false, 're-planning resets Plan Approval');
+    assert.strictEqual(hub.getPlan().stagesConfirmed, false, 're-planning resets Stage Confirmation');
+  });
+
+  await test('setPhaseOverride() invalidates a prior Stage Confirmation', async () => {
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const { hub, mock } = hubForPlanResponse(plan);
+    hub.inferPhasesFromSpec({
+      id: 'bps-test', version: 1, status: 'approved', implementationType: 'greenfield',
+      problemStatement: 'Build a dbt pipeline.', objectives: [], successCriteria: [],
+      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
+    });
+    await withMock(mock, () => hub.generatePlan('build a pipeline'));
+    hub.approvePlan();
+    hub.confirmStages();
+    assert.strictEqual(hub.getPlan().stagesConfirmed, true);
+
+    hub.setPhaseOverride('validate', true);
+    assert.strictEqual(hub.getPlan().stagesConfirmed, false, 'changing phase applicability invalidates the prior confirmation');
+    assert.strictEqual(hub.getPlan().planApproved, true, 'Plan Approval itself is untouched by a phase override');
+  });
+
+  await test('PlanManager.patchGates() persists Plan Approval / Stage Confirmation without bumping the plan version', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-plan-gates-'));
+    const contextRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
+    const mock = createMock();
+    mock.workspace.fs.createDirectory = async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); };
+    mock.workspace.fs.writeFile = async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); };
+    mock.workspace.fs.rename = async (a, b) => { fs.renameSync(a.fsPath, b.fsPath); };
+    mock.workspace.fs.readFile = async (uri) => { try { return fs.readFileSync(uri.fsPath); } catch { throw new Error('ENOENT'); } };
+    mock.workspace.fs.stat = async (uri) => { if (fs.existsSync(uri.fsPath)) return {}; throw new Error('ENOENT'); };
+
+    delete require.cache[require.resolve('../dist/context/PlanManager.js')];
+    const { PlanManager } = withMock(mock, () => require('../dist/context/PlanManager.js'));
+    const mgr = new PlanManager(contextRoot, () => {});
+    await withMock(mock, () => mgr.initialize());
+    await withMock(mock, () => mgr.savePlan({
+      id: 'plan-1', objective: 'x', schemaContext: '', status: 'ready', steps: [], generationReason: 'initial'
+    }));
+    await withMock(mock, () => mgr.patchGates({ planApproved: true, planApprovedAt: 't1' }));
+    await withMock(mock, () => mgr.patchGates({ stagesConfirmed: true, stagesConfirmedAt: 't2' }));
+
+    let current = mgr.getPlan();
+    assert.strictEqual(current.version, 1, 'patching gates does not bump the version');
+    assert.strictEqual(current.planApproved, true);
+    assert.strictEqual(current.stagesConfirmed, true);
+
+    const mgr2 = new PlanManager(contextRoot, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    current = mgr2.getPlan();
+    assert.strictEqual(current.planApproved, true, 'gate fields round-trip through reload');
+    assert.strictEqual(current.planApprovedAt, 't1');
+    assert.strictEqual(current.stagesConfirmed, true);
+    assert.strictEqual(current.stagesConfirmedAt, 't2');
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  await test('SpecManager round-trips implementationType and problemStatementApproved', async () => {
+    function mockFs() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: {
+          file: (p) => ({ fsPath: p }),
+          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
+        },
+        workspace: {
+          fs: {
+            createDirectory: async () => {},
+            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+            stat: async () => { throw new Error('ENOENT'); }
+          }
+        }
+      };
+    }
+    const mock = mockFs();
+    delete require.cache[require.resolve('../dist/context/SpecManager.js')];
+    const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
+    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    const spec = {
+      id: 'bps-1', version: 1, status: 'draft', problemStatement: 'p', objectives: ['o'], successCriteria: [],
+      scope: { in: ['a'], out: [] }, constraints: [], assumptions: [], domain: 'd', stakeholders: [], keyEntities: [],
+      createdAt: 'c', updatedAt: 'u',
+      implementationType: 'brownfield', implementationTypeReason: 'Manually set by user.', implementationTypeOverridden: true,
+      problemStatementApproved: true
+    };
+    await withMock(mock, () => mgr.saveSpec(spec));
+    const mgr2 = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    const loaded = mgr2.getSpec();
+    assert.strictEqual(loaded.implementationType, 'brownfield', 'implementationType now round-trips (previously silently dropped)');
+    assert.strictEqual(loaded.implementationTypeReason, 'Manually set by user.');
+    assert.strictEqual(loaded.implementationTypeOverridden, true);
+    assert.strictEqual(loaded.problemStatementApproved, true);
+  });
+
+  // ── Discovery progress surfacing (follow-up to v0.13.0) ──
+  await test('buildDiscoveryProgress() reports "addressed" only once every field a skill owns is at least partial', () => {
+    const mock = createMock();
+    const { buildDiscoveryProgress } = withMock(mock, () => require('../dist/core/discoveryProgress.js'));
+    const skills = [
+      { id: 'requirements', name: 'Requirements Discovery', order: 1, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['objectives', 'successCriteria'] },
+      { id: 'data-flow', name: 'Data Flow', order: 2, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['dataFlows'] },
+      { id: 'synthesis', name: 'Synthesis', order: 3, description: '', systemPrompt: 'p', questionGuidance: '', specFields: [] }
+    ];
+    const session = {
+      id: 's', problemStatement: 'p', state: 'discovery', questions: [], answers: [], insights: [],
+      coverage: { objectives: 'partial', successCriteria: 'missing', dataFlows: 'partial' },
+      turnCount: 3, turnBudget: 12, createdAt: '', updatedAt: ''
+    };
+    const progress = buildDiscoveryProgress(session, skills);
+    assert.strictEqual(progress.turnCount, 3);
+    assert.strictEqual(progress.turnBudget, 12);
+    assert.strictEqual(progress.coveredFields, 2, 'objectives and dataFlows are not missing');
+    assert.strictEqual(progress.totalFields, 3);
+    assert.strictEqual(progress.skills.length, 2, 'the synthesis skill (no specFields) is excluded');
+    const reqSkill = progress.skills.find((s) => s.id === 'requirements');
+    assert.strictEqual(reqSkill.status, 'partial', 'objectives touched, successCriteria still missing');
+    const flowSkill = progress.skills.find((s) => s.id === 'data-flow');
+    assert.strictEqual(flowSkill.status, 'addressed', 'its one field is not missing');
+  });
+
+  await test('buildDiscoveryProgress() marks a skill "not-started" when none of its fields have been touched, and "addressed" is never reached via coverage:"complete" mid-interview', () => {
+    const mock = createMock();
+    const { buildDiscoveryProgress } = withMock(mock, () => require('../dist/core/discoveryProgress.js'));
+    const skills = [{ id: 'constraints', name: 'Constraints & Assumptions', order: 1, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['constraints', 'assumptions'] }];
+    const session = {
+      id: 's', problemStatement: 'p', state: 'discovery', questions: [], answers: [], insights: [],
+      coverage: { constraints: 'missing', assumptions: 'missing' },
+      turnCount: 0, turnBudget: 12, createdAt: '', updatedAt: ''
+    };
+    const progress = buildDiscoveryProgress(session, skills);
+    assert.strictEqual(progress.coveredFields, 0);
+    assert.strictEqual(progress.skills[0].status, 'not-started');
+  });
+
+  await test('skillNameForField() resolves the owning skill deterministically, ignoring any skill the LLM itself might claim', () => {
+    const mock = createMock();
+    const { skillNameForField } = withMock(mock, () => require('../dist/core/discoveryProgress.js'));
+    const skills = [
+      { id: 'source-catalog', name: 'Source Catalog', order: 1, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['sourceCatalog'] },
+      { id: 'data-flow', name: 'Data Flow', order: 2, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['dataFlows', 'dependencies'] }
+    ];
+    assert.strictEqual(skillNameForField('dependencies', skills), 'Data Flow');
+    assert.strictEqual(skillNameForField('sourceCatalog', skills), 'Source Catalog');
+    assert.strictEqual(skillNameForField('unownedField', skills), undefined);
   });
 
   const failed = results.filter(r => !r.ok);

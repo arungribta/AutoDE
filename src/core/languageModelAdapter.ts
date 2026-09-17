@@ -1,4 +1,18 @@
 import * as vscode from 'vscode';
+import { ToolCallAuditEntry, ToolExecutionMode } from './types';
+import { AgenticToolCall, READ_ONLY_TOOL_SPECS, WRITE_TOOL_SPECS, executeAgenticTool } from './agenticTools';
+import { LlmHistoryTurn } from './llmAdapter';
+
+const MAX_TOOL_LOOP_TURNS = 12;
+
+/** Real alternating User/Assistant messages for prior turns — `vscode.lm` has no distinct
+ *  "history" concept, just a message array, so this is the whole of the wiring. */
+function buildHistoryMessages(history?: LlmHistoryTurn[]): vscode.LanguageModelChatMessage[] {
+  if (!history || history.length === 0) { return []; }
+  return history.map((turn) =>
+    turn.role === 'user' ? vscode.LanguageModelChatMessage.User(turn.content) : vscode.LanguageModelChatMessage.Assistant(turn.content)
+  );
+}
 
 /**
  * Which vendor family this adapter targets. Today only GitHub Copilot is served
@@ -151,6 +165,7 @@ export class LanguageModelAdapter {
       timeoutMs?: number;
       systemPrompt?: string;
       justification?: string;
+      history?: LlmHistoryTurn[];
       cancellationToken?: vscode.CancellationToken;
     }
   ): Promise<string> {
@@ -163,6 +178,7 @@ export class LanguageModelAdapter {
     if (opts?.systemPrompt && opts.systemPrompt.trim().length > 0) {
       messages.push(vscode.LanguageModelChatMessage.Assistant(opts.systemPrompt.trim()));
     }
+    messages.push(...buildHistoryMessages(opts?.history));
     messages.push(vscode.LanguageModelChatMessage.User(prompt));
 
     const request = model.sendRequest(
@@ -193,6 +209,90 @@ export class LanguageModelAdapter {
       throw new Error('The language model returned an empty response.');
     }
     return text.trim();
+  }
+
+  /**
+   * Like `complete()`, but runs an AutoDE-owned tool-calling loop using `vscode.lm`'s
+   * native tool API (`LanguageModelChatRequestOptions.tools`,
+   * `LanguageModelToolCallPart`/`LanguageModelToolResultPart`) — this is what lets
+   * a Copilot-backed chat actually read (and, in `'full'` mode, write) files, unlike
+   * plain `complete()` which is pure text-in/text-out. Generalized from the loop
+   * `ToolSkillAgent.runOnCopilot` originally built for Phase D tool-executing Skills.
+   */
+  public async completeWithTools(
+    prompt: string,
+    opts: {
+      model?: string;
+      systemPrompt?: string;
+      justification?: string;
+      mode: ToolExecutionMode;
+      workspaceRoot?: string;
+      history?: LlmHistoryTurn[];
+      cancellationToken?: vscode.CancellationToken;
+    }
+  ): Promise<{ text: string; audit: ToolCallAuditEntry[] }> {
+    if (opts.mode === 'none') {
+      const text = await this.complete(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, history: opts.history, cancellationToken: opts.cancellationToken });
+      return { text, audit: [] };
+    }
+    if (!opts.workspaceRoot) {
+      throw new Error('A workspace folder is required for tool execution.');
+    }
+    const workspaceRoot = opts.workspaceRoot;
+    const model = opts.model ? await this.selectModel(opts.model) : this.model;
+
+    const toolSpecs = opts.mode === 'full' ? [...READ_ONLY_TOOL_SPECS, ...WRITE_TOOL_SPECS] : READ_ONLY_TOOL_SPECS;
+    const tools: vscode.LanguageModelChatTool[] = toolSpecs.map((t) => ({ name: t.name, description: t.description, inputSchema: t.parameters }));
+
+    const messages: vscode.LanguageModelChatMessage[] = [];
+    if (opts.systemPrompt && opts.systemPrompt.trim().length > 0) {
+      messages.push(vscode.LanguageModelChatMessage.Assistant(opts.systemPrompt.trim()));
+    }
+    messages.push(...buildHistoryMessages(opts.history));
+    messages.push(vscode.LanguageModelChatMessage.User(prompt));
+
+    const audit: ToolCallAuditEntry[] = [];
+    let finalText = '';
+
+    for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
+      const response = await model.sendRequest(
+        messages,
+        { justification: opts.justification ?? 'Answer a data engineering question in the Auto Data Engineering Hub sidebar chat.', tools },
+        opts.cancellationToken
+      );
+
+      const assistantParts: Array<vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart> = [];
+      const toolCalls: vscode.LanguageModelToolCallPart[] = [];
+      let turnText = '';
+      for await (const part of response.stream) {
+        if (part instanceof vscode.LanguageModelToolCallPart) {
+          toolCalls.push(part);
+          assistantParts.push(part);
+        } else if (part instanceof vscode.LanguageModelTextPart) {
+          turnText += part.value;
+          assistantParts.push(part);
+        }
+      }
+      finalText += turnText;
+
+      if (toolCalls.length === 0) {
+        break;
+      }
+
+      messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
+      const resultParts: vscode.LanguageModelToolResultPart[] = [];
+      for (const call of toolCalls) {
+        const toolCall: AgenticToolCall = { id: call.callId, name: call.name, input: (call.input ?? {}) as Record<string, unknown> };
+        const outcome = await executeAgenticTool(toolCall, workspaceRoot, audit);
+        resultParts.push(new vscode.LanguageModelToolResultPart(call.callId, [new vscode.LanguageModelTextPart(outcome)]));
+      }
+      messages.push(vscode.LanguageModelChatMessage.User(resultParts));
+    }
+
+    if (!finalText.trim() && audit.length === 0) {
+      throw new Error('The language model returned an empty response.');
+    }
+    return { text: finalText.trim(), audit };
   }
 
   public async testCall(): Promise<{ ok: boolean; text?: string; error?: string }> {

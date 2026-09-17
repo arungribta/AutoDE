@@ -177,25 +177,31 @@ export class ClaudeCodeAdapter {
 
   /**
    * Run a single headless completion.
-   * @param opts.allowTools shorthand for `toolMode: 'read-only'` (kept for the existing grounded-chat
-   *   caller). @param opts.toolMode takes precedence when given: `'none'` (default) permits no tools
-   *   and caps the run at 1 turn; `'read-only'` allows Read/Grep/Glob so Claude Code can inspect the
-   *   workspace; `'full'` (Phase D, tool-executing Skills) additionally allows Edit/Write/Bash — Claude
-   *   Code's own tool loop still runs (AutoDE doesn't reimplement it), scoped to `opts.cwd`.
+   * @param opts.toolMode `'none'` (default) permits no tools and caps the run at 1 turn;
+   *   `'read-only'` allows Read/Grep/Glob so Claude Code can inspect the workspace (used by
+   *   grounded chat by default); `'full'` (chat's opt-in "allow edits" mode, and Phase D
+   *   tool-executing Skills) additionally allows Edit/Write/Bash — Claude Code's own tool loop
+   *   still runs (AutoDE doesn't reimplement it), scoped to `opts.cwd`.
+   * @param opts.sessionId / opts.isNewSession Claude Code headless (`-p`) sessions persist to
+   *   disk and can be resumed — empirically verified: `--session-id <uuid>` on a first call,
+   *   then `--resume <uuid>` on a later call in the same `cwd`, correctly recalls prior turns,
+   *   served from server-side cache rather than a re-sent transcript. When `sessionId` is set,
+   *   this is used instead of AutoDE building its own history text — see `AgentHub.chat`.
    */
   public async complete(
     prompt: string,
     opts?: {
       systemPrompt?: string;
       model?: string;
-      allowTools?: boolean;
       toolMode?: 'none' | 'read-only' | 'full';
       timeoutMs?: number;
       cwd?: string;
+      sessionId?: string;
+      isNewSession?: boolean;
       cancellationToken?: vscode.CancellationToken;
     }
   ): Promise<string> {
-    const mode = opts?.toolMode ?? (opts?.allowTools ? 'read-only' : 'none');
+    const mode = opts?.toolMode ?? 'none';
     const timeoutMs = opts?.timeoutMs ?? (mode === 'none' ? 90000 : 180000);
     const args = ['-p', '--output-format', 'json'];
 
@@ -206,6 +212,10 @@ export class ClaudeCodeAdapter {
     const model = (opts?.model ?? '').trim();
     if (model && CLAUDE_MODEL_HINT.test(model)) {
       args.push('--model', model);
+    }
+
+    if (opts?.sessionId) {
+      args.push(opts.isNewSession ? '--session-id' : '--resume', opts.sessionId);
     }
 
     if (mode === 'full') {

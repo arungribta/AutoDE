@@ -4,7 +4,11 @@ import { parseYaml, stringifyYaml } from './Yaml';
 
 /**
  * Manages the Business Problem Specification — the versioned system of record.
- * Persists to `.ai-context/spec/business-problem.yaml` with atomic writes.
+ * Persists to `<contextRoot>/spec/business-problem.yaml` with atomic writes.
+ *
+ * `contextRoot` is a business problem's own folder
+ * (`.ai-context/problems/<id>/`, v0.12.0) — the caller resolves which one;
+ * this class has no opinion about multi-problem routing.
  */
 export class SpecManager implements vscode.Disposable {
   private spec: BusinessProblemSpec | undefined;
@@ -12,10 +16,10 @@ export class SpecManager implements vscode.Disposable {
   private readonly specUri: vscode.Uri;
 
   constructor(
-    private readonly workspaceUri: vscode.Uri,
+    private readonly contextRoot: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
-    this.specDir = vscode.Uri.joinPath(workspaceUri, '.ai-context', 'spec');
+    this.specDir = vscode.Uri.joinPath(contextRoot, 'spec');
     this.specUri = vscode.Uri.joinPath(this.specDir, 'business-problem.yaml');
   }
 
@@ -165,7 +169,11 @@ export class SpecManager implements vscode.Disposable {
       createdAt: spec.createdAt,
       updatedAt: spec.updatedAt,
       approvedAt: spec.approvedAt,
-      approvedBy: spec.approvedBy
+      approvedBy: spec.approvedBy,
+      implementationType: spec.implementationType,
+      implementationTypeReason: spec.implementationTypeReason,
+      implementationTypeOverridden: spec.implementationTypeOverridden,
+      problemStatementApproved: spec.problemStatementApproved
     };
     // The `yaml` library drops `undefined` top-level keys, so optional fields are
     // omitted automatically; empty arrays are preserved (read back as []).
@@ -208,7 +216,11 @@ export class SpecManager implements vscode.Disposable {
       createdAt: str(doc.createdAt),
       updatedAt: str(doc.updatedAt),
       approvedAt: str(doc.approvedAt) || undefined,
-      approvedBy: str(doc.approvedBy) || undefined
+      approvedBy: str(doc.approvedBy) || undefined,
+      implementationType: (doc.implementationType === 'greenfield' || doc.implementationType === 'brownfield') ? doc.implementationType : undefined,
+      implementationTypeReason: str(doc.implementationTypeReason) || undefined,
+      implementationTypeOverridden: doc.implementationTypeOverridden === true,
+      problemStatementApproved: doc.problemStatementApproved === true
     };
 
     // v2 fields: native YAML keys now; legacy files may still carry a

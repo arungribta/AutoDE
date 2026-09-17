@@ -1,12 +1,14 @@
 import * as vscode from 'vscode';
 import { GraphManager } from './GraphManager';
 import { RegisteredSource } from './SourceRegistry';
+import { BusinessProblemSpec } from '../core/types';
 import {
   BaseNode,
   BusinessTermNode,
   BusinessRuleNode,
   VerifiedQueryNode,
-  GraphEdge
+  GraphEdge,
+  Origin
 } from './types';
 
 /**
@@ -45,6 +47,88 @@ export class SynthesisPipeline {
 
     this.log(`Synthesis complete: ${nodes} node(s), ${edges} edge(s)`);
     return { nodes, edges };
+  }
+
+  /**
+   * Ingests the approved Business Problem Specification itself as a context
+   * source — objectives, business requirements and dependencies become
+   * `business_term` nodes; constraints and assumptions become `business_rule`
+   * nodes (STRICT / RECOMMENDED respectively) — each stamped with `Origin.specId`
+   * / `specVersion` so it's traceable to the exact spec revision it came from.
+   *
+   * Re-synthesizing (e.g. on a later spec version) first removes every node
+   * this method previously derived from this same spec id, so the graph always
+   * reflects the *current* approved spec rather than accumulating stale
+   * fields from earlier revisions.
+   */
+  public async synthesizeFromSpec(spec: BusinessProblemSpec): Promise<{ nodes: number; edges: number }> {
+    const sourceRef = `spec:${spec.id}`;
+    await this.graphManager.removeNodesBySourceRef(sourceRef);
+
+    const now = new Date().toISOString();
+    const origin = (extractor: string): Origin => ({
+      source: 'derived',
+      sourceRef,
+      extractor,
+      extractedAt: now,
+      specId: spec.id,
+      specVersion: spec.version
+    });
+
+    let nodes = 0;
+
+    const addTerm = async (idSuffix: string, text: string): Promise<void> => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const node: BusinessTermNode = {
+        id: `spec-term-${spec.id}-${idSuffix}`,
+        type: 'business_term',
+        label: trimmed.slice(0, 80),
+        description: trimmed,
+        metadata: {},
+        version: spec.version,
+        layer: 'domain',
+        status: 'active',
+        origin: origin('spec-sync'),
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: 'autode',
+        mappedNodeIds: []
+      };
+      await this.graphManager.addNode(node);
+      nodes++;
+    };
+
+    const addRule = async (idSuffix: string, ruleText: string, enforcementLevel: 'STRICT' | 'RECOMMENDED'): Promise<void> => {
+      const trimmed = ruleText.trim();
+      if (!trimmed) return;
+      const node: BusinessRuleNode = {
+        id: `spec-rule-${spec.id}-${idSuffix}`,
+        type: 'business_rule',
+        label: trimmed.slice(0, 80),
+        ruleText: trimmed,
+        enforcementLevel,
+        metadata: {},
+        version: spec.version,
+        layer: 'domain',
+        status: 'active',
+        origin: origin('spec-sync'),
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: 'autode'
+      };
+      await this.graphManager.addNode(node);
+      nodes++;
+    };
+
+    for (let i = 0; i < spec.objectives.length; i++) { await addTerm(`objective-${i}`, spec.objectives[i]); }
+    for (let i = 0; i < (spec.businessRequirements ?? []).length; i++) { await addTerm(`requirement-${i}`, spec.businessRequirements![i]); }
+    for (let i = 0; i < (spec.dependencies ?? []).length; i++) { await addTerm(`dependency-${i}`, spec.dependencies![i]); }
+    for (let i = 0; i < spec.constraints.length; i++) { await addRule(`constraint-${i}`, spec.constraints[i], 'STRICT'); }
+    for (let i = 0; i < spec.assumptions.length; i++) { await addRule(`assumption-${i}`, spec.assumptions[i], 'RECOMMENDED'); }
+
+    this.log(`Context sync: ${nodes} node(s) derived from approved specification v${spec.version}.`);
+    return { nodes, edges: 0 };
   }
 
   private async readSource(relativePath: string): Promise<string | null> {
@@ -95,7 +179,7 @@ export class SynthesisPipeline {
         version: 1,
         layer: 'definition',
         status: 'active',
-        origin: { source: 'derived', sourceRef: source.path, extractor: 'synthesis-pipeline', extractedAt: now },
+        origin: { source: 'derived', sourceRef: source.path, extractor: 'synthesis-pipeline', extractedAt: now, environment: 'source' },
         createdAt: now,
         updatedAt: now,
         updatedBy: 'autode',
@@ -126,7 +210,7 @@ export class SynthesisPipeline {
         version: 1,
         layer: 'query',
         status: 'active',
-        origin: { source: 'derived', sourceRef: source.path, extractor: 'synthesis-pipeline', extractedAt: now },
+        origin: { source: 'derived', sourceRef: source.path, extractor: 'synthesis-pipeline', extractedAt: now, environment: 'source' },
         createdAt: now,
         updatedAt: now,
         updatedBy: 'autode',
@@ -166,7 +250,7 @@ export class SynthesisPipeline {
         version: 1,
         layer: 'system',
         status: 'active',
-        origin: { source: 'derived', sourceRef: source.path, extractor: 'synthesis-pipeline', extractedAt: now },
+        origin: { source: 'derived', sourceRef: source.path, extractor: 'synthesis-pipeline', extractedAt: now, environment: 'source' },
         createdAt: now,
         updatedAt: now,
         updatedBy: 'autode',

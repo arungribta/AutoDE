@@ -1,4 +1,4 @@
-import { BusinessProblemSpec, InferredPhase, PlanStep, WorkflowPhase } from './types';
+import { BusinessProblemSpec, ImplementationType, InferredPhase, PlanStep, SessionStatus, WorkflowPhase } from './types';
 
 /**
  * Spec-driven phase inference + orchestration.
@@ -94,14 +94,25 @@ export function buildPhaseDependencies(required: WorkflowPhase[]): Record<Workfl
 /**
  * Deterministically infers the required workflow phases from an approved BPS.
  * Rules:
- *  1. Positive keyword evidence in the specification marks a phase required.
+ *  1. Positive keyword evidence in the specification (plus, when supplied, the
+ *     synthesized Context Layer summary) marks a phase required.
  *  2. `scope.out` exclusions veto a phase even with positive evidence.
  *  3. If no phase matches at all, the whole (default) workflow is required so an
  *     underspecified-but-approved spec still produces a meaningful plan.
  *  4. A build phase that must transform data implies discovery when there is
  *     source/ingestion evidence.
+ *  5. A `brownfield` implementation forces `discover` required by default —
+ *     existing systems need assessment even when the spec doesn't say so
+ *     explicitly — unless `scope.out` explicitly excludes it (rule 2 still wins).
+ *
+ * `implementationType` and `contextSummary` are optional so existing callers
+ * (and tests) that only pass a spec keep working unchanged.
  */
-export function inferPhases(spec: BusinessProblemSpec): InferredPhase[] {
+export function inferPhases(
+  spec: BusinessProblemSpec,
+  implementationType?: ImplementationType,
+  contextSummary?: string
+): InferredPhase[] {
   const corpus = [
     spec.problemStatement || '',
     ...(spec.objectives || []),
@@ -110,7 +121,8 @@ export function inferPhases(spec: BusinessProblemSpec): InferredPhase[] {
     ...(spec.successCriteria || []),
     ...(spec.assumptions || []),
     spec.domain || '',
-    ...(spec.keyEntities || [])
+    ...(spec.keyEntities || []),
+    contextSummary || ''
   ]
     .filter((part) => typeof part === 'string')
     .join('\n')
@@ -119,6 +131,7 @@ export function inferPhases(spec: BusinessProblemSpec): InferredPhase[] {
   const outCorpus = (spec.scope?.out || []).filter((part) => typeof part === 'string').join('\n').toLowerCase();
 
   const required = new Set<WorkflowPhase>();
+  const defaultedByType = new Set<WorkflowPhase>();
   for (const phase of PHASE_ORDER) {
     const excluded = (SCOPE_OUT_EXCLUSIONS.find((e) => e.phase === phase)?.phrases ?? []).some((phrase) =>
       matchesAnyKeyword(outCorpus, [phrase])
@@ -139,11 +152,22 @@ export function inferPhases(spec: BusinessProblemSpec): InferredPhase[] {
     required.add('discover');
   }
 
+  // Brownfield projects need to assess what already exists, even absent explicit evidence.
+  const discoverExcluded = (SCOPE_OUT_EXCLUSIONS.find((e) => e.phase === 'discover')?.phrases ?? []).some(
+    (phrase) => matchesAnyKeyword(outCorpus, [phrase])
+  );
+  if (implementationType === 'brownfield' && !discoverExcluded && !required.has('discover')) {
+    required.add('discover');
+    defaultedByType.add('discover');
+  }
+
   const dependencies = buildPhaseDependencies([...required]);
 
   return PHASE_ORDER.map((phase) => {
     const isRequired = required.has(phase);
-    const reason = isRequired ? reasonFor(phase, corpus) : 'Excluded or not indicated by this specification.';
+    const reason = isRequired
+      ? reasonFor(phase, corpus, defaultedByType.has(phase) ? implementationType : undefined)
+      : 'Excluded or not indicated by this specification.';
     return {
       phase,
       label: PHASE_LABELS[phase],
@@ -155,31 +179,42 @@ export function inferPhases(spec: BusinessProblemSpec): InferredPhase[] {
   });
 }
 
-function reasonFor(phase: WorkflowPhase, corpus: string): string {
+function reasonFor(phase: WorkflowPhase, corpus: string, defaultedByType?: ImplementationType): string {
   const matched = PHASE_KEYWORDS[phase].filter((kw) => matchesAnyKeyword(corpus, [kw]));
-  if (matched.length === 0) {
-    return 'Required by default (no phase-specific evidence was detected).';
+  if (matched.length > 0) {
+    return `Indicated by: ${matched.slice(0, 4).join(', ')}`;
   }
-  return `Indicated by: ${matched.slice(0, 4).join(', ')}`;
+  if (defaultedByType === 'brownfield') {
+    return 'Required by default for a brownfield implementation (existing systems need discovery/assessment).';
+  }
+  return 'Required by default (no phase-specific evidence was detected).';
 }
 /**
  * Recomputes live phase statuses from the current plan steps.
- *   - no steps yet           -> required phases are `pending`
- *   - all phase steps done   -> `completed`
- *   - running / partial      -> `in-progress`
- *   - any step failed        -> `blocked`
- *   - all steps pending      -> `pending` when dependencies are met, otherwise `blocked`
+ *   - no steps yet                     -> required phases are `pending`
+ *   - steps exist, plan not yet run    -> required phases with nothing running/done are `pending-review`
+ *                                         (a plan was generated; the user has not clicked "Generate
+ *                                         Artifacts" yet — this is the stage-review checkpoint)
+ *   - all phase steps done             -> `completed`
+ *   - running / partial                -> `in-progress`
+ *   - any step failed                  -> `blocked`
+ *   - all steps pending, execution on  -> `pending` when dependencies are met, otherwise `blocked`
  */
 export function computePhaseStatuses(
   phases: InferredPhase[] | undefined,
   steps: PlanStep[],
-  _currentPhase?: WorkflowPhase
+  _currentPhase?: WorkflowPhase,
+  planStatus?: SessionStatus
 ): InferredPhase[] | undefined {
   if (!phases) return phases;
 
   if (steps.length === 0) {
     return phases.map((phase): InferredPhase => ({ ...phase, status: phase.required ? 'pending' : 'unrequired' }));
   }
+
+  // A plan exists but hasn't been run yet — required phases with no step activity
+  // are awaiting user review/confirmation, not simply "queued."
+  const awaitingReview = planStatus === 'ready';
 
   const stepsByPhase = new Map<WorkflowPhase, PlanStep[]>();
   for (const step of steps) {
@@ -221,6 +256,10 @@ export function computePhaseStatuses(
     const dependenciesMet = (phase.dependsOn ?? []).every(
       (dep) => !phaseHasSteps(dep) || allDone(dep)
     );
+
+    if (awaitingReview) {
+      return { ...phase, status: 'pending-review' };
+    }
 
     return {
       ...phase,

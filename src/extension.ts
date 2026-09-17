@@ -6,6 +6,8 @@ import { DataAgentHubWebviewProvider } from './core/webviewProvider';
 import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './dqm/ConnectionManager';
 import { ArtifactWriter } from './context/ArtifactWriter';
+import { PlanManager } from './context/PlanManager';
+import { TargetConfigManager } from './context/TargetConfigManager';
 import { DataModelEditorProvider } from './editors/DataModelEditorProvider';
 import { SttmEditorProvider } from './editors/SttmEditorProvider';
 import { GraphEditorProvider } from './editors/GraphEditorProvider';
@@ -32,10 +34,6 @@ async function copyDirectoryRecursive(source: vscode.Uri, target: vscode.Uri): P
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
   const hub = new DataAgentHubHub(configManager);
-  const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub);
-  const panelProvider = new DataAgentHubPanelProvider(context, hub);
-
-  let connectionManager: ConnectionManager | undefined;
 
   // Which VS Code Language Model provider the user has selected (Copilot or
   // Claude). Any other provider is API-key based and not exercised by these
@@ -43,12 +41,62 @@ export function activate(context: vscode.ExtensionContext): void {
   const activeLmProvider = (): 'copilot' | 'claude' =>
     configManager.getSettings().activeLlmProvider === 'claude' ? 'claude' : 'copilot';
 
-  // Initialize ArtifactWriter (single-workspace artifact persistence)
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? context.extensionUri;
-  const artifactWriter = new ArtifactWriter(workspaceRoot, (msg: string) => {
-    console.log(`[AutoDE Artifact] ${msg}`);
+
+  // PlanManager and ArtifactWriter are scoped to a business problem's own
+  // folder (v0.12.0, `.ai-context/problems/<id>/`) — but they're also the two
+  // managers the command-palette entry points (`autoDE.generatePlan`,
+  // `autoDE.executePlan`) can reach *without* the sidebar ever resolving, so
+  // ownership stays here rather than moving into `webviewProvider`. `applyProblemRoot`
+  // (re)points both at a given context root and re-injects them into `hub` —
+  // called once below with a safe fallback, then again by `webviewProvider`
+  // the moment it determines the real active business problem (or the lack
+  // of one). `hub.setPlanManager`/`setArtifactWriter` are plain setters, so a
+  // later call transparently supersedes an earlier one; nothing needs to be
+  // torn down.
+  const applyProblemRoot = async (contextRoot: vscode.Uri): Promise<void> => {
+    const artifactWriter = new ArtifactWriter(contextRoot, (msg: string) => {
+      console.log(`[AutoDE Artifact] ${msg}`);
+    });
+    hub.setArtifactWriter(artifactWriter);
+
+    const planManager = new PlanManager(contextRoot, (msg: string) => {
+      console.log(`[AutoDE Plan] ${msg}`);
+    });
+    hub.setPlanManager(planManager);
+    await planManager.initialize();
+    const persisted = planManager.getPlan();
+    if (persisted) {
+      hub.loadPersistedPlan(persisted);
+    }
+  };
+
+  // Fallback root for objective-only usage (command palette, no spec ever
+  // drafted) that never resolves to a real business problem — kept separate
+  // from any real problem folder so it can't be mistaken for one in the
+  // business-problem picker.
+  const unscopedRoot = vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'problems', '_unscoped');
+  void applyProblemRoot(unscopedRoot);
+
+  const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub, applyProblemRoot);
+  const panelProvider = new DataAgentHubPanelProvider(context, hub);
+
+  let connectionManager: ConnectionManager | undefined;
+
+  // Initialize TargetConfigManager (.ai-context/target-environment.yaml, profile
+  // inheritance) — kept instantiated for future dev/staging/prod profile
+  // switching, but (v0.11.0) its generic default profile is deliberately NOT
+  // seeded into the hub anymore. Doing that previously meant every workspace
+  // silently started with the same Snowflake/dimensional/dbt/Airflow
+  // assumptions regardless of the approved spec, and permanently short-
+  // circuited the one fallback that tried to infer target intent at all
+  // (`extractTargetFromMessage`). The Target Context Q&A (built + approved
+  // after spec approval, see requirements.md §8.10) is now the sole source of
+  // `state.targetEnvironment` — see `webviewProvider.approveTargetContext`.
+  const targetConfigManager = new TargetConfigManager(workspaceRoot, (msg: string) => {
+    console.log(`[AutoDE Target] ${msg}`);
   });
-  hub.setArtifactWriter(artifactWriter);
+  void targetConfigManager.initialize();
 
   // ── Commands ──
 
@@ -62,11 +110,21 @@ export function activate(context: vscode.ExtensionContext): void {
       placeHolder: 'Load daily sales events into a curated model and validate row counts.'
     });
     if (!objective || objective.trim().length === 0) { return; }
-    await hub.generatePlan(objective.trim());
+    try {
+      await hub.generatePlan(objective.trim());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to generate a plan.';
+      await vscode.window.showErrorMessage(message);
+    }
   });
 
   const executePlan = vscode.commands.registerCommand(`${EXTENSION_ID}.executePlan`, async () => {
-    await hub.executePlan();
+    try {
+      await hub.executePlan();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to execute the plan.';
+      await vscode.window.showErrorMessage(message);
+    }
   });
 
   const resetSession = vscode.commands.registerCommand(`${EXTENSION_ID}.resetSession`, async () => {
@@ -286,6 +344,51 @@ export function activate(context: vscode.ExtensionContext): void {
     else { vscode.window.showErrorMessage(`Skill "${picked.label}" failed: ${result.error || result.message}`); }
   });
 
+  // ── Chat sessions (Phase D5... Phase F, v0.9.0) ──
+
+  const newChat = vscode.commands.registerCommand(`${EXTENSION_ID}.newChat`, async () => {
+    await sidebarProvider.triggerNewChat();
+  });
+
+  const chatHistory = vscode.commands.registerCommand(`${EXTENSION_ID}.chatHistory`, async () => {
+    const manager = sidebarProvider.getChatSessionManager();
+    if (!manager) { vscode.window.showInformationMessage('Open the AutoDE sidebar first.'); return; }
+    const sessions = await manager.listSessions();
+    if (sessions.length === 0) { vscode.window.showInformationMessage('No chat sessions yet.'); return; }
+    const picked = await vscode.window.showQuickPick(
+      sessions.map((s) => ({
+        label: (s.title || '(no messages yet)') + (s.status === 'active' ? ' — active' : ''),
+        description: `${s.status} · ${new Date(s.updatedAt).toLocaleString()}`,
+        detail: s.specId ? `spec ${s.specId} v${s.specVersion}` : undefined,
+        chatId: s.id
+      })),
+      { title: 'Chat History', placeHolder: 'Select a chat to view its transcript' }
+    );
+    if (!picked) { return; }
+    const transcript = await manager.loadTranscript(picked.chatId);
+    const text = transcript.length === 0
+      ? '(empty chat)'
+      : transcript.map((m) => `[${m.at}] ${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
+    const doc = await vscode.workspace.openTextDocument({ content: `# Chat ${picked.chatId}\n\n${text}`, language: 'markdown' });
+    await vscode.window.showTextDocument(doc, { preview: true });
+  });
+
+  const discardChat = vscode.commands.registerCommand(`${EXTENSION_ID}.discardChat`, async () => {
+    const manager = sidebarProvider.getChatSessionManager();
+    if (!manager) { vscode.window.showInformationMessage('Open the AutoDE sidebar first.'); return; }
+    const sessions = await manager.listSessions();
+    if (sessions.length === 0) { vscode.window.showInformationMessage('No chat sessions yet.'); return; }
+    const picked = await vscode.window.showQuickPick(
+      sessions.map((s) => ({ label: (s.title || '(no messages yet)') + (s.status === 'active' ? ' — active' : ''), description: s.status, chatId: s.id })),
+      { title: 'Discard a chat', placeHolder: 'Select a chat to permanently discard' }
+    );
+    if (!picked) { return; }
+    const confirm = await vscode.window.showWarningMessage(`Permanently discard "${picked.label}"? This cannot be undone.`, { modal: true }, 'Discard');
+    if (confirm !== 'Discard') { return; }
+    await manager.discardSession(picked.chatId);
+    vscode.window.showInformationMessage('Chat discarded.');
+  });
+
   // ── Register all providers and commands ──
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, sidebarProvider, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -299,7 +402,8 @@ export function activate(context: vscode.ExtensionContext): void {
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
     testConnection, sourceAssessment, syncMetadata, reindex,
-    importToolSkill, runToolSkill
+    importToolSkill, runToolSkill,
+    newChat, chatHistory, discardChat
   );
 }
 

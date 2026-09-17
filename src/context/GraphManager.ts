@@ -63,6 +63,42 @@ export class GraphManager implements vscode.Disposable {
     });
   }
 
+  /**
+   * Removes every node (and any edge touching one) whose `origin.sourceRef`
+   * matches — used to replace previously-derived content (e.g. a prior spec
+   * version's synthesized nodes) before re-synthesizing from the current one,
+   * rather than accumulating stale nodes across revisions.
+   */
+  public async removeNodesBySourceRef(sourceRef: string): Promise<void> {
+    await this.lock(async () => {
+      const idsToRemove: string[] = [];
+      for (const [id, node] of this.nodes.entries()) {
+        if (node.origin?.sourceRef === sourceRef) idsToRemove.push(id);
+      }
+      for (const id of idsToRemove) {
+        this.nodes.delete(id);
+        for (const [label, set] of this.labelIndex.entries()) {
+          set.delete(id);
+          if (set.size === 0) this.labelIndex.delete(label);
+        }
+        for (const [type, set] of this.typeIndex.entries()) {
+          set.delete(id);
+          if (set.size === 0) this.typeIndex.delete(type);
+        }
+        for (const [fqn, fqnId] of this.fqnIndex.entries()) {
+          if (fqnId === id) this.fqnIndex.delete(fqn);
+        }
+      }
+      if (idsToRemove.length > 0) {
+        const removeIds = new Set(idsToRemove);
+        for (const [edgeId, edge] of this.edges.entries()) {
+          if (removeIds.has(edge.source) || removeIds.has(edge.target)) this.edges.delete(edgeId);
+        }
+        this.lastIndexedAt = new Date();
+      }
+    });
+  }
+
   public getNodeById(id: string): BaseNode | undefined {
     return this.nodes.get(id);
   }

@@ -301,6 +301,12 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
   protected snapshotToGraph(snapshot: SchemaSnapshot): { nodes: BaseNode[]; edges: GraphEdge[] } {
     const nodes: BaseNode[] = [];
     const edges: GraphEdge[] = [];
+    const now = new Date().toISOString();
+    // Every node here comes from introspecting a live, connected platform — in
+    // AutoDE's current model that is always the *source* side of a Brownfield
+    // implementation (nothing introspects a target platform; target intent is
+    // expressed as TargetEnvironment config, not discovered schema).
+    const sourceOrigin = { source: 'derived' as const, sourceRef: snapshot.platform, extractor: 'source-assessment', extractedAt: now, environment: 'source' as const };
 
     for (const table of snapshot.tables) {
       const tableNode: TableNode = {
@@ -317,7 +323,8 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
           sizeBytes: table.sizeBytes,
           platform: snapshot.platform
         },
-        version: 1
+        version: 1,
+        origin: sourceOrigin
       };
       nodes.push(tableNode);
 
@@ -335,7 +342,8 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
             profile: col.profile,
             ordinalPosition: col.ordinalPosition
           },
-          version: 1
+          version: 1,
+          origin: sourceOrigin
         };
         nodes.push(colNode);
 
@@ -364,7 +372,8 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
           viewDefinition: view.definition,
           platform: snapshot.platform
         },
-        version: 1
+        version: 1,
+        origin: sourceOrigin
       };
       nodes.push(viewNode);
     }

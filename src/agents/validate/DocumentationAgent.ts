@@ -1,4 +1,5 @@
 import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
+import { generateWithLlm } from '../llmCodegen';
 
 export async function executeArchitectureAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const target = context.targetEnvironment;
@@ -8,7 +9,16 @@ export async function executeArchitectureAgent(step: PlanStep, context: AgentExe
   const database = pc?.['database'] || context.settings.defaultSnowflakeDatabase || 'CURATED_DB';
   const tableName = `${step.id.replace(/[^a-zA-Z0-9_]/g, '_')}_curated`;
 
-  const ddl = `CREATE OR REPLACE TABLE ${database}.${schema}.${tableName} (
+  const modelingApproach = target?.modelingApproach || 'dimensional';
+  const transformationTool = target?.transformationTool || 'dbt';
+  const orchestrationTool = target?.orchestrationTool || 'airflow';
+
+  const llmDdl = await generateWithLlm(context, step, {
+    role: 'a data architect',
+    fence: 'sql',
+    instructions: `Write the curated-layer CREATE TABLE/VIEW DDL for ${database}.${schema}.${tableName}, with columns that reflect the actual entities named in the task/context above — not a generic id/run_id/payload placeholder unless nothing more specific is known.`
+  });
+  const ddl = llmDdl ?? `CREATE OR REPLACE TABLE ${database}.${schema}.${tableName} (
     id STRING,
     run_id STRING,
     created_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
@@ -18,14 +28,18 @@ export async function executeArchitectureAgent(step: PlanStep, context: AgentExe
 CREATE OR REPLACE VIEW ${database}.${schema}.${tableName}_view AS
 SELECT * FROM ${database}.${schema}.${tableName};`;
 
-  const modelingApproach = target?.modelingApproach || 'dimensional';
-  const transformationTool = target?.transformationTool || 'dbt';
-  const orchestrationTool = target?.orchestrationTool || 'airflow';
+  context.log(`Architecture agent for ${step.id} produced ${llmDdl ? 'LLM-derived' : 'template'} DDL for ${modelingApproach} model via ${transformationTool}`);
 
-  context.log(`Architecture agent for ${step.id} produced DDL for ${modelingApproach} model via ${transformationTool}`);
-
-  // Generate architecture documentation
-  const docContent = `# Architecture Documentation: ${tableName}
+  const llmDoc = await generateWithLlm(context, step, {
+    role: 'a data architect writing architecture documentation',
+    fence: 'markdown',
+    instructions: [
+      `Write architecture documentation (Markdown) for this step's deliverable in ${database}.${schema}.`,
+      'Cover: what this piece of the pipeline does and why (grounded in the business objective/task above, not generic boilerplate), the target environment, the generated DDL below, and the pipeline flow from source through validation.',
+      `Include this DDL verbatim in a \`\`\`sql fenced block:\n${ddl}`
+    ].join(' ')
+  });
+  const docContent = llmDoc ?? `# Architecture Documentation: ${tableName}
 
 ## Target Environment
 - **Platform:** ${target?.platform || 'snowflake'}

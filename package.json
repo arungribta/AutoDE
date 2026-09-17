@@ -111,6 +111,18 @@
       {
         "command": "autoDataEngineeringHub.runToolSkill",
         "title": "AutoDE: Run Tool Skill"
+      },
+      {
+        "command": "autoDataEngineeringHub.newChat",
+        "title": "AutoDE: New Chat"
+      },
+      {
+        "command": "autoDataEngineeringHub.chatHistory",
+        "title": "AutoDE: Chat History"
+      },
+      {
+        "command": "autoDataEngineeringHub.discardChat",
+        "title": "AutoDE: Discard Chat"
       }
     ],
     "viewsContainers": {
@@ -282,8 +294,8 @@
           "description": "Custom LLM endpoint."
         },
         "autoDataEngineeringHub.artifactDirectory": {
-          "type": "string", "default": "auto-de",
-          "description": "Folder (relative to the workspace root) where AutoDE writes generated artifacts."
+          "type": "string", "default": "artifacts",
+          "description": "Folder (relative to the active business problem's own folder, .ai-context/problems/<id>/) where AutoDE writes generated artifacts — alongside that problem's specification, context, and plan, so its knowledge base stays in one place."
         },
         "autoDataEngineeringHub.extensionDisplayName": {
           "type": "string", "default": "AutoDE — Data Engineering Workspace",

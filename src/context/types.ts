@@ -18,6 +18,15 @@ export interface Origin {
   extractedAt?: string;
   specId?: string;
   specVersion?: number;
+  /**
+   * Which side of a Brownfield implementation this node describes — `source`
+   * for facts about an existing system (schema, registered business context,
+   * data contracts), `target` for the platform being built. Undefined means
+   * the node isn't environment-specific (e.g. spec-derived objectives/
+   * constraints, which apply regardless of source/target). Kept on `Origin`
+   * rather than a new node field so it travels with provenance, not identity.
+   */
+  environment?: 'source' | 'target';
 }
 
 export interface BaseNode {

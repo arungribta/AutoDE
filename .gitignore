@@ -12,3 +12,10 @@ mock_*.js
 .ai-context/derived/
 .ai-context/state.json
 .ai-context/*.tmp.*
+
+# Chat sessions (Phase F, v0.9.0) — local/exploratory transcripts, unlike the
+# curated, committed BPS. Includes the abandoned-interview carryover notes
+# registered as a context source (their extracted graph content persists
+# separately via the normal context layer; the note file itself is not meant
+# to be shared/committed).
+.ai-context/chats/

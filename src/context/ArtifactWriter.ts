@@ -10,12 +10,13 @@ const PHASE_DIRS: Record<WorkflowPhase, string> = {
 
 /**
  * Persists generated artifacts into the user's repository under a visible,
- * configurable folder (default `auto-de/`), organized by workflow phase.
+ * configurable folder (default `artifacts/`, resolved beneath the active
+ * business problem's own folder — v0.12.0), organized by workflow phase.
  * Writes are atomic (temp file → rename).
  */
 export class ArtifactWriter {
   public constructor(
-    private readonly workspaceUri: vscode.Uri,
+    private readonly contextRoot: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {}
 
@@ -39,12 +40,35 @@ export class ArtifactWriter {
     const tempUri = vscode.Uri.joinPath(dirUri, `.${fileName}.tmp.${Date.now()}`);
 
     await vscode.workspace.fs.createDirectory(dirUri);
+    await this.archiveExisting(dirUri, fileName);
     await vscode.workspace.fs.writeFile(tempUri, Buffer.from(artifact.content, 'utf8'));
     await vscode.workspace.fs.rename(tempUri, targetUri, { overwrite: true });
 
     const loggedPath = [phaseDir, versionTag, ...segments, fileName].filter(Boolean).join('/');
     this.log(`Artifact written: ${loggedPath}`);
     return targetUri;
+  }
+
+  /**
+   * Archives whatever currently sits at `<dirUri>/<fileName>` to a `history/`
+   * subfolder before it's overwritten, so re-running a step within the same
+   * spec version doesn't silently discard the previous artifact — each rerun
+   * within a `<specId>.v<version>` folder now keeps every prior copy, not just
+   * the folder-level tag across spec versions.
+   */
+  private async archiveExisting(dirUri: vscode.Uri, fileName: string): Promise<void> {
+    const existingUri = vscode.Uri.joinPath(dirUri, fileName);
+    let existing: Uint8Array;
+    try {
+      existing = await vscode.workspace.fs.readFile(existingUri);
+    } catch {
+      return; // nothing to archive yet
+    }
+    const historyDir = vscode.Uri.joinPath(dirUri, 'history');
+    await vscode.workspace.fs.createDirectory(historyDir);
+    const archivedName = `${Date.now()}.${fileName}`;
+    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(historyDir, archivedName), existing);
+    this.log(`Archived previous artifact revision: history/${archivedName}`);
   }
 
   /** The `<specId>.v<version>` folder name an artifact is written under, or `undefined` when it carries no spec stamp. */
@@ -61,21 +85,22 @@ export class ArtifactWriter {
   }
 
   public getArtifactDirectory(): vscode.Uri {
-    return ArtifactWriter.resolveArtifactDirectory(this.workspaceUri);
+    return ArtifactWriter.resolveArtifactDirectory(this.contextRoot);
   }
 
   /**
-   * Resolves the configured artifact root for a workspace.
-   * Exposed statically so callers that do not own an ArtifactWriter instance
-   * (e.g. the webview provider's "open artifacts folder" action) resolve the
-   * same location without duplicating the configuration logic.
+   * Resolves the configured artifact root beneath a business problem's
+   * context root. Exposed statically so callers that do not own an
+   * ArtifactWriter instance (e.g. the webview provider's "open artifacts
+   * folder" action) resolve the same location without duplicating the
+   * configuration logic.
    */
-  public static resolveArtifactDirectory(workspaceUri: vscode.Uri): vscode.Uri {
+  public static resolveArtifactDirectory(contextRoot: vscode.Uri): vscode.Uri {
     const configured = vscode.workspace
       .getConfiguration('autoDataEngineeringHub')
-      .get<string>('artifactDirectory', 'auto-de');
-    const safe = (configured || 'auto-de').replace(/^[\\/]+|[\\/]+$/g, '') || 'auto-de';
-    return vscode.Uri.joinPath(workspaceUri, safe);
+      .get<string>('artifactDirectory', 'artifacts');
+    const safe = (configured || 'artifacts').replace(/^[\\/]+|[\\/]+$/g, '') || 'artifacts';
+    return vscode.Uri.joinPath(contextRoot, safe);
   }
 
   private resolveRelativePath(artifact: GeneratedArtifact): string {
