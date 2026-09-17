@@ -2283,6 +2283,159 @@ async function main() {
     assert.ok(result.content.includes('t.clean'));
   });
 
+  // ── Phase 2B-ii: primitive extensibility (Tier 2, declarative) ──
+
+  function validPrimitiveDefinitionYaml(kind, version = 1) {
+    return [
+      `kind: ${kind}`,
+      `version: ${version}`,
+      'status: published',
+      `description: "Adds a running total column via a window function."`,
+      'paramSchema:',
+      '  type: object',
+      '  additionalProperties: false',
+      '  required: [sourceObject, targetObject, partitionByColumns, orderByColumn, valueColumn]',
+      '  properties:',
+      '    sourceObject: { type: string, minLength: 1 }',
+      '    targetObject: { type: string, minLength: 1 }',
+      '    partitionByColumns: { type: array, items: { type: string } }',
+      '    orderByColumn: { type: string }',
+      '    valueColumn: { type: string }',
+      'platformTemplates:',
+      '  default: |',
+      '    CREATE OR REPLACE VIEW {{targetObject}} AS',
+      '    SELECT *, SUM({{valueColumn}}) OVER (PARTITION BY {{join partitionByColumns ", "}} ORDER BY {{orderByColumn}}) AS running_total',
+      '    FROM {{sourceObject}};',
+      'previewParams:',
+      '  sourceObject: src.sales',
+      '  targetObject: tgt.sales_running_total',
+      '  partitionByColumns: [region]',
+      '  orderByColumn: sale_date',
+      '  valueColumn: amount',
+      'outputChecks:',
+      '  - mustContain: "{{targetObject}}"'
+    ].join('\n');
+  }
+
+  await test('renderTemplate() supports {{param}}, {{join}}, and {{#each}}, with no code-execution path', () => {
+    const { renderTemplate } = require('../dist/core/transforms/declarative/templateEngine.js');
+
+    const simple = renderTemplate('SELECT {{col}} FROM {{tbl}}', { col: 'id', tbl: 'orders' });
+    assert.strictEqual(simple, 'SELECT id FROM orders');
+
+    const joined = renderTemplate('PARTITION BY {{join cols ", "}}', { cols: ['a', 'b', 'c'] });
+    assert.strictEqual(joined, 'PARTITION BY a, b, c');
+
+    const each = renderTemplate('{{#each cols}}[{{this}}]{{/each}}', { cols: ['x', 'y'] });
+    assert.strictEqual(each, '[x][y]');
+
+    // A JS-injection-shaped param value must render as inert literal text, never be evaluated.
+    const injectionAttempt = renderTemplate('col={{col}}', { col: '${process.exit(1)}' });
+    assert.strictEqual(injectionAttempt, 'col=${process.exit(1)}', 'the engine has no eval/Function() path — this is always just text');
+
+    const unknownVar = renderTemplate('X={{missing}}', {});
+    assert.strictEqual(unknownVar, 'X=', 'an unknown variable renders as empty text, never throws');
+  });
+
+  await test('validatePrimitiveDefinition() rejects a malformed definition with a specific error', () => {
+    const { validatePrimitiveDefinition } = require('../dist/core/transforms/declarative/schema.js');
+    const missingParamSchema = { kind: 'foo', version: 1, status: 'draft', description: 'x', platformTemplates: { default: 'x' }, previewParams: {} };
+    const result = validatePrimitiveDefinition(missingParamSchema);
+    assert.strictEqual(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes('paramSchema')));
+
+    const missingDefaultTemplate = { kind: 'foo', version: 1, status: 'draft', description: 'x', paramSchema: {}, platformTemplates: { snowflake: 'x' }, previewParams: {} };
+    assert.strictEqual(validatePrimitiveDefinition(missingDefaultTemplate).valid, false, 'platformTemplates must include a "default" entry');
+  });
+
+  await test('createDeclarativePrimitive() compiles a Tier-2 definition through the exact same TransformPrimitive interface Tier 1 uses', () => {
+    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const yaml = require('yaml');
+    const definition = yaml.parse(validPrimitiveDefinitionYaml('window_running_total'));
+    const primitive = createDeclarativePrimitive(definition);
+
+    assert.strictEqual(primitive.kind, 'window_running_total');
+    const compiled = primitive.compile(definition.previewParams, { platform: 'snowflake', database: 'd', schema: 's' }, 'snowflake');
+    assert.ok(compiled.content.includes('CREATE OR REPLACE VIEW tgt.sales_running_total'));
+    assert.ok(compiled.content.includes('PARTITION BY region ORDER BY sale_date'));
+  });
+
+  await test('createDeclarativePrimitive() throws when an outputCheck fails, rather than silently shipping bad output', () => {
+    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const primitive = createDeclarativePrimitive({
+      kind: 'broken', version: 1, status: 'published', description: 'x',
+      paramSchema: {}, platformTemplates: { default: 'SELECT 1;' }, previewParams: {},
+      outputChecks: [{ mustContain: '{{targetObject}}' }]
+    });
+    assert.throws(() => primitive.compile({ targetObject: 'tgt.x' }, { platform: 'snowflake', database: 'd', schema: 's' }, 'snowflake'), /outputCheck/);
+  });
+
+  await test('loadPrimitiveDefinitionsFromDirectory() loads valid definitions and reports (not silently drops) malformed ones', () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const { loadPrimitiveDefinitionsFromDirectory } = require('../dist/core/transforms/declarative/loader.js');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primitives-'));
+    fs.writeFileSync(path.join(dir, 'window_running_total.yaml'), validPrimitiveDefinitionYaml('window_running_total'));
+    fs.writeFileSync(path.join(dir, 'broken.yaml'), 'kind: broken\nversion: 1\n'); // missing required fields
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'not a primitive file, must be ignored');
+
+    const result = loadPrimitiveDefinitionsFromDirectory(dir);
+    assert.strictEqual(result.definitions.length, 1);
+    assert.strictEqual(result.definitions[0].kind, 'window_running_total');
+    assert.strictEqual(result.errors.length, 1, 'the malformed file is reported as an error, not silently skipped');
+    assert.strictEqual(result.errors[0].file, 'broken.yaml');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  await test('mergePrimitiveDefinitions() lets a later-loaded override win over a bundled default of the same kind', () => {
+    const { mergePrimitiveDefinitions } = require('../dist/core/transforms/declarative/loader.js');
+    const yaml = require('yaml');
+    const bundledDedup = yaml.parse(validPrimitiveDefinitionYaml('dedup', 1));
+    const overrideDedup = yaml.parse(validPrimitiveDefinitionYaml('dedup', 2));
+    overrideDedup.description = 'workspace override';
+
+    const merged = mergePrimitiveDefinitions([bundledDedup], [overrideDedup]);
+    assert.strictEqual(merged.length, 1);
+    assert.strictEqual(merged[0].version, 2);
+    assert.strictEqual(merged[0].description, 'workspace override', 'the workspace override, loaded later, wins — matching the skills system\'s override semantics');
+  });
+
+  await test('registerPrimitives()/resetDeclarativePrimitives(): a new kind requires zero TypeScript changes, Tier 1 always wins a name collision, and reset only removes Tier 2', async () => {
+    const registry = require('../dist/core/transforms/registry.js');
+    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const yaml = require('yaml');
+
+    // Purely declarative — this "primitive" never appears in any .ts file.
+    const definition = yaml.parse(validPrimitiveDefinitionYaml('window_running_total'));
+    const declarative = createDeclarativePrimitive(definition);
+
+    const { added, skipped } = registry.registerPrimitives([declarative]);
+    assert.deepStrictEqual(added, ['window_running_total']);
+    assert.deepStrictEqual(skipped, []);
+    assert.strictEqual(registry.TRANSFORM_PRIMITIVES.window_running_total, declarative, 'appears in TRANSFORM_PRIMITIVES exactly like a Tier-1 entry, same object key');
+
+    // selectTransformSpec()/compileTransformSpec() work identically for a Tier-2 kind — no call site needs to know the tier.
+    const compiled = registry.compileTransformSpec(
+      { kind: 'window_running_total', params: definition.previewParams },
+      { platform: 'snowflake', database: 'd', schema: 's' }, 'snowflake'
+    );
+    assert.ok(compiled.content.includes('running_total'));
+
+    // A Tier-2 attempt to shadow a Tier-1 kind is skipped, and the original Tier-1 primitive keeps serving that kind.
+    const fakeDedup = createDeclarativePrimitive(yaml.parse(validPrimitiveDefinitionYaml('dedup')));
+    const collision = registry.registerPrimitives([fakeDedup]);
+    assert.deepStrictEqual(collision.added, []);
+    assert.deepStrictEqual(collision.skipped, ['dedup']);
+    assert.notStrictEqual(registry.TRANSFORM_PRIMITIVES.dedup, fakeDedup, 'Tier 1 (reviewed code) always wins a kind collision');
+
+    registry.resetDeclarativePrimitives();
+    assert.strictEqual(registry.TRANSFORM_PRIMITIVES.window_running_total, undefined, 'Tier 2 primitive removed by reset');
+    assert.ok(registry.TRANSFORM_PRIMITIVES.dedup, 'Tier 1 primitives are untouched by reset');
+  });
+
   await test('createDisposableRegistry() disposes every registered disposable, in reverse registration order', () => {
     const { createDisposableRegistry } = require('../dist/core/disposables.js');
     const order = [];

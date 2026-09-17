@@ -7,7 +7,17 @@
  * for the optional `AgentExecutionContext.transformSpec` bypass field.
  */
 
-export type PrimitiveKind = 'rename_cast' | 'dedup' | 'incremental_load';
+/**
+ * The `& {}` on the string branch is the standard TS "open union" trick: it
+ * keeps autocomplete/literal-checking for the 3 known Tier-1 kinds below
+ * while still accepting any other string — needed since Phase 2B's Tier-2
+ * declarative primitives introduce `kind` values that don't exist at compile
+ * time (they're loaded from YAML files at runtime). Plain `string` would
+ * lose the autocomplete; a closed union couldn't represent a runtime-loaded
+ * kind at all.
+ */
+// eslint-disable-next-line @typescript-eslint/ban-types -- deliberate "open union" idiom, not an accidental empty-object type
+export type PrimitiveKind = 'rename_cast' | 'dedup' | 'incremental_load' | (string & {});
 
 /** Mirrors dqm/types.ts's `SqlDialect` — duplicated rather than imported to keep this module dependency-free. */
 export type SqlDialect = 'snowflake' | 'spark_sql' | 'google_sql' | 'postgres' | 'tsql' | 'ansi';
