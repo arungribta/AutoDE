@@ -1096,15 +1096,20 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   }
 
   var lastPrimitivesList = [];
-  function renderPalettePrimitives(items) {
+  var primitiveManagementEnabled = false;
+  function renderPalettePrimitives(items, managementEnabled) {
     if (!palettePrimitives) { return; }
     lastPrimitivesList = items || lastPrimitivesList;
+    if (managementEnabled !== undefined) { primitiveManagementEnabled = managementEnabled; }
     var list = lastPrimitivesList;
     if (!list.length) {
       palettePrimitives.innerHTML = '<div class="section-title">Transform Primitives</div><div class="spec-empty">No primitives registered.</div>';
       return;
     }
     var html = '<div class="section-title">Transform Primitives (' + list.length + ')</div>';
+    if (!primitiveManagementEnabled) {
+      html += '<div style="opacity:0.7;font-size:0.85em;">Publish/Deprecate are disabled — enable "autoDataEngineeringHub.primitiveManagementEnabled" to manage Tier-2 primitives.</div>';
+    }
     list.forEach(function (p) {
       var badge = p.tier === 'core' ? 'Tier 1 · core' : 'Tier 2 · ' + escapeHtml(p.status);
       html += '<div class="palette-card" data-primitive-kind="' + escapeHtml(p.kind) + '">' +
@@ -1112,10 +1117,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         '<div style="opacity:0.8;font-size:0.9em;">' + escapeHtml(p.description) + '</div>' +
         '<div style="margin-top:4px;">' +
         '<button data-primitive-action="preview" data-primitive-kind="' + escapeHtml(p.kind) + '">▶ Preview</button>';
-      if (p.tier === 'declarative' && p.status === 'draft') {
+      if (primitiveManagementEnabled && p.tier === 'declarative' && p.status === 'draft') {
         html += ' <button data-primitive-action="publish" data-primitive-kind="' + escapeHtml(p.kind) + '">✓ Publish</button>';
       }
-      if (p.tier === 'declarative' && p.status === 'published') {
+      if (primitiveManagementEnabled && p.tier === 'declarative' && p.status === 'published') {
         html += ' <button data-primitive-action="deprecate" data-primitive-kind="' + escapeHtml(p.kind) + '">Deprecate</button>';
       }
       html += '</div><pre class="primitive-preview" id="primitive-preview-' + escapeHtml(p.kind) + '" style="display:none;"></pre>' +
@@ -1723,7 +1728,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         renderPaletteContext();
         break;
       case 'artifactStaleness': renderPaletteArtifacts(msg.report); break;
-      case 'primitivesList': renderPalettePrimitives(msg.items); break;
+      case 'primitivesList': renderPalettePrimitives(msg.items, msg.managementEnabled); break;
       case 'primitivePreview': showPrimitivePreview(msg.kind, msg.content); break;
       case 'activeProblemChanged':
         activeProblemId = msg.problemId || null;

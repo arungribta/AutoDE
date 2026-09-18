@@ -26,7 +26,7 @@ import { AttachmentStore } from '../context/AttachmentStore';
 import { PipelineSpecManager } from '../context/PipelineSpecManager';
 import { generateDesignDoc } from './pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
-import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, compileTransformSpec } from './transforms/registry';
+import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, registerPrimitiveVersion, resetVersionedPrimitives, compileTransformSpec } from './transforms/registry';
 import { loadPrimitiveDefinitionsFromDirectory, mergePrimitiveDefinitions } from './transforms/declarative/loader';
 import { createDeclarativePrimitive } from './transforms/declarative/adapter';
 import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from './transforms/declarative/lifecycle';
@@ -842,6 +842,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'publishPrimitive': {
+          if (!this.configManager.getSettings().primitiveManagementEnabled) {
+            this.postMessage('error', { message: 'Primitive management is disabled — enable "autoDataEngineeringHub.primitiveManagementEnabled" to publish primitives.' });
+            break;
+          }
           const kind = typeof message.kind === 'string' ? message.kind : '';
           const dir = this.primitivesOverrideDir();
           if (!dir) { this.postMessage('error', { message: 'No workspace folder — cannot publish a primitive definition.' }); break; }
@@ -856,6 +860,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'deprecatePrimitive': {
+          if (!this.configManager.getSettings().primitiveManagementEnabled) {
+            this.postMessage('error', { message: 'Primitive management is disabled — enable "autoDataEngineeringHub.primitiveManagementEnabled" to deprecate primitives.' });
+            break;
+          }
           const kind = typeof message.kind === 'string' ? message.kind : '';
           const dir = this.primitivesOverrideDir();
           if (!dir) { this.postMessage('error', { message: 'No workspace folder — cannot deprecate a primitive definition.' }); break; }
@@ -1508,6 +1516,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private ensurePrimitivesLoaded(force = false): void {
     if (this.primitivesLoaded && !force) return;
     resetDeclarativePrimitives();
+    resetVersionedPrimitives();
     const bundledDir = vscode.Uri.joinPath(this.context.extensionUri, 'primitive-definitions').fsPath;
     const overrideDir = this.primitivesOverrideDir();
     const bundled = loadPrimitiveDefinitionsFromDirectory(bundledDir);
@@ -1517,6 +1526,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     registerPrimitives(merged.map((def) => createDeclarativePrimitive(def)));
     for (const err of [...bundled.errors, ...overrides.errors]) {
       this.postLog(`Skipped an invalid primitive definition (${err.file}): ${err.error}`);
+    }
+    // Also load every archived revision under history/ so an approved Pipeline Spec's
+    // TransformSpec.primitiveVersion pin can still resolve after a newer version is
+    // published (Phase 2B-iv) — these are registered for version-pinned lookup only,
+    // never added to the live catalog TRANSFORM_PRIMITIVES/postPrimitivesList shows.
+    if (overrideDir) {
+      const historyDir = vscode.Uri.joinPath(vscode.Uri.file(overrideDir), 'history').fsPath;
+      const archived = loadPrimitiveDefinitionsFromDirectory(historyDir);
+      for (const def of archived.definitions) {
+        registerPrimitiveVersion(createDeclarativePrimitive(def));
+      }
     }
     this.primitivesLoaded = true;
   }
@@ -1531,7 +1551,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       status: p.status ?? 'published',
       selectable: isSelectable(p)
     }));
-    this.postMessage('primitivesList', { items });
+    this.postMessage('primitivesList', { items, managementEnabled: !!this.configManager.getSettings().primitiveManagementEnabled });
   }
 
   /** A live snapshot of discovery progress (v0.13.0 follow-up) — see `discoveryProgress.ts`. */

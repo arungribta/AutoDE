@@ -41,6 +41,14 @@ export interface CompiledArtifact {
 export interface TransformSpec {
   kind: PrimitiveKind;
   params: Record<string, unknown>;
+  /**
+   * Pins compilation to a specific Tier-2 primitive version (Phase 2B-iv).
+   * Omitted means "whatever's currently live" (latest published). Set on an
+   * *approved* Pipeline Spec's transform blocks so its compiled meaning
+   * can't silently change if someone edits/republishes that primitive's
+   * definition later — see `registry.ts`'s version resolution.
+   */
+  primitiveVersion?: number;
 }
 
 /**
@@ -59,6 +67,8 @@ export interface TransformPrimitive<TParams = Record<string, unknown>> {
   paramSchema: object;
   /** Tier-2 only — see `PrimitiveLifecycleStatus`. `undefined` (Tier 1, or a Tier-2 primitive omitting it) is treated as always-selectable. */
   status?: PrimitiveLifecycleStatus;
+  /** Tier-2 only — the definition's own `version`. Used by `registry.ts` to resolve a `TransformSpec.primitiveVersion` pin against the right archived revision. */
+  version?: number;
   /** Pure function: validated params + target + dialect -> generated code. Never calls an LLM. */
   compile(params: TParams, target: TargetEnvironmentSummary, dialect: SqlDialect): CompiledArtifact;
 }

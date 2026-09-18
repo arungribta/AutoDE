@@ -36,7 +36,8 @@ export class ConfigurationManager {
       artifactDirectory: config.get<string>('artifactDirectory', 'artifacts'),
       languageModelProgrammaticConsent: config.get<boolean>('languageModelProgrammaticConsent', false),
       copilotProgrammaticConsent: config.get<boolean>('copilotProgrammaticConsent', false),
-      claudeCodePath: config.get<string>('claudeCodePath', '')
+      claudeCodePath: config.get<string>('claudeCodePath', ''),
+      primitiveManagementEnabled: config.get<boolean>('primitiveManagementEnabled', false)
     };
   }
 
@@ -67,7 +68,8 @@ export class ConfigurationManager {
      ['artifactDirectory', settings.artifactDirectory],
      ['languageModelProgrammaticConsent', settings.languageModelProgrammaticConsent],
      ['copilotProgrammaticConsent', settings.copilotProgrammaticConsent],
-     ['claudeCodePath', settings.claudeCodePath]
+     ['claudeCodePath', settings.claudeCodePath],
+     ['primitiveManagementEnabled', settings.primitiveManagementEnabled]
     ];
 
     for (const [name, value] of updates) {

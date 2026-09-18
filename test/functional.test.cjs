@@ -2791,6 +2791,79 @@ async function main() {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  // ── Phase 2B-iv: governance, validation & versioning ──
+
+  await test('compileTransformSpec() with primitiveVersion pins compilation to that archived revision, even after a newer version is live', () => {
+    const registry = require('../dist/core/transforms/registry.js');
+    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const yaml = require('yaml');
+
+    const v1Def = yaml.parse(validPrimitiveDefinitionYaml('window_running_total_pin', 1));
+    v1Def.platformTemplates.default = 'V1 TEMPLATE FOR {{targetObject}}';
+    registry.registerPrimitiveVersion(createDeclarativePrimitive(v1Def)); // simulates a v1 archived under history/
+
+    const v2Def = yaml.parse(validPrimitiveDefinitionYaml('window_running_total_pin', 2));
+    v2Def.platformTemplates.default = 'V2 TEMPLATE FOR {{targetObject}}';
+    registry.registerPrimitives([createDeclarativePrimitive(v2Def)]); // the live/published version
+
+    const target = { platform: 'snowflake', database: 'd', schema: 's' };
+    const pinnedToV1 = registry.compileTransformSpec({ kind: 'window_running_total_pin', params: v1Def.previewParams, primitiveVersion: 1 }, target, 'snowflake');
+    assert.ok(pinnedToV1.content.includes('V1 TEMPLATE'), 'an approved spec pinned to v1 keeps compiling against v1 after v2 is published');
+
+    const unpinned = registry.compileTransformSpec({ kind: 'window_running_total_pin', params: v2Def.previewParams }, target, 'snowflake');
+    assert.ok(unpinned.content.includes('V2 TEMPLATE'), 'no pin means "whatever is currently live" — unchanged Phase 2 behavior');
+
+    registry.resetDeclarativePrimitives();
+    registry.resetVersionedPrimitives();
+  });
+
+  await test('publishPrimitiveDefinition() always populates publishedBy/publishedAt, never leaving them blank', () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const { publishPrimitiveDefinition } = require('../dist/core/transforms/declarative/lifecycle.js');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primlife-'));
+    const draftYaml = validPrimitiveDefinitionYaml('window_running_total').replace('status: published', 'status: draft');
+    fs.writeFileSync(path.join(dir, 'window_running_total.yaml'), draftYaml);
+
+    const result = publishPrimitiveDefinition(dir, 'window_running_total', 'platform-admin@example.com');
+    assert.strictEqual(result.definition.publishedBy, 'platform-admin@example.com');
+    assert.ok(result.definition.publishedAt && result.definition.publishedAt.length > 0);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  await test('PipelineSpecManager loads a document with specVersion entirely absent (pre-dating its introduction) leniently, with a warning', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+          stat: async () => { throw new Error('ENOENT'); }
+        } },
+        __store: store
+      };
+    }
+    const mock = fsMapMock();
+    const yaml = require('yaml');
+    // No specVersion key at all — a document from before this field existed.
+    mock.__store.set('/ws/spec/pipeline.yaml', yaml.stringify({ id: 'pre-existing', version: 1, status: 'draft' }));
+    try { delete require.cache[require.resolve('../dist/context/PipelineSpecManager.js')]; } catch { /* not loaded */ }
+    const { PipelineSpecManager } = withMock(mock, () => require('../dist/context/PipelineSpecManager.js'));
+    const logs = [];
+    const mgr = new PipelineSpecManager({ fsPath: '/ws' }, (msg) => logs.push(msg));
+    await withMock(mock, () => mgr.initialize());
+    assert.ok(mgr.getSpec(), 'loads instead of throwing on a missing specVersion');
+    assert.strictEqual(mgr.getSpec().id, 'pre-existing');
+    assert.ok(logs.some((l) => l.includes('loading leniently')));
+  });
+
   await test('createDisposableRegistry() disposes every registered disposable, in reverse registration order', () => {
     const { createDisposableRegistry } = require('../dist/core/disposables.js');
     const order = [];

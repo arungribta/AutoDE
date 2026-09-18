@@ -26,7 +26,7 @@ export function compilePipelineSpec(spec: PipelineSpec, dialect: SqlDialect): Co
   return spec.entities.map((entity) => {
     const artifacts = entity.transforms.map((step) => {
       const compiled = compileTransformSpec(
-        { kind: step.kind, params: step.params },
+        { kind: step.kind, params: step.params, primitiveVersion: step.primitiveVersion },
         { platform: spec.targetPlatform, database: '', schema: '' },
         dialect
       );

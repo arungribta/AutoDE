@@ -323,6 +323,10 @@
         "autoDataEngineeringHub.copilotProgrammaticConsent": {
           "type": "boolean", "default": false,
           "markdownDescription": "_Deprecated — use `#autoDataEngineeringHub.languageModelProgrammaticConsent#`._ Still honored as a fallback for existing setups."
+        },
+        "autoDataEngineeringHub.primitiveManagementEnabled": {
+          "type": "boolean", "default": false,
+          "description": "Allow publishing/deprecating declarative (Tier 2) transform primitives from the Primitives palette (opt-in). Off by default — a workspace's platform admin turns this on deliberately."
         }
       }
     }

@@ -447,6 +447,8 @@ export interface DataAgentHubSettings {
   claudeCodePath?: string;
   /** @deprecated Superseded by `languageModelProgrammaticConsent`; still read as a fallback. */
   copilotProgrammaticConsent?: boolean;
+  /** Opt-in gate (Phase 2B-iv, default false) — publishing/deprecating a Tier-2 declarative primitive is disabled until a workspace's platform admin turns this on. */
+  primitiveManagementEnabled?: boolean;
 }
 
 export interface PlanStep {

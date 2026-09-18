@@ -29,20 +29,71 @@ export const TRANSFORM_PRIMITIVES: Record<string, TransformPrimitive<any>> = {
 /** The Tier-1 kinds present at module load — used by `resetDeclarativePrimitives()` to know what NOT to remove. */
 const CORE_PRIMITIVE_KINDS = new Set(Object.keys(TRANSFORM_PRIMITIVES));
 
+/**
+ * Historical Tier-2 primitive revisions, keyed by kind then version (Phase
+ * 2B-iv version pinning). Populated separately from `TRANSFORM_PRIMITIVES`
+ * (the live, latest-published catalog) — a caller that loads a primitive's
+ * `history/` archive (see `webviewProvider.ts::ensurePrimitivesLoaded`)
+ * registers each archived revision here via `registerPrimitiveVersion`,
+ * without it ever appearing in the live catalog listing.
+ */
+const VERSIONED_PRIMITIVES = new Map<string, Map<number, TransformPrimitive<any>>>();
+
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validators = new Map<string, ValidateFunction>();
 
-function getValidator(kind: string): ValidateFunction {
-  let validate = validators.get(kind);
+function validatorCacheKey(kind: string, version: number | undefined): string {
+  return version === undefined ? kind : `${kind}@${version}`;
+}
+
+function getValidator(kind: string, version: number | undefined, primitive: TransformPrimitive<any>): ValidateFunction {
+  const cacheKey = validatorCacheKey(kind, version);
+  let validate = validators.get(cacheKey);
   if (!validate) {
-    validate = ajv.compile(TRANSFORM_PRIMITIVES[kind].paramSchema);
-    validators.set(kind, validate);
+    validate = ajv.compile(primitive.paramSchema);
+    validators.set(cacheKey, validate);
   }
   return validate;
 }
 
 export function getPrimitive(kind: string): TransformPrimitive<any> | undefined {
   return TRANSFORM_PRIMITIVES[kind];
+}
+
+/**
+ * Registers one historical revision of a Tier-2 primitive for version
+ * pinning (Phase 2B-iv) — distinct from `registerPrimitives`, which governs
+ * the *live* catalog. A primitive with no `version` is ignored (nothing to
+ * pin to).
+ */
+export function registerPrimitiveVersion(primitive: TransformPrimitive<any>): void {
+  if (primitive.version === undefined) return;
+  if (!VERSIONED_PRIMITIVES.has(primitive.kind)) {
+    VERSIONED_PRIMITIVES.set(primitive.kind, new Map());
+  }
+  VERSIONED_PRIMITIVES.get(primitive.kind)!.set(primitive.version, primitive);
+}
+
+/** Clears all registered historical revisions (e.g. before a fresh reload) — leaves the live catalog untouched. */
+export function resetVersionedPrimitives(): void {
+  VERSIONED_PRIMITIVES.clear();
+}
+
+/**
+ * Resolves which primitive a spec actually compiles against. With no
+ * `primitiveVersion` pin, that's whatever's currently live (latest
+ * published) — unchanged behavior from Phase 2. With a pin, prefers an
+ * exact-version match from `VERSIONED_PRIMITIVES`; if that specific
+ * revision was never archived/loaded (e.g. a Tier-1 kind, which has no
+ * versioning concept, or a version that predates history tracking), falls
+ * back to the live entry rather than failing outright.
+ */
+function resolvePrimitive(spec: TransformSpec): TransformPrimitive<any> | undefined {
+  if (spec.primitiveVersion !== undefined) {
+    const pinned = VERSIONED_PRIMITIVES.get(spec.kind)?.get(spec.primitiveVersion);
+    if (pinned) return pinned;
+  }
+  return TRANSFORM_PRIMITIVES[spec.kind];
 }
 
 /** Every registered primitive, Tier 1 and Tier 2 alike — the UI's catalog listing (Phase 2B-iii). */
@@ -79,6 +130,7 @@ export function registerPrimitives(primitives: TransformPrimitive<any>[]): { add
     }
     TRANSFORM_PRIMITIVES[primitive.kind] = primitive;
     validators.delete(primitive.kind);
+    registerPrimitiveVersion(primitive); // so pinning to the currently-live version also resolves consistently
     added.push(primitive.kind);
   }
   return { added, skipped };
@@ -95,11 +147,11 @@ export function resetDeclarativePrimitives(): void {
 }
 
 export function validateTransformSpec(spec: TransformSpec): { valid: boolean; errors: string[] } {
-  const primitive = getPrimitive(spec.kind);
+  const primitive = resolvePrimitive(spec);
   if (!primitive) {
     return { valid: false, errors: [`Unknown primitive kind "${spec.kind}".`] };
   }
-  const validate = getValidator(spec.kind);
+  const validate = getValidator(spec.kind, spec.primitiveVersion, primitive);
   const valid = validate(spec.params) as boolean;
   const errors = (validate.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`);
   return { valid, errors };
@@ -107,7 +159,7 @@ export function validateTransformSpec(spec: TransformSpec): { valid: boolean; er
 
 /** Validates then compiles. Throws on invalid params — callers that want a non-throwing path should call `validateTransformSpec` first. */
 export function compileTransformSpec(spec: TransformSpec, target: TargetEnvironmentSummary, dialect: SqlDialect): CompiledArtifact {
-  const primitive = getPrimitive(spec.kind);
+  const primitive = resolvePrimitive(spec);
   if (!primitive) {
     throw new Error(`Unknown primitive kind "${spec.kind}".`);
   }
