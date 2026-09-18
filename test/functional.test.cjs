@@ -2706,6 +2706,91 @@ async function main() {
     assert.strictEqual(listed[0].extract.rawSummary, 'hi');
   });
 
+  // ── Phase 2B-iii: primitive lifecycle management & UI-facing catalog ──
+
+  await test('isSelectable(): Tier 1 (no status) and a "published" Tier 2 primitive are selectable; draft/deprecated/retired are not', () => {
+    const { isSelectable, TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    assert.strictEqual(isSelectable(TRANSFORM_PRIMITIVES.dedup), true, 'Tier 1 has no status field and is always selectable');
+    assert.strictEqual(isSelectable({ kind: 'x', status: 'published' }), true);
+    assert.strictEqual(isSelectable({ kind: 'x', status: 'draft' }), false);
+    assert.strictEqual(isSelectable({ kind: 'x', status: 'deprecated' }), false);
+    assert.strictEqual(isSelectable({ kind: 'x', status: 'retired' }), false);
+  });
+
+  await test('selectTransformSpec() never offers a draft/deprecated Tier-2 primitive to the LLM as a candidate, but compileTransformSpec() still compiles it directly', async () => {
+    const registry = require('../dist/core/transforms/registry.js');
+    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const { selectTransformSpec } = require('../dist/agents/llmParamSelector.js');
+    const yaml = require('yaml');
+
+    const draftDef = yaml.parse(validPrimitiveDefinitionYaml('window_running_total_draft'));
+    draftDef.status = 'draft';
+    registry.registerPrimitives([createDeclarativePrimitive(draftDef)]);
+
+    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
+    // Even if the LLM somehow guesses the draft kind, it must not be accepted.
+    const context = { objective: 'o', schemaContext: '', sourceProvider: 'snowflake', settings: {}, configManager: { getSecret: async () => undefined, getSettings: () => ({}) }, log: () => {},
+      callLlm: async (prompt) => {
+        assert.ok(!prompt.includes('window_running_total_draft'), 'the draft kind must not even appear in the candidate catalog shown to the LLM');
+        return `\`\`\`json\n{"kind": "window_running_total_draft", "params": ${JSON.stringify(draftDef.previewParams)}}\n\`\`\``;
+      }
+    };
+    const result = await selectTransformSpec(context, step, ['window_running_total_draft']);
+    assert.strictEqual(result, undefined, 'a non-selectable kind is rejected even if the LLM returns it');
+
+    // But it still compiles directly — a deprecated/draft primitive stays usable by anything that already references it.
+    const compiled = registry.compileTransformSpec({ kind: 'window_running_total_draft', params: draftDef.previewParams }, { platform: 'snowflake', database: 'd', schema: 's' }, 'snowflake');
+    assert.ok(compiled.content.includes('running_total'));
+
+    registry.resetDeclarativePrimitives();
+  });
+
+  await test('publishPrimitiveDefinition() keeps the version on a first publish, then bumps + archives on a republish', () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const { publishPrimitiveDefinition } = require('../dist/core/transforms/declarative/lifecycle.js');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primlife-'));
+    const draftYaml = validPrimitiveDefinitionYaml('window_running_total').replace('status: published', 'status: draft');
+    fs.writeFileSync(path.join(dir, 'window_running_total.yaml'), draftYaml);
+
+    const first = publishPrimitiveDefinition(dir, 'window_running_total', 'user');
+    assert.strictEqual(first.versionBumped, false, 'a first publish does not bump the version');
+    assert.strictEqual(first.definition.version, 1);
+    assert.strictEqual(first.definition.status, 'published');
+    assert.ok(first.definition.publishedAt);
+
+    const second = publishPrimitiveDefinition(dir, 'window_running_total', 'user');
+    assert.strictEqual(second.versionBumped, true, 'republishing an already-published definition bumps the version');
+    assert.strictEqual(second.definition.version, 2);
+
+    const archived = fs.readFileSync(path.join(dir, 'history', 'window_running_total.v1.yaml'), 'utf8');
+    assert.ok(archived.includes('version: 1'), 'the prior (v1) revision was archived before being replaced');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  await test('deprecatePrimitiveDefinition() flips status without touching version, and the change is reflected by the registry after reload', () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const { deprecatePrimitiveDefinition } = require('../dist/core/transforms/declarative/lifecycle.js');
+    const { loadPrimitiveDefinitionsFromDirectory } = require('../dist/core/transforms/declarative/loader.js');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primlife-'));
+    fs.writeFileSync(path.join(dir, 'window_running_total.yaml'), validPrimitiveDefinitionYaml('window_running_total'));
+
+    const deprecated = deprecatePrimitiveDefinition(dir, 'window_running_total');
+    assert.strictEqual(deprecated.status, 'deprecated');
+    assert.strictEqual(deprecated.version, 1, 'deprecation does not bump the version');
+
+    const reloaded = loadPrimitiveDefinitionsFromDirectory(dir);
+    assert.strictEqual(reloaded.definitions[0].status, 'deprecated', 'the on-disk change is picked up on the next directory load');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   await test('createDisposableRegistry() disposes every registered disposable, in reverse registration order', () => {
     const { createDisposableRegistry } = require('../dist/core/disposables.js');
     const order = [];

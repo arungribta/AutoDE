@@ -36,6 +36,7 @@ export function createDeclarativePrimitive(definition: PrimitiveDefinition): Tra
     kind: definition.kind,
     description: definition.description,
     paramSchema: definition.paramSchema,
+    status: definition.status,
     compile(params: Record<string, unknown>, _target: TargetEnvironmentSummary, dialect: SqlDialect): CompiledArtifact {
       const template = selectTemplate(definition, dialect);
       const rendered = renderTemplate(template, params);

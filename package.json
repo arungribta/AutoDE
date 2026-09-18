@@ -161,6 +161,12 @@
         }
       ]
     },
+    "yamlValidation": [
+      {
+        "fileMatch": "**/.ai-context/primitives/*.yaml",
+        "url": "./docs/schemas/primitive-definition.schema.json"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "autoDE.dataModelEditor",

@@ -43,12 +43,22 @@ export interface TransformSpec {
   params: Record<string, unknown>;
 }
 
+/**
+ * A Tier-2 (declarative) primitive's publication lifecycle (Phase 2B-iii):
+ * `draft` -> `published` -> `deprecated` -> `retired`. Tier-1 (code)
+ * primitives omit this entirely — reviewed code is always selectable, there
+ * is no draft/publish ceremony for it.
+ */
+export type PrimitiveLifecycleStatus = 'draft' | 'published' | 'deprecated' | 'retired';
+
 export interface TransformPrimitive<TParams = Record<string, unknown>> {
   kind: PrimitiveKind;
   /** Shown to the LLM during primitive selection, and used as documentation. */
   description: string;
   /** Ajv-compatible JSON Schema describing valid parameters for this primitive. */
   paramSchema: object;
+  /** Tier-2 only — see `PrimitiveLifecycleStatus`. `undefined` (Tier 1, or a Tier-2 primitive omitting it) is treated as always-selectable. */
+  status?: PrimitiveLifecycleStatus;
   /** Pure function: validated params + target + dialect -> generated code. Never calls an LLM. */
   compile(params: TParams, target: TargetEnvironmentSummary, dialect: SqlDialect): CompiledArtifact;
 }

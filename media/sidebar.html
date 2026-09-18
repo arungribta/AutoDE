@@ -484,6 +484,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       <div class="section" id="paletteArtifacts">
         <!-- Artifact staleness summary rendered by JS -->
       </div>
+      <div class="section" id="palettePrimitives">
+        <!-- Transform primitive catalog (Tier 1 + Tier 2) rendered by JS -->
+      </div>
       <div class="section" id="paletteAgents">
         <div class="section-title">Available Agents</div>
         <div id="paletteAgentCards">
@@ -526,6 +529,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   const paletteContext = $('#paletteContext');
   const palettePhases = $('#palettePhases');
   const paletteArtifacts = $('#paletteArtifacts');
+  const palettePrimitives = $('#palettePrimitives');
   const paletteAgentCards = $('#paletteAgentCards');
   const paletteContinueBtn = $('#paletteContinueBtn');
 
@@ -1091,6 +1095,56 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     paletteArtifacts.innerHTML = html;
   }
 
+  var lastPrimitivesList = [];
+  function renderPalettePrimitives(items) {
+    if (!palettePrimitives) { return; }
+    lastPrimitivesList = items || lastPrimitivesList;
+    var list = lastPrimitivesList;
+    if (!list.length) {
+      palettePrimitives.innerHTML = '<div class="section-title">Transform Primitives</div><div class="spec-empty">No primitives registered.</div>';
+      return;
+    }
+    var html = '<div class="section-title">Transform Primitives (' + list.length + ')</div>';
+    list.forEach(function (p) {
+      var badge = p.tier === 'core' ? 'Tier 1 · core' : 'Tier 2 · ' + escapeHtml(p.status);
+      html += '<div class="palette-card" data-primitive-kind="' + escapeHtml(p.kind) + '">' +
+        '<div><b>' + escapeHtml(p.kind) + '</b> <span style="opacity:0.7;">(' + badge + ')</span></div>' +
+        '<div style="opacity:0.8;font-size:0.9em;">' + escapeHtml(p.description) + '</div>' +
+        '<div style="margin-top:4px;">' +
+        '<button data-primitive-action="preview" data-primitive-kind="' + escapeHtml(p.kind) + '">▶ Preview</button>';
+      if (p.tier === 'declarative' && p.status === 'draft') {
+        html += ' <button data-primitive-action="publish" data-primitive-kind="' + escapeHtml(p.kind) + '">✓ Publish</button>';
+      }
+      if (p.tier === 'declarative' && p.status === 'published') {
+        html += ' <button data-primitive-action="deprecate" data-primitive-kind="' + escapeHtml(p.kind) + '">Deprecate</button>';
+      }
+      html += '</div><pre class="primitive-preview" id="primitive-preview-' + escapeHtml(p.kind) + '" style="display:none;"></pre>' +
+        '</div>';
+    });
+    palettePrimitives.innerHTML = html;
+    wirePrimitiveActions(palettePrimitives);
+  }
+
+  function wirePrimitiveActions(container) {
+    container.querySelectorAll('[data-primitive-action]').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var action = btn.getAttribute('data-primitive-action');
+        var kind = btn.getAttribute('data-primitive-kind');
+        if (action === 'preview') { post('previewPrimitive', { kind: kind }); }
+        else if (action === 'publish') { post('publishPrimitive', { kind: kind }); showToast('Publishing "' + kind + '"...', ''); }
+        else if (action === 'deprecate') { post('deprecatePrimitive', { kind: kind }); showToast('Deprecating "' + kind + '"...', ''); }
+      };
+    });
+  }
+
+  function showPrimitivePreview(kind, content) {
+    var pre = document.getElementById('primitive-preview-' + kind);
+    if (!pre) { return; }
+    pre.textContent = content;
+    pre.style.display = 'block';
+  }
+
   var palettePhase = 'discover';
   function getPhaseInfo(key) {
     if (!inferredPhases) { return null; }
@@ -1483,7 +1537,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 
   // ── Palette Panel ──
   const paletteOverlay = $('#paletteOverlay'), palettePanel = $('#palettePanel'), paletteBtn = $('#paletteBtn'), paletteCloseBtn = $('#paletteCloseBtn');
-  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); renderPaletteProblems(); renderPaletteSpec(); renderPaletteContext(); renderPalettePhases(); post('checkArtifactStaleness'); }
+  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); renderPaletteProblems(); renderPaletteSpec(); renderPaletteContext(); renderPalettePhases(); post('checkArtifactStaleness'); post('listPrimitives'); }
   function closePalette() { paletteOverlay.classList.remove('visible'); palettePanel.classList.remove('visible'); }
   paletteOverlay.onclick = closePalette; paletteCloseBtn.onclick = closePalette; paletteBtn.onclick = openPalette;
 
@@ -1669,6 +1723,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         renderPaletteContext();
         break;
       case 'artifactStaleness': renderPaletteArtifacts(msg.report); break;
+      case 'primitivesList': renderPalettePrimitives(msg.items); break;
+      case 'primitivePreview': showPrimitivePreview(msg.kind, msg.content); break;
       case 'activeProblemChanged':
         activeProblemId = msg.problemId || null;
         currentSpec = msg.spec || null;

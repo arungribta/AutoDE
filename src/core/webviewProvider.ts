@@ -26,6 +26,11 @@ import { AttachmentStore } from '../context/AttachmentStore';
 import { PipelineSpecManager } from '../context/PipelineSpecManager';
 import { generateDesignDoc } from './pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
+import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, compileTransformSpec } from './transforms/registry';
+import { loadPrimitiveDefinitionsFromDirectory, mergePrimitiveDefinitions } from './transforms/declarative/loader';
+import { createDeclarativePrimitive } from './transforms/declarative/adapter';
+import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from './transforms/declarative/lifecycle';
+import { PrimitiveDefinition } from './transforms/declarative/types';
 import { ConnectionManager } from '../dqm/ConnectionManager';
 import { applyCspNonce } from './webviewSecurity';
 import { classifyImplementationType } from './implementationType';
@@ -43,6 +48,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private specManager?: SpecManager;
   private specOpsEngine?: SpecOpsEngine;
   private skillRegistry?: SkillRegistry;
+  private primitivesLoaded = false;
+  /** Declarative (Tier-2) definitions by kind — carries `previewParams`, which isn't part of the shared `TransformPrimitive` interface. */
+  private primitiveDefinitionsByKind = new Map<string, PrimitiveDefinition>();
   private pendingSpecQuestions: SpecIntakeQuestion[] = [];
   /** Armed by the spec card's "Revise" action; consumed by the next chat message. */
   private pendingRevision = false;
@@ -808,6 +816,59 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+        case 'listPrimitives': {
+          this.postPrimitivesList();
+          break;
+        }
+        case 'previewPrimitive': {
+          // A plain local compile — no LLM call, no agentic tool loop, just the same
+          // deterministic compileTransformSpec() every real pipeline step already uses.
+          const kind = typeof message.kind === 'string' ? message.kind : '';
+          this.ensurePrimitivesLoaded();
+          const primitive = listPrimitives().find((p) => p.kind === kind);
+          if (!primitive) { this.postMessage('error', { message: `Unknown primitive "${kind}".` }); break; }
+          const explicitParams = message.params && typeof message.params === 'object' ? message.params as Record<string, unknown> : undefined;
+          const previewParams = explicitParams ?? this.primitiveDefinitionsByKind.get(kind)?.previewParams;
+          if (!previewParams) {
+            this.postMessage('error', { message: `No preview parameters available for "${kind}" (a Tier-1 primitive with no params supplied — Tier-2 definitions carry their own previewParams).` });
+            break;
+          }
+          try {
+            const compiled = compileTransformSpec({ kind, params: previewParams }, { platform: 'snowflake', database: '', schema: '' }, 'snowflake');
+            this.postMessage('primitivePreview', { kind, content: compiled.content, summary: compiled.summary });
+          } catch (err) {
+            this.postMessage('error', { message: `Preview failed for "${kind}": ${err instanceof Error ? err.message : String(err)}` });
+          }
+          break;
+        }
+        case 'publishPrimitive': {
+          const kind = typeof message.kind === 'string' ? message.kind : '';
+          const dir = this.primitivesOverrideDir();
+          if (!dir) { this.postMessage('error', { message: 'No workspace folder — cannot publish a primitive definition.' }); break; }
+          try {
+            const result = publishPrimitiveDefinition(dir, kind, 'user');
+            this.ensurePrimitivesLoaded(true);
+            this.postPrimitivesList();
+            this.postLog(`Primitive "${kind}" published${result.versionBumped ? ` as v${result.definition.version} (prior revision archived)` : ''}.`);
+          } catch (err) {
+            this.postMessage('error', { message: `Publish failed for "${kind}": ${err instanceof Error ? err.message : String(err)}` });
+          }
+          break;
+        }
+        case 'deprecatePrimitive': {
+          const kind = typeof message.kind === 'string' ? message.kind : '';
+          const dir = this.primitivesOverrideDir();
+          if (!dir) { this.postMessage('error', { message: 'No workspace folder — cannot deprecate a primitive definition.' }); break; }
+          try {
+            deprecatePrimitiveDefinition(dir, kind);
+            this.ensurePrimitivesLoaded(true);
+            this.postPrimitivesList();
+            this.postLog(`Primitive "${kind}" deprecated — still usable by existing specs, no longer offered for new ones.`);
+          } catch (err) {
+            this.postMessage('error', { message: `Deprecate failed for "${kind}": ${err instanceof Error ? err.message : String(err)}` });
+          }
+          break;
+        }
         case 'setPhaseRequired': {
           const phase = typeof message.phase === 'string' ? message.phase : '';
           const required = message.required === true;
@@ -1428,6 +1489,49 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const overrides = loadSkillsFromDirectory(overrideDir);
     this.skillRegistry = new SkillRegistry([...bundled, ...overrides]);
     return this.skillRegistry.list();
+  }
+
+  /** `.ai-context/primitives/` — the workspace override directory for Tier-2 primitive definitions (Phase 2B-ii/iii). */
+  private primitivesOverrideDir(): string | undefined {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!workspaceRoot) return undefined;
+    return vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'primitives').fsPath;
+  }
+
+  /**
+   * Loads Tier-2 primitive definitions (bundled + workspace override, later
+   * wins — the same merge shape as `ensureSkills()`) and registers them into
+   * the shared `TRANSFORM_PRIMITIVES` registry. Idempotent per sidebar
+   * session unless `force` is set (used after a publish/deprecate action, so
+   * the just-changed definition is reflected immediately).
+   */
+  private ensurePrimitivesLoaded(force = false): void {
+    if (this.primitivesLoaded && !force) return;
+    resetDeclarativePrimitives();
+    const bundledDir = vscode.Uri.joinPath(this.context.extensionUri, 'primitive-definitions').fsPath;
+    const overrideDir = this.primitivesOverrideDir();
+    const bundled = loadPrimitiveDefinitionsFromDirectory(bundledDir);
+    const overrides = overrideDir ? loadPrimitiveDefinitionsFromDirectory(overrideDir) : { definitions: [], errors: [] };
+    const merged = mergePrimitiveDefinitions(bundled.definitions, overrides.definitions);
+    this.primitiveDefinitionsByKind = new Map(merged.map((def) => [def.kind, def]));
+    registerPrimitives(merged.map((def) => createDeclarativePrimitive(def)));
+    for (const err of [...bundled.errors, ...overrides.errors]) {
+      this.postLog(`Skipped an invalid primitive definition (${err.file}): ${err.error}`);
+    }
+    this.primitivesLoaded = true;
+  }
+
+  /** Posts the full Tier-1 + Tier-2 primitive catalog to the sidebar's Primitives palette section. */
+  private postPrimitivesList(): void {
+    this.ensurePrimitivesLoaded();
+    const items = listPrimitives().map((p) => ({
+      kind: p.kind,
+      description: p.description,
+      tier: p.status ? 'declarative' : 'core',
+      status: p.status ?? 'published',
+      selectable: isSelectable(p)
+    }));
+    this.postMessage('primitivesList', { items });
   }
 
   /** A live snapshot of discovery progress (v0.13.0 follow-up) — see `discoveryProgress.ts`. */

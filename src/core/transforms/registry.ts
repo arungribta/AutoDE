@@ -45,6 +45,23 @@ export function getPrimitive(kind: string): TransformPrimitive<any> | undefined 
   return TRANSFORM_PRIMITIVES[kind];
 }
 
+/** Every registered primitive, Tier 1 and Tier 2 alike — the UI's catalog listing (Phase 2B-iii). */
+export function listPrimitives(): TransformPrimitive<any>[] {
+  return Object.values(TRANSFORM_PRIMITIVES);
+}
+
+/**
+ * A primitive is selectable (offered to the LLM as a candidate kind) unless
+ * it's a Tier-2 primitive explicitly in `draft`, `deprecated`, or `retired`.
+ * Tier 1 (code) primitives and any Tier-2 primitive without a status are
+ * always selectable. Selectability only gates the LLM's *choice* — a
+ * deprecated/retired primitive still compiles when explicitly referenced
+ * (e.g. by an already-approved Pipeline Spec); see `compileTransformSpec`.
+ */
+export function isSelectable(primitive: TransformPrimitive<any>): boolean {
+  return !primitive.status || primitive.status === 'published';
+}
+
 /**
  * Registers Tier-2 (declarative) primitives into the merged registry. A
  * `kind` that collides with an existing Tier-1 entry is skipped, not

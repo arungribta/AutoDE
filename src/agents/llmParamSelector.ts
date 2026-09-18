@@ -1,6 +1,6 @@
 import { AgentExecutionContext, PlanStep } from '../core/types';
 import { PrimitiveKind, TransformSpec, TargetEnvironmentSummary, SqlDialect } from '../core/transforms/types';
-import { TRANSFORM_PRIMITIVES, validateTransformSpec, compileTransformSpec } from '../core/transforms/registry';
+import { TRANSFORM_PRIMITIVES, validateTransformSpec, compileTransformSpec, getPrimitive, isSelectable } from '../core/transforms/registry';
 
 /**
  * Selects and parameterizes a deterministic transform primitive (Phase 2),
@@ -32,9 +32,16 @@ export async function selectTransformSpec(
   /** Parameters the caller already knows deterministically (e.g. object names it computed from settings) — merged in AFTER the LLM's response, so the LLM cannot override them. */
   fixedParams?: Record<string, unknown>
 ): Promise<TransformSpec | undefined> {
-  if (!context.callLlm || candidateKinds.length === 0) return undefined;
+  // A Tier-2 primitive in draft/deprecated/retired is never offered to the LLM as a
+  // choice (Phase 2B-iii's lifecycle) — it can still be compiled directly (e.g. by an
+  // already-approved Pipeline Spec referencing it), just never freshly selected here.
+  const selectableKinds = candidateKinds.filter((kind) => {
+    const primitive = getPrimitive(kind);
+    return !!primitive && isSelectable(primitive);
+  });
+  if (!context.callLlm || selectableKinds.length === 0) return undefined;
 
-  const catalog = candidateKinds
+  const catalog = selectableKinds
     .map((kind) => `- "${kind}": ${TRANSFORM_PRIMITIVES[kind].description}\n  Parameter schema: ${JSON.stringify(TRANSFORM_PRIMITIVES[kind].paramSchema)}`)
     .join('\n');
 
@@ -70,7 +77,7 @@ export async function selectTransformSpec(
   if (!isCandidateSpecShape(parsed) || typeof parsed.kind !== 'string' || typeof parsed.params !== 'object' || parsed.params === null) {
     return undefined;
   }
-  if (!candidateKinds.includes(parsed.kind as PrimitiveKind)) {
+  if (!selectableKinds.includes(parsed.kind as PrimitiveKind)) {
     return undefined;
   }
 

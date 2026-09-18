@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AutoDE Primitive Definition",
+  "description": "A Tier-2 (declarative) transform primitive (Phase 2B). Kept in sync by hand with src/core/transforms/declarative/schema.ts's PRIMITIVE_DEFINITION_SCHEMA, which is what actually validates a definition at load time — this file exists so editors (via yamlValidation) can offer the same real-time checking while authoring.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "version", "status", "description", "paramSchema", "platformTemplates", "previewParams"],
+  "properties": {
+    "kind": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9_]*$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "status": { "type": "string", "enum": ["draft", "published", "deprecated", "retired"] },
+    "description": { "type": "string", "minLength": 1 },
+    "paramSchema": { "type": "object" },
+    "platformTemplates": {
+      "type": "object",
+      "required": ["default"],
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "previewParams": { "type": "object" },
+    "outputChecks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "mustContain": { "type": "string", "minLength": 1 },
+          "mustNotContain": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "publishedBy": { "type": "string" },
+    "publishedAt": { "type": "string" },
+    "changelog": { "type": "string" }
+  }
+}

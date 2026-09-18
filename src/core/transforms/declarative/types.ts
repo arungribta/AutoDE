@@ -1,3 +1,5 @@
+import { PrimitiveLifecycleStatus } from '../types';
+
 /**
  * Tier 2 of Phase 2B-ii's primitive extensibility model: a `PrimitiveDefinition`
  * is data (a YAML document), not code — its `compile()` behavior is a
@@ -5,8 +7,6 @@
  * `templateEngine.ts`. See `adapter.ts` for how a definition becomes a real
  * `TransformPrimitive` (Tier 1's interface, unchanged).
  */
-
-export type PrimitiveLifecycleStatus = 'draft' | 'published' | 'deprecated' | 'retired';
 
 export interface PrimitiveDefinitionOutputCheck {
   /** Rendered against the same params as the template; the result must appear in the compiled output. */
