@@ -1,7 +1,7 @@
 # AutoDE — Technical Design Document
 
-**Last Updated:** 2026-09-16
-**Version:** 0.13.0
+**Last Updated:** 2026-09-17
+**Version:** 0.14.0
 **Status:** v0.8.0 code committed. Implemented:
 - Single-workspace model (`ArtifactWriter`, `autoDE.artifactDirectory`; `ProjectManager` removed)
 - Context Layer IA: unified envelope (`src/context/types.ts`, `docs/schemas/context-envelope.schema.json`), `SourceRegistry` (`sources.yaml`), `SynthesisPipeline`
@@ -18,7 +18,9 @@
 - **(v0.13.0, same day)** Discovery progress surfacing — see §8.13 of `requirements.md`. Fresh dev-host testing found that even a fully orchestrated discovery interview *read* as ungrounded, unstructured chat, because `SpecOpsEngine`'s real per-field coverage/turn-budget/skill-ownership tracking never reached the webview — `specQuestion`/`specQuestions` payloads were just the bare question, and the Workflow Palette showed nothing during discovery at all. New pure module `src/core/discoveryProgress.ts` (`buildDiscoveryProgress`, `skillNameForField`) now feeds a `progress` snapshot + per-question `skillLabel` into both message types; the chat bubbles show a topic + progress readout, and the palette shows a live "discovery in progress" card (progress bar + per-skill checklist) instead of staying blank until synthesis.
 - **(v0.13.0, same day)** Chat no longer auto-resumes on reload — see §8a.4 of `requirements.md`. A reload/restart previously reloaded whatever chat session was last active, transcript and all — confusing testers who expected a clean slate. Any session with real content is now folded on activation (archived via the existing `startNewChat()` path, never discarded) and a fresh empty one takes its place; a new "🕓" Chat History icon in the sidebar topbar lists past sessions and resumes one on click. `openChatSession`'s semantics changed from a read-only preview (`chatSessionViewed`, now retired) to a real resume (`chatSessionLoaded`, reactivating the session via `ChatSessionManager.updateMeta(id, {status:'active'})`) — this closed out the last piece of Phase F's chat-session plumbing that had no UI consumer.
 
-Next: **Phase 4 — real data adapters** (wire `snowflake-sdk`/`Databricks`) and beyond — see §10. The remaining SpecOps polish (skills authoring guidance, intake-session persistence) is tracked in §10. The AutoDE Dashboard panel (parked in v0.13.0) is the next lifecycle-adjacent item.
+- **(v0.14.0)** Deterministic Execution Core & Declarative Specification Framework — see §12. Stabilization (CI/lint/real `deactivate()`/dead-code removal); a closed, Ajv-validated transform-primitive registry (`src/core/transforms/`) the LLM only selects/parameterizes, never freehands, wired ahead of the existing freehand-LLM/template fallback in 3 of 5 codegen agents; a declarative (Tier 2, YAML-authored, no-code-execution-template-engine) primitive extensibility layer mirroring the skills-loader's bundled+override pattern; a strictly-validated Pipeline Spec (`src/core/pipelineSpec/`) deterministically compiled from — and rendering a Markdown design doc alongside — an approved BPS plus its full surrounding context, including a new attachment structured-extraction pass (`AttachmentStore`, `SpecProvenance`'s new `'attachment'` source); primitive lifecycle management (sidebar UI, publish/deprecate, an opt-in permission gate, and version pinning so an approved Pipeline Spec survives a primitive being republished later). Also produced (not yet implemented): a Platform Onboarding & Credential Architecture design — §4.8.
+
+Next: **Phase 3a/3b — platform onboarding + real data adapters** (see §4.8, §10) — the credential-resolution foundation and CLI-detection cascade designed in v0.14.0, then wiring `snowflake-sdk`/a Databricks SQL driver through it. Pulling forward, in parallel: generalizing tool-skill execution beyond 2 of 7 LLM providers (§5.6), a hard prerequisite for the also-planned Superpowers/Git-sourced skill import. The remaining SpecOps polish (skills authoring guidance, intake-session persistence) is tracked in §10. The AutoDE Dashboard panel (parked in v0.13.0) is the next lifecycle-adjacent item.
 
 ---
 
@@ -35,6 +37,7 @@ Next: **Phase 4 — real data adapters** (wire `snowflake-sdk`/`Databricks`) and
 9. [File Structure](#9-file-structure)
 10. [Implementation Phases](#10-implementation-phases)
 11. [Design Decisions & Tradeoffs](#11-design-decisions--tradeoffs)
+12. [Deterministic Execution Core & Declarative Specification Framework](#12-deterministic-execution-core--declarative-specification-framework)
 
 ---
 
@@ -708,6 +711,47 @@ Output: DDL, YAML, Markdown
 | `src/agents/model/SttmMapperAgent.ts` | Uses `targetEnvironment` for mapping output |
 | `src/agents/validate/DocumentationAgent.ts` | Uses `targetEnvironment` for architecture docs |
 
+### 4.8 Platform Onboarding & Credential Architecture (v0.14.0, designed — not yet implemented)
+
+An architecture review (2026-09-17), deliberately done before Phase 3's real-adapter work (§10), to design how AutoDE discovers/reuses a locally-installed platform CLI (`snow`, `databricks`) and falls back gracefully otherwise — for both an interactive developer and a headless service account — without coupling the mechanism to Snowflake/Databricks specifically. Grounded directly in two existing facts: `src/core/claudeCodeAdapter.ts#resolve()` already implements the exact detection shape needed (3-tier cascade: explicit setting → PATH → bundled-extension; structured result, never throws), and `snowflake-sdk` (already a dependency) already reads the Snowflake CLI's own `connections.toml` natively via `createConnection()` called with no options.
+
+**Two principals, one abstraction.** An interactive user at a workstation and a headless service account (CI, a scheduled job, a future server deployment) need different default paths, designed in together rather than one bolted onto the other later:
+
+```typescript
+type PrincipalType = 'interactive-user' | 'service-account';
+
+interface CredentialReference {           // stored in settings/Target Context — never the secret itself
+  platform: DataPlatformProvider;
+  principalType: PrincipalType;
+  ref: string;                            // a CLI connection/profile name, an env-var prefix, a secrets-manager path
+  resolverId: string;                     // 'cli' | 'env' | 'vscode-secret-storage' | 'keyvault' | ...
+}
+
+interface CredentialResolver {
+  readonly id: string;
+  readonly supportedPrincipalTypes: PrincipalType[];
+  resolve(reference: CredentialReference): Promise<Record<string, string> | undefined>;
+}
+```
+
+`ConnectionManager.connect()`'s existing `Record<string,string>` credentials contract (§4.5) is **unchanged** — a resolver becomes the thing that *produces* it, upstream of where `ConnectionManager.getCredentialsFromSettings()` does today. Ships with an `EnvVarCredentialResolver` (the simplest service-account path — no AutoDE-specific CI infrastructure) and a generalized VS Code SecretStorage resolver (today's `ConfigurationManager` has only 3 hardcoded secrets, all Snowflake/LLM-specific, keyed `autoDataEngineeringHub.secret.<platform>.<principalType>.<profileOrRef>.<field>` going forward); enterprise secrets managers (Key Vault, AWS Secrets Manager, Vault) are a documented `registerCredentialResolver()` extension point, not a shipped implementation — ship the interface, not every vendor.
+
+**CLI detection**, one `PlatformCliDescriptor` per platform, same shape as `ClaudeCodeAdapter.resolve()`:
+
+```typescript
+interface PlatformCliDescriptor {
+  platform: DataPlatformProvider;
+  detect(explicitPathSetting?: string): Promise<{ found: boolean; cliPath?: string; version?: string; source: 'setting'|'path'|'none'; error?: string }>;
+  listConnections(cliPath: string): Promise<{ name: string }[]>;   // enumeration only — never opens a real connection
+}
+```
+
+Snowflake's `listConnections()` shells out to `snow connection list` purely to populate a picker; the *real* connection still goes through `snowflake-sdk`'s native `connections.toml` loading, never re-implemented by AutoDE. Databricks has no equivalent SDK-native config support today — prefer a structured CLI subcommand over hand-parsing `~/.databrickscfg`, with a small INI parser as fallback only (exact subcommands need verification against the installed CLI, not assumed).
+
+**`providerRegistry.ts` (§4.6-adjacent) gets finally consumed** — confirmed unconsumed anywhere outside its own module today — and gains a `principalTypes` dimension per auth mode (e.g. Snowflake key-pair/OAuth-client-credentials → service-account; external-browser/username-password → interactive-user).
+
+**Not yet implemented** — this subsection records the design for Phase 3a; see `requirements.md` §17.6/§16.8 for the backlog entry and full rationale.
+
 ---
 
 ## 6. Agent Orchestration
@@ -861,6 +905,8 @@ interface AgentExecutionContext {
 **Import & storage:** `src/core/toolSkills.ts` (pure, mirrors `skillRegistry.ts`'s loading pattern) parses a `SKILL.md` (lenient YAML frontmatter + Markdown body) into a `ToolSkillDefinition`. `AutoDE: Import Tool Skill` copies a user-picked folder into `.ai-context/skills/tool-skills/<id>/`; `loadToolSkillsFromDirectory()` scans that directory at run time (no separate index file).
 
 **Execution paths — see `requirements.md` §9a.2 for the full detail, verified findings, and what was deliberately not built** (native Claude Code plugin loading, per-call approval on the Claude path, and a hard OS-level sandbox on either path are all explicitly out of scope for this pass). In short: `claude` gets Claude Code's own tool loop (one whole-run confirmation, `--permission-mode acceptEdits` — verified against the real CLI to be required and sufficient for Read/Grep/Glob/Edit/Write; Bash unverified); `copilot` gets a real loop AutoDE owns against the documented `vscode.lm` tool-calling API (`LanguageModelChatRequestOptions.tools`, `LanguageModelToolCallPart`/`LanguageModelToolResultPart` — types confirmed against the installed `@types/vscode` before writing code), with true per-call approval + an audit log, but not exercised against a live Copilot session in this environment.
+
+**Confirmed-still-open gap (v0.14.0 review):** `ToolSkillDefinition.declaredTools` (parsed from a skill's `allowed-tools` frontmatter) is informational only — never enforced at any call site (`grep -r "declaredTools" src/` shows zero enforcement outside `toolSkills.ts`/`types.ts` itself) — and only `claude`/`copilot` can run a tool skill at all, 2 of AutoDE's 7 LLM providers. The v0.14.0 platform-onboarding review (§4.8) flags generalizing this (a provider-agnostic loop for any adapter exposing `completeWithTools()`, plus real `allowed-tools` filtering via `src/core/agenticTools.ts`) as a **hard prerequisite**, not a nice-to-have, for the also-planned Superpowers/vendor-published skill integration (extending `AutoDE: Import Tool Skill` with a Git-URL source, reusing this exact execution path unchanged) — importing a skill that can only run on 2 of 7 providers doesn't meet AutoDE's own LLM-agnostic bar. See `requirements.md` §16.8.
 
 ---
 
@@ -1365,6 +1411,15 @@ AutoDE/
 - [x] **Phase F — Chat sessions & lifecycle.** §2.11. `ChatSessionManager` persists chat as BPS-identity-independent sessions; New Chat archives (never silently discards, folding partial interviews into context first); Chat History/Discard via Command Palette.
 - [ ] **Phase G — Context Memory curation.** Not started — see `requirements.md` §16.7.
 
+### Phase 9: Deterministic Execution Core & Declarative Specification Framework ✅ COMPLETE (v0.14.0)
+
+- [x] **Stabilization.** CI, first-pass ESLint, real `deactivate()` (`src/core/disposables.ts`), dead-code/stale-artifact removal.
+- [x] **Transform primitives.** §12.2. Closed, Ajv-validated registry; Tier 1 (code) + Tier 2 (declarative YAML, constrained no-code-execution template engine); wired ahead of the existing freehand-LLM/template fallback in 3 of 5 codegen agents.
+- [x] **Pipeline Spec.** §12.3. Strictly-validated (`additionalProperties:false` at every level), deterministically compiled, Markdown design doc generated alongside; new opt-in "Generate Pipeline Spec" command.
+- [x] **Attachment structured extraction.** §12.4. Closes the raw-text-dump gap in `attachSpecFile`; `SpecProvenance` gains an `'attachment'` source.
+- [x] **Primitive lifecycle & governance.** §12.5. Sidebar Primitives palette, `draft→published→deprecated→retired`, opt-in permission gate, version pinning.
+- [ ] **Platform Onboarding & Credential Architecture.** §4.8 — designed, not yet implemented. Next up: Phase 3a/3b, see the header changelog.
+
 ---
 
 ## 11. Design Decisions & Tradeoffs
@@ -1431,6 +1486,98 @@ AutoDE/
 - A full YAML parser would be overkill for these specific file formats
 
 **Superseded (v0.8.0, Phase 3 part 1):** the hand-rolled parsers are being replaced with the **`yaml`** library (pure JS, no native bindings → still VSIX-safe) via `src/context/Yaml.ts` (`parseYaml`/`stringifyYaml`). Structure validation uses **`ajv`** (`src/context/ContextValidator.ts`) against `docs/schemas/context-envelope.schema.json`. Remaining migration: `SpecManager`, `SourceRegistry`, `TargetConfigManager`, `ContextFileManager` (tracked in §10 Phase 3 part 2; requirements §16 #6).
+
+---
+
+## 12. Deterministic Execution Core & Declarative Specification Framework
+
+v0.14.0. Full product rationale in `requirements.md` §17; this section is the technical architecture.
+
+### 12.1 The problem this closes
+
+Before this phase, plan-step *dispatch* was deterministic (a fixed `AGENT_EXECUTORS` lookup table, §5.5) but step *content* was entirely LLM-freehand (`src/agents/llmCodegen.ts#generateWithLlm` — an LLM writes the actual SQL/dbt text, a generic non-schema-aware template only as a last-resort fallback), and AutoDE had no artifact playing the role of a compile-ready, per-entity spec — the BPS (§2) is a requirements document, not one.
+
+### 12.2 Transform primitives (`src/core/transforms/`)
+
+```typescript
+interface TransformPrimitive<TParams = Record<string, unknown>> {
+  kind: PrimitiveKind;                 // 'rename_cast' | 'dedup' | 'incremental_load' | (string & {})
+  description: string;
+  paramSchema: object;                 // Ajv JSON Schema
+  status?: PrimitiveLifecycleStatus;   // Tier 2 only — see 12.5
+  version?: number;                    // Tier 2 only — see 12.5
+  compile(params: TParams, target: TargetEnvironmentSummary, dialect: SqlDialect): CompiledArtifact;  // pure, no LLM call
+}
+```
+
+`PrimitiveKind` is an "open union" (`'rename_cast' | 'dedup' | 'incremental_load' | (string & {})`) — keeps autocomplete for the 3 Tier-1 kinds while accepting any runtime-loaded Tier-2 `kind`.
+
+**Two tiers, one interface, one registry (`registry.ts`):**
+- **Tier 1** (code, reviewed): `rename_cast` (staging casts/renames, plus a `dbt_model` output mode), `dedup` (`ROW_NUMBER()`, dialect-aware `EXCLUDE`/`EXCEPT`), `incremental_load` (keyed `MERGE`). Registered at module load into `TRANSFORM_PRIMITIVES: Record<string, TransformPrimitive<any>>`.
+- **Tier 2** (declarative, `declarative/`): a `PrimitiveDefinition` YAML (`kind`/`version`/`status`/`paramSchema`/`platformTemplates`/`previewParams`/`outputChecks`) whose `compile()` is a rendered template, not code — `templateEngine.ts` is a hand-rolled, deliberately constrained engine (`{{param}}`, `{{join arr ", "}}`, `{{#each}}...{{/each}}`, no `eval`/`Function()`) so a definition author cannot smuggle code execution into the compile path. `loadPrimitiveDefinitionsFromDirectory()` + `mergePrimitiveDefinitions()` mirror `skillRegistry.ts#loadSkillsFromDirectory` exactly — bundled `primitive-definitions/` + `.ai-context/primitives/` override, later wins. `registerPrimitives()` merges Tier 2 into the same `TRANSFORM_PRIMITIVES` map; Tier 1 always wins a `kind` collision.
+
+**Selection (`src/agents/llmParamSelector.ts`):** `selectTransformSpec(context, step, candidateKinds, fixedParams?)` asks the LLM for *only* `{kind, params}` JSON against the candidate primitives' schemas, Ajv-validates, and returns `undefined` (never throws) on any failure — `fixedParams` (object names the caller already computed deterministically) are merged in *after* the LLM's response so they can't be overridden. `generateViaPrimitiveOrFallback()` wraps this as tier 0 ahead of the *unmodified* existing tier 1 (freehand LLM) / tier 2 (hardcoded template) fallback chain in `IngestionPipelineAgent`, `SttmMapperAgent`, and `TransformationScaffolderAgent`'s staging model — the 3 of 5 codegen agents where a single-source primitive is a genuine fit (not `DataModelerAgent`'s multi-table schema design, nor the marts model's multi-source joins).
+
+### 12.3 The Pipeline Spec (`src/core/pipelineSpec/`)
+
+The compile-ready artifact the BPS was never meant to be. `additionalProperties: false` at **every** nesting level (top-level, each entity, `source`/`target`/`transforms`/`quality`/`governance` blocks) — the same recursive-strict Ajv pattern already used by `renameCast.ts`'s `paramSchema`, not the deliberately-open `context-envelope.schema.json` family (§4/context-envelope is for flexible knowledge-graph content; this is a machine-compile contract, a different lineage).
+
+```yaml
+specVersion: 1        # schema-of-the-schema version — separate from the document's own `version`
+id: pipeline-<slug>
+version: 1
+status: draft | approved
+derivedFromBpsId: bps-...
+derivedFromBpsVersion: 2
+targetPlatform: snowflake | databricks | ...
+entities:
+  - name: customers
+    source: { object: RAW_DB.PUBLIC.raw_customers, type: table }
+    transforms: [{ kind: rename_cast, params: {...}, primitiveVersion: 1 }]   # TransformSpec, §12.2, unchanged
+    target: { object: CURATED_DB.STAGING.stg_customers, materialization: view }
+    quality: { rules: [] }        # forward slot — Phase 6
+    governance: { columns: [] }   # forward slot — Phase 6
+```
+
+- **`compiler.ts#compilePipelineSpec(spec, dialect)`** — the AutoDE analogue of the sibling framework's `interpreter.py`: runs each entity's `transforms[]` through the existing `compileTransformSpec()` (§12.2) in order, zero LLM calls. Deliberately **no freehand fallback** here (unlike §12.2's tiered chain) — a compile failure is a bug in an already-approved, already-Ajv-validated spec, not a coverage gap.
+- **`designDocGenerator.ts#generateDesignDoc(spec)`** — a pure function producing Markdown (with a Mermaid `flowchart LR` lineage diagram) from a validated spec; same input always produces the same output, so the YAML and its Markdown projection cannot drift apart.
+- **`context/PipelineSpecManager.ts`** — persistence modeled function-for-function on `SpecManager.ts` (§2): `.ai-context/problems/<id>/spec/pipeline.yaml` + `spec/history/pipeline.v<version>.<status>.yaml`, atomic temp-then-rename writes, `approve()` doesn't bump version (a draft v1 becomes approved v1), a new revision from an approved predecessor does. A document whose `specVersion` doesn't match `CURRENT_PIPELINE_SPEC_VERSION` loads leniently (a logged warning, not a thrown error) — schema evolution must never brick an already-approved pipeline.
+- **Synthesis (`src/agents/pipelineSpecSynthesis.ts` + `AgentHub.synthesizePipelineSpec()`)** — grounded in the approved BPS, the approved Target Context (platform/naming/tooling feed `targetPlatform` directly — confirmed via test that swapping Target Context's platform changes the generated spec with no BPS change at all), the approved Source Context, the Context Layer graph, and attachment extracts (§12.4). Retries up to 3 times, feeding the previous attempt's Ajv errors back into the next prompt (`buildPipelineSpecSynthesisPrompt(inputs, validationErrors?)`) — the same discipline `selectTransformSpec` (§12.2) already uses for one primitive, now applied to the whole document. Also the first real consumer of `BusinessProblemSpec.provenance` (§2.2): a field tagged `source: 'assumption'` is called out in the prompt for conservative treatment.
+- **New command, "AutoDE: Generate Pipeline Spec"** — additive, not a replacement for §2.3's existing plan flow; gated on the same `computeContextGateStatus()` (§2.12) Generate Plan already requires.
+
+### 12.4 Attachment structured extraction
+
+Closes a real gap in the pre-existing `attachSpecFile` flow (§2.9): raw attachment text was appended verbatim to a prompt, never persisted past the discovery session, never tagged with provenance.
+
+- **`core/attachmentExtraction.ts`** — `buildAttachmentExtractionPrompt()`/`parseAttachmentExtract()`, pure (mirrors the `specOpsPrompts.ts`/`specSynthesis.ts` split for the BPS itself) — `AgentHub.extractAttachmentFacts()` owns the actual LLM call and never throws, falling back to `fallbackAttachmentExtract()` (a plain text summary, `confidence: 'low'`) on any failure. Deliberately not a rigid, format-specific parser — an attachment could be a schema dump, a memo, anything.
+- **`context/AttachmentStore.ts`** — persists `{raw content, extract}` to `.ai-context/problems/<id>/attachments/<id>.yaml`, atomic write, surviving past the ephemeral `IntakeSession` that created it.
+- **`SpecProvenance.source`** gains `'attachment'` (+ `attachmentId`) — `specSynthesis.ts#buildProvenance` tags `sourceCatalog`/`dataFlows` this way when an entity-extracting attachment exists and no direct question already covers the field (a narrow, honest heuristic — there's no per-field attribution signal from the LLM's synthesis output for anything broader).
+
+### 12.5 Primitive lifecycle & governance
+
+```typescript
+type PrimitiveLifecycleStatus = 'draft' | 'published' | 'deprecated' | 'retired';
+```
+
+- **UI:** sidebar Workflow Palette gains a "Primitives" section (`palettePrimitives`/`renderPalettePrimitives`) — chosen over a new panel or a 6th custom editor because the Dashboard panel has zero manager wiring and none of the 5 existing custom editors support write-back, whereas the palette's `paletteProblems`/`paletteSpec`/`paletteArtifacts` pattern (§3.6) already does exactly this shape of work. **Preview** is a plain `compileTransformSpec()` call — confirmed to need neither an LLM call nor `agenticTools.ts`'s agentic loop (§5.6), since rendering a template against sample params isn't LLM-directed at all.
+- **Selectability:** `isSelectable(primitive)` = `!primitive.status || primitive.status === 'published'` — `selectTransformSpec()` (§12.2) filters `candidateKinds` through this before building the LLM's catalog and again before accepting its response. `compileTransformSpec()` is **not** filtered — a deprecated/retired primitive still compiles for anything that already references it; selectability only gates the LLM's future choice.
+- **Version pinning:** `TransformSpec.primitiveVersion?: number`; `registry.ts` keeps a second map, `VERSIONED_PRIMITIVES: Map<kind, Map<version, TransformPrimitive>>`, independent of the live `TRANSFORM_PRIMITIVES` catalog. `resolvePrimitive(spec)` prefers an exact-version match when pinned, falling back to the live entry otherwise. `webviewProvider.ts#ensurePrimitivesLoaded()` also loads `.ai-context/primitives/history/` into this map (never into the live catalog) so an approved Pipeline Spec's pinned reference keeps resolving after a newer version is published.
+- **Publish/deprecate (`declarative/lifecycle.ts`):** `publishPrimitiveDefinition()` — a first publish keeps `version` as-is (mirrors `SpecManager.approve()`'s "draft v1 becomes approved v1"); republishing an already-published definition bumps `version` and archives the prior revision to `history/`, same convention as `SpecManager`/`PipelineSpecManager`. Gated by `autoDataEngineeringHub.primitiveManagementEnabled` (default `false`, same opt-in pattern as `languageModelProgrammaticConsent`, §6.0) — the sidebar hides Publish/Deprecate entirely, not just disables them, when off.
+
+### 12.6 Files
+
+| File | Purpose |
+|------|---------|
+| `src/core/transforms/{types,registry}.ts` | `TransformPrimitive` contract; the merged Tier 1 + Tier 2 catalog, version-pinned resolution |
+| `src/core/transforms/primitives/*.ts` | Tier 1: `renameCast.ts`, `dedup.ts`, `incrementalLoad.ts` |
+| `src/core/transforms/declarative/*.ts` | Tier 2: `types.ts`, `schema.ts`, `templateEngine.ts`, `loader.ts`, `adapter.ts`, `lifecycle.ts` |
+| `src/agents/llmParamSelector.ts` | `selectTransformSpec()`, `generateViaPrimitiveOrFallback()` |
+| `src/core/pipelineSpec/*.ts` | `types.ts`, `schema.ts`, `validator.ts`, `compiler.ts`, `designDocGenerator.ts` |
+| `src/context/PipelineSpecManager.ts` | Pipeline Spec persistence/versioning |
+| `src/agents/pipelineSpecSynthesis.ts` | Prompt-building + response-parsing for Pipeline Spec synthesis |
+| `src/core/attachmentExtraction.ts`, `src/context/AttachmentStore.ts` | Attachment structured extraction + persistence |
+| `src/core/disposables.ts` | `DisposableRegistry` — real `deactivate()` (§8) |
+| `docs/schemas/primitive-definition.schema.json` | `yamlValidation` contribution target for live-editing Tier-2 definitions |
 
 ---
 
