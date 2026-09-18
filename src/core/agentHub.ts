@@ -15,16 +15,21 @@ import { inferPhases, computePhaseStatuses, buildPhaseDependencies, PHASE_ORDER 
 import { SpecOpsEngine } from './specOps';
 import { buildDiscoveryTurnPrompt, buildSynthesisPrompt } from './specOpsPrompts';
 import { parseComprehensiveSpec } from './specSynthesis';
+import { buildAttachmentExtractionPrompt, fallbackAttachmentExtract, parseAttachmentExtract } from './attachmentExtraction';
+import { buildPipelineSpecSynthesisPrompt, parsePipelineSpecResponse, PipelineSpecSynthesisInputs } from '../agents/pipelineSpecSynthesis';
+import { PipelineSpec } from './pipelineSpec/types';
 import { LlmAdapterContext, LlmHistoryTurn, extractJsonText } from './llmAdapter';
 import { getLlmAdapter } from './llmProviders';
 import { contextWindowForModel, windowHistoryToBudget, RESERVED_PROMPT_TOKENS, RESERVED_RESPONSE_TOKENS } from './tokenBudget';
 import {
   AgentExecutionContext,
   AgentType,
+  AttachmentExtract,
   BusinessProblemSpec,
   ChatMessage,
   ImplementationType,
   InferredPhase,
+  IntakeAttachment,
   IntakeSession,
   PersistedPlan,
   PlanState,
@@ -319,6 +324,52 @@ export class DataAgentHubHub {
       'Synthesize the comprehensive Business Problem Specification from the collected requirements.'
     );
     return parseComprehensiveSpec(this.parseJsonObject(extractJsonText(raw)), { previous, session });
+  }
+
+  /**
+   * Extracts structured facts from a spec-discovery attachment (Phase 2B-i).
+   * Never throws — a failed/malformed extraction falls back to a plain
+   * summary of the attachment's own text, matching `generateWithLlm()`'s own
+   * "generation must never become a hard failure point" discipline.
+   */
+  public async extractAttachmentFacts(attachment: IntakeAttachment): Promise<AttachmentExtract> {
+    try {
+      const { system, user } = buildAttachmentExtractionPrompt(attachment);
+      const raw = await this.callConfiguredLlm(user, system, 'Extract structured facts from an attached reference document.');
+      return parseAttachmentExtract(this.parseJsonObject(extractJsonText(raw)), attachment);
+    } catch (err) {
+      this.log(`Attachment extraction failed for ${attachment.path} (${err instanceof Error ? err.message : String(err)}) — falling back to a plain summary.`);
+      return fallbackAttachmentExtract(attachment);
+    }
+  }
+
+  /**
+   * Synthesizes the Pipeline Spec (Phase 2B-i) — the strictly-validated,
+   * machine-compilable YAML generated from an approved Business Problem
+   * Specification plus its full surrounding context (Target/Source Context,
+   * Context Layer, attachment extracts). Retries up to `maxAttempts` times,
+   * feeding the previous attempt's Ajv validation errors back into the next
+   * prompt — the same "validate immediately, re-prompt with the specific
+   * errors" discipline `selectTransformSpec` already uses for a single
+   * primitive, now applied to the whole document.
+   */
+  public async synthesizePipelineSpec(inputs: PipelineSpecSynthesisInputs, maxAttempts = 3): Promise<PipelineSpec> {
+    let lastErrors: string[] | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { system, user } = buildPipelineSpecSynthesisPrompt(inputs, lastErrors);
+      const raw = await this.callConfiguredLlm(
+        user,
+        system,
+        'Synthesize a machine-executable Pipeline Spec from the approved Business Problem Specification and its context.'
+      );
+      try {
+        return parsePipelineSpecResponse(this.parseJsonObject(extractJsonText(raw)), inputs);
+      } catch (err) {
+        lastErrors = [err instanceof Error ? err.message : String(err)];
+        this.log(`Pipeline Spec synthesis attempt ${attempt} failed: ${lastErrors[0]}`);
+      }
+    }
+    throw new Error(`Pipeline Spec synthesis failed after ${maxAttempts} attempts: ${lastErrors?.join('; ') ?? 'unknown error'}`);
   }
 
   /** Renders a specification as the objective text used for plan generation. */

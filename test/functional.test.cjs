@@ -2436,6 +2436,276 @@ async function main() {
     assert.ok(registry.TRANSFORM_PRIMITIVES.dedup, 'Tier 1 primitives are untouched by reset');
   });
 
+  // ── Phase 2B-i: declarative specification framework (Pipeline Spec + attachment extraction) ──
+
+  function samplePipelineSpec(overrides = {}) {
+    return {
+      specVersion: 1,
+      id: 'pipeline-test',
+      version: 1,
+      status: 'draft',
+      derivedFromBpsId: 'bps-1',
+      derivedFromBpsVersion: 1,
+      targetPlatform: 'snowflake',
+      entities: [
+        {
+          name: 'customers',
+          source: { object: 'RAW_DB.PUBLIC.raw_customers', type: 'table' },
+          transforms: [{ kind: 'rename_cast', params: { sourceObject: 'RAW_DB.PUBLIC.raw_customers', targetObject: 'CURATED_DB.STAGING.stg_customers', columns: [{ source: 'cust_id', target: 'customer_id' }] } }],
+          target: { object: 'CURATED_DB.STAGING.stg_customers', materialization: 'view' }
+        },
+        {
+          name: 'orders',
+          source: { object: 'RAW_DB.PUBLIC.raw_orders', type: 'table' },
+          transforms: [{ kind: 'incremental_load', params: { sourceObject: 'RAW_DB.PUBLIC.raw_orders', targetObject: 'CURATED_DB.STAGING.orders', keyColumns: ['order_id'], updateColumns: ['status'] } }],
+          target: { object: 'CURATED_DB.STAGING.orders', materialization: 'table' }
+        },
+        {
+          name: 'products',
+          source: { object: 'RAW_DB.PUBLIC.raw_products', type: 'table' },
+          transforms: [],
+          target: { object: 'CURATED_DB.STAGING.products', materialization: 'table' }
+        }
+      ],
+      createdAt: 'c', updatedAt: 'u',
+      ...overrides
+    };
+  }
+
+  await test('PIPELINE_SPEC_SCHEMA rejects an unrecognized key at the top level, entity level, and source/target level', () => {
+    const { validatePipelineSpec } = require('../dist/core/pipelineSpec/validator.js');
+    const valid = validatePipelineSpec(samplePipelineSpec());
+    assert.strictEqual(valid.valid, true, 'a well-formed spec passes');
+
+    const topLevelTypo = validatePipelineSpec({ ...samplePipelineSpec(), unexpectedField: 'x' });
+    assert.strictEqual(topLevelTypo.valid, false);
+
+    const entityWithTypo = samplePipelineSpec();
+    entityWithTypo.entities[0].unexpectedField = 'x';
+    assert.strictEqual(validatePipelineSpec(entityWithTypo).valid, false, 'entity-level typo rejected');
+
+    const sourceWithTypo = samplePipelineSpec();
+    sourceWithTypo.entities[0].source.sourceObjct = 'x'; // the exact typo used as the running example
+    assert.strictEqual(validatePipelineSpec(sourceWithTypo).valid, false, 'nested source-block typo rejected');
+  });
+
+  await test('compilePipelineSpec() deterministically compiles every entity with zero LLM calls', () => {
+    const { compilePipelineSpec } = require('../dist/core/pipelineSpec/compiler.js');
+    const spec = samplePipelineSpec();
+    const compiled = compilePipelineSpec(spec, 'snowflake');
+    assert.strictEqual(compiled.length, 3);
+    assert.strictEqual(compiled[0].name, 'customers');
+    assert.strictEqual(compiled[0].artifacts.length, 1);
+    assert.ok(compiled[0].artifacts[0].content.includes('CURATED_DB.STAGING.stg_customers'));
+    assert.strictEqual(compiled[2].artifacts.length, 0, 'an entity with no transforms compiles to zero artifacts, not an error');
+  });
+
+  await test('generateDesignDoc() is a pure, deterministic function of the spec — byte-identical across repeated calls', () => {
+    const { generateDesignDoc } = require('../dist/core/pipelineSpec/designDocGenerator.js');
+    const spec = samplePipelineSpec();
+    const first = generateDesignDoc(spec);
+    const second = generateDesignDoc(spec);
+    assert.strictEqual(first, second);
+    assert.ok(first.includes('customers'));
+    assert.ok(first.includes('```mermaid'), 'embeds a lineage diagram');
+  });
+
+  await test('PipelineSpecManager version-bumps only when revising an approved predecessor, and archives the prior revision', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+          stat: async (uri) => { if (!store.has(keyOf(uri))) throw new Error('ENOENT'); return {}; }
+        } }
+      };
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/PipelineSpecManager.js')]; } catch { /* not loaded */ }
+    const { PipelineSpecManager } = withMock(mock, () => require('../dist/context/PipelineSpecManager.js'));
+    const mgr = new PipelineSpecManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    assert.strictEqual(mgr.getSpec(), undefined);
+
+    const draftV1 = samplePipelineSpec();
+    await withMock(mock, () => mgr.saveSpec(draftV1));
+    const approvedV1 = await withMock(mock, () => mgr.approve());
+    assert.strictEqual(approvedV1.version, 1, 'approving a draft does not bump the version');
+    assert.strictEqual(approvedV1.status, 'approved');
+
+    const revisionV2 = samplePipelineSpec({ version: 2, status: 'draft' });
+    await withMock(mock, () => mgr.saveSpec(revisionV2));
+    assert.strictEqual(mgr.getSpec().version, 2);
+
+    let historyRaw = null;
+    await withMock(mock, () => mock.workspace.fs.readFile({ fsPath: '/ws/spec/history/pipeline.v1.approved.yaml' })).then((b) => { historyRaw = b.toString('utf8'); });
+    assert.ok(historyRaw.includes('version: 1'), 'the approved v1 revision was archived before being replaced');
+  });
+
+  await test('PipelineSpecManager loads a specVersion-mismatched document leniently, with a warning, instead of hard-failing', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+          stat: async () => { throw new Error('ENOENT'); }
+        } },
+        __store: store
+      };
+    }
+    const mock = fsMapMock();
+    const yaml = require('yaml');
+    // A document from a future/older specVersion, missing fields the current schema would require.
+    mock.__store.set('/ws/spec/pipeline.yaml', yaml.stringify({ specVersion: 99, id: 'old', version: 1, status: 'draft' }));
+    try { delete require.cache[require.resolve('../dist/context/PipelineSpecManager.js')]; } catch { /* not loaded */ }
+    const { PipelineSpecManager } = withMock(mock, () => require('../dist/context/PipelineSpecManager.js'));
+    const logs = [];
+    const mgr = new PipelineSpecManager({ fsPath: '/ws' }, (msg) => logs.push(msg));
+    await withMock(mock, () => mgr.initialize());
+    assert.ok(mgr.getSpec(), 'loads instead of throwing');
+    assert.strictEqual(mgr.getSpec().id, 'old');
+    assert.ok(logs.some((l) => l.includes('specVersion 99') && l.includes('loading leniently')));
+  });
+
+  await test('parsePipelineSpecResponse() takes targetPlatform from the approved Target Context, not an LLM re-guess, when the LLM omits it', () => {
+    const { parsePipelineSpecResponse } = require('../dist/agents/pipelineSpecSynthesis.js');
+    const bps = { id: 'bps-1', version: 1, status: 'approved', problemStatement: 'p', objectives: ['o'], successCriteria: [], scope: { in: ['x'], out: [] }, constraints: [], assumptions: [], createdAt: 'c', updatedAt: 'u' };
+    const inputs = { bps, targetContext: { specId: 'bps-1', specVersion: 1, status: 'approved', platform: 'databricks', answers: {} } };
+    const llmResponse = { entities: [{ name: 'e1', source: { object: 's', type: 'table' }, transforms: [], target: { object: 't', materialization: 'view' } }] };
+    const result = parsePipelineSpecResponse(llmResponse, inputs);
+    assert.strictEqual(result.targetPlatform, 'databricks', 'targetPlatform came from Target Context, not a guess, since the LLM response omitted it');
+  });
+
+  await test('parsePipelineSpecResponse() bumps version only when revising an approved predecessor, and rejects an invalid entities shape', () => {
+    const { parsePipelineSpecResponse } = require('../dist/agents/pipelineSpecSynthesis.js');
+    const bps = { id: 'bps-1', version: 1, status: 'approved', problemStatement: 'p', objectives: ['o'], successCriteria: [], scope: { in: ['x'], out: [] }, constraints: [], assumptions: [], createdAt: 'c', updatedAt: 'u' };
+    const validEntities = { entities: [{ name: 'e1', source: { object: 's', type: 'table' }, transforms: [], target: { object: 't', materialization: 'view' } }] };
+
+    const first = parsePipelineSpecResponse(validEntities, { bps });
+    assert.strictEqual(first.version, 1);
+
+    const approvedPrevious = { ...first, status: 'approved' };
+    const revision = parsePipelineSpecResponse(validEntities, { bps, previous: approvedPrevious });
+    assert.strictEqual(revision.version, 2, 'revising an approved predecessor bumps the version');
+    assert.strictEqual(revision.id, approvedPrevious.id, 'the id is carried forward, not regenerated');
+
+    assert.throws(() => parsePipelineSpecResponse({ entities: [{ name: 'e1' }] }, { bps }), /source|target|transforms/i, 'an entity missing required blocks fails Ajv validation');
+  });
+
+  await test('fallbackAttachmentExtract()/parseAttachmentExtract() degrade gracefully instead of throwing on a malformed extraction response', () => {
+    const { fallbackAttachmentExtract, parseAttachmentExtract } = require('../dist/core/attachmentExtraction.js');
+    const attachment = { id: 'att-1', path: 'schema.sql', content: 'CREATE TABLE orders (order_id INT, status STRING);', attachedAt: 'c' };
+
+    const fallback = fallbackAttachmentExtract(attachment);
+    assert.strictEqual(fallback.confidence, 'low');
+    assert.ok(fallback.rawSummary.length > 0);
+
+    const fromGarbage = parseAttachmentExtract('not an object', attachment);
+    assert.strictEqual(fromGarbage.confidence, 'low');
+    assert.strictEqual(fromGarbage.attachmentId, 'att-1');
+
+    const fromMalformedConfidence = parseAttachmentExtract({ rawSummary: 'a summary', confidence: 'extremely-high' }, attachment);
+    assert.strictEqual(fromMalformedConfidence.confidence, 'low', 'an invalid confidence value falls back to low rather than propagating garbage');
+  });
+
+  await test('parseAttachmentExtract() extracts entities/columns from a well-formed response, which then flow into the Pipeline Spec synthesis prompt', () => {
+    const { parseAttachmentExtract } = require('../dist/core/attachmentExtraction.js');
+    const { buildPipelineSpecSynthesisPrompt } = require('../dist/agents/pipelineSpecSynthesis.js');
+    const attachment = { id: 'att-1', path: 'schema.sql', content: 'CREATE TABLE orders (order_id INT, status STRING);', attachedAt: 'c' };
+    const extract = parseAttachmentExtract({
+      entities: [{ name: 'orders', columns: [{ name: 'order_id', type: 'INT' }, { name: 'status', type: 'STRING' }] }],
+      rawSummary: 'An orders table.',
+      confidence: 'high'
+    }, attachment);
+    assert.strictEqual(extract.entities[0].name, 'orders');
+    assert.strictEqual(extract.entities[0].columns.length, 2);
+
+    const bps = { id: 'bps-1', version: 1, status: 'approved', problemStatement: 'p', objectives: ['o'], successCriteria: [], scope: { in: ['x'], out: [] }, constraints: [], assumptions: [], createdAt: 'c', updatedAt: 'u' };
+    const { user } = buildPipelineSpecSynthesisPrompt({ bps, attachmentExtracts: [extract] });
+    assert.ok(user.includes('orders(order_id, status)'), 'the extracted entity/columns are visible to the LLM in the synthesis prompt, not just the raw attachment text');
+  });
+
+  await test('buildProvenance() (via parseComprehensiveSpec) tags sourceCatalog/dataFlows as source:"attachment" when an entity-extracting attachment informed them and no direct question did', () => {
+    const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
+    const session = {
+      id: 's1', problemStatement: 'p', state: 'synthesizing', questions: [], answers: [], insights: [], coverage: {},
+      turnCount: 1, turnBudget: 12, createdAt: 'c', updatedAt: 'u',
+      attachments: [{ id: 'att-1', path: 'schema.sql', content: 'x', attachedAt: 'c', extract: { attachmentId: 'att-1', extractedAt: 'c', entities: [{ name: 'orders' }], rawSummary: 'x', confidence: 'high' } }]
+    };
+    const raw = { problemStatement: 'p', objectives: ['o'], scope: { in: ['x'] }, sourceCatalog: [{ name: 'orders', type: 'database' }] };
+    const spec = parseComprehensiveSpec(raw, { session });
+    const sourceCatalogProvenance = spec.provenance.find((p) => p.field === 'sourceCatalog');
+    assert.strictEqual(sourceCatalogProvenance.source, 'attachment');
+    assert.strictEqual(sourceCatalogProvenance.attachmentId, 'att-1');
+  });
+
+  await test('AttachmentStore persists an attachment beyond the discovery session and lists it back, tolerating a corrupt sibling file', async () => {
+    function fsDirMock() {
+      const files = new Map(); // dirPath -> Map(filename -> content)
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        FileType: { File: 1, Directory: 2 },
+        Uri: { joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          writeFile: async (uri, buf) => {
+            const p = keyOf(uri);
+            const dir = p.slice(0, p.lastIndexOf('/'));
+            const name = p.slice(p.lastIndexOf('/') + 1);
+            if (!files.has(dir)) files.set(dir, new Map());
+            files.get(dir).set(name, buf.toString('utf8'));
+          },
+          rename: async (a, b) => {
+            const ap = keyOf(a), bp = keyOf(b);
+            const adir = ap.slice(0, ap.lastIndexOf('/')), aname = ap.slice(ap.lastIndexOf('/') + 1);
+            const bdir = bp.slice(0, bp.lastIndexOf('/')), bname = bp.slice(bp.lastIndexOf('/') + 1);
+            const content = files.get(adir)?.get(aname);
+            files.get(adir)?.delete(aname);
+            if (!files.has(bdir)) files.set(bdir, new Map());
+            files.get(bdir).set(bname, content);
+          },
+          readFile: async (uri) => {
+            const p = keyOf(uri);
+            const dir = p.slice(0, p.lastIndexOf('/'));
+            const name = p.slice(p.lastIndexOf('/') + 1);
+            const content = files.get(dir)?.get(name);
+            if (content === undefined) throw new Error('ENOENT');
+            return Buffer.from(content, 'utf8');
+          },
+          readDirectory: async (uri) => {
+            const dir = keyOf(uri);
+            const entries = files.get(dir);
+            if (!entries) throw new Error('ENOENT');
+            return [...entries.keys()].map((name) => [name, 1]);
+          }
+        } }
+      };
+    }
+    const mock = fsDirMock();
+    try { delete require.cache[require.resolve('../dist/context/AttachmentStore.js')]; } catch { /* not loaded */ }
+    const { AttachmentStore } = withMock(mock, () => require('../dist/context/AttachmentStore.js'));
+    const store = new AttachmentStore({ fsPath: '/ws' });
+
+    await withMock(mock, () => store.save({ id: 'att-1', path: 'a.txt', content: 'hello', attachedAt: 'c', extract: { attachmentId: 'att-1', extractedAt: 'c', rawSummary: 'hi', confidence: 'low' } }));
+    // A corrupt/unreadable sibling file must not prevent listing the good one.
+    await mock.workspace.fs.writeFile({ fsPath: '/ws/attachments/broken.yaml' }, Buffer.from('foo: [1, 2', 'utf8'));
+
+    const listed = await withMock(mock, () => store.list());
+    assert.strictEqual(listed.length, 1);
+    assert.strictEqual(listed[0].id, 'att-1');
+    assert.strictEqual(listed[0].extract.rawSummary, 'hi');
+  });
+
   await test('createDisposableRegistry() disposes every registered disposable, in reverse registration order', () => {
     const { createDisposableRegistry } = require('../dist/core/disposables.js');
     const order = [];

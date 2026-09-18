@@ -57,6 +57,10 @@
         "title": "AutoDE: Execute Plan"
       },
       {
+        "command": "autoDataEngineeringHub.generatePipelineSpec",
+        "title": "AutoDE: Generate Pipeline Spec"
+      },
+      {
         "command": "autoDataEngineeringHub.resetSession",
         "title": "AutoDE: Reset Session"
       },

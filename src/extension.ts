@@ -137,6 +137,19 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
+  // Phase 2B-i — an additional, opt-in flow alongside Generate Plan/Execute Plan:
+  // synthesizes a strictly-validated, machine-compilable Pipeline Spec from the
+  // approved specification and its context. Delegates to the sidebar provider,
+  // which owns the spec/context managers this needs (see webviewProvider.ts).
+  const generatePipelineSpec = vscode.commands.registerCommand(`${EXTENSION_ID}.generatePipelineSpec`, async () => {
+    try {
+      await sidebarProvider.triggerGeneratePipelineSpec();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to generate the Pipeline Spec.';
+      await vscode.window.showErrorMessage(message);
+    }
+  });
+
   const resetSession = vscode.commands.registerCommand(`${EXTENSION_ID}.resetSession`, async () => {
     await hub.resetPlan();
   });
@@ -408,7 +421,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(EDITOR_GRAPH, new GraphEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_PROFILE, new ProfileEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_DOC, new DocEditorProvider(context)),
-    openSidebar, generatePlan, executePlan, resetSession,
+    openSidebar, generatePlan, executePlan, generatePipelineSpec, resetSession,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
     testConnection, sourceAssessment, syncMetadata, reindex,

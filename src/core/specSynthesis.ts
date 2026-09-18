@@ -76,16 +76,31 @@ function parseSourceCatalog(raw: unknown): SourceEntry[] {
   return entries;
 }
 
-/** Builds field→question traceability from the intake session. */
+/**
+ * Fields a document most directly informs, when nothing else already
+ * accounts for them — used to attribute `source: 'attachment'` provenance.
+ * Deliberately narrow (not "any field could come from an attachment") since
+ * there is no per-field attribution signal from the LLM's synthesis output
+ * today; this is the honest, limited case where the attachment's entity/
+ * column extraction plausibly IS what populated the field.
+ */
+const ATTACHMENT_ATTRIBUTABLE_FIELDS = new Set(['sourceCatalog', 'dataFlows']);
+
+/** Builds field→question/attachment traceability from the intake session. */
 function buildProvenance(session?: IntakeSession, previous?: BusinessProblemSpec): SpecProvenance[] {
   if (!session) return [];
   const previousByField = new Map((previous?.provenance ?? []).map((p) => [p.field, p]));
+  const entityAttachment = (session.attachments ?? []).find((a) => a.extract?.entities && a.extract.entities.length > 0);
+
   return PROVENANCE_FIELDS.map((field) => {
     const question = session.questions.find(
       (candidate) => candidate.field === field && session.answers.some((answer) => answer.questionId === candidate.id)
     );
     if (question) {
       return { field, source: 'question' as const, questionId: question.id, skill: question.skill };
+    }
+    if (entityAttachment && ATTACHMENT_ATTRIBUTABLE_FIELDS.has(field)) {
+      return { field, source: 'attachment' as const, attachmentId: entityAttachment.id };
     }
     // Not addressed by this session — if it was carried forward from a previous
     // revision, keep its original provenance rather than mislabeling it "synthesis".

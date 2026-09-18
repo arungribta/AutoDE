@@ -65,7 +65,23 @@ export function renderSpecSnapshot(spec: BusinessProblemSpec): string {
 
 function renderAttachments(attachments?: IntakeAttachment[]): string {
   if (!attachments || attachments.length === 0) return '';
-  const parts = attachments.map((a) => `--- ${a.path} ---\n${a.content}`);
+  const parts = attachments.map((a) => {
+    const header = `--- ${a.path} ---`;
+    if (!a.extract) return `${header}\n${a.content}`;
+    // Lead with the structured extract (better signal-to-noise than a raw dump) while
+    // keeping the original text available as fallback context right below it.
+    const extractLines = [`[Extracted summary, confidence: ${a.extract.confidence}] ${a.extract.rawSummary}`];
+    if (a.extract.entities && a.extract.entities.length > 0) {
+      extractLines.push(`Entities: ${a.extract.entities.map((e) => `${e.name}(${(e.columns ?? []).map((c) => c.name).join(', ')})`).join('; ')}`);
+    }
+    if (a.extract.businessRules && a.extract.businessRules.length > 0) {
+      extractLines.push(`Business rules: ${a.extract.businessRules.join('; ')}`);
+    }
+    if (a.extract.constraints && a.extract.constraints.length > 0) {
+      extractLines.push(`Constraints: ${a.extract.constraints.join('; ')}`);
+    }
+    return `${header}\n${extractLines.join('\n')}\n\n[Original text, for reference]\n${a.content}`;
+  });
   return `\n## Attached reference material (user-supplied)\n${parts.join('\n\n')}`;
 }
 

@@ -145,13 +145,15 @@ export interface SourceEntry {
   availability?: string;
 }
 
-/** Links a spec field to the question/skill/assumption that produced it. */
+/** Links a spec field to the question/skill/assumption/attachment that produced it. */
 export interface SpecProvenance {
   /** Dotted path, e.g. 'dataFlows' or 'objectives.0'. */
   field: string;
-  source: 'user' | 'question' | 'assumption' | 'synthesis' | 'skill';
+  source: 'user' | 'question' | 'assumption' | 'synthesis' | 'skill' | 'attachment';
   questionId?: string;
   skill?: string;
+  /** Populated when `source === 'attachment'` — the `IntakeAttachment.id` that informed this field. */
+  attachmentId?: string;
 }
 
 export type SpecQuestionKind = 'text' | 'single-select' | 'multi-select' | 'boolean';
@@ -179,11 +181,43 @@ export type SpecEngineState = 'discovery' | 'synthesizing' | 'draft' | 'refining
 
 export type SpecCoverageStatus = 'complete' | 'partial' | 'missing';
 
+/** A column the structured extraction found in an attached document. */
+export interface AttachmentExtractColumn {
+  name: string;
+  type?: string;
+}
+
+/** An entity (table-like structure) the structured extraction found in an attached document. */
+export interface AttachmentExtractEntity {
+  name: string;
+  columns?: AttachmentExtractColumn[];
+}
+
+/**
+ * Structured facts pulled from an `IntakeAttachment` by a dedicated LLM
+ * extraction pass (Phase 2B-i) — deliberately not a rigid, format-specific
+ * schema, since an attachment could be a schema dump, a requirements memo,
+ * or anything else. `rawSummary` is the graceful-degradation floor: always
+ * populated, even when nothing else can be extracted.
+ */
+export interface AttachmentExtract {
+  attachmentId: string;
+  extractedAt: string;
+  entities?: AttachmentExtractEntity[];
+  businessRules?: string[];
+  constraints?: string[];
+  rawSummary: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
 /** A file the user attached as supplementary reference material for a spec conversation. */
 export interface IntakeAttachment {
+  id: string;
   path: string;
   content: string;
   attachedAt: string;
+  /** Populated once the structured-extraction pass has run (Phase 2B-i) — absent for an attachment made before this existed, or if extraction itself is still pending. */
+  extract?: AttachmentExtract;
 }
 
 /** Persisted record of an in-progress (or completed) agentic specification conversation. */

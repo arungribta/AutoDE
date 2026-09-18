@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, ContextQuestion, TargetContext, SourceContext, DataPlatformProvider, ToolExecutionMode } from './types';
+import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, DataPlatformProvider, ToolExecutionMode } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
 import { SkillRegistry, loadSkillsFromDirectory } from './skillRegistry';
@@ -22,6 +22,9 @@ import { ChatSessionManager } from '../context/ChatSessionManager';
 import { TargetContextManager } from '../context/TargetContextManager';
 import { SourceContextManager } from '../context/SourceContextManager';
 import { ActiveProblemManager } from '../context/ActiveProblemManager';
+import { AttachmentStore } from '../context/AttachmentStore';
+import { PipelineSpecManager } from '../context/PipelineSpecManager';
+import { generateDesignDoc } from './pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
 import { ConnectionManager } from '../dqm/ConnectionManager';
 import { applyCspNonce } from './webviewSecurity';
@@ -48,6 +51,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private activeChatId?: string;
   private targetContextManager?: TargetContextManager;
   private sourceContextManager?: SourceContextManager;
+  private pipelineSpecManager?: PipelineSpecManager;
+  private attachmentStore?: AttachmentStore;
   private activeProblemManager?: ActiveProblemManager;
   /** `undefined` = no active business problem yet (fresh workspace, or "Start New" before the first draft). */
   private activeProblemId?: string;
@@ -73,6 +78,47 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** "AutoDE: New Chat" command proxy. */
   public async triggerNewChat(): Promise<void> {
     await this.startNewChat();
+  }
+
+  /** "AutoDE: Generate Pipeline Spec" command proxy (Phase 2B-i). */
+  public async triggerGeneratePipelineSpec(): Promise<void> {
+    await this.generatePipelineSpec();
+  }
+
+  /**
+   * Phase 2B-i — an additional, opt-in flow alongside "Generate Plan": turns
+   * the approved BPS + approved Target/Source Context + attachment extracts
+   * into a strictly-validated, machine-compilable Pipeline Spec (YAML) plus
+   * its deterministic Markdown design-doc projection.
+   */
+  private async generatePipelineSpec(): Promise<void> {
+    const spec = this.specManager?.getSpec();
+    if (!spec || !this.pipelineSpecManager) { this.postLog('No active business problem — approve a specification first.'); return; }
+    const gate = this.computeContextGateStatus(spec);
+    if (!gate.canGeneratePlan) {
+      this.postMessage('error', { message: `Pipeline Spec generation needs the same readiness as Generate Plan: ${gate.blockingReasons.join(' ')}` });
+      return;
+    }
+    try {
+      this.postLog('Synthesizing Pipeline Spec…');
+      const attachments = (await this.attachmentStore?.list()) ?? [];
+      const draft = await this.hub.synthesizePipelineSpec({
+        bps: spec,
+        targetContext: this.targetContextManager?.getContext(),
+        sourceContext: this.sourceContextManager?.getContext(),
+        contextLayerText: this.contextFileManager?.buildContextPrompt(),
+        attachmentExtracts: attachments.map((a) => a.extract).filter((e): e is NonNullable<typeof e> => !!e),
+        previous: this.pipelineSpecManager.getSpec()
+      });
+      await this.pipelineSpecManager.saveSpec(draft);
+      const designDoc = generateDesignDoc(draft);
+      const designDocUri = vscode.Uri.joinPath(this.pipelineSpecManager.getSpecDir(), 'design.md');
+      await vscode.workspace.fs.writeFile(designDocUri, Buffer.from(designDoc, 'utf8'));
+      this.postMessage('pipelineSpecGenerated', { spec: draft, designDoc });
+      this.postLog(`Pipeline Spec v${draft.version} drafted with ${draft.entities.length} entit${draft.entities.length === 1 ? 'y' : 'ies'} — review and approve it.`);
+    } catch (err) {
+      this.postMessage('error', { message: `Pipeline Spec generation failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
   }
 
   /** Builds an AJV envelope validator from the bundled context-envelope JSON Schema. */
@@ -204,6 +250,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.specManager = undefined;
       this.targetContextManager = undefined;
       this.sourceContextManager = undefined;
+      this.pipelineSpecManager = undefined;
+      this.attachmentStore = undefined;
       this.postSpec();
       this.postContextGateStatus();
       this.postContextUpdate();
@@ -217,10 +265,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.specManager = new SpecManager(contextRoot, (msg: string) => this.postLog(msg));
     this.targetContextManager = new TargetContextManager(contextRoot, (msg: string) => this.postLog(msg));
     this.sourceContextManager = new SourceContextManager(contextRoot, (msg: string) => this.postLog(msg));
+    this.pipelineSpecManager = new PipelineSpecManager(contextRoot, (msg: string) => this.postLog(msg));
+    this.attachmentStore = new AttachmentStore(contextRoot);
     try {
       await this.specManager.initialize();
       await this.targetContextManager.initialize();
       await this.sourceContextManager.initialize();
+      await this.pipelineSpecManager.initialize();
       const existingSpec = this.specManager.getSpec();
       if (existingSpec) {
         this.hub.setSpec(existingSpec.id, existingSpec.version);
@@ -744,6 +795,19 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postMessage('sourceContextQuestions', { questions, answers: existing?.answers ?? {} });
           break;
         }
+        case 'generatePipelineSpec': {
+          await this.generatePipelineSpec();
+          break;
+        }
+        case 'approvePipelineSpec': {
+          if (!this.pipelineSpecManager) break;
+          const approved = await this.pipelineSpecManager.approve();
+          if (approved) {
+            this.postMessage('pipelineSpecApproved', { spec: approved });
+            this.postLog(`Pipeline Spec v${approved.version} approved.`);
+          }
+          break;
+        }
         case 'setPhaseRequired': {
           const phase = typeof message.phase === 'string' ? message.phase : '';
           const required = message.required === true;
@@ -874,8 +938,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const content = Buffer.from(bytes).toString('utf8').slice(0, MAX_ATTACHMENT_BYTES);
             const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
             const displayPath = workspaceRoot ? path.relative(workspaceRoot.fsPath, fileUri.fsPath) : fileUri.fsPath;
-            this.specOpsEngine.addAttachment({ path: displayPath, content, attachedAt: new Date().toISOString() });
-            this.postLog(`Attached ${displayPath} as reference material for this conversation.`);
+            const attachment: IntakeAttachment = {
+              id: `att-${Date.now().toString(36)}`,
+              path: displayPath,
+              content,
+              attachedAt: new Date().toISOString()
+            };
+            this.postLog(`Attached ${displayPath} as reference material — extracting structured facts…`);
+            attachment.extract = await this.hub.extractAttachmentFacts(attachment);
+            this.specOpsEngine.addAttachment(attachment);
+            if (this.attachmentStore) { await this.attachmentStore.save(attachment); }
+            this.postLog(`Attached ${displayPath} as reference material for this conversation (confidence: ${attachment.extract.confidence}).`);
           } catch (err) {
             this.postLog(`Failed to attach file: ${err instanceof Error ? err.message : String(err)}`);
           }
