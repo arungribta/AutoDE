@@ -66,11 +66,47 @@
       },
       {
         "command": "autoDataEngineeringHub.testConnection",
-        "title": "AutoDE: Test Connection"
+        "title": "AutoDE: Test Source Connection"
+      },
+      {
+        "command": "autoDataEngineeringHub.testTargetConnection",
+        "title": "AutoDE: Test Target Connection"
       },
       {
         "command": "autoDataEngineeringHub.sourceAssessment",
         "title": "AutoDE: Run Source Assessment"
+      },
+      {
+        "command": "autoDataEngineeringHub.disconnectDataPlatform",
+        "title": "AutoDE: Disconnect Source Data Platform"
+      },
+      {
+        "command": "autoDataEngineeringHub.disconnectTargetDataPlatform",
+        "title": "AutoDE: Disconnect Target Data Platform"
+      },
+      {
+        "command": "autoDataEngineeringHub.browseSourceDatabase",
+        "title": "AutoDE: Browse Source Database/Schema"
+      },
+      {
+        "command": "autoDataEngineeringHub.browseTargetDatabase",
+        "title": "AutoDE: Browse Target Database/Schema"
+      },
+      {
+        "command": "autoDataEngineeringHub.ingestFileAsSourceContext",
+        "title": "AutoDE: Ingest File as Source Context (CSV/JSON/DDL)"
+      },
+      {
+        "command": "autoDataEngineeringHub.createMapping",
+        "title": "AutoDE: Create Mapping (Source → Target)"
+      },
+      {
+        "command": "autoDataEngineeringHub.buildSemanticLayer",
+        "title": "AutoDE: Build Unified Semantic Layer Snapshot"
+      },
+      {
+        "command": "autoDataEngineeringHub.reVerifySourceSchema",
+        "title": "AutoDE: Re-verify Source Schema"
       },
       {
         "command": "autoDataEngineeringHub.syncMetadata",
@@ -127,6 +163,14 @@
       {
         "command": "autoDataEngineeringHub.discardChat",
         "title": "AutoDE: Discard Chat"
+      },
+      {
+        "command": "autoDataEngineeringHub.connectToDataPlatform",
+        "title": "AutoDE: Connect to Data Platform"
+      },
+      {
+        "command": "autoDataEngineeringHub.testServiceAccountCredential",
+        "title": "AutoDE: Test Service Account Credential"
       }
     ],
     "viewsContainers": {
@@ -172,7 +216,9 @@
         "viewType": "autoDE.dataModelEditor",
         "displayName": "AutoDE Data Model",
         "selector": [
-          { "filenamePattern": "*.sql" }
+          {
+            "filenamePattern": "*.sql"
+          }
         ],
         "priority": "option"
       },
@@ -180,7 +226,9 @@
         "viewType": "autoDE.sttmEditor",
         "displayName": "AutoDE STTM Mapping",
         "selector": [
-          { "filenamePattern": "*.yaml" }
+          {
+            "filenamePattern": "*.yaml"
+          }
         ],
         "priority": "option"
       },
@@ -188,7 +236,9 @@
         "viewType": "autoDE.graphEditor",
         "displayName": "AutoDE Knowledge Graph",
         "selector": [
-          { "filenamePattern": "*.json" }
+          {
+            "filenamePattern": "*.json"
+          }
         ],
         "priority": "option"
       },
@@ -196,7 +246,9 @@
         "viewType": "autoDE.profileEditor",
         "displayName": "AutoDE Data Profile",
         "selector": [
-          { "filenamePattern": "*.md" }
+          {
+            "filenamePattern": "*.md"
+          }
         ],
         "priority": "option"
       },
@@ -204,7 +256,9 @@
         "viewType": "autoDE.docEditor",
         "displayName": "AutoDE Architecture Doc",
         "selector": [
-          { "filenamePattern": "*.md" }
+          {
+            "filenamePattern": "*.md"
+          }
         ],
         "priority": "option"
       }
@@ -214,71 +268,227 @@
       "properties": {
         "autoDataEngineeringHub.defaultProvider": {
           "type": "string",
-          "enum": ["snowflake", "databricks", "bigquery", "redshift", "synapse", "other"],
+          "enum": [
+            "snowflake",
+            "databricks",
+            "bigquery",
+            "redshift",
+            "synapse",
+            "other"
+          ],
           "default": "snowflake",
           "description": "Default data platform provider."
         },
+        "autoDataEngineeringHub.defaultDatabricksWorkspaceUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Default Databricks workspace host (e.g. adb-1234567890123456.7.azuredatabricks.net). Scheme (https://) is optional."
+        },
+        "autoDataEngineeringHub.defaultDatabricksHttpPath": {
+          "type": "string",
+          "default": "",
+          "description": "The target SQL warehouse's HTTP Path (e.g. /sql/1.0/warehouses/0123456789abcdef), copied from its Connection Details page."
+        },
+        "autoDataEngineeringHub.defaultDatabricksCatalog": {
+          "type": "string",
+          "default": "main",
+          "description": "Default Databricks (Unity Catalog) catalog."
+        },
+        "autoDataEngineeringHub.defaultDatabricksCatalogType": {
+          "type": "string",
+          "enum": ["auto", "unity", "hive_metastore"],
+          "default": "auto",
+          "description": "Which metadata-introspection shape to use for the configured catalog. 'auto' infers it from the catalog name (the reserved 'hive_metastore' name vs. everything else); set explicitly when a workspace has more than one catalog type, or as a manual override for another catalog that shares the legacy metastore's limitations (no bulk information_schema)."
+        },
+        "autoDataEngineeringHub.defaultDatabricksSchema": {
+          "type": "string",
+          "default": "default",
+          "description": "Default Databricks schema."
+        },
         "autoDataEngineeringHub.defaultSnowflakeAccount": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Default Snowflake account identifier."
         },
         "autoDataEngineeringHub.defaultSnowflakeUsername": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Default Snowflake username."
         },
         "autoDataEngineeringHub.defaultSnowflakeWarehouse": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Default Snowflake warehouse."
         },
         "autoDataEngineeringHub.defaultSnowflakeDatabase": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Default Snowflake database."
         },
         "autoDataEngineeringHub.defaultSnowflakeSchema": {
-          "type": "string", "default": "PUBLIC",
+          "type": "string",
+          "default": "PUBLIC",
           "description": "Default Snowflake schema."
         },
         "autoDataEngineeringHub.defaultSnowflakeRole": {
-          "type": "string", "default": "SYSADMIN",
+          "type": "string",
+          "default": "SYSADMIN",
           "description": "Default Snowflake role."
         },
         "autoDataEngineeringHub.defaultSnowflakeAuthMode": {
           "type": "string",
-          "enum": ["key-pair", "username-password", "oauth", "external-browser", "mcp"],
+          "enum": [
+            "key-pair",
+            "username-password",
+            "oauth",
+            "external-browser",
+            "mcp"
+          ],
           "default": "key-pair",
           "description": "Snowflake authentication mode."
         },
         "autoDataEngineeringHub.snowflakePrivateKeyPath": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Path to Snowflake private key."
         },
+        "autoDataEngineeringHub.defaultTargetProvider": {
+          "type": "string",
+          "enum": [
+            "snowflake",
+            "databricks",
+            "bigquery",
+            "redshift",
+            "synapse",
+            "other"
+          ],
+          "default": "snowflake",
+          "description": "Target data platform provider — independent of, and can be connected simultaneously with, the source platform above."
+        },
+        "autoDataEngineeringHub.defaultTargetDatabricksWorkspaceUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Target Databricks workspace host (e.g. adb-1234567890123456.7.azuredatabricks.net). Scheme (https://) is optional."
+        },
+        "autoDataEngineeringHub.defaultTargetDatabricksHttpPath": {
+          "type": "string",
+          "default": "",
+          "description": "The target platform's SQL warehouse HTTP Path (e.g. /sql/1.0/warehouses/0123456789abcdef), copied from its Connection Details page."
+        },
+        "autoDataEngineeringHub.defaultTargetDatabricksCatalog": {
+          "type": "string",
+          "default": "main",
+          "description": "Target Databricks (Unity Catalog) catalog."
+        },
+        "autoDataEngineeringHub.defaultTargetDatabricksCatalogType": {
+          "type": "string",
+          "enum": ["auto", "unity", "hive_metastore"],
+          "default": "auto",
+          "description": "Which metadata-introspection shape to use for the target's configured catalog. See defaultDatabricksCatalogType's description — same semantics, independent value for the target connection."
+        },
+        "autoDataEngineeringHub.defaultTargetDatabricksSchema": {
+          "type": "string",
+          "default": "default",
+          "description": "Target Databricks schema."
+        },
+        "autoDataEngineeringHub.defaultTargetSnowflakeAccount": {
+          "type": "string",
+          "default": "",
+          "description": "Target Snowflake account identifier — independent of, and can be connected simultaneously with, the source Snowflake account above."
+        },
+        "autoDataEngineeringHub.defaultTargetSnowflakeUsername": {
+          "type": "string",
+          "default": "",
+          "description": "Target Snowflake username."
+        },
+        "autoDataEngineeringHub.defaultTargetSnowflakeWarehouse": {
+          "type": "string",
+          "default": "",
+          "description": "Target Snowflake warehouse."
+        },
+        "autoDataEngineeringHub.defaultTargetSnowflakeDatabase": {
+          "type": "string",
+          "default": "",
+          "description": "Target Snowflake database."
+        },
+        "autoDataEngineeringHub.defaultTargetSnowflakeSchema": {
+          "type": "string",
+          "default": "PUBLIC",
+          "description": "Target Snowflake schema."
+        },
+        "autoDataEngineeringHub.defaultTargetSnowflakeRole": {
+          "type": "string",
+          "default": "SYSADMIN",
+          "description": "Target Snowflake role."
+        },
+        "autoDataEngineeringHub.defaultTargetSnowflakeAuthMode": {
+          "type": "string",
+          "enum": [
+            "key-pair",
+            "username-password",
+            "oauth",
+            "external-browser",
+            "mcp"
+          ],
+          "default": "key-pair",
+          "description": "Target Snowflake authentication mode."
+        },
+        "autoDataEngineeringHub.targetSnowflakePrivateKeyPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the target connection's Snowflake private key."
+        },
+        "autoDataEngineeringHub.targetSnowflakeCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Explicit path to the Snowflake CLI for the target connection (only if not found automatically). Leave blank if `snow` is on PATH."
+        },
+        "autoDataEngineeringHub.targetDatabricksCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Explicit path to the Databricks CLI for the target connection (only if not found automatically)."
+        },
         "autoDataEngineeringHub.metadataCachingDurationMinutes": {
-          "type": "number", "default": 15,
+          "type": "number",
+          "default": 15,
           "description": "Metadata caching duration in minutes."
         },
         "autoDataEngineeringHub.queryTimeoutSeconds": {
-          "type": "number", "default": 120,
+          "type": "number",
+          "default": 120,
           "description": "Default query timeout in seconds."
         },
         "autoDataEngineeringHub.readOnlyMode": {
-          "type": "boolean", "default": true,
+          "type": "boolean",
+          "default": true,
           "description": "Restrict to read-only mode."
         },
         "autoDataEngineeringHub.enableSessionReuse": {
-          "type": "boolean", "default": true,
+          "type": "boolean",
+          "default": true,
           "description": "Enable session reuse."
         },
         "autoDataEngineeringHub.autoDocumentationEnabled": {
-          "type": "boolean", "default": true,
+          "type": "boolean",
+          "default": true,
           "description": "Auto-generate documentation."
         },
         "autoDataEngineeringHub.telemetryEnabled": {
-          "type": "boolean", "default": false,
+          "type": "boolean",
+          "default": false,
           "description": "Allow telemetry (opt-in)."
         },
         "autoDataEngineeringHub.activeLlmProvider": {
           "type": "string",
-          "enum": ["azure-openai", "openai", "anthropic", "gemini", "ollama", "copilot", "claude"],
+          "enum": [
+            "azure-openai",
+            "openai",
+            "anthropic",
+            "gemini",
+            "ollama",
+            "copilot",
+            "claude"
+          ],
           "enumDescriptions": [
             "Azure OpenAI (API key)",
             "OpenAI (API key)",
@@ -292,23 +502,28 @@
           "description": "Active LLM provider."
         },
         "autoDataEngineeringHub.activeLlmModel": {
-          "type": "string", "default": "gpt-4o-mini",
+          "type": "string",
+          "default": "gpt-4o-mini",
           "description": "LLM model name. For the 'claude' provider this is passed to 'claude --model' when it looks like a Claude model (e.g. 'sonnet', 'opus', 'claude-sonnet-4'); otherwise Claude Code's default model is used."
         },
         "autoDataEngineeringHub.claudeCodePath": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Path to the Claude Code CLI ('claude' / 'claude.exe'). Leave empty to auto-detect: PATH, then the binary bundled with the 'Claude Code for VS Code' extension. Only used when activeLlmProvider is 'claude'."
         },
         "autoDataEngineeringHub.llmEndpoint": {
-          "type": "string", "default": "",
+          "type": "string",
+          "default": "",
           "description": "Custom LLM endpoint."
         },
         "autoDataEngineeringHub.artifactDirectory": {
-          "type": "string", "default": "artifacts",
+          "type": "string",
+          "default": "artifacts",
           "description": "Folder (relative to the active business problem's own folder, .ai-context/problems/<id>/) where AutoDE writes generated artifacts — alongside that problem's specification, context, and plan, so its knowledge base stays in one place."
         },
         "autoDataEngineeringHub.extensionDisplayName": {
-          "type": "string", "default": "AutoDE — Data Engineering Workspace",
+          "type": "string",
+          "default": "AutoDE — Data Engineering Workspace",
           "description": "Extension display name."
         },
         "autoDataEngineeringHub.extensionDescription": {
@@ -317,16 +532,39 @@
           "description": "Extension description."
         },
         "autoDataEngineeringHub.languageModelProgrammaticConsent": {
-          "type": "boolean", "default": false,
+          "type": "boolean",
+          "default": false,
           "description": "Allow AutoDE to programmatically use a locally-installed language model for its LLM calls (opt-in): GitHub Copilot via the VS Code Language Model API, or the Claude Code CLI."
         },
         "autoDataEngineeringHub.copilotProgrammaticConsent": {
-          "type": "boolean", "default": false,
+          "type": "boolean",
+          "default": false,
           "markdownDescription": "_Deprecated — use `#autoDataEngineeringHub.languageModelProgrammaticConsent#`._ Still honored as a fallback for existing setups."
         },
         "autoDataEngineeringHub.primitiveManagementEnabled": {
-          "type": "boolean", "default": false,
+          "type": "boolean",
+          "default": false,
           "description": "Allow publishing/deprecating declarative (Tier 2) transform primitives from the Primitives palette (opt-in). Off by default — a workspace's platform admin turns this on deliberately."
+        },
+        "autoDataEngineeringHub.dataPlatformCliConsent": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow AutoDE to shell out to a data-platform CLI (currently: 'snow connection list') to enumerate configured connections for 'AutoDE: Connect to Data Platform' (opt-in). CLI detection (a version check) does not require this."
+        },
+        "autoDataEngineeringHub.snowflakeCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Snowflake CLI ('snow' / 'snow.exe'). Leave empty to auto-detect via PATH."
+        },
+        "autoDataEngineeringHub.databricksCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Databricks CLI ('databricks' / 'databricks.exe'). Leave empty to auto-detect via PATH. Not required for connection enumeration, which reads '.databrickscfg' directly."
+        },
+        "autoDataEngineeringHub.serviceAccountCredentialRef": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "A service-account credential pointer, set once by a platform team — deliberately a plain settings value, no interactive UI. JSON string: `{\"platform\":\"snowflake\",\"resolverId\":\"env\",\"ref\":\"prod\"}`. `resolverId` names a registered `CredentialResolver` ('env', 'cli', 'vscode-secret-storage', or a custom one). Verify with 'AutoDE: Test Service Account Credential'."
         }
       }
     }
@@ -349,7 +587,6 @@
   },
   "dependencies": {
     "ajv": "^8.20.0",
-    "snowflake-sdk": "^2.0.0",
     "yaml": "^2.9.0"
   }
 }

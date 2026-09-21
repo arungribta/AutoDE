@@ -35,6 +35,37 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     protected readonly log: (msg: string) => void
   ) {}
 
+  /**
+   * A stable identifier for this specific connection (not just the platform
+   * kind) — e.g. `snowflake:prod` for a named CLI connection, `snowflake:ACME`
+   * for a direct-credential connection to account `ACME`, or just `snowflake`
+   * when nothing more specific is available. Used to tag extracted schema so
+   * multiple source connections of the same platform type stay distinguishable.
+   */
+  protected getConnectionId(): string {
+    const ref = this.credentials['connectionName'] || this.credentials['profile'] || this.credentials['account']
+      || this.credentials['workspaceUrl'] || this.credentials['username'] || '';
+    return ref ? `${this.platform}:${ref}` : this.platform;
+  }
+
+  abstract listDatabases(): Promise<string[]>;
+  abstract listSchemas(database: string): Promise<string[]>;
+
+  /**
+   * Reads a value out of a query-result row by trying several candidate
+   * column-name spellings in order — the same defensive pattern
+   * `assembleTables()` already uses, since `SHOW DATABASES`/`SHOW SCHEMAS`/
+   * `SHOW CATALOGS` return differently-cased/-named columns depending on
+   * platform and execution tier (CLI JSON vs. REST JSON).
+   */
+  protected firstColumnValue(row: Record<string, unknown>, candidates: string[]): string {
+    for (const key of candidates) {
+      const value = row[key];
+      if (typeof value === 'string' && value.length > 0) { return value; }
+    }
+    return '';
+  }
+
   // ── Abstract Methods (platform-specific) ──
 
   abstract connect(): Promise<ConnectionInfo>;
@@ -55,17 +86,30 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
 
     // 1. Fetch tables
     this.log(`[${this.platform}] Fetching tables...`);
-    const tablesResult = await this.executeQuery(queries.listTables, {
-      timeoutMs: 60000,
-      cancellationToken: options?.cancellationToken
-    });
+    let tablesResult: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
+    try {
+      tablesResult = await this.executeQuery(queries.listTables, {
+        timeoutMs: 60000,
+        cancellationToken: options?.cancellationToken
+      });
+    } catch (err) {
+      this.log(`[${this.platform}] Table listing failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-    // 2. Fetch columns
+    // 2. Fetch columns — non-fatal: some catalog types (e.g. Databricks' legacy
+    // `hive_metastore`) have no bulk, schema-wide column-introspection query at
+    // all (no `information_schema` support), only a per-table DESCRIBE — degrade
+    // to tables-without-column-detail rather than aborting the whole extraction.
     this.log(`[${this.platform}] Fetching columns...`);
-    const columnsResult = await this.executeQuery(queries.listColumns, {
-      timeoutMs: 60000,
-      cancellationToken: options?.cancellationToken
-    });
+    let columnsResult: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
+    try {
+      columnsResult = await this.executeQuery(queries.listColumns, {
+        timeoutMs: 60000,
+        cancellationToken: options?.cancellationToken
+      });
+    } catch (err) {
+      this.log(`[${this.platform}] Column listing failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     // 3. Fetch foreign keys
     this.log(`[${this.platform}] Fetching foreign keys...`);
@@ -123,6 +167,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
 
     return {
       platform: this.platform,
+      connectionId: this.getConnectionId(),
       extractedAt: startTime,
       tables,
       views,
@@ -141,8 +186,11 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
 
     for (const row of tablesResult.rows) {
       const r = row as Record<string, unknown>;
-      const schema = String(r['table_schema'] ?? r['schema_name'] ?? r['TABLE_SCHEMA'] ?? '');
-      const name = String(r['table_name'] ?? r['TABLE_NAME'] ?? '');
+      // `database`/`tableName` are Databricks' `SHOW TABLES` column names — the
+      // fallback a legacy Hive metastore catalog (no `information_schema`) uses,
+      // confirmed against a real workspace.
+      const schema = String(r['table_schema'] ?? r['schema_name'] ?? r['TABLE_SCHEMA'] ?? r['database'] ?? '');
+      const name = String(r['table_name'] ?? r['TABLE_NAME'] ?? r['tableName'] ?? '');
       const catalog = r['table_catalog'] ?? r['catalog_name'] ?? r['TABLE_CATALOG'];
       const fqn = catalog ? `${catalog}.${schema}.${name}` : `${schema}.${name}`;
       const tableType = String(r['table_type'] ?? r['TABLE_TYPE'] ?? 'TABLE').toUpperCase();
@@ -306,7 +354,21 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     // AutoDE's current model that is always the *source* side of a Brownfield
     // implementation (nothing introspects a target platform; target intent is
     // expressed as TargetEnvironment config, not discovered schema).
-    const sourceOrigin = { source: 'derived' as const, sourceRef: snapshot.platform, extractor: 'source-assessment', extractedAt: now, environment: 'source' as const };
+    const sourceOrigin = {
+      source: 'derived' as const,
+      sourceRef: snapshot.platform,
+      connectionId: snapshot.connectionId,
+      extractor: 'source-assessment',
+      extractedAt: now,
+      environment: 'source' as const,
+      // Step 7 (governance layer): a live connection's introspection is the
+      // most trustworthy provenance this codebase has — `confidence`/
+      // `reliability` were never actually set here before, a confirmed gap
+      // from the architecture review (Challenge 3).
+      confidence: 1.0,
+      reliability: 'live-verified' as const,
+      lastVerifiedAt: now
+    };
 
     for (const table of snapshot.tables) {
       const tableNode: TableNode = {

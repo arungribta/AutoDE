@@ -45,10 +45,24 @@ interface VerifiedQueriesFile {
   queries?: VerifiedQueryEntry[];
 }
 
+/**
+ * A generic, ephemeral fact about the current session (e.g. "a Snowflake
+ * connection is live right now") — never persisted to disk, cleared on
+ * extension reload by construction. Deliberately generic: `ContextFileManager`
+ * doesn't need to know what produced a fact (a connection, an LLM provider
+ * check, anything else), only how to render it — keeping fact producers and
+ * the LLM-prompt consumer decoupled through this one shared object.
+ */
+export interface RuntimeFact {
+  label: string;
+  text: string;
+}
+
 export class ContextFileManager implements vscode.Disposable {
   private watcher: vscode.FileSystemWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly DEBOUNCE_MS = 300;
+  private readonly runtimeFacts = new Map<string, RuntimeFact>();
 
   constructor(
     private readonly workspaceRoot: vscode.Uri,
@@ -56,6 +70,19 @@ export class ContextFileManager implements vscode.Disposable {
     private readonly log: (msg: string) => void,
     private readonly validator?: ContextValidator
   ) {}
+
+  /**
+   * Records or clears an in-memory, session-scoped fact under `key` (pass
+   * `null` to clear). Never written to `.ai-context/` — this is for live facts
+   * that must not survive a reload, not durable schema/glossary content.
+   */
+  public setRuntimeFact(key: string, fact: RuntimeFact | null): void {
+    if (fact === null) {
+      this.runtimeFacts.delete(key);
+    } else {
+      this.runtimeFacts.set(key, fact);
+    }
+  }
 
   public dispose(): void {
     if (this.debounceTimer) {
@@ -143,9 +170,33 @@ export class ContextFileManager implements vscode.Disposable {
       }
     }
 
-    // ── Derived layer: compiled `derived/graph.json` (atomic I/O), legacy `schema-graph.json` fallback ──
+    // ── Derived layer: compiled `derived/graph.json` (atomic I/O) vs. `schema-graph.json`
+    // (what a live extraction — Source Assessment, "Connect to build Source Context" —
+    // actually writes, via BaseAdapter.persistSchemaContext()). These used to be a plain
+    // exists()-based either/or, which was a real bug: persistCompiledGraph() below writes
+    // `derived/graph.json` unconditionally on every reindex, including the very first one
+    // on a fresh workspace (with zero nodes) — so after that first activation,
+    // `derived/graph.json` always exists, and a subsequent Source Assessment's fresh
+    // `schema-graph.json` was silently never read again, ever. Compare mtimes instead: a
+    // legitimately newer schema-graph.json (a fresh extraction) wins and gets compiled back
+    // into derived/graph.json below; otherwise the already-compiled cache is used as before. ──
     const graphPath = path.join(contextPath, 'derived', 'graph.json');
-    if (fs.existsSync(graphPath)) {
+    const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
+    const graphMtimeMs = fs.existsSync(graphPath) ? fs.statSync(graphPath).mtimeMs : -1;
+    const legacyMtimeMs = fs.existsSync(legacySchemaPath) ? fs.statSync(legacySchemaPath).mtimeMs : -1;
+
+    if (legacyMtimeMs > graphMtimeMs) {
+      try {
+        const content = fs.readFileSync(legacySchemaPath, 'utf8');
+        const snapshot = JSON.parse(content);
+        if (snapshot.nodes && snapshot.edges) {
+          await this.graphManager.loadSnapshot(snapshot);
+          this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges (newer than the compiled cache)`);
+        }
+      } catch (err) {
+        this.log(`Failed to load schema-graph.json: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else if (graphMtimeMs >= 0) {
       try {
         const snapshot = readGraphSnapshot(graphPath);
         if (snapshot && Array.isArray(snapshot.nodes) && Array.isArray(snapshot.edges)) {
@@ -154,20 +205,6 @@ export class ContextFileManager implements vscode.Disposable {
         }
       } catch (err) {
         this.log(`Failed to load derived/graph.json: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    } else {
-      const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
-      if (fs.existsSync(legacySchemaPath)) {
-        try {
-          const content = fs.readFileSync(legacySchemaPath, 'utf8');
-          const snapshot = JSON.parse(content);
-          if (snapshot.nodes && snapshot.edges) {
-            await this.graphManager.loadSnapshot(snapshot);
-            this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges`);
-          }
-        } catch (err) {
-          this.log(`Failed to load schema-graph.json: ${err instanceof Error ? err.message : String(err)}`);
-        }
       }
     }
 
@@ -202,7 +239,14 @@ export class ContextFileManager implements vscode.Disposable {
   }
 
   /** Persists the current in-memory graph to derived/graph.json (atomic temp + rename). */
-  private async persistCompiledGraph(): Promise<void> {
+  /**
+   * Persists the *current in-memory* graph as-is — no reload from disk first.
+   * Public (unlike the rest of this class's file-loading internals) so a
+   * caller that adds nodes directly to the shared `GraphManager` (e.g. file
+   * ingestion, Step 5) can save them without a `loadAllFiles()` reindex
+   * overwriting what it just added.
+   */
+  public async persistCompiledGraph(): Promise<void> {
     try {
       const contextPath = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath;
       const derivedDir = path.join(contextPath, 'derived');
@@ -445,9 +489,17 @@ export class ContextFileManager implements vscode.Disposable {
   public buildContextPrompt(maxTokens?: number): string {
     const parts: string[] = [];
     const stats = this.getContextStats();
+    const hasGraphContent = stats.tables > 0 || stats.terms > 0 || stats.queries > 0;
 
-    if (stats.tables === 0 && stats.terms === 0 && stats.queries === 0) {
-      return '';
+    if (this.runtimeFacts.size > 0) {
+      parts.push('## Live Session Facts');
+      for (const fact of this.runtimeFacts.values()) {
+        parts.push(`- **${fact.label}**: ${fact.text}`);
+      }
+    }
+
+    if (!hasGraphContent) {
+      return parts.join('\n');
     }
 
     parts.push('## Enterprise Context Layer');
@@ -467,7 +519,11 @@ export class ContextFileManager implements vscode.Disposable {
     if (tables.length > 0) {
       parts.push('### Database Tables');
       for (const t of tables.slice(0, 20)) {
-        parts.push(`- \`${t.fqn || t.label}\`${t.description ? ' — ' + t.description : ''}`);
+        // Step 7 (governance layer): never silently blend a live-verified fact
+        // with a best-effort one — flag file/LLM-derived tables explicitly so
+        // downstream generation (and the user) can weigh them differently.
+        const reliabilityNote = t.origin?.reliability === 'best-effort-inferred' ? ' _(file-derived, not live-verified)_' : '';
+        parts.push(`- \`${t.fqn || t.label}\`${t.description ? ' — ' + t.description : ''}${reliabilityNote}`);
       }
       if (tables.length > 20) {
         parts.push(`- ... and ${tables.length - 20} more tables`);

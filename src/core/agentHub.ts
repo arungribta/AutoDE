@@ -267,7 +267,7 @@ export class DataAgentHubHub {
    * - previous spec is a draft   -> same id and version, status draft (in-place revision)
    * - previous spec was approved -> same id, version + 1, status draft (new revision)
    */
-  public async generateSpec(userInput: string, previous?: BusinessProblemSpec): Promise<BusinessProblemSpec> {
+  public async generateSpec(userInput: string, previous?: BusinessProblemSpec, context?: string): Promise<BusinessProblemSpec> {
     const trimmed = (userInput ?? '').trim();
     if (!trimmed) {
       throw new Error('A description of the business problem is required to generate a specification.');
@@ -276,8 +276,11 @@ export class DataAgentHubHub {
     const previousBlock = previous
       ? `\n\n## Existing specification (revise it; do not discard content that is still valid)\n${JSON.stringify(this.specToJson(previous), null, 2)}`
       : '';
+    // Previously this prompt carried zero context of any kind — not even
+    // repository/connection facts other prompt-building paths already had.
+    const contextBlock = context && context.trim().length > 0 ? `\n\n${context.trim()}` : '';
 
-    const prompt = `## Business problem (from the user)\n${trimmed}${previousBlock}\n\nReturn the Business Problem Specification JSON object now.`;
+    const prompt = `## Business problem (from the user)\n${trimmed}${previousBlock}${contextBlock}\n\nReturn the Business Problem Specification JSON object now.`;
 
     this.log(previous ? 'Regenerating the Business Problem Specification\u2026' : 'Drafting the Business Problem Specification\u2026');
     const raw = await this.callConfiguredLlm(
@@ -466,7 +469,7 @@ export class DataAgentHubHub {
    * from the auto-planner (see the note on `VALID_AGENT_TYPES`). Bypasses the
    * DAG: this is a single, immediate step, not a queued plan step.
    */
-  public async runToolSkill(skillId: string, instruction: string): Promise<{ success: boolean; message: string; error?: string }> {
+  public async runToolSkill(skillId: string, instruction: string, liveContext?: string): Promise<{ success: boolean; message: string; error?: string }> {
     const step: PlanStep = {
       id: `skill-${Date.now().toString(36)}`,
       assignedAgent: 'toolSkillAgent',
@@ -476,7 +479,10 @@ export class DataAgentHubHub {
     };
     const context: AgentExecutionContext = {
       objective: this.state.objective,
-      schemaContext: this.state.schemaContext,
+      // Previously always this.state.schemaContext (a stale, plan-generation-scoped
+      // value) — a caller can now supply a live context block (e.g. from
+      // ContextFileManager.buildContextPrompt(), runtime facts included) instead.
+      schemaContext: liveContext ?? this.state.schemaContext,
       sourceProvider: this.state.sourceProvider,
       targetEnvironment: this.state.targetEnvironment,
       settings: this.configManager.getSettings(),

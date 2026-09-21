@@ -15,6 +15,10 @@ import { ProfileEditorProvider } from './editors/ProfileEditorProvider';
 import { DocEditorProvider } from './editors/DocEditorProvider';
 import { EDITOR_DATA_MODEL, EDITOR_STTM, EDITOR_GRAPH, EDITOR_PROFILE, EDITOR_DOC } from './core/extensionIdentity';
 import { createDisposableRegistry } from './core/disposables';
+import { registerDefaultCredentialResolvers, resolveCredential } from './dqm/credentials';
+import { DataPlatformProvider, DataAgentHubSettings } from './core/types';
+import { parseFile, detectFileFormat } from './context/fileIngestion';
+import * as path from 'node:path';
 
 /**
  * Resources that outlive a single command (e.g. `connectionManager` below,
@@ -43,6 +47,7 @@ async function copyDirectoryRecursive(source: vscode.Uri, target: vscode.Uri): P
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
   const hub = new DataAgentHubHub(configManager);
+  registerDefaultCredentialResolvers(context.secrets);
 
   // Which VS Code Language Model provider the user has selected (Copilot or
   // Claude). Any other provider is API-key based and not exercised by these
@@ -92,6 +97,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
   let connectionManager: ConnectionManager | undefined;
   disposableRegistry.register({ dispose: () => connectionManager?.dispose() });
+  // Target's own, independent live connection (v0.19.0) — both can be connected
+  // simultaneously per the confirmed decision; a completely separate
+  // ConnectionManager instance rather than reusing the source one.
+  let targetConnectionManager: ConnectionManager | undefined;
+  disposableRegistry.register({ dispose: () => targetConnectionManager?.dispose() });
 
   // Initialize TargetConfigManager (.ai-context/target-environment.yaml, profile
   // inheritance) — kept instantiated for future dev/staging/prod profile
@@ -152,6 +162,55 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const resetSession = vscode.commands.registerCommand(`${EXTENSION_ID}.resetSession`, async () => {
     await hub.resetPlan();
+  });
+
+  // Phase 3a-ii — interactive-developer onboarding: detects the platform's own
+  // CLI, offers its configured connections, and resolves the chosen one down to a
+  // Phase 3a-i `CredentialReference` instead of asking the user to re-type
+  // settings. Delegates to the sidebar provider, which owns Target Context.
+  const connectToDataPlatform = vscode.commands.registerCommand(`${EXTENSION_ID}.connectToDataPlatform`, async () => {
+    try {
+      await sidebarProvider.triggerConnectToDataPlatform();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to connect to the data platform.';
+      await vscode.window.showErrorMessage(message);
+    }
+  });
+
+  // Service-account path (Phase 3a-ii): deliberately un-fancy — no chat, no
+  // QuickPicker, no CLI detection dialog. A platform team sets
+  // "autoDataEngineeringHub.serviceAccountCredentialRef" once (JSON:
+  // {platform, resolverId, ref}) and this command just proves it resolves,
+  // with staged feedback matching testLanguageModelHandler's style.
+  const testServiceAccountCredential = vscode.commands.registerCommand(`${EXTENSION_ID}.testServiceAccountCredential`, async () => {
+    const raw = (configManager.getSettings().serviceAccountCredentialRef ?? '').trim();
+    if (!raw) {
+      vscode.window.showErrorMessage('"autoDataEngineeringHub.serviceAccountCredentialRef" is not set. Set it to {"platform":"snowflake","resolverId":"env","ref":"prod"} (or similar) first.');
+      return;
+    }
+    let parsed: { platform?: string; resolverId?: string; ref?: string };
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      vscode.window.showErrorMessage(`"autoDataEngineeringHub.serviceAccountCredentialRef" is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (!parsed.platform || !parsed.resolverId) {
+      vscode.window.showErrorMessage('"autoDataEngineeringHub.serviceAccountCredentialRef" must include at least "platform" and "resolverId".');
+      return;
+    }
+    const reference = { platform: parsed.platform as DataPlatformProvider, principalType: 'service-account' as const, resolverId: parsed.resolverId, ref: parsed.ref ?? '' };
+    vscode.window.showInformationMessage(`Resolving a service-account credential for ${parsed.platform} via resolver "${parsed.resolverId}"…`);
+    try {
+      const resolved = await resolveCredential(reference);
+      if (!resolved) {
+        vscode.window.showErrorMessage(`Resolver "${parsed.resolverId}" could not resolve this reference. Check the referenced env vars / CLI config / secret exist.`);
+        return;
+      }
+      vscode.window.showInformationMessage(`Resolved fields: ${Object.keys(resolved).join(', ')}.`);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Resolution error: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
 
   const asLmProvider = (v: unknown): 'copilot' | 'claude' | undefined =>
@@ -271,35 +330,396 @@ export function activate(context: vscode.ExtensionContext): void {
     } catch (err) { vscode.window.showErrorMessage('Failed to open handoff editor: ' + (err instanceof Error ? err.message : String(err))); }
   });
 
-  const testConnection = vscode.commands.registerCommand(`${EXTENSION_ID}.testConnection`, async () => {
+  /**
+   * Shared by `testConnection`/`testTargetConnection` (v0.19.0) — same logic,
+   * parameterized by role, so source and target don't drift into two
+   * independently-maintained copies. Reads/writes the role-appropriate
+   * `ConnectionManager` handle and settings/secrets (see
+   * `ConnectionManager.getCredentialsFromSettings()`'s `role` param).
+   */
+  async function runConnectionTest(role: 'source' | 'target'): Promise<void> {
+    const commandId = role === 'target' ? `${EXTENSION_ID}.testTargetConnection` : `${EXTENSION_ID}.testConnection`;
     try {
       const settings = configManager.getSettings();
-      const platform = settings.defaultProvider ?? 'snowflake';
-      const credentials = ConnectionManager.getCredentialsFromSettings(platform, settings as unknown as Record<string, unknown>);
+      const platform = (role === 'target' ? settings.defaultTargetProvider : settings.defaultProvider) ?? 'snowflake';
+      const credentials = ConnectionManager.getCredentialsFromSettings(platform, settings as unknown as Record<string, unknown>, role);
       if (platform === 'snowflake') {
-        const password = await configManager.getSnowflakePassword(); if (password) credentials['password'] = password;
-        const passphrase = await configManager.getSnowflakePrivateKeyPassphrase(); if (passphrase) credentials['passphrase'] = passphrase;
+        const password = role === 'target' ? await configManager.getTargetSnowflakePassword() : await configManager.getSnowflakePassword();
+        if (password) credentials['password'] = password;
+        const passphrase = role === 'target' ? await configManager.getTargetSnowflakePrivateKeyPassphrase() : await configManager.getSnowflakePrivateKeyPassphrase();
+        if (passphrase) credentials['privateKeyPassphrase'] = passphrase;
+      } else if (platform === 'databricks') {
+        const token = role === 'target' ? await configManager.getTargetDatabricksToken() : await configManager.getDatabricksToken();
+        if (token) credentials['token'] = token;
       }
+      // Only what every Snowflake execution path genuinely requires up front —
+      // Warehouse/Database used to be hardcoded here too, but that drifted out of
+      // sync with SnowflakeAdapter's real requirements (Database is REST-tier-only;
+      // Warehouse isn't required by any path, since Snowflake falls back to the
+      // account's default warehouse). Anything else missing is surfaced by
+      // SnowflakeAdapter.connect() itself with a path-specific, accurate message.
       const missing: string[] = [];
-      if (platform === 'snowflake') { if (!credentials['account']) missing.push('Account'); if (!credentials['username']) missing.push('Username'); if (!credentials['warehouse']) missing.push('Warehouse'); if (!credentials['database']) missing.push('Database'); }
-      else if (platform === 'databricks') { if (!credentials['workspaceUrl']) missing.push('Workspace URL'); if (!credentials['catalog']) missing.push('Catalog'); }
-      if (missing.length > 0) { vscode.window.showErrorMessage(`Missing credentials for ${platform}: ${missing.join(', ')}`); return; }
-      if (connectionManager) { connectionManager.dispose(); }
-      connectionManager = new ConnectionManager((msg: string) => { console.log(`[AutoDE Connection] ${msg}`); });
-      const info = await connectionManager.connect(platform, credentials);
-      vscode.window.showInformationMessage(`Connected to ${platform}: ${info.databaseName}.${info.schemaName} (v${info.version})`);
-    } catch (err) { vscode.window.showErrorMessage(`Connection failed: ${err instanceof Error ? err.message : String(err)}`); }
+      if (platform === 'snowflake') { if (!credentials['account']) missing.push('Account'); if (!credentials['username']) missing.push('Username'); }
+      else if (platform === 'databricks') { if (!credentials['workspaceUrl']) missing.push('Workspace URL'); if (!credentials['httpPath']) missing.push('SQL Warehouse HTTP Path'); if (!credentials['token']) missing.push('Token'); }
+      if (missing.length > 0) {
+        const msg = `Missing ${role} credentials for ${platform}: ${missing.join(', ')}`;
+        vscode.window.showErrorMessage(msg);
+        sidebarProvider.logToChat(msg);
+        return;
+      }
+      const newManager = new ConnectionManager((msg: string) => { console.log(`[AutoDE ${role} Connection] ${msg}`); sidebarProvider.logToChat(msg); });
+      if (role === 'target') { targetConnectionManager?.dispose(); targetConnectionManager = newManager; } else { connectionManager?.dispose(); connectionManager = newManager; }
+      const info = await newManager.connect(platform, credentials);
+      const successMsg = `Connected to ${role} ${platform}: ${info.databaseName}.${info.schemaName} (v${info.version})`;
+      vscode.window.showInformationMessage(successMsg);
+      sidebarProvider.logToChat(successMsg);
+      // This only proves connectivity — it does NOT extract schema (that's
+      // "Source Assessment", a source-only, separate step), so the status
+      // pill/chat context should say "connected" without implying tables are
+      // already known.
+      sidebarProvider.notifyConnectionStatus(role, { connected: true, platform, detail: `${info.databaseName}.${info.schemaName}` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // CLI-execution consent is an easy first-connection trip-up now that
+      // username/password auth also routes through the CLI (it needs the same
+      // consent a CLI-derived connection already required) — offer to flip the
+      // one setting and retry immediately, rather than sending the user hunting
+      // through Settings JSON for a boolean they may not know exists.
+      if (message.includes('dataPlatformCliConsent')) {
+        const choice = await vscode.window.showErrorMessage(`Connection failed: ${message}`, 'Enable CLI Consent & Retry');
+        if (choice === 'Enable CLI Consent & Retry') {
+          await configManager.updateSettings({ dataPlatformCliConsent: true });
+          sidebarProvider.logToChat('Enabled "autoDataEngineeringHub.dataPlatformCliConsent" — retrying connection…');
+          await vscode.commands.executeCommand(commandId);
+          return;
+        }
+      }
+      const failMsg = `Connection failed: ${message}`;
+      vscode.window.showErrorMessage(failMsg);
+      sidebarProvider.logToChat(failMsg);
+      sidebarProvider.notifyConnectionStatus(role, { connected: false });
+    }
+  }
+
+  const testConnection = vscode.commands.registerCommand(`${EXTENSION_ID}.testConnection`, () => runConnectionTest('source'));
+  const testTargetConnection = vscode.commands.registerCommand(`${EXTENSION_ID}.testTargetConnection`, () => runConnectionTest('target'));
+
+  // Returns its real outcome (not just void) so webviewProvider.ts's webview handler
+  // can react to what actually happened instead of duplicating this logic itself or
+  // guessing — the exact bug class this command previously fell into with a second,
+  // parallel "sourceAssessment" webview case that only reloaded already-on-disk
+  // context and unconditionally reported success without ever touching a live
+  // connection at all.
+  const sourceAssessment = vscode.commands.registerCommand(
+    `${EXTENSION_ID}.sourceAssessment`,
+    async (): Promise<{ success: boolean; tableCount?: number; viewCount?: number; error?: string }> => {
+      try {
+        if (!connectionManager || !connectionManager.isConnected()) {
+          await vscode.commands.executeCommand(`${EXTENSION_ID}.testConnection`);
+          if (!connectionManager || !connectionManager.isConnected()) {
+            const msg = 'Not connected to a data platform.';
+            vscode.window.showErrorMessage(msg);
+            sidebarProvider.logToChat(msg);
+            return { success: false, error: msg };
+          }
+        }
+        vscode.window.showInformationMessage('Running source assessment...');
+        sidebarProvider.logToChat('Running source assessment…');
+        const snapshot = await connectionManager.extractMetadata({ includeProfiling: true });
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot); }
+        const doneMsg = `Source assessment complete: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`;
+        vscode.window.showInformationMessage(doneMsg);
+        sidebarProvider.logToChat(doneMsg);
+        const platform = configManager.getSettings().defaultProvider ?? 'snowflake';
+        sidebarProvider.notifyConnectionStatus('source', { connected: true, platform, detail: `${snapshot.tables.length} tables, ${snapshot.views.length} views extracted` });
+        return { success: true, tableCount: snapshot.tables.length, viewCount: snapshot.views.length };
+      } catch (err) {
+        const failMsg = `Source assessment failed: ${err instanceof Error ? err.message : String(err)}`;
+        vscode.window.showErrorMessage(failMsg);
+        sidebarProvider.logToChat(failMsg);
+        return { success: false, error: failMsg };
+      }
+    }
+  );
+
+  /**
+   * Step 7 (governance layer) — the explicit, never-silent "re-verify" action
+   * the architecture review called for: nothing today re-validates captured
+   * context against a live source after the fact, so an unnoticed drift
+   * becomes a real correctness risk once specs/pipelines are generated off
+   * stale context. Re-runs the real Source Assessment extraction (the same
+   * one `sourceAssessment` already does) and — the part that's actually new —
+   * diffs the source-tagged table set before/after and reports the drift in
+   * plain terms, rather than silently overwriting context with no visible
+   * signal that anything changed. Never removes a table from context on its
+   * own initiative even if it's missing from the fresh extraction: a table
+   * temporarily inaccessible (a permissions change, a network blip) should
+   * surface as a flag for the user to investigate, not silently vanish.
+   */
+  const reVerifySourceSchema = vscode.commands.registerCommand(`${EXTENSION_ID}.reVerifySourceSchema`, async () => {
+    const before = new Set(sidebarProvider.listSourceTableFqns());
+    const result = await vscode.commands.executeCommand<{ success: boolean; tableCount?: number; viewCount?: number; error?: string }>(
+      `${EXTENSION_ID}.sourceAssessment`
+    );
+    if (!result?.success) return; // sourceAssessment already reported its own error
+    const after = new Set(sidebarProvider.listSourceTableFqns());
+    const added = [...after].filter((fqn) => !before.has(fqn));
+    const removed = [...before].filter((fqn) => !after.has(fqn));
+    const unchanged = [...after].filter((fqn) => before.has(fqn)).length;
+
+    const lines = [`Re-verified source schema: ${unchanged} table(s)/view(s) confirmed still present.`];
+    if (added.length > 0) lines.push(`${added.length} new: ${added.join(', ')}`);
+    if (removed.length > 0) lines.push(`${removed.length} no longer found in this extraction (may lack access, or may have been dropped — review before assuming they're gone): ${removed.join(', ')}`);
+    if (added.length === 0 && removed.length === 0 && before.size > 0) lines.push('No drift detected.');
+    const msg = lines.join(' ');
+    vscode.window.showInformationMessage(msg);
+    sidebarProvider.logToChat(msg);
   });
 
-  const sourceAssessment = vscode.commands.registerCommand(`${EXTENSION_ID}.sourceAssessment`, async () => {
+  /** Shared by `disconnectDataPlatform`/`disconnectTargetDataPlatform` (v0.19.0) — same logic, parameterized by role. */
+  async function runDisconnect(role: 'source' | 'target'): Promise<void> {
+    const mgr = role === 'target' ? targetConnectionManager : connectionManager;
+    if (!mgr || !mgr.isConnected()) {
+      const msg = `Not currently connected to a ${role} data platform.`;
+      vscode.window.showInformationMessage(msg);
+      sidebarProvider.logToChat(msg);
+      return;
+    }
     try {
-      if (!connectionManager || !connectionManager.isConnected()) { await vscode.commands.executeCommand(`${EXTENSION_ID}.testConnection`); if (!connectionManager || !connectionManager.isConnected()) { vscode.window.showErrorMessage('Not connected to a data platform.'); return; } }
-      vscode.window.showInformationMessage('Running source assessment...');
-      const snapshot = await connectionManager.extractMetadata({ includeProfiling: true });
-      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot); }
-      vscode.window.showInformationMessage(`Source assessment complete: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`);
-    } catch (err) { vscode.window.showErrorMessage(`Source assessment failed: ${err instanceof Error ? err.message : String(err)}`); }
+      await mgr.disconnect();
+      const msg = `Disconnected from the ${role} data platform.`;
+      vscode.window.showInformationMessage(msg);
+      sidebarProvider.logToChat(msg);
+    } catch (err) {
+      const failMsg = `Disconnect failed: ${err instanceof Error ? err.message : String(err)}`;
+      vscode.window.showErrorMessage(failMsg);
+      sidebarProvider.logToChat(failMsg);
+    } finally {
+      // Reported unconditionally, even if the adapter's own disconnect() threw —
+      // the local ConnectionManager handle is gone either way (isConnected() will
+      // report false from here on), so chat/the status pill must not keep
+      // claiming a connection that no longer exists on AutoDE's side.
+      sidebarProvider.notifyConnectionStatus(role, { connected: false });
+    }
+  }
+
+  const disconnectDataPlatform = vscode.commands.registerCommand(`${EXTENSION_ID}.disconnectDataPlatform`, () => runDisconnect('source'));
+  const disconnectTargetDataPlatform = vscode.commands.registerCommand(`${EXTENSION_ID}.disconnectTargetDataPlatform`, () => runDisconnect('target'));
+
+  /**
+   * Step 4 of the Source & Target Context Architecture plan — "don't assume
+   * the whole account is relevant." Connects (if not already), lists the real
+   * databases/catalogs and schemas via the adapter's new `listDatabases()`/
+   * `listSchemas()`, and lets the user pick from what's actually there via a
+   * native QuickPick rather than typing a name blindly. Writes the selection
+   * straight into settings (bypassing the webview's own save flow, since this
+   * runs from a command/button, not a form submit) and pushes a refresh so
+   * the panel's displayed fields don't go stale.
+   */
+  async function browseDatabaseAndSchema(role: 'source' | 'target'): Promise<void> {
+    let mgr = role === 'target' ? targetConnectionManager : connectionManager;
+    if (!mgr || !mgr.isConnected()) {
+      await runConnectionTest(role);
+      mgr = role === 'target' ? targetConnectionManager : connectionManager;
+      if (!mgr || !mgr.isConnected()) { return; } // runConnectionTest already reported why
+    }
+    try {
+      const databases = await mgr.listDatabases();
+      if (databases.length === 0) {
+        const msg = `No databases/catalogs found for the ${role} connection.`;
+        vscode.window.showInformationMessage(msg);
+        sidebarProvider.logToChat(msg);
+        return;
+      }
+      const database = await vscode.window.showQuickPick(databases, { title: `Choose a ${role} database/catalog`, placeHolder: `${databases.length} found` });
+      if (!database) return;
+
+      const schemas = await mgr.listSchemas(database);
+      let schema: string | undefined;
+      if (schemas.length > 0) {
+        schema = await vscode.window.showQuickPick(schemas, { title: `Choose a ${role} schema`, placeHolder: `${schemas.length} found in ${database}` });
+        if (!schema) return; // database alone is still useful to save, but stay consistent with "cancel means cancel"
+      }
+
+      const platform = (role === 'target' ? configManager.getSettings().defaultTargetProvider : configManager.getSettings().defaultProvider) ?? 'snowflake';
+      const patch: Partial<DataAgentHubSettings> = {};
+      if (platform === 'snowflake') {
+        if (role === 'target') { patch.defaultTargetSnowflakeDatabase = database; if (schema) patch.defaultTargetSnowflakeSchema = schema; }
+        else { patch.defaultSnowflakeDatabase = database; if (schema) patch.defaultSnowflakeSchema = schema; }
+      } else if (platform === 'databricks') {
+        if (role === 'target') { patch.defaultTargetDatabricksCatalog = database; if (schema) patch.defaultTargetDatabricksSchema = schema; }
+        else { patch.defaultDatabricksCatalog = database; if (schema) patch.defaultDatabricksSchema = schema; }
+      } else {
+        vscode.window.showInformationMessage(`Database/schema browsing isn't wired up for "${platform}" yet.`);
+        return;
+      }
+      await configManager.updateSettings(patch);
+      await sidebarProvider.refreshSettingsInWebview();
+      const msg = `Selected ${role} ${platform} scope: ${database}${schema ? '.' + schema : ''}.`;
+      vscode.window.showInformationMessage(msg);
+      sidebarProvider.logToChat(msg);
+    } catch (err) {
+      const msg = `Could not list ${role} databases/schemas: ${err instanceof Error ? err.message : String(err)}`;
+      vscode.window.showErrorMessage(msg);
+      sidebarProvider.logToChat(msg);
+    }
+  }
+
+  const browseSourceDatabase = vscode.commands.registerCommand(`${EXTENSION_ID}.browseSourceDatabase`, () => browseDatabaseAndSchema('source'));
+  const browseTargetDatabase = vscode.commands.registerCommand(`${EXTENSION_ID}.browseTargetDatabase`, () => browseDatabaseAndSchema('target'));
+
+  /**
+   * Step 5 of the Source & Target Context Architecture plan — real,
+   * structural file-based ingestion (CSV/JSON/DDL) for when live connectivity
+   * isn't available (security restrictions, network boundaries, third-party-
+   * managed systems). Deliberately source-only: the reviewed proposal lists
+   * file ingestion under the Source Panel's responsibilities, not Target's.
+   * Writes directly into the same shared schema graph a live connection's
+   * Source Assessment does, via `ingestFileIntoGraph()` — so it's visible
+   * everywhere `ContextFileManager.buildContextPrompt()` already is, with no
+   * new rendering path needed. Consistent with the same known, documented gap
+   * as `testConnection`/`sourceAssessment`: this does not also write a
+   * `SourceContext` record, since that's spec-scoped and this command (like
+   * those two) runs without necessarily having an active business problem.
+   */
+  const ingestFileAsSourceContext = vscode.commands.registerCommand(`${EXTENSION_ID}.ingestFileAsSourceContext`, async () => {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      filters: { 'Structured data files (CSV, JSON, DDL)': ['csv', 'json', 'sql', 'ddl'] },
+      title: 'Select a CSV, JSON, or DDL (.sql) file to ingest as Source Context'
+    });
+    if (!picked || picked.length === 0) return;
+    const fileUri = picked[0];
+    const fileName = path.basename(fileUri.fsPath);
+    const format = detectFileFormat(fileUri.fsPath);
+    if (!format) {
+      const msg = `Unsupported file type: ${fileName}. Supported: .csv, .json, .sql, .ddl.`;
+      vscode.window.showErrorMessage(msg);
+      sidebarProvider.logToChat(msg);
+      return;
+    }
+    try {
+      const contentBytes = await vscode.workspace.fs.readFile(fileUri);
+      const content = Buffer.from(contentBytes).toString('utf8');
+      const result = parseFile(content, fileUri.fsPath);
+      if (result.tableCount === 0) {
+        const msg = `Could not parse any tables from ${fileName}: ${result.warnings.join(' ') || 'unknown reason'}`;
+        vscode.window.showErrorMessage(msg);
+        sidebarProvider.logToChat(msg);
+        return;
+      }
+      await sidebarProvider.ingestFileIntoGraph(result.nodes, result.edges);
+      const doneMsg = `Ingested ${fileName}: ${result.tableCount} table(s), ${result.columnCount} column(s).${result.warnings.length > 0 ? ' (' + result.warnings.join(' ') + ')' : ''}`;
+      vscode.window.showInformationMessage(doneMsg);
+      sidebarProvider.logToChat(doneMsg);
+    } catch (err) {
+      const msg = `File ingestion failed for ${fileName}: ${err instanceof Error ? err.message : String(err)}`;
+      vscode.window.showErrorMessage(msg);
+      sidebarProvider.logToChat(msg);
+    }
+  });
+
+  /**
+   * Step 6 of the Source & Target Context Architecture plan — a QuickPick-
+   * driven flow to record one source→target `EntityMapping` into the active
+   * spec's Mapping Context. Both sides are picked from the same shared graph
+   * (`listMappableTables()`), per the architecture review's unified-graph
+   * decision — there's no separate "target graph" to pick from. A target
+   * table can also be typed freehand for Greenfield work, where no target
+   * node exists yet. Column mappings are auto-matched by case-insensitive
+   * name; per this codebase's QuickPick-only UX convention (no bespoke visual
+   * mapping editor), fine-grained column edits happen by editing the saved
+   * `context/mapping-context.yaml` directly.
+   */
+  const createMapping = vscode.commands.registerCommand(`${EXTENSION_ID}.createMapping`, async () => {
+    const specInfo = sidebarProvider.getMappingSpecInfo();
+    if (!specInfo) { vscode.window.showErrorMessage('No active business problem — approve a specification first.'); return; }
+
+    const tables = sidebarProvider.listMappableTables();
+    if (tables.length === 0) { vscode.window.showErrorMessage('No tables in context yet — connect a data platform or ingest a file first.'); return; }
+
+    const sourcePick = await vscode.window.showQuickPick(
+      tables.map((t) => ({ label: t.label, description: t.fqn, id: t.id })),
+      { title: 'Create Mapping — choose the SOURCE table', placeHolder: `${tables.length} table(s) available` }
+    );
+    if (!sourcePick) return;
+
+    const targetChoice = await vscode.window.showQuickPick(
+      [
+        { label: '$(edit) Enter target table name manually…', pickKind: 'manual' as const },
+        ...tables.map((t) => ({ label: t.label, description: t.fqn, id: t.id, pickKind: 'graph' as const }))
+      ],
+      { title: 'Create Mapping — choose the TARGET table', placeHolder: 'Pick an existing table, or enter a new one for Greenfield work' }
+    );
+    if (!targetChoice) return;
+
+    let targetEntityId: string | undefined;
+    let targetName: string;
+    let targetColumns: Array<{ id: string; label: string }> = [];
+    if (targetChoice.pickKind === 'manual') {
+      const typed = await vscode.window.showInputBox({ title: 'Target table name', placeHolder: 'e.g. dim_customer', validateInput: (v) => (v.trim() ? undefined : 'Required') });
+      if (!typed) return;
+      targetName = typed.trim();
+    } else {
+      targetEntityId = (targetChoice as { id: string }).id;
+      targetName = targetChoice.label;
+      targetColumns = sidebarProvider.listTableColumns(targetEntityId);
+    }
+
+    const sourceColumns = sidebarProvider.listTableColumns(sourcePick.id);
+    const columns = sourceColumns.map((sc) => {
+      const match = targetColumns.find((tc) => tc.label.toLowerCase() === sc.label.toLowerCase());
+      return { sourceColumn: sc.label, targetColumn: match ? match.label : sc.label };
+    });
+
+    const notes = await vscode.window.showInputBox({ title: 'Notes (optional)', placeHolder: 'Any mapping notes — leave blank to skip' });
+
+    const mapping = {
+      id: `map-${sourcePick.id}-${targetEntityId ?? targetName}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+      sourceEntityId: sourcePick.id,
+      sourceFqn: sourcePick.description ?? sourcePick.label,
+      targetEntityId,
+      targetName,
+      columns,
+      notes: notes?.trim() || undefined
+    };
+
+    try {
+      await sidebarProvider.upsertEntityMapping(mapping);
+      const msg = `Mapping saved: ${sourcePick.label} → ${targetName} (${columns.length} column(s)).`;
+      vscode.window.showInformationMessage(msg);
+      sidebarProvider.logToChat(msg);
+    } catch (err) {
+      const msg = `Could not save mapping: ${err instanceof Error ? err.message : String(err)}`;
+      vscode.window.showErrorMessage(msg);
+      sidebarProvider.logToChat(msg);
+    }
+  });
+
+  /**
+   * The second half of Step 6 — an explicit, spec-pinned snapshot of the
+   * already-unified semantic graph (per the architecture review's Q3, the
+   * graph itself doesn't need a second modeling system; this just captures
+   * its state at a point in time, mirroring the version-pinning
+   * `PipelineSpec`/primitive-versioning already use elsewhere). Never runs
+   * automatically — a real snapshot action, not a background sync.
+   */
+  const buildSemanticLayer = vscode.commands.registerCommand(`${EXTENSION_ID}.buildSemanticLayer`, async () => {
+    try {
+      const snapshot = await sidebarProvider.buildSemanticLayer();
+      if (!snapshot) {
+        vscode.window.showErrorMessage('No active business problem — approve a specification first.');
+        return;
+      }
+      const msg = `Unified Semantic Layer snapshot built: spec v${snapshot.specVersion} rev${snapshot.version} (${snapshot.nodeCount} node(s), ${snapshot.edgeCount} edge(s)).`;
+      vscode.window.showInformationMessage(msg);
+      sidebarProvider.logToChat(msg);
+    } catch (err) {
+      const msg = `Could not build the Unified Semantic Layer snapshot: ${err instanceof Error ? err.message : String(err)}`;
+      vscode.window.showErrorMessage(msg);
+      sidebarProvider.logToChat(msg);
+    }
   });
 
   const syncMetadata = vscode.commands.registerCommand(`${EXTENSION_ID}.syncMetadata`, async () => {
@@ -424,9 +844,10 @@ export function activate(context: vscode.ExtensionContext): void {
     openSidebar, generatePlan, executePlan, generatePipelineSpec, resetSession,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
-    testConnection, sourceAssessment, syncMetadata, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, syncMetadata, reindex,
     importToolSkill, runToolSkill,
-    newChat, chatHistory, discardChat
+    newChat, chatHistory, discardChat,
+    connectToDataPlatform, testServiceAccountCredential
   );
 }
 

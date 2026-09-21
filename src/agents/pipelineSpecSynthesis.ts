@@ -52,11 +52,13 @@ function renderTargetContext(tc?: TargetContext): string {
 }
 
 function renderSourceContext(sc?: SourceContext): string {
-  if (!sc) return '(no approved Source Context)';
+  if (!sc || sc.sources.length === 0) return '(no approved Source Context)';
   const parts: string[] = [];
-  if (sc.sourceType) parts.push(`Source type: ${sc.sourceType}`);
-  if (sc.description) parts.push(`Description: ${sc.description}`);
-  if (sc.connectionSummary) parts.push(`Connection: ${JSON.stringify(sc.connectionSummary)}`);
+  for (const entry of sc.sources) {
+    if (entry.sourceType) parts.push(`Source type: ${entry.sourceType}`);
+    if (entry.description) parts.push(`Description: ${entry.description}`);
+    if (entry.connectionSummary) parts.push(`Connection (${entry.platform ?? entry.connectionId}): ${JSON.stringify(entry.connectionSummary)}`);
+  }
   return parts.length > 0 ? parts.join('\n') : '(Source Context approved but empty)';
 }
 

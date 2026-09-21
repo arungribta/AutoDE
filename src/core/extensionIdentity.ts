@@ -26,5 +26,10 @@ export function getExtensionDescription(): string {
 export const SECRET_KEYS = {
   llmApiKey: 'autoDataEngineeringHub.llmApiKey',
   snowflakePassword: 'autoDataEngineeringHub.snowflakePassword',
-  snowflakePrivateKeyPassphrase: 'autoDataEngineeringHub.snowflakePrivateKeyPassphrase'
+  snowflakePrivateKeyPassphrase: 'autoDataEngineeringHub.snowflakePrivateKeyPassphrase',
+  databricksToken: 'autoDataEngineeringHub.databricksToken',
+  // ── Target connection secrets (v0.19.0) — see DataAgentHubSettings' doc comment ──
+  targetSnowflakePassword: 'autoDataEngineeringHub.targetSnowflakePassword',
+  targetSnowflakePrivateKeyPassphrase: 'autoDataEngineeringHub.targetSnowflakePrivateKeyPassphrase',
+  targetDatabricksToken: 'autoDataEngineeringHub.targetDatabricksToken'
 } as const;

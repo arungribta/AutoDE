@@ -50,6 +50,8 @@ export interface QueryResult {
 // ── Schema Snapshot ──
 export interface SchemaSnapshot {
   readonly platform: DataPlatformProvider;
+  /** Identifies the specific connection this snapshot came from (e.g. `snowflake:prod`), not just the platform kind — needed once more than one source connection can exist. See `BaseDataSourceAdapter.getConnectionId()`. */
+  readonly connectionId?: string;
   readonly extractedAt: string;
   readonly tables: TableMetadata[];
   readonly views: ViewMetadata[];
@@ -140,4 +142,14 @@ export interface IDataSourceAdapter extends vscode.Disposable {
   translateDialect(sql: string, targetDialect: SqlDialect): string;
   getMetadataQueries(): PlatformMetadataQueries;
   persistSchemaContext(snapshot: SchemaSnapshot, workspaceUri: vscode.Uri): Promise<void>;
+  /**
+   * Lists the databases/catalogs visible to the connected principal — lets a
+   * user pick from what's actually there instead of typing a name blindly, and
+   * is the discovery step "don't assume the whole account is relevant" needs
+   * (Source & Target Context Architecture plan, Step 4). For Databricks this
+   * lists catalogs (Unity Catalog's rough equivalent of a "database").
+   */
+  listDatabases(): Promise<string[]>;
+  /** Lists the schemas within a given database/catalog — same rationale as `listDatabases()`. */
+  listSchemas(database: string): Promise<string[]>;
 }

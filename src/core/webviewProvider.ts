@@ -4,13 +4,14 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, DataPlatformProvider, ToolExecutionMode } from './types';
+import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from './types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
 import { SkillRegistry, loadSkillsFromDirectory } from './skillRegistry';
 import { composeSynthesisPrompt } from './specOpsPrompts';
 import { buildDiscoveryProgress as buildDiscoveryProgressPure, skillNameForField, DiscoveryProgress } from './discoveryProgress';
 import { GraphManager } from '../context/GraphManager';
+import { BaseNode, GraphEdge } from '../context/types';
 import { ContextFileManager } from '../context/ContextFileManager';
 import { ContextValidator } from '../context/ContextValidator';
 import { SourceRegistry } from '../context/SourceRegistry';
@@ -21,6 +22,8 @@ import { scanArtifactStaleness } from '../context/ArtifactStalenessScanner';
 import { ChatSessionManager } from '../context/ChatSessionManager';
 import { TargetContextManager } from '../context/TargetContextManager';
 import { SourceContextManager } from '../context/SourceContextManager';
+import { MappingContextManager } from '../context/MappingContextManager';
+import { SemanticLayerManager } from '../context/SemanticLayerManager';
 import { ActiveProblemManager } from '../context/ActiveProblemManager';
 import { AttachmentStore } from '../context/AttachmentStore';
 import { PipelineSpecManager } from '../context/PipelineSpecManager';
@@ -32,6 +35,7 @@ import { createDeclarativePrimitive } from './transforms/declarative/adapter';
 import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from './transforms/declarative/lifecycle';
 import { PrimitiveDefinition } from './transforms/declarative/types';
 import { ConnectionManager } from '../dqm/ConnectionManager';
+import { getCliDescriptor, resolveCredential, CredentialReference } from '../dqm/credentials';
 import { applyCspNonce } from './webviewSecurity';
 import { classifyImplementationType } from './implementationType';
 import { buildTargetContextQuestions } from './targetContextQuestions';
@@ -59,6 +63,22 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private activeChatId?: string;
   private targetContextManager?: TargetContextManager;
   private sourceContextManager?: SourceContextManager;
+  private mappingContextManager?: MappingContextManager;
+  private semanticLayerManager?: SemanticLayerManager;
+  /**
+   * The most recent live connection outcome, per role — brownfield work
+   * routinely needs both a source (to read from) and a target (to write to),
+   * and `ConnectionManager` itself only ever holds one live connection at a
+   * time, so this is the one place both roles' last-known status lives for the
+   * UI. Drives the top status pills; the LLM-facing side of the same event
+   * goes through `ContextFileManager.setRuntimeFact()` instead (see
+   * `notifyConnectionStatus()`), so a UI concern and a prompt-content concern
+   * don't have to be kept in sync by hand at each call site.
+   */
+  private connectionStatus: Record<'source' | 'target', { connected: boolean; platform?: string; detail?: string }> = {
+    source: { connected: false },
+    target: { connected: false }
+  };
   private pipelineSpecManager?: PipelineSpecManager;
   private attachmentStore?: AttachmentStore;
   private activeProblemManager?: ActiveProblemManager;
@@ -91,6 +111,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** "AutoDE: Generate Pipeline Spec" command proxy (Phase 2B-i). */
   public async triggerGeneratePipelineSpec(): Promise<void> {
     await this.generatePipelineSpec();
+  }
+
+  /** "AutoDE: Connect to Data Platform" command proxy (Phase 3a-ii). */
+  public async triggerConnectToDataPlatform(): Promise<void> {
+    await this.connectToDataPlatform();
   }
 
   /**
@@ -221,16 +246,37 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postLog(`Chat session initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Detect the active local-LLM provider (Copilot / Claude Code) and include
-    // its status in the settings payload.
+    this.postMessage('settingsLoaded', await this.buildSettingsMessagePayload());
+  }
+
+  /**
+   * Assembles the `settingsLoaded` payload: plain settings, active-LLM-provider
+   * status, and (non-secret) flags for whether a given secret is already stored —
+   * never the secret value itself — so the webview can prepopulate what's safe to
+   * show (account/username/etc., already handled below) while still letting a
+   * write-only secret field indicate "already saved" without ever round-tripping
+   * the actual password/token back into the page.
+   */
+  private async buildSettingsMessagePayload(): Promise<Record<string, unknown>> {
+    const settings = this.configManager.getSettings();
+    let merged: Record<string, unknown> = { ...settings };
     try {
       const info = await this.detectLanguageModel();
-      const settings = this.configManager.getSettings();
-      const merged = Object.assign({}, settings, info ? { copilotInfo: info, languageModelInfo: info } : {});
-      this.postMessage('settingsLoaded', merged);
-    } catch {
-      this.postMessage('settingsLoaded', this.configManager.getSettings());
-    }
+      if (info) { merged = { ...merged, copilotInfo: info, languageModelInfo: info }; }
+    } catch { /* best-effort — language model status is a nice-to-have here */ }
+    try {
+      merged.snowflakeHasPassword = !!(await this.configManager.getSnowflakePassword());
+    } catch { /* best-effort */ }
+    try {
+      merged.targetSnowflakeHasPassword = !!(await this.configManager.getTargetSnowflakePassword());
+    } catch { /* best-effort */ }
+    try {
+      merged.databricksHasToken = !!(await this.configManager.getDatabricksToken());
+    } catch { /* best-effort */ }
+    try {
+      merged.targetDatabricksHasToken = !!(await this.configManager.getTargetDatabricksToken());
+    } catch { /* best-effort */ }
+    return merged;
   }
 
   /**
@@ -258,6 +304,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.specManager = undefined;
       this.targetContextManager = undefined;
       this.sourceContextManager = undefined;
+      this.mappingContextManager = undefined;
+      this.semanticLayerManager = undefined;
       this.pipelineSpecManager = undefined;
       this.attachmentStore = undefined;
       this.postSpec();
@@ -273,12 +321,16 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.specManager = new SpecManager(contextRoot, (msg: string) => this.postLog(msg));
     this.targetContextManager = new TargetContextManager(contextRoot, (msg: string) => this.postLog(msg));
     this.sourceContextManager = new SourceContextManager(contextRoot, (msg: string) => this.postLog(msg));
+    this.mappingContextManager = new MappingContextManager(contextRoot, (msg: string) => this.postLog(msg));
+    this.semanticLayerManager = new SemanticLayerManager(contextRoot, this.graphManager, (msg: string) => this.postLog(msg));
     this.pipelineSpecManager = new PipelineSpecManager(contextRoot, (msg: string) => this.postLog(msg));
     this.attachmentStore = new AttachmentStore(contextRoot);
     try {
       await this.specManager.initialize();
       await this.targetContextManager.initialize();
       await this.sourceContextManager.initialize();
+      await this.mappingContextManager.initialize();
+      await this.semanticLayerManager.initialize();
       await this.pipelineSpecManager.initialize();
       const existingSpec = this.specManager.getSpec();
       if (existingSpec) {
@@ -348,7 +400,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       switch (message.type) {
         case 'chat': {
           const chatMessage = typeof message.message === 'string' ? message.message : '';
-          const schemaContext = typeof message.schemaContext === 'string' ? message.schemaContext : '';
           const toolMode: ToolExecutionMode = message.toolMode === 'full' ? 'full' : 'read-only';
           if (!chatMessage.trim()) { this.postLog('A message is required.'); return; }
           const priorHistory = this.chatSessionManager && this.activeChatId
@@ -389,10 +440,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
               break;
             }
 
-            const repositoryContext = this.contextFileManager?.buildContextPrompt() ?? '';
-            const combinedContext = [repositoryContext, schemaContext]
-              .filter((part) => part && part.trim().length > 0)
-              .join('\n\n');
+            // Connection status (both roles) reaches this for free via
+            // ContextFileManager's runtime facts — see notifyConnectionStatus().
+            const combinedContext = this.contextFileManager?.buildContextPrompt() ?? '';
             const result = await this.hub.chat(chatMessage, combinedContext, toolMode, {
               history: priorHistory,
               priorSummary: priorMeta?.summary,
@@ -413,12 +463,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'generatePlan': {
           const objective = typeof message.objective === 'string' ? message.objective : '';
-          const schemaContext = typeof message.schemaContext === 'string' ? message.schemaContext : '';
           if (!objective.trim()) { this.postLog('A plan requires a user objective.'); return; }
-          const repositoryContext = this.contextFileManager?.buildContextPrompt() ?? '';
-          const combinedContext = [repositoryContext, schemaContext]
-            .filter((part) => part && part.trim().length > 0)
-            .join('\n\n');
+          // Same shared source as chat — connection status (both roles) is
+          // included automatically via ContextFileManager's runtime facts.
+          const combinedContext = this.contextFileManager?.buildContextPrompt() ?? '';
           const plan = await this.hub.generatePlan(objective, combinedContext);
           this.postPlan(plan);
           break;
@@ -457,6 +505,34 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             defaultSnowflakeRole: typeof settings.defaultSnowflakeRole === 'string' ? settings.defaultSnowflakeRole : undefined,
             defaultSnowflakeAuthMode: settings.defaultSnowflakeAuthMode === 'username-password' || settings.defaultSnowflakeAuthMode === 'oauth' || settings.defaultSnowflakeAuthMode === 'key-pair' || settings.defaultSnowflakeAuthMode === 'external-browser' || settings.defaultSnowflakeAuthMode === 'mcp' ? settings.defaultSnowflakeAuthMode : undefined,
             snowflakePrivateKeyPath: typeof settings.snowflakePrivateKeyPath === 'string' ? settings.snowflakePrivateKeyPath : undefined,
+            snowflakeCliPath: typeof settings.snowflakeCliPath === 'string' ? settings.snowflakeCliPath : undefined,
+            // Pre-existing gap, closed in passing: the source Databricks settings were
+            // never in this whitelist at all (the Databricks card has never been fully
+            // wired to save), unlike Snowflake's. Added here for consistency with the
+            // new target-side fields below, which need the same shape either way.
+            defaultDatabricksWorkspaceUrl: typeof settings.defaultDatabricksWorkspaceUrl === 'string' ? settings.defaultDatabricksWorkspaceUrl : undefined,
+            defaultDatabricksHttpPath: typeof settings.defaultDatabricksHttpPath === 'string' ? settings.defaultDatabricksHttpPath : undefined,
+            defaultDatabricksCatalog: typeof settings.defaultDatabricksCatalog === 'string' ? settings.defaultDatabricksCatalog : undefined,
+            defaultDatabricksSchema: typeof settings.defaultDatabricksSchema === 'string' ? settings.defaultDatabricksSchema : undefined,
+            defaultDatabricksCatalogType: settings.defaultDatabricksCatalogType === 'auto' || settings.defaultDatabricksCatalogType === 'unity' || settings.defaultDatabricksCatalogType === 'hive_metastore' ? settings.defaultDatabricksCatalogType : undefined,
+            databricksCliPath: typeof settings.databricksCliPath === 'string' ? settings.databricksCliPath : undefined,
+            // ── Target connection (v0.19.0) — mirrors the source fields above exactly ──
+            defaultTargetProvider: settings.defaultTargetProvider === 'snowflake' || settings.defaultTargetProvider === 'databricks' || settings.defaultTargetProvider === 'bigquery' || settings.defaultTargetProvider === 'redshift' || settings.defaultTargetProvider === 'synapse' || settings.defaultTargetProvider === 'other' ? settings.defaultTargetProvider : undefined,
+            defaultTargetSnowflakeAccount: typeof settings.defaultTargetSnowflakeAccount === 'string' ? settings.defaultTargetSnowflakeAccount : undefined,
+            defaultTargetSnowflakeUsername: typeof settings.defaultTargetSnowflakeUsername === 'string' ? settings.defaultTargetSnowflakeUsername : undefined,
+            defaultTargetSnowflakeWarehouse: typeof settings.defaultTargetSnowflakeWarehouse === 'string' ? settings.defaultTargetSnowflakeWarehouse : undefined,
+            defaultTargetSnowflakeDatabase: typeof settings.defaultTargetSnowflakeDatabase === 'string' ? settings.defaultTargetSnowflakeDatabase : undefined,
+            defaultTargetSnowflakeSchema: typeof settings.defaultTargetSnowflakeSchema === 'string' ? settings.defaultTargetSnowflakeSchema : undefined,
+            defaultTargetSnowflakeRole: typeof settings.defaultTargetSnowflakeRole === 'string' ? settings.defaultTargetSnowflakeRole : undefined,
+            defaultTargetSnowflakeAuthMode: settings.defaultTargetSnowflakeAuthMode === 'username-password' || settings.defaultTargetSnowflakeAuthMode === 'oauth' || settings.defaultTargetSnowflakeAuthMode === 'key-pair' || settings.defaultTargetSnowflakeAuthMode === 'external-browser' || settings.defaultTargetSnowflakeAuthMode === 'mcp' ? settings.defaultTargetSnowflakeAuthMode : undefined,
+            targetSnowflakePrivateKeyPath: typeof settings.targetSnowflakePrivateKeyPath === 'string' ? settings.targetSnowflakePrivateKeyPath : undefined,
+            targetSnowflakeCliPath: typeof settings.targetSnowflakeCliPath === 'string' ? settings.targetSnowflakeCliPath : undefined,
+            defaultTargetDatabricksWorkspaceUrl: typeof settings.defaultTargetDatabricksWorkspaceUrl === 'string' ? settings.defaultTargetDatabricksWorkspaceUrl : undefined,
+            defaultTargetDatabricksHttpPath: typeof settings.defaultTargetDatabricksHttpPath === 'string' ? settings.defaultTargetDatabricksHttpPath : undefined,
+            defaultTargetDatabricksCatalog: typeof settings.defaultTargetDatabricksCatalog === 'string' ? settings.defaultTargetDatabricksCatalog : undefined,
+            defaultTargetDatabricksSchema: typeof settings.defaultTargetDatabricksSchema === 'string' ? settings.defaultTargetDatabricksSchema : undefined,
+            defaultTargetDatabricksCatalogType: settings.defaultTargetDatabricksCatalogType === 'auto' || settings.defaultTargetDatabricksCatalogType === 'unity' || settings.defaultTargetDatabricksCatalogType === 'hive_metastore' ? settings.defaultTargetDatabricksCatalogType : undefined,
+            targetDatabricksCliPath: typeof settings.targetDatabricksCliPath === 'string' ? settings.targetDatabricksCliPath : undefined,
             metadataCachingDurationMinutes: typeof settings.metadataCachingDurationMinutes === 'number' ? settings.metadataCachingDurationMinutes : undefined,
             queryTimeoutSeconds: typeof settings.queryTimeoutSeconds === 'number' ? settings.queryTimeoutSeconds : undefined,
             readOnlyMode: typeof settings.readOnlyMode === 'boolean' ? settings.readOnlyMode : undefined,
@@ -474,6 +550,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (typeof message.llmApiKey === 'string') { await this.configManager.setLlmApiKey(message.llmApiKey); }
           if (typeof message.snowflakePassword === 'string') { await this.configManager.setSnowflakePassword(message.snowflakePassword); }
           if (typeof message.snowflakePrivateKeyPassphrase === 'string') { await this.configManager.setSnowflakePrivateKeyPassphrase(message.snowflakePrivateKeyPassphrase); }
+          if (typeof message.targetSnowflakePassword === 'string') { await this.configManager.setTargetSnowflakePassword(message.targetSnowflakePassword); }
+          if (typeof message.targetSnowflakePrivateKeyPassphrase === 'string') { await this.configManager.setTargetSnowflakePrivateKeyPassphrase(message.targetSnowflakePrivateKeyPassphrase); }
+          // Previously dead: setDatabricksToken() existed but nothing in the UI ever
+          // called it, since the Databricks card had no real token field.
+          if (typeof message.databricksToken === 'string') { await this.configManager.setDatabricksToken(message.databricksToken); }
+          if (typeof message.targetDatabricksToken === 'string') { await this.configManager.setTargetDatabricksToken(message.targetDatabricksToken); }
           this.postMessage('settingsSaved', { success: true });
           this.postLog('Settings saved securely to VS Code secrets.');
           // Refresh the active-provider status pill (e.g. after switching LLM card).
@@ -501,24 +583,34 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           try { await vscode.commands.executeCommand('revealFileInOS', contextUri); } catch { await vscode.commands.executeCommand('workbench.files.action.showActiveFileInExplorer'); }
           break;
         }
-        case 'testConnection': { this.postLog('Connecting to database...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testConnection`); } catch { this.postLog('Connect command not yet registered.'); } break; }
+        case 'testConnection': { this.postLog('Connecting to source database...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testConnection`); } catch { this.postLog('Connect command not yet registered.'); } break; }
+        case 'disconnectDataPlatform': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.disconnectDataPlatform`); } catch { this.postLog('Disconnect command not yet registered.'); } break; }
+        case 'testTargetConnection': { this.postLog('Connecting to target database...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testTargetConnection`); } catch { this.postLog('Test target connection command not yet registered.'); } break; }
+        case 'disconnectTargetDataPlatform': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.disconnectTargetDataPlatform`); } catch { this.postLog('Disconnect target command not yet registered.'); } break; }
+        case 'browseSourceDatabase': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.browseSourceDatabase`); } catch { this.postLog('Browse source database command not yet registered.'); } break; }
+        case 'browseTargetDatabase': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.browseTargetDatabase`); } catch { this.postLog('Browse target database command not yet registered.'); } break; }
+        case 'ingestFileAsSourceContext': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.ingestFileAsSourceContext`); } catch { this.postLog('File ingestion command not yet registered.'); } break; }
         case 'sourceAssessment': {
+          // Previously a second, parallel implementation that only reloaded
+          // whatever was already on disk and unconditionally reported success —
+          // it never connected to anything or extracted anything live, which is
+          // exactly why "Source Assessment" could report "complete" while chat
+          // still had zero real schema. Delegate to the one real command instead
+          // (same pattern `testConnection`'s case already uses), then force an
+          // immediate reindex so the freshly-written schema-graph.json is picked
+          // up now rather than waiting on the debounced file watcher.
           this.postLog('Running source assessment...');
-          try {
-            if (this.contextFileManager) {
-              const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
-              this.contextFileManager.dispose();
-              this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator());
-              await this.contextFileManager.initialize();
-              this.postContextUpdate();
-              this.postLog('Source assessment complete.');
-              this.postMessage('sourceAssessmentComplete', { success: true });
-            }
-          } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            this.postLog(`Source assessment failed: ${errMsg}`);
-            this.postMessage('sourceAssessmentComplete', { success: false, error: errMsg });
+          const result = await vscode.commands.executeCommand<{ success: boolean; tableCount?: number; viewCount?: number; error?: string }>(
+            `${EXTENSION_ID}.sourceAssessment`
+          );
+          if (result?.success && this.contextFileManager) {
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+            this.contextFileManager.dispose();
+            this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator());
+            await this.contextFileManager.initialize();
+            this.postContextUpdate();
           }
+          this.postMessage('sourceAssessmentComplete', result ?? { success: false, error: 'Source Assessment command is not available.' });
           break;
         }
         case 'syncMetadata': { this.postLog('Syncing database metadata...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.syncMetadata`); } catch { this.postLog('Sync metadata command not yet registered.'); } break; }
@@ -528,7 +620,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (!skillId || !instruction) { this.postLog('Usage: /skill <skillId> <instruction>'); break; }
           this.postLog(`Running skill "${skillId}"…`);
           try {
-            const result = await this.hub.runToolSkill(skillId, instruction);
+            const result = await this.hub.runToolSkill(skillId, instruction, this.contextFileManager?.buildContextPrompt());
             this.postMessage('chatResponse', { message: result.success ? result.message : `Skill failed: ${result.error || result.message}`, error: !result.success });
           } catch (err) {
             const message2 = err instanceof Error ? err.message : String(err);
@@ -561,12 +653,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'settingsLoaded': {
-          try {
-            const info = await this.detectLanguageModel();
-            const settings = this.configManager.getSettings();
-            const merged = Object.assign({}, settings, info ? { copilotInfo: info, languageModelInfo: info } : {});
-            this.postMessage('settingsLoaded', merged);
-          } catch { this.postMessage('settingsLoaded', this.configManager.getSettings()); }
+          this.postMessage('settingsLoaded', await this.buildSettingsMessagePayload());
           break;
         }
         case 'registerSource': {
@@ -771,9 +858,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             .filter((part) => part && part.trim().length > 0)
             .join('\n\n');
           const record: SourceContext = {
-            specId: spec.id, specVersion: spec.version, status: 'built', method: 'described',
-            sourceType: (answerMap.sourceType as SourceContext['sourceType']) || undefined,
-            description: description || undefined,
+            specId: spec.id, specVersion: spec.version, status: 'built',
+            sources: [{
+              connectionId: 'described',
+              method: 'described',
+              sourceType: (answerMap.sourceType as SourceContextEntry['sourceType']) || undefined,
+              description: description || undefined
+            }],
             answers: answerMap, builtAt: new Date().toISOString()
           };
           await this.sourceContextManager.save(record);
@@ -798,7 +889,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const spec = this.specManager?.getSpec();
           if (!spec || !this.sourceContextManager) break;
           const existing = this.sourceContextManager.getContext();
-          if (existing?.method === 'connected') { await this.runSourceConnectionCheck(spec); break; }
+          if (existing?.sources.some((s) => s.method === 'connected')) { await this.runSourceConnectionCheck(spec); break; }
           const questions = buildSourceContextQuestions(spec);
           this.postMessage('sourceContextQuestions', { questions, answers: existing?.answers ?? {} });
           break;
@@ -1068,6 +1159,145 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: 'logEntry', message });
   }
 
+  /** Lets `extension.ts`'s command handlers (e.g. `testConnection`) surface progress/results into the chat log, not just a native VS Code notification the webview never sees. */
+  public logToChat(message: string): void {
+    this.postLog(message);
+  }
+
+  /**
+   * Lets `extension.ts`'s command handlers (e.g. the database/schema browse
+   * picker, Step 4) push a fresh `settingsLoaded` payload after changing
+   * settings directly via `ConfigurationManager`, bypassing the webview's own
+   * `updateSettings` message — otherwise the panel's displayed fields would
+   * silently go stale until the next manual reload.
+   */
+  public async refreshSettingsInWebview(): Promise<void> {
+    this.postMessage('settingsLoaded', await this.buildSettingsMessagePayload());
+  }
+
+  /**
+   * Adds file-derived nodes/edges (Step 5 — CSV/JSON/DDL ingestion, run from
+   * `extension.ts` since it owns the file-picker/parsing flow) into the same
+   * shared `GraphManager` live-connection extraction already writes to, then
+   * persists and refreshes the palette — so an ingested file's tables render
+   * everywhere `ContextFileManager.buildContextPrompt()` already does, with
+   * zero special-casing needed downstream.
+   */
+  public async ingestFileIntoGraph(nodes: BaseNode[], edges: GraphEdge[]): Promise<void> {
+    for (const node of nodes) { await this.graphManager.addNode(node); }
+    for (const edge of edges) { await this.graphManager.addEdge(edge); }
+    await this.contextFileManager?.persistCompiledGraph();
+    this.postContextUpdate();
+  }
+
+  /**
+   * Lists graph `table`/`semantic_view` nodes as mapping candidates for
+   * `extension.ts`'s "Create Mapping" QuickPick (Step 6) — deliberately
+   * platform-agnostic (source and target connections both write into the same
+   * shared `GraphManager`, per the architecture review's unified-graph
+   * decision), so both sides of a mapping are picked from one list.
+   */
+  public listMappableTables(): Array<{ id: string; label: string; fqn?: string }> {
+    const tables = [...this.graphManager.getNodesByType('table'), ...this.graphManager.getNodesByType('semantic_view')];
+    return tables.map((t) => ({ id: t.id, label: t.label, fqn: (t as unknown as { fqn?: string }).fqn }));
+  }
+
+  /** Columns of a given table node, via its `contains` edges — for the same "Create Mapping" QuickPick. */
+  public listTableColumns(tableId: string): Array<{ id: string; label: string }> {
+    const snapshot = this.graphManager.serializeSnapshot();
+    const columnIds = new Set(snapshot.edges.filter((e) => e.type === 'contains' && e.source === tableId).map((e) => e.target));
+    return snapshot.nodes.filter((n) => columnIds.has(n.id)).map((n) => ({ id: n.id, label: n.label }));
+  }
+
+  /** The active spec identity a new Mapping Context entry should be filed under, if any. */
+  public getMappingSpecInfo(): { specId: string; specVersion: number } | undefined {
+    const spec = this.specManager?.getSpec();
+    return spec ? { specId: spec.id, specVersion: spec.version } : undefined;
+  }
+
+  public getMappingContext(): MappingContext | undefined {
+    return this.mappingContextManager?.getContext();
+  }
+
+  /**
+   * Adds/replaces one `EntityMapping` in the active spec's Mapping Context,
+   * auto-resetting to a fresh record first if the container belongs to a
+   * different (or no) spec lineage yet — mirrors how Source/Target Context
+   * get reset onto the current spec elsewhere in this file.
+   */
+  public async upsertEntityMapping(mapping: EntityMapping): Promise<MappingContext | undefined> {
+    if (!this.mappingContextManager) return undefined;
+    const spec = this.specManager?.getSpec();
+    if (spec) {
+      const current = this.mappingContextManager.getContext();
+      if (!current || current.specId !== spec.id || current.specVersion !== spec.version) {
+        await this.mappingContextManager.reset(spec.id, spec.version);
+      }
+    }
+    return this.mappingContextManager.upsertMapping(mapping);
+  }
+
+  public getSemanticLayerSnapshot() {
+    return this.semanticLayerManager?.getSnapshot();
+  }
+
+  /**
+   * Step 7 (governance layer) — the current set of source-tagged table/view
+   * FQNs in the shared graph, for `extension.ts`'s `reVerifySourceSchema`
+   * command to diff against a fresh extraction. Never mutates anything; a
+   * pure read so the diff itself stays the one place drift becomes visible.
+   */
+  public listSourceTableFqns(): string[] {
+    const tables = [...this.graphManager.getNodesByType('table'), ...this.graphManager.getNodesByType('semantic_view')];
+    return tables
+      .filter((t) => t.origin?.environment === 'source')
+      .map((t) => (t as unknown as { fqn?: string }).fqn ?? t.label);
+  }
+
+  /**
+   * The one explicit "Build Semantic Layer" action (Step 6, second half) —
+   * captures the live shared graph's current content/counts as a spec-pinned,
+   * versioned snapshot. Never runs implicitly; called only from
+   * `extension.ts`'s `buildSemanticLayer` command.
+   */
+  public async buildSemanticLayer() {
+    if (!this.semanticLayerManager) return undefined;
+    const spec = this.specManager?.getSpec();
+    if (!spec) return undefined;
+    return this.semanticLayerManager.build(spec.id, spec.version);
+  }
+
+  /**
+   * Records the latest connection outcome for one role (source or target) and
+   * propagates it two ways: to the webview's status pills (UI concern), and to
+   * `ContextFileManager`'s runtime facts (LLM-prompt concern) via
+   * `connection:<role>` — the single shared object every prompt-building call
+   * site that already calls `buildContextPrompt()` picks this up from, with no
+   * per-call-site wiring needed. Called from `extension.ts`'s `testConnection`/
+   * `sourceAssessment` commands (a different module/scope, hence public) and
+   * from `runSourceConnectionCheck()`/`connectToDataPlatform()` below.
+   */
+  public notifyConnectionStatus(role: 'source' | 'target', status: { connected: boolean; platform?: string; detail?: string }): void {
+    this.connectionStatus[role] = status;
+    this.postMessage('connectionStatus', this.connectionStatus);
+
+    const factKey = `connection:${role}`;
+    if (!status.connected) {
+      this.contextFileManager?.setRuntimeFact(factKey, null);
+      return;
+    }
+    const roleLabel = role === 'source' ? 'Source Connection' : 'Target Connection';
+    const platformText = status.platform ?? 'a data platform';
+    const detailText = status.detail ? ` (${status.detail})` : '';
+    const noSchemaHint = role === 'source' && (this.contextFileManager?.getContextStats().tables ?? 0) === 0
+      ? ' No schema has been extracted into context yet — if asked about specific tables/columns, suggest running "Source Assessment" (next to Connect in Settings → Connections), or offer to run it.'
+      : '';
+    this.contextFileManager?.setRuntimeFact(factKey, {
+      label: roleLabel,
+      text: `Connected to ${platformText}${detailText}.${noSchemaHint}`
+    });
+  }
+
   private postContextUpdate(): void {
     if (!this.contextFileManager) return;
     const stats = this.contextFileManager.getContextStats();
@@ -1254,9 +1484,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const sc = this.sourceContextManager?.getContext();
     if (sc && sc.specId === spec.id && sc.specVersion === spec.version && sc.status !== 'not_applicable') {
       const lines = ['## Source Context'];
-      if (sc.description) lines.push(sc.description);
-      if (sc.connectionSummary) {
-        lines.push(`Live connection: ${sc.connectionSummary.platform} — ${sc.connectionSummary.database}.${sc.connectionSummary.schema} (${sc.connectionSummary.tableCount} tables, ${sc.connectionSummary.viewCount} views)`);
+      for (const entry of sc.sources) {
+        if (entry.description) lines.push(entry.description);
+        if (entry.connectionSummary) {
+          lines.push(`Live connection: ${entry.platform ?? entry.connectionId} — ${entry.connectionSummary.database}.${entry.connectionSummary.schema} (${entry.connectionSummary.tableCount} tables, ${entry.connectionSummary.viewCount} views)`);
+        }
       }
       if (lines.length > 1) parts.push(lines.join('\n'));
     }
@@ -1327,23 +1559,27 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const credentials = ConnectionManager.getCredentialsFromSettings(platform, settings as unknown as Record<string, unknown>);
     try {
       if (platform === 'snowflake') {
-        const password = await this.configManager.getSecret('autoDataEngineeringHub.snowflakePassword');
+        const password = await this.configManager.getSnowflakePassword();
         if (password) credentials['password'] = password;
+        const passphrase = await this.configManager.getSnowflakePrivateKeyPassphrase();
+        if (passphrase) credentials['privateKeyPassphrase'] = passphrase;
       } else if (platform === 'databricks') {
-        const token = await this.configManager.getSecret('autoDataEngineeringHub.databricksToken');
+        const token = await this.configManager.getDatabricksToken();
         if (token) credentials['token'] = token;
       }
     } catch { /* best-effort — connect() will surface a clear error if a required secret is missing */ }
 
+    // Only what every Snowflake execution path genuinely requires up front — see
+    // the matching comment in extension.ts's `testConnection` command for why
+    // Warehouse/Database were dropped from this list.
     const missing: string[] = [];
     if (platform === 'snowflake') {
       if (!credentials['account']) missing.push('Account');
       if (!credentials['username']) missing.push('Username');
-      if (!credentials['warehouse']) missing.push('Warehouse');
-      if (!credentials['database']) missing.push('Database');
     } else if (platform === 'databricks') {
       if (!credentials['workspaceUrl']) missing.push('Workspace URL');
-      if (!credentials['catalog']) missing.push('Catalog');
+      if (!credentials['httpPath']) missing.push('SQL Warehouse HTTP Path');
+      if (!credentials['token']) missing.push('Token');
     }
     if (missing.length > 0) {
       this.postMessage('error', { message: `Missing connection settings for ${platform}: ${missing.join(', ')}. Configure them in Settings → Connections, or choose "Describe source" instead.` });
@@ -1358,16 +1594,136 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
       if (workspaceRoot) { await connectionManager.persistSchemaContext(snapshot, workspaceRoot); }
       const record: SourceContext = {
-        specId: spec.id, specVersion: spec.version, status: 'built', method: 'connected',
-        connectionSummary: { platform, database: info.databaseName, schema: info.schemaName, tableCount: snapshot.tables.length, viewCount: snapshot.views.length },
+        specId: spec.id, specVersion: spec.version, status: 'built',
+        sources: [{
+          connectionId: snapshot.connectionId ?? platform,
+          platform,
+          method: 'connected',
+          connectionSummary: { database: info.databaseName, schema: info.schemaName, tableCount: snapshot.tables.length, viewCount: snapshot.views.length },
+          extractedAt: snapshot.extractedAt
+        }],
         answers: {}, builtAt: new Date().toISOString()
       };
       await this.sourceContextManager.save(record);
       this.postMessage('sourceContextBuilt', { context: this.sourceContextManager.getContext() });
       this.postLog(`Source Context built from a live connection: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`);
       this.postContextGateStatus();
+      this.notifyConnectionStatus('source', { connected: true, platform, detail: `${info.databaseName}.${info.schemaName} — ${snapshot.tables.length} tables, ${snapshot.views.length} views extracted` });
     } catch (err) {
       this.postMessage('error', { message: `Could not connect to build Source Context: ${err instanceof Error ? err.message : String(err)}. You can choose "Describe source" instead.` });
+      this.notifyConnectionStatus('source', { connected: false });
+    } finally {
+      connectionManager.dispose();
+    }
+  }
+
+  /**
+   * "AutoDE: Connect to Data Platform" (Phase 3a-ii) — the interactive-developer
+   * onboarding flow: detect the platform's own CLI, offer its configured
+   * connections, resolve the chosen one down to a `CredentialReference` (via the
+   * Phase 3a-i `cli` resolver — never a raw secret), test it, and populate the
+   * existing Target Context model. Staged feedback goes through the same
+   * `postLog`/`postMessage` channel every other chat-visible flow in this class
+   * uses; platform/connection *choices* use native QuickPicks rather than a new
+   * bespoke webview wizard.
+   */
+  private async connectToDataPlatform(): Promise<void> {
+    const spec = this.specManager?.getSpec();
+    if (!spec || !this.targetContextManager) {
+      this.postLog('No active business problem — start or open one first, then run "AutoDE: Connect to Data Platform" again.');
+      return;
+    }
+
+    const settings = this.configManager.getSettings();
+    const platformChoices: { label: string; platform: DataPlatformProvider; displayName: string }[] = [
+      { label: 'Snowflake', platform: 'snowflake', displayName: 'Snowflake' },
+      { label: 'Databricks', platform: 'databricks', displayName: 'Databricks' }
+    ];
+    platformChoices.sort((a, b) => (a.platform === settings.defaultProvider ? -1 : b.platform === settings.defaultProvider ? 1 : 0));
+    const platformPicked = await vscode.window.showQuickPick(platformChoices, { title: 'AutoDE: Connect to Data Platform', placeHolder: 'Choose a data platform' });
+    if (!platformPicked) return;
+    const { platform, displayName } = platformPicked;
+
+    const descriptor = getCliDescriptor(platform);
+    if (!descriptor) {
+      this.postLog(`No CLI-reuse support for ${displayName} yet. Enter credentials manually in Settings → Connections, then run "AutoDE: Test Connection".`);
+      return;
+    }
+
+    this.postLog(`Detecting the ${displayName} CLI…`);
+    const cliPathSetting = platform === 'snowflake' ? settings.snowflakeCliPath : settings.databricksCliPath;
+    const detection = await descriptor.detect(cliPathSetting);
+    if (!detection.found || !detection.cliPath) {
+      this.postLog(`${displayName} CLI not found. ${detection.error ?? ''}`.trim());
+      this.postLog('Enter credentials manually in Settings → Connections, then run "AutoDE: Test Connection" — or install the CLI and run "AutoDE: Connect to Data Platform" again.');
+      return;
+    }
+    this.postLog(`${displayName} CLI found via ${detection.source} (${detection.cliPath}${detection.version ? `, ${detection.version}` : ''}).`);
+
+    // Shelling out to list real connections/profiles is gated by explicit consent —
+    // detection above (a version check) is exempt, same as ClaudeCodeAdapter's own.
+    // Databricks reads `.databrickscfg` directly (no CLI shell-out), so it needs no gate.
+    if (platform === 'snowflake' && !settings.dataPlatformCliConsent) {
+      const consent = await vscode.window.showInformationMessage(
+        `AutoDE wants to run "snow connection list" to show your configured Snowflake connections. Allow AutoDE to invoke the Snowflake CLI?`,
+        'Allow', 'Not now'
+      );
+      if (consent !== 'Allow') {
+        this.postLog('Skipped connection enumeration (CLI consent not given). Enter credentials manually in Settings → Connections, or allow CLI use and try again.');
+        return;
+      }
+      await this.configManager.updateSettings({ dataPlatformCliConsent: true });
+    }
+
+    this.postLog(`Looking up configured ${displayName} connections…`);
+    const connections = await descriptor.listConnections(detection.cliPath);
+    if (connections.length === 0) {
+      this.postLog(`No configured ${displayName} connections found. Enter credentials manually in Settings → Connections, then run "AutoDE: Test Connection".`);
+      return;
+    }
+
+    const connectionItems = [
+      ...connections.map((c) => ({ label: `Use existing ${displayName} CLI connection "${c.name}"`, connectionName: c.name })),
+      { label: 'Enter credentials manually instead', connectionName: undefined }
+    ];
+    const connectionPicked = await vscode.window.showQuickPick(connectionItems, { title: `Choose a ${displayName} connection`, placeHolder: `Found ${connections.length} configured connection(s)` });
+    if (!connectionPicked) return;
+    if (!connectionPicked.connectionName) {
+      this.postLog('Enter credentials manually in Settings → Connections, then run "AutoDE: Test Connection".');
+      return;
+    }
+
+    const reference: CredentialReference = { platform, principalType: 'interactive-user', ref: connectionPicked.connectionName, resolverId: 'cli' };
+    const resolved = await resolveCredential(reference);
+    if (!resolved) {
+      this.postMessage('error', { message: `Could not confirm connection "${connectionPicked.connectionName}" — it may have been removed. Try again.` });
+      return;
+    }
+
+    this.postLog(`Testing the connection "${connectionPicked.connectionName}"…`);
+    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg));
+    try {
+      const info = await connectionManager.connect(platform, resolved);
+      this.postLog(`Connected: ${info.databaseName}.${info.schemaName} (${info.version}).`);
+
+      const existing = this.targetContextManager.getContext();
+      const record: TargetContext = {
+        ...(existing && existing.specId === spec.id && existing.specVersion === spec.version ? existing : { specId: spec.id, specVersion: spec.version, answers: {} }),
+        specId: spec.id,
+        specVersion: spec.version,
+        status: 'built',
+        platform,
+        credentialRef: { resolverId: 'cli', ref: connectionPicked.connectionName },
+        builtAt: new Date().toISOString()
+      };
+      await this.targetContextManager.save(record);
+      this.postMessage('targetContextBuilt', { context: this.targetContextManager.getContext() });
+      this.postLog(`Target Context updated: platform=${platform}, connection="${connectionPicked.connectionName}". Review and approve it to use this as your target platform.`);
+      this.postContextGateStatus();
+      this.notifyConnectionStatus('target', { connected: true, platform, detail: `${info.databaseName}.${info.schemaName}` });
+    } catch (err) {
+      this.postMessage('error', { message: `Connected via the CLI reference, but the test connection failed: ${err instanceof Error ? err.message : String(err)}` });
+      this.notifyConnectionStatus('target', { connected: false });
     } finally {
       connectionManager.dispose();
     }
@@ -1450,7 +1806,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    * This is the first responsibility of AutoDE in the spec-driven flow.
    */
   private async draftSpec(prompt: string, previous?: BusinessProblemSpec): Promise<void> {
-    const spec = await this.hub.generateSpec(prompt, previous);
+    const spec = await this.hub.generateSpec(prompt, previous, this.contextFileManager?.buildContextPrompt());
     await this.ensureActiveProblem(spec.problemStatement);
     if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
     this.applyImplementationType(spec, previous);
@@ -1470,7 +1826,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private async reviseSpec(refinement: string): Promise<void> {
     if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
     const previous = this.specManager.getSpec();
-    const spec = await this.hub.generateSpec(refinement, previous);
+    const spec = await this.hub.generateSpec(refinement, previous, this.contextFileManager?.buildContextPrompt());
     this.applyImplementationType(spec, previous);
     await this.specManager.saveSpec(spec);
     this.hub.setSpec(spec.id, spec.version);

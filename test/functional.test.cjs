@@ -1116,6 +1116,68 @@ async function main() {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  await test('ContextFileManager picks up a freshly-written schema-graph.json even after derived/graph.json already exists (real bug: a Source Assessment run after first activation was silently never read again)', async () => {
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-cfm-schema-'));
+    const ctxDir = path.join(dir, '.ai-context');
+    fs.mkdirSync(ctxDir, { recursive: true });
+
+    function cfmMock() {
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: {
+          fs: {
+            createDirectory: async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); },
+            readFile: async (uri) => { if (fs.existsSync(uri.fsPath)) return fs.readFileSync(uri.fsPath); throw new Error('ENOENT'); },
+            writeFile: async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); },
+            rename: async (a, b) => { fs.renameSync(a.fsPath, b.fsPath); },
+            stat: async () => { throw new Error('ENOENT'); }
+          },
+          createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} })
+        },
+        RelativePattern: class { constructor(_base, _pattern) {} }
+      };
+    }
+    const mock = cfmMock();
+    delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+    delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+
+    // Step 1: "first activation" on an empty workspace — this alone creates
+    // derived/graph.json (with zero nodes), exactly as it does in production.
+    const graph1 = new GraphManager();
+    const cfm1 = new ContextFileManager({ fsPath: dir }, graph1, () => {});
+    await withMock(mock, () => cfm1.initialize());
+    const graphPath = path.join(ctxDir, 'derived', 'graph.json');
+    assert.ok(fs.existsSync(graphPath), 'derived/graph.json exists after the very first activation, even with nothing extracted yet');
+    assert.strictEqual(graph1.getNodesByType('table').length, 0);
+
+    // Step 2: "Source Assessment" writes schema-graph.json with real tables —
+    // give it a guaranteed-later mtime (real filesystem timestamp resolution can
+    // otherwise be too coarse to distinguish two writes microseconds apart).
+    const schemaGraphPath = path.join(ctxDir, 'schema-graph.json');
+    fs.writeFileSync(schemaGraphPath, JSON.stringify({
+      nodes: [{ id: 't1', type: 'table', label: 'orders', fqn: 'db.public.orders', metadata: {}, version: 1 }],
+      edges: []
+    }));
+    const future = new Date(Date.now() + 60000);
+    fs.utimesSync(schemaGraphPath, future, future);
+
+    // Step 3: a fresh reindex (simulating the file-watcher-triggered reload, or a
+    // reload of the extension) must now pick up the newer schema-graph.json.
+    const graph2 = new GraphManager();
+    const cfm2 = new ContextFileManager({ fsPath: dir }, graph2, () => {});
+    await withMock(mock, () => cfm2.initialize());
+    const tables = graph2.getNodesByType('table');
+    assert.strictEqual(tables.length, 1, 'the freshly-extracted table is now loaded, not shadowed by the older compiled cache');
+    assert.strictEqual(tables[0].label, 'orders');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   await test('ArtifactWriter writes under a <specId>.v<version> folder; scanArtifactStaleness classifies current/stale/untagged', async () => {
     const os = require('node:os');
     const path = require('node:path');
@@ -1631,10 +1693,126 @@ async function main() {
 
     await withMock(mock, () => mgr.reset('bps-1', 2));
     assert.strictEqual(mgr.isReadyFor('bps-1', 2), false, 'freshly reset (Brownfield) is not ready until built + approved');
-    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 2, status: 'built', method: 'described', description: 'A Postgres orders database.', answers: {} }));
+    const entry = { connectionId: 'described', method: 'described', description: 'A Postgres orders database.' };
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 2, status: 'built', sources: [entry], answers: {} }));
     assert.strictEqual(mgr.isReadyFor('bps-1', 2), false, 'built is not yet approved');
-    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 2, status: 'approved', method: 'described', description: 'A Postgres orders database.', answers: {} }));
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 2, status: 'approved', sources: [entry], answers: {} }));
     assert.strictEqual(mgr.isReadyFor('bps-1', 2), true);
+  });
+
+  await test('SourceContextManager round-trips the sources[] entry list through a real save+reload, including connectionId', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
+        } }
+      };
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/SourceContextManager.js')]; } catch { /* not loaded */ }
+    const { SourceContextManager } = withMock(mock, () => require('../dist/context/SourceContextManager.js'));
+    const mgr = new SourceContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    await withMock(mock, () => mgr.save({
+      specId: 'bps-1', specVersion: 1, status: 'built',
+      sources: [{ connectionId: 'snowflake:prod', platform: 'snowflake', method: 'connected', connectionSummary: { database: 'RAW_DB', schema: 'PUBLIC', tableCount: 12, viewCount: 3 }, extractedAt: 't1' }],
+      answers: {}
+    }));
+
+    // Fresh manager instance forces a real reload from the serialized file.
+    const mgr2 = new SourceContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    const reloaded = mgr2.getContext();
+    assert.strictEqual(reloaded.sources.length, 1);
+    assert.strictEqual(reloaded.sources[0].connectionId, 'snowflake:prod');
+    assert.strictEqual(reloaded.sources[0].connectionSummary.tableCount, 12);
+  });
+
+  await test('SourceContextManager bumps version + archives only when revising an already-approved predecessor of the same spec lineage — not on approving a draft, and never twice for the same revision', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+          stat: async (uri) => { if (!store.has(keyOf(uri))) throw new Error('ENOENT'); return {}; }
+        } },
+        store
+      };
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/SourceContextManager.js')]; } catch { /* not loaded */ }
+    const { SourceContextManager } = withMock(mock, () => require('../dist/context/SourceContextManager.js'));
+    const mgr = new SourceContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+
+    // built -> approved on the same lineage: never bumps ("a draft v1 becomes an approved v1").
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'built', sources: [{ connectionId: 'described', method: 'described', description: 'v1 desc' }], answers: {} }));
+    assert.strictEqual(mgr.getContext().version, 1);
+    await withMock(mock, () => mgr.save({ ...mgr.getContext(), status: 'approved' }));
+    assert.strictEqual(mgr.getContext().version, 1, 'approving a not-yet-approved record must not bump the version');
+    assert.strictEqual(mock.store.has('/ws/context/history/source-context.spec1.v1.yaml'), false, 'nothing archived yet — no revision has happened');
+
+    // Revising the now-approved v1 (same specId/specVersion, new content) bumps to v2 and archives v1.
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'built', sources: [{ connectionId: 'described', method: 'described', description: 'v2 desc' }], answers: {} }));
+    assert.strictEqual(mgr.getContext().version, 2, 'revising an approved predecessor bumps the version');
+    assert.strictEqual(mock.store.has('/ws/context/history/source-context.spec1.v1.yaml'), true, 'the approved v1 predecessor was archived before being overwritten');
+
+    // A different spec lineage (new specVersion) starts fresh at v1, but the
+    // approved v2 being replaced is still archived, not silently discarded.
+    await withMock(mock, () => mgr.save({ ...mgr.getContext(), status: 'approved' }));
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 2, status: 'pending', sources: [], answers: {} }));
+    assert.strictEqual(mgr.getContext().version, 1, 'a new spec lineage starts its own version count at 1');
+    assert.strictEqual(mock.store.has('/ws/context/history/source-context.spec1.v2.yaml'), true, 'the approved v2 (spec v1 lineage) was archived before spec v2 lineage started fresh');
+  });
+
+  await test('SourceContextManager migrates a pre-v0.19.0 flat-shape source-context.yaml (method/connectionSummary at the document root) into sources[]', async () => {
+    function fsMapMock(initialFile) {
+      const store = new Map([['/ws/context/source-context.yaml', initialFile]]);
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
+        } }
+      };
+    }
+    const legacyYaml = [
+      'specId: bps-legacy',
+      'specVersion: 1',
+      'status: approved',
+      'method: connected',
+      'connectionSummary:',
+      '  platform: snowflake',
+      '  database: RAW_DB',
+      '  schema: PUBLIC',
+      '  tableCount: 5',
+      '  viewCount: 1',
+      'answers: {}'
+    ].join('\n') + '\n';
+    const mock = fsMapMock(legacyYaml);
+    try { delete require.cache[require.resolve('../dist/context/SourceContextManager.js')]; } catch { /* not loaded */ }
+    const { SourceContextManager } = withMock(mock, () => require('../dist/context/SourceContextManager.js'));
+    const mgr = new SourceContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    const ctx = mgr.getContext();
+    assert.strictEqual(ctx.sources.length, 1, 'legacy flat shape migrates into a single sources[] entry');
+    assert.strictEqual(ctx.sources[0].method, 'connected');
+    assert.strictEqual(ctx.sources[0].platform, 'snowflake');
+    assert.strictEqual(ctx.sources[0].connectionSummary.tableCount, 5);
   });
 
   await test('PlanManager persists plans with version history across versions and reloads', async () => {
@@ -1752,6 +1930,62 @@ async function main() {
 
     const stats = cfm.getContextStats();
     assert.strictEqual(stats.sourceEnvironmentNodes, 2, 'the table and the registered data-contract rule are source-tagged; the spec-derived term is not');
+  });
+
+  await test('ContextFileManager.setRuntimeFact()/buildContextPrompt() renders ephemeral session facts, and clears cleanly', async () => {
+    const mock = createMock();
+    for (const p of ['../dist/context/GraphManager.js', '../dist/context/ContextFileManager.js']) {
+      try { delete require.cache[require.resolve(p)]; } catch { /* not loaded */ }
+    }
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const graph = new GraphManager();
+    const cfm = new ContextFileManager({ fsPath: '/ws' }, graph, () => {});
+
+    // No facts, no graph content at all: no section, not even an empty heading.
+    assert.strictEqual(cfm.buildContextPrompt(), '');
+
+    cfm.setRuntimeFact('connection:source', { label: 'Source Connection', text: 'Connected to snowflake (RAW_DB.PUBLIC).' });
+    const withFact = cfm.buildContextPrompt();
+    assert.ok(withFact.includes('## Live Session Facts'));
+    assert.ok(withFact.includes('Source Connection'));
+    assert.ok(withFact.includes('Connected to snowflake'));
+
+    cfm.setRuntimeFact('connection:target', { label: 'Target Connection', text: 'Connected to databricks (main.default).' });
+    const withBoth = cfm.buildContextPrompt();
+    assert.ok(withBoth.includes('Source Connection') && withBoth.includes('Target Connection'), 'both roles render independently, keyed separately');
+
+    cfm.setRuntimeFact('connection:source', null);
+    const afterClear = cfm.buildContextPrompt();
+    assert.ok(!afterClear.includes('Source Connection'), 'clearing one fact removes only that one');
+    assert.ok(afterClear.includes('Target Connection'), 'the other fact survives');
+  });
+
+  await test('AgentHub.generateSpec() now includes a passed-in context block in its prompt (previously always zero context, not even repository context)', async () => {
+    const validSpecJson = JSON.stringify({ problemStatement: 'Load sales into a mart', objectives: ['a'], scope: { in: ['a'] } });
+    let capturedUserContent = '';
+    const model = {
+      id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
+      sendRequest: async (msgs) => {
+        const userMsg = msgs.find((m) => m.role === 1);
+        capturedUserContent = userMsg ? userMsg.content : '';
+        return { text: textIter(validSpecJson) };
+      }
+    };
+    const mock = createMock({ models: [model] });
+    delete require.cache[require.resolve('../dist/core/agentHub.js')];
+    clearAdapterCache();
+    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
+    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
+
+    await withMock(mock, () => hub.generateSpec('We need a sales mart', undefined, '## Live Session Facts\n- **Source Connection**: Connected to snowflake (RAW_DB.PUBLIC).'));
+    assert.ok(capturedUserContent.includes('Live Session Facts'), 'the context block reaches the actual LLM prompt');
+    assert.ok(capturedUserContent.includes('Source Connection'));
+
+    // Backward-compatible: context is optional, omitting it doesn't break the call.
+    capturedUserContent = '';
+    await withMock(mock, () => hub.generateSpec('We need a sales mart'));
+    assert.ok(!capturedUserContent.includes('Live Session Facts'));
   });
 
   await test('ArtifactWriter archives the previous revision to history/ before overwriting', async () => {
@@ -2882,6 +3116,1260 @@ async function main() {
     registry.register({ dispose: () => { throw new Error('boom'); } });
     registry.disposeAll();
     assert.strictEqual(secondDisposed, true);
+  });
+
+  // ── Phase 3a-i: Credential resolution foundation ──
+
+  await test('EnvVarCredentialResolver resolves a complete Snowflake service-account credential set from documented env vars, with zero VS Code dependency', async () => {
+    // Required directly with no vscode mock active at all: Module._load throws
+    // 'no mock' on any require('vscode') attempt when `active` is null, so this
+    // succeeding at all proves the resolver never touches the vscode module.
+    const { EnvVarCredentialResolver } = fresh('../dist/dqm/credentials/EnvVarCredentialResolver.js');
+    const resolver = new EnvVarCredentialResolver({
+      AUTODE_SNOWFLAKE_ACCOUNT: 'acme-prod',
+      AUTODE_SNOWFLAKE_USERNAME: 'svc_autode',
+      AUTODE_SNOWFLAKE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----',
+      AUTODE_SNOWFLAKE_WAREHOUSE: 'ETL_WH',
+      AUTODE_SNOWFLAKE_DATABASE: 'RAW'
+    });
+    const creds = await resolver.resolve({ platform: 'snowflake', principalType: 'service-account', ref: '', resolverId: 'env' });
+    assert.strictEqual(creds.account, 'acme-prod');
+    assert.strictEqual(creds.username, 'svc_autode');
+    assert.ok(creds.privateKey.includes('BEGIN PRIVATE KEY'));
+    assert.strictEqual(creds.warehouse, 'ETL_WH');
+    assert.strictEqual(creds.database, 'RAW');
+  });
+
+  await test('EnvVarCredentialResolver returns undefined when none of a platform\'s env vars are set, and supports a named-profile prefix', async () => {
+    const { EnvVarCredentialResolver } = fresh('../dist/dqm/credentials/EnvVarCredentialResolver.js');
+    const empty = new EnvVarCredentialResolver({});
+    assert.strictEqual(await empty.resolve({ platform: 'snowflake', principalType: 'service-account', ref: '', resolverId: 'env' }), undefined);
+
+    const profiled = new EnvVarCredentialResolver({
+      AUTODE_SNOWFLAKE_PROD_ACCOUNT: 'acme-prod',
+      AUTODE_SNOWFLAKE_ACCOUNT: 'acme-dev'
+    });
+    const prodCreds = await profiled.resolve({ platform: 'snowflake', principalType: 'service-account', ref: 'prod', resolverId: 'env' });
+    assert.strictEqual(prodCreds.account, 'acme-prod');
+    const defaultCreds = await profiled.resolve({ platform: 'snowflake', principalType: 'service-account', ref: '', resolverId: 'env' });
+    assert.strictEqual(defaultCreds.account, 'acme-dev');
+  });
+
+  await test('registerCredentialResolver() lets a test register a fake vault resolver that participates in resolution untouched by ConnectionManager/adapters', async () => {
+    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/dqm/credentials/registry.js');
+    const fakeVault = {
+      id: 'fake-vault',
+      supportedPrincipalTypes: ['service-account'],
+      resolve: async (ref) => (ref.ref === 'known-secret' ? { token: 'vault-issued-token' } : undefined)
+    };
+    registerCredentialResolver(fakeVault);
+    try {
+      const creds = await resolveCredential({ platform: 'databricks', principalType: 'service-account', ref: 'known-secret', resolverId: 'fake-vault' });
+      assert.strictEqual(creds.token, 'vault-issued-token');
+      const miss = await resolveCredential({ platform: 'databricks', principalType: 'service-account', ref: 'unknown', resolverId: 'fake-vault' });
+      assert.strictEqual(miss, undefined);
+      // An unregistered resolver id resolves to undefined, never throws.
+      const noResolver = await resolveCredential({ platform: 'databricks', principalType: 'service-account', ref: 'x', resolverId: 'nonexistent' });
+      assert.strictEqual(noResolver, undefined);
+    } finally {
+      unregisterCredentialResolver('fake-vault');
+    }
+  });
+
+  await test('providerRegistry authModes partition correctly by principalType for Snowflake and Databricks', () => {
+    const mock = createMock();
+    const { getAuthModesForPrincipal } = withMock(mock, () => fresh('../dist/core/providerRegistry.js'));
+    const modeNames = (list) => list.map((m) => m.mode);
+
+    // Snowflake: key-pair is usable by both, but is the platform's own recommended
+    // service-account default; browser/username-password stay interactive-only.
+    assert.deepStrictEqual(modeNames(getAuthModesForPrincipal('snowflake', 'service-account')), ['key-pair', 'oauth']);
+    assert.ok(modeNames(getAuthModesForPrincipal('snowflake', 'interactive-user')).includes('external-browser'));
+    assert.ok(!modeNames(getAuthModesForPrincipal('snowflake', 'service-account')).includes('external-browser'));
+
+    // Databricks: OAuth U2M / a personal access token are interactive; OAuth M2M /
+    // a service-principal-scoped token are the headless/automation paths.
+    assert.deepStrictEqual(modeNames(getAuthModesForPrincipal('databricks', 'interactive-user')), ['oauth-u2m', 'personal-access-token']);
+    assert.deepStrictEqual(modeNames(getAuthModesForPrincipal('databricks', 'service-account')), ['oauth-m2m', 'service-principal-token']);
+  });
+
+  await test('No resolver-resolved secret is ever written to VS Code SecretStorage when the active resolver is cli or env', async () => {
+    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/dqm/credentials/registry.js');
+    const { EnvVarCredentialResolver } = fresh('../dist/dqm/credentials/EnvVarCredentialResolver.js');
+    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
+    const { VsCodeSecretStorageResolver } = withMock(createMock(), () => fresh('../dist/dqm/credentials/VsCodeSecretStorageResolver.js'));
+
+    let storeCalls = 0;
+    const spySecrets = { store: async () => { storeCalls++; }, get: async () => undefined, delete: async () => {} };
+
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-cli-config-'));
+    fs.writeFileSync(path.join(tmpDir, 'connections.toml'), '[default]\naccount = "acme"\n');
+    const prevHome = process.env.SNOWFLAKE_HOME;
+    process.env.SNOWFLAKE_HOME = tmpDir;
+
+    registerCredentialResolver(new EnvVarCredentialResolver({ AUTODE_SNOWFLAKE_ACCOUNT: 'acme-ci' }));
+    registerCredentialResolver(new CliConfigResolver());
+    registerCredentialResolver(new VsCodeSecretStorageResolver(spySecrets));
+
+    try {
+      const envCreds = await resolveCredential({ platform: 'snowflake', principalType: 'service-account', ref: '', resolverId: 'env' });
+      assert.strictEqual(envCreds.account, 'acme-ci');
+      const cliCreds = await resolveCredential({ platform: 'snowflake', principalType: 'interactive-user', ref: '', resolverId: 'cli' });
+      assert.strictEqual(cliCreds.connectionName, 'default');
+      assert.strictEqual(storeCalls, 0, 'SecretStorage.store() must never be called by the env or cli resolvers');
+    } finally {
+      if (prevHome === undefined) { delete process.env.SNOWFLAKE_HOME; } else { process.env.SNOWFLAKE_HOME = prevHome; }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      unregisterCredentialResolver('env');
+      unregisterCredentialResolver('cli');
+      unregisterCredentialResolver('vscode-secret-storage');
+    }
+  });
+
+  await test('CliConfigResolver reads named connections out of a real connections.toml without ever extracting secret field values', async () => {
+    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-cli-config-'));
+    fs.writeFileSync(path.join(tmpDir, 'connections.toml'), '[default]\naccount = "acme-dev"\nuser = "dev_user"\n\n[prod]\naccount = "acme-prod"\nuser = "prod_user"\n');
+    const prevHome = process.env.SNOWFLAKE_HOME;
+    process.env.SNOWFLAKE_HOME = tmpDir;
+
+    const resolver = new CliConfigResolver();
+    try {
+      const def = await resolver.resolve({ platform: 'snowflake', principalType: 'interactive-user', ref: '', resolverId: 'cli' });
+      assert.deepStrictEqual(def, { connectionName: 'default', authMode: 'connections-toml' });
+
+      const prod = await resolver.resolve({ platform: 'snowflake', principalType: 'interactive-user', ref: 'prod', resolverId: 'cli' });
+      assert.deepStrictEqual(prod, { connectionName: 'prod', authMode: 'connections-toml' });
+
+      const missing = await resolver.resolve({ platform: 'snowflake', principalType: 'interactive-user', ref: 'staging', resolverId: 'cli' });
+      assert.strictEqual(missing, undefined);
+    } finally {
+      if (prevHome === undefined) { delete process.env.SNOWFLAKE_HOME; } else { process.env.SNOWFLAKE_HOME = prevHome; }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await test('CliConfigResolver (Phase 3a-ii) confirms a Databricks profile exists in .databrickscfg, returning a pointer that never includes host/token field values', async () => {
+    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-databrickscfg-'));
+    const cfgPath = path.join(tmpDir, 'databrickscfg');
+    fs.writeFileSync(cfgPath, '[DEFAULT]\nhost = https://example.databricks.net\ntoken = should-never-be-returned\n\n[prod]\nhost = https://prod.databricks.net\ntoken = also-should-never-be-returned\n');
+    const prevCfg = process.env.DATABRICKS_CONFIG_FILE;
+    process.env.DATABRICKS_CONFIG_FILE = cfgPath;
+
+    const resolver = new CliConfigResolver();
+    try {
+      const def = await resolver.resolve({ platform: 'databricks', principalType: 'interactive-user', ref: '', resolverId: 'cli' });
+      assert.deepStrictEqual(def, { profile: 'DEFAULT', authMode: 'databrickscfg' });
+
+      const prod = await resolver.resolve({ platform: 'databricks', principalType: 'interactive-user', ref: 'prod', resolverId: 'cli' });
+      assert.deepStrictEqual(prod, { profile: 'prod', authMode: 'databrickscfg' });
+      assert.strictEqual(JSON.stringify(prod).includes('token'), false, 'must never surface the raw token field');
+
+      const missing = await resolver.resolve({ platform: 'databricks', principalType: 'interactive-user', ref: 'staging', resolverId: 'cli' });
+      assert.strictEqual(missing, undefined);
+    } finally {
+      if (prevCfg === undefined) { delete process.env.DATABRICKS_CONFIG_FILE; } else { process.env.DATABRICKS_CONFIG_FILE = prevCfg; }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await test('CliConfigResolver returns undefined (never throws) when no connections.toml exists', async () => {
+    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
+    const os = require('node:os');
+    const path = require('node:path');
+    const prevHome = process.env.SNOWFLAKE_HOME;
+    process.env.SNOWFLAKE_HOME = path.join(os.tmpdir(), 'autode-nonexistent-' + Date.now());
+    const resolver = new CliConfigResolver();
+    try {
+      const result = await resolver.resolve({ platform: 'snowflake', principalType: 'interactive-user', ref: '', resolverId: 'cli' });
+      assert.strictEqual(result, undefined);
+    } finally {
+      if (prevHome === undefined) { delete process.env.SNOWFLAKE_HOME; } else { process.env.SNOWFLAKE_HOME = prevHome; }
+    }
+  });
+
+  await test('VsCodeSecretStorageResolver reads only a platform\'s secret fields under the generalized key scheme', async () => {
+    const mock = createMock();
+    const { VsCodeSecretStorageResolver, secretStorageKey } = withMock(mock, () => fresh('../dist/dqm/credentials/VsCodeSecretStorageResolver.js'));
+    const store = new Map();
+    store.set(secretStorageKey('snowflake', 'service-account', 'prod', 'password'), 'shh');
+    const secrets = { store: async () => {}, get: async (k) => store.get(k), delete: async () => {} };
+
+    const resolver = new VsCodeSecretStorageResolver(secrets);
+    const creds = await resolver.resolve({ platform: 'snowflake', principalType: 'service-account', ref: 'prod', resolverId: 'vscode-secret-storage' });
+    assert.strictEqual(creds.password, 'shh');
+    assert.strictEqual(creds.privateKey, undefined);
+
+    const noneStored = await resolver.resolve({ platform: 'snowflake', principalType: 'service-account', ref: 'dev', resolverId: 'vscode-secret-storage' });
+    assert.strictEqual(noneStored, undefined);
+  });
+
+  // ── Phase 3a-ii: Interactive Onboarding UX ──
+
+  function cliBinaryMock(opts = {}) {
+    const versionOut = opts.versionOut; // string | null (null => nothing runnable)
+    const explicitPaths = opts.existsPaths || [];
+    const onPath = versionOut != null && opts.onPath !== false;
+    const mockPath = opts.mockPath || (process.platform === 'win32' ? 'C:\\mock\\bin\\snow.exe' : '/mock/bin/snow');
+    const base = createMock();
+    const existsPaths = onPath ? explicitPaths.concat([mockPath]) : explicitPaths;
+    base.__fs = {
+      existsSync: (p) => existsPaths.includes(p),
+      statSync: (p) => {
+        if (!existsPaths.includes(p)) { const err = new Error(`ENOENT: ${p}`); throw err; }
+        return { isFile: () => true, isDirectory: () => false };
+      }
+    };
+    base.__childProcess = {
+      spawnSync: (bin, args) => {
+        if (bin === 'where' || bin === 'which') {
+          return onPath ? { status: 0, stdout: mockPath + '\n' } : { status: 1, stdout: '' };
+        }
+        return versionOut != null ? { status: 0, stdout: versionOut } : { status: 1, stdout: '' };
+      }
+    };
+    return { mock: base, mockPath };
+  }
+
+  await test('detectCliBinary() finds a CLI on PATH and reports its version, mirroring ClaudeCodeAdapter.resolve()\'s shape', async () => {
+    const { mock, mockPath } = cliBinaryMock({ versionOut: '1.2.3\n' });
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const result = detectCliBinary({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, installHint: 'Install it.' });
+    assert.strictEqual(result.found, true);
+    assert.strictEqual(result.source, 'path');
+    assert.strictEqual(result.cliPath, mockPath);
+    assert.strictEqual(result.version, '1.2.3');
+  });
+
+  await test('detectCliBinary() reports found:false with actionable guidance text when the CLI is nowhere to be found', async () => {
+    const { mock } = cliBinaryMock({ versionOut: null, onPath: false });
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const result = detectCliBinary({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, installHint: 'Install it from the docs.' });
+    assert.strictEqual(result.found, false);
+    assert.strictEqual(result.source, 'none');
+    assert.ok(result.error && result.error.includes('Install it from the docs.'), 'never a bare error');
+  });
+
+  await test('detectCliBinary() prefers an explicit path setting over PATH, and reports a clear error when that setting is wrong', async () => {
+    const explicitPath = process.platform === 'win32' ? 'C:\\custom\\snow.exe' : '/custom/snow';
+    const { mock } = cliBinaryMock({ versionOut: '9.9.9', existsPaths: [explicitPath] });
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const found = detectCliBinary({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, explicitPathSetting: explicitPath, installHint: 'x' });
+    assert.strictEqual(found.source, 'setting');
+    assert.strictEqual(found.cliPath, explicitPath);
+
+    // A separate mock where nothing resolves via `where`/`which` either — otherwise
+    // this mock's own `where`/`which` stub would "find" the bad path regardless.
+    const { mock: notFoundMock } = cliBinaryMock({ versionOut: null, onPath: false });
+    const { detectCliBinary: detectCliBinary2 } = withMock(notFoundMock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const wrong = withMock(notFoundMock, () => detectCliBinary2({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, explicitPathSetting: '/nonexistent/snow', installHint: 'x' }));
+    assert.strictEqual(wrong.found, false);
+    assert.ok(wrong.error.includes('/nonexistent/snow'));
+  });
+
+  await test('detectCliBinary() auto-completes an explicit setting that points at the CLI\'s folder (not the binary itself) to <folder>/<binName>, instead of trying to spawn the directory (a real ENOENT hit live)', async () => {
+    const folder = process.platform === 'win32' ? 'D:\\Program Files\\Snowflake CLI' : '/opt/snowflake-cli';
+    const binName = process.platform === 'win32' ? 'snow.exe' : 'snow';
+    const exePath = require('path').join(folder, binName);
+    const mock = createMock();
+    mock.__fs = {
+      existsSync: (p) => p === folder || p === exePath,
+      statSync: (p) => {
+        if (p === folder) { return { isFile: () => false, isDirectory: () => true }; }
+        if (p === exePath) { return { isFile: () => true, isDirectory: () => false }; }
+        throw new Error(`ENOENT: ${p}`);
+      }
+    };
+    mock.__childProcess = { spawnSync: () => ({ status: 0, stdout: '3.27.0\n' }) };
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const result = withMock(mock, () => detectCliBinary({
+      displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, explicitPathSetting: folder, installHint: 'x'
+    }));
+    assert.strictEqual(result.found, true);
+    assert.strictEqual(result.source, 'setting');
+    assert.strictEqual(result.cliPath, exePath);
+  });
+
+  await test('detectCliBinary() falls back to a well-known install directory when PATH resolution fails, but never scans beyond the given candidates', async () => {
+    const binName = process.platform === 'win32' ? 'snow.exe' : 'snow';
+    const wellKnownDir = process.platform === 'win32' ? 'D:\\Program Files\\Snowflake CLI' : '/opt/homebrew/bin';
+    const wellKnownPath = require('path').join(wellKnownDir, binName);
+    const { mock } = cliBinaryMock({ versionOut: '3.27.0', onPath: false, existsPaths: [wellKnownPath] });
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+
+    const found = detectCliBinary({
+      displayName: 'Snowflake',
+      binaryNames: { win32: 'snow.exe', default: 'snow' },
+      installHint: 'x',
+      wellKnownDirs: [wellKnownDir]
+    });
+    assert.strictEqual(found.found, true);
+    assert.strictEqual(found.source, 'well-known-location');
+    assert.strictEqual(found.cliPath, wellKnownPath);
+
+    const notListed = detectCliBinary({
+      displayName: 'Snowflake',
+      binaryNames: { win32: 'snow.exe', default: 'snow' },
+      installHint: 'x',
+      wellKnownDirs: ['/some/other/dir']
+    });
+    assert.strictEqual(notListed.found, false);
+  });
+
+  await test('SnowflakeCli.listConnections() parses "snow connection list --format json" output into names, without establishing a real connection', async () => {
+    const base = createMock();
+    base.__childProcess = {
+      spawnSync: (bin, args) => {
+        assert.deepStrictEqual(args, ['connection', 'list', '--format', 'json']);
+        return { status: 0, stdout: JSON.stringify([{ connection_name: 'default', is_default: true }, { connection_name: 'prod' }]) };
+      }
+    };
+    const { SnowflakeCli } = withMock(base, () => fresh('../dist/dqm/credentials/SnowflakeCli.js'));
+    const cli = new SnowflakeCli();
+    const connections = await withMock(base, () => cli.listConnections('/mock/bin/snow'));
+    assert.deepStrictEqual(connections, [{ name: 'default' }, { name: 'prod' }]);
+  });
+
+  await test('SnowflakeCli.listConnections() degrades to an empty list (never throws) on a non-zero exit or malformed JSON', async () => {
+    const base = createMock();
+    base.__childProcess = { spawnSync: () => ({ status: 1, stdout: 'not json' }) };
+    const { SnowflakeCli } = withMock(base, () => fresh('../dist/dqm/credentials/SnowflakeCli.js'));
+    const cli = new SnowflakeCli();
+    assert.deepStrictEqual(await withMock(base, () => cli.listConnections('/mock/bin/snow')), []);
+
+    const base2 = createMock();
+    base2.__childProcess = { spawnSync: () => ({ status: 0, stdout: '{not valid json' }) };
+    const { SnowflakeCli: SnowflakeCli2 } = withMock(base2, () => fresh('../dist/dqm/credentials/SnowflakeCli.js'));
+    assert.deepStrictEqual(await withMock(base2, () => new SnowflakeCli2().listConnections('/mock/bin/snow')), []);
+  });
+
+  await test('readDatabricksCfgProfiles() parses .databrickscfg sections without exposing them anywhere but as names, and respects DATABRICKS_CONFIG_FILE', async () => {
+    const { readDatabricksCfgProfiles, databricksConfigPath } = fresh('../dist/dqm/credentials/databricksCfg.js');
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-databrickscfg-'));
+    const cfgPath = path.join(tmpDir, 'databrickscfg');
+    fs.writeFileSync(cfgPath, '# a comment\n[DEFAULT]\nhost = https://a.databricks.net\ntoken = secret-a\n\n[staging]\nhost = https://b.databricks.net\ntoken = secret-b\n');
+    const prevCfg = process.env.DATABRICKS_CONFIG_FILE;
+    process.env.DATABRICKS_CONFIG_FILE = cfgPath;
+    try {
+      assert.strictEqual(databricksConfigPath(), cfgPath);
+      const profiles = await readDatabricksCfgProfiles();
+      assert.deepStrictEqual(profiles.map((p) => p.name), ['DEFAULT', 'staging']);
+      assert.strictEqual(profiles[1].fields.host, 'https://b.databricks.net');
+
+      const missing = await readDatabricksCfgProfiles(path.join(tmpDir, 'nope'));
+      assert.strictEqual(missing, undefined);
+    } finally {
+      if (prevCfg === undefined) { delete process.env.DATABRICKS_CONFIG_FILE; } else { process.env.DATABRICKS_CONFIG_FILE = prevCfg; }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await test('DatabricksCli.listConnections() enumerates .databrickscfg profile names only — no CLI shell-out, so no consent gate applies', async () => {
+    const { DatabricksCli } = fresh('../dist/dqm/credentials/DatabricksCli.js');
+    const os = require('node:os');
+    const path = require('node:path');
+    const fs = require('node:fs');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-databrickscfg-'));
+    const cfgPath = path.join(tmpDir, 'databrickscfg');
+    fs.writeFileSync(cfgPath, '[DEFAULT]\nhost = https://a.databricks.net\ntoken = secret-a\n');
+    const prevCfg = process.env.DATABRICKS_CONFIG_FILE;
+    process.env.DATABRICKS_CONFIG_FILE = cfgPath;
+    try {
+      const cli = new DatabricksCli();
+      const connections = await cli.listConnections('unused-cli-path');
+      assert.deepStrictEqual(connections, [{ name: 'DEFAULT' }]);
+    } finally {
+      if (prevCfg === undefined) { delete process.env.DATABRICKS_CONFIG_FILE; } else { process.env.DATABRICKS_CONFIG_FILE = prevCfg; }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await test('getCliDescriptor() returns a descriptor for snowflake/databricks and undefined for a platform with no CLI-reuse story yet', () => {
+    const { getCliDescriptor } = fresh('../dist/dqm/credentials/cliRegistry.js');
+    assert.strictEqual(getCliDescriptor('snowflake').platform, 'snowflake');
+    assert.strictEqual(getCliDescriptor('databricks').platform, 'databricks');
+    assert.strictEqual(getCliDescriptor('bigquery'), undefined);
+  });
+
+  await test('SnowflakeCliBackend surfaces the TAIL of a long, noisy CLI error (where the actionable message lives), not the head', async () => {
+    const mock = createMock();
+    const noise = 'internal traceback noise line\n'.repeat(200); // well over 2000 chars
+    const actionable = 'Incoming request with IP/Token 1.2.3.4 is not allowed to access Snowflake. Contact your account administrator.';
+    mock.__childProcess = {
+      spawnSync: () => ({ status: 1, stderr: noise + actionable, stdout: '' })
+    };
+    const { SnowflakeCliBackend } = withMock(mock, () => fresh('../dist/dqm/executionBackends/SnowflakeCliBackend.js'));
+    const backend = new SnowflakeCliBackend('/mock/bin/snow', { kind: 'named', connectionName: 'prod' }, () => {});
+    await assert.rejects(
+      () => withMock(mock, () => backend.executeQuery('SELECT 1')),
+      (err) => err.message.includes(actionable) && err.message.length < noise.length
+    );
+  });
+
+  function freshAdapterModule(mock, modulePath) {
+    for (const p of [
+      modulePath,
+      '../dist/dqm/BaseAdapter.js',
+      '../dist/core/extensionIdentity.js',
+      '../dist/dqm/credentials/cliRegistry.js',
+      '../dist/dqm/credentials/SnowflakeCli.js',
+      '../dist/dqm/credentials/DatabricksCli.js',
+      '../dist/dqm/credentials/cliDetection.js',
+      '../dist/dqm/executionBackends/SnowflakeCliBackend.js',
+      '../dist/dqm/executionBackends/SnowflakeRestBackend.js',
+      '../dist/dqm/executionBackends/DatabricksRestBackend.js',
+      '../dist/dqm/adapters/snowflakeJwt.js'
+    ]) {
+      try { delete require.cache[require.resolve(p)]; } catch { /* not loaded */ }
+    }
+    return withMock(mock, () => require(modulePath));
+  }
+
+  await test('SnowflakeAdapter.connect() (Phase 3b) executes via the CLI shell-out backend (tier 1) for a CLI-derived connectionName, gated by CLI-execution consent', async () => {
+    const mockPath = process.platform === 'win32' ? 'C:\\mock\\bin\\snow.exe' : '/mock/bin/snow';
+    const consented = createMock({ config: { dataPlatformCliConsent: true } });
+    consented.__fs = {
+      existsSync: (p) => p === mockPath,
+      statSync: (p) => { if (p !== mockPath) { throw new Error(`ENOENT: ${p}`); } return { isFile: () => true, isDirectory: () => false }; }
+    };
+    consented.__childProcess = {
+      spawnSync: (bin, args) => {
+        if (bin === 'where' || bin === 'which') { return { status: 0, stdout: mockPath + '\n' }; }
+        if (args[0] === '--version') { return { status: 0, stdout: '1.2.3\n' }; }
+        assert.strictEqual(args[0], 'sql');
+        assert.deepStrictEqual(args.slice(1, 3), ['-c', 'prod']);
+        return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'PROD_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
+      }
+    };
+    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ connectionName: 'prod' }, () => {});
+    const info = await withMock(consented, () => adapter.connect());
+    assert.strictEqual(info.connected, true);
+    assert.strictEqual(info.databaseName, 'PROD_DB');
+    assert.strictEqual(info.version, '8.1');
+
+    // Without consent, refused before any shell-out is attempted.
+    const unconsented = createMock({ config: { dataPlatformCliConsent: false } });
+    const { SnowflakeAdapter: SnowflakeAdapterNoConsent } = freshAdapterModule(unconsented, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const adapter2 = new SnowflakeAdapterNoConsent({ connectionName: 'prod' }, () => {});
+    await assert.rejects(() => withMock(unconsented, () => adapter2.connect()), /CLI-execution consent/);
+
+    const bare = new SnowflakeAdapterNoConsent({}, () => {});
+    await assert.rejects(() => withMock(unconsented, () => bare.connect()), /requires account, username, and database/);
+  });
+
+  await test('SnowflakeAdapter.connect() (Phase 3b) honors username/password auth via the CLI\'s ad-hoc --user/--password flags, since the SQL API cannot accept it', async () => {
+    const mockPath = process.platform === 'win32' ? 'C:\\mock\\bin\\snow.exe' : '/mock/bin/snow';
+    const consented = createMock({ config: { dataPlatformCliConsent: true } });
+    consented.__fs = { existsSync: (p) => p === mockPath };
+    consented.__childProcess = {
+      spawnSync: (bin, args) => {
+        if (bin === 'where' || bin === 'which') { return { status: 0, stdout: mockPath + '\n' }; }
+        if (args[0] === '--version') { return { status: 0, stdout: '1.2.3\n' }; }
+        assert.strictEqual(args[0], 'sql');
+        assert.deepStrictEqual(args.slice(1, 5), ['--account', 'ACME', '--user', 'jdoe']);
+        assert.ok(args.includes('--password'), 'password flag present');
+        assert.ok(!args.includes('prod'), 'never falls back to a named connection');
+        return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'RAW_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
+      }
+    };
+    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter(
+      { account: 'ACME', username: 'jdoe', password: 'secret-pw', database: 'RAW_DB', authMode: 'username-password' },
+      () => {}
+    );
+    const info = await withMock(consented, () => adapter.connect());
+    assert.strictEqual(info.connected, true);
+    assert.strictEqual(info.databaseName, 'RAW_DB');
+
+    // Same auth mode but no password stored yet: falls through to the REST tier's
+    // explicit, actionable rejection rather than a silent/bare failure.
+    const { SnowflakeAdapter: SnowflakeAdapter2 } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const noPassword = new SnowflakeAdapter2(
+      { account: 'ACME', username: 'jdoe', database: 'RAW_DB', authMode: 'username-password' },
+      () => {}
+    );
+    await assert.rejects(() => withMock(consented, () => noPassword.connect()), /requires a password/);
+  });
+
+  await test('DatabricksAdapter.connect() (Phase 3b) rejects a CLI-derived profile credential with an explanation, since Databricks has no native-protocol CLI path unlike Snowflake', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const adapter = new DatabricksAdapter({ profile: 'FinanceIQ', authMode: 'databrickscfg' }, () => {});
+    await assert.rejects(() => withMock(mock, () => adapter.connect()), /no CLI-based native execution path/);
+
+    const bare = new DatabricksAdapter({}, () => {});
+    await assert.rejects(() => withMock(mock, () => bare.connect()), /requires a workspace host, SQL warehouse HTTP path, and token/);
+  });
+
+  await test('TargetContext.credentialRef (Phase 3a-ii) round-trips through TargetContextManager, proving "Connect to Data Platform" reuses the existing Target Context model', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
+        } }
+      };
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/TargetContextManager.js')]; } catch { /* not loaded */ }
+    const { TargetContextManager } = withMock(mock, () => require('../dist/context/TargetContextManager.js'));
+    const mgr = new TargetContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+
+    await withMock(mock, () => mgr.save({
+      specId: 'bps-1', specVersion: 1, status: 'built', platform: 'snowflake',
+      credentialRef: { resolverId: 'cli', ref: 'prod' }, answers: {}
+    }));
+    assert.deepStrictEqual(mgr.getContext().credentialRef, { resolverId: 'cli', ref: 'prod' });
+
+    const mgr2 = new TargetContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    assert.deepStrictEqual(mgr2.getContext().credentialRef, { resolverId: 'cli', ref: 'prod' }, 'survives a reload');
+  });
+
+  await test('TargetContextManager bumps version + archives only when revising an already-approved predecessor of the same spec lineage (v0.19.0, mirrors SourceContextManager exactly)', async () => {
+    function fsMapMock() {
+      const store = new Map();
+      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+      return {
+        Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+        workspace: { fs: {
+          createDirectory: async () => {},
+          readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+          writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+          rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+          stat: async (uri) => { if (!store.has(keyOf(uri))) throw new Error('ENOENT'); return {}; }
+        } },
+        store
+      };
+    }
+    const mock = fsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/TargetContextManager.js')]; } catch { /* not loaded */ }
+    const { TargetContextManager } = withMock(mock, () => require('../dist/context/TargetContextManager.js'));
+    const mgr = new TargetContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'built', platform: 'snowflake', answers: {} }));
+    await withMock(mock, () => mgr.save({ ...mgr.getContext(), status: 'approved' }));
+    assert.strictEqual(mgr.getContext().version, 1, 'approving a not-yet-approved record must not bump the version');
+
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'built', platform: 'databricks', answers: {} }));
+    assert.strictEqual(mgr.getContext().version, 2, 'revising an approved predecessor bumps the version');
+    assert.strictEqual(mock.store.has('/ws/context/history/target-context.spec1.v1.yaml'), true, 'the approved v1 predecessor was archived before being overwritten');
+  });
+
+  // ── Phase 3b: Data Platform Connectivity (execution-backend cascade) ──
+
+  await test('buildSnowflakeKeyPairJwt() produces a verifiable RS256 JWT with Snowflake\'s documented claim shape, using only node:crypto', () => {
+    const { buildSnowflakeKeyPairJwt } = fresh('../dist/dqm/adapters/snowflakeJwt.js');
+    const crypto = require('node:crypto');
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+    });
+
+    const jwt = buildSnowflakeKeyPairJwt({ account: 'my-org.my-account', username: 'svc_user', privateKeyPem: privateKey });
+    const [headerPart, payloadPart, signaturePart] = jwt.split('.');
+    const b64urlToBuf = (s) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    const header = JSON.parse(b64urlToBuf(headerPart).toString('utf8'));
+    const payload = JSON.parse(b64urlToBuf(payloadPart).toString('utf8'));
+
+    assert.deepStrictEqual(header, { alg: 'RS256', typ: 'JWT' });
+    assert.strictEqual(payload.sub, 'MY-ORG-MY-ACCOUNT.SVC_USER', 'account periods become hyphens, everything uppercased');
+    assert.ok(payload.iss.startsWith('MY-ORG-MY-ACCOUNT.SVC_USER.SHA256:'));
+    assert.ok(payload.exp > payload.iat && payload.exp - payload.iat <= 3600, 'exp respects the 60-minute ceiling');
+
+    const verified = crypto.verify('RSA-SHA256', Buffer.from(`${headerPart}.${payloadPart}`), publicKey, b64urlToBuf(signaturePart));
+    assert.strictEqual(verified, true, 'signature must verify against the corresponding public key');
+  });
+
+  await test('SnowflakeRestBackend executes a synchronous query, casts FIXED/BOOLEAN types, and prefers a token over key-pair auth', async () => {
+    const { SnowflakeRestBackend } = fresh('../dist/dqm/executionBackends/SnowflakeRestBackend.js');
+    const origFetch = global.fetch;
+    let capturedUrl, capturedHeaders;
+    global.fetch = async (url, init) => {
+      capturedUrl = url; capturedHeaders = init.headers;
+      return {
+        status: 200,
+        json: async () => ({
+          resultSetMetaData: { rowType: [{ name: 'ROW_COUNT', type: 'FIXED' }, { name: 'IS_VIEW', type: 'BOOLEAN' }, { name: 'NAME', type: 'TEXT' }] },
+          data: [['42', 'true', 'orders']]
+        })
+      };
+    };
+    try {
+      const backend = new SnowflakeRestBackend({ account: 'acme', username: 'u', token: 'pat-secret' }, () => {});
+      const result = await backend.executeQuery('SELECT 1');
+      assert.strictEqual(capturedUrl, 'https://acme.snowflakecomputing.com/api/v2/statements');
+      assert.strictEqual(capturedHeaders.Authorization, 'Bearer pat-secret');
+      assert.deepStrictEqual(result.columns, ['ROW_COUNT', 'IS_VIEW', 'NAME']);
+      assert.deepStrictEqual(result.rows, [{ ROW_COUNT: 42, IS_VIEW: true, NAME: 'orders' }]);
+      assert.strictEqual(typeof result.rows[0].ROW_COUNT, 'number', 'FIXED values are cast to real numbers, not left as strings');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('SnowflakeRestBackend polls a 202 response to a terminal state instead of assuming success after one check', async () => {
+    const { SnowflakeRestBackend } = fresh('../dist/dqm/executionBackends/SnowflakeRestBackend.js');
+    const origFetch = global.fetch;
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      if (calls === 1) { return { status: 202, json: async () => ({ statementHandle: 'h1' }) }; }
+      if (calls === 2) { return { status: 202, json: async () => ({ statementHandle: 'h1' }) }; }
+      return { status: 200, json: async () => ({ resultSetMetaData: { rowType: [{ name: 'X', type: 'FIXED' }] }, data: [['1']] }) };
+    };
+    try {
+      const backend = new SnowflakeRestBackend({ account: 'acme', username: 'u', token: 't' }, () => {});
+      const result = await backend.executeQuery('SELECT 1');
+      assert.strictEqual(calls, 3, 'kept polling until a genuinely terminal (non-202) response, not just once');
+      assert.deepStrictEqual(result.rows, [{ X: 1 }]);
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('SnowflakeRestBackend rejects when no PAT/OAuth token or key-pair key is available', async () => {
+    const { SnowflakeRestBackend } = fresh('../dist/dqm/executionBackends/SnowflakeRestBackend.js');
+    const backend = new SnowflakeRestBackend({ account: 'acme', username: 'u' }, () => {});
+    await assert.rejects(() => backend.executeQuery('SELECT 1'), /Programmatic Access Token, OAuth token, or key-pair/);
+  });
+
+  await test('DatabricksRestBackend derives warehouse_id from the HTTP Path, executes synchronously, and casts numeric types', async () => {
+    const { DatabricksRestBackend } = fresh('../dist/dqm/executionBackends/DatabricksRestBackend.js');
+    const origFetch = global.fetch;
+    let capturedUrl, capturedBody;
+    global.fetch = async (url, init) => {
+      capturedUrl = url; capturedBody = JSON.parse(init.body);
+      return {
+        status: 200,
+        json: async () => ({
+          status: { state: 'SUCCEEDED' },
+          // Databricks' `type_name` is Spark's internal type name, not SQL type text —
+          // a BIGINT column reports type_name "LONG" (confirmed against a real workspace).
+          manifest: { schema: { columns: [{ name: 'CNT', type_name: 'LONG' }, { name: 'NAME', type_name: 'STRING' }] } },
+          result: { data_array: [['7', 'orders']] }
+        })
+      };
+    };
+    try {
+      const backend = new DatabricksRestBackend({ host: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc123', token: 'dapi-secret', catalog: 'main', schema: 'default' }, () => {});
+      const result = await backend.executeQuery('SELECT 1');
+      assert.strictEqual(capturedUrl, 'https://acme.databricks.net/api/2.0/sql/statements');
+      assert.strictEqual(capturedBody.warehouse_id, 'abc123');
+      assert.deepStrictEqual(result.rows, [{ CNT: 7, NAME: 'orders' }]);
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('DatabricksRestBackend polls PENDING/RUNNING to a terminal state and surfaces a FAILED statement as a rejection', async () => {
+    const { DatabricksRestBackend } = fresh('../dist/dqm/executionBackends/DatabricksRestBackend.js');
+    const origFetch = global.fetch;
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      if (calls === 1) { return { status: 200, json: async () => ({ statement_id: 's1', status: { state: 'PENDING' } }) }; }
+      return { status: 200, json: async () => ({ statement_id: 's1', status: { state: 'FAILED', error: { message: 'table not found' } } }) };
+    };
+    try {
+      const backend = new DatabricksRestBackend({ host: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc123', token: 't' }, () => {});
+      await assert.rejects(() => backend.executeQuery('SELECT 1'), /table not found/);
+      assert.strictEqual(calls, 2, 'polled at least once past the initial PENDING response');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('SnowflakeAdapter.connect() (Phase 3b) routes username/password auth through the CLI, not the REST tier, and requires the same CLI-execution consent a CLI-derived connection does', async () => {
+    const mock = createMock();
+    const { SnowflakeAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ account: 'acme', username: 'u', database: 'db', authMode: 'username-password', password: 'hunter2' }, () => {});
+    // No dataPlatformCliConsent in this mock's config, and no fetch mock either —
+    // if this ever silently fell through to REST (which cannot do password auth at
+    // all) it would throw a different error than the CLI-consent one asserted here.
+    await assert.rejects(() => withMock(mock, () => adapter.connect()), /CLI-execution consent/);
+  });
+
+  await test('SnowflakeAdapter.connect() (Phase 3b) via the REST backend (tier 3) succeeds end-to-end with a PAT credential', async () => {
+    const mock = createMock();
+    const { SnowflakeAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const origFetch = global.fetch;
+    global.fetch = async () => ({
+      status: 200,
+      json: async () => ({
+        resultSetMetaData: { rowType: [{ name: 'CURRENT_DB', type: 'TEXT' }, { name: 'CURRENT_SCHEMA', type: 'TEXT' }, { name: 'CURRENT_VERSION', type: 'TEXT' }] },
+        data: [['ANALYTICS', 'PUBLIC', '8.20']]
+      })
+    });
+    try {
+      const adapter = new SnowflakeAdapter({ account: 'acme', username: 'svc', database: 'ANALYTICS', token: 'pat-secret' }, () => {});
+      const info = await withMock(mock, () => adapter.connect());
+      assert.strictEqual(info.connected, true);
+      assert.strictEqual(info.databaseName, 'ANALYTICS');
+      assert.strictEqual(info.version, '8.20');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('DatabricksAdapter.connect() (Phase 3b) succeeds end-to-end via REST given a workspace host, HTTP path, and token', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const origFetch = global.fetch;
+    global.fetch = async () => ({
+      status: 200,
+      json: async () => ({
+        status: { state: 'SUCCEEDED' },
+        manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } },
+        result: { data_array: [['main', 'default']] }
+      })
+    });
+    try {
+      const adapter = new DatabricksAdapter({ workspaceUrl: 'https://acme.azuredatabricks.net/', httpPath: '/sql/1.0/warehouses/abc123', token: 'dapi-secret' }, () => {});
+      const info = await withMock(mock, () => adapter.connect());
+      assert.strictEqual(info.connected, true);
+      assert.strictEqual(info.databaseName, 'main');
+      assert.strictEqual(info.schemaName, 'default');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('ConnectionManager.getSupportedPlatforms() reads providerRegistry.ts, intersected with actually-registered adapter factories', () => {
+    const mock = createMock();
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const manager = new ConnectionManager(() => {});
+    const platforms = manager.getSupportedPlatforms();
+    assert.ok(platforms.includes('snowflake'));
+    assert.ok(platforms.includes('databricks'));
+    assert.ok(!platforms.includes('bigquery'), 'listed in providerRegistry but has no registered adapter factory yet');
+  });
+
+  await test('ConnectionManager.getCredentialsFromSettings() reads the real Databricks settings (a pre-existing gap: it used to reference a settings key that never existed)', () => {
+    const mock = createMock();
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const creds = ConnectionManager.getCredentialsFromSettings('databricks', {
+      defaultDatabricksWorkspaceUrl: 'acme.azuredatabricks.net',
+      defaultDatabricksHttpPath: '/sql/1.0/warehouses/abc123',
+      defaultDatabricksCatalog: 'main',
+      defaultDatabricksSchema: 'default'
+    });
+    assert.strictEqual(creds.workspaceUrl, 'acme.azuredatabricks.net');
+    assert.strictEqual(creds.httpPath, '/sql/1.0/warehouses/abc123');
+    assert.strictEqual(creds.catalog, 'main');
+    assert.strictEqual(creds.schema, 'default');
+  });
+
+  await test('ConnectionManager.getCredentialsFromSettings() passes snowflakeCliPath through (a real gap: it was silently dropped, so a configured explicit path never reached SnowflakeAdapter from the settings-panel flow)', () => {
+    const mock = createMock();
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const creds = ConnectionManager.getCredentialsFromSettings('snowflake', {
+      defaultSnowflakeAccount: 'ACME', defaultSnowflakeUsername: 'jdoe', snowflakeCliPath: 'D:/Program Files/Snowflake CLI/snow.exe'
+    });
+    assert.strictEqual(creds.snowflakeCliPath, 'D:/Program Files/Snowflake CLI/snow.exe');
+
+    const withoutPath = ConnectionManager.getCredentialsFromSettings('snowflake', { defaultSnowflakeAccount: 'ACME' });
+    assert.strictEqual(withoutPath.snowflakeCliPath, '');
+  });
+
+  await test('ConnectionManager.getCredentialsFromSettings() reads the parallel defaultTarget* settings when role="target" (v0.19.0), and both roles can hold different values simultaneously', () => {
+    const mock = createMock();
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const settings = {
+      defaultSnowflakeAccount: 'SOURCE_ACC', defaultSnowflakeUsername: 'source_user', snowflakeCliPath: '/src/snow',
+      defaultTargetSnowflakeAccount: 'TARGET_ACC', defaultTargetSnowflakeUsername: 'target_user', targetSnowflakeCliPath: '/tgt/snow',
+      defaultDatabricksWorkspaceUrl: 'source.databricks.net', defaultTargetDatabricksWorkspaceUrl: 'target.databricks.net'
+    };
+    const sourceCreds = ConnectionManager.getCredentialsFromSettings('snowflake', settings);
+    assert.strictEqual(sourceCreds.account, 'SOURCE_ACC', 'defaults to role="source" for backward compatibility');
+    assert.strictEqual(sourceCreds.snowflakeCliPath, '/src/snow');
+
+    const targetCreds = ConnectionManager.getCredentialsFromSettings('snowflake', settings, 'target');
+    assert.strictEqual(targetCreds.account, 'TARGET_ACC');
+    assert.strictEqual(targetCreds.snowflakeCliPath, '/tgt/snow');
+    assert.notStrictEqual(targetCreds.account, sourceCreds.account, 'source and target settings are genuinely independent, not aliases of each other');
+
+    const targetDatabricks = ConnectionManager.getCredentialsFromSettings('databricks', settings, 'target');
+    assert.strictEqual(targetDatabricks.workspaceUrl, 'target.databricks.net');
+    const sourceDatabricks = ConnectionManager.getCredentialsFromSettings('databricks', settings);
+    assert.strictEqual(sourceDatabricks.workspaceUrl, 'source.databricks.net');
+  });
+
+  await test('DatabricksAdapter.getMetadataQueries() branches on catalog: Unity-Catalog-style catalogs get information_schema, hive_metastore gets SHOW TABLES plus deliberately empty (never mis-mapped) column/FK/view queries', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const origFetch = global.fetch;
+    global.fetch = async () => ({ status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } }, result: { data_array: [['hive_metastore', 'default']] } }) });
+    try {
+      const adapter = new DatabricksAdapter({ workspaceUrl: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 't', catalog: 'hive_metastore' }, () => {});
+      await withMock(mock, () => adapter.connect());
+      const queries = adapter.getMetadataQueries();
+      assert.ok(queries.listTables.includes('SHOW TABLES IN hive_metastore.default'));
+      assert.ok(!queries.listColumns.includes('information_schema'), 'no mis-mapped information_schema query for a catalog confirmed not to support it');
+      assert.ok(queries.listColumns.includes('WHERE 1 = 0'), 'a deliberate, always-valid empty no-op instead');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('BaseDataSourceAdapter.assembleTables() (via extractMetadata) recognizes Databricks\' native SHOW TABLES column names (database/tableName) as a fallback, and degrades non-fatally instead of aborting when table/column listing fails', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const origFetch = global.fetch;
+    let call = 0;
+    global.fetch = async () => {
+      call++;
+      if (call === 1) {
+        // connect()'s validation query
+        return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } }, result: { data_array: [['hive_metastore', 'default']] } }) };
+      }
+      if (call === 2) {
+        // listTables via SHOW TABLES — real Databricks column names, not information_schema's
+        return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'database', type_name: 'STRING' }, { name: 'tableName', type_name: 'STRING' }, { name: 'isTemporary', type_name: 'BOOLEAN' }] } }, result: { data_array: [['default', 'legacy_orders', 'false']] } }) };
+      }
+      // listColumns/listForeignKeys/listViews (deliberately empty no-ops) all resolve the same trivial shape
+      return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [] } }, result: { data_array: [] } }) };
+    };
+    try {
+      const adapter = new DatabricksAdapter({ workspaceUrl: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 't', catalog: 'hive_metastore' }, () => {});
+      await withMock(mock, () => adapter.connect());
+      const snapshot = await withMock(mock, () => adapter.extractMetadata());
+      assert.strictEqual(snapshot.tables.length, 1);
+      assert.strictEqual(snapshot.tables[0].schema, 'default', 'mapped from SHOW TABLES\' "database" column via the new fallback');
+      assert.strictEqual(snapshot.tables[0].name, 'legacy_orders', 'mapped from SHOW TABLES\' "tableName" column via the new fallback');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('BaseDataSourceAdapter.extractMetadata()/snapshotToGraph() tag connectionId (not just platform) on the snapshot and every resulting graph node\'s Origin, so multiple connections of the same platform stay distinguishable', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const origFetch = global.fetch;
+    let call = 0;
+    global.fetch = async () => {
+      call++;
+      if (call === 1) {
+        return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } }, result: { data_array: [['hive_metastore', 'default']] } }) };
+      }
+      if (call === 2) {
+        return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'database', type_name: 'STRING' }, { name: 'tableName', type_name: 'STRING' }, { name: 'isTemporary', type_name: 'BOOLEAN' }] } }, result: { data_array: [['default', 'legacy_orders', 'false']] } }) };
+      }
+      return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [] } }, result: { data_array: [] } }) };
+    };
+    try {
+      const adapter = new DatabricksAdapter({ workspaceUrl: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 't', catalog: 'hive_metastore' }, () => {});
+      await withMock(mock, () => adapter.connect());
+      const snapshot = await withMock(mock, () => adapter.extractMetadata());
+      assert.strictEqual(snapshot.connectionId, 'databricks:acme.databricks.net', 'derived from the workspaceUrl credential, not just the bare platform name');
+      assert.strictEqual(snapshot.tables.length, 1);
+
+      const graph = adapter.snapshotToGraph(snapshot);
+      const tableNodes = graph.nodes.filter((n) => n.type === 'table' || n.type === 'semantic_view');
+      assert.strictEqual(tableNodes.length, 1);
+      assert.strictEqual(tableNodes[0].origin.connectionId, 'databricks:acme.databricks.net');
+      assert.strictEqual(tableNodes[0].origin.environment, 'source');
+      assert.strictEqual(tableNodes[0].origin.confidence, 1.0, 'Step 7: a live connection\'s extraction must set confidence — previously never set at all');
+      assert.strictEqual(tableNodes[0].origin.reliability, 'live-verified', 'Step 7: distinguishes a live connection from file/LLM-derived provenance');
+      assert.ok(tableNodes[0].origin.lastVerifiedAt, 'Step 7: a fresh extraction is itself a verification');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('BaseDataSourceAdapter.extractMetadata() degrades non-fatally (never aborts the whole extraction) when table or column listing itself fails, not just FK/view/lineage', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const origFetch = global.fetch;
+    let call = 0;
+    global.fetch = async () => {
+      call++;
+      if (call === 1) {
+        return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } }, result: { data_array: [['main', 'default']] } }) };
+      }
+      // Every post-connect query fails — extractMetadata() must still resolve, not reject.
+      return { status: 500, json: async () => ({ message: 'internal error' }) };
+    };
+    try {
+      const adapter = new DatabricksAdapter({ workspaceUrl: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 't', catalog: 'main' }, () => {});
+      await withMock(mock, () => adapter.connect());
+      const snapshot = await withMock(mock, () => adapter.extractMetadata());
+      assert.strictEqual(snapshot.tables.length, 0);
+      assert.strictEqual(snapshot.views.length, 0);
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('DatabricksAdapter\'s catalog-type detection is explicit-first: defaultDatabricksCatalogType overrides the hive_metastore-name heuristic in both directions, not just the auto-detected default', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const origFetch = global.fetch;
+    let requestBody;
+    global.fetch = async (url, init) => {
+      requestBody = JSON.parse(init.body);
+      return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } }, result: { data_array: [[requestBody.catalog, requestBody.schema]] } }) };
+    };
+    try {
+      // A workspace can have more than one catalog type side by side — explicit
+      // configuration decides which shape applies per connection, not just a name check.
+      const forcedUnity = new DatabricksAdapter({ workspaceUrl: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 't', catalog: 'hive_metastore', catalogType: 'unity' }, () => {});
+      await withMock(mock, () => forcedUnity.connect());
+      assert.ok(forcedUnity.getMetadataQueries().listTables.includes('information_schema'), 'an explicit "unity" override wins even against the reserved hive_metastore name');
+
+      // The escape hatch: force legacy behavior for some OTHER catalog that isn't
+      // literally named hive_metastore but shares its limitations.
+      const forcedLegacy = new DatabricksAdapter({ workspaceUrl: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 't', catalog: 'some_federated_catalog', catalogType: 'hive_metastore' }, () => {});
+      await withMock(mock, () => forcedLegacy.connect());
+      const q = forcedLegacy.getMetadataQueries();
+      assert.ok(q.listTables.includes('SHOW TABLES IN some_federated_catalog'), 'the override targets whatever catalog was actually configured, not a hardcoded "hive_metastore" name');
+      assert.ok(!q.listColumns.includes('information_schema'));
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('DatabricksAdapter.listDatabases()/listSchemas() run SHOW CATALOGS / SHOW SCHEMAS IN <catalog> and parse Databricks\' real column names (Step 4 — discovery-based selection, not blind typing)', async () => {
+    const mock = createMock();
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const origFetch = global.fetch;
+    let lastSql = '';
+    global.fetch = async (url, init) => {
+      const body = JSON.parse(init.body);
+      lastSql = body.statement || '';
+      if (/^SHOW CATALOGS/i.test(lastSql)) {
+        return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'catalog', type_name: 'STRING' }] } }, result: { data_array: [['main'], ['hive_metastore']] } }) };
+      }
+      if (/^SHOW SCHEMAS IN/i.test(lastSql)) {
+        return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'databaseName', type_name: 'STRING' }] } }, result: { data_array: [['default'], ['sales']] } }) };
+      }
+      // connect()'s validation query
+      return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } }, result: { data_array: [['main', 'default']] } }) };
+    };
+    try {
+      const adapter = new DatabricksAdapter({ workspaceUrl: 'acme.databricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 't', catalog: 'main' }, () => {});
+      await withMock(mock, () => adapter.connect());
+      const databases = await withMock(mock, () => adapter.listDatabases());
+      assert.deepStrictEqual(databases, ['main', 'hive_metastore']);
+      const schemas = await withMock(mock, () => adapter.listSchemas('main'));
+      assert.deepStrictEqual(schemas, ['default', 'sales']);
+      assert.ok(lastSql.includes('SHOW SCHEMAS IN main'), 'the bare (unwrapped) SHOW command syntax confirmed live this session');
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('SnowflakeAdapter.listDatabases()/listSchemas() run SHOW DATABASES / SHOW SCHEMAS IN DATABASE <db> over the CLI tier and parse the real connection-list JSON shape', async () => {
+    const mockPath = process.platform === 'win32' ? 'C:\\mock\\bin\\snow.exe' : '/mock/bin/snow';
+    const consented = createMock({ config: { dataPlatformCliConsent: true } });
+    consented.__fs = {
+      existsSync: (p) => p === mockPath,
+      statSync: (p) => { if (p !== mockPath) { throw new Error(`ENOENT: ${p}`); } return { isFile: () => true, isDirectory: () => false }; }
+    };
+    let lastArgs = [];
+    consented.__childProcess = {
+      spawnSync: (bin, args) => {
+        if (bin === 'where' || bin === 'which') { return { status: 0, stdout: mockPath + '\n' }; }
+        if (args[0] === '--version') { return { status: 0, stdout: '1.2.3\n' }; }
+        lastArgs = args;
+        const query = args[args.indexOf('-q') + 1];
+        if (/^SHOW DATABASES/i.test(query)) { return { status: 0, stdout: JSON.stringify([{ name: 'RAW_DB' }, { name: 'ANALYTICS_DB' }]) }; }
+        if (/^SHOW SCHEMAS/i.test(query)) { return { status: 0, stdout: JSON.stringify([{ name: 'PUBLIC' }, { name: 'STAGING' }]) }; }
+        return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'RAW_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
+      }
+    };
+    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ connectionName: 'prod' }, () => {});
+    await withMock(consented, () => adapter.connect());
+    const databases = await withMock(consented, () => adapter.listDatabases());
+    assert.deepStrictEqual(databases, ['RAW_DB', 'ANALYTICS_DB']);
+    const schemas = await withMock(consented, () => adapter.listSchemas('RAW_DB'));
+    assert.deepStrictEqual(schemas, ['PUBLIC', 'STAGING']);
+    assert.ok(lastArgs.includes('SHOW SCHEMAS IN DATABASE RAW_DB'));
+  });
+
+  await test('detectFileFormat() maps extensions to the 3 supported structural formats and rejects anything else (Step 5 — file-based ingestion)', () => {
+    const { detectFileFormat } = fresh('../dist/context/fileIngestion.js');
+    assert.strictEqual(detectFileFormat('/x/orders.csv'), 'csv');
+    assert.strictEqual(detectFileFormat('/x/orders.json'), 'json');
+    assert.strictEqual(detectFileFormat('/x/schema.sql'), 'ddl');
+    assert.strictEqual(detectFileFormat('/x/schema.ddl'), 'ddl');
+    assert.strictEqual(detectFileFormat('/x/orders.parquet'), undefined, 'Parquet needs a real binary parser — deliberately not claimed as supported');
+    assert.strictEqual(detectFileFormat('/x/notes.docx'), undefined);
+  });
+
+  await test('parseCsv() infers real column types from actual sample values (not an LLM guess) and tags every node with file provenance + confidence 1.0', () => {
+    const { parseCsv } = fresh('../dist/context/fileIngestion.js');
+    const csv = [
+      'id,name,price,is_active,signup_date',
+      '1,Alice,19.99,true,2024-01-15',
+      '2,Bob,29.50,false,2024-02-20',
+      '3,Carol,9.75,true,2024-03-01'
+    ].join('\n');
+    const result = parseCsv(csv, '/data/customers.csv');
+    assert.strictEqual(result.tableCount, 1);
+    assert.strictEqual(result.columnCount, 5);
+    const table = result.nodes.find((n) => n.type === 'table');
+    assert.strictEqual(table.label, 'customers');
+    assert.strictEqual(table.origin.sourceRef, '/data/customers.csv');
+    assert.strictEqual(table.origin.extractor, 'file-ingestion');
+    assert.strictEqual(table.origin.confidence, 1.0, 'a structural CSV parse is a fact, not an inference — full confidence');
+    const cols = result.nodes.filter((n) => n.type === 'column');
+    const byName = Object.fromEntries(cols.map((c) => [c.label, c]));
+    assert.strictEqual(byName.id.dataType, 'INTEGER');
+    assert.strictEqual(byName.name.dataType, 'STRING');
+    assert.strictEqual(byName.price.dataType, 'FLOAT');
+    assert.strictEqual(byName.is_active.dataType, 'BOOLEAN');
+    assert.strictEqual(byName.signup_date.dataType, 'TIMESTAMP');
+    // One `contains` edge per column, table -> column.
+    assert.strictEqual(result.edges.length, 5);
+    assert.ok(result.edges.every((e) => e.source === table.id && e.type === 'contains'));
+  });
+
+  await test('parseCsv() handles quoted fields with embedded commas (and escaped quotes) correctly, not naively splitting on every comma', () => {
+    const { parseCsv } = fresh('../dist/context/fileIngestion.js');
+    const csv = [
+      'id,description',
+      '1,"Widget, Deluxe Edition"',
+      '2,"Contains a ""quoted"" word"'
+    ].join('\n');
+    const result = parseCsv(csv, '/data/products.csv');
+    assert.strictEqual(result.columnCount, 2);
+    const table = result.nodes.find((n) => n.type === 'table');
+    assert.strictEqual(table.label, 'products');
+  });
+
+  await test('parseJson() unions keys across records (a missing key means nullable, not "the field doesn\'t exist") and infers types from real values', () => {
+    const { parseJson } = fresh('../dist/context/fileIngestion.js');
+    const json = JSON.stringify([
+      { id: 1, name: 'Alice', tags: ['a', 'b'] },
+      { id: 2, name: 'Bob' } // no `tags` — should make `tags` nullable, not absent
+    ]);
+    const result = parseJson(json, '/data/users.json');
+    assert.strictEqual(result.tableCount, 1);
+    const cols = result.nodes.filter((n) => n.type === 'column');
+    const byName = Object.fromEntries(cols.map((c) => [c.label, c]));
+    assert.strictEqual(byName.id.dataType, 'INTEGER');
+    assert.strictEqual(byName.name.dataType, 'STRING');
+    assert.ok(byName.tags, 'tags must still be a column even though one record lacks it');
+    assert.strictEqual(byName.tags.dataType, 'ARRAY');
+    assert.strictEqual(byName.tags.isNullable, true);
+    assert.strictEqual(byName.id.isNullable, false, 'present in every sampled record');
+  });
+
+  await test('parseJson() degrades to a clear warning (never throws) on invalid JSON or a non-object-array shape', () => {
+    const { parseJson } = fresh('../dist/context/fileIngestion.js');
+    const badSyntax = parseJson('{not valid json', '/data/broken.json');
+    assert.strictEqual(badSyntax.tableCount, 0);
+    assert.ok(badSyntax.warnings[0].includes('Not valid JSON'));
+    const wrongShape = parseJson('[1, 2, 3]', '/data/numbers.json');
+    assert.strictEqual(wrongShape.tableCount, 0);
+    assert.ok(wrongShape.warnings.length > 0);
+  });
+
+  await test('parseDdl() extracts columns from CREATE TABLE, honors NOT NULL/PRIMARY KEY, handles a DECIMAL(10,2)-style type without splitting on its internal comma, and skips constraint-only lines', () => {
+    const { parseDdl } = fresh('../dist/context/fileIngestion.js');
+    const ddl = `
+      CREATE TABLE orders (
+        order_id INT NOT NULL PRIMARY KEY,
+        customer_id INT NOT NULL,
+        total DECIMAL(10,2),
+        notes VARCHAR(255),
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+      );
+      CREATE TABLE customers (
+        id INT NOT NULL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL
+      );
+    `;
+    const result = parseDdl(ddl, '/data/schema.sql');
+    assert.strictEqual(result.tableCount, 2);
+    const tables = result.nodes.filter((n) => n.type === 'table');
+    assert.deepStrictEqual(tables.map((t) => t.label).sort(), ['customers', 'orders']);
+
+    const ordersCols = result.nodes.filter((n) => n.type === 'column' && n.id.includes('orders'));
+    assert.strictEqual(ordersCols.length, 4, 'the FOREIGN KEY constraint line must not be miscounted as a 5th column');
+    const byName = Object.fromEntries(ordersCols.map((c) => [c.label, c]));
+    assert.strictEqual(byName.order_id.isPrimaryKey, true);
+    assert.strictEqual(byName.order_id.isNullable, false);
+    assert.strictEqual(byName.total.dataType, 'DECIMAL(10,2)', 'the type\'s own internal comma must not be treated as a column separator');
+    assert.strictEqual(byName.notes.isNullable, true, 'no NOT NULL stated');
+  });
+
+  await test('parseDdl() reports a warning (never throws) when no CREATE TABLE statements are found', () => {
+    const { parseDdl } = fresh('../dist/context/fileIngestion.js');
+    const result = parseDdl('SELECT * FROM orders;', '/data/query.sql');
+    assert.strictEqual(result.tableCount, 0);
+    assert.ok(result.warnings.some((w) => w.includes('No CREATE TABLE')));
+  });
+
+  await test('ConnectionManager.getCredentialsFromSettings() passes defaultDatabricksCatalogType through as a credential field, defaulting to "auto"', () => {
+    const mock = createMock();
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const creds = ConnectionManager.getCredentialsFromSettings('databricks', { defaultDatabricksWorkspaceUrl: 'x', defaultDatabricksHttpPath: 'y' });
+    assert.strictEqual(creds.catalogType, 'auto');
+    const creds2 = ConnectionManager.getCredentialsFromSettings('databricks', { defaultDatabricksCatalogType: 'hive_metastore' });
+    assert.strictEqual(creds2.catalogType, 'hive_metastore');
+  });
+
+  // ── Step 6: Mapping Context ──
+
+  function mappingFsMapMock() {
+    const store = new Map();
+    const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
+    return {
+      Uri: { file: (p) => ({ fsPath: p }), joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
+      workspace: { fs: {
+        createDirectory: async () => {},
+        readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+        writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
+        rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+        stat: async (uri) => { if (!store.has(keyOf(uri))) throw new Error('ENOENT'); return {}; }
+      } },
+      store
+    };
+  }
+
+  await test('MappingContextManager round-trips an EntityMapping (with column mappings) through a real save+reload', async () => {
+    const mock = mappingFsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/MappingContextManager.js')]; } catch { /* not loaded */ }
+    const { MappingContextManager } = withMock(mock, () => require('../dist/context/MappingContextManager.js'));
+    const mgr = new MappingContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    assert.strictEqual(mgr.getContext(), undefined, 'no mapping-context.yaml exists yet');
+
+    await withMock(mock, () => mgr.reset('bps-1', 1));
+    const mapping = {
+      id: 'map-orders-fact_orders',
+      sourceEntityId: 'table-src-orders',
+      sourceFqn: 'db.schema.orders',
+      targetEntityId: undefined,
+      targetName: 'fact_orders',
+      columns: [
+        { sourceColumn: 'order_id', targetColumn: 'order_id' },
+        { sourceColumn: 'total', targetColumn: 'order_total', transformExpression: 'ROUND(total, 2)' }
+      ],
+      notes: 'Greenfield target — no existing node yet'
+    };
+    await withMock(mock, () => mgr.upsertMapping(mapping));
+
+    const mgr2 = new MappingContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr2.initialize());
+    const reloaded = mgr2.getContext();
+    assert.strictEqual(reloaded.specId, 'bps-1');
+    assert.strictEqual(reloaded.mappings.length, 1);
+    assert.strictEqual(reloaded.mappings[0].targetName, 'fact_orders');
+    assert.strictEqual(reloaded.mappings[0].columns.length, 2);
+    assert.strictEqual(reloaded.mappings[0].columns[1].transformExpression, 'ROUND(total, 2)');
+  });
+
+  await test('MappingContextManager bumps version + archives only when revising an already-approved predecessor of the same spec lineage (mirrors SourceContextManager/TargetContextManager exactly)', async () => {
+    const mock = mappingFsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/MappingContextManager.js')]; } catch { /* not loaded */ }
+    const { MappingContextManager } = withMock(mock, () => require('../dist/context/MappingContextManager.js'));
+    const mgr = new MappingContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'built', mappings: [] }));
+    await withMock(mock, () => mgr.save({ ...mgr.getContext(), status: 'approved' }));
+    assert.strictEqual(mgr.getContext().version, 1, 'approving a not-yet-approved record must not bump the version');
+
+    await withMock(mock, () => mgr.save({ specId: 'bps-1', specVersion: 1, status: 'built', mappings: [] }));
+    assert.strictEqual(mgr.getContext().version, 2, 'revising an approved predecessor bumps the version');
+    assert.strictEqual(mock.store.has('/ws/context/history/mapping-context.spec1.v1.yaml'), true, 'the approved v1 predecessor was archived before being overwritten');
+  });
+
+  await test('MappingContextManager.upsertMapping() drops an approved container back to "built" status on any mapping change, so an edited-then-unreviewed mapping set is never silently treated as still-approved', async () => {
+    const mock = mappingFsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/MappingContextManager.js')]; } catch { /* not loaded */ }
+    const { MappingContextManager } = withMock(mock, () => require('../dist/context/MappingContextManager.js'));
+    const mgr = new MappingContextManager({ fsPath: '/ws' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+
+    await withMock(mock, () => mgr.reset('bps-1', 1));
+    await withMock(mock, () => mgr.upsertMapping({ id: 'm1', sourceEntityId: 't1', sourceFqn: 'db.s.t1', targetName: 'target1', columns: [] }));
+    await withMock(mock, () => mgr.save({ ...mgr.getContext(), status: 'approved' }));
+    assert.strictEqual(mgr.getContext().status, 'approved');
+
+    await withMock(mock, () => mgr.upsertMapping({ id: 'm2', sourceEntityId: 't2', sourceFqn: 'db.s.t2', targetName: 'target2', columns: [] }));
+    assert.strictEqual(mgr.getContext().status, 'built', 'editing an approved mapping set must drop it back to built, not leave it approved');
+    assert.strictEqual(mgr.getContext().mappings.length, 2);
+
+    await withMock(mock, () => mgr.removeMapping('m1'));
+    assert.strictEqual(mgr.getContext().mappings.length, 1);
+    assert.strictEqual(mgr.getContext().mappings[0].id, 'm2');
+  });
+
+  await test('SemanticLayerManager.build() captures the live shared graph\'s current content/counts as a spec-pinned snapshot, and archives the prior graph content (not just metadata) on revising an approved predecessor', async () => {
+    const mock = mappingFsMapMock();
+    try { delete require.cache[require.resolve('../dist/context/SemanticLayerManager.js')]; } catch { /* not loaded */ }
+    try { delete require.cache[require.resolve('../dist/context/GraphManager.js')]; } catch { /* not loaded */ }
+    const { SemanticLayerManager } = withMock(mock, () => require('../dist/context/SemanticLayerManager.js'));
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+
+    const graph = new GraphManager();
+    await graph.addNode({ id: 't1', type: 'table', label: 'orders', database: 'db', schema: 's', fqn: 'db.s.orders', isView: false, metadata: {}, version: 1 });
+    await graph.addNode({ id: 'c1', type: 'column', label: 'order_id', dataType: 'INT', isNullable: false, isPrimaryKey: true, isForeignKey: false, metadata: {}, version: 1 });
+    await graph.addEdge({ id: 'e1', source: 't1', target: 'c1', type: 'contains' });
+
+    const mgr = new SemanticLayerManager({ fsPath: '/ws' }, graph, () => {});
+    await withMock(mock, () => mgr.initialize());
+    assert.strictEqual(mgr.getSnapshot(), undefined);
+
+    const built = await withMock(mock, () => mgr.build('bps-1', 1));
+    assert.strictEqual(built.nodeCount, 2);
+    assert.strictEqual(built.edgeCount, 1);
+    assert.strictEqual(built.version, 1);
+
+    const graphContent = await withMock(mock, () => mgr.getGraphContent());
+    assert.strictEqual(graphContent.nodes.length, 2);
+    assert.strictEqual(graphContent.edges.length, 1);
+
+    await withMock(mock, () => mgr.save({ ...mgr.getSnapshot(), status: 'approved' }));
+    assert.strictEqual(mgr.getSnapshot().version, 1, 'approving a not-yet-approved snapshot must not bump the version');
+
+    await graph.addNode({ id: 't2', type: 'table', label: 'customers', database: 'db', schema: 's', fqn: 'db.s.customers', isView: false, metadata: {}, version: 1 });
+    const rebuilt = await withMock(mock, () => mgr.build('bps-1', 1));
+    assert.strictEqual(rebuilt.version, 2, 'revising an approved predecessor bumps the version');
+    assert.strictEqual(rebuilt.nodeCount, 3, 'the rebuild captures the graph\'s current (updated) content');
+    assert.strictEqual(mock.store.has('/ws/context/history/semantic-layer.spec1.v1.yaml'), true, 'the approved v1 predecessor\'s metadata was archived');
+    assert.strictEqual(mock.store.has('/ws/context/history/semantic-layer.spec1.v1.json'), true, 'the approved v1 predecessor\'s captured graph content was archived too, not just its metadata');
+  });
+
+  // ── Step 7: Governance layer (provenance/reliability, staleness, re-verify) ──
+
+  await test('parseCsv()/parseDdl() tag every node reliability: "best-effort-inferred" (Step 7) — a structural file parse is a real fact about the file, but has never been checked against the live source', () => {
+    const { parseCsv, parseDdl } = fresh('../dist/context/fileIngestion.js');
+    const csvResult = parseCsv('id,name\n1,alice\n', '/data/users.csv');
+    assert.ok(csvResult.nodes.length > 0);
+    assert.ok(csvResult.nodes.every((n) => n.origin.reliability === 'best-effort-inferred'));
+
+    const ddlResult = parseDdl('CREATE TABLE t (id INT);', '/data/t.sql');
+    assert.ok(ddlResult.nodes.every((n) => n.origin.reliability === 'best-effort-inferred'));
+  });
+
+  await test('ContextFileManager.buildContextPrompt() flags file-derived (best-effort-inferred) tables distinctly from live-verified ones, never silently blending the two (Step 7)', async () => {
+    const mock = createMock();
+    try { delete require.cache[require.resolve('../dist/context/GraphManager.js')]; } catch { /* not loaded */ }
+    try { delete require.cache[require.resolve('../dist/context/ContextFileManager.js')]; } catch { /* not loaded */ }
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+
+    const graph = new GraphManager();
+    await graph.addNode({
+      id: 't-live', type: 'table', label: 'orders', database: 'db', schema: 's', fqn: 'db.s.orders', isView: false, metadata: {}, version: 1,
+      origin: { source: 'derived', sourceRef: 'snowflake', reliability: 'live-verified' }
+    });
+    await graph.addNode({
+      id: 't-file', type: 'table', label: 'legacy_customers', database: 'db', schema: 's', fqn: 'db.s.legacy_customers', isView: false, metadata: {}, version: 1,
+      origin: { source: 'derived', sourceRef: '/data/customers.csv', reliability: 'best-effort-inferred' }
+    });
+
+    const cfm = withMock(mock, () => new ContextFileManager({ fsPath: '/ws' }, graph, () => {}));
+    const prompt = cfm.buildContextPrompt();
+    const lines = prompt.split('\n');
+    const ordersLine = lines.find((l) => l.includes('db.s.orders'));
+    const legacyLine = lines.find((l) => l.includes('db.s.legacy_customers'));
+    assert.ok(ordersLine && !ordersLine.includes('file-derived'), 'a live-verified table must not be flagged');
+    assert.ok(legacyLine && legacyLine.includes('_(file-derived, not live-verified)_'), 'a file-derived table must be explicitly flagged, not silently presented as equally solid');
   });
 
   const failed = results.filter(r => !r.ok);

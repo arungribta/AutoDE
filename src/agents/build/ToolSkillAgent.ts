@@ -92,9 +92,14 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
   };
 }
 
-function buildSkillSystemPrompt(skill: ToolSkillDefinition): string {
+function buildSkillSystemPrompt(skill: ToolSkillDefinition, context: AgentExecutionContext): string {
   const lines = [`You are executing the imported skill "${skill.name}".`];
   if (skill.description) { lines.push(skill.description); }
+  // Previously omitted entirely — a tool-executing skill had no idea a live
+  // data-platform connection or repository context existed, unlike chat/plan.
+  if (context.schemaContext && context.schemaContext.trim().length > 0) {
+    lines.push('\n' + context.schemaContext.trim());
+  }
   lines.push('\n## Skill instructions\n' + skill.instructions);
   lines.push('\nFollow the instructions above to satisfy the user\'s request. Tool access is sandboxed to the current workspace.');
   return lines.join('\n');
@@ -120,7 +125,7 @@ async function runOnClaude(skill: ToolSkillDefinition, instruction: string, cont
       return { success: false, message: info.error || 'Claude Code CLI is not available.', error: info.error };
     }
     const result = await adapter.complete(instruction, {
-      systemPrompt: buildSkillSystemPrompt(skill),
+      systemPrompt: buildSkillSystemPrompt(skill, context),
       model: context.settings.activeLlmModel,
       toolMode: 'full',
       cwd: context.workspaceRoot
@@ -149,7 +154,7 @@ async function runOnCopilot(skill: ToolSkillDefinition, instruction: string, con
 
     const { text, audit } = await adapter.completeWithTools(instruction, {
       model: context.settings.activeLlmModel,
-      systemPrompt: buildSkillSystemPrompt(skill),
+      systemPrompt: buildSkillSystemPrompt(skill, context),
       justification: `Run imported skill "${skill.name}"`,
       mode: 'full',
       workspaceRoot

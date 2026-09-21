@@ -3,6 +3,13 @@ import { TransformSpec } from './transforms/types';
 export type LlmProvider = 'azure-openai' | 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'copilot' | 'claude';
 export type DataPlatformProvider = 'snowflake' | 'databricks' | 'bigquery' | 'redshift' | 'synapse' | 'other';
 export type SnowflakeAuthMode = 'username-password' | 'oauth' | 'key-pair' | 'external-browser' | 'mcp';
+/** An interactive-user is a human at a workstation; a service-account is a headless principal (CI, a scheduled job, a server deployment). */
+export type PrincipalType = 'interactive-user' | 'service-account';
+/** Which principal type(s) a platform's auth mode is suited to — a UI/service config surface only offers applicable modes. */
+export interface AuthModeDescriptor {
+  mode: string;
+  principalTypes: PrincipalType[];
+}
 export type AgentType = 'ingestionAgent' | 'sttmAgent' | 'architectureAgent' | 'snowflakeExecutor' | 'sourceAssessmentAgent' | 'dataModelerAgent' | 'transformScaffoldAgent' | 'toolSkillAgent';
 export type PlanStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type SessionStatus = 'idle' | 'planning' | 'ready' | 'running' | 'paused' | 'failed' | 'completed';
@@ -356,6 +363,16 @@ export interface ContextQuestion {
 export interface TargetContext {
   specId: string;
   specVersion: number;
+  /**
+   * The Target Context's own content-revision counter — independent of
+   * `specVersion` (which BPS revision this context belongs to). Bumped only
+   * when a revision replaces an already-*approved* predecessor, mirroring
+   * `PipelineSpec.version`/`PrimitiveDefinition.version`; approving a
+   * not-yet-approved record never bumps it. The prior revision is archived to
+   * `context/history/target-context.v<N>.yaml` on bump. Defaults to 1 when
+   * absent (pre-v0.19.0 records, or a fresh first build).
+   */
+  version?: number;
   status: ContextStatus;
   platform?: DataPlatformProvider;
   environmentProfile?: EnvironmentProfile;
@@ -365,6 +382,13 @@ export interface TargetContext {
   orchestrationTool?: OrchestrationTool;
   outputFormats?: OutputFormat[];
   platformConfig?: Record<string, string>;
+  /**
+   * How the platform connection was established via "AutoDE: Connect to Data
+   * Platform" (Phase 3a-ii) — a pointer, never the secret. `resolverId` names a
+   * registered `CredentialResolver` (`src/dqm/credentials/`, e.g. `'cli'`); `ref`
+   * is that resolver's own reference (e.g. a `connections.toml` connection name).
+   */
+  credentialRef?: { resolverId: string; ref: string };
   /** Raw Q&A record (question id → answer) for traceability and re-display when revising. */
   answers: Record<string, string>;
   builtAt?: string;
@@ -378,21 +402,130 @@ export interface TargetContext {
  * for data-push/no-connectivity cases). Its `description`/`connectionSummary`
  * feed the Context Layer prompt alongside the spec once approved.
  */
-export interface SourceContext {
-  specId: string;
-  specVersion: number;
-  status: ContextStatus;
-  method?: 'connected' | 'described';
+/**
+ * One connected or described source system within a `SourceContext`.
+ * `connectionId` is the stable discriminator that distinguishes it from any
+ * other entry (see `BaseDataSourceAdapter.getConnectionId()` /
+ * `Origin.connectionId`) — required so multiple entries (a future capability;
+ * v1 UI only ever populates one) never collide, e.g. two Snowflake connections
+ * or two tables named the same across different sources. Distinct from the
+ * unrelated, pre-existing `SourceEntry` (a Business Problem Spec's named
+ * source-catalog item) — different concept, deliberately different name.
+ */
+export interface SourceContextEntry {
+  connectionId: string;
+  platform?: DataPlatformProvider;
+  /** `'file'` (v0.22.0, Step 5) — structurally parsed from a CSV/JSON/DDL file, for when live connectivity isn't available. See `src/context/fileIngestion.ts`. */
+  method: 'connected' | 'described' | 'file';
   sourceType?: 'database' | 'api' | 'file' | 'stream' | 'saas' | 'other';
   description?: string;
   connectionSummary?: {
-    platform: string;
     database: string;
     schema: string;
     tableCount: number;
     viewCount: number;
   };
+  /** Populated only for `method: 'file'` entries. */
+  fileSummary?: {
+    fileName: string;
+    format: 'csv' | 'json' | 'ddl';
+    tableCount: number;
+    columnCount: number;
+  };
+  extractedAt?: string;
+}
+
+/**
+ * The Source Context is one object with one lifecycle/approval, even once it
+ * describes more than one source system — `sources` holds the (currently 0-or-1,
+ * future N) entries. See "Source & Target Context Architecture" in the
+ * architecture plan for the reasoning: one container, internally scalable,
+ * rather than multiple sibling context records.
+ */
+export interface SourceContext {
+  specId: string;
+  specVersion: number;
+  /** Content-revision counter, independent of `specVersion` — see `TargetContext.version`'s doc comment for the exact semantics (same pattern on both). */
+  version?: number;
+  status: ContextStatus;
+  sources: SourceContextEntry[];
   answers: Record<string, string>;
+  builtAt?: string;
+  approvedAt?: string;
+}
+
+/**
+ * One source column → target column correspondence within an `EntityMapping`.
+ * `transformExpression` is free-text (e.g. `UPPER(source_col)`) — deliberately
+ * not a structured transform reference in this pass; that's the same
+ * selectable-primitive concept `TransformSpec` already models elsewhere, and
+ * wiring the two together is future work, not invented fresh here.
+ */
+export interface ColumnMapping {
+  sourceColumn: string;
+  targetColumn: string;
+  transformExpression?: string;
+}
+
+/**
+ * One source table → target table mapping. `sourceEntityId` references a real
+ * `GraphManager` node id (a live-connected or file-ingested table) — the
+ * mapping is meaningless without a real source. `targetEntityId` is optional:
+ * per the reviewed proposal's Greenfield case, a target table frequently
+ * doesn't exist as a discovered node yet (it's being designed), so `targetName`
+ * (free text) is what's authoritative when there's no node to point at.
+ */
+export interface EntityMapping {
+  id: string;
+  sourceEntityId: string;
+  sourceFqn: string;
+  targetEntityId?: string;
+  targetName: string;
+  columns: ColumnMapping[];
+  notes?: string;
+}
+
+/**
+ * A separate, independent object from `SourceContext`/`TargetContext` — per
+ * the architecture review's Q2: mappings are inherently relational and don't
+ * belong inside either side. `sourceContextVersion`/`targetContextVersion` pin
+ * the mapping to the specific context revisions it was built against (the
+ * same version-pinning pattern `PipelineSpec`/primitive-version-pinning
+ * already use elsewhere), so a later Source/Target Context revision can't
+ * silently invalidate an existing mapping — it just becomes visibly stale
+ * against a newer version, never silently wrong.
+ */
+export interface MappingContext {
+  specId: string;
+  specVersion: number;
+  version?: number;
+  status: ContextStatus;
+  sourceContextVersion?: number;
+  targetContextVersion?: number;
+  mappings: EntityMapping[];
+  builtAt?: string;
+  approvedAt?: string;
+}
+
+/**
+ * A persisted, versioned snapshot of the Unified Semantic Layer — per the
+ * architecture review's Q3, the semantic layer is already one unified
+ * `GraphManager` graph (source and target nodes coexist via
+ * `Origin.environment` tagging), so this is deliberately NOT a second
+ * modeling system. It's an explicit, spec-pinned point-in-time capture of
+ * that one graph's node/edge counts, generated only on an explicit "Build"
+ * action (never silently/automatically, matching this codebase's consistent
+ * governance pattern) — the same reasoning `PipelineSpec`/primitive-version
+ * pinning already use: a later live-graph change shouldn't silently
+ * invalidate what a pipeline was actually generated against.
+ */
+export interface SemanticLayerSnapshot {
+  specId: string;
+  specVersion: number;
+  version?: number;
+  status: ContextStatus;
+  nodeCount: number;
+  edgeCount: number;
   builtAt?: string;
   approvedAt?: string;
 }
@@ -449,6 +582,62 @@ export interface DataAgentHubSettings {
   copilotProgrammaticConsent?: boolean;
   /** Opt-in gate (Phase 2B-iv, default false) — publishing/deprecating a Tier-2 declarative primitive is disabled until a workspace's platform admin turns this on. */
   primitiveManagementEnabled?: boolean;
+  /** Consent to shell out to an external data-platform CLI (`snow`/`databricks`) — to enumerate connections/profiles (Phase 3a-ii), and to actually execute queries via a CLI-derived connection (Phase 3b's `SnowflakeCliBackend`). CLI *detection* (a version check) is exempt — only these actually invoke the vendor CLI. */
+  dataPlatformCliConsent?: boolean;
+  /** Optional explicit path to the Snowflake CLI (`snow` / `snow.exe`). Empty = auto-detect via PATH. */
+  snowflakeCliPath?: string;
+  /** Optional explicit path to the Databricks CLI (`databricks` / `databricks.exe`). Empty = auto-detect via PATH. */
+  databricksCliPath?: string;
+  /**
+   * A service-account `CredentialReference` set once by a platform team (Phase
+   * 3a-ii) — deliberately a plain settings surface, no chat/QuickPick/CLI-detection
+   * dialog. JSON string of `{platform, resolverId, ref}`; `principalType` is always
+   * `'service-account'` for this setting. See `getServiceAccountCredentialReference()`.
+   */
+  serviceAccountCredentialRef?: string;
+  /** Default Databricks workspace host (e.g. `adb-1234.5.azuredatabricks.net`, scheme optional). Phase 3b — Databricks has no equivalent settings today; `ConnectionManager.getCredentialsFromSettings()` previously referenced a nonexistent `workspaceUrl` key. */
+  defaultDatabricksWorkspaceUrl?: string;
+  /** The target SQL warehouse's HTTP Path (e.g. `/sql/1.0/warehouses/<id>`), copied from its connection-details page. Used both to derive `warehouse_id` for the Statement Execution REST API and (Phase 3b-iv, future) as the native-driver connection path. */
+  defaultDatabricksHttpPath?: string;
+  defaultDatabricksCatalog?: string;
+  defaultDatabricksSchema?: string;
+  /**
+   * Explicit override for which metadata-introspection shape `DatabricksAdapter`
+   * uses — `'unity'` (`information_schema` as a schema within the catalog) or
+   * `'hive_metastore'` (legacy: no bulk `information_schema` at all, `SHOW TABLES`
+   * only, no column/FK/view-level detail). `'auto'` (default) infers it from the
+   * catalog name (`hive_metastore` is a reserved name Databricks never lets a user
+   * repurpose) — but a single workspace can have *both* kinds of catalog side by
+   * side, so this is user-settable rather than silently inferred every time,
+   * and also doubles as a manual escape hatch for any other catalog that turns
+   * out to share the legacy catalog's limitations.
+   */
+  defaultDatabricksCatalogType?: 'auto' | 'unity' | 'hive_metastore';
+
+  // ── Target connection (v0.19.0 Source/Target Panel split) ──
+  // Doubled flat settings, deliberately additive rather than a symmetric
+  // rename: the fields above (defaultProvider/defaultSnowflake*/
+  // defaultDatabricks*) keep meaning "source" exactly as they always have —
+  // renaming them would have orphaned real, already-configured settings.json
+  // values. `defaultTargetProvider` etc. are the new, parallel target-side
+  // settings; both can be live simultaneously (separate `ConnectionManager`
+  // instances in `extension.ts`), per the confirmed decision.
+  defaultTargetProvider?: DataPlatformProvider;
+  defaultTargetSnowflakeAccount?: string;
+  defaultTargetSnowflakeUsername?: string;
+  defaultTargetSnowflakeWarehouse?: string;
+  defaultTargetSnowflakeDatabase?: string;
+  defaultTargetSnowflakeSchema?: string;
+  defaultTargetSnowflakeRole?: string;
+  defaultTargetSnowflakeAuthMode?: SnowflakeAuthMode;
+  targetSnowflakePrivateKeyPath?: string;
+  targetSnowflakeCliPath?: string;
+  targetDatabricksCliPath?: string;
+  defaultTargetDatabricksWorkspaceUrl?: string;
+  defaultTargetDatabricksHttpPath?: string;
+  defaultTargetDatabricksCatalog?: string;
+  defaultTargetDatabricksSchema?: string;
+  defaultTargetDatabricksCatalogType?: 'auto' | 'unity' | 'hive_metastore';
 }
 
 export interface PlanStep {

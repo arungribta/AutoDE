@@ -27,6 +27,38 @@ export interface Origin {
    * rather than a new node field so it travels with provenance, not identity.
    */
   environment?: 'source' | 'target';
+  /**
+   * Which specific connection/platform instance this node came from — distinct
+   * from `sourceRef` (which today is just the bare kind, e.g. `'snowflake'`, or
+   * a file path). Undefined for anything not tied to a specific connection
+   * (spec-derived facts, business-context.yaml entries). Required going forward
+   * for anything environment-tagged `'source'`, once more than one source
+   * connection can exist side by side — without it, two connections of the same
+   * platform type (or two tables both named the same across different sources)
+   * are indistinguishable. See the Source & Target Context Architecture plan.
+   */
+  connectionId?: string;
+  /**
+   * Explicit reliability tag — Step 7 of the Source & Target Context
+   * Architecture plan (governance layer, reusing the Phase 4 skill-governance
+   * 3-layer model: provenance capture, review before low-confidence content
+   * drives generation, explicit re-verify). `'live-verified'` means this node
+   * came from introspecting a real, currently-reachable system just now;
+   * `'best-effort-inferred'` covers everything else (file-derived, LLM-
+   * derived, user-typed descriptions) — a real distinction the review flagged
+   * as missing (`confidence` existed but was never actually set anywhere).
+   * Undefined means pre-dates this field (legacy/spec-derived nodes) — never
+   * treated as a red flag, just unknown.
+   */
+  reliability?: 'live-verified' | 'best-effort-inferred';
+  /**
+   * When this node's content was last confirmed against its real source,
+   * distinct from `extractedAt` (when it was first captured) — closes the
+   * "silent staleness" gap the review flagged: nothing today re-validates
+   * captured context after the fact, so an unnoticed drift in the real
+   * source becomes a correctness risk once specs/code are generated off it.
+   */
+  lastVerifiedAt?: string;
 }
 
 export interface BaseNode {

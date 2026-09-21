@@ -3,6 +3,7 @@ import { DataPlatformProvider } from '../core/types';
 import { IDataSourceAdapter, ConnectionInfo, SchemaSnapshot, ExtractOptions, QueryOptions, QueryResult, PlatformCapabilities } from './types';
 import { SnowflakeAdapter } from './adapters/SnowflakeAdapter';
 import { DatabricksAdapter } from './adapters/DatabricksAdapter';
+import { getSupportedProviders } from '../core/providerRegistry';
 
 type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
 
@@ -106,6 +107,22 @@ export class ConnectionManager implements vscode.Disposable {
     return this.activeAdapter.extractMetadata(options);
   }
 
+  /** Lists databases/catalogs visible to the connected principal (Step 4 — discovery-based selection, not blind typing). */
+  async listDatabases(): Promise<string[]> {
+    if (!this.activeAdapter) {
+      throw new Error('No active connection. Connect to a data platform first.');
+    }
+    return this.activeAdapter.listDatabases();
+  }
+
+  /** Lists schemas within a database/catalog on the connected platform. */
+  async listSchemas(database: string): Promise<string[]> {
+    if (!this.activeAdapter) {
+      throw new Error('No active connection. Connect to a data platform first.');
+    }
+    return this.activeAdapter.listSchemas(database);
+  }
+
   /**
    * Execute a query on the connected platform.
    */
@@ -124,6 +141,16 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   /**
+   * Platforms with both a `providerRegistry.ts` entry and a real registered adapter
+   * factory here — i.e. actually connectable today, not just listed as a future
+   * platform. Reads `providerRegistry.ts` (Phase 3a-i, previously unconsumed
+   * anywhere) instead of hardcoding the factory-map's own keys a second time.
+   */
+  getSupportedPlatforms(): DataPlatformProvider[] {
+    return getSupportedProviders().filter((p) => this.adapterFactories.has(p));
+  }
+
+  /**
    * Persist the schema context to .ai-context/.
    */
   async persistSchemaContext(snapshot: SchemaSnapshot, workspaceUri: vscode.Uri): Promise<void> {
@@ -134,27 +161,41 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   /**
-   * Get credentials from VS Code settings for a given platform.
+   * Get credentials from VS Code settings for a given platform and role.
+   * `role` defaults to `'source'` for backward compatibility with existing
+   * callers — the pre-v0.19.0 `defaultSnowflake*`/`defaultDatabricks*` settings
+   * keep meaning "source" exactly as they always have; a target connection
+   * reads the parallel `defaultTargetSnowflake*`/`defaultTargetDatabricks*`
+   * settings instead (see `DataAgentHubSettings`' doc comment).
    */
-  static getCredentialsFromSettings(platform: DataPlatformProvider, settings: Record<string, unknown>): Record<string, string> {
+  static getCredentialsFromSettings(platform: DataPlatformProvider, settings: Record<string, unknown>, role: 'source' | 'target' = 'source'): Record<string, string> {
     const creds: Record<string, string> = {};
+    const p = role === 'target' ? 'Target' : '';
 
     switch (platform) {
       case 'snowflake':
-        creds['account'] = String(settings['defaultSnowflakeAccount'] ?? '');
-        creds['username'] = String(settings['defaultSnowflakeUsername'] ?? '');
-        creds['warehouse'] = String(settings['defaultSnowflakeWarehouse'] ?? '');
-        creds['database'] = String(settings['defaultSnowflakeDatabase'] ?? '');
-        creds['schema'] = String(settings['defaultSnowflakeSchema'] ?? 'PUBLIC');
-        creds['role'] = String(settings['defaultSnowflakeRole'] ?? 'SYSADMIN');
-        creds['authMode'] = String(settings['defaultSnowflakeAuthMode'] ?? 'key-pair');
-        creds['keyPath'] = String(settings['snowflakePrivateKeyPath'] ?? '');
+        creds['account'] = String(settings[`default${p}SnowflakeAccount`] ?? '');
+        creds['username'] = String(settings[`default${p}SnowflakeUsername`] ?? '');
+        creds['warehouse'] = String(settings[`default${p}SnowflakeWarehouse`] ?? '');
+        creds['database'] = String(settings[`default${p}SnowflakeDatabase`] ?? '');
+        creds['schema'] = String(settings[`default${p}SnowflakeSchema`] ?? 'PUBLIC');
+        creds['role'] = String(settings[`default${p}SnowflakeRole`] ?? 'SYSADMIN');
+        creds['authMode'] = String(settings[`default${p}SnowflakeAuthMode`] ?? 'key-pair');
+        creds['keyPath'] = String(settings[role === 'target' ? 'targetSnowflakePrivateKeyPath' : 'snowflakePrivateKeyPath'] ?? '');
+        creds['snowflakeCliPath'] = String(settings[role === 'target' ? 'targetSnowflakeCliPath' : 'snowflakeCliPath'] ?? '');
         break;
       case 'databricks':
-        creds['workspaceUrl'] = String(settings['workspaceUrl'] ?? '');
-        creds['token'] = String(settings['token'] ?? '');
-        creds['catalog'] = String(settings['catalog'] ?? 'main');
-        creds['schema'] = String(settings['schema'] ?? 'default');
+        // `workspaceUrl`/`token`/`catalog`/`schema` were previously read from settings
+        // keys that never existed (`settings['workspaceUrl']` etc.) — Databricks had no
+        // real settings surface until Phase 3b. Fixed to the actual `defaultDatabricks*`
+        // settings (`src/core/types.ts`); `httpPath` is new — required by the Statement
+        // Execution REST API (`warehouse_id` is derived from it) and not derivable from
+        // `.databrickscfg`.
+        creds['workspaceUrl'] = String(settings[`default${p}DatabricksWorkspaceUrl`] ?? '');
+        creds['httpPath'] = String(settings[`default${p}DatabricksHttpPath`] ?? '');
+        creds['catalog'] = String(settings[`default${p}DatabricksCatalog`] ?? 'main');
+        creds['schema'] = String(settings[`default${p}DatabricksSchema`] ?? 'default');
+        creds['catalogType'] = String(settings[`default${p}DatabricksCatalogType`] ?? 'auto');
         break;
       default:
         break;

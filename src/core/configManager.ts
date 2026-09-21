@@ -37,7 +37,34 @@ export class ConfigurationManager {
       languageModelProgrammaticConsent: config.get<boolean>('languageModelProgrammaticConsent', false),
       copilotProgrammaticConsent: config.get<boolean>('copilotProgrammaticConsent', false),
       claudeCodePath: config.get<string>('claudeCodePath', ''),
-      primitiveManagementEnabled: config.get<boolean>('primitiveManagementEnabled', false)
+      primitiveManagementEnabled: config.get<boolean>('primitiveManagementEnabled', false),
+      dataPlatformCliConsent: config.get<boolean>('dataPlatformCliConsent', false),
+      snowflakeCliPath: config.get<string>('snowflakeCliPath', ''),
+      databricksCliPath: config.get<string>('databricksCliPath', ''),
+      serviceAccountCredentialRef: config.get<string>('serviceAccountCredentialRef', ''),
+      defaultDatabricksWorkspaceUrl: config.get<string>('defaultDatabricksWorkspaceUrl', ''),
+      defaultDatabricksHttpPath: config.get<string>('defaultDatabricksHttpPath', ''),
+      defaultDatabricksCatalog: config.get<string>('defaultDatabricksCatalog', 'main'),
+      defaultDatabricksSchema: config.get<string>('defaultDatabricksSchema', 'default'),
+      defaultDatabricksCatalogType: config.get<'auto' | 'unity' | 'hive_metastore'>('defaultDatabricksCatalogType', 'auto'),
+
+      // ── Target connection (v0.19.0) — see DataAgentHubSettings' own doc comment ──
+      defaultTargetProvider: config.get<DataPlatformProvider>('defaultTargetProvider', 'snowflake'),
+      defaultTargetSnowflakeAccount: config.get<string>('defaultTargetSnowflakeAccount', ''),
+      defaultTargetSnowflakeUsername: config.get<string>('defaultTargetSnowflakeUsername', ''),
+      defaultTargetSnowflakeWarehouse: config.get<string>('defaultTargetSnowflakeWarehouse', ''),
+      defaultTargetSnowflakeDatabase: config.get<string>('defaultTargetSnowflakeDatabase', ''),
+      defaultTargetSnowflakeSchema: config.get<string>('defaultTargetSnowflakeSchema', 'PUBLIC'),
+      defaultTargetSnowflakeRole: config.get<string>('defaultTargetSnowflakeRole', 'SYSADMIN'),
+      defaultTargetSnowflakeAuthMode: config.get<SnowflakeAuthMode>('defaultTargetSnowflakeAuthMode', 'key-pair'),
+      targetSnowflakePrivateKeyPath: config.get<string>('targetSnowflakePrivateKeyPath', ''),
+      targetSnowflakeCliPath: config.get<string>('targetSnowflakeCliPath', ''),
+      targetDatabricksCliPath: config.get<string>('targetDatabricksCliPath', ''),
+      defaultTargetDatabricksWorkspaceUrl: config.get<string>('defaultTargetDatabricksWorkspaceUrl', ''),
+      defaultTargetDatabricksHttpPath: config.get<string>('defaultTargetDatabricksHttpPath', ''),
+      defaultTargetDatabricksCatalog: config.get<string>('defaultTargetDatabricksCatalog', 'main'),
+      defaultTargetDatabricksSchema: config.get<string>('defaultTargetDatabricksSchema', 'default'),
+      defaultTargetDatabricksCatalogType: config.get<'auto' | 'unity' | 'hive_metastore'>('defaultTargetDatabricksCatalogType', 'auto')
     };
   }
 
@@ -69,7 +96,32 @@ export class ConfigurationManager {
      ['languageModelProgrammaticConsent', settings.languageModelProgrammaticConsent],
      ['copilotProgrammaticConsent', settings.copilotProgrammaticConsent],
      ['claudeCodePath', settings.claudeCodePath],
-     ['primitiveManagementEnabled', settings.primitiveManagementEnabled]
+     ['primitiveManagementEnabled', settings.primitiveManagementEnabled],
+     ['dataPlatformCliConsent', settings.dataPlatformCliConsent],
+     ['snowflakeCliPath', settings.snowflakeCliPath],
+     ['databricksCliPath', settings.databricksCliPath],
+     ['serviceAccountCredentialRef', settings.serviceAccountCredentialRef],
+     ['defaultDatabricksWorkspaceUrl', settings.defaultDatabricksWorkspaceUrl],
+     ['defaultDatabricksHttpPath', settings.defaultDatabricksHttpPath],
+     ['defaultDatabricksCatalog', settings.defaultDatabricksCatalog],
+     ['defaultDatabricksSchema', settings.defaultDatabricksSchema],
+     ['defaultDatabricksCatalogType', settings.defaultDatabricksCatalogType],
+     ['defaultTargetProvider', settings.defaultTargetProvider],
+     ['defaultTargetSnowflakeAccount', settings.defaultTargetSnowflakeAccount],
+     ['defaultTargetSnowflakeUsername', settings.defaultTargetSnowflakeUsername],
+     ['defaultTargetSnowflakeWarehouse', settings.defaultTargetSnowflakeWarehouse],
+     ['defaultTargetSnowflakeDatabase', settings.defaultTargetSnowflakeDatabase],
+     ['defaultTargetSnowflakeSchema', settings.defaultTargetSnowflakeSchema],
+     ['defaultTargetSnowflakeRole', settings.defaultTargetSnowflakeRole],
+     ['defaultTargetSnowflakeAuthMode', settings.defaultTargetSnowflakeAuthMode],
+     ['targetSnowflakePrivateKeyPath', settings.targetSnowflakePrivateKeyPath],
+     ['targetSnowflakeCliPath', settings.targetSnowflakeCliPath],
+     ['targetDatabricksCliPath', settings.targetDatabricksCliPath],
+     ['defaultTargetDatabricksWorkspaceUrl', settings.defaultTargetDatabricksWorkspaceUrl],
+     ['defaultTargetDatabricksHttpPath', settings.defaultTargetDatabricksHttpPath],
+     ['defaultTargetDatabricksCatalog', settings.defaultTargetDatabricksCatalog],
+     ['defaultTargetDatabricksSchema', settings.defaultTargetDatabricksSchema],
+     ['defaultTargetDatabricksCatalogType', settings.defaultTargetDatabricksCatalogType]
     ];
 
     for (const [name, value] of updates) {
@@ -118,5 +170,39 @@ export class ConfigurationManager {
 
   public async getSnowflakePrivateKeyPassphrase(): Promise<string | undefined> {
     return this.getSecret(SECRET_KEYS.snowflakePrivateKeyPassphrase);
+  }
+
+  public async setDatabricksToken(value: string): Promise<void> {
+    await this.setSecret(SECRET_KEYS.databricksToken, value);
+  }
+
+  public async getDatabricksToken(): Promise<string | undefined> {
+    return this.getSecret(SECRET_KEYS.databricksToken);
+  }
+
+  // ── Target connection secrets (v0.19.0) — mirror the source-side methods above exactly ──
+
+  public async setTargetSnowflakePassword(value: string): Promise<void> {
+    await this.setSecret(SECRET_KEYS.targetSnowflakePassword, value);
+  }
+
+  public async getTargetSnowflakePassword(): Promise<string | undefined> {
+    return this.getSecret(SECRET_KEYS.targetSnowflakePassword);
+  }
+
+  public async setTargetSnowflakePrivateKeyPassphrase(value: string): Promise<void> {
+    await this.setSecret(SECRET_KEYS.targetSnowflakePrivateKeyPassphrase, value);
+  }
+
+  public async getTargetSnowflakePrivateKeyPassphrase(): Promise<string | undefined> {
+    return this.getSecret(SECRET_KEYS.targetSnowflakePrivateKeyPassphrase);
+  }
+
+  public async setTargetDatabricksToken(value: string): Promise<void> {
+    await this.setSecret(SECRET_KEYS.targetDatabricksToken, value);
+  }
+
+  public async getTargetDatabricksToken(): Promise<string | undefined> {
+    return this.getSecret(SECRET_KEYS.targetDatabricksToken);
   }
 }

@@ -5,8 +5,10 @@ import { parseYaml, stringifyYaml } from './Yaml';
 /**
  * Manages the reviewed, approved Target Context for the current spec version.
  * Persists to `<contextRoot>/context/target-context.yaml` with atomic writes —
- * a single current record (no version history; it's recomputed fresh per
- * spec version, tied to `specId`/`specVersion` for staleness detection).
+ * a single *current* record, but with real content-revision history: revising
+ * an already-approved record bumps `version` and archives the predecessor to
+ * `context/history/` (v0.19.0, mirrors `PipelineSpecManager`/`SourceContextManager`
+ * exactly), tied to `specId`/`specVersion` for staleness detection.
  *
  * `contextRoot` is a business problem's own folder (v0.12.0) — deliberately
  * distinct from the *shared* `.ai-context/context/business-context.yaml` /
@@ -54,14 +56,47 @@ export class TargetContextManager implements vscode.Disposable {
     return this.getContext()!;
   }
 
+  /**
+   * Content-revision versioning, mirroring `SourceContextManager.save()`/
+   * `PipelineSpecManager`'s exact pattern: revising an already-*approved*
+   * predecessor of the same spec lineage bumps `version` and archives the
+   * predecessor; approving a not-yet-approved record never bumps. A different
+   * spec lineage (a new `specId`/`specVersion`) starts fresh at `version: 1`,
+   * but an approved predecessor being replaced is still archived first.
+   */
   public async save(context: TargetContext): Promise<TargetContext> {
-    this.context = context;
+    const previous = this.context;
+    const sameLineage = !!previous && previous.specId === context.specId && previous.specVersion === context.specVersion;
+    const previousWasApproved = previous?.status === 'approved';
+    const version = sameLineage
+      ? (previousWasApproved ? (previous!.version ?? 1) + 1 : (previous!.version ?? 1))
+      : (context.version ?? 1);
+    if (previousWasApproved) {
+      await this.archive(previous!);
+    }
+    const toSave: TargetContext = { ...context, version };
+    this.context = toSave;
     await vscode.workspace.fs.createDirectory(this.contextDir);
     const tempUri = vscode.Uri.joinPath(this.contextDir, `.target-context.tmp.${Date.now()}.yaml`);
-    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(this.serialize(context), 'utf8'));
+    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(this.serialize(toSave), 'utf8'));
     await vscode.workspace.fs.rename(tempUri, this.fileUri, { overwrite: true });
-    this.log(`Saved Target Context v${context.specVersion} (${context.status}).`);
+    this.log(`Saved Target Context spec-v${toSave.specVersion} rev${toSave.version} (${toSave.status}).`);
     return this.getContext()!;
+  }
+
+  /** Archives an about-to-be-replaced, already-approved revision — idempotent, mirrors `PipelineSpecManager`'s `archive()`. */
+  private async archive(previous: TargetContext): Promise<void> {
+    const historyDir = vscode.Uri.joinPath(this.contextDir, 'history');
+    await vscode.workspace.fs.createDirectory(historyDir);
+    const target = vscode.Uri.joinPath(historyDir, `target-context.spec${previous.specVersion}.v${previous.version ?? 1}.yaml`);
+    try {
+      await vscode.workspace.fs.stat(target);
+      return; // already archived
+    } catch {
+      // not present yet — write it
+    }
+    await vscode.workspace.fs.writeFile(target, Buffer.from(this.serialize(previous), 'utf8'));
+    this.log(`Archived Target Context spec-v${previous.specVersion} rev${previous.version ?? 1} → context/history/`);
   }
 
   /** True once a Target Context exists, matches the given spec version, and is approved. */
@@ -83,6 +118,7 @@ export class TargetContextManager implements vscode.Disposable {
     return {
       specId: str(doc.specId),
       specVersion: typeof doc.specVersion === 'number' ? doc.specVersion : 1,
+      version: typeof doc.version === 'number' ? doc.version : 1,
       status: (str(doc.status) as TargetContext['status']) || 'pending',
       platform: (str(doc.platform) as TargetContext['platform']) || undefined,
       environmentProfile: (str(doc.environmentProfile) as TargetContext['environmentProfile']) || undefined,
@@ -92,6 +128,7 @@ export class TargetContextManager implements vscode.Disposable {
       orchestrationTool: (str(doc.orchestrationTool) as TargetContext['orchestrationTool']) || undefined,
       outputFormats: Array.isArray(doc.outputFormats) ? doc.outputFormats as TargetContext['outputFormats'] : undefined,
       platformConfig: (doc.platformConfig && typeof doc.platformConfig === 'object') ? doc.platformConfig as Record<string, string> : undefined,
+      credentialRef: (doc.credentialRef && typeof doc.credentialRef === 'object') ? doc.credentialRef as TargetContext['credentialRef'] : undefined,
       answers: (doc.answers && typeof doc.answers === 'object') ? doc.answers as Record<string, string> : {},
       builtAt: str(doc.builtAt) || undefined,
       approvedAt: str(doc.approvedAt) || undefined

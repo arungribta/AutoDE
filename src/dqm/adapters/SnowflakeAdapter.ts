@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'node:fs';
 import { BaseDataSourceAdapter } from '../BaseAdapter';
 import {
   PlatformCapabilities,
@@ -8,16 +9,34 @@ import {
   PlatformMetadataQueries,
   SqlDialect
 } from '../types';
+import { ExecutionBackend } from '../executionBackends/types';
+import { SnowflakeCliBackend, SnowflakeCliConnectionSpec } from '../executionBackends/SnowflakeCliBackend';
+import { SnowflakeRestBackend } from '../executionBackends/SnowflakeRestBackend';
+import { getCliDescriptor } from '../credentials/cliRegistry';
+import { CONFIG_SECTION } from '../../core/extensionIdentity';
 
 /**
  * Snowflake data platform adapter.
  *
- * Metadata extraction uses INFORMATION_SCHEMA views.
- * Lineage extraction uses ACCOUNT_USAGE.QUERY_HISTORY (requires elevated permissions).
- * Authentication supports key-pair, OAuth, username/password, external browser, and MCP.
+ * Real execution (Phase 3b) picks between backends at `connect()` time, never a
+ * bundled SDK:
+ * - a CLI-derived connection (`connectionName`, from `CliConfigResolver`, Phase
+ *   3a-ii) shells out to `snow sql`, riding Snowflake's native protocol — the
+ *   preferred path, since it's the same wire path every other approved Snowflake
+ *   tool uses and carries no bundle weight;
+ * - a username/password credential also shells out to `snow sql`, but with the
+ *   CLI's ad-hoc `--user`/`--password` flags instead of a named connection — this
+ *   is the only way to honor that auth mode at all, since the SQL API below
+ *   categorically rejects plain username/password;
+ * - a direct credential (account/PAT/key-pair) calls the public SQL API v2
+ *   directly over `fetch()` — the always-available fallback, with the caveats
+ *   documented on `SnowflakeRestBackend`.
+ *
+ * Metadata extraction uses INFORMATION_SCHEMA views. Lineage extraction uses
+ * ACCOUNT_USAGE.QUERY_HISTORY (requires elevated permissions).
  */
 export class SnowflakeAdapter extends BaseDataSourceAdapter {
-  private conn: unknown = null;
+  private backend: ExecutionBackend | null = null;
   private connectedDb: string = '';
   private connectedSchema: string = '';
 
@@ -26,6 +45,78 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
   }
 
   async connect(): Promise<ConnectionInfo> {
+    const connectionName = this.credentials['connectionName'] || '';
+    const authMode = this.credentials['authMode'] || this.credentials['defaultSnowflakeAuthMode'] || 'key-pair';
+    const password = this.credentials['password'] || '';
+
+    if (connectionName) {
+      this.backend = await this.createCliBackend({ kind: 'named', connectionName });
+    } else if (authMode === 'username-password' && password) {
+      // The SQL API (tier 3) categorically rejects plain username/password, so this
+      // auth mode can only be honored via the CLI's own `--user`/`--password` flags —
+      // still Snowflake's native protocol, not a REST workaround.
+      this.backend = await this.createCliBackend(this.buildAdHocSpec(password));
+    } else {
+      this.backend = this.createRestBackend();
+    }
+
+    try {
+      const info = await this.executeQuery(
+        'SELECT CURRENT_DATABASE() AS CURRENT_DB, CURRENT_SCHEMA() AS CURRENT_SCHEMA, CURRENT_VERSION() AS CURRENT_VERSION'
+      );
+      const row = (info.rows[0] ?? {}) as Record<string, unknown>;
+      this.connectedDb = String(row['CURRENT_DB'] ?? this.credentials['database'] ?? '');
+      this.connectedSchema = String(row['CURRENT_SCHEMA'] ?? this.credentials['schema'] ?? 'PUBLIC');
+      const version = String(row['CURRENT_VERSION'] ?? 'unknown');
+      this.log(`[snowflake] Connected to ${this.connectedDb}.${this.connectedSchema} (Snowflake ${version}).`);
+      return {
+        connected: true,
+        platform: 'snowflake',
+        databaseName: this.connectedDb,
+        schemaName: this.connectedSchema,
+        version,
+        capabilities: this.getCapabilities()
+      };
+    } catch (err) {
+      this.backend = null;
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  private async createCliBackend(spec: SnowflakeCliConnectionSpec): Promise<SnowflakeCliBackend> {
+    const consent = vscode.workspace.getConfiguration(CONFIG_SECTION).get<boolean>('dataPlatformCliConsent', false);
+    if (!consent) {
+      throw new Error(
+        'Executing queries via the Snowflake CLI requires CLI-execution consent — enable "autoDataEngineeringHub.dataPlatformCliConsent" in Settings.'
+      );
+    }
+    const descriptor = getCliDescriptor('snowflake');
+    const detection = await descriptor?.detect(this.credentials['snowflakeCliPath']);
+    if (!detection?.found || !detection.cliPath) {
+      throw new Error(`Snowflake CLI not found: ${detection?.error ?? 'unknown error'}`);
+    }
+    return new SnowflakeCliBackend(detection.cliPath, spec, (msg) => this.log(msg));
+  }
+
+  private buildAdHocSpec(password: string): SnowflakeCliConnectionSpec {
+    const account = this.credentials['account'] || this.credentials['defaultSnowflakeAccount'] || '';
+    const username = this.credentials['username'] || this.credentials['defaultSnowflakeUsername'] || '';
+    if (!account || !username) {
+      throw new Error('Snowflake username/password auth requires an account and username.');
+    }
+    return {
+      kind: 'adhoc',
+      account,
+      username,
+      password,
+      warehouse: this.credentials['warehouse'] || this.credentials['defaultSnowflakeWarehouse'] || undefined,
+      database: this.credentials['database'] || this.credentials['defaultSnowflakeDatabase'] || undefined,
+      schema: this.credentials['schema'] || this.credentials['defaultSnowflakeSchema'] || undefined,
+      role: this.credentials['role'] || this.credentials['defaultSnowflakeRole'] || undefined
+    };
+  }
+
+  private createRestBackend(): SnowflakeRestBackend {
     const account = this.credentials['account'] || this.credentials['defaultSnowflakeAccount'] || '';
     const username = this.credentials['username'] || this.credentials['defaultSnowflakeUsername'] || '';
     const warehouse = this.credentials['warehouse'] || this.credentials['defaultSnowflakeWarehouse'] || '';
@@ -33,71 +124,78 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
     const schema = this.credentials['schema'] || this.credentials['defaultSnowflakeSchema'] || 'PUBLIC';
     const role = this.credentials['role'] || this.credentials['defaultSnowflakeRole'] || 'SYSADMIN';
     const authMode = this.credentials['authMode'] || this.credentials['defaultSnowflakeAuthMode'] || 'key-pair';
-    const password = this.credentials['password'] || '';
+    const token = this.credentials['token'] || this.credentials['pat'] || '';
     const keyPath = this.credentials['keyPath'] || this.credentials['snowflakePrivateKeyPath'] || '';
+    const privateKeyPem = this.credentials['privateKey'] || this.readPrivateKeyFile(keyPath);
+    const privateKeyPassphrase = this.credentials['privateKeyPassphrase'] || '';
 
     if (!account || !username || !database) {
       throw new Error('Snowflake connection requires account, username, and database.');
     }
-
-    this.connectedDb = database;
-    this.connectedSchema = schema;
-
-    // In production, this would use the snowflake-sdk to establish a real connection.
-    // For now, we validate credentials and return a connection info object.
-    // The actual connection will be established lazily on first query.
-
-    this.log(`[snowflake] Connecting to ${account}.snowflakecomputing.com as ${username}...`);
-
-    // Simulate connection validation
-    if (authMode === 'key-pair' && !keyPath && !password) {
-      throw new Error('Snowflake key-pair auth requires a private key path or password.');
+    if (!token && authMode === 'key-pair' && !privateKeyPem) {
+      throw new Error('Snowflake key-pair auth requires a private key path or private key content.');
+    }
+    if (!token && authMode === 'username-password') {
+      throw new Error(
+        'Username/password auth requires a password — set it in Settings → Connections (stored in VS Code SecretStorage), or provide a Programmatic Access Token/key-pair instead. The SQL API itself never accepts plain username/password; a password is only usable via the Snowflake CLI.'
+      );
+    }
+    if (!token && authMode !== 'key-pair') {
+      throw new Error(
+        'Snowflake REST execution needs a Programmatic Access Token, OAuth token, or key-pair credentials — the SQL API does not accept plain username/password. Provide a token, switch to key-pair auth, or use a CLI-derived connection instead.'
+      );
     }
 
-    this.conn = { account, username, warehouse, database, schema, role, authMode };
+    return new SnowflakeRestBackend(
+      { account, username, warehouse, database, schema, role, token: token || undefined, privateKeyPem: privateKeyPem || undefined, privateKeyPassphrase: privateKeyPassphrase || undefined },
+      (msg) => this.log(msg)
+    );
+  }
 
-    this.log(`[snowflake] Connected to ${database}.${schema}`);
-
-    return {
-      connected: true,
-      platform: 'snowflake',
-      databaseName: database,
-      schemaName: schema,
-      version: '7.x', // Would be fetched via SELECT CURRENT_VERSION()
-      capabilities: this.getCapabilities()
-    };
+  private readPrivateKeyFile(keyPath: string): string {
+    if (!keyPath) {
+      return '';
+    }
+    try {
+      return fs.readFileSync(keyPath, 'utf8');
+    } catch (err) {
+      this.log(`[snowflake] Could not read private key file at "${keyPath}": ${err instanceof Error ? err.message : String(err)}`);
+      return '';
+    }
   }
 
   async disconnect(): Promise<void> {
-    this.conn = null;
+    this.backend?.dispose();
+    this.backend = null;
     this.log('[snowflake] Disconnected.');
   }
 
   dispose(): void {
-    this.conn = null;
+    this.backend?.dispose();
+    this.backend = null;
   }
 
   async executeQuery(sql: string, options?: QueryOptions): Promise<QueryResult> {
-    if (!this.conn) {
+    if (!this.backend) {
       throw new Error('Not connected to Snowflake. Call connect() first.');
     }
+    return this.backend.executeQuery(sql, options);
+  }
 
-    const startTime = Date.now();
+  /** Lists databases visible to the connected principal — lets a user pick from what's actually there (Step 4) instead of typing a name blindly. */
+  async listDatabases(): Promise<string[]> {
+    const result = await this.executeQuery('SHOW DATABASES');
+    return result.rows
+      .map((row) => this.firstColumnValue(row as Record<string, unknown>, ['name', 'NAME', 'database_name']))
+      .filter((name) => name.length > 0);
+  }
 
-    // In production, this would execute via snowflake-sdk Connection.execute().
-    // For now, we return an empty result set — the adapter layer is ready for
-    // real execution when the snowflake-sdk integration is completed.
-    this.log(`[snowflake] Executing query (${sql.length} chars)...`);
-
-    // Simulate query execution
-    const executionTimeMs = Date.now() - startTime;
-
-    return {
-      columns: [],
-      rows: [],
-      rowCount: 0,
-      executionTimeMs
-    };
+  /** Lists schemas within a given database. */
+  async listSchemas(database: string): Promise<string[]> {
+    const result = await this.executeQuery(`SHOW SCHEMAS IN DATABASE ${database}`);
+    return result.rows
+      .map((row) => this.firstColumnValue(row as Record<string, unknown>, ['name', 'NAME', 'schema_name']))
+      .filter((name) => name.length > 0);
   }
 
   getCapabilities(): PlatformCapabilities {

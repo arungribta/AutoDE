@@ -342,9 +342,13 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         <span class="dot warn" id="providerDot"></span>
         <span id="providerLabel">Copilot</span>
       </div>
-      <div class="status-pill" id="connPill" title="Click to manage connections">
+      <div class="status-pill" id="connPill" title="Source connection — click to manage connections">
         <span class="dot err" id="connDot"></span>
-        <span id="connLabel">Not connected</span>
+        <span id="connLabel">Source: not connected</span>
+      </div>
+      <div class="status-pill" id="targetConnPill" title="Target connection — click to manage connections">
+        <span class="dot err" id="targetConnDot"></span>
+        <span id="targetConnLabel">Target: not connected</span>
       </div>
       <div class="metric" id="ctxMetric" title="Click to expand context drawer">
         <span>📊</span>
@@ -435,7 +439,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     <div class="slide-panel-header"><span class="slide-title">Settings & Connections</span><button class="icon-btn" id="slideCloseBtn">✕</button></div>
     <div class="slide-tabs" id="slideTabs">
       <button class="slide-tab active" data-slide-tab="llm">🤖 LLM</button>
-      <button class="slide-tab" data-slide-tab="connect">🔌 Connect</button>
+      <button class="slide-tab" data-slide-tab="connect">🔌 Source</button>
+      <button class="slide-tab" data-slide-tab="target">🎯 Target</button>
       <button class="slide-tab" data-slide-tab="prefs">⚙ Prefs</button>
     </div>
     <div class="slide-panel-body" id="slideBody">
@@ -450,12 +455,20 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         <div class="card" data-llm="ollama"><div class="card-header"><span class="radio"></span><span class="card-title">Ollama (Local)</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model</label><input id="ollamaModel" placeholder="llama3" /></div><div><label>Endpoint</label><input id="ollamaEndpoint" placeholder="http://localhost:11434" /></div></div></div></div>
       </div>
       <div class="section slide-section" id="slideSectionConnect" style="display:none;">
-        <div class="section-title">Data Platform</div>
-        <div class="card selected" data-provider="snowflake"><div class="card-header"><span class="radio"></span><span class="card-title">Snowflake</span><span class="card-status" id="snowflakeStatus">Not connected</span></div><div class="card-body"><div class="form-row"><div><label>Account</label><input id="sfAccount" placeholder="XYZ12345" /></div><div><label>Username</label><input id="sfUsername" placeholder="data_agent" /></div></div><div class="form-row"><div><label>Warehouse</label><input id="sfWarehouse" placeholder="WH_XS" /></div><div><label>Database</label><input id="sfDatabase" placeholder="RAW_DB" /></div></div><div class="form-row"><div><label>Schema</label><input id="sfSchema" placeholder="PUBLIC" /></div><div><label>Role</label><input id="sfRole" placeholder="SYSADMIN" /></div></div><div class="form-row"><div><label>Auth Mode</label><select id="sfAuthMode"><option value="key-pair">Key-Pair</option><option value="username-password">Username + Password</option><option value="oauth">OAuth</option><option value="external-browser">External Browser</option><option value="mcp">MCP</option></select></div><div><label>Key Path</label><input id="sfKeyPath" placeholder="/path/to/key.pem" /></div></div><div class="btn-row"><button id="testConnBtn" class="primary">Connect</button><button id="sourceAssessmentBtn">Source Assessment</button></div></div></div>
-        <div class="card" data-provider="databricks"><div class="card-header"><span class="radio"></span><span class="card-title">Databricks</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Workspace URL</label><input placeholder="https://..." /></div><div><label>Token</label><input type="password" placeholder="••••" /></div></div></div></div>
+        <div class="section-title">Source Platform</div><div class="card-body" style="padding:6px 0 10px;"><div style="font-size:12px;opacity:0.8;margin-bottom:6px;">No live connectivity? Ingest a CSV, JSON, or DDL (.sql) file's real structure instead.</div><button id="ingestFileBtn">Import File...</button></div>
+        <div class="card selected" data-provider="snowflake"><div class="card-header"><span class="radio"></span><span class="card-title">Snowflake</span><span class="card-status" id="snowflakeStatus">Not connected</span></div><div class="card-body"><div class="form-row"><div><label>Account</label><input id="sfAccount" placeholder="XYZ12345" /></div><div><label>Username</label><input id="sfUsername" placeholder="data_agent" /></div></div><div class="form-row"><div><label>Warehouse</label><input id="sfWarehouse" placeholder="WH_XS" /></div><div><label>Database</label><input id="sfDatabase" placeholder="RAW_DB" /></div></div><div class="form-row"><div><label>Schema</label><input id="sfSchema" placeholder="PUBLIC" /></div><div><label>Role</label><input id="sfRole" placeholder="SYSADMIN" /></div></div><div class="form-row"><div><label>Auth Mode</label><select id="sfAuthMode"><option value="key-pair">Key-Pair</option><option value="username-password">Username + Password</option><option value="oauth">OAuth</option><option value="external-browser">External Browser</option><option value="mcp">MCP</option></select></div><div><label>Key Path</label><input id="sfKeyPath" placeholder="/path/to/key.pem" /></div></div><div class="form-row"><div><label>Password (for Username + Password auth)</label><input id="sfPassword" type="password" placeholder="Stored in VS Code SecretStorage — never shown again" autocomplete="new-password" /></div></div><div class="form-row"><div><label>Snowflake CLI path (only if not found automatically)</label><input id="sfCliPath" placeholder="e.g. D:\Program Files\Snowflake CLI\snow.exe — leave blank if `snow` is on PATH" /></div></div><div class="btn-row"><button id="testConnBtn" class="primary">Connect</button><button id="browseSourceBtn">Browse...</button><button id="sourceAssessmentBtn">Source Assessment</button><button id="disconnectBtn">Disconnect</button></div></div></div>
+        <div class="card" data-provider="databricks"><div class="card-header"><span class="radio"></span><span class="card-title">Databricks</span><span class="card-status" id="databricksStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Workspace URL</label><input id="dbxWorkspaceUrl" placeholder="adb-1234.5.azuredatabricks.net" /></div><div><label>SQL Warehouse HTTP Path</label><input id="dbxHttpPath" placeholder="/sql/1.0/warehouses/abc123" /></div></div><div class="form-row"><div><label>Catalog</label><input id="dbxCatalog" placeholder="main" /></div><div><label>Schema</label><input id="dbxSchema" placeholder="default" /></div></div><div class="form-row"><div><label>Catalog Type</label><select id="dbxCatalogType"><option value="auto">Auto</option><option value="unity">Unity Catalog</option><option value="hive_metastore">Hive Metastore</option></select></div><div><label>CLI path (only if not found automatically)</label><input id="dbxCliPath" placeholder="leave blank if databricks is on PATH" /></div></div><div class="form-row"><div><label>Token</label><input id="dbxToken" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testConnBtnDbx" class="primary">Connect</button><button id="browseSourceBtnDbx">Browse...</button><button id="sourceAssessmentBtnDbx">Source Assessment</button><button id="disconnectBtnDbx">Disconnect</button></div></div></div>
         <div class="card" data-provider="bigquery"><div class="card-header"><span class="radio"></span><span class="card-title">BigQuery</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Project ID</label><input placeholder="my-project" /></div><div><label>Dataset</label><input placeholder="analytics" /></div></div></div></div>
         <div class="card" data-provider="redshift"><div class="card-header"><span class="radio"></span><span class="card-title">Redshift</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Cluster</label><input placeholder="my-cluster" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
         <div class="card" data-provider="synapse"><div class="card-header"><span class="radio"></span><span class="card-title">Azure Synapse</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Server</label><input placeholder="my-server" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
+      </div>
+      <div class="section slide-section" id="slideSectionTarget" style="display:none;">
+        <div class="section-title">Target Platform</div>
+        <div class="card selected" data-target-provider="snowflake"><div class="card-header"><span class="radio"></span><span class="card-title">Snowflake</span><span class="card-status" id="tgtSnowflakeStatus">Not connected</span></div><div class="card-body"><div class="form-row"><div><label>Account</label><input id="tgtSfAccount" placeholder="XYZ12345" /></div><div><label>Username</label><input id="tgtSfUsername" placeholder="data_agent" /></div></div><div class="form-row"><div><label>Warehouse</label><input id="tgtSfWarehouse" placeholder="WH_XS" /></div><div><label>Database</label><input id="tgtSfDatabase" placeholder="TARGET_DB" /></div></div><div class="form-row"><div><label>Schema</label><input id="tgtSfSchema" placeholder="PUBLIC" /></div><div><label>Role</label><input id="tgtSfRole" placeholder="SYSADMIN" /></div></div><div class="form-row"><div><label>Auth Mode</label><select id="tgtSfAuthMode"><option value="key-pair">Key-Pair</option><option value="username-password">Username + Password</option><option value="oauth">OAuth</option><option value="external-browser">External Browser</option><option value="mcp">MCP</option></select></div><div><label>Key Path</label><input id="tgtSfKeyPath" placeholder="/path/to/key.pem" /></div></div><div class="form-row"><div><label>Password (for Username + Password auth)</label><input id="tgtSfPassword" type="password" placeholder="Stored in VS Code SecretStorage — never shown again" autocomplete="new-password" /></div></div><div class="form-row"><div><label>Snowflake CLI path (only if not found automatically)</label><input id="tgtSfCliPath" placeholder="e.g. D:\Program Files\Snowflake CLI\snow.exe — leave blank if `snow` is on PATH" /></div></div><div class="btn-row"><button id="testTargetConnBtn" class="primary">Connect</button><button id="browseTargetBtn">Browse...</button><button id="targetDisconnectBtn">Disconnect</button></div></div></div>
+        <div class="card" data-target-provider="databricks"><div class="card-header"><span class="radio"></span><span class="card-title">Databricks</span><span class="card-status" id="tgtDatabricksStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Workspace URL</label><input id="tgtDbxWorkspaceUrl" placeholder="adb-1234.5.azuredatabricks.net" /></div><div><label>SQL Warehouse HTTP Path</label><input id="tgtDbxHttpPath" placeholder="/sql/1.0/warehouses/abc123" /></div></div><div class="form-row"><div><label>Catalog</label><input id="tgtDbxCatalog" placeholder="main" /></div><div><label>Schema</label><input id="tgtDbxSchema" placeholder="default" /></div></div><div class="form-row"><div><label>Catalog Type</label><select id="tgtDbxCatalogType"><option value="auto">Auto</option><option value="unity">Unity Catalog</option><option value="hive_metastore">Hive Metastore</option></select></div><div><label>CLI path (only if not found automatically)</label><input id="tgtDbxCliPath" placeholder="leave blank if databricks is on PATH" /></div></div><div class="form-row"><div><label>Token</label><input id="tgtDbxToken" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testTargetConnBtnDbx" class="primary">Connect</button><button id="browseTargetBtnDbx">Browse...</button><button id="targetDisconnectBtnDbx">Disconnect</button></div></div></div>
+        <div class="card" data-target-provider="bigquery"><div class="card-header"><span class="radio"></span><span class="card-title">BigQuery</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Project ID</label><input placeholder="my-project" /></div><div><label>Dataset</label><input placeholder="analytics" /></div></div></div></div>
+        <div class="card" data-target-provider="redshift"><div class="card-header"><span class="radio"></span><span class="card-title">Redshift</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Cluster</label><input placeholder="my-cluster" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
+        <div class="card" data-target-provider="synapse"><div class="card-header"><span class="radio"></span><span class="card-title">Azure Synapse</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Server</label><input placeholder="my-server" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
       </div>
       <div class="section slide-section" id="slideSectionPrefs" style="display:none;">
         <div class="section-title">Extension Settings</div>
@@ -514,6 +527,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   const welcomeBlock = $('#welcomeBlock');
   const providerPill = $('#providerPill'), providerDot = $('#providerDot'), providerLabel = $('#providerLabel');
   const connPill = $('#connPill'), connDot = $('#connDot'), connLabel = $('#connLabel');
+  const targetConnPill = $('#targetConnPill'), targetConnDot = $('#targetConnDot'), targetConnLabel = $('#targetConnLabel');
+  const snowflakeStatus = $('#snowflakeStatus');
   const ctxMetricText = $('#ctxMetricText'), ctxMetricBar = $('#ctxMetricBar');
   const ctxDrawer = $('#ctxDrawer'), ctxDrawerToggle = $('#ctxDrawerToggle'), ctxDrawerChevron = $('#ctxDrawerChevron'), ctxDrawerStats = $('#ctxDrawerStats');
   const ctxDbGrid = $('#ctxDbGrid'), ctxBizGrid = $('#ctxBizGrid'), ctxQueryGrid = $('#ctxQueryGrid');
@@ -1243,13 +1258,14 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       html += '<div class="ctx-card" id="ctxSourceCard">' +
         '<div class="ctx-card-header"><span class="ctx-card-title">🔌 Source Context</span><span class="ctx-status-badge ' + ss + '">' + ctxStatusLabel(ss) + '</span></div>' +
         '<div class="ctx-card-body">';
-      if ((ss === 'built' || ss === 'approved') && sourceContext) {
-        if (sourceContext.method === 'connected' && sourceContext.connectionSummary) {
-          var cs = sourceContext.connectionSummary;
-          html += '<div class="ctx-summary-row"><span>Connected to</span><span>' + escapeHtml(cs.platform) + '</span></div>' +
+      var srcEntry = (sourceContext && sourceContext.sources && sourceContext.sources.length > 0) ? sourceContext.sources[0] : null;
+      if ((ss === 'built' || ss === 'approved') && srcEntry) {
+        if (srcEntry.method === 'connected' && srcEntry.connectionSummary) {
+          var cs = srcEntry.connectionSummary;
+          html += '<div class="ctx-summary-row"><span>Connected to</span><span>' + escapeHtml(srcEntry.platform || srcEntry.connectionId) + '</span></div>' +
             '<div class="ctx-summary-row"><span>Discovered</span><span>' + cs.tableCount + ' tables, ' + cs.viewCount + ' views</span></div>';
         } else {
-          html += '<div style="max-height:80px;overflow-y:auto;">' + escapeHtml((sourceContext.description || '').slice(0, 240)) + ((sourceContext.description || '').length > 240 ? '…' : '') + '</div>';
+          html += '<div style="max-height:80px;overflow-y:auto;">' + escapeHtml((srcEntry.description || '').slice(0, 240)) + ((srcEntry.description || '').length > 240 ? '…' : '') + '</div>';
         }
       } else {
         html += 'Brownfield implementation — connect to the source platform, or describe it, before planning.';
@@ -1533,12 +1549,13 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   $('#settingsBtn').onclick = function () { openSlidePanel('llm'); };
   providerPill.onclick = function () { openSlidePanel('llm'); };
   connPill.onclick = function () { openSlidePanel('connect'); };
+  targetConnPill.onclick = function () { openSlidePanel('target'); };
   $('#welcomeConnectBtn').onclick = function () { openSlidePanel('connect'); };
   $('#welcomeSettingsBtn').onclick = function () { openSlidePanel('llm'); };
 
   var slideTabs = $$('.slide-tab');
   slideTabs.forEach(function (tab) { tab.onclick = function () { switchSlideTab(tab.getAttribute('data-slide-tab')); }; });
-  function switchSlideTab(tabName) { slideTabs.forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-slide-tab') === tabName); }); var sections = { llm: $('#slideSectionLlm'), connect: $('#slideSectionConnect'), prefs: $('#slideSectionPrefs') }; Object.keys(sections).forEach(function (k) { if (sections[k]) sections[k].style.display = k === tabName ? '' : 'none'; }); }
+  function switchSlideTab(tabName) { slideTabs.forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-slide-tab') === tabName); }); var sections = { llm: $('#slideSectionLlm'), connect: $('#slideSectionConnect'), target: $('#slideSectionTarget'), prefs: $('#slideSectionPrefs') }; Object.keys(sections).forEach(function (k) { if (sections[k]) sections[k].style.display = k === tabName ? '' : 'none'; }); }
 
   // ── Palette Panel ──
   const paletteOverlay = $('#paletteOverlay'), palettePanel = $('#palettePanel'), paletteBtn = $('#paletteBtn'), paletteCloseBtn = $('#paletteCloseBtn');
@@ -1557,14 +1574,21 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     post('updateSettings', { settings: { activeLlmProvider: llm } });   // auto-save, like the consent toggle
   }; });
   var providerCards = $$('#slideSectionConnect .card[data-provider]');
-  providerCards.forEach(function (card) { card.onclick = function (e) { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL') return; providerCards.forEach(function (c) { c.classList.remove('selected'); }); card.classList.add('selected'); providerCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== card); }); }; });
+  function selectProviderCard(card, cardsList) {
+    cardsList.forEach(function (c) { c.classList.remove('selected'); });
+    card.classList.add('selected');
+    cardsList.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== card); });
+  }
+  providerCards.forEach(function (card) { card.onclick = function (e) { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL') return; selectProviderCard(card, providerCards); }; });
+  var targetProviderCards = $$('#slideSectionTarget .card[data-target-provider]');
+  targetProviderCards.forEach(function (card) { card.onclick = function (e) { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL') return; selectProviderCard(card, targetProviderCards); }; });
 
   // ── Send Message ──
   sendBtn.onclick = function () { sendMessage(); };
   if ($('#attachSpecFileBtn')) { $('#attachSpecFileBtn').onclick = function () { post('attachSpecFile'); }; }
   chatInput.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } handleMentionInput(e); };
   chatInput.oninput = function (e) { handleMentionInput(e); };
-  function sendMessage() { var text = chatInput.value.trim(); if (!text) return; addMessage('user', text, 'You'); chatInput.value = ''; mentionDropdown.classList.remove('visible'); if (text.startsWith('/')) { handleSlashCommand(text); return; } beginPending(pendingLabelForChat()); post('chat', { message: text, schemaContext: '', toolMode: chatToolMode }); }
+  function sendMessage() { var text = chatInput.value.trim(); if (!text) return; addMessage('user', text, 'You'); chatInput.value = ''; mentionDropdown.classList.remove('visible'); if (text.startsWith('/')) { handleSlashCommand(text); return; } beginPending(pendingLabelForChat()); post('chat', { message: text, toolMode: chatToolMode }); }
 
   // ── Tool mode toggle (read-only vs. allow edits) ──
   var chatToolMode = 'read-only';
@@ -1583,7 +1607,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       }
     };
   }
-  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } beginPending(currentSpec ? 'Revising the specification…' : 'Drafting the specification…'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': if (currentSpec && currentSpec.status === 'approved') { beginPlanGeneration('Building implementation plan…'); post('generatePlanFromSpec'); break; } var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; beginPlanGeneration('Building implementation plan…'); post('generatePlan', { objective: objective, schemaContext: '' }); break; case '/execute': post('executePlan'); break; case '/skill': var skillArgs = text.replace('/skill', '').trim(); var skillMatch = skillArgs.match(/^(\S+)\s+([\s\S]+)$/); if (!skillMatch) { addMessage('ai', 'Usage: /skill <skillId> <instruction> — import a skill first via "AutoDE: Import Tool Skill".', 'AutoDE'); break; } beginPending('Running skill "' + skillMatch[1] + '"… this may write files or run commands, and will ask for your approval.'); post('runToolSkill', { skillId: skillMatch[1], instruction: skillMatch[2] }); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
+  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } beginPending(currentSpec ? 'Revising the specification…' : 'Drafting the specification…'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': if (currentSpec && currentSpec.status === 'approved') { beginPlanGeneration('Building implementation plan…'); post('generatePlanFromSpec'); break; } var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; beginPlanGeneration('Building implementation plan…'); post('generatePlan', { objective: objective }); break; case '/execute': post('executePlan'); break; case '/skill': var skillArgs = text.replace('/skill', '').trim(); var skillMatch = skillArgs.match(/^(\S+)\s+([\s\S]+)$/); if (!skillMatch) { addMessage('ai', 'Usage: /skill <skillId> <instruction> — import a skill first via "AutoDE: Import Tool Skill".', 'AutoDE'); break; } beginPending('Running skill "' + skillMatch[1] + '"… this may write files or run commands, and will ask for your approval.'); post('runToolSkill', { skillId: skillMatch[1], instruction: skillMatch[2] }); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/target': openSlidePanel('target'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
 
   // ── @-mention ──
   function handleMentionInput(e) { var val = chatInput.value; var cursorPos = chatInput.selectionStart; var textBeforeCursor = val.substring(0, cursorPos); var mentionMatch = textBeforeCursor.match(/@(\w*)$/); if (mentionMatch) { var query = mentionMatch[1].toLowerCase(); var items = buildMentionItems(query); if (items.length > 0) { renderMentionDropdown(items); mentionDropdown.classList.add('visible'); } else { mentionDropdown.classList.remove('visible'); } } else { mentionDropdown.classList.remove('visible'); } }
@@ -1645,14 +1669,86 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   if ($('#listLmBtn')) $('#listLmBtn').onclick = function () { post('listLanguageModels', { provider: 'claude' }); };
   if ($('#claudeConsent')) $('#claudeConsent').onchange = function () { post('updateSettings', { settings: { languageModelProgrammaticConsent: $('#claudeConsent').checked } }); };
   if ($('#claudeCodePath')) $('#claudeCodePath').onchange = function () { post('updateSettings', { settings: { claudeCodePath: $('#claudeCodePath').value.trim() } }); };
-  $('#testConnBtn').onclick = function () { post('testConnection'); showToast('Connecting...', ''); };
+  // "Connect" must persist whatever's currently typed in the form first — it used
+  // to fire `testConnection` directly, which reads only already-*saved* VS Code
+  // settings, so typing Account/Username/Password and clicking Connect without a
+  // separate "Save Settings" click first always failed with a stale
+  // "Missing credentials" error even though the fields were visibly filled in.
+  // Waits for the extension's `settingsSaved` ack (not a fixed delay) before firing
+  // `testConnection`, so the connection attempt is guaranteed to read the values
+  // that were just saved rather than racing the save itself.
+  // null | 'testConnection' | 'testTargetConnection' — which command (if any) to
+  // fire once the pending saveSettings() call is acknowledged. Generalized to
+  // both roles and both platform cards (Snowflake/Databricks) per card, since
+  // the same save-before-connect race applies to all four Connect buttons.
+  var pendingConnectionCommand = null;
+  function connectAfterSave(card, cardsList, command) {
+    if (card) selectProviderCard(card, cardsList);
+    pendingConnectionCommand = command;
+    saveSettings();
+  }
+  $('#testConnBtn').onclick = function () { connectAfterSave($('#testConnBtn').closest('.card'), providerCards, 'testConnection'); };
+  $('#testConnBtnDbx').onclick = function () { connectAfterSave($('#testConnBtnDbx').closest('.card'), providerCards, 'testConnection'); };
+  $('#testTargetConnBtn').onclick = function () { connectAfterSave($('#testTargetConnBtn').closest('.card'), targetProviderCards, 'testTargetConnection'); };
+  $('#testTargetConnBtnDbx').onclick = function () { connectAfterSave($('#testTargetConnBtnDbx').closest('.card'), targetProviderCards, 'testTargetConnection'); };
   $('#sourceAssessmentBtn').onclick = function () { post('sourceAssessment'); showToast('Running source assessment...', ''); };
+  $('#sourceAssessmentBtnDbx').onclick = function () { post('sourceAssessment'); showToast('Running source assessment...', ''); };
+  $('#disconnectBtn').onclick = function () { post('disconnectDataPlatform'); showToast('Disconnecting...', ''); };
+  $('#disconnectBtnDbx').onclick = function () { post('disconnectDataPlatform'); showToast('Disconnecting...', ''); };
+  $('#targetDisconnectBtn').onclick = function () { post('disconnectTargetDataPlatform'); showToast('Disconnecting...', ''); };
+  $('#targetDisconnectBtnDbx').onclick = function () { post('disconnectTargetDataPlatform'); showToast('Disconnecting...', ''); };
+  // "Browse..." (Step 4) — same save-before-act need as Connect, so it reuses
+  // connectAfterSave() to guarantee the command reads freshly-saved settings
+  // (which platform/account to list databases/schemas for) rather than racing
+  // an unsaved edit.
+  $('#browseSourceBtn').onclick = function () { connectAfterSave($('#browseSourceBtn').closest('.card'), providerCards, 'browseSourceDatabase'); };
+  $('#browseSourceBtnDbx').onclick = function () { connectAfterSave($('#browseSourceBtnDbx').closest('.card'), providerCards, 'browseSourceDatabase'); };
+  $('#browseTargetBtn').onclick = function () { connectAfterSave($('#browseTargetBtn').closest('.card'), targetProviderCards, 'browseTargetDatabase'); };
+  $('#browseTargetBtnDbx').onclick = function () { connectAfterSave($('#browseTargetBtnDbx').closest('.card'), targetProviderCards, 'browseTargetDatabase'); };
+  // Step 5 — no save-before-act needed here (unlike Connect/Browse), since
+  // ingestion doesn't depend on any typed-but-unsaved connection field.
+  $('#ingestFileBtn').onclick = function () { post('ingestFileAsSourceContext'); showToast('Pick a file to ingest...', ''); };
   $('#saveSettingsBtn').onclick = function () { saveSettings(); };
   $('#copilotConsent').onchange = function () { post('updateSettings', { settings: { languageModelProgrammaticConsent: $('#copilotConsent').checked } }); };
 
-  function saveSettings() { var settings = { activeLlmProvider: getSelectedLlm(), defaultProvider: getSelectedProvider(), defaultSnowflakeAccount: $('#sfAccount').value, defaultSnowflakeUsername: $('#sfUsername').value, defaultSnowflakeWarehouse: $('#sfWarehouse').value, defaultSnowflakeDatabase: $('#sfDatabase').value, defaultSnowflakeSchema: $('#sfSchema').value, defaultSnowflakeRole: $('#sfRole').value, defaultSnowflakeAuthMode: $('#sfAuthMode').value, snowflakePrivateKeyPath: $('#sfKeyPath').value, activeLlmModel: (getSelectedLlm() === 'claude' && $('#claudeModel') ? $('#claudeModel').value : '') || $('#openaiModel').value || $('#anthropicModel').value || $('#geminiModel').value || $('#ollamaModel').value || 'gpt-4o-mini', llmEndpoint: $('#azureEndpoint').value || $('#ollamaEndpoint').value || '', claudeCodePath: $('#claudeCodePath') ? $('#claudeCodePath').value.trim() : '', languageModelProgrammaticConsent: $('#copilotConsent').checked || ($('#claudeConsent') ? $('#claudeConsent').checked : false), readOnlyMode: $('#readOnlyMode').checked, autoDocumentationEnabled: $('#autoDocEnabled').checked, telemetryEnabled: $('#telemetryEnabled').checked, metadataCachingDurationMinutes: parseInt($('#cacheDuration').value) || 15, queryTimeoutSeconds: parseInt($('#queryTimeout').value) || 120 }; post('updateSettings', { settings: settings }); closeSlidePanel(); showToast('Settings saved', 'success'); }
+  function saveSettings() {
+    var settings = {
+      activeLlmProvider: getSelectedLlm(),
+      defaultProvider: getSelectedProvider(),
+      defaultSnowflakeAccount: $('#sfAccount').value, defaultSnowflakeUsername: $('#sfUsername').value, defaultSnowflakeWarehouse: $('#sfWarehouse').value, defaultSnowflakeDatabase: $('#sfDatabase').value, defaultSnowflakeSchema: $('#sfSchema').value, defaultSnowflakeRole: $('#sfRole').value, defaultSnowflakeAuthMode: $('#sfAuthMode').value, snowflakePrivateKeyPath: $('#sfKeyPath').value, snowflakeCliPath: $('#sfCliPath').value.trim(),
+      defaultDatabricksWorkspaceUrl: $('#dbxWorkspaceUrl').value, defaultDatabricksHttpPath: $('#dbxHttpPath').value, defaultDatabricksCatalog: $('#dbxCatalog').value, defaultDatabricksSchema: $('#dbxSchema').value, defaultDatabricksCatalogType: $('#dbxCatalogType').value, databricksCliPath: $('#dbxCliPath').value.trim(),
+      // ── Target connection (v0.19.0) ──
+      defaultTargetProvider: getSelectedTargetProvider(),
+      defaultTargetSnowflakeAccount: $('#tgtSfAccount').value, defaultTargetSnowflakeUsername: $('#tgtSfUsername').value, defaultTargetSnowflakeWarehouse: $('#tgtSfWarehouse').value, defaultTargetSnowflakeDatabase: $('#tgtSfDatabase').value, defaultTargetSnowflakeSchema: $('#tgtSfSchema').value, defaultTargetSnowflakeRole: $('#tgtSfRole').value, defaultTargetSnowflakeAuthMode: $('#tgtSfAuthMode').value, targetSnowflakePrivateKeyPath: $('#tgtSfKeyPath').value, targetSnowflakeCliPath: $('#tgtSfCliPath').value.trim(),
+      defaultTargetDatabricksWorkspaceUrl: $('#tgtDbxWorkspaceUrl').value, defaultTargetDatabricksHttpPath: $('#tgtDbxHttpPath').value, defaultTargetDatabricksCatalog: $('#tgtDbxCatalog').value, defaultTargetDatabricksSchema: $('#tgtDbxSchema').value, defaultTargetDatabricksCatalogType: $('#tgtDbxCatalogType').value, targetDatabricksCliPath: $('#tgtDbxCliPath').value.trim(),
+      activeLlmModel: (getSelectedLlm() === 'claude' && $('#claudeModel') ? $('#claudeModel').value : '') || $('#openaiModel').value || $('#anthropicModel').value || $('#geminiModel').value || $('#ollamaModel').value || 'gpt-4o-mini',
+      llmEndpoint: $('#azureEndpoint').value || $('#ollamaEndpoint').value || '',
+      claudeCodePath: $('#claudeCodePath') ? $('#claudeCodePath').value.trim() : '',
+      languageModelProgrammaticConsent: $('#copilotConsent').checked || ($('#claudeConsent') ? $('#claudeConsent').checked : false),
+      readOnlyMode: $('#readOnlyMode').checked, autoDocumentationEnabled: $('#autoDocEnabled').checked, telemetryEnabled: $('#telemetryEnabled').checked,
+      metadataCachingDurationMinutes: parseInt($('#cacheDuration').value) || 15, queryTimeoutSeconds: parseInt($('#queryTimeout').value) || 120
+    };
+    var payload = { settings: settings };
+    // Only sent when the user actually typed something this time — each field is
+    // write-only (never repopulated from stored settings), so an untouched, blank
+    // box on a later "Save Settings" click must never overwrite an already-stored
+    // secret with an empty string.
+    var secretFields = [
+      ['sfPassword', 'snowflakePassword'], ['tgtSfPassword', 'targetSnowflakePassword'],
+      ['dbxToken', 'databricksToken'], ['tgtDbxToken', 'targetDatabricksToken']
+    ];
+    secretFields.forEach(function (pair) {
+      var el = $('#' + pair[0]);
+      if (el && el.value) { payload[pair[1]] = el.value; }
+      if (el) { el.value = ''; }
+    });
+    post('updateSettings', payload);
+    closeSlidePanel();
+    showToast('Settings saved', 'success');
+  }
   function getSelectedLlm() { var card = document.querySelector('#slideSectionLlm .card.selected'); return card ? card.getAttribute('data-llm') : 'copilot'; }
   function getSelectedProvider() { var card = document.querySelector('#slideSectionConnect .card.selected'); return card ? card.getAttribute('data-provider') : 'snowflake'; }
+  function getSelectedTargetProvider() { var card = document.querySelector('#slideSectionTarget .card.selected'); return card ? card.getAttribute('data-target-provider') : 'snowflake'; }
 
   // ── Message Handler ──
   window.addEventListener('message', function (event) {
@@ -1672,9 +1768,32 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         break;
       case 'planUpdated': endPending(); if (msg.plan && msg.plan.steps) { addPlanCard(msg.plan); } break;
       case 'logEntry': if (msg.message) { if (pendingBubble) { updatePending(msg.message); } else { addLogEntry(msg.message); } } break;
+      case 'connectionStatus': {
+        function renderRole(roleLabel, status, dotEl, labelEl) {
+          var connected = !!(status && status.connected);
+          dotEl.className = 'dot ' + (connected ? 'ok' : 'err');
+          var platformLabel = status && status.platform ? (status.platform.charAt(0).toUpperCase() + status.platform.slice(1)) : 'Connected';
+          labelEl.textContent = roleLabel + ': ' + (connected ? (platformLabel + (status.detail ? ' — ' + status.detail : '')) : 'not connected');
+        }
+        renderRole('Source', msg.source, connDot, connLabel);
+        renderRole('Target', msg.target, targetConnDot, targetConnLabel);
+        function renderCardStatus(el, status, platform) {
+          if (!el) return;
+          if (status && status.connected && status.platform === platform) { el.textContent = status.detail || 'Connected'; }
+          else if (!status || !status.connected) { el.textContent = 'Not connected'; }
+        }
+        renderCardStatus(snowflakeStatus, msg.source, 'snowflake');
+        renderCardStatus($('#databricksStatus'), msg.source, 'databricks');
+        renderCardStatus($('#tgtSnowflakeStatus'), msg.target, 'snowflake');
+        renderCardStatus($('#tgtDatabricksStatus'), msg.target, 'databricks');
+        break;
+      }
       case 'settingsLoaded': applySettings(msg); break;
       case 'languageModelStatus': if (msg.info) { updateCopilotStatus(msg.info); } break;
-      case 'settingsSaved': showToast('Settings saved', 'success'); break;
+      case 'settingsSaved':
+        showToast('Settings saved', 'success');
+        if (pendingConnectionCommand) { var cmd = pendingConnectionCommand; pendingConnectionCommand = null; post(cmd); }
+        break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': endPending(); if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
@@ -1749,7 +1868,75 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     }
   });
 
-  function applySettings(data) { if (!data) return; if (data.activeLlmProvider) { var llmCard = document.querySelector('#slideSectionLlm .card[data-llm="' + data.activeLlmProvider + '"]'); if (llmCard) { llmCards.forEach(function (c) { c.classList.remove('selected'); }); llmCard.classList.add('selected'); llmCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== llmCard); }); } providerLabel.textContent = llmDisplayName(data.activeLlmProvider); } if (data.defaultProvider) { var pCard = document.querySelector('#slideSectionConnect .card[data-provider="' + data.defaultProvider + '"]'); if (pCard) { providerCards.forEach(function (c) { c.classList.remove('selected'); }); pCard.classList.add('selected'); } } if (data.languageModelInfo || data.copilotInfo) { updateCopilotStatus(data.languageModelInfo || data.copilotInfo); } if (typeof data.readOnlyMode === 'boolean') $('#readOnlyMode').checked = data.readOnlyMode; if (typeof data.autoDocumentationEnabled === 'boolean') $('#autoDocEnabled').checked = data.autoDocumentationEnabled; if (typeof data.telemetryEnabled === 'boolean') $('#telemetryEnabled').checked = data.telemetryEnabled; var lmConsent = (typeof data.languageModelProgrammaticConsent === 'boolean') ? data.languageModelProgrammaticConsent : (typeof data.copilotProgrammaticConsent === 'boolean' ? data.copilotProgrammaticConsent : undefined); if (typeof lmConsent === 'boolean') { $('#copilotConsent').checked = lmConsent; if ($('#claudeConsent')) $('#claudeConsent').checked = lmConsent; } if (data.defaultSnowflakeAccount) $('#sfAccount').value = data.defaultSnowflakeAccount; if (data.defaultSnowflakeUsername) $('#sfUsername').value = data.defaultSnowflakeUsername; if (data.defaultSnowflakeWarehouse) $('#sfWarehouse').value = data.defaultSnowflakeWarehouse; if (data.defaultSnowflakeDatabase) $('#sfDatabase').value = data.defaultSnowflakeDatabase; if (data.defaultSnowflakeSchema) $('#sfSchema').value = data.defaultSnowflakeSchema; if (data.defaultSnowflakeRole) $('#sfRole').value = data.defaultSnowflakeRole; if (data.defaultSnowflakeAuthMode) $('#sfAuthMode').value = data.defaultSnowflakeAuthMode; if (data.snowflakePrivateKeyPath) $('#sfKeyPath').value = data.snowflakePrivateKeyPath; if (data.activeLlmModel) { $('#openaiModel').value = data.activeLlmModel; $('#anthropicModel').value = data.activeLlmModel; $('#geminiModel').value = data.activeLlmModel; $('#ollamaModel').value = data.activeLlmModel; if ($('#claudeModel')) $('#claudeModel').value = data.activeLlmModel; } if (data.llmEndpoint) { $('#azureEndpoint').value = data.llmEndpoint; $('#ollamaEndpoint').value = data.llmEndpoint; } if (typeof data.claudeCodePath === 'string' && $('#claudeCodePath')) { $('#claudeCodePath').value = data.claudeCodePath; } if (typeof data.metadataCachingDurationMinutes === 'number') $('#cacheDuration').value = data.metadataCachingDurationMinutes; if (typeof data.queryTimeoutSeconds === 'number') $('#queryTimeout').value = data.queryTimeoutSeconds; }
+  function applySettings(data) {
+    if (!data) return;
+    if (data.activeLlmProvider) {
+      var llmCard = document.querySelector('#slideSectionLlm .card[data-llm="' + data.activeLlmProvider + '"]');
+      if (llmCard) {
+        llmCards.forEach(function (c) { c.classList.remove('selected'); });
+        llmCard.classList.add('selected');
+        llmCards.forEach(function (c) { var body = c.querySelector('.card-body'); if (body) body.classList.toggle('collapsed', c !== llmCard); });
+      }
+      providerLabel.textContent = llmDisplayName(data.activeLlmProvider);
+    }
+    if (data.defaultProvider) {
+      var pCard = document.querySelector('#slideSectionConnect .card[data-provider="' + data.defaultProvider + '"]');
+      if (pCard) selectProviderCard(pCard, providerCards);
+    }
+    if (data.defaultTargetProvider) {
+      var tCard = document.querySelector('#slideSectionTarget .card[data-target-provider="' + data.defaultTargetProvider + '"]');
+      if (tCard) selectProviderCard(tCard, targetProviderCards);
+    }
+    if (data.languageModelInfo || data.copilotInfo) { updateCopilotStatus(data.languageModelInfo || data.copilotInfo); }
+    if (typeof data.readOnlyMode === 'boolean') $('#readOnlyMode').checked = data.readOnlyMode;
+    if (typeof data.autoDocumentationEnabled === 'boolean') $('#autoDocEnabled').checked = data.autoDocumentationEnabled;
+    if (typeof data.telemetryEnabled === 'boolean') $('#telemetryEnabled').checked = data.telemetryEnabled;
+    var lmConsent = (typeof data.languageModelProgrammaticConsent === 'boolean') ? data.languageModelProgrammaticConsent : (typeof data.copilotProgrammaticConsent === 'boolean' ? data.copilotProgrammaticConsent : undefined);
+    if (typeof lmConsent === 'boolean') { $('#copilotConsent').checked = lmConsent; if ($('#claudeConsent')) $('#claudeConsent').checked = lmConsent; }
+    // Source — Snowflake
+    if (data.defaultSnowflakeAccount) $('#sfAccount').value = data.defaultSnowflakeAccount;
+    if (data.defaultSnowflakeUsername) $('#sfUsername').value = data.defaultSnowflakeUsername;
+    if (data.defaultSnowflakeWarehouse) $('#sfWarehouse').value = data.defaultSnowflakeWarehouse;
+    if (data.defaultSnowflakeDatabase) $('#sfDatabase').value = data.defaultSnowflakeDatabase;
+    if (data.defaultSnowflakeSchema) $('#sfSchema').value = data.defaultSnowflakeSchema;
+    if (data.defaultSnowflakeRole) $('#sfRole').value = data.defaultSnowflakeRole;
+    if (data.defaultSnowflakeAuthMode) $('#sfAuthMode').value = data.defaultSnowflakeAuthMode;
+    if (data.snowflakePrivateKeyPath) $('#sfKeyPath').value = data.snowflakePrivateKeyPath;
+    if (data.snowflakeCliPath) $('#sfCliPath').value = data.snowflakeCliPath;
+    if ($('#sfPassword')) { $('#sfPassword').placeholder = data.snowflakeHasPassword ? 'Password already saved — leave blank to keep it, or type a new one to replace it' : 'Stored in VS Code SecretStorage — never shown again'; }
+    // Source — Databricks
+    if (data.defaultDatabricksWorkspaceUrl) $('#dbxWorkspaceUrl').value = data.defaultDatabricksWorkspaceUrl;
+    if (data.defaultDatabricksHttpPath) $('#dbxHttpPath').value = data.defaultDatabricksHttpPath;
+    if (data.defaultDatabricksCatalog) $('#dbxCatalog').value = data.defaultDatabricksCatalog;
+    if (data.defaultDatabricksSchema) $('#dbxSchema').value = data.defaultDatabricksSchema;
+    if (data.defaultDatabricksCatalogType) $('#dbxCatalogType').value = data.defaultDatabricksCatalogType;
+    if (data.databricksCliPath) $('#dbxCliPath').value = data.databricksCliPath;
+    if ($('#dbxToken')) { $('#dbxToken').placeholder = data.databricksHasToken ? 'Token already saved — leave blank to keep it, or type a new one to replace it' : 'Stored in VS Code SecretStorage — never shown again'; }
+    // Target — Snowflake
+    if (data.defaultTargetSnowflakeAccount) $('#tgtSfAccount').value = data.defaultTargetSnowflakeAccount;
+    if (data.defaultTargetSnowflakeUsername) $('#tgtSfUsername').value = data.defaultTargetSnowflakeUsername;
+    if (data.defaultTargetSnowflakeWarehouse) $('#tgtSfWarehouse').value = data.defaultTargetSnowflakeWarehouse;
+    if (data.defaultTargetSnowflakeDatabase) $('#tgtSfDatabase').value = data.defaultTargetSnowflakeDatabase;
+    if (data.defaultTargetSnowflakeSchema) $('#tgtSfSchema').value = data.defaultTargetSnowflakeSchema;
+    if (data.defaultTargetSnowflakeRole) $('#tgtSfRole').value = data.defaultTargetSnowflakeRole;
+    if (data.defaultTargetSnowflakeAuthMode) $('#tgtSfAuthMode').value = data.defaultTargetSnowflakeAuthMode;
+    if (data.targetSnowflakePrivateKeyPath) $('#tgtSfKeyPath').value = data.targetSnowflakePrivateKeyPath;
+    if (data.targetSnowflakeCliPath) $('#tgtSfCliPath').value = data.targetSnowflakeCliPath;
+    if ($('#tgtSfPassword')) { $('#tgtSfPassword').placeholder = data.targetSnowflakeHasPassword ? 'Password already saved — leave blank to keep it, or type a new one to replace it' : 'Stored in VS Code SecretStorage — never shown again'; }
+    // Target — Databricks
+    if (data.defaultTargetDatabricksWorkspaceUrl) $('#tgtDbxWorkspaceUrl').value = data.defaultTargetDatabricksWorkspaceUrl;
+    if (data.defaultTargetDatabricksHttpPath) $('#tgtDbxHttpPath').value = data.defaultTargetDatabricksHttpPath;
+    if (data.defaultTargetDatabricksCatalog) $('#tgtDbxCatalog').value = data.defaultTargetDatabricksCatalog;
+    if (data.defaultTargetDatabricksSchema) $('#tgtDbxSchema').value = data.defaultTargetDatabricksSchema;
+    if (data.defaultTargetDatabricksCatalogType) $('#tgtDbxCatalogType').value = data.defaultTargetDatabricksCatalogType;
+    if (data.targetDatabricksCliPath) $('#tgtDbxCliPath').value = data.targetDatabricksCliPath;
+    if ($('#tgtDbxToken')) { $('#tgtDbxToken').placeholder = data.targetDatabricksHasToken ? 'Token already saved — leave blank to keep it, or type a new one to replace it' : 'Stored in VS Code SecretStorage — never shown again'; }
+    if (data.activeLlmModel) { $('#openaiModel').value = data.activeLlmModel; $('#anthropicModel').value = data.activeLlmModel; $('#geminiModel').value = data.activeLlmModel; $('#ollamaModel').value = data.activeLlmModel; if ($('#claudeModel')) $('#claudeModel').value = data.activeLlmModel; }
+    if (data.llmEndpoint) { $('#azureEndpoint').value = data.llmEndpoint; $('#ollamaEndpoint').value = data.llmEndpoint; }
+    if (typeof data.claudeCodePath === 'string' && $('#claudeCodePath')) { $('#claudeCodePath').value = data.claudeCodePath; }
+    if (typeof data.metadataCachingDurationMinutes === 'number') $('#cacheDuration').value = data.metadataCachingDurationMinutes;
+    if (typeof data.queryTimeoutSeconds === 'number') $('#queryTimeout').value = data.queryTimeoutSeconds;
+  }
   function updateCopilotStatus(info) { if (!info) return; var isClaude = info.provider === 'claude'; var statusEl = $(isClaude ? '#claudeStatus' : '#copilotStatus'); if (!statusEl) return; var label = isClaude ? 'Claude Code' : 'Copilot';
     if (isClaude) {
       if (info.hasAccess) { statusEl.textContent = 'Ready — ' + (info.cliSource || 'found') + (info.version ? ' (' + info.version + ')' : ''); statusEl.style.color = 'var(--success)'; providerDot.className = 'dot ok'; providerLabel.textContent = label; }

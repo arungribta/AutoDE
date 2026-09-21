@@ -1,5 +1,7 @@
-import * as snowflake from 'snowflake-sdk';
 import { AgentExecutionContext, AgentExecutionResult, GeneratedArtifact, PlanStep } from '../core/types';
+import { SECRET_KEYS } from '../core/extensionIdentity';
+import { ConnectionManager } from '../dqm/ConnectionManager';
+import { SnowflakeAdapter } from '../dqm/adapters/SnowflakeAdapter';
 
 const VALIDATION_SQL = (stepId: string): string =>
   `SELECT '${stepId}' AS step_id, CURRENT_TIMESTAMP() AS executed_at, 1 AS validation_check;`;
@@ -27,59 +29,37 @@ function skippedNoConnection(step: PlanStep, context: AgentExecutionContext, rea
   };
 }
 
+/**
+ * Runs a validation query against Snowflake for real (Phase 3b), via the same
+ * `SnowflakeAdapter` — and its execution-backend cascade — every other Snowflake
+ * caller uses, rather than duplicating connection logic against `snowflake-sdk`
+ * directly. The username is now whatever's configured (`defaultSnowflakeUsername`),
+ * never the previously-hardcoded `DATA_AGENT_USER`.
+ */
 export async function executeSnowflakeAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const settings = context.settings;
-  const account = settings.defaultSnowflakeAccount?.trim();
-  const warehouse = settings.defaultSnowflakeWarehouse?.trim();
-  const database = settings.defaultSnowflakeDatabase?.trim();
-  const password = await context.configManager.getSecret('autoDataEngineeringHub.snowflakePassword');
+  const credentials = ConnectionManager.getCredentialsFromSettings('snowflake', settings as unknown as Record<string, unknown>);
+  const password = await context.configManager.getSecret(SECRET_KEYS.snowflakePassword);
+  if (password) credentials['password'] = password;
+  const passphrase = await context.configManager.getSecret(SECRET_KEYS.snowflakePrivateKeyPassphrase);
+  if (passphrase) credentials['privateKeyPassphrase'] = passphrase;
 
-  if (!account || !warehouse || !database || !password) {
-    return skippedNoConnection(step, context, 'Snowflake account, warehouse, database, and password must be configured');
+  if (!credentials['account'] || !credentials['username'] || !credentials['database']) {
+    return skippedNoConnection(step, context, 'Snowflake account, username, and database must be configured');
   }
 
-  const connection = snowflake.createConnection({
-    account,
-    username: 'DATA_AGENT_USER',
-    password,
-    warehouse,
-    database,
-    schema: settings.defaultSnowflakeSchema || 'PUBLIC',
-    role: settings.defaultSnowflakeRole || 'SYSADMIN'
-  });
-
+  const adapter = new SnowflakeAdapter(credentials, (msg) => context.log(msg));
   try {
-    await new Promise<void>((resolve, reject) => {
-      connection.connect((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
-
+    await adapter.connect();
     const sql = VALIDATION_SQL(step.id);
-    const rows = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
-      connection.execute({
-        sqlText: sql,
-        complete: (error, _statement, resultRows) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve(Array.isArray(resultRows) ? resultRows.slice(0, 50) : []);
-        }
-      });
-    });
+    const result = await adapter.executeQuery(sql, { maxRows: 50 });
 
     return {
       success: true,
       message: `Snowflake execution completed for step ${step.id}.`,
       details: {
         sql,
-        rows,
+        rows: result.rows,
         rowLimit: 50
       }
     };
@@ -87,6 +67,6 @@ export async function executeSnowflakeAgent(step: PlanStep, context: AgentExecut
     const message = error instanceof Error ? error.message : 'Snowflake SQL execution failed.';
     return skippedNoConnection(step, context, message);
   } finally {
-    connection.destroy(() => undefined);
+    adapter.dispose();
   }
 }
