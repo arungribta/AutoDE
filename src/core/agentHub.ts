@@ -1163,6 +1163,19 @@ Message: ${message}`;
     this.emitState();
   }
 
+  /**
+   * A spec this run depends on changed on disk mid-execution (v0.25.0,
+   * docs/mcp-engine-requirements.md §8.6). Unlike `pauseExecution()`, the
+   * step already running is allowed to finish — the loop's existing pause
+   * check stops before the *next* step, so later steps never run against a
+   * spec revision the user hasn't seen. No-op when nothing is running.
+   */
+  public pauseForExternalChange(reason: string): void {
+    if (this.state.status !== 'running') return;
+    this.executionPaused = true;
+    this.log(`${reason} — execution will pause after the current step. Review the change, then re-run or re-plan.`);
+  }
+
   public async resetPlan(): Promise<void> {
     this.state.objective = '';
     this.state.schemaContext = '';

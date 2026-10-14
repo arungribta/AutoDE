@@ -235,7 +235,7 @@ export function parseDdl(content: string, filePath: string): IngestResult {
   let tableCount = 0;
   let columnCount = 0;
 
-  const createTableRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_."`\[\]]+)\s*\(/gi;
+  const createTableRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_."`[\]]+)\s*\(/gi;
   let match: RegExpExecArray | null;
   while ((match = createTableRe.exec(content)) !== null) {
     const rawName = match[1].replace(/["`[\]]/g, '');

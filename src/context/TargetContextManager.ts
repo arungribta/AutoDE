@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { TargetContext } from '../core/types';
 import { parseYaml, stringifyYaml } from './Yaml';
+import { RevisionedFile, applyReload } from './RevisionedFile';
 
 /**
  * Manages the reviewed, approved Target Context for the current spec version.
@@ -23,26 +24,39 @@ export class TargetContextManager implements vscode.Disposable {
   private context: TargetContext | undefined;
   private readonly contextDir: vscode.Uri;
   private readonly fileUri: vscode.Uri;
+  private readonly file: RevisionedFile;
 
   constructor(
     private readonly contextRoot: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
     this.contextDir = vscode.Uri.joinPath(contextRoot, 'context');
-    this.fileUri = vscode.Uri.joinPath(this.contextDir, 'target-context.yaml');
+    this.file = new RevisionedFile(vscode, this.contextDir, 'target-context.yaml', 'Target Context');
+    this.fileUri = this.file.getUri();
   }
 
   public dispose(): void {}
 
   public async initialize(): Promise<void> {
     try {
-      const content = await vscode.workspace.fs.readFile(this.fileUri);
-      this.context = this.parse(Buffer.from(content).toString('utf8'));
+      const content = await this.file.read();
+      if (content === undefined) throw new Error('absent');
+      this.context = this.parse(content);
       this.log(`Loaded Target Context for ${this.context.specId} v${this.context.specVersion} (${this.context.status}).`);
     } catch {
       this.context = undefined;
       this.log('No Target Context yet.');
     }
+  }
+
+  /** Re-reads the file after an external change (v0.25.0). Returns true when the loaded record changed. */
+  public async reload(): Promise<boolean> {
+    const result = await this.file.reload((content) => this.parse(content));
+    return applyReload(result, 'Target Context', this.log, (context) => { this.context = context; });
+  }
+
+  public getFileUri(): vscode.Uri {
+    return this.fileUri;
   }
 
   public getContext(): TargetContext | undefined {
@@ -75,11 +89,8 @@ export class TargetContextManager implements vscode.Disposable {
       await this.archive(previous!);
     }
     const toSave: TargetContext = { ...context, version };
+    await this.file.write(this.serialize(toSave));
     this.context = toSave;
-    await vscode.workspace.fs.createDirectory(this.contextDir);
-    const tempUri = vscode.Uri.joinPath(this.contextDir, `.target-context.tmp.${Date.now()}.yaml`);
-    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(this.serialize(toSave), 'utf8'));
-    await vscode.workspace.fs.rename(tempUri, this.fileUri, { overwrite: true });
     this.log(`Saved Target Context spec-v${toSave.specVersion} rev${toSave.version} (${toSave.status}).`);
     return this.getContext()!;
   }

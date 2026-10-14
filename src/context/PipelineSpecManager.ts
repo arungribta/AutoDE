@@ -3,6 +3,7 @@ import { PipelineSpec } from '../core/pipelineSpec/types';
 import { CURRENT_PIPELINE_SPEC_VERSION } from '../core/pipelineSpec/types';
 import { validatePipelineSpec } from '../core/pipelineSpec/validator';
 import { parseYaml, stringifyYaml } from './Yaml';
+import { RevisionedFile, applyReload } from './RevisionedFile';
 
 /**
  * Manages the Pipeline Spec — modeled directly on `SpecManager.ts`'s exact,
@@ -15,26 +16,35 @@ export class PipelineSpecManager implements vscode.Disposable {
   private spec: PipelineSpec | undefined;
   private readonly specDir: vscode.Uri;
   private readonly specUri: vscode.Uri;
+  private readonly file: RevisionedFile;
 
   constructor(
     private readonly contextRoot: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
     this.specDir = vscode.Uri.joinPath(contextRoot, 'spec');
-    this.specUri = vscode.Uri.joinPath(this.specDir, 'pipeline.yaml');
+    this.file = new RevisionedFile(vscode, this.specDir, 'pipeline.yaml', 'Pipeline Spec');
+    this.specUri = this.file.getUri();
   }
 
   public dispose(): void {}
 
   public async initialize(): Promise<void> {
     try {
-      const content = await vscode.workspace.fs.readFile(this.specUri);
-      this.spec = this.parse(Buffer.from(content).toString('utf8'));
+      const content = await this.file.read();
+      if (content === undefined) throw new Error('absent');
+      this.spec = this.parse(content);
       this.log(`Loaded Pipeline Spec v${this.spec.version} (${this.spec.status})`);
     } catch {
       this.spec = undefined;
       this.log('No Pipeline Spec yet.');
     }
+  }
+
+  /** Re-reads the file after an external change (v0.25.0). Returns true when the loaded spec changed. */
+  public async reload(): Promise<boolean> {
+    const result = await this.file.reload((content) => this.parse(content));
+    return applyReload(result, 'Pipeline Spec', this.log, (spec) => { this.spec = spec; });
   }
 
   public getSpec(): PipelineSpec | undefined {
@@ -51,8 +61,8 @@ export class PipelineSpecManager implements vscode.Disposable {
       throw new Error(`Invalid Pipeline Spec: ${errors.join('; ')}`);
     }
     await this.archive(this.spec, spec);
+    await this.file.write(this.serialize(spec));
     this.spec = spec;
-    await this.persist();
     this.log(`Saved Pipeline Spec v${spec.version} (${spec.status})`);
   }
 
@@ -71,8 +81,8 @@ export class PipelineSpecManager implements vscode.Disposable {
     const now = new Date().toISOString();
     const approved: PipelineSpec = { ...this.spec, status: 'approved', approvedAt: now, approvedBy: 'user', updatedAt: now };
     await this.archive(this.spec, approved);
+    await this.file.write(this.serialize(approved));
     this.spec = approved;
-    await this.persist();
     this.log(`Approved Pipeline Spec v${this.spec.version}`);
     return this.getSpec();
   }
@@ -120,14 +130,6 @@ export class PipelineSpecManager implements vscode.Disposable {
         governance: entity.governance ? { columns: entity.governance.columns.map((c) => ({ ...c })) } : undefined
       }))
     };
-  }
-
-  private async persist(): Promise<void> {
-    if (!this.spec) return;
-    await vscode.workspace.fs.createDirectory(this.specDir);
-    const tempUri = vscode.Uri.joinPath(this.specDir, `.pipeline.tmp.${Date.now()}.yaml`);
-    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(this.serialize(this.spec), 'utf8'));
-    await vscode.workspace.fs.rename(tempUri, this.specUri, { overwrite: true });
   }
 
   private serialize(spec: PipelineSpec): string {

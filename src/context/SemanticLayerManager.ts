@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { SemanticLayerSnapshot, ContextStatus } from '../core/types';
 import { GraphManager } from './GraphManager';
 import { parseYaml, stringifyYaml } from './Yaml';
+import { RevisionedFile, applyReload } from './RevisionedFile';
 
 /**
  * Manages the Unified Semantic Layer snapshot — Step 6's second piece,
@@ -23,6 +24,7 @@ export class SemanticLayerManager implements vscode.Disposable {
   private readonly contextDir: vscode.Uri;
   private readonly metaFileUri: vscode.Uri;
   private readonly graphFileUri: vscode.Uri;
+  private readonly file: RevisionedFile;
 
   constructor(
     private readonly contextRoot: vscode.Uri,
@@ -30,7 +32,8 @@ export class SemanticLayerManager implements vscode.Disposable {
     private readonly log: (msg: string) => void
   ) {
     this.contextDir = vscode.Uri.joinPath(contextRoot, 'context');
-    this.metaFileUri = vscode.Uri.joinPath(this.contextDir, 'semantic-layer.yaml');
+    this.file = new RevisionedFile(vscode, this.contextDir, 'semantic-layer.yaml', 'Unified Semantic Layer snapshot');
+    this.metaFileUri = this.file.getUri();
     this.graphFileUri = vscode.Uri.joinPath(this.contextDir, 'semantic-layer.snapshot.json');
   }
 
@@ -38,13 +41,24 @@ export class SemanticLayerManager implements vscode.Disposable {
 
   public async initialize(): Promise<void> {
     try {
-      const content = await vscode.workspace.fs.readFile(this.metaFileUri);
-      this.snapshot = this.parse(Buffer.from(content).toString('utf8'));
+      const content = await this.file.read();
+      if (content === undefined) throw new Error('absent');
+      this.snapshot = this.parse(content);
       this.log(`Loaded Unified Semantic Layer snapshot for ${this.snapshot.specId} v${this.snapshot.specVersion} (${this.snapshot.nodeCount} node(s), ${this.snapshot.edgeCount} edge(s)).`);
     } catch {
       this.snapshot = undefined;
       this.log('No Unified Semantic Layer snapshot yet.');
     }
+  }
+
+  /** Re-reads the metadata file after an external change (v0.25.0). Returns true when the loaded snapshot changed. */
+  public async reload(): Promise<boolean> {
+    const result = await this.file.reload((content) => this.parse(content));
+    return applyReload(result, 'Unified Semantic Layer snapshot', this.log, (snapshot) => { this.snapshot = snapshot; });
+  }
+
+  public getFileUri(): vscode.Uri {
+    return this.metaFileUri;
   }
 
   public getSnapshot(): SemanticLayerSnapshot | undefined {
@@ -96,11 +110,8 @@ export class SemanticLayerManager implements vscode.Disposable {
       await this.archive(previous!);
     }
     const toSave: SemanticLayerSnapshot = { ...snapshot, version };
+    await this.file.write(this.serialize(toSave));
     this.snapshot = toSave;
-    await vscode.workspace.fs.createDirectory(this.contextDir);
-    const tempUri = vscode.Uri.joinPath(this.contextDir, `.semantic-layer.tmp.${Date.now()}.yaml`);
-    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(this.serialize(toSave), 'utf8'));
-    await vscode.workspace.fs.rename(tempUri, this.metaFileUri, { overwrite: true });
     this.log(`Saved Unified Semantic Layer snapshot spec-v${toSave.specVersion} rev${toSave.version} (${toSave.nodeCount} node(s), ${toSave.edgeCount} edge(s)).`);
     return this.getSnapshot()!;
   }

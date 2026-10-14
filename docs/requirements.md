@@ -1152,6 +1152,18 @@ If any requirement appears to conflict with project packaging constraints (e.g.,
 For clarifications or to request changes to this specification, please reply with comments or request a revision; the implementation plan will follow this spec and this document will be used as the acceptance source of truth.
 
 
+## 19. MCP Engine & Portable Skill Registry (v0.25.0 onward)
+
+The full specification, phasing and acceptance criteria live in [mcp-engine-requirements.md](mcp-engine-requirements.md); the context-layer track in [context-layer-requirements.md](context-layer-requirements.md) (to be summarized here as §20 when its first phase lands). The combined roadmap is mcp-engine-requirements.md §9.0. This section records what has shipped.
+
+### 19.1 Spec state synchronization (v0.25.0)
+
+- Every cached `.ai-context` document (Business Problem Spec, Pipeline Spec, Source/Target/Mapping Context, Unified Semantic Layer metadata) is reloaded when its file changes on disk, whoever changed it.
+- AutoDE never silently overwrites an external change: a save of a stale copy is refused, the user's change is not adopted, and the user chooses **Reload from Disk** or **Overwrite**.
+- AutoDE's own writes do not trigger reloads.
+- An external switch of `.ai-context/active-problem.json` activates that problem.
+- A spec change during plan execution lets the running step finish and pauses before the next one.
+
 ---
 
 (End of requirements document)

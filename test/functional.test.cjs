@@ -4372,6 +4372,161 @@ async function main() {
     assert.ok(legacyLine && legacyLine.includes('_(file-derived, not live-verified)_'), 'a file-derived table must be explicitly flagged, not silently presented as equally solid');
   });
 
+  // ── v0.25.0: spec state synchronization (docs/mcp-engine-requirements.md §8) ──
+  // An in-memory vscode.workspace.fs; `store` doubles as "another process"
+  // editing files behind a manager's back.
+  function revisionFsMock() {
+    const store = new Map();
+    const keyOf = (uri) => uri.fsPath;
+    const mock = createMock();
+    mock.workspace.fs = {
+      createDirectory: async () => {},
+      readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
+      writeFile: async (uri, buf) => { store.set(keyOf(uri), Buffer.from(buf).toString('utf8')); },
+      rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
+      stat: async (uri) => { if (!store.has(keyOf(uri))) throw new Error('ENOENT'); return {}; },
+      delete: async (uri) => { store.delete(keyOf(uri)); }
+    };
+    return { mock, store };
+  }
+  function loadFresh(mock, rel) {
+    delete require.cache[require.resolve('../dist/context/RevisionedFile.js')];
+    delete require.cache[require.resolve(rel)];
+    return withMock(mock, () => require(rel));
+  }
+  const baseSpec = (overrides = {}) => ({
+    id: 'bps-1', version: 1, status: 'draft', problemStatement: 'p', objectives: ['o'], successCriteria: [],
+    scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: 'c', updatedAt: 'u', ...overrides
+  });
+
+  await test('v0.25.0: SpecManager.reload() picks up an external edit of business-problem.yaml', async () => {
+    const { mock, store } = revisionFsMock();
+    const { SpecManager } = loadFresh(mock, '../dist/context/SpecManager.js');
+    const mgr = new SpecManager({ fsPath: '/ws/p1' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    await withMock(mock, () => mgr.saveSpec(baseSpec()));
+    const file = '/ws/p1/spec/business-problem.yaml';
+    store.set(file, store.get(file).replace('problemStatement: p', 'problemStatement: edited elsewhere'));
+    const changed = await withMock(mock, () => mgr.reload());
+    assert.strictEqual(changed, true);
+    assert.strictEqual(mgr.getSpec().problemStatement, 'edited elsewhere');
+  });
+
+  await test('v0.25.0: a manager\'s own save is not reported as an external change (no reload loop)', async () => {
+    const { mock } = revisionFsMock();
+    const { SpecManager } = loadFresh(mock, '../dist/context/SpecManager.js');
+    const mgr = new SpecManager({ fsPath: '/ws/p1' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    await withMock(mock, () => mgr.saveSpec(baseSpec()));
+    assert.strictEqual(await withMock(mock, () => mgr.reload()), false);
+    await withMock(mock, () => mgr.approve());
+    assert.strictEqual(await withMock(mock, () => mgr.reload()), false);
+  });
+
+  await test('v0.25.0: saving a stale copy after an external edit is refused — disk unchanged, memory unchanged, conflict handler notified', async () => {
+    const { mock, store } = revisionFsMock();
+    const { SpecManager } = loadFresh(mock, '../dist/context/SpecManager.js');
+    const { setRevisionConflictHandler, RevisionConflictError } = withMock(mock, () => require('../dist/context/RevisionedFile.js'));
+    const conflicts = [];
+    setRevisionConflictHandler((c) => conflicts.push(c));
+    try {
+      const mgr = new SpecManager({ fsPath: '/ws/p1' }, () => {});
+      await withMock(mock, () => mgr.initialize());
+      await withMock(mock, () => mgr.saveSpec(baseSpec()));
+      const file = '/ws/p1/spec/business-problem.yaml';
+      const external = store.get(file).replace('problemStatement: p', 'problemStatement: external');
+      store.set(file, external);
+      await assert.rejects(withMock(mock, () => mgr.saveSpec(baseSpec({ problemStatement: 'stale save' }))), (err) => err instanceof RevisionConflictError);
+      assert.strictEqual(store.get(file), external, 'the external edit must survive');
+      assert.strictEqual(mgr.getSpec().problemStatement, 'p', 'the refused change must not be adopted in memory');
+      assert.strictEqual(conflicts.length, 1);
+
+      // "Overwrite": writes the refused content; the follow-up reload brings memory in line with disk.
+      await withMock(mock, () => conflicts[0].overwrite());
+      assert.ok(store.get(file).includes('stale save'));
+      assert.strictEqual(await withMock(mock, () => mgr.reload()), true);
+      assert.strictEqual(mgr.getSpec().problemStatement, 'stale save');
+    } finally {
+      setRevisionConflictHandler(undefined);
+    }
+  });
+
+  await test('v0.25.0: an unparseable external edit keeps the loaded copy, and the next save asks instead of clobbering it', async () => {
+    const { mock, store } = revisionFsMock();
+    const { PipelineSpecManager } = loadFresh(mock, '../dist/context/PipelineSpecManager.js');
+    const { RevisionConflictError } = withMock(mock, () => require('../dist/context/RevisionedFile.js'));
+    const file = '/ws/p1/spec/pipeline.yaml';
+    store.set(file, '# AutoDE Pipeline Spec\nspecVersion: 0\nversion: 1\nstatus: draft\n');
+    const mgr = new PipelineSpecManager({ fsPath: '/ws/p1' }, () => {});
+    await withMock(mock, () => mgr.initialize());
+    assert.strictEqual(mgr.getSpec().status, 'draft');
+    store.set(file, ': : not yaml [');
+    assert.strictEqual(await withMock(mock, () => mgr.reload()), false);
+    assert.strictEqual(mgr.getSpec().status, 'draft', 'the loaded copy is kept');
+    await assert.rejects(withMock(mock, () => mgr.approve()), (err) => err instanceof RevisionConflictError);
+    assert.strictEqual(store.get(file), ': : not yaml [', 'the in-progress external edit is not overwritten');
+  });
+
+  await test('v0.25.0: Source/Target/Mapping/Semantic-layer managers reload external edits and refuse stale saves', async () => {
+    const cases = [
+      ['../dist/context/SourceContextManager.js', 'SourceContextManager', 'source-context.yaml', { specId: 's', specVersion: 1, status: 'pending', sources: [], answers: {} }],
+      ['../dist/context/TargetContextManager.js', 'TargetContextManager', 'target-context.yaml', { specId: 's', specVersion: 1, status: 'pending', answers: {} }],
+      ['../dist/context/MappingContextManager.js', 'MappingContextManager', 'mapping-context.yaml', { specId: 's', specVersion: 1, status: 'pending', mappings: [] }],
+      ['../dist/context/SemanticLayerManager.js', 'SemanticLayerManager', 'semantic-layer.yaml', { specId: 's', specVersion: 1, status: 'pending', nodeCount: 0, edgeCount: 0 }]
+    ];
+    for (const [rel, cls, fileName, record] of cases) {
+      const { mock, store } = revisionFsMock();
+      const Ctor = loadFresh(mock, rel)[cls];
+      const { RevisionConflictError } = withMock(mock, () => require('../dist/context/RevisionedFile.js'));
+      const mgr = cls === 'SemanticLayerManager' ? new Ctor({ fsPath: '/ws/p1' }, { serializeSnapshot: () => ({ nodes: [], edges: [] }) }, () => {}) : new Ctor({ fsPath: '/ws/p1' }, () => {});
+      await withMock(mock, () => mgr.initialize());
+      await withMock(mock, () => mgr.save(record));
+      const file = `/ws/p1/context/${fileName}`;
+      assert.strictEqual(mgr.getFileUri().fsPath, file, `${cls} exposes its file for watcher routing`);
+      assert.strictEqual(await withMock(mock, () => mgr.reload()), false, `${cls}: own save is not an external change`);
+      store.set(file, store.get(file).replace('status: pending', 'status: built'));
+      assert.strictEqual(await withMock(mock, () => mgr.reload()), true, `${cls}: external edit is picked up`);
+      store.set(file, store.get(file).replace('status: built', 'status: approved'));
+      await assert.rejects(withMock(mock, () => mgr.save(record)), (err) => err instanceof RevisionConflictError, `${cls}: stale save refused`);
+    }
+  });
+
+  await test('v0.25.0: ContextFileWatcher ignores temp files and history archives, and debounces bursts per path', async () => {
+    const handlers = {};
+    const mock = createMock();
+    mock.workspace.createFileSystemWatcher = () => ({
+      onDidChange: (h) => { handlers.change = h; }, onDidCreate: (h) => { handlers.create = h; }, onDidDelete: (h) => { handlers.delete = h; }, dispose: () => {}
+    });
+    delete require.cache[require.resolve('../dist/context/ContextFileWatcher.js')];
+    const { ContextFileWatcher } = withMock(mock, () => require('../dist/context/ContextFileWatcher.js'));
+    const seen = [];
+    const watcher = withMock(mock, () => new ContextFileWatcher({ fsPath: '/ws' }, (uri) => seen.push(uri.fsPath), 10));
+    handlers.change({ fsPath: '/ws/.ai-context/problems/p1/spec/.business-problem.tmp.123.yaml' });
+    handlers.create({ fsPath: '/ws/.ai-context/problems/p1/spec/history/business-problem.v1.draft.yaml' });
+    handlers.change({ fsPath: '/ws/.ai-context/problems/p1/spec/business-problem.yaml' });
+    handlers.change({ fsPath: '/ws/.ai-context/problems/p1/spec/business-problem.yaml' });
+    handlers.delete({ fsPath: '/ws/.ai-context/problems/p1/context/source-context.yaml' });
+    await new Promise((r) => setTimeout(r, 40));
+    watcher.dispose();
+    assert.deepStrictEqual(seen.sort(), ['/ws/.ai-context/problems/p1/context/source-context.yaml', '/ws/.ai-context/problems/p1/spec/business-problem.yaml']);
+  });
+
+  await test('v0.25.0: AgentHub.pauseForExternalChange() only arms a pause while a run is in progress', async () => {
+    const mock = createMock();
+    delete require.cache[require.resolve('../dist/core/agentHub.js')];
+    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
+    const logs = [];
+    const hub = new DataAgentHubHub(fakeCm({}));
+    hub.setLogListener((m) => logs.push(m));
+    hub.pauseForExternalChange('spec changed');
+    assert.strictEqual(hub.executionPaused, false, 'idle hub: nothing to pause');
+    assert.strictEqual(logs.length, 0);
+    hub.state.status = 'running';
+    hub.pauseForExternalChange('spec changed');
+    assert.strictEqual(hub.executionPaused, true);
+    assert.ok(logs.some((m) => m.includes('spec changed') && m.includes('after the current step')));
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

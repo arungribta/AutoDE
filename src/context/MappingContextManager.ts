@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { MappingContext, EntityMapping, ColumnMapping, ContextStatus } from '../core/types';
 import { parseYaml, stringifyYaml } from './Yaml';
+import { RevisionedFile, applyReload } from './RevisionedFile';
 
 /**
  * Manages the Mapping Context — Step 6 of the Source & Target Context
@@ -16,26 +17,39 @@ export class MappingContextManager implements vscode.Disposable {
   private context: MappingContext | undefined;
   private readonly contextDir: vscode.Uri;
   private readonly fileUri: vscode.Uri;
+  private readonly file: RevisionedFile;
 
   constructor(
     private readonly contextRoot: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
     this.contextDir = vscode.Uri.joinPath(contextRoot, 'context');
-    this.fileUri = vscode.Uri.joinPath(this.contextDir, 'mapping-context.yaml');
+    this.file = new RevisionedFile(vscode, this.contextDir, 'mapping-context.yaml', 'Mapping Context');
+    this.fileUri = this.file.getUri();
   }
 
   public dispose(): void {}
 
   public async initialize(): Promise<void> {
     try {
-      const content = await vscode.workspace.fs.readFile(this.fileUri);
-      this.context = this.parse(Buffer.from(content).toString('utf8'));
+      const content = await this.file.read();
+      if (content === undefined) throw new Error('absent');
+      this.context = this.parse(content);
       this.log(`Loaded Mapping Context for ${this.context.specId} v${this.context.specVersion} (${this.context.mappings.length} mapping(s)).`);
     } catch {
       this.context = undefined;
       this.log('No Mapping Context yet.');
     }
+  }
+
+  /** Re-reads the file after an external change (v0.25.0). Returns true when the loaded record changed. */
+  public async reload(): Promise<boolean> {
+    const result = await this.file.reload((content) => this.parse(content));
+    return applyReload(result, 'Mapping Context', this.log, (context) => { this.context = context; });
+  }
+
+  public getFileUri(): vscode.Uri {
+    return this.fileUri;
   }
 
   public getContext(): MappingContext | undefined {
@@ -83,11 +97,8 @@ export class MappingContextManager implements vscode.Disposable {
       await this.archive(previous!);
     }
     const toSave: MappingContext = { ...context, version };
+    await this.file.write(this.serialize(toSave));
     this.context = toSave;
-    await vscode.workspace.fs.createDirectory(this.contextDir);
-    const tempUri = vscode.Uri.joinPath(this.contextDir, `.mapping-context.tmp.${Date.now()}.yaml`);
-    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(this.serialize(toSave), 'utf8'));
-    await vscode.workspace.fs.rename(tempUri, this.fileUri, { overwrite: true });
     this.log(`Saved Mapping Context spec-v${toSave.specVersion} rev${toSave.version} (${toSave.mappings.length} mapping(s)).`);
     return this.getContext()!;
   }

@@ -31,6 +31,11 @@ export class ActiveProblemManager implements vscode.Disposable {
     return vscode.Uri.joinPath(this.problemsDir, problemId);
   }
 
+  /** The pointer file's location — so a watcher can recognize an external switch of the active problem. */
+  public getPointerUri(): vscode.Uri {
+    return this.pointerUri;
+  }
+
   public async getActiveProblemId(): Promise<string | undefined> {
     try {
       const content = await vscode.workspace.fs.readFile(this.pointerUri);

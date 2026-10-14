@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { BusinessProblemSpec, DataFlow, SourceEntry, SpecProvenance, SpecStatus } from '../core/types';
 import { parseYaml, stringifyYaml } from './Yaml';
+import { RevisionedFile, applyReload } from './RevisionedFile';
 
 /**
  * Manages the Business Problem Specification — the versioned system of record.
@@ -14,26 +15,35 @@ export class SpecManager implements vscode.Disposable {
   private spec: BusinessProblemSpec | undefined;
   private readonly specDir: vscode.Uri;
   private readonly specUri: vscode.Uri;
+  private readonly file: RevisionedFile;
 
   constructor(
     private readonly contextRoot: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
     this.specDir = vscode.Uri.joinPath(contextRoot, 'spec');
-    this.specUri = vscode.Uri.joinPath(this.specDir, 'business-problem.yaml');
+    this.file = new RevisionedFile(vscode, this.specDir, 'business-problem.yaml', 'Business Problem Specification');
+    this.specUri = this.file.getUri();
   }
 
   public dispose(): void {}
 
   public async initialize(): Promise<void> {
     try {
-      const content = await vscode.workspace.fs.readFile(this.specUri);
-      this.spec = this.parse(Buffer.from(content).toString('utf8'));
+      const content = await this.file.read();
+      if (content === undefined) throw new Error('absent');
+      this.spec = this.parse(content);
       this.log(`Loaded Business Problem Specification v${this.spec.version} (${this.spec.status})`);
     } catch {
       this.spec = undefined;
       this.log('No Business Problem Specification yet.');
     }
+  }
+
+  /** Re-reads the file after an external change (v0.25.0). Returns true when the loaded spec changed. */
+  public async reload(): Promise<boolean> {
+    const result = await this.file.reload((content) => this.parse(content));
+    return applyReload(result, 'Business Problem Specification', this.log, (spec) => { this.spec = spec; });
   }
 
   public getSpec(): BusinessProblemSpec | undefined {
@@ -56,8 +66,8 @@ export class SpecManager implements vscode.Disposable {
     // Archive whatever is currently persisted before it is replaced, so that every
     // prior draft/approved revision stays traceable in .ai-context/spec/history/.
     await this.archive(this.spec, spec);
+    await this.file.write(this.serialize(spec));
     this.spec = spec;
-    await this.persist();
     this.log(`Saved Business Problem Specification v${spec.version} (${spec.status})`);
   }
 
@@ -83,8 +93,8 @@ export class SpecManager implements vscode.Disposable {
       updatedAt: now
     };
     await this.archive(this.spec, approved);
+    await this.file.write(this.serialize(approved));
     this.spec = approved;
-    await this.persist();
     this.log(`Approved Business Problem Specification v${this.spec.version}`);
     return this.getSpec();
   }
@@ -133,14 +143,6 @@ export class SpecManager implements vscode.Disposable {
       sourceCatalog: spec.sourceCatalog ? spec.sourceCatalog.map((entry) => ({ ...entry })) : undefined,
       provenance: spec.provenance ? spec.provenance.map((entry) => ({ ...entry })) : undefined
     };
-  }
-
-  private async persist(): Promise<void> {
-    if (!this.spec) return;
-    await vscode.workspace.fs.createDirectory(this.specDir);
-    const tempUri = vscode.Uri.joinPath(this.specDir, `.business-problem.tmp.${Date.now()}.yaml`);
-    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(this.serialize(this.spec), 'utf8'));
-    await vscode.workspace.fs.rename(tempUri, this.specUri, { overwrite: true });
   }
 
   private serialize(spec: BusinessProblemSpec): string {

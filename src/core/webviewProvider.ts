@@ -27,6 +27,8 @@ import { SemanticLayerManager } from '../context/SemanticLayerManager';
 import { ActiveProblemManager } from '../context/ActiveProblemManager';
 import { AttachmentStore } from '../context/AttachmentStore';
 import { PipelineSpecManager } from '../context/PipelineSpecManager';
+import { ContextFileWatcher, normalizeFsPath } from '../context/ContextFileWatcher';
+import { RevisionConflictError, setRevisionConflictHandler } from '../context/RevisionedFile';
 import { generateDesignDoc } from './pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
 import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, registerPrimitiveVersion, resetVersionedPrimitives, compileTransformSpec } from './transforms/registry';
@@ -85,6 +87,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** `undefined` = no active business problem yet (fresh workspace, or "Start New" before the first draft). */
   private activeProblemId?: string;
   private workspaceRoot?: vscode.Uri;
+  private contextFileWatcher?: ContextFileWatcher;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -188,6 +191,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
     this.workspaceRoot = workspaceRoot;
     this.activeProblemManager = new ActiveProblemManager(workspaceRoot, (msg: string) => this.postLog(msg));
+    // v0.25.0 (docs/mcp-engine-requirements.md §8): keep every cached spec/context
+    // document in step with the file on disk when another process edits it, and
+    // never silently overwrite such an edit from a stale in-memory copy.
+    setRevisionConflictHandler((conflict) => { void this.handleRevisionConflict(conflict); });
+    if (!this.contextFileWatcher) {
+      this.contextFileWatcher = new ContextFileWatcher(workspaceRoot, (uri) => { void this.onContextFileChanged(uri); });
+      this.context.subscriptions.push(this.contextFileWatcher);
+    }
     this.contextFileManager = new ContextFileManager(
       workspaceRoot,
       this.graphManager,
@@ -1144,6 +1155,85 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       const observed = error instanceof Error ? error.message : 'Unexpected webview error.';
       this.postLog(`Webview error: ${observed}`);
       this.postMessage('error', { message: observed });
+    }
+  }
+
+  /**
+   * A `.ai-context` file changed on disk (debounced by `ContextFileWatcher`).
+   * Our own writes are filtered out by each manager's `reload()` — the file's
+   * revision still matches what that manager last wrote, so it reports
+   * "unchanged" and nothing below runs.
+   */
+  private async onContextFileChanged(uri: vscode.Uri): Promise<void> {
+    try {
+      const key = normalizeFsPath(uri.fsPath);
+      if (this.activeProblemManager && key === normalizeFsPath(this.activeProblemManager.getPointerUri().fsPath)) {
+        const problemId = await this.activeProblemManager.getActiveProblemId();
+        if (problemId !== this.activeProblemId) {
+          this.postLog(`Active business problem changed on disk (${problemId ?? 'none'}) — switching.`);
+          await this.activateProblem(problemId);
+        }
+        return;
+      }
+      await this.reloadContextFile(key);
+    } catch (err) {
+      this.postLog(`Reloading ${path.basename(uri.fsPath)} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** Routes a changed path to the manager that owns it, reloads, and refreshes whatever depends on it. Returns false when no manager owns the path. */
+  private async reloadContextFile(key: string): Promise<boolean> {
+    const owners: Array<{ uri?: vscode.Uri; reload?: () => Promise<boolean>; after: () => Promise<void> | void }> = [
+      { uri: this.specManager?.getSpecUri(), reload: () => this.specManager!.reload(), after: () => this.afterSpecReloaded() },
+      {
+        uri: this.pipelineSpecManager?.getSpecUri(), reload: () => this.pipelineSpecManager!.reload(),
+        after: () => { this.hub.pauseForExternalChange('The Pipeline Spec changed on disk during execution'); this.postContextGateStatus(); }
+      },
+      { uri: this.sourceContextManager?.getFileUri(), reload: () => this.sourceContextManager!.reload(), after: () => this.postContextGateStatus() },
+      { uri: this.targetContextManager?.getFileUri(), reload: () => this.targetContextManager!.reload(), after: () => this.postContextGateStatus() },
+      { uri: this.mappingContextManager?.getFileUri(), reload: () => this.mappingContextManager!.reload(), after: () => this.postContextGateStatus() },
+      { uri: this.semanticLayerManager?.getFileUri(), reload: () => this.semanticLayerManager!.reload(), after: () => undefined }
+    ];
+    const owner = owners.find((o) => o.uri && normalizeFsPath(o.uri.fsPath) === key);
+    if (!owner || !owner.reload) return false;
+    if (await owner.reload()) {
+      await owner.after();
+    }
+    return true;
+  }
+
+  private async afterSpecReloaded(): Promise<void> {
+    const spec = this.specManager?.getSpec();
+    if (spec) this.hub.setSpec(spec.id, spec.version);
+    this.hub.pauseForExternalChange('The Business Problem Specification changed on disk during execution');
+    this.postSpec();
+    this.postContextGateStatus();
+    if (this.workspaceRoot) {
+      const report = await scanArtifactStaleness(this.workspaceRoot, spec ? { id: spec.id, version: spec.version } : undefined);
+      this.postMessage('artifactStaleness', { report });
+    }
+  }
+
+  /**
+   * A save was refused because the file changed on disk first. The change the
+   * user just made was not written; offer to load the disk version, or to write
+   * theirs over it — never decide silently.
+   */
+  private async handleRevisionConflict(conflict: RevisionConflictError): Promise<void> {
+    const name = path.basename(conflict.uri.fsPath);
+    this.postLog(`${conflict.label} (${name}) changed on disk since AutoDE loaded it — your change was not saved.`);
+    const choice = await vscode.window.showWarningMessage(
+      `${conflict.label} (${name}) changed on disk since AutoDE loaded it. Your latest change was not saved.`,
+      'Reload from Disk',
+      'Overwrite'
+    );
+    const key = normalizeFsPath(conflict.uri.fsPath);
+    if (choice === 'Overwrite') {
+      await conflict.overwrite();
+      this.postLog(`Overwrote ${name} with AutoDE's version — the external change was discarded.`);
+      await this.reloadContextFile(key);
+    } else if (choice === 'Reload from Disk') {
+      await this.reloadContextFile(key);
     }
   }
 
