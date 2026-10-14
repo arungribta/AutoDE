@@ -157,6 +157,7 @@ Read-only SQL checks run through the engine (`autode_execute_query`, read-only m
 
 - Probes are templates in the primitive registry (Tier-2 `PrimitiveDefinition`s with a `probe` category), so they get the same governance, versioning and conformance tests (mcp-engine Phase 6).
 - Probes respect `maxRows`, the query timeout and sampling (`TABLESAMPLE` where the dialect supports it). Results record the sample size, and a sampled pass is labelled as such.
+- Probes return **aggregates only** (counts, rates, min/max), never row values, so they are unaffected by the sample-data consent setting (mcp-engine Phase 4).
 - On pass: emit a `verified` event and raise trust to `verified`. On fail: emit `verification_failed`, set status `needs_review`, and show the observed numbers in the inbox (e.g. *"order_id is not unique: 1.2% duplicates in 50 000 sampled rows"*).
 - Probes run automatically for `proposed` key/grain/relationship assertions when a connection is live and the `readOnlyMode` setting is on, and on demand from the inbox. Without a live connection, assertions stay at their tier and show *"not verified — no connection"*.
 
@@ -346,7 +347,10 @@ Scope: §10.3 (fixtures, replay harness, metrics computation), with grounding ch
 Acceptance: `npm run eval` runs offline; `eval-report.md` records baseline numbers for the current pipeline (expected to be poor; that's the point); traps 1–5 are recorded as detected or not.
 
 ### Phase C2: Assertion ledger and projection
-Scope: §4 (Assertion, schemas, ledger, folding, compaction, projections, migration); conflict detector and supersession (§8.1).
+Scope: §4 (Assertion, schemas, ledger, folding, compaction, projections, migration); conflict detector and supersession (§8.1). Also absorbs leftovers from the earlier "Phase 5 — grounding/retrieval" plan, and closes a deferred v0.19.0 gap:
+- `ContextValidator` dispatches to the per-kind definitions already in `context-envelope.schema.json` but never referenced. Validation stays lenient for old persisted data: warn, don't fail.
+- Every node's `origin.confidence` is filled from its supporting assertion's trust tier. Today the field is optional and almost never set.
+- The settings-panel Connect / Source Assessment flow (`extension.ts`) still writes no `SourceContext` record (the gap deferred in v0.19.0). It now writes `schema_fact` assertions to the ledger. They are project-wide (`specId` unset) when no business problem is active, which answers the open "spec-scoped vs project-level" question without reshaping `SourceContext`.
 Acceptance: migration is idempotent and graph-equivalent (test); folding is deterministic (same ledger → byte-identical projection); conflict and supersession unit tests; trap 1 detected in replay.
 
 ### Phase C3: Context packs, manifests and causality
@@ -354,11 +358,15 @@ Scope: §7.1, §7.3, §8.3, §10.1 (all checks), Grounding Report; `buildContext
 Acceptance: every artifact written has a manifest; "What the agent saw" and "Explain This Artifact" work; trap 4 (context gap) and trap 5 (dilution) pass in replay; identifier grounding rate is reported per run.
 
 ### Phase C4: Enrichment from chat, interview and discovery; Context Inbox; probes
-Scope: §5 in full; §7.2 cited Q&A; MCP additions in §9. Depends on the MCP platform phase, since probes run through `autode_execute_query`.
+Scope: §5 in full; §7.2 cited Q&A; MCP additions in §9. Depends on the MCP platform phase, since probes run through `autode_execute_query`. Also absorbs the open phase 5 of the earlier chat-memory plan, **tool-action memory**:
+- `AgentHub.chat()` returns the tool audit it already collects (`ToolCallAuditEntry[]`).
+- The chat handler appends one compact `log` message per meaningful action (file written, command run) to the transcript.
+- Structured history includes those entries. For Anthropic and Gemini they are folded into the adjacent assistant turn, because those APIs require strict user/assistant alternation.
+- Actions that change context (e.g. a written spec file) are also recorded as ledger evidence.
 Acceptance: the scripted chat produces the golden assertions (≥ 90% match, the rest surfaced in the inbox); traps 2 and 3 pass; extraction never blocks or fails a chat turn (fault-injection test); chat answers cite assertion ids.
 
 ### Phase C5: Semantic model
-Scope: §6, including dbt and Snowflake semantic-view export primitives (Databricks metric views where supported) and C3 consumption by the modeling/STTM/transform agents.
+Scope: §6, including dbt and Snowflake semantic-view export primitives (Databricks metric views where supported) and C3 consumption by the modeling/STTM/transform agents. Depends on mcp-engine Phase G (governance-as-code): the model's `rules` and PII classifications come from G's governance assertions, and the reference problem's masking expectations need G's `mask` primitive.
 Acceptance: projected model equals `golden/semantic-model.yaml` after the scripted run; exports pass primitive conformance tests; no agent emits a join or metric absent from the model (a grounding check enforces this).
 
 ### Phase C6: Freshness, health and release evaluation
@@ -369,7 +377,7 @@ Acceptance: every metric target in §10.2 is met in replay mode; the live-mode r
 
 ## 12. Out of scope
 
-- Vector databases and embedding models (they'd add a dependency and runtime; lexical + alias + graph retrieval is sufficient at the target size, §1). Revisit only if an evaluation shows retrieval misses.
+- Vector databases and embedding models (they'd add a dependency and runtime; lexical + alias + graph retrieval is sufficient at the target size, §1). This supersedes the earlier "Phase 5" plan's provider-sourced embeddings design. Revisit only if a C1/C6 evaluation shows retrieval misses that alias and graph expansion can't fix.
 - Replacing an enterprise catalog (Horizon, Unity Catalog, Atlan, etc.). Importing from catalogs is a future *source* of `documented` assertions via the same ledger, not a reason to build one.
 - Auto-confirming LLM-proposed assertions, and confirmation over MCP.
 - LLM-written verification probes.

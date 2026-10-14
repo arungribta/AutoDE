@@ -1,6 +1,6 @@
 # AutoDE — MCP Engine & Portable Skill Registry: Requirements Specification
 
-**Status:** Proposed · **Baseline:** v0.24.0 (`6f09e62`) · **Target:** v0.25.0 – v0.36.0 · **Companion:** [context-layer-requirements.md](context-layer-requirements.md)
+**Status:** Proposed · **Baseline:** v0.24.0 (`6f09e62`) · **Target:** v0.25.0 – v0.40.0 · **Companion:** [context-layer-requirements.md](context-layer-requirements.md)
 **Audience:** the coding agent (Claude Code, Gemini, Copilot) implementing this, and the reviewers approving each phase.
 
 ---
@@ -41,7 +41,7 @@ Non-negotiable principles (every phase MUST preserve them):
 | P3 | Human approval gates are enforced by the orchestrator, not only by the UI. | `agentHub.ts` `executePlan()` |
 | P4 | LLM-agnostic: `vscode.lm` (Copilot and others), Claude Code CLI, and API providers all keep working. | `src/core/llmProviders.ts`, `languageModelAdapter.ts`, `claudeCodeAdapter.ts` |
 | P5 | Credentials are pointers (`CredentialReference`), never secrets in LLM context, logs, or tool output. | `src/dqm/credentials/` |
-| P6 | Small footprint, works offline / on locked-down client networks: no runtime downloads, no native modules, no heavy SDKs. | `package.json` (deps: `ajv`, `yaml` only) |
+| P6 | Small footprint, works offline / on locked-down client networks: no **automatic** downloads, and no native modules or heavy SDKs in the VSIX. The one sanctioned download is the user-initiated, integrity-checked native-driver acquisition (Phase D), with CLI/REST as the offline fallback. | `package.json` (deps: `ajv`, `yaml` only) |
 | P7 | Platform CLIs (`snow`, `databricks`) are optional accelerators, never prerequisites — REST backends work without them. | `src/dqm/executionBackends/` |
 
 ---
@@ -169,7 +169,7 @@ There is deliberately no vendor-named tool (`execute_snowflake_query` etc.); the
 ### 5.4 Prompts
 
 - One prompt per interview skill in `skills/*.json`: `autode_interview_<id>` (e.g. `autode_interview_data-flow`). Body = `systemPrompt` + `questionGuidance` + `exampleQuestions`, with an optional `answers_so_far` argument. This lets any client run the same requirements interview.
-- One prompt per imported tool skill (`SKILL.md`): `autode_skill_<id>`, body = the skill instructions.
+- One prompt per imported tool skill (`SKILL.md`): `autode_skill_<id>`, body = the skill instructions. **Only skills that are `published` and at trust tier `reviewed` or `trusted` (Phase S2) are exposed**; `unreviewed`, `draft`, `deprecated` and `retired` skills never appear in `prompts/list`. The prompt text states the skill's declared `allowed-tools` so the client can honour them; enforcement inside AutoDE is Phase S1's allow-list.
 
 ### 5.5 Resources (read-only)
 
@@ -223,7 +223,7 @@ A thin typed wrapper (`searchPrimitives()`, `compileTransform()`, `compilePipeli
 
 - `ToolSkillAgent.ts`: replace the direct `vscode.window.showWarningMessage` and the `extensionContext` cast with a `host` interface on `AgentExecutionContext`: `host.confirm(message, detail) → Promise<boolean>` and `host.workspaceRoot`. Remove `extensionContext` from `AgentExecutionContext` once nothing reads it.
 - `SourceAssessmentAgent.ts:82`: use `host.workspaceRoot` instead of `vscode.workspace.workspaceFolders`.
-- `ToolSkillAgent` MUST also offer the engine's MCP tools (§5.1–5.3) to the model alongside the existing `READ_ONLY_TOOL_SPECS` / `WRITE_TOOL_SPECS`, so an imported skill can call primitives rather than write SQL. Write-capable engine tools follow the existing `ToolExecutionMode` gates and audit log (`ToolCallAuditEntry`).
+- `ToolSkillAgent` MUST also offer the engine's MCP tools (§5.1–5.3) to the model alongside the existing `READ_ONLY_TOOL_SPECS` / `WRITE_TOOL_SPECS`, so an imported skill can call primitives rather than write SQL. Write-capable engine tools follow the existing `ToolExecutionMode` gates and audit log (`ToolCallAuditEntry`), **and** the skill's `allowed-tools` allow-list and trust-tier mode ceiling (Phases S1/S2): an engine tool the skill did not declare is filtered out, and a `reviewed` (not `trusted`) skill never receives write-capable engine tools.
 
 ### 7.5 Exposing the server to other agents
 
@@ -248,24 +248,132 @@ Until this phase ships, the MCP server MUST NOT be given write access to `.ai-co
 
 ## 9. Phases and acceptance criteria
 
-### 9.0 Combined roadmap (MCP track + context-layer track)
+### 9.0 Combined roadmap
 
-Implement strictly in this order; each row is one minor version. Context-layer phases (C1–C6) are specified in [context-layer-requirements.md](context-layer-requirements.md) §11.
+Implement strictly in this order; each row is one minor version.
+- Context-layer phases (C1–C6) are specified in [context-layer-requirements.md](context-layer-requirements.md) §11.
+- Phases S1–S3, D and G carry forward open items from the earlier AutoDE roadmap and are specified in §9.1: the Phase 4 skills library, Phase 3b-iv driver acquisition, and Phase 6 governance-as-code.
 
 | Version | Phase | Why here |
 |---------|-------|----------|
-| v0.25.0 | **1** Spec state synchronization | Live bug; prerequisite for any second writer of `.ai-context/`. |
+| v0.25.0 | **1** Spec state synchronization ✅ | Live bug; prerequisite for any second writer of `.ai-context/`. |
 | v0.26.0 | **2** Engine boundary and context store | Everything after this builds in `src/engine/`. |
 | v0.27.0 | **C1** Reference problem, eval harness, baseline | Measures the v0.26.0 baseline *before* the context layer changes, so improvement can be shown. |
-| v0.28.0 | **C2** Assertion ledger and projection | System of record for context. |
-| v0.29.0 | **C3** Context packs, manifests, causality | Grounded delivery; the server should expose the final retrieval, not the old dump. |
-| v0.30.0 | **3** MCP server: registry, spec, prompts, resources | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding` (context §9). |
-| v0.31.0 | **4** MCP server: data platform | Prerequisite for verification probes. |
-| v0.32.0 | **C4** Enrichment from chat/interview/discovery, Context Inbox, probes | Remaining context MCP tools (`autode_propose_assertion`, `autode_verify_assertion`). |
-| v0.33.0 | **C5** Semantic model | Built on confirmed/verified assertions. |
-| v0.34.0 | **5** Extension as MCP client; exposure to other agents | Done once the surface is complete, so it's routed once. |
-| v0.35.0 | **6** Skill governance hardening | Includes probe primitives' conformance. |
-| v0.36.0 | **C6** Freshness, context health, release evaluation | Final metric targets met; eval report becomes a release gate. |
+| v0.28.0 | **S1** Tool-skill execution on every provider + `allowed-tools` enforcement | Security prerequisite: skills later get engine tools (§7.4) and are exposed over MCP (§5.4). |
+| v0.29.0 | **C2** Assertion ledger and projection | System of record for context. |
+| v0.30.0 | **C3** Context packs, manifests, causality | Grounded delivery; the server should expose the final retrieval, not the old dump. |
+| v0.31.0 | **S2** Tool-skill lifecycle, provenance, review and trust tiers | Must exist before any skill is exposed to external agents over MCP. |
+| v0.32.0 | **3** MCP server: registry, spec, prompts, resources | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding` (context §9). |
+| v0.33.0 | **4** MCP server: data platform, plus sample-data consent and redaction | Prerequisite for verification probes and for driver acquisition. |
+| v0.34.0 | **D** Opt-in native driver acquisition + platform-onboarding UI | Lives in the engine; needs Phase 4's backend cascade there. |
+| v0.35.0 | **C4** Enrichment from chat/interview/discovery, Context Inbox, probes, chat tool-action memory | Remaining context MCP tools (`autode_propose_assertion`, `autode_verify_assertion`). |
+| v0.36.0 | **G** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | Required by the C5/C6 grounding checks and the reference problem's PII expectations. |
+| v0.37.0 | **C5** Semantic model | Built on confirmed/verified assertions. |
+| v0.38.0 | **5** Extension as MCP client; exposure to other agents | Done once the surface is complete, so it's routed once. |
+| v0.39.0 | **6** + **S3** Skill and primitive governance hardening; Git-URL skill import; docs and starter library | Opening the door to third-party skills ships last, once every safety rail exists. |
+| v0.40.0 | **C6** Freshness, context health, release evaluation | Final metric targets met; eval report becomes a release gate. |
+
+### 9.1 Carried-forward phases (S1, S2, D, G, S3)
+
+These come from the earlier AutoDE plans:
+- Phase 4, "Skill Onboarding, Versioning & Governance" (becomes S1–S3).
+- Phase 3b-iv, opt-in driver acquisition and platform onboarding (becomes D).
+- Phase 6, "Governance/DQ-as-Code" (becomes G).
+
+Their detailed designs still apply, except where this document overrides them: the engine boundary, MCP exposure, and no automatic downloads.
+
+#### Phase S1: Tool-skill execution on every provider + `allowed-tools` enforcement
+Scope:
+- **One dispatch for all providers.** Replace `runOnClaude` / `runOnCopilot` in `src/agents/build/ToolSkillAgent.ts` with a single call through `getLlmAdapter(provider).complete(...)`. Extract `AgentHub.buildLlmContext()` so `ToolSkillAgent` can construct it. The Claude Code CLI path keeps its whole-run confirmation, because no per-call audit is possible there, and the confirmation text says so.
+- **Allow-list filter.** Add `filterToolSpecsByAllowList(specs, declaredTools)` to `src/core/agenticTools.ts`.
+  - An alias table maps `Read`, `Write`, `Bash`, `Grep` and `Glob` to the `autode_*` tools.
+  - Unknown names are dropped.
+  - Absent or empty `declaredTools` means no extra restriction.
+  - Thread `allowedToolNames?: string[]` through `LlmCompleteOptions` and every adapter's `toolSpecsForMode(...)` call site in `llmProviders.ts`.
+- **Mode ceiling.** Add `resolveToolExecutionMode(skill)` in `ToolSkillAgent`; S2's trust tiers extend it.
+- **Dead `systemPrompt` field.** `SkillDefinition.systemPrompt` is parsed by `skillRegistry.ts` but never used. Wire it into the interview prompt in `specOpsPrompts.ts`. §5.4 exposes it over MCP, so the in-app and MCP paths must behave the same.
+
+Acceptance:
+- A tool skill runs with a full `ToolCallAuditEntry[]` on copilot and on at least one of openai/anthropic/gemini/ollama, with no `SKILL.md` changes.
+- A skill declaring `allowed-tools: [Read]` cannot reach `autode_write_file` or `autode_run_command` on any of the six non-CLI providers. A test asserts on the filtered tool list.
+- A skill with no declared tools behaves exactly as before.
+- An interview turn's prompt contains the skill's `systemPrompt`.
+
+#### Phase S2: Tool-skill lifecycle, provenance, review and trust tiers
+Scope:
+- **Sidecar file.** AutoDE owns `.ai-context/skills/tool-skills/<id>/.autode-skill.json` and never modifies the foreign `SKILL.md`. Fields:
+  - `status`: `draft | published | deprecated | retired`
+  - `version`
+  - `provenance { source: local|git, repoUrl?, ref?, resolvedCommit?, subpath?, contentChecksum, importedAt }`
+  - `trustTier`: `unreviewed | reviewed | trusted`
+
+  A skill with no sidecar defaults to `{ status: published, version: 1, trustTier: trusted }` if it was imported before this phase (back-compat), and `unreviewed` if imported after.
+- **Lifecycle.** `src/core/toolSkillLifecycle.ts` mirrors `transforms/declarative/lifecycle.ts`: publish, deprecate, archive to `history/v<N>/`. It is gated by a new `toolSkillManagementEnabled` setting (default false, hidden when off).
+- **Review screen.** Shows the full `SKILL.md`, declared tools and resource files, with an explicit "Trust and enable". Tier semantics:
+  - `unreviewed`: not runnable, not exposed over MCP.
+  - `reviewed`: runnable with a `read-only` mode ceiling; not eligible for the Claude CLI path.
+  - `trusted`: an explicit elevation to `full` and Claude CLI eligibility.
+
+  Every transition is logged.
+- **Run gate.** `isSkillRunnable()` gates the run picker the way `isSelectable()` gates primitives. A pinned `skillVersion` still resolves after deprecation.
+
+Acceptance:
+- A freshly imported skill is neither runnable nor listed in MCP `prompts/list` until reviewed.
+- Review unlocks read-only only; elevation unlocks full.
+- Publish/deprecate/archive round-trip tests mirror the primitive lifecycle tests.
+
+#### Phase D: Opt-in native driver acquisition + platform-onboarding UI
+Scope (the earlier Phase 3b-iv design, moved into the engine):
+- **Backend cascade per connection.** Native-protocol CLI (Snowflake `snow sql`) → **opt-in native driver** (`snowflake-sdk` / `@databricks/sql`) → REST. All three return the existing `QueryResult` shape.
+- **Driver acquisition** in `src/engine/platform/driverAcquisition.ts`:
+  - Resolves the package from a **configurable registry URL**. The default is `https://registry.npmjs.org`; it can point at Artifactory or Nexus on client networks.
+  - Reads the version, tarball URL and `integrity` hash from the registry's metadata. Never hardcoded, never chosen by an LLM.
+  - Verifies the hash, then extracts to the extension's global storage under `drivers/<pkg>/<version>/`.
+  - Loads the driver in the **engine server process** only, and caches it by version.
+- **Only ever started by the user**, from the onboarding UI, with the trade-offs stated: download size, disk space, and why it helps. Never at activation, never automatic. A failed fetch (offline, proxy, air-gapped) is reported plainly and the connection falls back to CLI or REST.
+- **Platform-onboarding UI** ("Data Platforms"):
+  1. Pick platforms.
+  2. Per platform, Configure: the existing detect / pick-connection flow.
+  3. Choose a backend tier, with honest caveats for each.
+  4. Guided authentication.
+  5. End-to-end connectivity check before the platform is marked ready.
+
+Acceptance (using a mocked registry and a local tarball fixture):
+- A tampered payload is rejected by the integrity check.
+- A configured internal registry URL is used.
+- With the registry unreachable, the connection falls back to REST with a clear message.
+- The VSIX contains neither driver.
+- Nothing downloads unless the user clicks the install action; a test asserts there is no fetch on activation or on connection.
+
+#### Phase G: Governance-as-code
+Scope (from the earlier Phase 6 plan):
+- `src/engine/governance/types.ts` (`PiiClassification`, `ColumnGovernance`). Fill in the `governance` block already reserved on each Pipeline Spec entity.
+- A `mask` primitive as a Tier-2 `PrimitiveDefinition`, with **non-reversible strategies only** (`hash`, `redact`). `tokenize` is out of scope because it needs an external vault.
+- Optional `sensitivityHint` / `governance` fields on `BusinessProblemSpec`, `SourceEntry` and `DataFlow`.
+- Governance discovery questions in `skills/*.json`, and a `governanceContent` definition in `context-envelope.schema.json`.
+- Governance facts are stored as `business_rule` / `quality_expectation` assertions in the ledger (context spec §4), so they flow into context packs, manifests and grounding checks.
+
+Acceptance:
+- A `sensitive-pii` / `hash` entry compiles to deterministic masking SQL for each dialect, covered by the conformance suite.
+- Generated artifacts for a flagged entity contain the masking expression.
+- A spec without governance still validates.
+- The interview raises a governance question when governance guidance is active.
+
+#### Phase S3 (ships with Phase 6): Git-URL skill import, docs and starter library
+Scope:
+- **Import sources.** `SkillImportSource` covers a local folder and a Git URL. For Git:
+  - Shallow clone only.
+  - File-count and byte caps are checked **before** anything is copied.
+  - Path-traversal check, like `resolveSandboxedPath`.
+  - `resolvedCommit` is recorded.
+- **Format importers.** `SkillFormatImporter`, with today's `SKILL.md` parser as the default implementation.
+- **"Update Skill" command.** Re-fetches, shows a diff, and resets `trustTier` to `unreviewed`. Never silent.
+- **Docs and starter library.** Skills authoring docs for both skill systems, and an optional bundled `skills-library/` of first-party `trusted` starter skills.
+
+Acceptance:
+- A Git import from a local bare-repo fixture lands in the same shape, with provenance recorded and `unreviewed`.
+- An oversized or path-escaping repo is rejected before anything is copied.
+- Update Skill against a changed ref shows a diff and requires re-approval.
 
 ### Phase 1: Spec state synchronization
 Scope: §8, plus the `package.json` version alignment (§2.5).
@@ -294,12 +402,13 @@ Acceptance:
 - Manual: Claude Code configured with the server (by hand, per `docs/mcp-setup.md`) can search, describe and compile a primitive.
 
 ### Phase 4: MCP server — data platform
-Scope: §5.3, §6. (`ContextStore` already exists from Phase 2.)
+Scope: §5.3, §6. (`ContextStore` already exists from Phase 2.) Plus **sample-data consent and redaction**: row samples from profiling, `autode_execute_query` results and CSV ingestion never enter an LLM prompt unless the per-connection setting `allowSampleDataInPrompts` is on (default off). When it is off, only schema, counts and aggregate statistics are used. Values in columns classified as PII (by Phase G, or by column-name heuristics until then) are masked in any sample that is allowed through.
 Acceptance:
 - Read-only guard tests: `INSERT`, `MERGE`, `DROP`, `CREATE`, `GRANT`, `CALL`, multi-statement input, and comment-smuggled writes are rejected without `--allow-write`; `SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN` pass.
 - Redaction test: no tool response or log line contains any test secret value.
 - Manual, live: Snowflake via CLI connection and via key-pair REST; Databricks via PAT REST — list schemas, extract metadata, explain, select.
 - A machine without `snow`/`databricks` CLIs installed can still use the REST paths (P7).
+- Test: with `allowSampleDataInPrompts` off, no sampled row value appears in any assembled prompt; with it on, PII-named columns are masked.
 
 ### Phase 5: Extension as an MCP client; exposure to other agents
 Scope: §7.1–7.3, §7.5.
@@ -326,7 +435,7 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 |----------|--------------|
 | Moving the engine to a separate repository | Shared types (e.g. `SqlDialect` duplicated between `dqm/types.ts` and `transforms/types.ts`) would drift; one repo with a lint-enforced boundary gives the same isolation (D1). |
 | Native per-OS binaries (`pkg`, PyInstaller, Go) | `pkg` is archived; binaries are 40–80 MB each, need code signing, and are often blocked on client networks. A bundled JS file on VS Code's Node is a few hundred KB (D2). |
-| Downloading the server or CLIs at activation (JIT installer) | Breaks offline / air-gapped clients, slows activation, and introduces an unsigned download-and-execute path. |
+| Downloading the server or CLIs at activation (JIT installer) | Breaks offline / air-gapped clients, slows activation, and introduces an unsigned download-and-execute path. The only sanctioned download is Phase D's user-initiated, integrity-checked driver acquisition, which has an offline fallback. |
 | Blocking activation or the panel on `snow` / `databricks` being installed | REST backends need no CLI (P7); detection already exists in `cliDetection.ts` and runs lazily at connection time. |
 | Rewriting `skillRegistry.ts` as an MCP client or deleting it | It loads the interview prompt packs; they are exposed as MCP **prompts** (§5.4), and the client lives in `src/core/mcp/`. |
 | Making the extension a proxy between Claude Code / Copilot and the server | Both connect to MCP servers directly; the extension is one client among several (§7.5). |
