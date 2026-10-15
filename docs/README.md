@@ -18,7 +18,7 @@ Each document answers one kind of question. When two disagree, the precedence ru
 
 1. **Behaviour that has shipped:** the code, then the latest [CHANGELOG.md](../CHANGELOG.md) entry, then requirements.md. A disagreement is a documentation bug; record it in the roadmap.
 2. **Planned behaviour:** the phase specification, as ordered by roadmap.md.
-3. **Order and status:** roadmap.md, over any plan text elsewhere (technical-design.md §10 and the plan sections of earlier requirements.md versions are historical).
+3. **Order and status:** roadmap.md, over any plan text elsewhere (plan sections in earlier versions of requirements.md and technical-design.md, at `fc16b0d`, are historical).
 
 ## Rules for keeping these documents straight
 

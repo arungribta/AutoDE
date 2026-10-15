@@ -220,7 +220,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 
 ## Appendix A — Where the previous sections went (2026-10-15)
 
-The previous document (commit `fc16b0d`) mixed requirements with implementation detail and per-version narratives. Every section is accounted for below. "→ design" means the HOW content moves into [technical-design.md](technical-design.md) in the next documentation step (until then it remains in git at `fc16b0d`); "→ history" means it is release history, already in [CHANGELOG.md](../CHANGELOG.md).
+The previous document (commit `fc16b0d`) mixed requirements with implementation detail and per-version narratives. Every section is accounted for below. "→ design" means the HOW content now lives in [technical-design.md](technical-design.md) (moved and brought up to date on 2026-10-15); "→ history" means it is release history, already in [CHANGELOG.md](../CHANGELOG.md).
 
 | Previous section | Now |
 |---|---|

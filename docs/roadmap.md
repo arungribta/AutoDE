@@ -33,7 +33,7 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | tbd | **M1–M3** Migration track: assessment; bulk mapping and generation (importing external code-converter output); reconciliation and cutover | not yet written | Agreed in outline 2026-10-15; specified and positioned after K and C4a. |
 | tbd | **RET** Embeddings as an optional, opt-in ranking signal | not yet written | Only if K's vocabulary-mismatch eval shows misses that the deterministic signals can't fix (see §3). |
 
-**Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `C1`–`C6`, `C4a`/`C4b`, `K` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in [requirements.md §11](requirements.md) and [technical-design.md §10](technical-design.md).
+**Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `C1`–`C6`, `C4a`/`C4b`, `K` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in the plan sections of earlier versions of requirements.md (§11) and technical-design.md (§10), both at `fc16b0d`.
 
 **Workflow per phase:** spec section verified against the code → implementation with tests → `npm test`, `npm run lint`, `npm run eval` → CHANGELOG entry (with deviations) → requirements.md: the affected requirements' status and wording (WHAT/WHY only) → technical-design.md for the HOW → spec section shrinks to a pointer → ✅ here → version bump → commit and push.
 
@@ -59,6 +59,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Rename and delete business problems from the UI (WS-3) | §8.11 | Folders can only be removed by hand. |
 | Edits to `.ai-context/context/business-context.yaml` take effect without a window reload (CTX-5) | found 2026-10-14 | That folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message. |
 | Style guide; keyboard and screen-reader verification (UI-4, UI-5) | §2 | |
+| Remove unused `src/spokes/{architectureAgent,ingestionAgent,sttmAgent}.ts` | found 2026-10-15 | Not imported anywhere; superseded by `src/agents/`. |
 | Refresh the engineering onboarding guide (describes v0.13.0) | — | Both specs list onboarding chapters as documentation deliverables. |
 
 **Covered by a planned phase**
@@ -123,4 +124,4 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 | 2026-10-15 | Embedded database only if K's scale measurements require it; embeddings only via RET, if K's vocabulary-mismatch eval requires it. |
 | 2026-10-15 | Documents reorganised: requirements answer WHAT/WHY, technical design answers HOW, this roadmap answers WHEN, CHANGELOG.md records what changed. Phases D and G renamed DRV and GOV. |
 
-**Superseded planning documents.** The plan files under `~/.claude/plans/` used before v0.25.0 were folded into this roadmap and are no longer maintained. The plan and backlog sections of the previous requirements.md (§11, §15, §16 at `fc16b0d`) and [technical-design.md §10](technical-design.md) are historical.
+**Superseded planning documents.** The plan files under `~/.claude/plans/` used before v0.25.0 were folded into this roadmap and are no longer maintained. The plan and backlog sections of the previous requirements.md (§11, §15, §16) and technical-design.md (§10), both at `fc16b0d`, are historical; the technical-design phase list was removed on 2026-10-15 and lives on in git and CHANGELOG.md.
