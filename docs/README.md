@@ -4,7 +4,7 @@ Each document answers one kind of question. When two disagree, the precedence ru
 
 | Question | Document | Notes |
 |---|---|---|
-| **What** must AutoDE do, and **why**? (shipped behaviour) | [requirements.md](requirements.md) | Authoritative for shipped behaviour. Being rewritten into WHAT/WHY-only form; until then, the sections listed in [roadmap.md §3](roadmap.md) are known to be outdated or to contain HOW detail. |
+| **What** must AutoDE do, and **why**? (shipped behaviour) | [requirements.md](requirements.md) | Authoritative for shipped behaviour and for the product-wide principles (P1–P7, C1–C9). Requirements have IDs (`WS-1`, `GRD-4` …) and a status. |
 | What and why, for **planned** work | [mcp-engine-requirements.md](mcp-engine-requirements.md) — MCP server, engine boundary, skills, platform access, governance · [context-layer-requirements.md](context-layer-requirements.md) — ledger, context packs, grounding, estate catalogs, business-problem documents, semantic model | Phase specifications: WHAT/WHY plus the implementation contract for phases not yet built. A migration-track spec (M1–M3) will join them. |
 | **When**, and is it done? | [roadmap.md](roadmap.md) | The only place for phase order and status, the unscheduled backlog, and the decision log. |
 | **How** is it built? | [technical-design.md](technical-design.md) | Architecture, modules, data formats, algorithms, trade-offs. |
@@ -18,7 +18,7 @@ Each document answers one kind of question. When two disagree, the precedence ru
 
 1. **Behaviour that has shipped:** the code, then the latest [CHANGELOG.md](../CHANGELOG.md) entry, then requirements.md. A disagreement is a documentation bug; record it in the roadmap.
 2. **Planned behaviour:** the phase specification, as ordered by roadmap.md.
-3. **Order and status:** roadmap.md, over any plan text elsewhere (requirements.md §11/§15/§16 and technical-design.md §10 are historical).
+3. **Order and status:** roadmap.md, over any plan text elsewhere (technical-design.md §10 and the plan sections of earlier requirements.md versions are historical).
 
 ## Rules for keeping these documents straight
 

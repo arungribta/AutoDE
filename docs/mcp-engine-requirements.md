@@ -11,7 +11,7 @@
 1. Implement **one phase at a time** (§9), in order. Each phase is one minor version bump and ends with the acceptance criteria for that phase passing.
 2. Before changing a file, read it. Every file and symbol named here exists at the baseline commit; if one does not, stop and report it rather than guessing.
 3. Keep `npm test` and `npm run lint` green at the end of every phase. Add tests for every new behavior.
-4. Follow existing repo conventions: changelog entries at the top of `docs/technical-design.md` (one `(vX.Y.Z)` bullet per phase), matching sections in `docs/requirements.md`, comment density and naming as in the surrounding code.
+4. Follow existing repo conventions (see [README.md](README.md) and the per-phase workflow in [roadmap.md](roadmap.md)): a `CHANGELOG.md` entry per phase, the affected requirements updated in `docs/requirements.md` (WHAT/WHY, by ID), comment density and naming as in the surrounding code.
 5. Anything listed in §10 (Rejected approaches) is out of scope. Do not implement it even if it seems helpful.
 6. Where this document says **MUST**, it is a requirement; **SHOULD** is a strong default you may deviate from only with a written reason in the phase's changelog entry.
 
@@ -35,15 +35,7 @@ Business problem (interview, skills/*.json)
 
 Non-negotiable principles (every phase MUST preserve them):
 
-| # | Principle | Where it lives today |
-|---|-----------|----------------------|
-| P1 | The LLM selects and parameterizes; it does not freehand code where a primitive exists. Output is Ajv-validated JSON. | `src/agents/llmParamSelector.ts`, `src/core/transforms/registry.ts` |
-| P2 | The skill/primitive registry is **static and governed at design time** (publish / deprecate / version). Nothing is created at runtime by an LLM. | `src/core/transforms/declarative/lifecycle.ts` |
-| P3 | Human approval gates are enforced by the orchestrator, not only by the UI. | `agentHub.ts` `executePlan()` |
-| P4 | LLM-agnostic: `vscode.lm` (Copilot and others), Claude Code CLI, and API providers all keep working. | `src/core/llmProviders.ts`, `languageModelAdapter.ts`, `claudeCodeAdapter.ts` |
-| P5 | Credentials are pointers (`CredentialReference`), never secrets in LLM context, logs, or tool output. | `src/dqm/credentials/` |
-| P6 | Small footprint, works offline / on locked-down client networks: no **automatic** downloads, and no native modules or heavy SDKs in the VSIX. The one sanctioned download is the user-initiated, integrity-checked native-driver acquisition (Phase DRV), with CLI/REST as the offline fallback. | `package.json` (deps: `ajv`, `yaml` only) |
-| P7 | Platform CLIs (`snow`, `databricks`) are optional accelerators, never prerequisites — REST backends work without them. | `src/dqm/executionBackends/` |
+Defined in [requirements.md §2.1](requirements.md) (P1–P7), which is canonical: P1 the LLM selects and parameterises, never freehands where a primitive exists; P2 the catalog is governed at design time; P3 approval gates enforced by the orchestrator; P4 LLM-agnostic; P5 credentials are pointers; P6 small footprint, offline, no automatic downloads (DRV is the one opt-in exception), new dependencies need a recorded decision; P7 platform CLIs are optional accelerators.
 
 ---
 
@@ -428,4 +420,4 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 
 ## 11. Documentation deliverables
 
-Per phase: a `(vX.Y.Z)` changelog bullet in `docs/technical-design.md`, the matching requirements section in `docs/requirements.md` (new §19 "MCP Engine & Portable Skill Registry", referencing this document), and onboarding-guide updates for the new `src/engine/` / `src/mcp/` layout. Phase 3 adds `docs/mcp-setup.md`. Phase 6 adds a "How to onboard a new primitive" section covering the conformance requirements.
+Per phase: a `CHANGELOG.md` entry, the affected requirements in `docs/requirements.md` updated by ID (WHAT/WHY only), the HOW in `docs/technical-design.md`, and onboarding-guide updates for the new `src/engine/` / `src/mcp/` layout. Phase 3 adds `docs/mcp-setup.md`. Phase 6 adds a "How to onboard a new primitive" section covering the conformance requirements.

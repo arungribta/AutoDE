@@ -35,13 +35,13 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 
 **Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `C1`–`C6`, `C4a`/`C4b`, `K` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in [requirements.md §11](requirements.md) and [technical-design.md §10](technical-design.md).
 
-**Workflow per phase:** spec section verified against the code → implementation with tests → `npm test`, `npm run lint`, `npm run eval` → CHANGELOG entry (with deviations) → requirements.md updated for the shipped WHAT/WHY, technical-design.md for the HOW → ✅ here → version bump → commit and push.
+**Workflow per phase:** spec section verified against the code → implementation with tests → `npm test`, `npm run lint`, `npm run eval` → CHANGELOG entry (with deviations) → requirements.md: the affected requirements' status and wording (WHAT/WHY only) → technical-design.md for the HOW → spec section shrinks to a pointer → ✅ here → version bump → commit and push.
 
 ---
 
 ## 2. Not yet scheduled
 
-Every item from the retired backlog ([requirements.md §16](requirements.md)) and checklist (§15), triaged on 2026-10-15 against the code.
+Every item from the retired backlog and checklist of the previous requirements.md (§16 and §15 at `fc16b0d`), triaged on 2026-10-15 against the code. Requirement IDs for the open items are in [requirements.md](requirements.md).
 
 **Still open**
 
@@ -51,11 +51,14 @@ Every item from the retired backlog ([requirements.md §16](requirements.md)) an
 | Opt-in telemetry + privacy/data-flow note | §16.4 | `telemetryEnabled` is read; nothing reports. |
 | Interview (intake) session survives a reload | §16.5 | Still in memory only. Natural fit for C4a. |
 | Spec revision fallback keeps the comprehensive fields | §16.5 | The emergency path re-drafts with the older single-shot generator. |
-| Sidebar chat browser | §16.7 | Optional; chat history is command-palette only. |
+| Search, tags and export in the chat history browser | §16.7 | The sidebar history dropdown with resume exists (v0.13.0). |
 | Context drawer surfaces layers, rules, relationships read-only | §16.6, §15 | Partly done. |
 | Agents not built: DDL generator, orchestration generator (Airflow/Dagster/Prefect), test generator | §16.3 | DDL generation is likely covered by M2's bulk generation; decide when M is specified. |
 | Orchestrator ideas: action suggestions, intent-based agent invocation, plan diff, first-run onboarding, SQL result preview, Markdown/YAML export | §16.3 | Product backlog; unprioritised. |
 | Old `testConnection` path still assembles credentials from settings rather than the credential resolvers | §16.8 | Verify, then fold into K or DRV. |
+| Rename and delete business problems from the UI (WS-3) | §8.11 | Folders can only be removed by hand. |
+| Edits to `.ai-context/context/business-context.yaml` take effect without a window reload (CTX-5) | found 2026-10-14 | That folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message. |
+| Style guide; keyboard and screen-reader verification (UI-4, UI-5) | §2 | |
 | Refresh the engineering onboarding guide (describes v0.13.0) | — | Both specs list onboarding chapters as documentation deliverables. |
 
 **Covered by a planned phase**
@@ -88,22 +91,22 @@ Every item from the retired backlog ([requirements.md §16](requirements.md)) an
 
 ## 3. Requirements revisited (2026-10-15)
 
-Requirements in [requirements.md](requirements.md) that were unmet or contradicted by later decisions, reviewed on their merits rather than dropped. The requirements rewrite carries these verdicts.
+Requirements in the previous requirements.md that were unmet or contradicted by later decisions, reviewed on their merits rather than dropped. The rewritten [requirements.md](requirements.md) carries these verdicts (IDs in the last column).
 
-| Requirement (requirements.md) | Verdict | Where it lives now |
+| Requirement (section numbers of the previous requirements.md, `fc16b0d`) | Verdict | Where it lives now |
 |---|---|---|
-| Heavy work never blocks the UI; worker threads (§1, §3.10, §10.1, §10.5) | **Keep, restated and measurable.** The real risk is blocking the *extension host*, which freezes AutoDE's panel and every other extension (Copilot included); the editor itself runs in another process. Requirement: no synchronous task over 100 ms at large-estate size; long work yields, reports progress, can be cancelled. Worker threads are one possible HOW, not the requirement. | Phase K item 11 (acceptance on the large fixture); Phase 5 moves heavy work into the engine process. |
-| Embeddings and a vector store for retrieval at scale (§3.11, §5 module F, §13) | **Keep the need, change the means.** The need is retrieval that survives vocabulary mismatch (synonyms, abbreviations, another organisation's terms), which is real for merges and legacy estates. Embeddings are a poor *default*: embedding APIs exist for some of the 7 providers but not all (P4), a local model is a heavy dependency (P6), and they make retrieval provider-dependent and harder to reproduce. Deterministic signals first; embeddings as an optional signal only if measured misses remain. | Phase K item 12 + vocabulary-mismatch eval; phase RET (conditional). context-layer §12 updated to match. |
-| "Availability" of context | **Keep, as offline operation:** AutoDE works without a live connection from cached and imported metadata, and says what it can't see. | Phase K (cache, legacy imports, visibility). |
-| Kùzu embedded graph DB beyond ~50k nodes (§3.2, §3.11, §13) | **Drop Kùzu; keep "storage scales".** The graph queries AutoDE needs (neighbourhood, join paths ≤ 3 hops) run on the working set in memory; the at-scale problem is catalog storage and text search, which a relational store with full-text search suits better than a graph database. Any store must also respect P6 (no native modules). | Phase K: embedded-store decision from measurements. |
-| Exact token counting with `js-tiktoken` (§3.10, §6, §10.3, §13) | **Drop the library; keep "never exceed the budget".** Each provider tokenises differently and only OpenAI's tokenizer ships as a library, so "precise" can't hold across 7 providers. Requirement: a conservative estimate with headroom, exact counts where a provider offers them; pruning never cuts mid-block and never drops STRICT rules (met by context packs). | Requirements rewrite; C6 (context health). |
-| Namespaced, readable IDs (§3.6) | **Keep the intent; the scheme was never implemented.** | Phase K items 1 and 10. |
-| Authoritative vs derived separation; sources referenced, never copied (§3.1) | **Keep.** It also underpins the rejection of a local catalog mirror. | Requirements rewrite (principles). |
-| File layout (§3.7), module list (§5), file list (§14) | **Move to technical design (HOW);** update to the actual layout (ledger, problems, catalog). | Requirements rewrite / technical-design. |
-| Deactivation releases everything within 200 ms (§10.5) | **Keep** (drop "terminate worker threads"). | Requirements rewrite (NFR). |
-| One workspace = one effort (§7) | **Superseded** by multi-problem workspaces (v0.12.0). | Requirements rewrite. |
-| Licensing review for hnswlib/ONNX (§12, §13) | **Fold into a general rule:** any new dependency needs a P6 decision record with licence and size. | Requirements rewrite (NFR). |
-| UI tab names (§2) | **Update** to the current panel (LLM / Source / Target / Prefs); keep the design principles. | Requirements rewrite. |
+| Heavy work never blocks the UI; worker threads (§1, §3.10, §10.1, §10.5) | **Keep, restated and measurable.** The real risk is blocking the *extension host*, which freezes AutoDE's panel and every other extension (Copilot included); the editor itself runs in another process. Requirement: no synchronous task over 100 ms at large-estate size; long work yields, reports progress, can be cancelled. Worker threads are one possible HOW, not the requirement. | NFR-1; Phase K item 11 (acceptance on the large fixture); Phase 5 moves heavy work into the engine process. |
+| Embeddings and a vector store for retrieval at scale (§3.11, §5 module F, §13) | **Keep the need, change the means.** The need is retrieval that survives vocabulary mismatch (synonyms, abbreviations, another organisation's terms), which is real for merges and legacy estates. Embeddings are a poor *default*: embedding APIs exist for some of the 7 providers but not all (P4), a local model is a heavy dependency (P6), and they make retrieval provider-dependent and harder to reproduce. Deterministic signals first; embeddings as an optional signal only if measured misses remain. | GRD-8; Phase K item 12 + vocabulary-mismatch eval; phase RET (conditional). context-layer §12 updated to match. |
+| "Availability" of context | **Keep, as offline operation:** AutoDE works without a live connection from cached and imported metadata, and says what it can't see. | NFR-6; Phase K (cache, legacy imports, visibility). |
+| Kùzu embedded graph DB beyond ~50k nodes (§3.2, §3.11, §13) | **Drop Kùzu; keep "storage scales".** The graph queries AutoDE needs (neighbourhood, join paths ≤ 3 hops) run on the working set in memory; the at-scale problem is catalog storage and text search, which a relational store with full-text search suits better than a graph database. Any store must also respect P6 (no native modules). | NFR-8; Phase K: embedded-store decision from measurements. |
+| Exact token counting with `js-tiktoken` (§3.10, §6, §10.3, §13) | **Drop the library; keep "never exceed the budget".** Each provider tokenises differently and only OpenAI's tokenizer ships as a library, so "precise" can't hold across 7 providers. Requirement: a conservative estimate with headroom, exact counts where a provider offers them; pruning never cuts mid-block and never drops STRICT rules (met by context packs). | GRD-2; C6 (context health). |
+| Namespaced, readable IDs (§3.6) | **Keep the intent; the scheme was never implemented.** | STC-10; Phase K items 1 and 10. |
+| Authoritative vs derived separation; sources referenced, never copied (§3.1) | **Keep.** It also underpins the rejection of a local catalog mirror. | Principle C9. |
+| File layout (§3.7), module list (§5), file list (§14) | **Move to technical design (HOW);** update to the actual layout (ledger, problems, catalog). | technical-design.md (documentation stage 3). |
+| Deactivation releases everything within 200 ms (§10.5) | **Keep** (drop "terminate worker threads"). | NFR-4. |
+| One workspace = one effort (§7) | **Superseded** by multi-problem workspaces (v0.12.0). | WS-2. |
+| Licensing review for hnswlib/ONNX (§12, §13) | **Fold into a general rule:** any new dependency needs a P6 decision record with licence and size. | Principle P6. |
+| UI tab names (§2) | **Update** to the current panel (LLM / Source / Target / Prefs); keep the design principles. | UI-1, UI-2. |
 
 ---
 
@@ -120,4 +123,4 @@ Requirements in [requirements.md](requirements.md) that were unmet or contradict
 | 2026-10-15 | Embedded database only if K's scale measurements require it; embeddings only via RET, if K's vocabulary-mismatch eval requires it. |
 | 2026-10-15 | Documents reorganised: requirements answer WHAT/WHY, technical design answers HOW, this roadmap answers WHEN, CHANGELOG.md records what changed. Phases D and G renamed DRV and GOV. |
 
-**Superseded planning documents.** The plan files under `~/.claude/plans/` used before v0.25.0 were folded into this roadmap and are no longer maintained. [requirements.md §11/§15/§16](requirements.md) and [technical-design.md §10](technical-design.md) are historical.
+**Superseded planning documents.** The plan files under `~/.claude/plans/` used before v0.25.0 were folded into this roadmap and are no longer maintained. The plan and backlog sections of the previous requirements.md (§11, §15, §16 at `fc16b0d`) and [technical-design.md §10](technical-design.md) are historical.
