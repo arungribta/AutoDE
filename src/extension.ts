@@ -385,6 +385,8 @@ export function activate(context: vscode.ExtensionContext): void {
       // pill/chat context should say "connected" without implying tables are
       // already known.
       sidebarProvider.notifyConnectionStatus(role, { connected: true, platform, detail: `${info.databaseName}.${info.schemaName}` });
+      // Phase K2: the source connection answers catalog query-through and refresh on use.
+      if (role === 'source') sidebarProvider.setCatalogFetcher(newManager.catalogFetcher());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // CLI-execution consent is an easy first-connection trip-up now that
@@ -432,7 +434,13 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         vscode.window.showInformationMessage('Running source assessment...');
         sidebarProvider.logToChat('Running source assessment…');
-        const snapshot = await connectionManager.extractMetadata({ includeProfiling: true });
+        // Phase K2: profiling is sampled and bounded by a per-run query budget.
+        const discoveryCfg = vscode.workspace.getConfiguration('autoDataEngineeringHub');
+        const snapshot = await connectionManager.extractMetadata({
+          includeProfiling: true,
+          profile: { queryBudget: discoveryCfg.get<number>('discovery.profileQueryBudget'), concurrency: discoveryCfg.get<number>('discovery.profileConcurrency') }
+        });
+        if (snapshot.profiling && snapshot.profiling.skippedTables > 0) sidebarProvider.logToChat(`Profiling used its budget of ${snapshot.profiling.budget} queries; ${snapshot.profiling.skippedTables} table(s) were not profiled (setting: discovery.profileQueryBudget).`);
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
         if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot.fsPath, createVscodeFileIo(vscode)); }
         const doneMsg = `Source assessment complete: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`;

@@ -18,6 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createVscodeHost, installVscodeHost } = require('./lib/vscodeHost.cjs');
 const { LlmRouter } = require('./lib/llmRouter.cjs');
+const { generateLargeEstate } = require('./lib/largeEstate.cjs');
 
 const ROOT = path.join(__dirname, '..', '..');
 const REF = path.join(ROOT, 'test', 'reference', 'retail-orders');
@@ -146,7 +147,9 @@ async function main() {
 
     // ── Scenario E: estate identity (Phase K1) — the same table names in two systems,
     // and in dev and prod of one system, plus a legacy dictionary export ──
-    fs.mkdirSync(path.join(scratch, 'estate'), { recursive: true });
+    fs.mkdirSync(path.join(scratch, 'estate', '.ai-context', 'context'), { recursive: true });
+    // Phase K2: the acquired CRM team's vocabulary, where an engineer would record it.
+    fs.copyFileSync(path.join(REF, 'documents', 'vocabulary.yaml'), path.join(scratch, 'estate', '.ai-context', 'context', 'vocabulary.yaml'));
     const sutE = createSut({ provider: args.provider });
     const estateFiles = ['shop.ddl', 'crm.ddl', 'shop_dev.ddl', 'legacy/edw_dbc_columns.csv'];
     await sutE.setup({ workspaceDir: path.join(scratch, 'estate'), referenceDir: REF, sourceOrder: estateFiles,
@@ -160,6 +163,33 @@ async function main() {
       systems: [...new Set(estateTables.map((n) => `${n.origin && n.origin.system}/${n.origin && n.origin.systemEnvironment}`))].sort(),
       legacyIds: estateGraph.nodes.filter((n) => !/^(obj|term|rule|query|metric|rel):/.test(n.id)).length
     };
+
+    // ── Scenario V: vocabulary mismatch (Phase K2) — does each question's pack seed the table it
+    // means, and which deterministic signal finds it (names → + comments → + abbreviations →
+    // + synonyms, the customer's vocabulary file and glossary aliases)? ──
+    const cfmE = sutE.internals ? sutE.internals().cfm : undefined;
+    if (cfmE && cfmE.getCatalog && cfmE.getCatalog().size > 0) {
+      const { resolveText } = dist('engine/context/retrieval.js');
+      const { selectSeedHits } = dist('engine/context/catalog.js');
+      const cat = cfmE.getCatalog();
+      const levels = [
+        ['names only', { comments: false, abbreviations: false, synonyms: false, glossary: false }],
+        ['+ comments', { abbreviations: false, synonyms: false, glossary: false }],
+        ['+ abbreviations', { synonyms: false, glossary: false }],
+        ['+ synonyms, vocabulary file, glossary', {}]
+      ];
+      const seedsAt = (q, signals) => new Set([...resolveText(q, estateGraph).map((m) => m.nodeId), ...selectSeedHits(cat.search(q, { signals })).map((h) => h.id)]);
+      results.vocabulary = {
+        levels: levels.map(([n]) => n),
+        questions: load('vocabulary-questions.yaml').questions.map((q) => {
+          const seeds = new Set(cfmE.buildContextPack({ purpose: 'qa', query: q.question }).manifest.seeds);
+          return { id: q.id, kind: q.kind, question: q.question, found: q.expect.some((e) => seeds.has(e)), byLevel: levels.map(([, sig]) => { const s = seedsAt(q.question, sig); return q.expect.some((e) => s.has(e)); }) };
+        })
+      };
+    }
+
+    // ── Scenario L: the large estate (Phase K2) — scale, responsiveness, scoping ──
+    results.large = await measureLargeEstate(dist, scratch);
 
     // ── The engineer's conversation ──
     results.chat = [];
@@ -269,6 +299,91 @@ async function main() {
   }
 }
 
+/**
+ * Phase K2 acceptance on a generated estate (~2 000 tables, ~50 000 columns, four systems):
+ * ingest time, memory, ledger sync, pack build time, the longest synchronous task, whether packs
+ * stay scoped, and recall on questions phrased in other words. Runs the extension's own
+ * ContextFileManager — the same code path as "Import File…".
+ */
+async function measureLargeEstate(dist, scratch) {
+  const v8 = require('node:v8');
+  const vm = require('node:vm');
+  const { performance, monitorEventLoopDelay } = require('node:perf_hooks');
+  v8.setFlagsFromString('--expose-gc');
+  const gc = vm.runInNewContext('gc');
+  const { GraphManager } = dist('context/GraphManager.js');
+  const { ContextFileManager } = dist('context/ContextFileManager.js');
+  const { parseFile } = dist('engine/context/fileIngestion.js');
+  const dir = path.join(scratch, 'large');
+  fs.mkdirSync(path.join(dir, '.ai-context'), { recursive: true });
+  const estate = generateLargeEstate();
+  gc();
+  const heap0 = process.memoryUsage().heapUsed;
+  const graph = new GraphManager();
+  const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+  await cfm.initialize();
+  // Longest synchronous task: event-loop delay while a stage runs (10 ms resolution), plus the
+  // directly timed synchronous calls (each file parse, each pack build).
+  const h = monitorEventLoopDelay({ resolution: 10 });
+  h.enable();
+  const stages = {};
+  const stage = async (name, fn) => {
+    h.reset();
+    const t0 = performance.now();
+    await fn();
+    stages[name] = { ms: Math.round(performance.now() - t0), maxBlockMs: Math.round(h.max / 1e6) };
+  };
+  let parseMaxMs = 0;
+  await stage('ingest', async () => {
+    for (const f of estate.files) {
+      const t = performance.now();
+      const parsed = parseFile(f.ddl, path.join(dir, f.name), { system: f.system, environment: f.environment });
+      parseMaxMs = Math.max(parseMaxMs, performance.now() - t);
+      await cfm.ingestParsed(parsed.nodes, parsed.edges);
+    }
+  });
+  gc();
+  const heapMB = Math.round((process.memoryUsage().heapUsed - heap0) / 1e6);
+  const cat = cfm.getCatalog();
+  const schemaOf = (id) => { const [sys, , fqn] = id.slice(4).split('/'); return `${sys}/${fqn.split('.').slice(-2)[0]}`; };
+  const allSchemas = new Set(cat.all().map((e) => schemaOf(e.id)));
+  const packs = [];
+  await stage('packs', async () => {
+    for (const n of estate.needles) {
+      const t = performance.now();
+      const p = cfm.buildContextPack({ purpose: 'qa', query: n.question });
+      const ms = performance.now() - t;
+      const tables = p.manifest.nodeIds.filter((id) => cat.has(id));
+      packs.push({ id: n.id, kind: n.kind, question: n.question, ms: Math.round(ms * 10) / 10, found: p.manifest.seeds.includes(n.expect), tables: tables.length, schemas: new Set(tables.map(schemaOf)).size, tokens: p.manifest.tokenCount });
+    }
+  });
+  await stage('promotion sync', () => cfm.whenIdle());
+  const workingSet = graph.getNodesByType('table').length;
+  await stage('reload', async () => {
+    const c2 = new ContextFileManager({ fsPath: dir }, new GraphManager(), () => {});
+    await c2.initialize();
+  });
+  h.disable();
+  const bytes = (d) => fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? bytes(path.join(d, e.name)) : fs.statSync(path.join(d, e.name)).size), 0) : 0;
+  const packMaxMs = Math.max(...packs.map((p) => p.ms));
+  return {
+    tables: estate.tables,
+    columns: estate.columns,
+    systems: estate.files.length,
+    schemas: allSchemas.size,
+    catalogued: cat.size,
+    workingSet,
+    heapMB,
+    stages,
+    parseMaxMs: Math.round(parseMaxMs),
+    packMaxMs,
+    longestSyncMs: Math.max(parseMaxMs, packMaxMs, ...Object.values(stages).map((s) => s.maxBlockMs)),
+    catalogKB: Math.round(bytes(path.join(dir, '.ai-context', 'catalog')) / 1024),
+    ledgerKB: Math.round(bytes(path.join(dir, '.ai-context', 'ledger')) / 1024),
+    packs
+  };
+}
+
 function summaryRows(r) {
   const g = r.grounding;
   const idTotal = g.tablesChecked + g.columnsChecked;
@@ -291,6 +406,9 @@ function summaryRows(r) {
     ['Source tables kept distinct at ingestion', 'all', `${r.ingestion.represented}/${r.ingestion.declared}`],
     ['Tables kept distinct across systems and environments', 'all', r.estate ? `${r.estate.distinct}/${r.estate.declared}` : 'n/a'],
     ['Stale-fact use', '0', r.manifests && r.manifests.staleUse !== null ? String(r.manifests.staleUse) : 'n/a — needs grounding manifests (C3)'],
+    ['Vocabulary-mismatch seed recall', 'reported', r.vocabulary ? `${r.vocabulary.questions.filter((q) => q.found).length}/${r.vocabulary.questions.length} (paraphrases: ${r.vocabulary.questions.filter((q) => q.kind === 'paraphrase' && q.found).length}/${r.vocabulary.questions.filter((q) => q.kind === 'paraphrase').length})` : 'n/a — no catalog (before K2)'],
+    ['Large-estate seed recall', 'reported', r.large ? `${r.large.packs.filter((p) => p.found).length}/${r.large.packs.length}` : 'n/a'],
+    ['Longest synchronous task, large estate', '≤ 100 ms', r.large ? `${Math.round(r.large.longestSyncMs)} ms` : 'n/a'],
     ['Plan-step context size', 'reported', `${r.contextNoiseLast.tokens} tokens median per step (max ${r.contextNoiseLast.tokensMax})`]
   ];
 }
@@ -328,6 +446,30 @@ function renderReport(r) {
   for (const c of r.ingestion.collisions) {
     if (c.nodes.length < c.sources.length) L.push(`- **Collision:** ${c.sources.join(' and ')} became one node (${c.nodes.join(', ') || 'none'}). Their columns are merged and one source's table metadata is lost.`);
     else L.push(`- Same table name in two sources, kept distinct: ${c.nodes.join(', ')}.`);
+  }
+
+  if (r.large) {
+    const g = r.large;
+    L.push('', '## Large estate (Phase K2)', '');
+    L.push(`Generated estate: ${g.systems} systems, ${g.schemas} schemas, ${g.tables} tables, ${g.columns} columns (same names across schemas and systems; a legacy EDW with abbreviated names; an acquired CRM with its own words). Imported the way "Import File…" imports: into the catalog, and into the working set as far as it fits.`, '');
+    L.push('| Measure | Result |', '|---|---|');
+    L.push(`| Catalogued / in the working set after the questions | ${g.catalogued} / ${g.workingSet} tables |`);
+    L.push(`| Ingest time (parse + catalog + ledger) | ${g.stages.ingest.ms} ms |`);
+    L.push(`| Extension-host heap growth after ingest | ${g.heapMB} MB |`);
+    L.push(`| Pack build, max | ${g.packMaxMs} ms |`);
+    L.push(`| Promotion and ledger sync after the questions | ${g.stages['promotion sync'].ms} ms |`);
+    L.push(`| Reload (catalog, ledger, projection) | ${g.stages.reload.ms} ms |`);
+    L.push(`| Longest synchronous task (parse ${g.parseMaxMs} ms; event-loop delay per stage: ${Object.entries(g.stages).map(([k, v]) => `${k} ${v.maxBlockMs}`).join(', ')} ms) | ${Math.round(g.longestSyncMs)} ms |`);
+    L.push(`| On disk: catalog / ledger | ${g.catalogKB} KB / ${g.ledgerKB} KB |`);
+    L.push('', '| Question | Kind | Seeded | Tables in pack | Schemas in pack (of ' + g.schemas + ') | Build ms |', '|---|---|---|---|---|---|');
+    for (const p of g.packs) L.push(`| ${p.id} ${p.question} | ${p.kind} | ${p.found ? 'yes' : 'no'} | ${p.tables} | ${p.schemas} | ${p.ms} |`);
+  }
+  if (r.vocabulary) {
+    const v = r.vocabulary;
+    L.push('', '## Vocabulary mismatch (Phase K2)', '', 'Questions that name a table in other words, over the estate fixture (shop, crm, legacy EDW export) with the acquired team\'s vocabulary file. "Seeded" is the system as shipped; the columns to the right switch the deterministic signals on one at a time.', '');
+    L.push(`| Question | Kind | Seeded | ${v.levels.join(' | ')} |`, `|---|---|---|${v.levels.map(() => '---').join('|')}|`);
+    for (const q of v.questions) L.push(`| ${q.id} ${q.question} | ${q.kind} | ${q.found ? 'yes' : 'no'} | ${q.byLevel.map((b) => (b ? 'yes' : 'no')).join(' | ')} |`);
+    L.push(`| **Total** | | **${v.questions.filter((q) => q.found).length}/${v.questions.length}** | ${v.levels.map((_, i) => `${v.questions.filter((q) => q.byLevel[i]).length}/${v.questions.length}`).join(' | ')} |`);
   }
 
   L.push('', '## Context delivery', '', '| | Noise imported last | Noise imported first |', '|---|---|---|');

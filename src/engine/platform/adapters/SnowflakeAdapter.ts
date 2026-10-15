@@ -211,10 +211,12 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
     };
   }
 
-  getMetadataQueries(scope?: string): PlatformMetadataQueries {
+  getMetadataQueries(scope?: string, tables?: string[]): PlatformMetadataQueries {
     const parts = scope ? scope.split('.') : [];
     const db = parts.length > 1 ? parts[0] : this.connectedDb;
     const schema = parts.length > 0 ? parts[parts.length - 1] : (this.connectedSchema || 'PUBLIC');
+    // Phase K2 query-through: only the named tables (case-insensitive; names are literals, quotes doubled).
+    const only = tables && tables.length > 0 ? `\n          AND UPPER(table_name) IN (${tables.map((t) => `'${t.toUpperCase().replace(/'/g, "''")}'`).join(', ')})` : '';
 
     return {
       listTables: `
@@ -225,10 +227,16 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
           table_type,
           row_count,
           bytes,
+          last_altered,
           comment
         FROM ${db}.INFORMATION_SCHEMA.TABLES
-        WHERE table_schema = '${schema}'
+        WHERE table_schema = '${schema}'${only}
         ORDER BY table_name`,
+
+      lastAltered: `
+        SELECT table_schema, table_name, last_altered
+        FROM ${db}.INFORMATION_SCHEMA.TABLES
+        WHERE table_schema = '${schema}'${only}`,
 
       listColumns: `
         SELECT
@@ -242,7 +250,7 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
           comment,
           column_default
         FROM ${db}.INFORMATION_SCHEMA.COLUMNS
-        WHERE table_schema = '${schema}'
+        WHERE table_schema = '${schema}'${only}
         ORDER BY table_name, ordinal_position`,
 
       listForeignKeys: `
@@ -277,6 +285,10 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
           MAX(${col})::STRING AS max_value,
           AVG(LENGTH(${col}::STRING)) AS avg_length
         FROM ${fqn}`,
+
+      profileTable: (fqn: string, cols: string[], sampleRows: number) => `
+        SELECT COUNT(*) AS row_count${cols.map((c, i) => `, COUNT(DISTINCT ${c}) AS d_${i}, COUNT(*) - COUNT(${c}) AS n_${i}`).join('')}
+        FROM ${fqn} SAMPLE (${Math.max(1, Math.floor(sampleRows))} ROWS)`,
 
       extractLineage: `
         SELECT

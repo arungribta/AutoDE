@@ -1,0 +1,39 @@
+# Vocabulary-mismatch question set (Phase K2, docs/context-layer-requirements.md §11 Phase K item 12).
+#
+# Each question names a table in words that differ from its physical name. Run over the estate
+# fixture: shop (prod and dev), crm and the legacy EDW dictionary export, with the acquired CRM
+# team's terms in documents/vocabulary.yaml.
+#
+# expect: table ids, any one of which counts as found (a seed of the question's context pack).
+# kind:   synonym       a common business synonym (default dictionary)
+#         abbreviation  a cryptic legacy name (default abbreviation dictionary)
+#         cross-org     the other organisation's word (customer vocabulary file)
+#         glossary      only the client's glossary links the words to the table
+#         paraphrase    no dictionary covers it — the deterministic signals are not expected to
+#                       find these; their misses are what the RET (embeddings) decision rests on.
+#
+# Limitation: the default dictionaries and these questions were written by the same team. The
+# paraphrase group and the generated large-estate questions are the guard against measuring the
+# dictionary against itself.
+questions:
+  - { id: v01, kind: synonym, question: Which clients bought something last month?, expect: [obj:shop/prod/shop.customers, obj:crm/prod/crm.customers] }
+  - { id: v02, kind: synonym, question: Where are purchases recorded?, expect: [obj:shop/prod/shop.orders] }
+  - { id: v03, kind: synonym, question: Show the reimbursements given to shoppers, expect: [obj:shop/prod/shop.refunds] }
+  - { id: v04, kind: synonym, question: Which deliveries arrived late?, expect: [obj:shop/prod/shop.shipments] }
+  - { id: v05, kind: synonym, question: List the goods we sell, expect: [obj:shop/prod/shop.products] }
+  - { id: v06, kind: synonym, question: Who are the rewards programme members?, expect: [obj:crm/prod/crm.loyalty_members] }
+  - { id: v07, kind: synonym, question: How many help desk cases are still open?, expect: [obj:crm/prod/crm.support_tickets] }
+  - { id: v08, kind: synonym, question: Settlements received against each order, expect: [obj:shop/prod/shop.payments] }
+  - { id: v09, kind: abbreviation, question: Where is the legacy customer master?, expect: [obj:edw/prod/edw_sales.cust_mstr] }
+  - { id: v10, kind: abbreviation, question: Order headers in the enterprise warehouse, expect: [obj:edw/prod/edw_sales.ord_hdr] }
+  - { id: v11, kind: abbreviation, question: Order lines in the legacy warehouse, expect: [obj:edw/prod/edw_sales.ord_ln] }
+  - { id: v12, kind: abbreviation, question: Client master in the old warehouse, expect: [obj:edw/prod/edw_sales.cust_mstr] }
+  - { id: v13, kind: cross-org, question: Engagement responses from the acquired CRM, expect: [obj:crm/prod/crm.campaign_responses] }
+  - { id: v14, kind: cross-org, question: Which engagements ran this quarter?, expect: [obj:crm/prod/crm.campaigns] }
+  - { id: v15, kind: cross-org, question: Patron segments, expect: [obj:crm/prod/crm.segments] }
+  - { id: v16, kind: glossary, question: Where is the GOLD / SILVER / BRONZE status kept?, expect: [obj:crm/prod/crm.loyalty_members] }
+  - { id: v17, kind: glossary, question: What feeds gross merchandise value?, expect: [obj:shop/prod/shop.order_items] }
+  - { id: v18, kind: paraphrase, question: Money customers got back after returning things, expect: [obj:shop/prod/shop.refunds] }
+  - { id: v19, kind: paraphrase, question: Points members earned or spent, expect: [obj:crm/prod/crm.loyalty_transactions] }
+  - { id: v20, kind: paraphrase, question: Complaints raised with the service team, expect: [obj:crm/prod/crm.support_tickets] }
+  - { id: v21, kind: paraphrase, question: Where do parcels get sent?, expect: [obj:shop/prod/shop.customer_addresses, obj:shop/prod/shop.shipments] }

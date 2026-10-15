@@ -5866,6 +5866,319 @@ async function main() {
     }
   });
 
+  // ---------- v0.32.0: Phase K2 — working-set cache and scale ----------
+
+  const k2 = {
+    async cfm(options = {}) {
+      const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+      const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k2-'));
+      nodeFs.mkdirSync(p.join(dir, '.ai-context'), { recursive: true });
+      const mock = {
+        Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+        workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
+        RelativePattern: class {}
+      };
+      delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+      delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+      const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+      const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+      const make = async () => {
+        const graph = new GraphManager();
+        const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+        if (options.policy) cfm.setWorkingSetPolicy(options.policy);
+        if (options.fetcher) cfm.setCatalogFetcher(options.fetcher);
+        await cfm.initialize();
+        return { graph, cfm };
+      };
+      const first = await make();
+      return { dir, ...first, reload: make, cleanup: () => nodeFs.rmSync(dir, { recursive: true, force: true }) };
+    },
+    /** `n` tables in schema `s` of system `sys`: names t0…, two columns each. */
+    ddl(s, names, extra = '') {
+      return names.map((n) => `CREATE TABLE ${s}.${n} (\n  ${n}_id INTEGER NOT NULL PRIMARY KEY,\n  amount NUMBER(18,2)\n);`).join('\n') + '\n' + extra;
+    },
+    parsed(sys, s, names, extra) {
+      const { parseDdl } = require('../dist/engine/context/fileIngestion.js');
+      return parseDdl(k2.ddl(s, names, extra), `/src/${sys}.ddl`, { system: sys, environment: 'prod' });
+    }
+  };
+
+  await test('v0.32.0: vocabulary reduces names and prose to shared concepts — abbreviations, synonyms, a customer file extends both', () => {
+    const v = require('../dist/engine/context/vocabulary.js');
+    const vocab = v.buildVocabulary();
+    assert.deepStrictEqual(v.concepts('CUST_ORD_HDR', vocab), ['customer', 'order', 'header']);
+    assert.deepStrictEqual(v.concepts('Which clients placed purchases?', vocab, v.ALL_SIGNALS, true), ['customer', 'placed', 'order']);
+    assert.deepStrictEqual(v.concepts('custOrderLines', vocab), ['customer', 'order', 'line'], 'camel case splits too');
+    assert.deepStrictEqual(v.concepts('CUST_ORD_HDR', vocab, { abbreviations: false, synonyms: true }), ['cust', 'ord', 'hdr'], 'ablation switch');
+    assert.ok(v.concepts('patron rewards', vocab).includes('patron'), 'an organisation-specific word is not in the defaults');
+    const file = v.parseVocabularyFile('abbreviations:\n  PTRN: patron\nsynonyms:\n  - [patron, customer]\n  - [engagement, campaign]\n');
+    const custom = v.buildVocabulary(file);
+    assert.deepStrictEqual(v.concepts('PTRN engagement', custom), ['customer', 'engagement'], 'patron joins the default customer group; a new group folds onto its first word');
+    assert.deepStrictEqual(v.concepts('campaigns', custom), ['engagement']);
+    assert.deepStrictEqual(v.parseVocabularyFile('not: [valid'), {});
+  });
+
+  await test('v0.32.0: DDL and dictionary comments are kept (COMMENT ON TABLE/COLUMN, inline COMMENT with commas) — they are a retrieval signal', () => {
+    const { parseDdl, parseFile } = fresh('../dist/engine/context/fileIngestion.js');
+    const r = parseDdl("CREATE TABLE EDW.CUST_MSTR (\n  CUST_NO VARCHAR(20) NOT NULL COMMENT 'Customer number, as in (legacy) CRM',\n  SEG_CD CHAR(4)\n);\nCOMMENT ON TABLE EDW.CUST_MSTR IS 'Customer master — one row per client';\nCOMMENT ON COLUMN EDW.CUST_MSTR.SEG_CD IS 'Segment code';", '/x.ddl');
+    const t = r.nodes.find((n) => n.type === 'table');
+    assert.strictEqual(t.description, 'Customer master — one row per client');
+    assert.deepStrictEqual(r.nodes.filter((n) => n.type === 'column').map((c) => [c.label, c.dataType, c.description]), [['CUST_NO', 'VARCHAR(20)', 'Customer number, as in (legacy) CRM'], ['SEG_CD', 'CHAR(4)', 'Segment code']]);
+    const csv = 'DatabaseName,TableName,ColumnName,ColumnType,ColumnLength,Nullable,ColumnId,CommentString\nEDW,ORD_HDR,ORD_NO,CV,20,N,1,Order number\n';
+    const d = parseFile(csv, '/dbc.csv');
+    assert.strictEqual(d.nodes.find((n) => n.type === 'column').description, 'Order number');
+  });
+
+  await test('v0.32.0: catalog search ranks by concepts over names, comments and glossary aliases; seeds are the best few within a margin', async () => {
+    const { Catalog, entriesFromGraph, selectSeedHits } = require('../dist/engine/context/catalog.js');
+    const { parseDdl } = require('../dist/engine/context/fileIngestion.js');
+    const g = parseDdl(k2.ddl('edw', ['CUST_ORD_HDR', 'GL_JRNL_LN', 'WHSE_INVTY_SNAP', 'CUST_MSTR']) + k2.ddl('crm', ['patron_rewards']) + "COMMENT ON TABLE crm.patron_rewards IS 'Points ledger';", '/e.ddl', { system: 'edw', environment: 'prod' });
+    const cat = new Catalog('/unused');
+    cat.upsert(entriesFromGraph(g.nodes, g.edges));
+    await cat.buildIndex();
+    const top = (q, opts) => cat.search(q, opts)[0]?.id.split('/').pop();
+    assert.strictEqual(top('customer order headers'), 'edw.cust_ord_hdr');
+    assert.strictEqual(top('general ledger journal lines'), 'edw.gl_jrnl_ln');
+    assert.strictEqual(top('points ledger'), 'crm.patron_rewards', 'table comments are indexed');
+    assert.strictEqual(cat.search('customer order headers', { signals: { abbreviations: false } }).length, 0, 'without abbreviation expansion nothing matches');
+    cat.setAliases(new Map([['obj:edw/prod/crm.patron_rewards', ['Loyalty Tier']]]));
+    assert.strictEqual(top('loyalty tier'), 'crm.patron_rewards', 'glossary terms bound to a table are aliases');
+    assert.strictEqual(cat.search('amount').length, 0, 'a column-name match alone is too weak to seed');
+    const seeds = selectSeedHits(cat.search('customer'));
+    assert.ok(seeds.length >= 1 && seeds.length <= 3 && seeds.every((h) => /cust/.test(h.id)));
+  });
+
+  await test('v0.32.0: an import over the working-set size is catalogued, not mirrored; a pack renders a matching table from the catalog and promotes it; a small import enters whole', async () => {
+    const env = await k2.cfm({ policy: { maxTables: 5 } });
+    try {
+      const big = k2.parsed('edw', 'edw', ['CUST_ORD_HDR', 'GL_JRNL_LN', 'WHSE_INVTY_SNAP', 'PROD_MSTR', 'SUPP_MSTR', 'EMP_MSTR', 'INV_HDR']);
+      const r = await env.cfm.ingestParsed(big.nodes, big.edges);
+      assert.deepStrictEqual(r, { catalogued: 7, promoted: 0 });
+      assert.strictEqual(env.graph.getNodesByType('table').length, 0);
+      assert.ok(!env.cfm.getLedger().assertions().some((a) => a.predicate === 'node'), 'nothing mirrored into the ledger');
+      const pack = env.cfm.buildContextPack({ purpose: 'chat', query: 'Which table holds customer order headers?' });
+      assert.ok(pack.text.includes('edw.CUST_ORD_HDR') && pack.text.includes('CUST_ORD_HDR_id'), 'rendered from the catalog with its columns');
+      assert.deepStrictEqual(pack.manifest.promoted, ['obj:edw/prod/edw.cust_ord_hdr']);
+      assert.ok(!pack.text.includes('GL_JRNL_LN'), 'unrelated tables stay out');
+      await env.cfm.whenIdle();
+      assert.deepStrictEqual(env.graph.getNodesByType('table').map((t) => t.id), ['obj:edw/prod/edw.cust_ord_hdr']);
+      assert.ok(env.cfm.getLedger().assertions().some((a) => a.predicate === 'node' && a.subject[0] === 'obj:edw/prod/edw.cust_ord_hdr' && a.status === 'active'));
+      const small = k2.parsed('shop', 'shop', ['orders', 'customers']);
+      assert.deepStrictEqual(await env.cfm.ingestParsed(small.nodes, small.edges), { catalogued: 2, promoted: 2 });
+      // Catalog files: per system/environment, and ignored by git.
+      const nodeFs = require('node:fs');
+      assert.ok(nodeFs.existsSync(`${env.dir}/.ai-context/catalog/edw/prod/catalog.json`));
+      assert.ok(/\*/.test(nodeFs.readFileSync(`${env.dir}/.ai-context/catalog/.gitignore`, 'utf8')));
+      const again = await env.reload();
+      assert.strictEqual(again.cfm.getCatalog().size, 9, 'the catalog survives a reload');
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.32.0: tables imported after the glossary get its maps_to links, and glossary terms index catalog tables outside the working set', async () => {
+    const nodeFs = require('node:fs');
+    const env = await k2.cfm({ policy: { maxTables: 1 } });
+    try {
+      nodeFs.mkdirSync(`${env.dir}/.ai-context/context`, { recursive: true });
+      nodeFs.writeFileSync(`${env.dir}/.ai-context/context/business-context.yaml`, 'business_terms:\n  - term: Loyalty Tier\n    description: GOLD, SILVER or BRONZE from the points balance.\n    mapped_tables: [crm.members]\n  - term: Gross Merchandise Value\n    mapped_tables: [crm.orders_hist]\n');
+      const reloaded = await env.reload();
+      const g = k2.parsed('crm', 'crm', ['members']);
+      await reloaded.cfm.ingestParsed(g.nodes, g.edges);
+      const edges = reloaded.graph.serializeSnapshot().edges.filter((e) => e.type === 'maps_to');
+      assert.deepStrictEqual(edges.map((e) => `${e.source} -> ${e.target}`), ['term:loyalty-tier -> obj:crm/prod/crm.members']);
+      const big = k2.parsed('crm', 'crm', ['orders_hist', 'x1', 'x2']);
+      assert.strictEqual((await reloaded.cfm.ingestParsed(big.nodes, big.edges)).promoted, 0, 'over the size: catalog only');
+      const hits = reloaded.cfm.getCatalog().search('gross merchandise value');
+      assert.strictEqual(hits[0] && hits[0].id, 'obj:crm/prod/crm.orders_hist', 'the term indexes a table that is only in the catalog');
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.32.0: offline, a name-only catalog object raises a "structure" gap; one hidden by grants is reported as not visible', async () => {
+    const env = await k2.cfm();
+    try {
+      const cat = env.cfm.getCatalog();
+      cat.upsertNames([{ id: 'obj:edw/prod/edw.cust_mstr', system: 'edw', environment: 'prod', table: { id: 'obj:edw/prod/edw.cust_mstr', type: 'table', label: 'CUST_MSTR', fqn: 'edw.CUST_MSTR', database: '', schema: 'edw', isView: false, version: 1 } },
+        { id: 'obj:edw/prod/edw.cust_addr', system: 'edw', environment: 'prod', table: { id: 'obj:edw/prod/edw.cust_addr', type: 'table', label: 'CUST_ADDR', fqn: 'edw.CUST_ADDR', database: '', schema: 'edw', isView: false, version: 1 } }]);
+      cat.markInvisible('obj:edw/prod/edw.cust_addr');
+      await cat.buildIndex();
+      const pack = env.cfm.buildContextPack({ purpose: 'chat', query: 'customer master and customer addresses' });
+      const gap = pack.manifest.gaps.find((g) => g.needed === 'structure');
+      assert.ok(gap && gap.subject[0] === 'obj:edw/prod/edw.cust_mstr');
+      assert.ok(/not loaded/.test(pack.text), 'the gap is in the pack text');
+      assert.ok(/1 object\(s\) in scope are not visible with your current grants \(edw\.CUST_ADDR\)/.test(pack.text));
+      assert.ok(pack.manifest.warnings.includes('invisible:edw.CUST_ADDR'));
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.32.0: query-through loads a name-only object from the live source and promotes it; one the source does not return is marked not visible', async () => {
+    const fetched = [];
+    const { parseDdl } = require('../dist/engine/context/fileIngestion.js');
+    const fetcher = {
+      covers: (system) => system === 'edw',
+      fetchStructure: async (entries) => {
+        fetched.push(...entries.map((e) => e.id));
+        const g = parseDdl(k2.ddl('edw', ['CUST_MSTR']), '/live', { system: 'edw', environment: 'prod' });
+        for (const n of g.nodes) n.origin = { ...n.origin, reliability: 'live-verified', lastVerifiedAt: new Date().toISOString() };
+        return g;
+      }
+    };
+    const env = await k2.cfm({ fetcher });
+    try {
+      const cat = env.cfm.getCatalog();
+      const name = (n) => ({ id: `obj:edw/prod/edw.${n.toLowerCase()}`, system: 'edw', environment: 'prod', table: { id: `obj:edw/prod/edw.${n.toLowerCase()}`, type: 'table', label: n, fqn: `edw.${n}`, database: '', schema: 'edw', isView: false, version: 1 } });
+      cat.upsertNames([name('CUST_MSTR'), name('CUST_MSTR_ARCH')]);
+      await env.cfm.prepareContext({ purpose: 'chat', query: 'the customer master' });
+      assert.ok(fetched.includes('obj:edw/prod/edw.cust_mstr'));
+      assert.strictEqual(cat.get('obj:edw/prod/edw.cust_mstr').tier, 1);
+      assert.ok(env.graph.getNodesByType('table').some((t) => t.id === 'obj:edw/prod/edw.cust_mstr'), 'promoted into the working set');
+      assert.ok(fetched.includes('obj:edw/prod/edw.cust_mstr_arch'));
+      assert.strictEqual(cat.get('obj:edw/prod/edw.cust_mstr_arch').visible, false, 'asked for, not returned: hidden by grants');
+      assert.strictEqual(cat.get('obj:edw/prod/edw.cust_mstr_arch').tier, 0);
+      const pack = env.cfm.buildContextPack({ purpose: 'chat', query: 'the customer master' });
+      assert.ok(!pack.manifest.gaps.some((g) => g.needed === 'structure' && g.subject[0] === 'obj:edw/prod/edw.cust_mstr'));
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.32.0: refresh on use — an unchanged last-altered only marks the object checked; a changed one is re-read and the ledger supersedes the schema fact', async () => {
+    let altered = '2026-10-01T00:00:00Z';
+    let columns = ['id INTEGER', 'amount NUMBER(18,2)'];
+    let fetches = 0;
+    const { parseDdl } = require('../dist/engine/context/fileIngestion.js');
+    const live = () => {
+      const g = parseDdl(`CREATE TABLE sales.orders (${columns.join(', ')});`, '/live', { system: 'shop', environment: 'prod' });
+      for (const n of g.nodes) {
+        n.origin = { ...n.origin, reliability: 'live-verified', lastVerifiedAt: new Date().toISOString() };
+        if (n.type === 'table') n.metadata = { ...n.metadata, lastAltered: altered };
+      }
+      return g;
+    };
+    const fetcher = { covers: () => true, fetchStructure: async () => { fetches++; return live(); }, lastAltered: async (entries) => new Map(entries.map((e) => [e.id, altered])) };
+    const env = await k2.cfm({ fetcher, policy: { schemaTtlDays: 0 } });
+    try {
+      const g = live();
+      await env.cfm.ingestParsed(g.nodes, g.edges);
+      const id = 'obj:shop/prod/sales.orders';
+      assert.strictEqual(env.cfm.getCatalog().get(id).lastAltered, altered);
+      await new Promise((r) => setTimeout(r, 5));
+      let r = await env.cfm.refreshWorkingSet();
+      assert.deepStrictEqual(r, { checked: 1, fetched: 0 }, 'unchanged: checked by last-altered, nothing re-read');
+      assert.strictEqual(fetches, 0);
+      altered = '2026-10-15T00:00:00Z';
+      columns = ['id INTEGER', 'amount NUMBER(18,2)', 'channel VARCHAR(20)'];
+      await new Promise((r) => setTimeout(r, 5));
+      r = await env.cfm.refreshWorkingSet();
+      assert.deepStrictEqual(r, { checked: 1, fetched: 1 });
+      assert.ok(env.graph.getNodeById(`${id}.channel`), 'the new column is in the working set');
+      assert.ok(env.cfm.getLedger().assertions().some((a) => a.predicate === 'node' && a.subject[0] === `${id}.channel` && a.status === 'active'));
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.32.0: eviction — over the working-set size, unused and unreferenced tables leave it ("left the working set", no review flags); referenced ones and small estates stay', async () => {
+    const { selectEvictions } = require('../dist/engine/context/catalog.js');
+    const now = new Date('2026-10-15T00:00:00Z');
+    const cat = { get: (id) => ({ lastUsedAt: id === 'b' ? '2026-10-14T00:00:00Z' : '2026-08-01T00:00:00Z' }) };
+    const policy = { maxTables: 2, evictAfterDays: 30, schemaTtlDays: 7 };
+    assert.deepStrictEqual(selectEvictions(['a', 'b', 'c', 'd'], cat, new Set(['c']), policy, now), ['a', 'd']);
+    assert.deepStrictEqual(selectEvictions(['a', 'b'], cat, new Set(), policy, now), [], 'within the size nothing is evicted');
+
+    const env = await k2.cfm({ policy: { maxTables: 3, evictAfterDays: 1 } });
+    try {
+      const g = k2.parsed('shop', 'shop', ['orders', 'customers', 'refunds']);
+      await env.cfm.ingestParsed(g.nodes, g.edges);
+      await env.cfm.getLedger().assert({ kind: 'key', subject: ['obj:shop/prod/shop.refunds'], predicate: 'primary', value: ['refunds_id'], statement: 'refunds_id is the key', evidence: [{ type: 'chat_message', ref: 't1' }], status: 'active', trust: 'confirmed' });
+      const more = k2.parsed('crm', 'crm', ['tickets']);
+      assert.deepStrictEqual(await env.cfm.ingestParsed(more.nodes, more.edges), { catalogued: 1, promoted: 0 }, 'over the size: catalogued only');
+      await env.cfm.promote(['obj:crm/prod/crm.tickets']);
+      assert.strictEqual(env.graph.getNodesByType('table').length, 4, 'a task used it: the working set is now over its size');
+      // Nobody has used anything since January (markChecked also marks the entry for saving).
+      for (const e of env.cfm.getCatalog().all()) { e.lastUsedAt = '2026-01-01T00:00:00Z'; env.cfm.getCatalog().markChecked(e.id, '2026-01-01T00:00:00Z'); }
+      await env.cfm.getCatalog().save();
+      const after = await env.reload();
+      const tables = after.graph.getNodesByType('table').map((t) => t.id).sort();
+      assert.deepStrictEqual(tables, ['obj:shop/prod/shop.customers', 'obj:shop/prod/shop.orders', 'obj:shop/prod/shop.refunds'], 'one evicted (oldest, then by id); the referenced table stays');
+      const ledger = after.cfm.getLedger();
+      const gone = ledger.assertions().find((a) => a.predicate === 'node' && a.subject[0] === 'obj:crm/prod/crm.tickets');
+      assert.strictEqual(gone.status, 'rejected');
+      assert.ok(ledger.history(gone.id).some((e) => e.reason === 'left the working set (unused; still in the catalog)'));
+      assert.ok(!ledger.assertions().some((a) => a.status === 'needs_review'), 'eviction flags nothing for review');
+      assert.strictEqual(after.cfm.getCatalog().get('obj:crm/prod/crm.tickets').tier, 1, 'a file-sourced entry keeps its structure in the catalog');
+      const pack = after.cfm.buildContextPack({ purpose: 'chat', query: 'tickets' });
+      assert.ok(pack.manifest.promoted && pack.manifest.promoted.includes('obj:crm/prod/crm.tickets'), 'and comes back on use');
+      await after.cfm.whenIdle();
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.32.0: profiling is sampled, one query per table, at most `concurrency` in flight and never over the query budget', async () => {
+    const { SnowflakeAdapter } = require('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ account: 'acme', username: 'u', database: 'SALES' }, () => {});
+    adapter.connectedDb = 'SALES';
+    let inFlight = 0, maxInFlight = 0, profileQueries = 0;
+    const names = Array.from({ length: 30 }, (_, i) => `T${i}`);
+    adapter.executeQuery = async (sql) => {
+      if (/INFORMATION_SCHEMA\.TABLES/i.test(sql)) return { columns: [], rows: names.map((n) => ({ TABLE_CATALOG: 'SALES', TABLE_SCHEMA: 'PUBLIC', TABLE_NAME: n, TABLE_TYPE: 'BASE TABLE' })), rowCount: 30, executionTimeMs: 0 };
+      if (/INFORMATION_SCHEMA\.COLUMNS/i.test(sql)) return { columns: [], rows: names.flatMap((n) => [{ TABLE_SCHEMA: 'PUBLIC', TABLE_NAME: n, COLUMN_NAME: 'ID', DATA_TYPE: 'NUMBER', IS_NULLABLE: 'NO' }, { TABLE_SCHEMA: 'PUBLIC', TABLE_NAME: n, COLUMN_NAME: 'V', DATA_TYPE: 'TEXT', IS_NULLABLE: 'YES' }]), rowCount: 60, executionTimeMs: 0 };
+      if (/SAMPLE \(/.test(sql)) {
+        profileQueries++; inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 2));
+        inFlight--;
+        return { columns: [], rows: [{ ROW_COUNT: 100, D_0: 100, N_0: 0, D_1: 7, N_1: 3 }], rowCount: 1, executionTimeMs: 0 };
+      }
+      assert.ok(!/COUNT\(DISTINCT/.test(sql), 'no per-column full scans');
+      return { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
+    };
+    adapter.getCapabilities = () => ({ supportsColumnProfiling: true, supportsLineageExtraction: false });
+    const snap = await adapter.extractMetadata({ includeProfiling: true, profile: { queryBudget: 5, concurrency: 2, sampleRows: 500 } });
+    assert.strictEqual(profileQueries, 5);
+    assert.ok(maxInFlight <= 2);
+    assert.deepStrictEqual(snap.profiling, { queries: 5, budget: 5, profiledTables: 5, skippedTables: 25 });
+    assert.deepStrictEqual(snap.tables[0].columns.map((c) => c.profile), [{ distinctCount: 100, nullCount: 0 }, { distinctCount: 7, nullCount: 3 }]);
+  });
+
+  await test('v0.32.0: query-through SQL filters by table and reads last-altered; a table filter skips lineage; ConnectionManager exposes a catalog fetcher for its system', async () => {
+    const { SnowflakeAdapter } = require('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const { DatabricksAdapter } = require('../dist/engine/platform/adapters/DatabricksAdapter.js');
+    const sf = new SnowflakeAdapter({ account: 'acme', username: 'u', database: 'SALES' }, () => {});
+    sf.connectedDb = 'SALES';
+    const q = sf.getMetadataQueries('SALES.PUBLIC', ["orders", "o'brien"]);
+    assert.ok(/AND UPPER\(table_name\) IN \('ORDERS', 'O''BRIEN'\)/.test(q.listColumns) && /last_altered/.test(q.listTables) && /last_altered/.test(q.lastAltered));
+    assert.ok(!/IN \(/.test(sf.getMetadataQueries('SALES.PUBLIC').listTables), 'no filter without tables');
+    const db = new DatabricksAdapter({ workspaceUrl: 'https://x', token: 't', httpPath: '/sql/1.0/warehouses/abc', catalog: 'main' }, () => {});
+    assert.ok(/lower\(table_name\) IN \('orders'\)/.test(db.getMetadataQueries('main.sales', ['ORDERS']).listTables));
+    const seen = [];
+    sf.executeQuery = async (sql) => { seen.push(sql); return { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 }; };
+    sf.getCapabilities = () => ({ supportsColumnProfiling: false, supportsLineageExtraction: true });
+    await sf.extractMetadata({ schemaFilter: ['PUBLIC'], tableFilter: ['ORDERS'] });
+    assert.ok(!seen.some((s) => /QUERY_HISTORY/i.test(s)), 'no lineage on query-through');
+    const { ConnectionManager } = require('../dist/engine/platform/ConnectionManager.js');
+    const cm = new ConnectionManager(() => {});
+    assert.strictEqual(cm.catalogFetcher(), undefined, 'nothing connected');
+    cm.activeAdapter = sf;
+    cm.setEstateResolver(() => ({ identity: { system: 'shop', environment: 'prod', role: 'source' } }));
+    const f = cm.catalogFetcher();
+    assert.ok(f.covers('shop', 'prod') && !f.covers('crm', 'prod') && typeof f.lastAltered === 'function');
+  });
+
+  await test('v0.32.0: executePlan() refreshes the working set before the run and prepares each step\'s pack before building it', async () => {
+    const { hub } = hubForPlanResponse('# Architecture\n\nOrders.');
+    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      const calls = [];
+      hub.setContextProvider({
+        beforeRun: async () => { calls.push('beforeRun'); },
+        prepare: async (req) => { calls.push(`prepare:${req.stepId}`); },
+        buildPack: (req) => { calls.push(`build:${req.stepId}`); return buildContextPack(req, c3.sources(env.ledger, env.project())); },
+        sources: () => c3.sources(env.ledger, env.project())
+      });
+      hub.loadPersistedPlan({
+        id: 'p', version: 1, objective: 'x', schemaContext: '',
+        steps: [{ id: 's1', assignedAgent: 'architectureAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
+        status: 'ready', planApproved: true, stagesConfirmed: true
+      });
+      await hub.executePlan();
+      assert.deepStrictEqual(calls, ['beforeRun', 'prepare:s1', 'build:s1']);
+    } finally { env.cleanup(); }
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

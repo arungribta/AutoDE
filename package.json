@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "publisher": "Arun Gribta",
   "license": "MIT",
   "icon": "media/logo.svg",
@@ -531,6 +531,36 @@
           "type": "string",
           "default": "",
           "description": "Custom LLM endpoint."
+        },
+        "autoDataEngineeringHub.context.workingSetMaxTables": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Tables AutoDE keeps in its working set (the context graph and ledger). Imports and extractions beyond this go into the estate catalog only, and a table enters the working set when a task, spec or mapping uses it."
+        },
+        "autoDataEngineeringHub.context.evictAfterDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "While the working set is over its size, tables no task has used for this many days (and no confirmed fact is about) go back to the catalog."
+        },
+        "autoDataEngineeringHub.context.schemaTtlDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 0,
+          "description": "Schema facts older than this are re-checked against a connected source when a task uses them and before a plan runs."
+        },
+        "autoDataEngineeringHub.discovery.profileQueryBudget": {
+          "type": "number",
+          "default": 50,
+          "minimum": 0,
+          "description": "Most profiling queries one Source Assessment may run (one sampled query per table). Tables beyond the budget are reported as not profiled."
+        },
+        "autoDataEngineeringHub.discovery.profileConcurrency": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "description": "Profiling queries run in parallel during Source Assessment."
         },
         "autoDataEngineeringHub.artifactDirectory": {
           "type": "string",

@@ -74,7 +74,7 @@ function targetContextBlock(t) {
  * Hooks for adapters that build on this one: `chatContext(text)` replaces the context a chat
  * turn is sent with; `configureHub(hub, target)` runs before plan execution.
  */
-function createBaselineSut({ provider, chatContext, configureHub }) {
+function createBaselineSut({ provider, chatContext, configureHub, viaCatalog }) {
   const { GraphManager } = dist('context/GraphManager.js');
   const { ContextFileManager } = dist('context/ContextFileManager.js');
   const { parseFile } = dist('engine/context/fileIngestion.js');
@@ -103,8 +103,13 @@ function createBaselineSut({ provider, chatContext, configureHub }) {
         const full = path.join(referenceDir, 'sources', file);
         // Phase K1: a file's estate system/environment (default: a system named after the file).
         const parsed = parseFile(fs.readFileSync(full, 'utf8'), full, identities && identities[file]);
-        for (const n of parsed.nodes) await graph.addNode(n);
-        for (const e of parsed.edges) await graph.addEdge(e);
+        // v0.32.0: "Import File…" goes through ContextFileManager.ingestParsed() (catalog, working set,
+        // glossary links); the baseline keeps the v0.26.0 path of adding straight to the graph.
+        if (viaCatalog) await cfm.ingestParsed(parsed.nodes, parsed.edges);
+        else {
+          for (const n of parsed.nodes) await graph.addNode(n);
+          for (const e of parsed.edges) await graph.addEdge(e);
+        }
         ingestion.push({ file, tables: parsed.nodes.filter((n) => n.type === 'table').length, warnings: parsed.warnings || [] });
       }
     },

@@ -139,7 +139,7 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
     };
   }
 
-  getMetadataQueries(scope?: string): PlatformMetadataQueries {
+  getMetadataQueries(scope?: string, tables?: string[]): PlatformMetadataQueries {
     const parts = scope ? scope.split('.') : [];
     const catalog = parts.length > 1 ? parts[0] : (this.connectedCatalog || 'main');
     const schema = parts.length > 0 ? parts[parts.length - 1] : (this.connectedSchema || 'default');
@@ -168,7 +168,7 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
     if (resolvedType === 'hive_metastore') {
       return this.getHiveMetastoreMetadataQueries(catalog, schema);
     }
-    return this.getUnityCatalogMetadataQueries(catalog, schema);
+    return this.getUnityCatalogMetadataQueries(catalog, schema, tables);
   }
 
   /**
@@ -202,7 +202,9 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
   }
 
   /** Unity Catalog (and anything Unity-Catalog-backed — Iceberg-via-UC, Lakehouse Federation, an attached external Iceberg REST catalog) — `information_schema` is a schema within each catalog, uniformly. */
-  private getUnityCatalogMetadataQueries(catalog: string, schema: string): PlatformMetadataQueries {
+  private getUnityCatalogMetadataQueries(catalog: string, schema: string, tables?: string[]): PlatformMetadataQueries {
+    // Phase K2 query-through: only the named tables (Unity Catalog stores names lower-cased).
+    const only = tables && tables.length > 0 ? `\n          AND lower(table_name) IN (${tables.map((t) => `'${t.toLowerCase().replace(/'/g, "''")}'`).join(', ')})` : '';
     return {
       // `<catalog>.information_schema.tables`, not nested under a `system` catalog
       // segment — confirmed against a real workspace (Phase 3b live verification);
@@ -214,10 +216,16 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
           table_name,
           table_type,
           data_source_format,
+          last_altered,
           comment
         FROM ${catalog}.information_schema.tables
-        WHERE table_schema = '${schema}'
+        WHERE table_schema = '${schema}'${only}
         ORDER BY table_name`,
+
+      lastAltered: `
+        SELECT table_schema, table_name, last_altered
+        FROM ${catalog}.information_schema.tables
+        WHERE table_schema = '${schema}'${only}`,
 
       listColumns: `
         SELECT
@@ -231,7 +239,7 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
           comment,
           column_default
         FROM ${catalog}.information_schema.columns
-        WHERE table_schema = '${schema}'
+        WHERE table_schema = '${schema}'${only}
         ORDER BY table_name, ordinal_position`,
 
       listForeignKeys: `
@@ -267,7 +275,11 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
           CAST(MIN(${col}) AS STRING) AS min_value,
           CAST(MAX(${col}) AS STRING) AS max_value,
           AVG(LENGTH(CAST(${col} AS STRING))) AS avg_length
-        FROM ${fqn}`
+        FROM ${fqn}`,
+
+      profileTable: (fqn: string, cols: string[], sampleRows: number) => `
+        SELECT COUNT(*) AS row_count${cols.map((c, i) => `, COUNT(DISTINCT ${c}) AS d_${i}, COUNT(*) - COUNT(${c}) AS n_${i}`).join('')}
+        FROM ${fqn} TABLESAMPLE (${Math.max(1, Math.floor(sampleRows))} ROWS)`
     };
   }
 

@@ -2,7 +2,7 @@
 
 **The single place for order and status.** Specifications say *what* each phase delivers and *why*; this document says *when*, and whether it's done. If another document's plan disagrees with this one, this one wins. Document map: [README.md](README.md).
 
-Last updated: 2026-10-15 · Current version: **0.31.0** · Branch: `feature/engine-boundary`
+Last updated: 2026-10-15 · Current version: **0.32.0** · Branch: `feature/engine-boundary`
 
 ---
 
@@ -19,8 +19,8 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.29.0 | ✅ **C2** Assertion ledger and projection | [context-layer §4, §11](context-layer-requirements.md) | System of record for context. |
 | v0.30.0 | ✅ **C3** Context packs, manifests, causality | [context-layer §7, §8.3, §11](context-layer-requirements.md) | Grounded delivery. |
 | v0.31.0 | ✅ **K1** Estate identity and catalogs: system/environment-qualified, namespaced ids with alias-map migration; `estate.yaml`; several schemas per connection; schema-scoped merges; catalog revisions in manifests; legacy dictionary import; planned objects in grounding | [context-layer §11 Phase K](context-layer-requirements.md) (items 1–3, 6, 7, 9, 10) | Every later phase attaches facts to these ids. |
-| v0.32.0 | **K2** Working-set cache and scale: tiered cache with query-through, refresh on use, visibility, the 100 ms responsiveness budget, vocabulary-robust retrieval; large-estate fixture; embedded-store and RET decisions | [context-layer §11 Phase K](context-layer-requirements.md) (items 4, 5, 8, 11, 12) | Estates beyond the working-set size. |
-| v0.33.0 | **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
+| v0.32.0 | ✅ **K2** Working-set cache and scale: tiered cache with query-through, refresh on use, visibility, the 100 ms responsiveness budget, vocabulary-robust retrieval; large-estate fixture; embedded-store and RET decisions | [context-layer §11 Phase K](context-layer-requirements.md) (items 4, 5, 8, 11, 12) | Estates beyond the working-set size. |
+| v0.33.0 | **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report, vocabulary capture | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
 | v0.34.0 | **S2** Tool-skill lifecycle, provenance, review, trust tiers | [mcp-engine §9.1](mcp-engine-requirements.md) | Must exist before any skill is exposed to external agents over MCP. |
 | v0.35.0 | **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
 | v0.36.0 | **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
@@ -32,7 +32,7 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.42.0 | **6** + **S3** Skill and primitive governance hardening; Git-URL skill import; docs and starter library | [mcp-engine §9](mcp-engine-requirements.md) | Third-party skills open last, once every safety rail exists. |
 | v0.43.0 | **C6** Freshness, context health, release evaluation | [context-layer §8, §11](context-layer-requirements.md) | Final metric targets; eval report becomes a release gate. |
 | tbd | **M1–M3** Migration track: assessment; bulk mapping and generation (importing external code-converter output); reconciliation and cutover | not yet written | Agreed in outline 2026-10-15; specified and positioned after K and C4a. |
-| tbd | **RET** Embeddings as an optional, opt-in ranking signal | not yet written | Only if K's vocabulary-mismatch eval shows misses that the deterministic signals can't fix (see §3). |
+| tbd | **RET** Embeddings as an optional, opt-in ranking signal | not yet written | Not scheduled (K2 measured 17/21 and 8/8; the misses are free paraphrases — decision log 2026-10-15). Reconsidered if real engagements show paraphrase misses that C4a's vocabulary capture does not fix. |
 
 **Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `C1`–`C6`, `C4a`/`C4b`, `K1`/`K2` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in the plan sections of earlier versions of requirements.md (§11) and technical-design.md (§10), both at `fc16b0d`.
 
@@ -56,7 +56,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Context drawer surfaces layers, rules, relationships read-only | §16.6, §15 | Partly done. |
 | Agents not built: DDL generator, orchestration generator (Airflow/Dagster/Prefect), test generator | §16.3 | DDL generation is likely covered by M2's bulk generation; decide when M is specified. |
 | Orchestrator ideas: action suggestions, intent-based agent invocation, plan diff, first-run onboarding, SQL result preview, Markdown/YAML export | §16.3 | Product backlog; unprioritised. |
-| Old `testConnection` path still assembles credentials from settings rather than the credential resolvers | §16.8 | Verify, then fold into K or DRV. |
+| Old `testConnection` path still assembles credentials from settings rather than the credential resolvers | §16.8 | Verify, then fold into DRV. |
 | Rename and delete business problems from the UI (WS-3) | §8.11 | Folders can only be removed by hand. |
 | Edits to `.ai-context/context/business-context.yaml` take effect without a window reload (CTX-5) | found 2026-10-14 | That folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message. |
 | Style guide; keyboard and screen-reader verification (UI-4, UI-5) | §2 | |
@@ -68,7 +68,6 @@ Every item from the retired backlog and checklist of the previous requirements.m
 
 | Item | From | Covered by |
 |---|---|---|
-| Persist platform metadata under `derived/system/` | §16.1 | K (per-system catalogs) |
 | Target profiles for dev/staging/prod | §16.3a | K (environments) |
 | Lineage persisted as graph edges | §16.3a | M1 (dependency graph) |
 | Data Lineage Mapper and Data Quality Profiler agents | §16.3 | M1, and K tier-2 profiles + C4a probes |
@@ -83,6 +82,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Item | From | Done in |
 |---|---|---|
 | Real Snowflake/Databricks execution | §16.1 | v0.17.0 |
+| Persist platform metadata under `derived/system/` | §16.1 | v0.32.0 (per-system catalogs under `.ai-context/catalog/`) |
 | `deactivate()` cleanup | §16.4 | v0.14.0 |
 | Token-aware prompt assembly, STRICT rules survive pruning | §16.2 | v0.30.0 (context packs) |
 | Per-kind content validation | §16.6 | v0.29.0 |
@@ -125,6 +125,9 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 | 2026-10-15 | Parked: SAP-style sources with cryptic physical names. |
 | 2026-10-15 | Embedded database only if K's scale measurements require it; embeddings only via RET, if K's vocabulary-mismatch eval requires it. |
 | 2026-10-15 | Phase K split into K1 (identity and catalogs, v0.31.0) and K2 (working-set cache and scale, v0.32.0) — twelve scope items are two reviewable phases; later phases move down one version. |
+| 2026-10-15 | K2: the ledger and graph hold only the **working set**; the estate lives in per-system catalogs. Measured on 2 008 tables / 49 393 columns: mirroring everything cost 713 MB of extension-host heap and a 2.1 s sync; the catalog costs 24 MB and the longest synchronous task is 46 ms. Imports enter the working set whole while it stays within 200 tables, so estates of the original target size behave as before. |
+| 2026-10-15 | K2: **no embedded database.** The catalog at 2 000 tables is 11 MB of JSON and 24 MB of heap, packs build in ≤ 2.2 ms and every budget holds with margin. Revisit at roughly ten times that size (about 20 000 tables), where JSON load and heap would approach the limits. |
+| 2026-10-15 | K2: **RET not scheduled.** Deterministic signals found 17 of 21 vocabulary-mismatch questions (3 of 21 from names alone) and 8 of 8 on the large estate; all 4 misses are free paraphrases. Counter-measure first: C4a's vocabulary capture (LLM-proposed, engineer-reviewed `vocabulary.yaml` entries) keeps run-time retrieval deterministic and provider-independent. RET is reconsidered if real engagements' questions show paraphrase misses that this does not fix. |
 | 2026-10-15 | Documents reorganised: requirements answer WHAT/WHY, technical design answers HOW, this roadmap answers WHEN, CHANGELOG.md records what changed. Phases D and G renamed DRV and GOV. |
 
 **Superseded planning documents.** The plan files under `~/.claude/plans/` used before v0.25.0 were folded into this roadmap and are no longer maintained. The plan and backlog sections of the previous requirements.md (§11, §15, §16) and technical-design.md (§10), both at `fc16b0d`, are historical; the technical-design phase list was removed on 2026-10-15 and lives on in git and CHANGELOG.md.

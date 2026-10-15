@@ -17,7 +17,7 @@ import { isMirror } from './projection';
  *    the grounding manifest, see `grounding/manifest.ts`).
  */
 
-export type GapClass = 'relationship' | 'key' | 'grain' | 'decision';
+export type GapClass = 'relationship' | 'key' | 'grain' | 'decision' | 'structure';
 
 export interface ContextGap {
   needed: GapClass;
@@ -37,7 +37,8 @@ export const DEFAULT_MIN_TRUST: Record<GapClass, TrustTier> = {
   relationship: 'confirmed',
   key: 'confirmed',
   grain: 'confirmed',
-  decision: 'documented'
+  decision: 'documented',
+  structure: 'documented'
 };
 
 /**
@@ -167,6 +168,9 @@ export function describeGap(gap: ContextGap): string {
     return gap.reason === 'absent'
       ? `No known relationship joins ${gap.text}. How are they related (which columns), or should this be dropped?`
       : `The join ${gap.text} is only ${gap.foundTrust} (needs ${gap.minTrust}). Confirm the join columns before it is used.`;
+  }
+  if (gap.needed === 'structure') {
+    return `The structure of ${gap.text} is not loaded (only its name is known). Connect to its system, or import its DDL or column dictionary, before relying on its columns.`;
   }
   return `${gap.needed} for ${gap.subject.join(', ')} is ${gap.reason === 'absent' ? 'not known' : `only ${gap.foundTrust} (needs ${gap.minTrust})`}.`;
 }

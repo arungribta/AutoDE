@@ -12,7 +12,7 @@ npm run eval -- --sut ledger                        # ablation: same ledger, the
 npm run eval -- --sut baseline                      # measure the v0.26.0 behaviour instead of the current system
 ```
 
-The report is written to `eval-report.md` (with raw numbers in `eval-results.json`). Both are rolling and git-ignored. Frozen reports per release live in `baselines/`. `baselines/v0.26.0-offline.md` is the starting point, recorded before any context-layer work. `baselines/v0.29.0-offline.md` adds the assertion ledger (C2). `baselines/v0.30.0-offline.md` adds context packs and grounding manifests (C3). `baselines/v0.31.0-offline.md` adds estate identity (K1) and is the first on the 20-table fixture.
+The report is written to `eval-report.md` (with raw numbers in `eval-results.json`). Both are rolling and git-ignored. Frozen reports per release live in `baselines/`. `baselines/v0.26.0-offline.md` is the starting point, recorded before any context-layer work. `baselines/v0.29.0-offline.md` adds the assertion ledger (C2). `baselines/v0.30.0-offline.md` adds context packs and grounding manifests (C3). `baselines/v0.31.0-offline.md` adds estate identity (K1) and is the first on the 20-table fixture. `baselines/v0.32.0-offline.md` adds the working-set cache (K2): the large-estate scenario and the vocabulary-mismatch question set.
 
 Record mode works with the `fetch()`-based providers (`openai`, `azure-openai`, `anthropic`, `gemini`, `ollama`) and with `claude` if the Claude Code CLI is installed. `copilot` needs VS Code itself and can't be recorded from the command line.
 
@@ -25,6 +25,9 @@ Record mode works with the `fetch()`-based providers (`openai`, `azure-openai`, 
 | `sources/shop_dev.ddl` | Two tables of the shop system's dev environment: same names as production, one column ahead. Must stay distinct from production (v0.31.0). |
 | `sources/legacy/edw_dbc_columns.csv` | A Teradata `DBC.ColumnsV` export of a legacy EDW (3 tables, cryptic names): a source with no live connector (v0.31.0). |
 | `sources/hr_legacy.ddl` | 40 irrelevant tables, there to test context dilution |
+| `vocabulary-questions.yaml` | 21 questions that name a table in other words — synonyms, legacy abbreviations, the acquired team's terms, glossary-only links and free paraphrases — scored per retrieval signal (v0.32.0) |
+| `documents/vocabulary.yaml` | The acquired CRM team's vocabulary (cross-organisation synonyms), as an engineer records it in `.ai-context/context/vocabulary.yaml` |
+| `../../eval/lib/largeEstate.cjs` | Generator for the large estate (4 systems, ~2 000 tables, ~50 000 columns, planted questions) used to measure scale and responsiveness (v0.32.0) |
 | `sources/samples/loyalty_members.csv` | Sample rows; contains a duplicate `member_id` |
 | `documents/business-context.yaml` | The client's finance glossary and rules (defines revenue as gross) |
 | `chat-script.yaml` | The engineer's side of the conversation, including the traps |

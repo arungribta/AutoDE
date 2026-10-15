@@ -1045,6 +1045,13 @@ Message: ${message}`;
     this.state.status = 'running';
     this.emitState();
 
+    // Phase K2: refresh on use — the working set's objects past their TTL are re-checked against the source.
+    try {
+      await this.contextProvider?.beforeRun?.();
+    } catch (err) {
+      this.log(`Context refresh before the run failed (continuing with what is known): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     const completedIds = new Set<string>();
     const failedIds = new Set<string>();
     let anyFailure = false;
@@ -1110,7 +1117,13 @@ Message: ${message}`;
 
         // C3: this step's own context pack (task-scoped), plus the approved
         // Source/Target Context, instead of the plan-time context string.
-        const pack = this.contextProvider?.buildPack({ purpose: 'step', query: readyStep.taskDescription, stepId: readyStep.id });
+        const packRequest = { purpose: 'step' as const, query: readyStep.taskDescription, stepId: readyStep.id };
+        try {
+          await this.contextProvider?.prepare?.(packRequest);
+        } catch (err) {
+          this.log(`Loading context for step ${readyStep.id} failed (the pack reports what is missing): ${err instanceof Error ? err.message : String(err)}`);
+        }
+        const pack = this.contextProvider?.buildPack(packRequest);
         if (pack) {
           this.stepPacks.set(readyStep.id, pack);
           this.packListener?.(`Plan step ${readyStep.id} (${readyStep.assignedAgent})`, pack);

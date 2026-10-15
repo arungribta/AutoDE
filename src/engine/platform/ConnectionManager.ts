@@ -5,6 +5,10 @@ import { SnowflakeAdapter } from './adapters/SnowflakeAdapter';
 import { DatabricksAdapter } from './adapters/DatabricksAdapter';
 import { getSupportedProviders } from './providerRegistry';
 import { FileIo, nodeFileIo, writeFileAtomic } from '../context/contextStore';
+import type { CatalogEntry, CatalogFetcher } from '../context/catalog';
+import { DEFAULT_ENVIRONMENT, slugifyId } from '../context/estate';
+import { BaseDataSourceAdapter } from './BaseAdapter';
+import type { BaseNode, GraphEdge } from '../context/types';
 
 type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
 
@@ -145,6 +149,52 @@ export class ConnectionManager implements Disposable {
     const binding = id && this.estateResolver ? this.estateResolver(id) : undefined;
     const effective = !options?.schemaFilter?.length && binding?.schemas?.length ? { ...options, schemaFilter: binding.schemas } : options;
     return this.activeAdapter.extractMetadata(effective);
+  }
+
+  /**
+   * Phase K2: live structure lookups for the catalog — query-through for
+   * tables whose structure isn't loaded, and last-altered checks for refresh
+   * on use. Covers the system and environment this connection feeds.
+   * `undefined` when nothing is connected.
+   */
+  catalogFetcher(): CatalogFetcher | undefined {
+    const adapter = this.activeAdapter;
+    if (!adapter) return undefined;
+    const identity = () => this.activeIdentity() ?? { system: slugifyId(adapter.getConnectionId?.() ?? 'source'), environment: DEFAULT_ENVIRONMENT, role: 'source' as const };
+    const scopeOf = (e: CatalogEntry) => (e.table.database ? `${e.table.database}.${e.table.schema}` : e.table.schema);
+    const byScope = (entries: readonly CatalogEntry[]) => {
+      const m = new Map<string, CatalogEntry[]>();
+      for (const e of entries) m.set(scopeOf(e), [...(m.get(scopeOf(e)) ?? []), e]);
+      return m;
+    };
+    return {
+      covers: (system, environment) => {
+        const i = identity();
+        return i.system === system && i.environment === environment;
+      },
+      fetchStructure: async (entries) => {
+        const nodes: BaseNode[] = [];
+        const edges: GraphEdge[] = [];
+        for (const [scope, list] of byScope(entries)) {
+          const snapshot = await adapter.extractMetadata({ schemaFilter: [scope], tableFilter: list.map((e) => e.table.label), includeProfiling: false });
+          const g = adapter.snapshotToGraph(snapshot, identity());
+          nodes.push(...g.nodes);
+          edges.push(...g.edges);
+        }
+        return { nodes, edges };
+      },
+      lastAltered: adapter instanceof BaseDataSourceAdapter ? async (entries) => {
+        const out = new Map<string, string>();
+        for (const [scope, list] of byScope(entries)) {
+          const found = await adapter.readLastAltered(scope, list.map((e) => e.table.label));
+          for (const e of list) {
+            const at = found.get(e.table.fqn.toLowerCase()) ?? found.get(`${e.table.schema}.${e.table.label}`.toLowerCase());
+            if (at) out.set(e.id, at);
+          }
+        }
+        return out;
+      } : undefined
+    };
   }
 
   /** Lists databases/catalogs visible to the connected principal (Step 4 — discovery-based selection, not blind typing). */

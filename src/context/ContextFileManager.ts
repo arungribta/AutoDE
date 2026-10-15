@@ -11,6 +11,10 @@ import { Conflict, detectConflicts, flagConflicts } from '../engine/context/conf
 import { ContextPack, ContextPackRequest, ContextPackSources, buildContextPack } from '../engine/context/contextPack';
 import { DEFAULT_ENVIRONMENT, Estate, EstateBinding, ObjectIdentity, UNASSIGNED_SYSTEM, catalogWatermarks, edgeId, emptyEstate, parseEstate, queryId, rekeyLegacyGraph, resolveIdentity, ruleId, serializeEstate, termId } from '../engine/context/estate';
 import type { IngestIdentity } from '../engine/context/fileIngestion';
+import { Catalog, CatalogEntry, CatalogFetcher, DEFAULT_WORKING_SET_POLICY, WorkingSetPolicy, entriesFromGraph, isStale, selectEvictions, selectSeedHits } from '../engine/context/catalog';
+import { buildVocabulary, parseVocabularyFile } from '../engine/context/vocabulary';
+import { isLive } from '../engine/context/assertions';
+import { isMirror } from '../engine/context/projection';
 import type { Origin } from '../engine/context/types';
 import {
   BaseNode,
@@ -86,6 +90,16 @@ export class ContextFileManager implements vscode.Disposable {
   private estateDirty = false;
   /** Re-keyings found while loading, recorded in the ledger at the next persist. */
   private pendingAliases = new Map<string, string>();
+  /**
+   * Phase K2: the estate catalog (tiers 0–2, `.ai-context/catalog/`, git-ignored).
+   * The graph and ledger hold only the working set; see `admitObjects()`.
+   */
+  private readonly catalog: Catalog;
+  private catalogLoaded = false;
+  private policy: WorkingSetPolicy = { ...DEFAULT_WORKING_SET_POLICY };
+  private fetcher: CatalogFetcher | undefined;
+  /** Promotions requested by packs, applied one after another. */
+  private promotions: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly workspaceRoot: vscode.Uri,
@@ -94,6 +108,227 @@ export class ContextFileManager implements vscode.Disposable {
     private readonly validator?: ContextValidator
   ) {
     this.ledger = new AssertionLedger(path.join(vscode.Uri.joinPath(workspaceRoot, '.ai-context').fsPath, 'ledger'));
+    this.catalog = new Catalog(path.join(vscode.Uri.joinPath(workspaceRoot, '.ai-context').fsPath, 'catalog'));
+  }
+
+  // ── Working set and catalog (Phase K2) ──────────────────────────────────────
+
+  /** Working-set size, eviction age and schema TTL (settings `autoDataEngineeringHub.context.*`). */
+  public setWorkingSetPolicy(policy: Partial<WorkingSetPolicy>): void {
+    this.policy = { ...this.policy, ...Object.fromEntries(Object.entries(policy).filter(([, v]) => typeof v === 'number' && v >= 0)) };
+  }
+
+  /** Live structure lookups for query-through and refresh-on-use; `undefined` when nothing is connected. */
+  public setCatalogFetcher(fetcher: CatalogFetcher | undefined): void {
+    this.fetcher = fetcher;
+  }
+
+  public getCatalog(): Catalog {
+    return this.catalog;
+  }
+
+  /** Resolves when the promotions packs asked for have been applied. */
+  public whenIdle(): Promise<void> {
+    return this.promotions;
+  }
+
+  /** Physical tables (and views) in the working set — the graph. */
+  private workingSetTableIds(): Set<string> {
+    return new Set([...this.graphManager.getNodesByType('table'), ...this.graphManager.getNodesByType('semantic_view')].map((n) => n.id).filter((id) => id.startsWith('obj:')));
+  }
+
+  /** Tables that live business assertions are about (a column counts for its table) — never evicted. */
+  private referencedTables(): Set<string> {
+    const out = new Set<string>();
+    for (const a of this.ledger.assertions()) {
+      if (isMirror(a) || !isLive(a.status)) continue;
+      for (const s of a.subject) {
+        if (this.catalog.has(s)) out.add(s);
+        else {
+          const table = s.replace(/\.[^./]+$/, '');
+          if (this.catalog.has(table)) out.add(table);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Replaces the graph's copy of these tables (and their columns) with the catalog's. */
+  private async putInGraph(ids: ReadonlySet<string>): Promise<void> {
+    if (ids.size === 0) return;
+    const snap = this.graphManager.serializeSnapshot();
+    const remove = new Set(ids);
+    for (const e of snap.edges) if (e.type === 'contains' && ids.has(e.source)) remove.add(e.target);
+    await this.graphManager.removeNodesWhere((n) => remove.has(n.id));
+    const g = this.catalog.toGraph(ids);
+    for (const n of g.nodes) await this.graphManager.addNode(n);
+    for (const e of g.edges) await this.graphManager.addEdge(e);
+    await this.relinkGlossary(ids);
+  }
+
+  /**
+   * Glossary terms name their tables (`mapped_tables`); the `maps_to` edges are
+   * made when the glossary is read. A table that arrives later — imported,
+   * extracted or promoted after that — gets its edges here. (Before v0.32.0
+   * they appeared only after the next re-index.)
+   */
+  private async relinkGlossary(tableIds: ReadonlySet<string>): Promise<void> {
+    const tables = [...tableIds].map((id) => this.graphManager.getNodeById(id)).filter((n): n is BaseNode => !!n);
+    if (tables.length === 0) return;
+    for (const term of [...this.graphManager.getNodesByType('business_term'), ...this.graphManager.getNodesByType('metric')]) {
+      const refs = ((term as BusinessTermNode).mappedNodeIds ?? []).map((r) => String(r).toLowerCase());
+      for (const t of tables) {
+        const fqn = String((t as unknown as { fqn?: string }).fqn ?? '').toLowerCase();
+        if (!refs.some((r) => r === fqn || fqn.endsWith('.' + r) || r === t.label.toLowerCase())) continue;
+        await this.graphManager.addEdge({ id: edgeId('maps_to', term.id, t.id), source: term.id, target: t.id, type: 'maps_to', weight: 0.8 });
+      }
+    }
+  }
+
+  /**
+   * Admits parsed or extracted objects (Phase K2, item 4): every table goes
+   * into the catalog; the working set takes all of them when they fit its
+   * size (`maxTables`), otherwise only the ones already in it or referenced
+   * by a business assertion — the rest enter it when a pack, spec or mapping
+   * uses them. Does not persist; callers do.
+   */
+  public async admitObjects(nodes: readonly BaseNode[], edges: readonly GraphEdge[], workingSetBefore?: ReadonlySet<string>): Promise<{ catalogued: number; promoted: number }> {
+    const entries = entriesFromGraph(nodes, edges);
+    this.catalog.upsert(entries);
+    const ws = workingSetBefore ?? this.workingSetTableIds();
+    const fresh = entries.filter((e) => !ws.has(e.id));
+    const fits = ws.size + fresh.length <= this.policy.maxTables;
+    const referenced = fits ? new Set<string>() : this.referencedTables();
+    const chosen = fits ? entries : entries.filter((e) => ws.has(e.id) || referenced.has(e.id));
+    await this.putInGraph(new Set(chosen.map((e) => e.id)));
+    if (!fits) this.log(`Catalogued ${entries.length} table(s); ${chosen.length} in the working set (limit ${this.policy.maxTables}). The rest enter it when a task uses them.`);
+    return { catalogued: entries.length, promoted: chosen.length };
+  }
+
+  /** "Import File…" and other producers: admit, then record in the ledger and persist. */
+  public async ingestParsed(nodes: readonly BaseNode[], edges: readonly GraphEdge[]): Promise<{ catalogued: number; promoted: number }> {
+    const r = await this.admitObjects(nodes, edges);
+    await this.persistCompiledGraph();
+    return r;
+  }
+
+  /** Brings catalog objects with loaded structure into the working set (a pack used them). */
+  public async promote(ids: readonly string[]): Promise<number> {
+    const ws = this.workingSetTableIds();
+    const todo = new Set(ids.filter((id) => !ws.has(id) && (this.catalog.get(id)?.tier ?? 0) > 0));
+    if (todo.size === 0) return 0;
+    await this.putInGraph(todo);
+    await this.persistCompiledGraph();
+    this.log(`Working set: ${todo.size} table(s) promoted from the catalog.`);
+    return todo.size;
+  }
+
+  /**
+   * Re-checks entries against the live source (items 4 and 5): unchanged
+   * last-altered → just marked checked; otherwise the structure is fetched.
+   * A requested table the source doesn't return is not visible with the
+   * current grants. Working-set members get their new structure in the graph,
+   * so the ledger records a change as a supersession and flags dependents.
+   */
+  private async refreshEntries(entries: readonly CatalogEntry[]): Promise<{ checked: number; fetched: number }> {
+    const f = this.fetcher;
+    const mine = f ? entries.filter((e) => f.covers(e.system, e.environment)) : [];
+    if (!f || mine.length === 0) return { checked: 0, fetched: 0 };
+    const now = new Date().toISOString();
+    let toFetch = mine;
+    if (f.lastAltered) {
+      const known = mine.filter((e) => e.tier > 0 && e.lastAltered);
+      const altered = known.length ? await f.lastAltered(known) : new Map<string, string>();
+      const unchanged = new Set(known.filter((e) => altered.get(e.id) === e.lastAltered).map((e) => e.id));
+      for (const id of unchanged) this.catalog.markChecked(id, now);
+      toFetch = mine.filter((e) => !unchanged.has(e.id));
+    }
+    if (toFetch.length === 0) return { checked: mine.length, fetched: 0 };
+    const g = await f.fetchStructure(toFetch);
+    const fetched = entriesFromGraph(g.nodes, g.edges, now);
+    const got = new Set(fetched.map((e) => e.id));
+    for (const e of toFetch) if (!got.has(e.id)) this.catalog.markInvisible(e.id, now);
+    this.catalog.upsert(fetched);
+    const ws = this.workingSetTableIds();
+    const inWs = new Set(fetched.filter((e) => ws.has(e.id)).map((e) => e.id));
+    if (inWs.size > 0) {
+      await this.putInGraph(inWs);
+      await this.persistCompiledGraph();
+    } else {
+      await this.catalog.save();
+    }
+    return { checked: mine.length, fetched: fetched.length };
+  }
+
+  /**
+   * Before a pack is built (`ContextPackProvider.prepare`): the request's
+   * catalog matches are loaded (query-through for name-only entries, refresh
+   * for stale ones) and promoted into the working set. Offline, nothing is
+   * fetched and the pack reports what's missing as a context gap.
+   */
+  public async prepareContext(request: ContextPackRequest): Promise<void> {
+    if (!request.query) return;
+    if (this.catalog.isIndexStale()) await this.catalog.buildIndex();
+    const now = new Date();
+    const entries = selectSeedHits(this.catalog.search(request.query))
+      .map((h) => this.catalog.get(h.id))
+      .filter((e): e is CatalogEntry => !!e && (e.visible !== false || isStale(e, this.policy, now)));
+    await this.refreshEntries(entries.filter((e) => e.tier === 0 || isStale(e, this.policy, now)));
+    await this.promote(entries.map((e) => e.id));
+  }
+
+  /** Refresh on use before a plan runs (`ContextPackProvider.beforeRun`): the working set's stale objects. */
+  public async refreshWorkingSet(): Promise<{ checked: number; fetched: number }> {
+    const now = new Date();
+    const stale = [...this.workingSetTableIds()].map((id) => this.catalog.get(id)).filter((e): e is CatalogEntry => !!e && isStale(e, this.policy, now));
+    return this.refreshEntries(stale);
+  }
+
+  /** Working-set tables unused past the eviction age while the set is over its size (item 4). */
+  private async evictUnused(): Promise<Set<string> | undefined> {
+    const ids = selectEvictions([...this.workingSetTableIds()], this.catalog, this.referencedTables(), this.policy, new Date());
+    if (ids.length === 0) return undefined;
+    const set = new Set(ids);
+    for (const e of this.graphManager.serializeSnapshot().edges) if (e.type === 'contains' && ids.includes(e.source)) set.add(e.target);
+    await this.graphManager.removeNodesWhere((n) => set.has(n.id));
+    for (const id of ids) this.catalog.demote(id);
+    this.log(`Working set: ${ids.length} unused table(s) evicted to the catalog.`);
+    return set;
+  }
+
+  /** The working set into the catalog (backfills workspaces from before K2), glossary aliases, index, save. */
+  private async syncCatalog(): Promise<void> {
+    const snap = this.graphManager.serializeSnapshot();
+    this.catalog.upsert(entriesFromGraph(snap.nodes, snap.edges));
+    // Glossary aliases: a term's name and definition index the tables it names —
+    // resolved against the catalog, so they bind to tables outside the working set too.
+    const byName = new Map<string, string[]>();
+    for (const e of this.catalog.all()) {
+      for (const k of [e.table.fqn, `${e.table.schema}.${e.table.label}`, e.table.label].map((x) => String(x ?? '').toLowerCase())) {
+        if (k) byName.set(k, [...new Set([...(byName.get(k) ?? []), e.id])]);
+      }
+    }
+    const aliases = new Map<string, string[]>();
+    for (const term of snap.nodes) {
+      if (term.type !== 'business_term' && term.type !== 'metric') continue;
+      const text = [term.label, term.description].filter(Boolean).join(' ');
+      for (const ref of (term as BusinessTermNode).mappedNodeIds ?? []) {
+        for (const id of byName.get(String(ref).toLowerCase()) ?? []) aliases.set(id, [...new Set([...(aliases.get(id) ?? []), text])]);
+      }
+    }
+    this.catalog.setAliases(aliases);
+    if (this.catalog.isIndexStale()) await this.catalog.buildIndex();
+    await this.catalog.save();
+  }
+
+  /** `.ai-context/context/vocabulary.yaml` (or the legacy root): the customer's abbreviations and synonyms. */
+  private loadVocabulary(contextPath: string): void {
+    const file = this.firstExisting([path.join(contextPath, 'context', 'vocabulary.yaml'), path.join(contextPath, 'vocabulary.yaml')]);
+    try {
+      this.catalog.setVocabulary(buildVocabulary(file ? parseVocabularyFile(fs.readFileSync(file, 'utf8')) : undefined));
+    } catch (err) {
+      this.log(`Failed to read vocabulary.yaml: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -277,6 +512,15 @@ export class ContextFileManager implements vscode.Disposable {
     // the ledger. ──
     this.graphManager.clear();
     this.loadEstate();
+    if (!this.catalogLoaded) {
+      try {
+        await this.catalog.load();
+      } catch (err) {
+        this.log(`Failed to read the catalog (it is rebuilt from its sources): ${err instanceof Error ? err.message : String(err)}`);
+      }
+      this.catalogLoaded = true;
+    }
+    this.loadVocabulary(contextPath);
     const graphPath = path.join(contextPath, 'derived', 'graph.json');
     const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
     try {
@@ -336,10 +580,17 @@ export class ContextFileManager implements vscode.Disposable {
           const replacedTables = new Set(current.nodes.filter((n) => (n.type === 'table' || n.type === 'semantic_view') && (scopes.has(scopeKey(n)) || connScopes.has(connScope(n)))).map((n) => n.id));
           const replaced = new Set(replacedTables);
           for (const e of current.edges) if (e.type === 'contains' && replacedTables.has(e.source)) replaced.add(e.target);
+          const before = this.workingSetTableIds();
           const ids = new Set(snapshot.nodes.map((n) => n.id));
           await this.graphManager.removeNodesWhere((n) => ids.has(n.id) || replaced.has(n.id));
-          for (const n of snapshot.nodes) await this.graphManager.addNode(n);
-          for (const e of snapshot.edges) await this.graphManager.addEdge(e);
+          // Phase K2: the same scope is replaced in the catalog; the extraction is
+          // admitted there whole and into the working set as far as it fits.
+          const incoming = new Set(incomingTables.map((n) => n.id));
+          this.catalog.removeWhere((e) => {
+            const n = { ...e.table, origin: e.origin } as BaseNode;
+            return !incoming.has(e.id) && (scopes.has(scopeKey(n)) || connScopes.has(connScope(n)));
+          });
+          await this.admitObjects(snapshot.nodes, snapshot.edges, before);
           for (const [from, to] of re.aliases) this.pendingAliases.set(from, to);
           this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges (newer than the compiled cache)`);
         }
@@ -388,8 +639,9 @@ export class ContextFileManager implements vscode.Disposable {
       }
     }
 
-    // ── Record in the ledger, re-project, persist ──
-    await this.persistCompiledGraph();
+    // ── Eviction (Phase K2), then record in the ledger, re-project, persist ──
+    const evicted = await this.evictUnused();
+    await this.persistCompiledGraph({ evicted });
   }
 
   /** Returns the first path that exists, or null. */
@@ -436,12 +688,12 @@ export class ContextFileManager implements vscode.Disposable {
    * detected and their active sides flagged for review. A ledger failure is
    * logged and the graph is still persisted as it stands.
    */
-  public async persistCompiledGraph(): Promise<void> {
+  public async persistCompiledGraph(options: { evicted?: ReadonlySet<string> } = {}): Promise<void> {
     try {
       await this.rekeyLiveGraph();
       const aliases = new Map(this.pendingAliases);
       if (aliases.size > 0) await this.ledger.append(this.ledger.buildAliasEvents(aliases));
-      const sync = await syncGraphToLedger(this.ledger, this.graphManager.serializeSnapshot(), { activeSpecId: this.activeSpecId, aliases });
+      const sync = await syncGraphToLedger(this.ledger, this.graphManager.serializeSnapshot(), { activeSpecId: this.activeSpecId, aliases, evicted: options.evicted });
       this.pendingAliases.clear();
       this.graphManager.setAliases(this.ledger.aliases());
       this.saveEstateIfChanged();
@@ -453,6 +705,11 @@ export class ContextFileManager implements vscode.Disposable {
       await this.graphManager.loadSnapshot(projectGraph(this.ledger.assertions(), { activeSpecId: this.activeSpecId }));
     } catch (err) {
       this.log(`Context ledger update failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      await this.syncCatalog();
+    } catch (err) {
+      this.log(`Catalog update failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
       const contextPath = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath;
@@ -610,6 +867,13 @@ export class ContextFileManager implements vscode.Disposable {
       });
     }
 
+    // Phase K2: tables in the catalog but outside the working set can be mentioned too.
+    const inGraph = new Set(tables.map((t) => t.id));
+    for (const e of this.catalog.all()) {
+      if (inGraph.has(e.id)) continue;
+      entities.push({ icon: '📦', label: e.table.label, type: 'table', detail: `${e.table.fqn} (catalog)` });
+    }
+
     const terms = this.graphManager.getNodesByType('business_term');
     for (const t of terms) {
       entities.push({
@@ -684,7 +948,8 @@ export class ContextFileManager implements vscode.Disposable {
       assertions: this.ledger.assertions(),
       conflicts: this.conflicts,
       runtimeFacts: [...this.runtimeFacts.values()],
-      catalogRevisions: catalogWatermarks(snapshot.nodes)
+      catalogRevisions: mergeWatermarks(catalogWatermarks(snapshot.nodes), this.catalog.watermarks()),
+      catalog: this.catalog
     };
   }
 
@@ -696,6 +961,12 @@ export class ContextFileManager implements vscode.Disposable {
   public buildContextPack(request: ContextPackRequest, title?: string): ContextPack {
     const pack = buildContextPack(request, this.getPackSources());
     if (title) this.recordPack(title, pack);
+    // Phase K2: what a pack used stays in the working set; what it rendered from the catalog enters it.
+    this.catalog.touch([...pack.manifest.seeds, ...pack.manifest.nodeIds]);
+    const promoted = pack.manifest.promoted ?? [];
+    if (promoted.length > 0) {
+      this.promotions = this.promotions.then(() => this.promote(promoted).then(() => undefined)).catch((err) => this.log(`Working-set promotion failed: ${err instanceof Error ? err.message : String(err)}`));
+    }
     return pack;
   }
 
@@ -718,6 +989,13 @@ export class ContextFileManager implements vscode.Disposable {
   public buildContextPrompt(maxTokens?: number): string {
     return this.buildContextPack({ purpose: 'chat', maxTokens }).text;
   }
+}
+
+/** Latest watermark per key across two maps (`unknown` loses to any timestamp). */
+function mergeWatermarks(a: Record<string, string>, b: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = { ...a };
+  for (const [k, v] of Object.entries(b)) if (!(k in out) || out[k] === 'unknown' || (v !== 'unknown' && v > out[k])) out[k] = v;
+  return Object.fromEntries(Object.entries(out).sort(([x], [y]) => (x < y ? -1 : 1)));
 }
 
 function toPosix(p: string): string {

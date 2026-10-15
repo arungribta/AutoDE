@@ -13,6 +13,7 @@ import { buildDiscoveryProgress as buildDiscoveryProgressPure, skillNameForField
 import { GraphManager } from '../context/GraphManager';
 import { BaseNode, GraphEdge } from '../engine/context/types';
 import { ContextFileManager } from '../context/ContextFileManager';
+import type { CatalogFetcher } from '../engine/context/catalog';
 import { ContextValidator } from '../engine/context/ContextValidator';
 import { SourceRegistry } from '../context/SourceRegistry';
 import { SynthesisPipeline } from '../context/SynthesisPipeline';
@@ -53,6 +54,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private graphManager: GraphManager;
   private contextFileManager?: ContextFileManager;
+  private catalogFetcher: CatalogFetcher | undefined;
   private sourceRegistry?: SourceRegistry;
   private synthesisPipeline?: SynthesisPipeline;
   private specManager?: SpecManager;
@@ -209,6 +211,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       (msg: string) => this.postLog(msg),
       this.createContextValidator()
     );
+    this.configureContextFileManager(this.contextFileManager);
     try {
       await this.contextFileManager.initialize();
       this.postContextUpdate();
@@ -464,6 +467,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
             // Connection status (both roles) reaches this for free via
             // ContextFileManager's runtime facts — see notifyConnectionStatus().
+            // Phase K2: load (query-through) and promote what the message is about before its pack is built.
+            try { await this.contextFileManager?.prepareContext({ purpose: 'chat', query: chatMessage }); } catch (err) { this.postLog(`Loading context failed (the pack reports what is missing): ${err instanceof Error ? err.message : String(err)}`); }
             const combinedContext = this.contextPackText('chat', chatMessage, `Chat: ${chatMessage.slice(0, 60)}`);
             const result = await this.hub.chat(chatMessage, combinedContext, toolMode, {
               history: priorHistory,
@@ -630,6 +635,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const activeSpecId = this.contextFileManager.getActiveSpecId();
             this.contextFileManager.dispose();
             this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator());
+            this.configureContextFileManager(this.contextFileManager);
             this.contextFileManager.setActiveSpecId(activeSpecId);
             await this.contextFileManager.initialize();
             this.postContextUpdate();
@@ -1357,10 +1363,31 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    * zero special-casing needed downstream.
    */
   public async ingestFileIntoGraph(nodes: BaseNode[], edges: GraphEdge[]): Promise<void> {
-    for (const node of nodes) { await this.graphManager.addNode(node); }
-    for (const edge of edges) { await this.graphManager.addEdge(edge); }
-    await this.contextFileManager?.persistCompiledGraph();
+    if (this.contextFileManager) {
+      // Phase K2: into the catalog; into the working set as far as it fits.
+      await this.contextFileManager.ingestParsed(nodes, edges);
+    } else {
+      for (const node of nodes) { await this.graphManager.addNode(node); }
+      for (const edge of edges) { await this.graphManager.addEdge(edge); }
+    }
     this.postContextUpdate();
+  }
+
+  /** Phase K2: the source connection's live lookups (query-through, refresh on use); `undefined` when disconnected. */
+  public setCatalogFetcher(fetcher: CatalogFetcher | undefined): void {
+    this.catalogFetcher = fetcher;
+    this.contextFileManager?.setCatalogFetcher(fetcher);
+  }
+
+  /** Applies the working-set settings and the current connection to a (re)created ContextFileManager. */
+  private configureContextFileManager(cfm: ContextFileManager): void {
+    const cfg = vscode.workspace.getConfiguration('autoDataEngineeringHub');
+    cfm.setWorkingSetPolicy({
+      maxTables: cfg.get<number>('context.workingSetMaxTables'),
+      evictAfterDays: cfg.get<number>('context.evictAfterDays'),
+      schemaTtlDays: cfg.get<number>('context.schemaTtlDays')
+    });
+    cfm.setCatalogFetcher(this.catalogFetcher);
   }
 
   /**
@@ -1372,14 +1399,26 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    */
   public listMappableTables(): Array<{ id: string; label: string; fqn?: string }> {
     const tables = [...this.graphManager.getNodesByType('table'), ...this.graphManager.getNodesByType('semantic_view')];
-    return tables.map((t) => ({ id: t.id, label: t.label, fqn: (t as unknown as { fqn?: string }).fqn }));
+    const listed = tables.map((t) => ({ id: t.id, label: t.label, fqn: (t as unknown as { fqn?: string }).fqn }));
+    // Phase K2: tables known to the catalog but outside the working set can be mapped too.
+    const inGraph = new Set(listed.map((t) => t.id));
+    const catalogued = (this.contextFileManager?.getCatalog().all() ?? [])
+      .filter((e) => e.tier > 0 && !inGraph.has(e.id))
+      .map((e) => ({ id: e.id, label: e.table.label, fqn: e.table.fqn }));
+    return [...listed, ...catalogued];
   }
 
   /** Columns of a given table node, via its `contains` edges — for the same "Create Mapping" QuickPick. */
   public listTableColumns(tableId: string): Array<{ id: string; label: string }> {
     const snapshot = this.graphManager.serializeSnapshot();
     const columnIds = new Set(snapshot.edges.filter((e) => e.type === 'contains' && e.source === tableId).map((e) => e.target));
-    return snapshot.nodes.filter((n) => columnIds.has(n.id)).map((n) => ({ id: n.id, label: n.label }));
+    const inGraph = snapshot.nodes.filter((n) => columnIds.has(n.id)).map((n) => ({ id: n.id, label: n.label }));
+    if (inGraph.length > 0) return inGraph;
+    // Phase K2: a catalog table picked for a mapping is in scope — it enters the working set.
+    const entry = this.contextFileManager?.getCatalog().get(tableId);
+    if (!entry?.columns) return [];
+    void this.contextFileManager?.promote([tableId]).catch((err) => this.postLog(`Working-set promotion failed: ${err instanceof Error ? err.message : String(err)}`));
+    return entry.columns.map((c) => ({ id: c.id, label: c.label }));
   }
 
   /** The active spec identity a new Mapping Context entry should be filed under, if any. */
@@ -1680,6 +1719,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private createContextPackProvider(): ContextPackProvider {
     return {
       buildPack: (request) => this.contextFileManager!.buildContextPack(request),
+      prepare: async (request) => { await this.contextFileManager?.prepareContext(request); },
+      beforeRun: async () => {
+        const r = await this.contextFileManager?.refreshWorkingSet();
+        if (r && r.checked > 0) this.postLog(`Refreshed the working set before the run: ${r.checked} object(s) re-checked, ${r.fetched} re-read.`);
+      },
       sources: () => this.contextFileManager!.getPackSources(),
       supplementary: () => {
         const spec = this.specManager?.getSpec();

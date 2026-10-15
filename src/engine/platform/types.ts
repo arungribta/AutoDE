@@ -32,7 +32,28 @@ export interface ConnectionInfo {
 export interface ExtractOptions {
   readonly includeProfiling?: boolean;
   readonly schemaFilter?: string[];
+  /** Phase K2 query-through: only these tables (by name) of each schema; lineage is skipped. */
+  readonly tableFilter?: string[];
+  /** Phase K2 tier-2 profiling limits: sampled, in parallel, within a per-run query budget. */
+  readonly profile?: ProfileOptions;
   readonly signal?: AbortSignal;
+}
+
+export interface ProfileOptions {
+  /** Most profiling queries one run may issue (default 50). */
+  readonly queryBudget?: number;
+  /** Queries in flight at once (default 4). */
+  readonly concurrency?: number;
+  /** Rows sampled per table where the platform supports sampling (default 10 000). */
+  readonly sampleRows?: number;
+}
+
+/** What a profiling run did (Phase K2) — it never exceeds `budget`. */
+export interface ProfilingReport {
+  readonly queries: number;
+  readonly budget: number;
+  readonly profiledTables: number;
+  readonly skippedTables: number;
 }
 
 export interface QueryOptions {
@@ -58,6 +79,7 @@ export interface SchemaSnapshot {
   readonly views: ViewMetadata[];
   readonly foreignKeys: ForeignKeyMetadata[];
   readonly lineage?: LineageEdge[];
+  readonly profiling?: ProfilingReport;
 }
 
 export interface TableMetadata {
@@ -68,6 +90,8 @@ export interface TableMetadata {
   readonly type: 'TABLE' | 'VIEW' | 'EXTERNAL' | 'STREAM' | 'MATERIALIZED_VIEW';
   readonly rowCount?: number;
   readonly sizeBytes?: number;
+  /** The platform's last-altered timestamp (Phase K2 refresh on use), when it reports one. */
+  readonly lastAltered?: string;
   readonly columns: ColumnMetadata[];
   readonly comment?: string;
   readonly properties?: Record<string, unknown>;
@@ -130,6 +154,13 @@ export interface PlatformMetadataQueries {
   readonly listForeignKeys: string;
   readonly listViews: string;
   readonly profileColumn: (fqn: string, column: string) => string;
+  /**
+   * Phase K2: one sampled query profiling several columns of a table. The row
+   * has `row_count` and, per column i, `d_<i>` (distinct) and `n_<i>` (nulls).
+   */
+  readonly profileTable?: (fqn: string, columns: string[], sampleRows: number) => string;
+  /** Phase K2: `table_schema`, `table_name`, `last_altered` for the scope's tables (filtered like listTables). */
+  readonly lastAltered?: string;
   readonly extractLineage?: string;
 }
 
@@ -146,8 +177,11 @@ export interface IDataSourceAdapter extends Disposable {
   executeQuery(sql: string, options?: QueryOptions): Promise<QueryResult>;
   getCapabilities(): PlatformCapabilities;
   translateDialect(sql: string, targetDialect: SqlDialect): string;
-  /** `scope` (`SCHEMA` or `DATABASE.SCHEMA`) overrides the connected schema (Phase K1: several schemas per connection). */
-  getMetadataQueries(scope?: string): PlatformMetadataQueries;
+  /**
+   * `scope` (`SCHEMA` or `DATABASE.SCHEMA`) overrides the connected schema (Phase K1: several schemas per
+   * connection); `tables` limits table, column and last-altered queries to those names (Phase K2 query-through).
+   */
+  getMetadataQueries(scope?: string, tables?: string[]): PlatformMetadataQueries;
   /** Stable id of this connection (e.g. `snowflake:acme`). */
   getConnectionId?(): string;
   /** Converts an extracted snapshot to graph nodes/edges with live-verified provenance. Pure — persisting it is the caller's job. */

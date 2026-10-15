@@ -29,7 +29,8 @@ function dist(rel) {
 const WITHHELD = ['status', 'trust', 'supersedes', 'conflictsWith', 'verification', 'id', 'evidence'];
 
 function createLedgerSut(opts) {
-  const base = createBaselineSut(opts);
+  // Sources are imported the way "Import File…" imports them since v0.32.0 (catalog + working set).
+  const base = createBaselineSut({ ...opts, viaCatalog: true });
   const { parseYaml } = dist('engine/context/Yaml.js');
   const { createSubjectResolver, resolveSubjects } = dist('engine/context/projection.js');
   const { detectConflicts } = dist('engine/context/conflicts.js');

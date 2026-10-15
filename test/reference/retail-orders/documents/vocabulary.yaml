@@ -1,0 +1,7 @@
+# The acquired CRM team's vocabulary, as an engineer records it in .ai-context/context/vocabulary.yaml
+# (Phase K2). Extends AutoDE's default abbreviations and synonyms; these win on conflict.
+synonyms:
+  - [campaign, engagement]
+  - [customer, patron]
+abbreviations:
+  EDW: enterprise warehouse

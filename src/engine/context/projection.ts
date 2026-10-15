@@ -176,18 +176,21 @@ export interface SyncResult {
   reverified: number;
   /** Non-mirror assertions sent to review because a subject's schema fact changed or vanished (§8.1). */
   dependentsFlagged: number;
+  /** Mirrors retracted because their object left the working set (Phase K2) — not a change in the source. */
+  evicted: number;
   events: number;
 }
 
 /**
  * Records the graph's current content in the ledger (see the module comment).
- * `scope`, when given, limits retraction to mirrors whose key it accepts —
- * so a caller syncing a partial graph never retracts what it didn't load.
+ * `evicted` (Phase K2) names nodes that left the working set but still exist
+ * in the catalog: their mirrors are retracted with that reason, and nothing
+ * built on them is flagged — the source did not change.
  */
 export async function syncGraphToLedger(
   ledger: AssertionLedger,
   graph: GraphSnapshotLike,
-  options: { causedBy?: string; activeSpecId?: string; aliases?: ReadonlyMap<string, string> } = {}
+  options: { causedBy?: string; activeSpecId?: string; aliases?: ReadonlyMap<string, string>; evicted?: ReadonlySet<string> } = {}
 ): Promise<SyncResult> {
   const live = new Map<string, Assertion>();
   for (const a of ledger.assertions()) {
@@ -203,7 +206,7 @@ export async function syncGraphToLedger(
 
   const events: LedgerEvent[] = [];
   const changedSubjects = new Map<string, string>(); // node id → reason
-  const result: SyncResult = { rekeyed: 0, asserted: 0, superseded: 0, retracted: 0, reverified: 0, dependentsFlagged: 0, events: 0 };
+  const result: SyncResult = { rekeyed: 0, asserted: 0, superseded: 0, retracted: 0, reverified: 0, dependentsFlagged: 0, evicted: 0, events: 0 };
   const seen = new Set<string>();
   // Re-keyed ids: the new key's predecessor is the old key's live mirror.
   const predecessor = new Map<string, Assertion>();
@@ -253,8 +256,19 @@ export async function syncGraphToLedger(
     }
   }
 
+  const evictedMirror = (key: string, a: Assertion) => {
+    if (!options.evicted?.size) return false;
+    if (key.startsWith('node:')) return options.evicted.has(key.slice(5));
+    const e = (a.value as { edge?: GraphEdge }).edge;
+    return !!e && (options.evicted.has(e.source) || options.evicted.has(e.target));
+  };
   for (const [key, a] of live) {
     if (seen.has(key) || !inSpecScope(a, options.activeSpecId)) continue;
+    if (evictedMirror(key, a)) {
+      events.push(ledger.buildEvent('rejected', a.id, 'system', { reason: 'left the working set (unused; still in the catalog)', causedBy: options.causedBy }));
+      result.evicted++;
+      continue;
+    }
     const ref = a.evidence[0]?.ref ?? 'its source';
     events.push(ledger.buildEvent('rejected', a.id, 'system', { reason: `no longer present in ${ref}`, causedBy: options.causedBy }));
     result.retracted++;

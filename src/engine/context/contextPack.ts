@@ -5,6 +5,7 @@ import { Conflict } from './conflicts';
 import { isMirror } from './projection';
 import { GraphView, TextMatch, expandNeighborhood, resolveText } from './retrieval';
 import { ContextGap, DEFAULT_MIN_TRUST, describeGap, detectRelationshipGaps } from './contextGaps';
+import { CatalogLookup, selectSeedHits } from './catalog';
 
 /**
  * Task-scoped context packs (C3, v0.30.0; docs/context-layer-requirements.md
@@ -37,6 +38,8 @@ export interface ContextPackSources {
   runtimeFacts?: ReadonlyArray<{ label: string; text: string }>;
   /** Latest extraction per `system/environment` (Phase K1), pinned in grounding manifests. */
   catalogRevisions?: Record<string, string>;
+  /** The estate catalog beyond the working set (Phase K2): ranked, vocabulary-aware retrieval. */
+  catalog?: CatalogLookup;
 }
 
 export interface PackManifest {
@@ -57,6 +60,8 @@ export interface PackManifest {
   maxTokens: number;
   gaps: ContextGap[];
   warnings: string[];
+  /** Catalog objects rendered from the catalog because they were not in the working set yet; the host promotes them (Phase K2). */
+  promoted?: string[];
 }
 
 export interface ContextPack {
@@ -82,6 +87,15 @@ export interface ContextPackProvider {
   specRevision?(): string | undefined;
   /** Objects the approved Pipeline Spec plans to create (Phase K1: grounding treats them as known). */
   plannedObjects?(): string[];
+  /**
+   * Phase K2: loads what a request will need before its pack is built —
+   * query-through for catalog objects whose structure isn't loaded, and a
+   * refresh of in-scope objects past their TTL. Optional; without it a pack
+   * reports such objects as context gaps.
+   */
+  prepare?(request: ContextPackRequest): Promise<void>;
+  /** Phase K2: refresh-on-use for the working set before a plan runs. */
+  beforeRun?(): Promise<void>;
 }
 
 /** char/4, the same heuristic as `core/tokenBudget.ts`. */
@@ -147,16 +161,19 @@ function reliabilityNote(n: BaseNode): string {
 }
 
 /** Builds a pack (see the module comment). */
-export function buildContextPack(request: ContextPackRequest, sources: ContextPackSources): ContextPack {
+export function buildContextPack(request: ContextPackRequest, input: ContextPackSources): ContextPack {
+  const fromCatalog = request.query && input.catalog ? catalogSeeds(request.query, input) : undefined;
+  const sources = fromCatalog?.graph ? { ...input, graph: fromCatalog.graph } : input;
   const idx = buildIndex(sources);
   const purpose = request.purpose;
   const maxTokens = request.maxTokens ?? BUDGET[purpose];
   const matches: TextMatch[] = request.query ? resolveText(request.query, sources.graph) : [];
-  const seeds = [...new Set([...(request.seeds ?? []), ...matches.map((m) => m.nodeId)])].filter((id) => idx.nodes.has(id));
+  const seeds = [...new Set([...(request.seeds ?? []), ...matches.map((m) => m.nodeId), ...(fromCatalog?.seeds ?? [])])].filter((id) => idx.nodes.has(id));
 
   const gaps = request.query
     ? detectRelationshipGaps(request.query, matches, sources.graph, sources.assertions, { minTrust: request.minJoinTrust ?? DEFAULT_MIN_TRUST.relationship, stepId: request.stepId })
     : [];
+  gaps.push(...(fromCatalog?.gaps ?? []).map((g) => ({ ...g, stepId: request.stepId })));
 
   const parts: string[] = [];
   if (sources.runtimeFacts && sources.runtimeFacts.length > 0) {
@@ -167,6 +184,19 @@ export function buildContextPack(request: ContextPackRequest, sources: ContextPa
   const result = seeds.length === 0
     ? renderOverview(sources, idx)
     : renderSeeded(seeds, purpose, maxTokens - estimatePackTokens(parts.join('\n')), sources, idx, gaps);
+  if (seeds.length === 0 && gaps.length > 0) {
+    // Nothing resolved to a loaded object, but something is known to be missing: say so.
+    result.lines.push('### Warnings', ...gaps.map((g) => `- **Context gap:** ${describeGap(g)}`));
+    result.warnings.push(...gaps.map((g) => `gap:${g.needed}:${g.subject.join('+')}`));
+  }
+  if (fromCatalog && fromCatalog.invisible.length > 0) {
+    // Item 8: say what can't be seen instead of omitting it silently.
+    const note = `- **Not visible:** ${fromCatalog.invisible.length} object(s) in scope are not visible with your current grants (${fromCatalog.invisible.slice(0, 5).join(', ')}${fromCatalog.invisible.length > 5 ? ', …' : ''}).`;
+    const at = result.lines.indexOf('### Warnings');
+    if (at >= 0) result.lines.splice(at + 1, 0, note);
+    else result.lines.push('### Warnings', note);
+    result.warnings.push(...fromCatalog.invisible.map((f) => `invisible:${f}`));
+  }
   if (result.lines.length > 0) parts.push(...result.lines);
 
   const text = parts.join('\n');
@@ -188,10 +218,44 @@ export function buildContextPack(request: ContextPackRequest, sources: ContextPa
     tokenCount: estimatePackTokens(text),
     maxTokens,
     gaps,
-    warnings: result.warnings
+    warnings: result.warnings,
+    ...(fromCatalog && fromCatalog.promoted.length > 0 ? { promoted: fromCatalog.promoted.filter((id) => result.nodeIds.includes(id)) } : {})
   };
   const packId = 'pack-' + createHash('sha256').update(canonicalJson({ purpose, seeds, query: request.query, stepId: request.stepId, text })).digest('hex').slice(0, 20);
   return { text, manifest: { packId, ...manifestCore } };
+}
+
+/**
+ * Phase K2 (items 4, 8, 12): the request's best catalog matches. Objects in
+ * the working set are seeds as they are; objects whose structure the catalog
+ * holds are added to this pack's graph view (and reported for promotion);
+ * name-only objects raise a `structure` gap; objects hidden by grants are
+ * counted for the visibility warning.
+ */
+function catalogSeeds(query: string, sources: ContextPackSources): { seeds: string[]; graph?: GraphView; promoted: string[]; gaps: ContextGap[]; invisible: string[] } {
+  const catalog = sources.catalog!;
+  const hits = selectSeedHits(catalog.search(query));
+  if (hits.length === 0) return { seeds: [], promoted: [], gaps: [], invisible: [] };
+  const inGraph = new Set(sources.graph.nodes.map((n) => n.id));
+  const seeds: string[] = [];
+  const promoted: string[] = [];
+  const gaps: ContextGap[] = [];
+  const invisible: string[] = [];
+  for (const h of hits) {
+    const entry = catalog.get(h.id);
+    const name = entry?.table.fqn ?? h.id;
+    if (!h.visible) { invisible.push(name); continue; }
+    if (inGraph.has(h.id)) { seeds.push(h.id); continue; }
+    if (h.tier === 0) {
+      gaps.push({ needed: 'structure', subject: [h.id], text: name, reason: 'absent', minTrust: 'documented' });
+      continue;
+    }
+    seeds.push(h.id);
+    promoted.push(h.id);
+  }
+  if (promoted.length === 0) return { seeds, promoted, gaps, invisible };
+  const extra = catalog.toGraph(promoted);
+  return { seeds, promoted, gaps, invisible, graph: { nodes: [...sources.graph.nodes, ...extra.nodes], edges: [...sources.graph.edges, ...extra.edges] } };
 }
 
 interface Rendered { lines: string[]; nodeIds: string[]; extraAssertions: string[]; truncated: Record<string, number>; warnings: string[] }

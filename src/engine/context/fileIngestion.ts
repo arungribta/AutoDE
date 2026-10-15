@@ -89,7 +89,8 @@ function buildTableGraph(
   schemaLabel: string,
   confidence: number,
   database: string | undefined,
-  ident: ResolvedIdentity
+  ident: ResolvedIdentity,
+  description?: string
 ): { nodes: BaseNode[]; edges: GraphEdge[] } {
   const fqn = database ? `${database}.${schemaLabel}.${tableName}` : `${schemaLabel}.${tableName}`;
   const tableId = objectId(ident.system, ident.environment, fqn);
@@ -101,6 +102,7 @@ function buildTableGraph(
     id: tableId,
     type: 'table',
     label: tableName,
+    ...(description ? { description } : {}),
     database: database ?? 'ingested_files',
     schema: schemaLabel,
     fqn,
@@ -259,6 +261,14 @@ export function parseDdl(content: string, filePath: string, identity?: IngestIde
   // into bogus "columns", swallowing the next real column's name.
   const sql = content.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, '');
   const warnings: string[] = [];
+  // K2: comments are a retrieval signal — `COMMENT ON TABLE|COLUMN x IS '…'` (Oracle, Teradata,
+  // Postgres, Snowflake) and inline `COMMENT '…'` on a column (Snowflake, MySQL, Databricks).
+  const tableComments = new Map<string, string>();
+  const columnComments = new Map<string, string>();
+  for (const m of sql.matchAll(/COMMENT\s+ON\s+(TABLE|COLUMN)\s+([a-zA-Z0-9_."`[\]]+)\s+IS\s+'((?:[^']|'')*)'/gi)) {
+    const ref = m[2].replace(/["`[\]]/g, '').toLowerCase();
+    (m[1].toUpperCase() === 'TABLE' ? tableComments : columnComments).set(ref, m[3].replace(/''/g, "'"));
+  }
   const nodes: BaseNode[] = [];
   const edges: GraphEdge[] = [];
   let tableCount = 0;
@@ -279,9 +289,11 @@ export function parseDdl(content: string, filePath: string, identity?: IngestIde
     const bodyStart = createTableRe.lastIndex;
     let depth = 1;
     let i = bodyStart;
+    let quoted = false;
     while (i < sql.length && depth > 0) {
-      if (sql[i] === '(') depth++;
-      else if (sql[i] === ')') depth--;
+      if (sql[i] === "'") quoted = !quoted;
+      else if (!quoted && sql[i] === '(') depth++;
+      else if (!quoted && sql[i] === ')') depth--;
       i++;
     }
     if (depth !== 0) {
@@ -290,11 +302,12 @@ export function parseDdl(content: string, filePath: string, identity?: IngestIde
     }
     const body = sql.slice(bodyStart, i - 1);
     const columns = parseDdlColumnDefs(body);
+    for (const c of columns) c.comment = c.comment ?? columnComments.get(`${rawName}.${c.name}`.toLowerCase());
     if (columns.length === 0) {
       warnings.push(`CREATE TABLE ${rawName}: no parseable column definitions — skipped.`);
       continue;
     }
-    const { nodes: tNodes, edges: tEdges } = buildTableGraph(tableName, columns, filePath, schemaLabel, 1.0, database, ident);
+    const { nodes: tNodes, edges: tEdges } = buildTableGraph(tableName, columns, filePath, schemaLabel, 1.0, database, ident, tableComments.get(rawName.toLowerCase()));
     nodes.push(...tNodes);
     edges.push(...tEdges);
     tableCount++;
@@ -310,19 +323,21 @@ export function parseDdl(content: string, filePath: string, identity?: IngestIde
 
 const DDL_CONSTRAINT_KEYWORDS = /^(PRIMARY\s+KEY|FOREIGN\s+KEY|CONSTRAINT|UNIQUE|CHECK|KEY\s*\()/i;
 
-function parseDdlColumnDefs(body: string): Array<{ name: string; dataType: string; isNullable?: boolean; isPrimaryKey?: boolean }> {
+function parseDdlColumnDefs(body: string): Array<{ name: string; dataType: string; isNullable?: boolean; isPrimaryKey?: boolean; comment?: string }> {
   // Split on top-level commas only (not ones nested inside a type's own parens, e.g. DECIMAL(10,2)).
   const parts: string[] = [];
   let depth = 0;
   let current = '';
+  let quoted = false; // inside a '…' literal (a COMMENT may hold commas and parentheses)
   for (const ch of body) {
-    if (ch === '(') depth++;
-    if (ch === ')') depth--;
-    if (ch === ',' && depth === 0) { parts.push(current); current = ''; } else { current += ch; }
+    if (ch === "'") quoted = !quoted;
+    if (!quoted && ch === '(') depth++;
+    if (!quoted && ch === ')') depth--;
+    if (!quoted && ch === ',' && depth === 0) { parts.push(current); current = ''; } else { current += ch; }
   }
   if (current.trim()) parts.push(current);
 
-  const columns: Array<{ name: string; dataType: string; isNullable?: boolean; isPrimaryKey?: boolean }> = [];
+  const columns: Array<{ name: string; dataType: string; isNullable?: boolean; isPrimaryKey?: boolean; comment?: string }> = [];
   const tablePrimaryKey: string[] = [];
   for (const rawPart of parts) {
     const part = rawPart.trim();
@@ -336,7 +351,8 @@ function parseDdlColumnDefs(body: string): Array<{ name: string; dataType: strin
     const dataType = colMatch[2].trim().toUpperCase();
     const isNullable = !/NOT\s+NULL/i.test(part);
     const isPrimaryKey = /PRIMARY\s+KEY/i.test(part);
-    columns.push({ name, dataType, isNullable, isPrimaryKey });
+    const comment = /\bCOMMENT\s+'((?:[^']|'')*)'/i.exec(part)?.[1]?.replace(/''/g, "'");
+    columns.push({ name, dataType, isNullable, isPrimaryKey, ...(comment ? { comment } : {}) });
   }
   for (const col of columns) {
     if (tablePrimaryKey.includes(col.name.toLowerCase())) { col.isPrimaryKey = true; col.isNullable = false; }
@@ -368,6 +384,7 @@ interface DictionaryColumns {
   scale?: number;
   nullable?: number;
   ordinal?: number;
+  comment?: number;
 }
 
 /**
@@ -383,7 +400,7 @@ function detectColumnDictionary(header: string[]): DictionaryColumns | undefined
   const table = at('tablename', 'table_name');
   const column = at('columnname', 'column_name');
   if (table === undefined || column === undefined) return undefined;
-  const common = { table, column, length: at('columnlength', 'data_length', 'character_maximum_length'), precision: at('decimaltotaldigits', 'data_precision', 'numeric_precision'), scale: at('decimalfractionaldigits', 'data_scale', 'numeric_scale'), nullable: at('nullable', 'is_nullable'), ordinal: at('columnid', 'column_id', 'ordinal_position') };
+  const common = { table, column, length: at('columnlength', 'data_length', 'character_maximum_length'), precision: at('decimaltotaldigits', 'data_precision', 'numeric_precision'), scale: at('decimalfractionaldigits', 'data_scale', 'numeric_scale'), nullable: at('nullable', 'is_nullable'), ordinal: at('columnid', 'column_id', 'ordinal_position'), comment: at('commentstring', 'comments', 'comment', 'column_comment') };
   const tdSchema = at('databasename');
   const tdType = at('columntype');
   if (tdSchema !== undefined && tdType !== undefined) return { flavor: 'teradata', schema: tdSchema, type: tdType, ...common };
@@ -415,7 +432,7 @@ function dictionaryType(flavor: DictionaryFlavor, row: string[], c: DictionaryCo
 
 function parseColumnDictionary(lines: string[], header: string[], c: DictionaryColumns, filePath: string, identity?: IngestIdentity): IngestResult {
   const ident = identityFor(filePath, identity);
-  const tables = new Map<string, { catalog?: string; schema: string; table: string; cols: Array<{ ord: number; name: string; dataType: string; isNullable: boolean }> }>();
+  const tables = new Map<string, { catalog?: string; schema: string; table: string; cols: Array<{ ord: number; name: string; dataType: string; isNullable: boolean; comment?: string }> }>();
   const warnings: string[] = [];
   let skipped = 0;
   for (const line of lines.slice(1)) {
@@ -429,7 +446,8 @@ function parseColumnDictionary(lines: string[], header: string[], c: DictionaryC
     const entry = tables.get(key) ?? { catalog, schema, table, cols: [] };
     const nullRaw = c.nullable !== undefined ? (row[c.nullable] ?? '').trim().toUpperCase() : '';
     const ordRaw = c.ordinal !== undefined ? Number((row[c.ordinal] ?? '').trim()) : NaN;
-    entry.cols.push({ ord: Number.isFinite(ordRaw) ? ordRaw : entry.cols.length + 1, name: column, dataType: dictionaryType(c.flavor, row, c), isNullable: !(nullRaw === 'N' || nullRaw === 'NO') });
+    const comment = c.comment !== undefined ? (row[c.comment] ?? '').trim() || undefined : undefined;
+    entry.cols.push({ ord: Number.isFinite(ordRaw) ? ordRaw : entry.cols.length + 1, name: column, dataType: dictionaryType(c.flavor, row, c), isNullable: !(nullRaw === 'N' || nullRaw === 'NO'), ...(comment ? { comment } : {}) });
     tables.set(key, entry);
   }
   if (skipped) warnings.push(`${skipped} row(s) without a schema, table or column name were skipped.`);
@@ -437,7 +455,7 @@ function parseColumnDictionary(lines: string[], header: string[], c: DictionaryC
   const edges: GraphEdge[] = [];
   let columnCount = 0;
   for (const t of tables.values()) {
-    const cols = t.cols.sort((a, b) => a.ord - b.ord).map(({ name, dataType, isNullable }) => ({ name, dataType, isNullable }));
+    const cols = t.cols.sort((a, b) => a.ord - b.ord).map(({ name, dataType, isNullable, comment }) => ({ name, dataType, isNullable, comment }));
     const g = buildTableGraph(t.table, cols, filePath, t.schema, 1.0, t.catalog, ident);
     for (const n of g.nodes) if (n.type === 'table') (n.metadata as Record<string, unknown>).dictionaryFlavor = c.flavor;
     nodes.push(...g.nodes);
