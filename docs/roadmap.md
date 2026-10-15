@@ -59,6 +59,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Rename and delete business problems from the UI (WS-3) | §8.11 | Folders can only be removed by hand. |
 | Edits to `.ai-context/context/business-context.yaml` take effect without a window reload (CTX-5) | found 2026-10-14 | That folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message. |
 | Style guide; keyboard and screen-reader verification (UI-4, UI-5) | §2 | |
+| Make command-only features discoverable from the panel: a Skills section in the Workflow Palette (import, run, list) and chat slash commands for import, "What the Agent Saw" and "Explain This Artifact" (UI-1) | manual testing 2026-10-15 | Today they exist only in the Command Palette. |
 | Remove unused `src/spokes/{architectureAgent,ingestionAgent,sttmAgent}.ts` | found 2026-10-15 | Not imported anywhere; superseded by `src/agents/`. |
 | Refresh the engineering onboarding guide (describes v0.13.0) | — | Both specs list onboarding chapters as documentation deliverables. |
 

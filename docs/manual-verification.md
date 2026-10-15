@@ -18,6 +18,7 @@ Time: about 90 minutes, of which Part 7 (a full plan run) takes the longest. Par
 4. **Open the AutoDE panel** (AutoDE icon in the activity bar). Log lines appear as small grey messages in the chat stream; most "Expect" items below refer to those.
 5. **Choose an LLM provider** with `/settings` in the chat box. Parts 4 and 7 need a working provider; use Copilot if it is available, plus one API provider (OpenAI, Anthropic, Gemini or Ollama) for Part 4.
 6. Keep the Explorer open on `.ai-context/`; several checks look at files there.
+7. **Where commands are:** every step written as "`AutoDE: …`" is a VS Code command, run from the **Command Palette** (Ctrl+Shift+P, type part of the name) **in the Development Host window**. Most have no button in the AutoDE panel. Steps written as `/something` are typed into the AutoDE chat box.
 
 > **Known gap found while writing this:** edits to `.ai-context/context/business-context.yaml` are not picked up live (that folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message). Where a step edits that file, it says to run **Developer: Reload Window** afterwards.
 
@@ -76,7 +77,7 @@ Find every .ddl file under the workspace, read each one, and reply with a list o
 CREATE TABLE names per file. Do not create or modify any file.
 ```
 
-- [ ] **4.1 Import.** Do: `AutoDE: Import Tool Skill`, pick the `table-lister` folder.
+- [ ] **4.1 Import.** Do: Command Palette → `AutoDE: Import Tool Skill`; in the folder picker select the `table-lister` **folder** (not `SKILL.md` itself) and click "Import as a tool skill".
   Expect: it lands under `.ai-context/skills/tool-skills/table-lister/`.
 - [ ] **4.2 Runs on Copilot.** Do: with Copilot active, chat `/skill table-lister list the tables`.
   Expect: a reply listing the `shop`, `crm` and `hr_legacy` tables. No write tool was offered (nothing created in the workspace).
