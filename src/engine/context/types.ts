@@ -75,6 +75,8 @@ export interface BaseNode {
   readonly createdAt?: string;
   readonly updatedAt?: string;
   readonly updatedBy?: string;
+  /** Ids of the ledger assertions this node is projected from (C2, v0.29.0). Set by the projection, never by producers. */
+  readonly supportedBy?: string[];
 }
 
 export interface TableNode extends BaseNode {
@@ -122,6 +124,8 @@ export interface GraphEdge {
   readonly origin?: Origin;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+  /** Ids of the ledger assertions this edge is projected from (C2, v0.29.0). */
+  readonly supportedBy?: string[];
 }
 
 export interface RetrievalOptions {

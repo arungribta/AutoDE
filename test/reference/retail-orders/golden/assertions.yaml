@@ -16,6 +16,7 @@ assertions:
     subject: [metric:net_revenue]
     predicate: defined_as
     value:
+      name: Revenue          # the name t2 defines ("Revenue for us means net revenue")
       expression: SUM(order_items.quantity * order_items.unit_price - COALESCE(order_items.discount_amount, 0)) - SUM(refunds.amount)
       filters: ["orders.status <> 'CANCELLED'"]
       grain: [order_items]
@@ -130,7 +131,7 @@ assertions:
     kind: business_term
     subject: [term:revenue]
     predicate: defined_as
-    value: { formula: SUM(order_items.quantity * order_items.unit_price) }
+    value: { term: Revenue, formula: SUM(order_items.quantity * order_items.unit_price) }
     status: needs_review   # in conflict with A-metric-net-revenue (trap 1)
     trust: documented
     evidence: [{ type: file, ref: documents/business-context.yaml }]

@@ -313,6 +313,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     if (!problemId) {
+      this.contextFileManager?.setActiveSpecId(undefined);
       this.specManager = undefined;
       this.targetContextManager = undefined;
       this.sourceContextManager = undefined;
@@ -345,10 +346,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       await this.semanticLayerManager.initialize();
       await this.pipelineSpecManager.initialize();
       const existingSpec = this.specManager.getSpec();
+      this.contextFileManager?.setActiveSpecId(existingSpec?.id);
       if (existingSpec) {
         this.hub.setSpec(existingSpec.id, existingSpec.version);
         if (existingSpec.status === 'approved') {
-          if (this.synthesisPipeline) { await this.synthesisPipeline.synthesizeFromSpec(existingSpec); }
+          if (this.synthesisPipeline) {
+            await this.synthesisPipeline.synthesizeFromSpec(existingSpec);
+            await this.contextFileManager?.persistCompiledGraph();
+          }
           this.hub.inferPhasesFromSpec(existingSpec, this.contextFileManager?.buildContextPrompt());
           // A previously-approved Target Context becomes the plan's live target
           // environment again — closes the gap where a generic
@@ -617,8 +622,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           );
           if (result?.success && this.contextFileManager) {
             const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+            const activeSpecId = this.contextFileManager.getActiveSpecId();
             this.contextFileManager.dispose();
             this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator());
+            this.contextFileManager.setActiveSpecId(activeSpecId);
             await this.contextFileManager.initialize();
             this.postContextUpdate();
           }
@@ -1346,6 +1353,15 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * `AutoDE: Compact Context Ledger` (C2, v0.29.0): writes the ledger's folded
+   * state to `.ai-context/ledger/snapshot.json`. With `prune`, the event files
+   * folded into it are deleted — the only operation that removes history.
+   */
+  public async compactContextLedger(prune: boolean): Promise<{ assertions: number; prunedFiles: number } | undefined> {
+    return this.contextFileManager?.compactLedger(prune);
+  }
+
+  /**
    * The one explicit "Build Semantic Layer" action (Step 6, second half) —
    * captures the live shared graph's current content/counts as a spec-pinned,
    * versioned snapshot. Never runs implicitly; called only from
@@ -1853,7 +1869,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private async syncContextFromApprovedSpec(spec: BusinessProblemSpec): Promise<void> {
     if (!this.synthesisPipeline) { return; }
     try {
+      this.contextFileManager?.setActiveSpecId(spec.id);
       const result = await this.synthesisPipeline.synthesizeFromSpec(spec);
+      // C2 (v0.29.0): record the spec's facts in the ledger — a changed field supersedes.
+      await this.contextFileManager?.persistCompiledGraph();
       this.postContextUpdate();
       this.postLog(`Context Layer synced from approved specification v${spec.version} (${result.nodes} node(s)).`);
       await this.writeContextSnapshot(spec);

@@ -1,0 +1,637 @@
+{
+  "version": "0.29.0",
+  "mode": "offline",
+  "provider": null,
+  "generatedAt": "2026-10-15T03:44:29.043Z",
+  "sut": "assertion ledger (v0.29.0, C2)",
+  "ingestion": {
+    "declared": 18,
+    "represented": 18,
+    "collisions": [
+      {
+        "name": "customers",
+        "sources": [
+          "shop.customers",
+          "crm.customers"
+        ],
+        "nodes": [
+          "shop.customers",
+          "crm.customers"
+        ]
+      }
+    ],
+    "graphTables": 58,
+    "files": [
+      {
+        "file": "shop.ddl",
+        "tables": 10,
+        "warnings": []
+      },
+      {
+        "file": "crm.ddl",
+        "tables": 8,
+        "warnings": []
+      },
+      {
+        "file": "hr_legacy.ddl",
+        "tables": 40,
+        "warnings": []
+      }
+    ]
+  },
+  "contextNoiseLast": {
+    "tokens": 477,
+    "relevantTablesShown": 17,
+    "relevantTablesTotal": 17,
+    "noiseTablesShown": 2,
+    "noiseTablesTotal": 40,
+    "columnsShown": false
+  },
+  "contextNoiseFirst": {
+    "tokens": 509,
+    "relevantTablesShown": 2,
+    "relevantTablesTotal": 17,
+    "noiseTablesShown": 20,
+    "noiseTablesTotal": 40,
+    "columnsShown": false
+  },
+  "chat": [
+    {
+      "id": "t1",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t2",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t3",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t4",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t5",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t6",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t7",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t8",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t9",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t10",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t11",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    }
+  ],
+  "answerability": [
+    {
+      "id": "q01",
+      "answerable": false,
+      "missing": [
+        "one row per order"
+      ]
+    },
+    {
+      "id": "q02",
+      "answerable": false,
+      "missing": [
+        "order_item_id"
+      ]
+    },
+    {
+      "id": "q03",
+      "answerable": false,
+      "missing": [
+        "cust_no"
+      ]
+    },
+    {
+      "id": "q04",
+      "answerable": false,
+      "missing": [
+        "shop_customer_id",
+        "customer_id"
+      ]
+    },
+    {
+      "id": "q05",
+      "answerable": false,
+      "missing": [
+        "member_id",
+        "duplicate"
+      ]
+    },
+    {
+      "id": "q06",
+      "answerable": false,
+      "missing": [
+        "updated_at",
+        "incremental"
+      ]
+    },
+    {
+      "id": "q07",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q08",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q09",
+      "answerable": false,
+      "missing": [
+        "order_ref"
+      ]
+    },
+    {
+      "id": "q10",
+      "answerable": false,
+      "missing": [
+        "cust_no"
+      ]
+    },
+    {
+      "id": "q11",
+      "answerable": false,
+      "missing": [
+        "category_id"
+      ]
+    },
+    {
+      "id": "q12",
+      "answerable": false,
+      "missing": [
+        "net revenue",
+        "cancel"
+      ]
+    },
+    {
+      "id": "q13",
+      "answerable": false,
+      "missing": [
+        "cancel"
+      ]
+    },
+    {
+      "id": "q14",
+      "answerable": false,
+      "missing": [
+        "net revenue"
+      ]
+    },
+    {
+      "id": "q15",
+      "answerable": false,
+      "missing": [
+        "retained"
+      ]
+    },
+    {
+      "id": "q16",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q17",
+      "answerable": false,
+      "missing": [
+        "order_ts",
+        "timestamp"
+      ]
+    },
+    {
+      "id": "q18",
+      "answerable": false,
+      "missing": [
+        "discount_amount"
+      ]
+    },
+    {
+      "id": "q19",
+      "answerable": false,
+      "missing": [
+        "status",
+        "cancelled"
+      ]
+    },
+    {
+      "id": "q20",
+      "answerable": false,
+      "missing": [
+        "segment_code",
+        "lifecycle_stage"
+      ]
+    },
+    {
+      "id": "q21",
+      "answerable": false,
+      "missing": [
+        "currency"
+      ]
+    },
+    {
+      "id": "q22",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q23",
+      "answerable": false,
+      "missing": [
+        "fx conversion"
+      ]
+    },
+    {
+      "id": "q24",
+      "answerable": false,
+      "missing": [
+        "dim_customer",
+        "scd type 2"
+      ]
+    },
+    {
+      "id": "q25",
+      "answerable": false,
+      "missing": [
+        "snowflake",
+        "dbt"
+      ]
+    },
+    {
+      "id": "q26",
+      "answerable": true,
+      "missing": []
+    }
+  ],
+  "qa": [],
+  "artifactDuplicates": 13,
+  "steps": [
+    {
+      "id": "s1",
+      "agent": "sourceAssessmentAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s2",
+      "agent": "dataModelerAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s3",
+      "agent": "sttmAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s4",
+      "agent": "ingestionAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s5",
+      "agent": "transformScaffoldAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s6",
+      "agent": "architectureAgent",
+      "status": "completed"
+    }
+  ],
+  "artifacts": [
+    {
+      "title": "Source Assessment (Context-Derived)",
+      "type": "discovery_report",
+      "language": "markdown",
+      "generatedBy": "sourceAssessmentAgent"
+    },
+    {
+      "title": "Dimensional Model: ANALYTICS.MARTS",
+      "type": "data_model",
+      "language": "sql",
+      "generatedBy": "dataModelerAgent"
+    },
+    {
+      "title": "STTM Mapping: s3_mapped",
+      "type": "sttm_mapping",
+      "language": "sql",
+      "generatedBy": "sttmAgent"
+    },
+    {
+      "title": "Ingestion: s4_landing",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "ingestionAgent"
+    },
+    {
+      "title": "dbt_project.yml",
+      "path": "dbt_project.yml",
+      "type": "sql_script",
+      "language": "yaml",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "stg_source.sql",
+      "path": "models/staging/stg_source.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "int_sales_aggregated.sql",
+      "path": "models/intermediate/int_sales_aggregated.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "fct_main.sql",
+      "path": "models/marts/fct_main.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "schema.yml",
+      "path": "models/marts/schema.yml",
+      "type": "sql_script",
+      "language": "yaml",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "assert_positive_amounts.sql",
+      "path": "tests/generic/assert_positive_amounts.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "generate_schema_name.sql",
+      "path": "macros/generate_schema_name.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "DDL: s6_curated",
+      "type": "ddl_script",
+      "language": "sql",
+      "generatedBy": "architectureAgent"
+    },
+    {
+      "title": "Architecture Doc: s6_curated",
+      "type": "architecture_diagram",
+      "language": "markdown",
+      "generatedBy": "architectureAgent"
+    }
+  ],
+  "grounding": {
+    "tablesChecked": 3,
+    "tablesResolved": 0,
+    "columnsChecked": 0,
+    "columnsResolved": 0,
+    "unresolved": [
+      {
+        "kind": "table",
+        "ref": "RAW_DB.PUBLIC.landing",
+        "artifact": "STTM Mapping: s3_mapped"
+      },
+      {
+        "kind": "table",
+        "ref": "raw_sales",
+        "artifact": "models/staging/stg_source.sql"
+      },
+      {
+        "kind": "table",
+        "ref": "stg_sales",
+        "artifact": "models/intermediate/int_sales_aggregated.sql"
+      }
+    ],
+    "ambiguous": [],
+    "typeIssues": [],
+    "sqlArtifacts": 9
+  },
+  "planContextTokens": 531,
+  "expected": [
+    {
+      "id": "E1",
+      "description": "Staging deduplicates orders on order_id",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E2",
+      "description": "Orders load incrementally on updated_at",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E3",
+      "description": "dim_customer is SCD type 2",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E4",
+      "description": "Customer email is masked with a hash",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E5",
+      "description": "Net revenue excludes cancelled orders",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E6",
+      "description": "Net revenue is net of refunds (the refunds table is actually read)",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E7",
+      "description": "No invented join between support tickets and orders",
+      "pass": true,
+      "matchedIn": []
+    },
+    {
+      "id": "E8",
+      "description": "CRM customers are joined to shop customers on shop_customer_id",
+      "pass": false,
+      "matchedIn": []
+    }
+  ],
+  "notes": [
+    "Chat extraction arrives in C4. This run proposes each turn's scripted facts to the ledger as an extractor would (outcomes such as status, trust, supersession and conflicts withheld), so trap 1 measures the conflict detector, not extraction."
+  ],
+  "conflicts": [
+    {
+      "rule": "declared_key",
+      "key": "declared_key|table-crm_customers|01M4YTJMS1BWNBR1V7H3HH2FJW",
+      "subject": [
+        "table-crm_customers"
+      ],
+      "ids": [
+        "01M4YTJMJ13916SNADB5X17JDH",
+        "01M4YTJMS1BWNBR1V7H3HH2FJW"
+      ],
+      "sides": [
+        "The customer key across both systems is customer_id. (inferred, proposed)",
+        "Schema declares primary key (cust_no) (documented)"
+      ]
+    },
+    {
+      "rule": "definition",
+      "key": "definition|revenue",
+      "subject": [
+        "biz-term-revenue",
+        "metric:net_revenue"
+      ],
+      "ids": [
+        "01M4YTJMHHCQ908CEPG1F33Q6E",
+        "01M4YTJMNWCHEEHBCFB8TGG5WY"
+      ],
+      "sides": [
+        "Revenue = SUM(order_items.quantity * order_items.unit_price) (documented, needs_review)",
+        "Revenue = SUM(order_items.quantity * order_items.unit_price - COALESCE(order_items.discount_amount, 0)) - SUM(refunds.amount) WHERE orders.status <> 'CANCELLED' (inferred, proposed)"
+      ]
+    },
+    {
+      "rule": "value",
+      "key": "value|key|table-crm_customers|primary",
+      "subject": [
+        "table-crm_customers"
+      ],
+      "ids": [
+        "01M4YTJMS1BWNBR1V7H3HH2FJW",
+        "01M4YTJMSQ01AD53Q41HYMX1G5"
+      ],
+      "sides": [
+        "The customer key across both systems is customer_id. (inferred, proposed)",
+        "Correction — in the CRM the customer key is cust_no, not customer_id. crm.customers.shop_customer_id links to shop.customers.customer_id. (inferred, proposed)"
+      ]
+    }
+  ],
+  "ledger": {
+    "assertions": 721,
+    "events": 722,
+    "active": 707,
+    "proposed": 13,
+    "needsReview": 1,
+    "byTrust": [
+      [
+        "verified",
+        0
+      ],
+      [
+        "confirmed",
+        0
+      ],
+      [
+        "documented",
+        708
+      ],
+      [
+        "inferred",
+        13
+      ]
+    ],
+    "unresolvedProposals": [
+      {
+        "fact": "A-constraint-platform",
+        "unresolved": [
+          "target"
+        ]
+      },
+      {
+        "fact": "A-metric-net-revenue",
+        "unresolved": [
+          "metric:net_revenue"
+        ]
+      },
+      {
+        "fact": "A-decision-scd2-customer",
+        "unresolved": [
+          "dim_customer"
+        ]
+      },
+      {
+        "fact": "A-metric-retention-90d",
+        "unresolved": [
+          "metric:retention_90d"
+        ]
+      }
+    ]
+  },
+  "traps": [
+    {
+      "id": 1,
+      "name": "Revenue defined two ways (glossary gross vs chat net)",
+      "detected": true,
+      "how": "conflict detector (definition rule)"
+    },
+    {
+      "id": 2,
+      "name": "Customer key corrected mid-chat (customer_id → cust_no)",
+      "detected": false,
+      "how": "not yet: the ledger supersedes, but telling that a chat turn corrects an earlier one is extraction (C4) — here t5 and t6 surface as a key conflict instead"
+    },
+    {
+      "id": 3,
+      "name": "Claimed-unique member_id has duplicates",
+      "detected": false,
+      "how": "not supported: no verification probes"
+    },
+    {
+      "id": 4,
+      "name": "Ticket-to-order join requested with no relationship",
+      "detected": false,
+      "how": "not supported: no context gaps (artifacts did not invent the join)"
+    },
+    {
+      "id": 5,
+      "name": "Irrelevant 40-table schema ingested",
+      "detected": false,
+      "how": "noise tables in step context: 2 (noise last), 20 (noise first)"
+    }
+  ],
+  "llm": {
+    "calls": 32,
+    "hits": 0,
+    "misses": 0,
+    "recorded": 0,
+    "failures": 32
+  }
+}

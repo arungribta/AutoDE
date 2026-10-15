@@ -4886,6 +4886,463 @@ async function main() {
     assert.ok(user.includes('approach: Ask one flow at a time.'));
   });
 
+  // ---------- v0.29.0: context-layer C2 — assertion ledger and projection ----------
+
+  const c2 = {
+    tmp() { const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path'); return nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-c2-')); },
+    ledgerDir(root) { return require('node:path').join(root, 'ledger'); },
+    /** A small graph shaped like every producer's output: a table + columns + contains edges, a glossary term, a spec-derived rule. */
+    graph() {
+      const fileOrigin = { source: 'derived', sourceRef: '/data/shop.ddl', extractor: 'file-ingestion', extractedAt: '2026-10-01T00:00:00.000Z', environment: 'source', confidence: 1, reliability: 'best-effort-inferred' };
+      const liveOrigin = { source: 'system', sourceRef: 'snowflake', connectionId: 'sf-main', extractedAt: '2026-10-01T00:00:00.000Z', reliability: 'live-verified', lastVerifiedAt: '2026-10-01T00:00:00.000Z' };
+      const nodes = [
+        { id: 'table-shop_orders', type: 'table', label: 'orders', database: 'ingested_files', schema: 'shop', fqn: 'shop.orders', isView: false, metadata: {}, version: 1, origin: fileOrigin },
+        { id: 'col-shop_orders.order_id', type: 'column', label: 'order_id', dataType: 'INTEGER', isNullable: false, isPrimaryKey: true, isForeignKey: false, metadata: { ordinalPosition: 1 }, version: 1, origin: fileOrigin },
+        { id: 'col-shop_orders.status', type: 'column', label: 'status', dataType: 'VARCHAR(20)', isNullable: true, isPrimaryKey: false, isForeignKey: false, metadata: { ordinalPosition: 2 }, version: 1, origin: fileOrigin },
+        { id: 'table-sf_customers', type: 'table', label: 'customers', database: 'DB', schema: 'CRM', fqn: 'DB.CRM.customers', isView: false, metadata: {}, version: 1, origin: liveOrigin },
+        { id: 'biz-term-revenue', type: 'business_term', label: 'Revenue', description: 'Gross merchandise value', formula: 'SUM(order_items.quantity * order_items.unit_price)', mappedNodeIds: [], metadata: {}, version: 1, origin: { source: 'user', sourceRef: 'context/business-context.yaml', extractor: 'business-context' } },
+        { id: 'spec-rule-bps-1-c0', type: 'business_rule', label: 'Daily refresh', ruleText: 'Daily refresh', enforcementLevel: 'STRICT', metadata: {}, version: 2, origin: { source: 'derived', sourceRef: 'spec:bps-1', specId: 'bps-1', specVersion: 2, extractor: 'spec-sync' } }
+      ];
+      const edges = [
+        { id: 'edge-contains-table-shop_orders-col-shop_orders.order_id', source: 'table-shop_orders', target: 'col-shop_orders.order_id', type: 'contains', weight: 1 },
+        { id: 'edge-contains-table-shop_orders-col-shop_orders.status', source: 'table-shop_orders', target: 'col-shop_orders.status', type: 'contains', weight: 1 }
+      ];
+      return { nodes, edges };
+    },
+    withoutProjected(items) {
+      return items.map((x) => {
+        const c = JSON.parse(JSON.stringify(x));
+        delete c.supportedBy;
+        if (c.origin) delete c.origin.confidence;
+        return c;
+      });
+    }
+  };
+
+  await test('v0.29.0: ULIDs are 26 Crockford chars and strictly increase within one millisecond', () => {
+    const { createUlidFactory } = require('../dist/engine/context/assertions.js');
+    const next = createUlidFactory(() => 1760000000000);
+    const ids = Array.from({ length: 50 }, () => next());
+    assert.ok(ids.every((id) => /^[0-9A-HJKMNP-TV-Z]{26}$/.test(id)), ids[0]);
+    for (let i = 1; i < ids.length; i++) assert.ok(ids[i] > ids[i - 1], `${ids[i]} > ${ids[i - 1]}`);
+  });
+
+  await test('v0.29.0: per-kind Ajv schemas validate an assertion value (relationship, key, metric) and the envelope', () => {
+    const { validateAssertion } = require('../dist/engine/context/assertionSchemas.js');
+    const base = { subject: ['table-a', 'table-b'], predicate: 'joins_to', statement: 'a joins b', evidence: [{ type: 'chat_message', ref: 't4' }] };
+    assert.deepStrictEqual(validateAssertion({ ...base, kind: 'relationship', value: { from: { entity: 'a', columns: ['id'] }, to: { entity: 'b', columns: ['a_id'] }, cardinality: '1:N', optional: false } }), []);
+    assert.ok(validateAssertion({ ...base, kind: 'relationship', value: { from: { entity: 'a', columns: [] }, to: { entity: 'b', columns: ['x'] }, cardinality: '2:2' } }).length >= 2, 'empty column list and a bad cardinality are both reported');
+    assert.deepStrictEqual(validateAssertion({ ...base, kind: 'key', predicate: 'primary', value: ['order_id'] }), []);
+    assert.ok(validateAssertion({ ...base, kind: 'key', predicate: 'primary', value: 'order_id' }).length > 0);
+    assert.ok(validateAssertion({ ...base, kind: 'metric', predicate: 'defined_as', value: { name: 'Revenue' } }).length > 0, 'a metric needs an expression or a definition');
+    assert.ok(validateAssertion({ ...base, kind: 'key', value: ['x'], evidence: [] }).some((e) => /evidence/.test(e)));
+    assert.ok(validateAssertion({ ...base, kind: 'nonsense', value: {} })[0].includes('unknown kind'));
+  });
+
+  await test('v0.29.0: migration of the graph into the ledger is graph-equivalent and idempotent (also across sessions)', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger, projectGraph } = require('../dist/engine/context/projection.js');
+    const root = c2.tmp();
+    try {
+      const g = c2.graph();
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      await ledger.load();
+      const first = await syncGraphToLedger(ledger, g);
+      assert.strictEqual(first.asserted, g.nodes.length + g.edges.length);
+      const projected = projectGraph(ledger.assertions(), { activeSpecId: 'bps-1' });
+      assert.deepStrictEqual(c2.withoutProjected(projected.nodes), c2.withoutProjected(g.nodes), 'node set equal pre/post (apart from the fields the projection adds)');
+      assert.deepStrictEqual(c2.withoutProjected(projected.edges), c2.withoutProjected(g.edges), 'edge set equal pre/post');
+      assert.ok(projected.nodes.every((n) => Array.isArray(n.supportedBy) && n.supportedBy.length === 1));
+      const byId = Object.fromEntries(projected.nodes.map((n) => [n.id, n]));
+      assert.strictEqual(byId['table-sf_customers'].origin.confidence, 1.0, 'live-verified → verified');
+      assert.strictEqual(byId['table-shop_orders'].origin.confidence, 0.8, 'file-derived → documented');
+      assert.strictEqual(byId['spec-rule-bps-1-c0'].origin.confidence, 0.9, 'from an approved spec → confirmed');
+      const trustOf = (id) => ledger.get(byId[id].supportedBy[0]).trust;
+      assert.deepStrictEqual([trustOf('table-sf_customers'), trustOf('table-shop_orders'), trustOf('biz-term-revenue'), trustOf('spec-rule-bps-1-c0')], ['verified', 'documented', 'documented', 'confirmed']);
+      assert.strictEqual(ledger.get(byId['spec-rule-bps-1-c0'].supportedBy[0]).specId, 'bps-1');
+      assert.strictEqual(ledger.get(byId['table-shop_orders'].supportedBy[0]).specId, undefined, 'project-wide when not from a spec');
+
+      // Idempotent: the projected graph syncs back without a single event — in this session and in a new one.
+      assert.strictEqual((await syncGraphToLedger(ledger, projected, { activeSpecId: 'bps-1' })).events, 0);
+      assert.strictEqual((await syncGraphToLedger(ledger, g, { activeSpecId: 'bps-1' })).events, 0, 'timestamps and confidence alone are not a change');
+      const later = new AssertionLedger(c2.ledgerDir(root));
+      await later.load();
+      assert.strictEqual((await syncGraphToLedger(later, projected, { activeSpecId: 'bps-1' })).events, 0);
+      assert.strictEqual(nodeFs.readdirSync(c2.ledgerDir(root)).filter((f) => f.endsWith('.jsonl')).length, 1, 'a session that appends nothing writes no file');
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: folding is deterministic — the same ledger always gives a byte-identical projection, whatever order its files are read in', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger, foldEvents } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger, projectGraph } = require('../dist/engine/context/projection.js');
+    const root = c2.tmp();
+    try {
+      const s1 = new AssertionLedger(c2.ledgerDir(root));
+      await syncGraphToLedger(s1, c2.graph());
+      const s2 = new AssertionLedger(c2.ledgerDir(root));
+      await s2.load();
+      const g = c2.graph();
+      g.nodes[2] = { ...g.nodes[2], dataType: 'VARCHAR(40)' };
+      await syncGraphToLedger(s2, g);
+      await s2.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key', evidence: [{ type: 'chat_message', ref: 't3' }] });
+
+      const read = async () => { const l = new AssertionLedger(c2.ledgerDir(root)); await l.load(); return l; };
+      const a = await read();
+      const b = await read();
+      assert.strictEqual(JSON.stringify(projectGraph(a.assertions())), JSON.stringify(projectGraph(b.assertions())));
+      const events = [...a.allEvents()];
+      const reversed = foldEvents(events.slice().reverse());
+      assert.strictEqual(JSON.stringify(reversed), JSON.stringify(foldEvents(events)), 'event order on disk does not matter; ids do');
+      assert.strictEqual(JSON.stringify(projectGraph(reversed)), JSON.stringify(projectGraph(a.assertions())));
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: a changed fact supersedes (validTo, supersededBy, history kept), a vanished one is rejected with a reason, and dependents go to review', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger, projectGraph } = require('../dist/engine/context/projection.js');
+    const root = c2.tmp();
+    try {
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      let g = c2.graph();
+      await syncGraphToLedger(ledger, g, { activeSpecId: 'bps-1' });
+      const statusRule = await ledger.assert({ kind: 'quality_expectation', subject: ['col-shop_orders.status'], predicate: 'accepted_values', value: { check: 'accepted_values', values: ['OPEN', 'CANCELLED'] }, statement: 'status is OPEN or CANCELLED', evidence: [{ type: 'chat_message', ref: 't9' }], status: 'active', trust: 'confirmed' });
+      const keyClaim = await ledger.assert({ kind: 'key', subject: ['table-sf_customers'], predicate: 'primary', value: ['cust_no'], statement: 'cust_no is the key', evidence: [{ type: 'chat_message', ref: 't6' }], status: 'active', trust: 'confirmed' });
+      const oldId = projectGraph(ledger.assertions(), { activeSpecId: 'bps-1' }).nodes.find((n) => n.id === 'col-shop_orders.status').supportedBy[0];
+
+      g = c2.graph();
+      g.nodes[2] = { ...g.nodes[2], dataType: 'VARCHAR(40)' };
+      g.nodes.splice(3, 1); // the live customers table disappeared
+      const r = await syncGraphToLedger(ledger, g, { activeSpecId: 'bps-1' });
+      assert.deepStrictEqual([r.asserted, r.superseded, r.retracted, r.dependentsFlagged], [0, 1, 1, 2]);
+
+      const old = ledger.get(oldId);
+      assert.strictEqual(old.status, 'superseded');
+      assert.ok(old.validTo && old.supersededBy);
+      const replacement = ledger.get(old.supersededBy);
+      assert.strictEqual(replacement.supersedes, oldId);
+      assert.strictEqual(replacement.value.node.dataType, 'VARCHAR(40)');
+      assert.ok(ledger.history(oldId).some((e) => e.type === 'asserted'), 'the original assertion is still on disk');
+
+      const gone = ledger.assertions().find((a) => a.predicate === 'node' && a.value.node.id === 'table-sf_customers');
+      assert.strictEqual(gone.status, 'rejected');
+      assert.ok(/no longer present in sf-main/.test(gone.reviewReason), gone.reviewReason);
+      assert.strictEqual(ledger.get(statusRule.id).status, 'needs_review');
+      assert.ok(/schema fact .* changed/.test(ledger.get(statusRule.id).reviewReason));
+      assert.strictEqual(ledger.get(keyClaim.id).status, 'needs_review');
+
+      const projected = projectGraph(ledger.assertions(), { activeSpecId: 'bps-1' });
+      assert.ok(!projected.nodes.some((n) => n.id === 'table-sf_customers'), 'rejected facts are not projected');
+      assert.strictEqual(projected.nodes.find((n) => n.id === 'col-shop_orders.status').dataType, 'VARCHAR(40)');
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: lifecycle events fold as specified — confirm, reject, explicit supersede, failed verification', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger, AssertionValidationError } = require('../dist/engine/context/ledger.js');
+    const root = c2.tmp();
+    try {
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      const ev = [{ type: 'chat_message', ref: 't5', excerpt: 'x'.repeat(400) }];
+      const v1 = await ledger.assert({ kind: 'key', subject: ['table-crm_customers'], predicate: 'primary', value: ['customer_id'], statement: 'customer_id is the key', evidence: ev });
+      assert.deepStrictEqual([v1.status, v1.trust, v1.createdBy], ['proposed', 'inferred', 'system']);
+      assert.strictEqual(v1.evidence[0].excerpt.length, 300, 'excerpts are capped at 300 chars');
+      const v2 = await ledger.supersede(v1.id, { kind: 'key', subject: ['table-crm_customers'], predicate: 'primary', value: ['cust_no'], statement: 'cust_no is the key', evidence: [{ type: 'chat_message', ref: 't6' }] });
+      assert.strictEqual(ledger.get(v1.id).status, 'superseded');
+      assert.strictEqual(ledger.get(v1.id).supersededBy, v2.id);
+      await ledger.confirm(v2.id, 'user:arun');
+      assert.deepStrictEqual([ledger.get(v2.id).status, ledger.get(v2.id).trust], ['active', 'confirmed']);
+      await ledger.recordVerification(v2.id, { method: 'probe', at: '2026-10-14T00:00:00.000Z', result: 'pass' });
+      assert.strictEqual(ledger.get(v2.id).trust, 'verified');
+      const m = await ledger.assert({ kind: 'key', subject: ['table-crm_loyalty_members'], predicate: 'unique', value: ['member_id'], statement: 'member_id is unique', evidence: [{ type: 'chat_message', ref: 't7' }] });
+      await ledger.recordVerification(m.id, { method: 'probe', at: '2026-10-14T00:00:00.000Z', result: 'fail', detail: 'LM-1004 appears twice' });
+      assert.deepStrictEqual([ledger.get(m.id).status, ledger.get(m.id).reviewReason], ['needs_review', 'LM-1004 appears twice']);
+      await ledger.reject(m.id, 'user:arun', 'not a key');
+      assert.ok(ledger.get(m.id).validTo);
+      await assert.rejects(() => ledger.assert({ kind: 'key', subject: [], predicate: 'primary', value: 'x', statement: '', evidence: [] }), AssertionValidationError);
+      // Everything above was appended to one session file and folds the same after a reload.
+      const reread = new AssertionLedger(c2.ledgerDir(root));
+      await reread.load();
+      assert.strictEqual(JSON.stringify(reread.assertions()), JSON.stringify(ledger.assertions()));
+      assert.ok(ledger.history(v2.id).map((e) => e.type).join() === 'asserted,confirmed,verified');
+      assert.ok(ledger.history(v1.id).find((e) => e.type === 'superseded').causedBy, 'every derived event says what caused it');
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: the conflict detector raises trap 1 (revenue defined twice) instead of merging, and flags only active sides, once', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger } = require('../dist/engine/context/projection.js');
+    const { detectConflicts, flagConflicts } = require('../dist/engine/context/conflicts.js');
+    const root = c2.tmp();
+    try {
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      await syncGraphToLedger(ledger, c2.graph(), { activeSpecId: 'bps-1' });
+      assert.deepStrictEqual(detectConflicts(ledger.assertions()), [], 'one definition is not a conflict');
+      const same = await ledger.assert({ kind: 'business_term', subject: ['biz-term-revenue'], predicate: 'defined_as', value: { term: 'revenue', formula: 'sum(order_items.quantity*order_items.unit_price)' }, statement: 'Revenue is gross', evidence: [{ type: 'attachment', ref: 'a1' }] });
+      assert.deepStrictEqual(detectConflicts(ledger.assertions()), [], 'the same definition, spelled differently, agrees');
+      const net = await ledger.assert({ kind: 'metric', subject: ['metric:net_revenue'], predicate: 'defined_as', value: { name: 'Revenue', expression: 'SUM(quantity * unit_price - discount_amount)', filters: ["status <> 'CANCELLED'"] }, statement: 'Revenue means net revenue', evidence: [{ type: 'chat_message', ref: 't2' }] });
+      const conflicts = detectConflicts(ledger.assertions());
+      assert.strictEqual(conflicts.length, 1);
+      assert.strictEqual(conflicts[0].rule, 'definition');
+      assert.strictEqual(conflicts[0].key, 'definition|revenue');
+      assert.ok(conflicts[0].ids.includes(net.id) && conflicts[0].ids.includes(same.id));
+      const glossaryId = conflicts[0].ids.find((id) => id !== net.id && id !== same.id);
+      const flagged = await flagConflicts(ledger, conflicts);
+      assert.deepStrictEqual(flagged.map((e) => e.assertionId), [glossaryId], 'the active glossary term is flagged; proposals are already awaiting review');
+      assert.strictEqual(ledger.get(glossaryId).status, 'needs_review');
+      assert.ok(ledger.get(glossaryId).reviewReason.includes(net.id));
+      assert.strictEqual((await flagConflicts(ledger, detectConflicts(ledger.assertions()))).length, 0, 'idempotent');
+      assert.strictEqual(detectConflicts(ledger.assertions()).length, 1, 'still surfaced until someone resolves it');
+      await ledger.reject(net.id, 'user:arun');
+      assert.strictEqual(detectConflicts(ledger.assertions()).length, 0, 'a rejected side no longer conflicts');
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: value conflicts (same slot) and claimed-vs-declared primary keys are detected', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger } = require('../dist/engine/context/projection.js');
+    const { detectConflicts } = require('../dist/engine/context/conflicts.js');
+    const root = c2.tmp();
+    try {
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      await syncGraphToLedger(ledger, c2.graph(), { activeSpecId: 'bps-1' });
+      const ev = [{ type: 'chat_message', ref: 't' }];
+      await ledger.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['ORDER_ID'], statement: 'order_id is the key', evidence: ev });
+      assert.deepStrictEqual(detectConflicts(ledger.assertions()), [], 'agrees with the declared key (case-insensitive)');
+      const bad = await ledger.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['status'], statement: 'status is the key', evidence: ev });
+      const rules = detectConflicts(ledger.assertions()).map((c) => c.rule).sort();
+      assert.deepStrictEqual(rules, ['declared_key', 'value']);
+      const declared = detectConflicts(ledger.assertions()).find((c) => c.rule === 'declared_key');
+      assert.ok(declared.ids.includes(bad.id) && declared.sides[1].includes('(order_id)'));
+      await ledger.assert({ kind: 'decision', subject: ['dim_customer'], predicate: 'history', value: { scdType: 2 }, statement: 'SCD2', evidence: ev });
+      await ledger.assert({ kind: 'decision', subject: ['dim_customer'], predicate: 'history', value: { scdType: 1 }, statement: 'SCD1', evidence: ev });
+      assert.ok(detectConflicts(ledger.assertions()).some((c) => c.rule === 'value' && c.subject[0] === 'dim_customer'));
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: spec-scoped assertions survive switching business problems — out of scope, not retracted', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger, projectGraph } = require('../dist/engine/context/projection.js');
+    const root = c2.tmp();
+    try {
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      const g = c2.graph();
+      await syncGraphToLedger(ledger, g, { activeSpecId: 'bps-1' });
+      const withoutSpec = { nodes: g.nodes.filter((n) => !n.origin.specId), edges: g.edges };
+      assert.strictEqual((await syncGraphToLedger(ledger, withoutSpec, { activeSpecId: 'bps-2' })).retracted, 0);
+      assert.ok(!projectGraph(ledger.assertions(), { activeSpecId: 'bps-2' }).nodes.some((n) => n.id === 'spec-rule-bps-1-c0'));
+      assert.ok(projectGraph(ledger.assertions(), { activeSpecId: 'bps-1' }).nodes.some((n) => n.id === 'spec-rule-bps-1-c0'), 'back in scope when its problem is active again');
+      assert.strictEqual((await syncGraphToLedger(ledger, withoutSpec, { activeSpecId: 'bps-1' })).retracted, 1, 'removed while its own problem is active = retracted');
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: subject resolution maps fqns, columns and term:/metric: names to graph ids, and keeps the rest as given', () => {
+    const { createSubjectResolver, resolveSubjects } = require('../dist/engine/context/projection.js');
+    const resolve = createSubjectResolver(c2.graph());
+    assert.deepStrictEqual(resolveSubjects(['shop.orders', 'SHOP.ORDERS.status', 'term:revenue', 'orders', 'metric:net_revenue', 'table-sf_customers'], resolve), {
+      subject: ['table-shop_orders', 'col-shop_orders.status', 'biz-term-revenue', 'table-shop_orders', 'metric:net_revenue', 'table-sf_customers'],
+      unresolved: ['metric:net_revenue']
+    });
+  });
+
+  await test('v0.29.0: projection turns live non-mirror definitions into nodes and edges, and ignores proposed ones', async () => {
+    const nodeFs = require('node:fs');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger, projectGraph } = require('../dist/engine/context/projection.js');
+    const root = c2.tmp();
+    try {
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      await syncGraphToLedger(ledger, c2.graph(), { activeSpecId: 'bps-1' });
+      const ev = [{ type: 'chat_message', ref: 't11' }];
+      const metric = await ledger.assert({ kind: 'metric', subject: ['metric:retention_90d'], predicate: 'defined_as', value: { name: 'Retention 90d', definition: 'another order within 90 days' }, statement: 'retention', evidence: ev });
+      const rel = await ledger.assert({ kind: 'relationship', subject: ['table-shop_orders', 'table-sf_customers'], predicate: 'joins_to', value: { from: { entity: 'shop.orders', columns: ['customer_id'] }, to: { entity: 'DB.CRM.customers', columns: ['shop_customer_id'] }, cardinality: 'N:1' }, statement: 'orders join customers', evidence: ev });
+      const supportOfRevenue = await ledger.assert({ kind: 'business_term', subject: ['biz-term-revenue'], predicate: 'defined_as', value: { term: 'Revenue', formula: 'SUM(order_items.quantity * order_items.unit_price)' }, statement: 'gross', evidence: ev, status: 'active', trust: 'confirmed' });
+      let p = projectGraph(ledger.assertions(), { activeSpecId: 'bps-1' });
+      assert.ok(!p.nodes.some((n) => n.type === 'metric') && !p.edges.some((e) => e.type === 'related_to'), 'proposed facts are not projected');
+      const revenue = p.nodes.find((n) => n.id === 'biz-term-revenue');
+      assert.ok(revenue.supportedBy.includes(supportOfRevenue.id), 'a confirming definition supports the existing term node');
+      assert.strictEqual(revenue.origin.confidence, 0.9, 'confidence comes from the strongest supporter');
+      await ledger.confirm(metric.id, 'user:arun');
+      await ledger.confirm(rel.id, 'user:arun');
+      p = projectGraph(ledger.assertions(), { activeSpecId: 'bps-1' });
+      const m = p.nodes.find((n) => n.type === 'metric');
+      assert.deepStrictEqual([m.id, m.label, m.supportedBy], ['metric:retention_90d', 'Retention 90d', [metric.id]]);
+      const e = p.edges.find((x) => x.type === 'related_to');
+      assert.deepStrictEqual([e.source, e.target, e.supportedBy], ['table-shop_orders', 'table-sf_customers', [rel.id]]);
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: compaction writes snapshot.json, keeps history unless prune, and folds to the same state', async () => {
+    const nodeFs = require('node:fs');
+    const p = require('node:path');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger } = require('../dist/engine/context/projection.js');
+    const root = c2.tmp();
+    try {
+      const ledger = new AssertionLedger(c2.ledgerDir(root));
+      await syncGraphToLedger(ledger, c2.graph());
+      const before = JSON.stringify(ledger.assertions());
+      const r = await ledger.compact();
+      assert.strictEqual(r.prunedFiles, 0);
+      const files = () => nodeFs.readdirSync(c2.ledgerDir(root));
+      assert.ok(files().includes('snapshot.json') && files().some((f) => f.endsWith('.jsonl')), 'history kept by default');
+      const after = new AssertionLedger(c2.ledgerDir(root));
+      await after.load();
+      assert.strictEqual(JSON.stringify(after.assertions()), before);
+      await after.assert({ kind: 'assumption', subject: ['table-shop_orders'], predicate: 'complete', value: {}, statement: 'orders are complete', evidence: [{ type: 'chat_message', ref: 'x' }] });
+      const withNew = JSON.stringify(after.assertions());
+      const pruned = await after.compact({ prune: true });
+      assert.strictEqual(pruned.prunedFiles, 2);
+      assert.deepStrictEqual(files(), ['snapshot.json']);
+      const fromSnapshot = new AssertionLedger(c2.ledgerDir(root));
+      await fromSnapshot.load();
+      assert.strictEqual(JSON.stringify(fromSnapshot.assertions()), withNew);
+      assert.ok(JSON.parse(nodeFs.readFileSync(p.join(c2.ledgerDir(root), 'snapshot.json'), 'utf8')).lastEventId);
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: ContextValidator dispatches per-kind content definitions and warns without failing', () => {
+    const nodeFs = require('node:fs');
+    const { ContextValidator } = require('../dist/engine/context/ContextValidator.js');
+    const schema = JSON.parse(nodeFs.readFileSync(require('node:path').join(__dirname, '..', 'docs', 'schemas', 'context-envelope.schema.json'), 'utf8'));
+    const v = new ContextValidator(schema);
+    const env = { id: 'term:revenue', kind: 'business_term', layer: 'definition', label: 'Revenue', origin: { source: 'user', sourceRef: 'x' }, version: 1 };
+    assert.deepStrictEqual(v.validateEnvelope({ ...env, content: { formula: 'SUM(x)' } }), { valid: true, errors: [], warnings: [] });
+    const bad = v.validateEnvelope({ ...env, content: { formula: 42 } });
+    assert.strictEqual(bad.valid, true, 'old persisted data keeps loading');
+    assert.ok(bad.warnings.some((w) => w.startsWith('/content/formula')), JSON.stringify(bad.warnings));
+    const rule = v.validateEnvelope({ ...env, id: 'rule:pii', kind: 'business_rule', content: { enforcementLevel: 'MAYBE' } });
+    assert.ok(rule.warnings.some((w) => w.includes('/content/enforcementLevel')));
+    assert.strictEqual(v.validateEnvelope({ ...env, kind: 'edge' }).warnings.length, 0, 'kinds without a content definition are not checked');
+  });
+
+  await test('v0.29.0: parseDdl() keeps the declared schema (shop.customers ≠ crm.customers) and honours table-level PRIMARY KEY', () => {
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+    const r = parseDdl(`
+      CREATE TABLE shop.customers (customer_id INT PRIMARY KEY, email VARCHAR(255));
+      CREATE TABLE crm.customers (cust_no VARCHAR(20) PRIMARY KEY, email VARCHAR(255));
+      CREATE TABLE analytics.sales.order_lines (order_id INT, line_no INT, CONSTRAINT pk_ol PRIMARY KEY (order_id, line_no));
+      CREATE TABLE loose (id INT);
+    `, '/data/all.sql');
+    const tables = r.nodes.filter((n) => n.type === 'table');
+    assert.deepStrictEqual(tables.map((t) => t.fqn), ['shop.customers', 'crm.customers', 'analytics.sales.order_lines', 'ddl.loose']);
+    assert.strictEqual(new Set(tables.map((t) => t.id)).size, 4);
+    assert.deepStrictEqual([tables[2].database, tables[2].schema], ['analytics', 'sales']);
+    assert.strictEqual(r.nodes.filter((n) => n.type === 'column' && n.id.startsWith('col-crm_customers.')).length, 2, 'columns are not merged across the two customers tables');
+    const lines = r.nodes.filter((n) => n.type === 'column' && n.id.startsWith('col-analytics_sales_order_lines.'));
+    assert.deepStrictEqual(lines.map((c) => [c.label, c.isPrimaryKey, c.isNullable]), [['order_id', true, false], ['line_no', true, false]]);
+  });
+
+  await test('v0.29.0: ContextFileManager records every load in the ledger, projects supportedBy/confidence, and a business-context edit supersedes (it used to be ignored once derived/graph.json existed)', async () => {
+    const nodeFs = require('node:fs');
+    const p = require('node:path');
+    const dir = c2.tmp();
+    const authDir = p.join(dir, '.ai-context', 'context');
+    nodeFs.mkdirSync(authDir, { recursive: true });
+    const write = (formula) => nodeFs.writeFileSync(p.join(authDir, 'business-context.yaml'), ['business_terms:', '  - term: Revenue', `    formula: ${formula}`, '  - term: Margin', '    formula: revenue - cost', ''].join('\n'));
+    write('SUM(amount)');
+    const mock = {
+      Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+      workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
+      RelativePattern: class {}
+    };
+    delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+    delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    try {
+      const graph = new GraphManager();
+      const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+      await cfm.initialize();
+      const term = () => graph.getNodesByType('business_term').find((n) => n.label === 'Revenue');
+      assert.strictEqual(term().id, 'biz-term-revenue', 'term ids are keyed by name, not position');
+      assert.strictEqual(term().origin.confidence, 0.8);
+      assert.strictEqual(term().supportedBy.length, 1);
+      const firstId = term().supportedBy[0];
+      assert.ok(nodeFs.readdirSync(p.join(dir, '.ai-context', 'ledger')).some((f) => f.endsWith('.jsonl')));
+
+      write('SUM(amount) - SUM(refunds)');
+      const graph2 = new GraphManager();
+      const cfm2 = new ContextFileManager({ fsPath: dir }, graph2, () => {});
+      await cfm2.initialize();
+      const t2 = graph2.getNodesByType('business_term').find((n) => n.label === 'Revenue');
+      assert.strictEqual(t2.formula, 'SUM(amount) - SUM(refunds)', 'the edit reaches the graph');
+      assert.strictEqual(cfm2.getLedger().get(firstId).status, 'superseded');
+      assert.strictEqual(cfm2.getLedger().get(t2.supportedBy[0]).supersedes, firstId);
+      assert.strictEqual(graph2.getNodesByType('business_term').length, 2);
+
+      // File ingestion goes through persistCompiledGraph() — and is recorded too.
+      await graph2.addNode({ id: 'table-shop_orders', type: 'table', label: 'orders', fqn: 'shop.orders', database: 'x', schema: 'shop', isView: false, metadata: {}, version: 1, origin: { source: 'derived', sourceRef: '/d/shop.ddl', reliability: 'best-effort-inferred' } });
+      await cfm2.persistCompiledGraph();
+      const table = graph2.getNodesByType('table')[0];
+      assert.strictEqual(cfm2.getLedger().get(table.supportedBy[0]).kind, 'schema_fact');
+      assert.strictEqual(cfm2.getLedger().get(table.supportedBy[0]).evidence[0].ref, '/d/shop.ddl');
+      assert.deepStrictEqual(cfm2.getConflicts(), []);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.29.0: a live extraction (schema-graph.json) is recorded as verified schema facts and no longer wipes file-ingested tables', async () => {
+    const nodeFs = require('node:fs');
+    const p = require('node:path');
+    const dir = c2.tmp();
+    const ctxDir = p.join(dir, '.ai-context');
+    nodeFs.mkdirSync(ctxDir, { recursive: true });
+    const mock = {
+      Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+      workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
+      RelativePattern: class {}
+    };
+    delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+    delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    try {
+      const graph = new GraphManager();
+      const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+      await cfm.initialize();
+      await graph.addNode({ id: 'table-csv_events', type: 'table', label: 'events', fqn: 'csv.events', database: 'ingested_files', schema: 'csv', isView: false, metadata: {}, version: 1, origin: { source: 'derived', sourceRef: '/d/events.csv' } });
+      await cfm.persistCompiledGraph();
+      const schemaGraphPath = p.join(ctxDir, 'schema-graph.json');
+      const live = { source: 'system', sourceRef: 'snowflake', connectionId: 'sf', reliability: 'live-verified', lastVerifiedAt: '2026-10-14T00:00:00.000Z' };
+      nodeFs.writeFileSync(schemaGraphPath, JSON.stringify({ nodes: [{ id: 't1', type: 'table', label: 'orders', fqn: 'DB.PUBLIC.orders', metadata: {}, version: 1, origin: live }], edges: [] }));
+      const future = new Date(Date.now() + 60000);
+      nodeFs.utimesSync(schemaGraphPath, future, future);
+      const graph2 = new GraphManager();
+      const cfm2 = new ContextFileManager({ fsPath: dir }, graph2, () => {});
+      await cfm2.initialize();
+      assert.deepStrictEqual(graph2.getNodesByType('table').map((t) => t.id).sort(), ['t1', 'table-csv_events']);
+      const a = cfm2.getLedger().get(graph2.getNodeById('t1').supportedBy[0]);
+      assert.deepStrictEqual([a.kind, a.trust, a.status, a.specId, a.evidence[0].type], ['schema_fact', 'verified', 'active', undefined, 'introspection'], 'project-wide schema_fact when no problem is active');
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

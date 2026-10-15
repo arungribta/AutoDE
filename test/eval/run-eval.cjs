@@ -7,6 +7,7 @@
  *   npm run eval -- --mode record --provider openai   call the real provider, record a cassette
  *                                                 (needs AUTODE_EVAL_API_KEY; AUTODE_EVAL_MODEL optional)
  *   --out <file>   report path (default: test/reference/retail-orders/eval-report.md)
+ *   --sut <name>   system under test: `ledger` (default, C2 v0.29.0) or `baseline` (v0.26.0 behaviour)
  *
  * Measures how grounded AutoDE is on the reference problem in test/reference/retail-orders and
  * writes a Markdown report plus eval-results.json. It measures; it does not pass/fail — the
@@ -20,16 +21,22 @@ const { LlmRouter } = require('./lib/llmRouter.cjs');
 
 const ROOT = path.join(__dirname, '..', '..');
 const REF = path.join(ROOT, 'test', 'reference', 'retail-orders');
+const SUTS = {
+  baseline: () => require('./sut/baseline.cjs').createBaselineSut,
+  ledger: () => require('./sut/ledger.cjs').createLedgerSut
+};
 const UNKNOWN_RE = /\b(not (known|specified|provided|available|defined|stated|mentioned)|unknown|no information|don'?t know|do not know|cannot determine|can't determine|isn'?t (specified|defined|stated)|not in the context)\b/i;
 
 function parseArgs(argv) {
-  const args = { mode: 'offline', provider: 'openai', out: path.join(REF, 'eval-report.md') };
+  const args = { mode: 'offline', provider: 'openai', sut: 'ledger', out: path.join(REF, 'eval-report.md') };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--mode') args.mode = argv[++i];
     else if (a === '--provider') args.provider = argv[++i];
     else if (a === '--out') args.out = path.resolve(argv[++i]);
+    else if (a === '--sut') args.sut = argv[++i];
   }
+  if (!SUTS[args.sut]) throw new Error(`Unknown --sut "${args.sut}" (expected: ${Object.keys(SUTS).join(', ')}).`);
   if (!['offline', 'replay', 'record'].includes(args.mode)) throw new Error(`Unknown --mode "${args.mode}".`);
   return args;
 }
@@ -54,7 +61,7 @@ async function main() {
     const { parseYaml } = dist('engine/context/Yaml.js');
     const { buildSchemaIndex, checkSqlGrounding } = dist('engine/grounding/sqlGrounding.js');
     const { estimateTokens } = dist('core/tokenBudget.js');
-    const { createBaselineSut } = require('./sut/baseline.cjs');
+    const createSut = SUTS[args.sut]();
     const load = (f) => parseYaml(fs.readFileSync(path.join(REF, f), 'utf8'));
 
     const chatScript = load('chat-script.yaml');
@@ -77,7 +84,7 @@ async function main() {
 
     // ── Scenario A: realistic order (relevant sources first, noise last) — the main run ──
     fs.mkdirSync(path.join(scratch, 'main'), { recursive: true });
-    const sut = createBaselineSut({ provider: args.provider });
+    const sut = createSut({ provider: args.provider });
     results.sut = sut.name;
     await sut.setup({ workspaceDir: path.join(scratch, 'main'), referenceDir: REF, sourceOrder: [...relevantFiles, noiseFile] });
 
@@ -108,7 +115,7 @@ async function main() {
 
     // ── Scenario B: same inputs, noise schema imported first — order sensitivity of delivery ──
     fs.mkdirSync(path.join(scratch, 'noise-first'), { recursive: true });
-    const sutB = createBaselineSut({ provider: args.provider });
+    const sutB = createSut({ provider: args.provider });
     await sutB.setup({ workspaceDir: path.join(scratch, 'noise-first'), referenceDir: REF, sourceOrder: [noiseFile, ...relevantFiles] });
     results.contextNoiseFirst = measureContext(await sutB.contextFor({ purpose: 'step' }));
 
@@ -182,11 +189,15 @@ async function main() {
 
     // ── Traps ──
     const cap = sut.capabilities || {};
+    results.notes = sut.notes || [];
+    results.conflicts = cap.conflicts ? await cap.conflicts() : null;
+    results.ledger = sut.ledgerSummary ? sut.ledgerSummary() : null;
+    const revenueConflict = (results.conflicts || []).find((c) => /revenue/i.test(c.key) || c.sides.some((x) => /revenue/i.test(x)));
     const e7 = results.expected.find((e) => e.id === 'E7');
     const noiseFree = results.contextNoiseLast.noiseTablesShown === 0 && results.contextNoiseFirst.noiseTablesShown === 0;
     results.traps = [
-      { id: 1, name: 'Revenue defined two ways (glossary gross vs chat net)', detected: !!(cap.conflicts && (await cap.conflicts()).length), how: cap.conflicts ? 'conflict detector' : 'not supported: no conflict detection' },
-      { id: 2, name: 'Customer key corrected mid-chat (customer_id → cust_no)', detected: !!(cap.superseded && (await cap.superseded()).length), how: cap.superseded ? 'supersession' : 'not supported: chat facts are not recorded, so nothing can be superseded' },
+      { id: 1, name: 'Revenue defined two ways (glossary gross vs chat net)', detected: !!revenueConflict, how: cap.conflicts ? (revenueConflict ? `conflict detector (${revenueConflict.rule} rule)` : 'conflict detector ran; no revenue conflict found') : 'not supported: no conflict detection' },
+      { id: 2, name: 'Customer key corrected mid-chat (customer_id → cust_no)', detected: !!(cap.superseded && (await cap.superseded()).length), how: cap.superseded ? 'supersession' : ((sut.trapNotes || {})[2] || 'not supported: chat facts are not recorded, so nothing can be superseded') },
       { id: 3, name: 'Claimed-unique member_id has duplicates', detected: !!(cap.verify && (await cap.verify({ table: 'crm.loyalty_members', column: 'member_id', predicate: 'unique' }))?.result === 'fail'), how: cap.verify ? 'verification probe' : 'not supported: no verification probes' },
       { id: 4, name: 'Ticket-to-order join requested with no relationship', detected: !!(cap.contextGaps && (await cap.contextGaps()).length), how: cap.contextGaps ? 'context gap' : `not supported: no context gaps (artifacts ${e7 && e7.pass ? 'did not' : 'did'} invent the join)` },
       { id: 5, name: 'Irrelevant 40-table schema ingested', detected: noiseFree, how: `noise tables in step context: ${results.contextNoiseLast.noiseTablesShown} (noise last), ${results.contextNoiseFirst.noiseTablesShown} (noise first)` }
@@ -224,7 +235,7 @@ function summaryRows(r) {
     ['Trap detection', '5/5', `${trapsCaught}/5`],
     ['Expected artifact properties', 'all', `${expPass}/${r.expected.length}`],
     ['Source tables kept distinct at ingestion', 'all', `${r.ingestion.represented}/${r.ingestion.declared}`],
-    ['Stale-fact use', '0', 'n/a — no fact tracking yet (C2)'],
+    ['Stale-fact use', '0', 'n/a — needs grounding manifests (C3)'],
     ['Plan-step context size', 'reported', `${r.planContextTokens} tokens`]
   ];
 }
@@ -244,9 +255,24 @@ function renderReport(r) {
   L.push('', '## Traps', '', '| # | Trap | Detected | How |', '|---|---|---|---|');
   for (const t of r.traps) L.push(`| ${t.id} | ${t.name} | ${t.detected ? 'yes' : 'no'} | ${t.how} |`);
 
+  if (r.ledger) {
+    const l = r.ledger;
+    L.push('', '## Context ledger', '');
+    L.push(`${l.assertions} assertions from ${l.events} ledger events: ${l.active} active, ${l.proposed} proposed, ${l.needsReview} needs review. By trust: ${l.byTrust.map(([t, n]) => `${t} ${n}`).join(', ')}.`);
+    if (l.unresolvedProposals.length) L.push('', `Proposed facts with a subject that does not resolve to a graph node (kept as given and flagged \`unresolved_subject\`): ${l.unresolvedProposals.map((p) => `${p.fact} (${p.unresolved.join(', ')})`).join('; ')}.`);
+  }
+  if (r.conflicts) {
+    L.push('', '## Conflicts detected', '');
+    if (!r.conflicts.length) L.push('None.');
+    for (const c of r.conflicts) L.push(`- **${c.rule}** on ${c.subject.join(', ')}:`, ...c.sides.map((x) => `  - ${x.replace(/\|/g, '\\|')}`));
+  }
+
   L.push('', '## Ingestion', '');
   L.push(`Declared source tables (shop + crm): ${r.ingestion.declared}. Kept as distinct graph nodes: ${r.ingestion.represented}. Graph tables in total, including the noise schema: ${r.ingestion.graphTables}.`);
-  for (const c of r.ingestion.collisions) L.push(`- **Collision:** ${c.sources.join(' and ')} became one node (${c.nodes.join(', ') || 'none'}). Their columns are merged and one source's table metadata is lost.`);
+  for (const c of r.ingestion.collisions) {
+    if (c.nodes.length < c.sources.length) L.push(`- **Collision:** ${c.sources.join(' and ')} became one node (${c.nodes.join(', ') || 'none'}). Their columns are merged and one source's table metadata is lost.`);
+    else L.push(`- Same table name in two sources, kept distinct: ${c.nodes.join(', ')}.`);
+  }
 
   L.push('', '## Context delivery', '', '| | Noise imported last | Noise imported first |', '|---|---|---|');
   const a = r.contextNoiseLast, b = r.contextNoiseFirst;
@@ -290,6 +316,7 @@ function renderReport(r) {
   L.push('- Offline mode measures AutoDE with its LLM paths disabled, so artifacts come from the template fallbacks. Replay/record runs measure the LLM paths.');
   L.push('- The plan is the fixed reference plan in `plan.yaml`, so planning quality itself is not scored here.');
   L.push('- The ablation run (context packs vs. the baseline dump) becomes meaningful once context packs exist (Phase C3).');
+  for (const n of r.notes || []) L.push(`- ${n}`);
   return L.join('\n') + '\n';
 }
 

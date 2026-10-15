@@ -22,6 +22,14 @@ export function createVscodeFileIo(api: Pick<typeof vscode, 'workspace' | 'Uri'>
     },
     writeFile: async (filePath, content) => { await api.workspace.fs.writeFile(api.Uri.file(filePath), content); },
     rename: async (from, to) => { await api.workspace.fs.rename(api.Uri.file(from), api.Uri.file(to), { overwrite: true }); },
-    mkdirp: async (dirPath) => { await api.workspace.fs.createDirectory(api.Uri.file(dirPath)); }
+    mkdirp: async (dirPath) => { await api.workspace.fs.createDirectory(api.Uri.file(dirPath)); },
+    async listDir(dirPath) {
+      try {
+        return (await api.workspace.fs.readDirectory(api.Uri.file(dirPath))).map(([name]) => name);
+      } catch {
+        return undefined;
+      }
+    },
+    deleteFile: async (filePath) => { await api.workspace.fs.delete(api.Uri.file(filePath)); }
   };
 }

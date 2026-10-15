@@ -66,9 +66,10 @@ function buildTableGraph(
   columns: Array<{ name: string; dataType: string; isNullable?: boolean; isPrimaryKey?: boolean; comment?: string }>,
   filePath: string,
   schemaLabel: string,
-  confidence: number
+  confidence: number,
+  database?: string
 ): { nodes: BaseNode[]; edges: GraphEdge[] } {
-  const fqn = `${schemaLabel}.${tableName}`;
+  const fqn = database ? `${database}.${schemaLabel}.${tableName}` : `${schemaLabel}.${tableName}`;
   const tableId = `table-${sanitizeId(fqn)}`;
   const origin = baseOrigin(filePath, confidence);
   const nodes: BaseNode[] = [];
@@ -78,7 +79,7 @@ function buildTableGraph(
     id: tableId,
     type: 'table',
     label: tableName,
-    database: 'ingested_files',
+    database: database ?? 'ingested_files',
     schema: schemaLabel,
     fqn,
     isView: false,
@@ -239,7 +240,13 @@ export function parseDdl(content: string, filePath: string): IngestResult {
   let match: RegExpExecArray | null;
   while ((match = createTableRe.exec(content)) !== null) {
     const rawName = match[1].replace(/["`[\]]/g, '');
-    const tableName = rawName.includes('.') ? rawName.split('.').pop()! : rawName;
+    // Keep the declared schema (and database): `shop.customers` and `crm.customers`
+    // are different tables. Only an unqualified name falls back to the `ddl` label.
+    // (Before v0.29.0 every table became `ddl.<name>`, so same-named tables collided.)
+    const nameParts = rawName.split('.').filter(Boolean);
+    const tableName = nameParts[nameParts.length - 1];
+    const schemaLabel = nameParts.length >= 2 ? nameParts[nameParts.length - 2] : 'ddl';
+    const database = nameParts.length >= 3 ? nameParts[nameParts.length - 3] : undefined;
     // Find the matching closing paren by bracket-depth counting from where the regex left off.
     const bodyStart = createTableRe.lastIndex;
     let depth = 1;
@@ -259,7 +266,7 @@ export function parseDdl(content: string, filePath: string): IngestResult {
       warnings.push(`CREATE TABLE ${rawName}: no parseable column definitions — skipped.`);
       continue;
     }
-    const { nodes: tNodes, edges: tEdges } = buildTableGraph(tableName, columns, filePath, 'ddl', 1.0);
+    const { nodes: tNodes, edges: tEdges } = buildTableGraph(tableName, columns, filePath, schemaLabel, 1.0, database);
     nodes.push(...tNodes);
     edges.push(...tEdges);
     tableCount++;
@@ -288,8 +295,12 @@ function parseDdlColumnDefs(body: string): Array<{ name: string; dataType: strin
   if (current.trim()) parts.push(current);
 
   const columns: Array<{ name: string; dataType: string; isNullable?: boolean; isPrimaryKey?: boolean }> = [];
+  const tablePrimaryKey: string[] = [];
   for (const rawPart of parts) {
     const part = rawPart.trim();
+    // A table-level `[CONSTRAINT x] PRIMARY KEY (a, b)` marks those columns as the key.
+    const pk = /^(?:CONSTRAINT\s+\S+\s+)?PRIMARY\s+KEY\s*\(([^)]*)\)/i.exec(part);
+    if (pk) tablePrimaryKey.push(...pk[1].split(',').map((c) => c.trim().replace(/["`[\]]/g, '').toLowerCase()).filter(Boolean));
     if (!part || DDL_CONSTRAINT_KEYWORDS.test(part)) continue;
     const colMatch = /^["`[]?([a-zA-Z_][a-zA-Z0-9_]*)["`\]]?\s+([a-zA-Z0-9_]+(?:\s*\([^)]*\))?)/.exec(part);
     if (!colMatch) continue;
@@ -298,6 +309,9 @@ function parseDdlColumnDefs(body: string): Array<{ name: string; dataType: strin
     const isNullable = !/NOT\s+NULL/i.test(part);
     const isPrimaryKey = /PRIMARY\s+KEY/i.test(part);
     columns.push({ name, dataType, isNullable, isPrimaryKey });
+  }
+  for (const col of columns) {
+    if (tablePrimaryKey.includes(col.name.toLowerCase())) { col.isPrimaryKey = true; col.isNullable = false; }
   }
   return columns;
 }

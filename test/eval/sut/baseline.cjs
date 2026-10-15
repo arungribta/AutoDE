@@ -139,6 +139,11 @@ function createBaselineSut({ provider }) {
       return graph.serializeSnapshot();
     },
 
+    /** For adapters that build on this one (sut/ledger.cjs). */
+    internals() {
+      return { graph, cfm, logs };
+    },
+
     // The baseline has none of these mechanisms — the harness records each as "not supported".
     capabilities: {}
   };

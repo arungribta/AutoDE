@@ -70,10 +70,15 @@ export class GraphManager implements vscode.Disposable {
    * rather than accumulating stale nodes across revisions.
    */
   public async removeNodesBySourceRef(sourceRef: string): Promise<void> {
+    await this.removeNodesWhere((node) => node.origin?.sourceRef === sourceRef);
+  }
+
+  /** Removes every node matching `predicate`, and any edge touching one. */
+  public async removeNodesWhere(predicate: (node: BaseNode) => boolean): Promise<void> {
     await this.lock(async () => {
       const idsToRemove: string[] = [];
       for (const [id, node] of this.nodes.entries()) {
-        if (node.origin?.sourceRef === sourceRef) idsToRemove.push(id);
+        if (predicate(node)) idsToRemove.push(id);
       }
       for (const id of idsToRemove) {
         this.nodes.delete(id);

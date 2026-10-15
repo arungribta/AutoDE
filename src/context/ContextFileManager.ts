@@ -5,6 +5,9 @@ import { GraphManager } from './GraphManager';
 import { parseYaml } from '../engine/context/Yaml';
 import { readGraphSnapshot, writeGraphSnapshot } from './GraphPersistence';
 import { ContextValidator } from '../engine/context/ContextValidator';
+import { AssertionLedger } from '../engine/context/ledger';
+import { projectGraph, syncGraphToLedger } from '../engine/context/projection';
+import { Conflict, detectConflicts, flagConflicts } from '../engine/context/conflicts';
 import {
   BaseNode,
   BusinessTermNode,
@@ -63,13 +66,51 @@ export class ContextFileManager implements vscode.Disposable {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly DEBOUNCE_MS = 300;
   private readonly runtimeFacts = new Map<string, RuntimeFact>();
+  /**
+   * The assertion ledger (C2, v0.29.0) — the context layer's system of
+   * record. The graph is rebuilt from it on every persist; see
+   * `persistCompiledGraph()`. Node `fs`, like the rest of this class.
+   */
+  private readonly ledger: AssertionLedger;
+  private conflicts: Conflict[] = [];
+  /** The active business problem's spec id — scopes spec-derived assertions (see `inSpecScope`). */
+  private activeSpecId: string | undefined;
 
   constructor(
     private readonly workspaceRoot: vscode.Uri,
     private readonly graphManager: GraphManager,
     private readonly log: (msg: string) => void,
     private readonly validator?: ContextValidator
-  ) {}
+  ) {
+    this.ledger = new AssertionLedger(path.join(vscode.Uri.joinPath(workspaceRoot, '.ai-context').fsPath, 'ledger'));
+  }
+
+  /**
+   * Sets which business problem's spec-derived assertions are in scope. Call
+   * before synthesizing a spec into the graph; switching problems leaves the
+   * previous problem's assertions live in the ledger, just not projected.
+   */
+  public setActiveSpecId(specId: string | undefined): void {
+    this.activeSpecId = specId;
+  }
+
+  public getActiveSpecId(): string | undefined {
+    return this.activeSpecId;
+  }
+
+  public getLedger(): AssertionLedger {
+    return this.ledger;
+  }
+
+  /** Contradictions found at the last persist (§8.1). */
+  public getConflicts(): readonly Conflict[] {
+    return this.conflicts;
+  }
+
+  /** `AutoDE: Compact Context Ledger` — snapshot the folded state; history is kept unless `prune`. */
+  public async compactLedger(prune = false): Promise<{ assertions: number; prunedFiles: number }> {
+    return this.ledger.compact({ prune });
+  }
 
   /**
    * Records or clears an in-memory, session-scoped fact under `key` (pass
@@ -133,10 +174,65 @@ export class ContextFileManager implements vscode.Disposable {
     const contextPath = contextDir.fsPath;
     const authoritativeDir = path.join(contextPath, 'context');
 
-    // Clear existing business context nodes (keep schema nodes if any)
-    this.removeBusinessContextNodes();
+    // ── Base graph (C2, v0.29.0): the projection of the assertion ledger, the
+    // system of record. A workspace with no ledger yet starts from the compiled
+    // `derived/graph.json` instead, which the persist below then migrates into
+    // the ledger. ──
+    this.graphManager.clear();
+    const graphPath = path.join(contextPath, 'derived', 'graph.json');
+    const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
+    try {
+      await this.ledger.load();
+    } catch (err) {
+      this.log(`Failed to read the context ledger: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!this.ledger.isEmpty()) {
+      await this.graphManager.loadSnapshot(projectGraph(this.ledger.assertions(), { activeSpecId: this.activeSpecId }));
+    } else if (fs.existsSync(graphPath)) {
+      try {
+        const snapshot = readGraphSnapshot(graphPath);
+        if (snapshot && Array.isArray(snapshot.nodes) && Array.isArray(snapshot.edges)) {
+          await this.graphManager.loadSnapshot(snapshot as { nodes: BaseNode[]; edges: GraphEdge[] });
+          this.log(`Loaded compiled graph from derived/graph.json (${snapshot.nodes.length} nodes, ${snapshot.edges.length} edges)`);
+        }
+      } catch (err) {
+        this.log(`Failed to load derived/graph.json: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
-    // ── Authoritative layer (`context/**` first, then legacy `.ai-context/` root) ──
+    // ── A live extraction (Source Assessment, "Connect to build Source Context")
+    // writes `schema-graph.json` via ConnectionManager.persistSchemaContext().
+    // When it is newer than the compiled graph it is merged in: nodes from the
+    // same source (`origin.sourceRef`) are replaced, everything else — file
+    // ingestion, business context — is kept (before v0.29.0 the whole graph was
+    // replaced). Compare mtimes rather than existence: persistCompiledGraph()
+    // writes derived/graph.json on every reindex, so an exists() check would
+    // shadow every later extraction (a real bug, fixed earlier). ──
+    const graphMtimeMs = fs.existsSync(graphPath) ? fs.statSync(graphPath).mtimeMs : -1;
+    const legacyMtimeMs = fs.existsSync(legacySchemaPath) ? fs.statSync(legacySchemaPath).mtimeMs : -1;
+    if (legacyMtimeMs > graphMtimeMs) {
+      try {
+        const snapshot = JSON.parse(fs.readFileSync(legacySchemaPath, 'utf8')) as { nodes?: BaseNode[]; edges?: GraphEdge[] };
+        if (snapshot.nodes && snapshot.edges) {
+          const refs = new Set(snapshot.nodes.map((n) => n.origin?.sourceRef).filter((r): r is string => !!r));
+          const ids = new Set(snapshot.nodes.map((n) => n.id));
+          await this.graphManager.removeNodesWhere((n) => ids.has(n.id) || (!!n.origin?.sourceRef && refs.has(n.origin.sourceRef)));
+          for (const n of snapshot.nodes) await this.graphManager.addNode(n);
+          for (const e of snapshot.edges) await this.graphManager.addEdge(e);
+          this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges (newer than the compiled cache)`);
+        }
+      } catch (err) {
+        this.log(`Failed to load schema-graph.json: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ── Authoritative layer (`context/**` first, then legacy `.ai-context/` root),
+    // re-read every time: what came from these files before is dropped first, so an
+    // edited or removed entry is superseded or retracted in the ledger, not kept. ──
+    await this.graphManager.removeNodesWhere((n) =>
+      (n.type === 'business_term' || n.type === 'business_rule' || n.type === 'verified_query') &&
+      (!n.origin || n.origin.extractor === 'business-context' || n.origin.extractor === 'verified-queries'));
+
     const bizCtxPath = this.firstExisting([
       path.join(authoritativeDir, 'business-context.yaml'),
       path.join(contextPath, 'business-context.yaml')
@@ -146,7 +242,7 @@ export class ContextFileManager implements vscode.Disposable {
         const content = fs.readFileSync(bizCtxPath, 'utf8');
         const parsed = parseYaml(content) as BusinessContextFile;
         this.validateDoc('business-context.yaml', parsed);
-        await this.loadBusinessContext(parsed);
+        await this.loadBusinessContext(parsed, toPosix(path.relative(contextPath, bizCtxPath)));
         this.log(`Loaded business context from ${path.relative(contextPath, bizCtxPath)}`);
       } catch (err) {
         this.log(`Failed to parse business-context.yaml: ${err instanceof Error ? err.message : String(err)}`);
@@ -163,52 +259,14 @@ export class ContextFileManager implements vscode.Disposable {
         const content = fs.readFileSync(queriesPath, 'utf8');
         const parsed = parseYaml(content) as VerifiedQueriesFile;
         this.validateDoc('verified-queries.yaml', parsed);
-        await this.loadVerifiedQueries(parsed);
+        await this.loadVerifiedQueries(parsed, toPosix(path.relative(contextPath, queriesPath)));
         this.log(`Loaded verified queries from ${path.relative(contextPath, queriesPath)}`);
       } catch (err) {
         this.log(`Failed to parse verified-queries.yaml: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
-    // ── Derived layer: compiled `derived/graph.json` (atomic I/O) vs. `schema-graph.json`
-    // (what a live extraction — Source Assessment, "Connect to build Source Context" —
-    // actually writes, via BaseAdapter.persistSchemaContext()). These used to be a plain
-    // exists()-based either/or, which was a real bug: persistCompiledGraph() below writes
-    // `derived/graph.json` unconditionally on every reindex, including the very first one
-    // on a fresh workspace (with zero nodes) — so after that first activation,
-    // `derived/graph.json` always exists, and a subsequent Source Assessment's fresh
-    // `schema-graph.json` was silently never read again, ever. Compare mtimes instead: a
-    // legitimately newer schema-graph.json (a fresh extraction) wins and gets compiled back
-    // into derived/graph.json below; otherwise the already-compiled cache is used as before. ──
-    const graphPath = path.join(contextPath, 'derived', 'graph.json');
-    const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
-    const graphMtimeMs = fs.existsSync(graphPath) ? fs.statSync(graphPath).mtimeMs : -1;
-    const legacyMtimeMs = fs.existsSync(legacySchemaPath) ? fs.statSync(legacySchemaPath).mtimeMs : -1;
-
-    if (legacyMtimeMs > graphMtimeMs) {
-      try {
-        const content = fs.readFileSync(legacySchemaPath, 'utf8');
-        const snapshot = JSON.parse(content);
-        if (snapshot.nodes && snapshot.edges) {
-          await this.graphManager.loadSnapshot(snapshot);
-          this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges (newer than the compiled cache)`);
-        }
-      } catch (err) {
-        this.log(`Failed to load schema-graph.json: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    } else if (graphMtimeMs >= 0) {
-      try {
-        const snapshot = readGraphSnapshot(graphPath);
-        if (snapshot && Array.isArray(snapshot.nodes) && Array.isArray(snapshot.edges)) {
-          await this.graphManager.loadSnapshot(snapshot as { nodes: BaseNode[]; edges: GraphEdge[] });
-          this.log(`Loaded compiled graph from derived/graph.json (${snapshot.nodes.length} nodes, ${snapshot.edges.length} edges)`);
-        }
-      } catch (err) {
-        this.log(`Failed to load derived/graph.json: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    // ── Persist the compiled graph atomically to derived/graph.json ──
+    // ── Record in the ledger, re-project, persist ──
     await this.persistCompiledGraph();
   }
 
@@ -235,18 +293,39 @@ export class ContextFileManager implements vscode.Disposable {
       if (!result.valid) {
         this.log(`Context validation (${label}): ${result.errors.slice(0, 5).join('; ')}`);
       }
+      if (result.warnings.length > 0) {
+        this.log(`Context validation warning (${label}, ${String(record.kind)} content): ${result.warnings.slice(0, 5).join('; ')}`);
+      }
     }
   }
 
-  /** Persists the current in-memory graph to derived/graph.json (atomic temp + rename). */
   /**
-   * Persists the *current in-memory* graph as-is — no reload from disk first.
-   * Public (unlike the rest of this class's file-loading internals) so a
-   * caller that adds nodes directly to the shared `GraphManager` (e.g. file
-   * ingestion, Step 5) can save them without a `loadAllFiles()` reindex
-   * overwriting what it just added.
+   * Records the current in-memory graph in the assertion ledger, rebuilds the
+   * graph from the ledger, and persists that projection to derived/graph.json
+   * (atomic temp + rename) — no reload from disk first, so a caller that adds
+   * nodes directly to the shared `GraphManager` (file ingestion, spec sync)
+   * can save them.
+   *
+   * C2 (v0.29.0): this is the one place every producer's facts reach the
+   * ledger — live discovery and Source Assessment (via the reindex that
+   * follows `schema-graph.json`), file ingestion (`ingestFileIntoGraph`),
+   * spec sync and the business-context files. New nodes are asserted, changed
+   * ones superseded, vanished ones rejected with a reason; conflicts are
+   * detected and their active sides flagged for review. A ledger failure is
+   * logged and the graph is still persisted as it stands.
    */
   public async persistCompiledGraph(): Promise<void> {
+    try {
+      const sync = await syncGraphToLedger(this.ledger, this.graphManager.serializeSnapshot(), { activeSpecId: this.activeSpecId });
+      this.conflicts = detectConflicts(this.ledger.assertions());
+      const flagged = await flagConflicts(this.ledger, this.conflicts);
+      if (sync.events > 0 || flagged.length > 0) {
+        this.log(`Context ledger: ${sync.asserted} asserted, ${sync.superseded} superseded, ${sync.retracted} retracted, ${sync.reverified} re-verified, ${sync.dependentsFlagged + flagged.length} flagged for review; ${this.conflicts.length} conflict(s).`);
+      }
+      await this.graphManager.loadSnapshot(projectGraph(this.ledger.assertions(), { activeSpecId: this.activeSpecId }));
+    } catch (err) {
+      this.log(`Context ledger update failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     try {
       const contextPath = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath;
       const derivedDir = path.join(contextPath, 'derived');
@@ -263,32 +342,16 @@ export class ContextFileManager implements vscode.Disposable {
     }
   }
 
-  private removeBusinessContextNodes(): void {
-    // GraphManager doesn't have a remove-by-type, so we clear and reload.
-    // In production, this would be more surgical.
-    // For now, we only clear business context types and keep schema nodes.
-    const diag = this.graphManager.getDiagnostics();
-    if (diag.totalNodes > 0) {
-      // Re-serialize, filter, and reload
-      const snapshot = this.graphManager.serializeSnapshot();
-      const schemaNodes = snapshot.nodes.filter(
-        (n) => n.type === 'table' || n.type === 'column' || n.type === 'semantic_view'
-      );
-      const schemaEdges = snapshot.edges.filter(
-        (e) => e.type === 'contains' || e.type === 'foreign_key'
-      );
-      this.graphManager.clear();
-      // We'll reload schema from the file in loadAllFiles
-    }
-  }
-
-  private async loadBusinessContext(data: BusinessContextFile): Promise<void> {
-    let termIndex = 0;
+  private async loadBusinessContext(data: BusinessContextFile, sourceRef: string): Promise<void> {
     let ruleIndex = 0;
+    const usedIds = new Set<string>();
+    const origin = { source: 'user' as const, sourceRef, extractor: 'business-context' };
 
     if (data.business_terms) {
       for (const entry of data.business_terms) {
-        const nodeId = `biz-term-${++termIndex}`;
+        // Keyed by the term's name (v0.29.0; was its position in the file), so
+        // reordering the file changes nothing and redefining a term supersedes it.
+        const nodeId = uniqueId(`biz-term-${slugify(entry.term)}`, usedIds);
         const node: BusinessTermNode = {
           id: nodeId,
           type: 'business_term',
@@ -297,7 +360,8 @@ export class ContextFileManager implements vscode.Disposable {
           formula: entry.formula,
           mappedNodeIds: entry.mapped_tables || [],
           metadata: {},
-          version: 1
+          version: 1,
+          origin
         };
         await this.graphManager.addNode(node);
 
@@ -332,7 +396,8 @@ export class ContextFileManager implements vscode.Disposable {
           ruleText: entry.rule,
           enforcementLevel: entry.enforcement || 'RECOMMENDED',
           metadata: {},
-          version: 1
+          version: 1,
+          origin
         };
         await this.graphManager.addNode(node);
 
@@ -358,12 +423,12 @@ export class ContextFileManager implements vscode.Disposable {
     }
   }
 
-  private async loadVerifiedQueries(data: VerifiedQueriesFile): Promise<void> {
-    let queryIndex = 0;
+  private async loadVerifiedQueries(data: VerifiedQueriesFile, sourceRef: string): Promise<void> {
+    const usedIds = new Set<string>();
 
     if (data.queries) {
       for (const entry of data.queries) {
-        const nodeId = `verified-query-${++queryIndex}`;
+        const nodeId = uniqueId(`verified-query-${slugify(entry.name)}`, usedIds);
         const node: VerifiedQueryNode = {
           id: nodeId,
           type: 'verified_query',
@@ -374,7 +439,8 @@ export class ContextFileManager implements vscode.Disposable {
           tablesUsed: entry.tables_used || [],
           author: entry.author,
           metadata: {},
-          version: 1
+          version: 1,
+          origin: { source: 'user', sourceRef, extractor: 'verified-queries' }
         };
         await this.graphManager.addNode(node);
 
@@ -551,4 +617,19 @@ export class ContextFileManager implements vscode.Disposable {
 
     return parts.join('\n');
   }
+}
+
+function toPosix(p: string): string {
+  return p.split(path.sep).join('/');
+}
+
+function slugify(text: string): string {
+  return String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unnamed';
+}
+
+function uniqueId(base: string, used: Set<string>): string {
+  let id = base;
+  for (let i = 2; used.has(id); i++) id = `${base}-${i}`;
+  used.add(id);
+  return id;
 }

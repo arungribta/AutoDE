@@ -1186,6 +1186,17 @@ Full specification: [context-layer-requirements.md](context-layer-requirements.m
 - Runs offline with no credentials; can record and replay real LLM responses per provider.
 - The v0.26.0 baseline is frozen in `test/reference/retail-orders/baselines/` so every later phase can show its effect.
 
+### 20.2 Assertion ledger and projection (v0.29.0)
+
+- Every fact in the context layer is an assertion — one claim about one subject with evidence, a trust tier (verified > confirmed > documented > inferred), a status (proposed, active, needs review, superseded, rejected) and a validity period — recorded in an append-only ledger under `.ai-context/ledger/` (one JSON Lines file per session, so team members' changes merge without conflicts).
+- The context graph is rebuilt from the ledger. Each node and edge lists the assertions supporting it (`supportedBy`), and its `origin.confidence` comes from their trust tier.
+- Nothing is silently overwritten: a changed fact supersedes the old one, a fact that disappears from its source is rejected with the reason, and history is kept. Business assertions about a changed or removed table or column go to review.
+- Existing context is migrated automatically on first load; the migration produces the same graph and is idempotent.
+- Contradictions are detected and both sides surfaced: two definitions of the same business term or metric, two different values for the same fact, or a claimed key that differs from the schema's declared key. Active facts in a contradiction go to "needs review".
+- Live discovery, Source Assessment, file ingestion, spec approval and the business-context files all record assertions. Facts from a business problem's spec are scoped to that problem; schema facts discovered with no problem active are project-wide.
+- `AutoDE: Compact Context Ledger` writes a snapshot of the current state; history is deleted only if the user explicitly chooses to prune it.
+- DDL import keeps each table's schema, so same-named tables from different systems (e.g. `shop.customers`, `crm.customers`) stay separate.
+
 ---
 
 (End of requirements document)

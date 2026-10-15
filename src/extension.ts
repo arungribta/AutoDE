@@ -726,6 +726,28 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
+  // C2 (v0.29.0, docs/context-layer-requirements.md §4.2): snapshot the assertion
+  // ledger. History is kept unless the user explicitly picks the prune option.
+  const compactContextLedger = vscode.commands.registerCommand(`${EXTENSION_ID}.compactContextLedger`, async () => {
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: 'Compact', description: 'Write a snapshot; keep the full event history', prune: false },
+        { label: 'Compact and prune history', description: 'Write a snapshot, then delete the event files it replaces (cannot be undone)', prune: true }
+      ],
+      { title: 'Compact Context Ledger' }
+    );
+    if (!choice) return;
+    try {
+      const result = await sidebarProvider.compactContextLedger(choice.prune);
+      if (!result) { vscode.window.showErrorMessage('The context layer is not initialized yet — open the AutoDE panel first.'); return; }
+      const msg = `Context ledger compacted: ${result.assertions} assertion(s) in snapshot.json${choice.prune ? `, ${result.prunedFiles} event file(s) pruned` : ''}.`;
+      vscode.window.showInformationMessage(msg);
+      sidebarProvider.logToChat(msg);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Could not compact the context ledger: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+
   const syncMetadata = vscode.commands.registerCommand(`${EXTENSION_ID}.syncMetadata`, async () => {
     try {
       if (!connectionManager || !connectionManager.isConnected()) { vscode.window.showErrorMessage('Not connected. Connect first via Settings → Connections.'); return; }
@@ -848,7 +870,7 @@ export function activate(context: vscode.ExtensionContext): void {
     openSidebar, generatePlan, executePlan, generatePipelineSpec, resetSession,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
-    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, syncMetadata, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, syncMetadata, reindex,
     importToolSkill, runToolSkill,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential

@@ -25,6 +25,10 @@ export interface FileIo {
   /** Must replace an existing `to`. */
   rename(from: string, to: string): Promise<void>;
   mkdirp(dirPath: string): Promise<void>;
+  /** File names (not paths) in a directory; `undefined` when it does not exist. Optional: the C2 ledger needs it. */
+  listDir?(dirPath: string): Promise<string[] | undefined>;
+  /** Optional: only ledger pruning uses it. */
+  deleteFile?(filePath: string): Promise<void>;
 }
 
 export const nodeFileIo: FileIo = {
@@ -37,7 +41,15 @@ export const nodeFileIo: FileIo = {
   },
   writeFile: (filePath, content) => fsp.writeFile(filePath, content),
   rename: (from, to) => fsp.rename(from, to),
-  mkdirp: async (dirPath) => { await fsp.mkdir(dirPath, { recursive: true }); }
+  mkdirp: async (dirPath) => { await fsp.mkdir(dirPath, { recursive: true }); },
+  async listDir(dirPath) {
+    try {
+      return await fsp.readdir(dirPath);
+    } catch {
+      return undefined;
+    }
+  },
+  deleteFile: async (filePath) => { await fsp.rm(filePath, { force: true }); }
 };
 
 export function computeRevision(content: Uint8Array | string): string {
