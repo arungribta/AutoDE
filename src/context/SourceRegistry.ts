@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ContextLayer } from './types';
-import { parseYaml, stringifyYaml } from './Yaml';
+import { ContextLayer } from '../engine/context/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
 
 export type SourceKind = 'business_context' | 'verified_queries' | 'data_definitions';
 

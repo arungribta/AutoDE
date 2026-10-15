@@ -1,7 +1,7 @@
-import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../engine/types';
 import { generateWithLlm } from '../llmCodegen';
 import { generateViaPrimitiveOrFallback } from '../llmParamSelector';
-import { platformToDialect } from '../../core/transforms/platformDialect';
+import { platformToDialect } from '../../engine/transforms/platformDialect';
 
 export async function executeSttmAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const task = step.taskDescription.trim();

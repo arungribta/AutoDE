@@ -8,7 +8,7 @@ import {
   SpecEngineState,
   SpecIntakeQuestion,
   SpecQuestionKind
-} from './types';
+} from '../engine/types';
 
 export const DEFAULT_TURN_BUDGET = 12;
 

@@ -4,16 +4,16 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from './types';
+import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
-import { SkillRegistry, loadSkillsFromDirectory } from './skillRegistry';
+import { SkillRegistry, loadSkillsFromDirectory } from '../engine/skills/skillRegistry';
 import { composeSynthesisPrompt } from './specOpsPrompts';
 import { buildDiscoveryProgress as buildDiscoveryProgressPure, skillNameForField, DiscoveryProgress } from './discoveryProgress';
 import { GraphManager } from '../context/GraphManager';
-import { BaseNode, GraphEdge } from '../context/types';
+import { BaseNode, GraphEdge } from '../engine/context/types';
 import { ContextFileManager } from '../context/ContextFileManager';
-import { ContextValidator } from '../context/ContextValidator';
+import { ContextValidator } from '../engine/context/ContextValidator';
 import { SourceRegistry } from '../context/SourceRegistry';
 import { SynthesisPipeline } from '../context/SynthesisPipeline';
 import { SpecManager } from '../context/SpecManager';
@@ -28,16 +28,17 @@ import { ActiveProblemManager } from '../context/ActiveProblemManager';
 import { AttachmentStore } from '../context/AttachmentStore';
 import { PipelineSpecManager } from '../context/PipelineSpecManager';
 import { ContextFileWatcher, normalizeFsPath } from '../context/ContextFileWatcher';
-import { RevisionConflictError, setRevisionConflictHandler } from '../context/RevisionedFile';
-import { generateDesignDoc } from './pipelineSpec/designDocGenerator';
+import { createVscodeFileIo } from '../context/vscodeFileIo';
+import { RevisionConflictError, setRevisionConflictHandler } from '../engine/context/contextStore';
+import { generateDesignDoc } from '../engine/pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
-import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, registerPrimitiveVersion, resetVersionedPrimitives, compileTransformSpec } from './transforms/registry';
-import { loadPrimitiveDefinitionsFromDirectory, mergePrimitiveDefinitions } from './transforms/declarative/loader';
-import { createDeclarativePrimitive } from './transforms/declarative/adapter';
-import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from './transforms/declarative/lifecycle';
-import { PrimitiveDefinition } from './transforms/declarative/types';
-import { ConnectionManager } from '../dqm/ConnectionManager';
-import { getCliDescriptor, resolveCredential, CredentialReference } from '../dqm/credentials';
+import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, registerPrimitiveVersion, resetVersionedPrimitives, compileTransformSpec } from '../engine/transforms/registry';
+import { loadPrimitiveDefinitionsFromDirectory, mergePrimitiveDefinitions } from '../engine/transforms/declarative/loader';
+import { createDeclarativePrimitive } from '../engine/transforms/declarative/adapter';
+import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from '../engine/transforms/declarative/lifecycle';
+import { PrimitiveDefinition } from '../engine/transforms/declarative/types';
+import { ConnectionManager } from '../engine/platform/ConnectionManager';
+import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
 import { applyCspNonce } from './webviewSecurity';
 import { classifyImplementationType } from './implementationType';
 import { buildTargetContextQuestions } from './targetContextQuestions';
@@ -656,7 +657,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (targetConfig && typeof targetConfig === 'object') {
             this.postLog('Updating target environment configuration...');
             try {
-              this.hub.setTargetEnvironment(targetConfig as import('./types').TargetEnvironment);
+              this.hub.setTargetEnvironment(targetConfig as import('../engine/types').TargetEnvironment);
               this.postLog('Target environment updated.');
               this.postMessage('targetConfigUpdated', { success: true });
             } catch (err) { this.postLog(`Failed to update target config: ${err instanceof Error ? err.message : String(err)}`); }
@@ -1220,14 +1221,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    * theirs over it — never decide silently.
    */
   private async handleRevisionConflict(conflict: RevisionConflictError): Promise<void> {
-    const name = path.basename(conflict.uri.fsPath);
+    const name = path.basename(conflict.filePath);
     this.postLog(`${conflict.label} (${name}) changed on disk since AutoDE loaded it — your change was not saved.`);
     const choice = await vscode.window.showWarningMessage(
       `${conflict.label} (${name}) changed on disk since AutoDE loaded it. Your latest change was not saved.`,
       'Reload from Disk',
       'Overwrite'
     );
-    const key = normalizeFsPath(conflict.uri.fsPath);
+    const key = normalizeFsPath(conflict.filePath);
     if (choice === 'Overwrite') {
       await conflict.overwrite();
       this.postLog(`Overwrote ${name} with AutoDE's version — the external change was discarded.`);
@@ -1597,10 +1598,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Converts an approved Target Context into the `TargetEnvironment` shape `AgentHub` expects, filling reasonable defaults for anything left blank. */
-  private targetContextToEnvironment(tc: TargetContext): import('./types').TargetEnvironment {
+  private targetContextToEnvironment(tc: TargetContext): import('../engine/types').TargetEnvironment {
     const platform: DataPlatformProvider = tc.platform ?? 'snowflake';
     const pc = tc.platformConfig ?? {};
-    let platformConfig: import('./types').TargetEnvironment['platformConfig'];
+    let platformConfig: import('../engine/types').TargetEnvironment['platformConfig'];
     switch (platform) {
       case 'databricks':
         platformConfig = { workspaceUrl: pc.workspaceUrl ?? '', catalog: pc.database ?? 'main', schema: pc.schema ?? 'default' };
@@ -1676,13 +1677,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg));
+    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), { cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true });
     try {
       this.postLog(`Connecting to ${platform} to build Source Context…`);
       const info = await connectionManager.connect(platform, credentials);
       const snapshot = await connectionManager.extractMetadata({ includeProfiling: false });
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (workspaceRoot) { await connectionManager.persistSchemaContext(snapshot, workspaceRoot); }
+      if (workspaceRoot) { await connectionManager.persistSchemaContext(snapshot, workspaceRoot.fsPath, createVscodeFileIo(vscode)); }
       const record: SourceContext = {
         specId: spec.id, specVersion: spec.version, status: 'built',
         sources: [{
@@ -1791,7 +1792,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     this.postLog(`Testing the connection "${connectionPicked.connectionName}"…`);
-    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg));
+    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), { cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true });
     try {
       const info = await connectionManager.connect(platform, resolved);
       this.postLog(`Connected: ${info.databaseName}.${info.schemaName} (${info.version}).`);

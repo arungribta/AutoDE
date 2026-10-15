@@ -1,4 +1,4 @@
-import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../engine/types';
 import { generateWithLlm } from '../llmCodegen';
 
 export async function executeArchitectureAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {

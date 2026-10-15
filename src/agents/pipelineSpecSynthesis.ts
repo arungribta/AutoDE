@@ -1,7 +1,7 @@
-import { AttachmentExtract, BusinessProblemSpec, SourceContext, TargetContext } from '../core/types';
-import { CURRENT_PIPELINE_SPEC_VERSION, PipelineSpec } from '../core/pipelineSpec/types';
-import { validatePipelineSpec } from '../core/pipelineSpec/validator';
-import { TRANSFORM_PRIMITIVES } from '../core/transforms/registry';
+import { AttachmentExtract, BusinessProblemSpec, SourceContext, TargetContext } from '../engine/types';
+import { CURRENT_PIPELINE_SPEC_VERSION, PipelineSpec } from '../engine/pipelineSpec/types';
+import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
+import { TRANSFORM_PRIMITIVES } from '../engine/transforms/registry';
 
 /**
  * Pure prompt-building + response-parsing for Pipeline Spec synthesis —

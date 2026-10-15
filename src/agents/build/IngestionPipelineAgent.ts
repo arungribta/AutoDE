@@ -1,7 +1,7 @@
-import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep, GeneratedArtifact } from '../../engine/types';
 import { generateWithLlm } from '../llmCodegen';
 import { generateViaPrimitiveOrFallback } from '../llmParamSelector';
-import { platformToDialect } from '../../core/transforms/platformDialect';
+import { platformToDialect } from '../../engine/transforms/platformDialect';
 
 function templateSql(step: PlanStep, database: string, schema: string, tableName: string): string {
   return `CREATE OR REPLACE TABLE ${database}.${schema}.${tableName} (

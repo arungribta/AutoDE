@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { PipelineSpec } from '../core/pipelineSpec/types';
-import { CURRENT_PIPELINE_SPEC_VERSION } from '../core/pipelineSpec/types';
-import { validatePipelineSpec } from '../core/pipelineSpec/validator';
-import { parseYaml, stringifyYaml } from './Yaml';
-import { RevisionedFile, applyReload } from './RevisionedFile';
+import { PipelineSpec } from '../engine/pipelineSpec/types';
+import { CURRENT_PIPELINE_SPEC_VERSION } from '../engine/pipelineSpec/types';
+import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
+import { createVscodeFileIo } from './vscodeFileIo';
 
 /**
  * Manages the Pipeline Spec — modeled directly on `SpecManager.ts`'s exact,
@@ -23,8 +24,8 @@ export class PipelineSpecManager implements vscode.Disposable {
     private readonly log: (msg: string) => void
   ) {
     this.specDir = vscode.Uri.joinPath(contextRoot, 'spec');
-    this.file = new RevisionedFile(vscode, this.specDir, 'pipeline.yaml', 'Pipeline Spec');
-    this.specUri = this.file.getUri();
+    this.specUri = vscode.Uri.joinPath(this.specDir, 'pipeline.yaml');
+    this.file = new RevisionedFile(new ContextStore(createVscodeFileIo(vscode)), this.specUri.fsPath, 'Pipeline Spec');
   }
 
   public dispose(): void {}

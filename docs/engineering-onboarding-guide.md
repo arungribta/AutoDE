@@ -140,9 +140,10 @@ Data / analytics engineers who already use VS Code and (ideally) already have Gi
 AutoDE/
 ├── src/                         # All TypeScript source (compiles to dist/) — 58 files
 │   ├── extension.ts             # ★ Activation entry point, command + provider registration
-│   ├── core/                    # Orchestration, LLM, config, webview bridge, spec engine (19 files)
-│   ├── context/                 # Enterprise Context Layer: graph, YAML, spec, plan, context, artifacts (12 files)
-│   ├── dqm/                     # "Data Quality/Query Mgmt" — data-platform adapter layer
+│   ├── engine/                  # ★ v0.26.0 — host-agnostic engine (no `vscode` import, lint-enforced): types,
+│   │                            #   transforms, pipelineSpec, skills, platform (was dqm/), context store/YAML/ingestion
+│   ├── core/                    # Orchestration, LLM, config, webview bridge, spec engine, credentials (VS Code side)
+│   ├── context/                 # Enterprise Context Layer managers: graph, spec, plan, context, artifacts, watcher
 │   ├── agents/                  # ★ The 7 wired sub-agents (discover/model/build/validate) + llmCodegen.ts
 │   ├── editors/                 # 5 custom text editors (webview-backed)
 │   ├── spokes/                  # LEGACY agents — only snowflakeExecutor.ts is still wired
@@ -178,7 +179,24 @@ AutoDE/
 
 > ⚠ FLAG FOR REVIEW — this repository's own local `.ai-context/` (2026-09-16) still has **pre-migration, single-problem-layout files on disk** (`.ai-context/spec/business-problem.yaml`, `.ai-context/derived/graph.json`) that predate the v0.12.0 multi-business-problem change and are no longer referenced by the app (no `active-problem.json` exists, so `ActiveProblemManager.listProblems()` finds nothing under `.ai-context/problems/`). They're untracked (`git status` shows `.ai-context/spec/` as `??`) except the already-tracked `.ai-context/sources.yaml`, so nothing committed is at risk — but worth a conscious decision (migrate into a `problems/<id>/` folder, or delete) rather than leaving them as silent dead weight.
 
+### `src/engine/` — host-agnostic engine layer (v0.26.0)
+
+Everything here runs without VS Code: today inside the extension host, from Phase 3 also inside the standalone MCP server (`docs/mcp-engine-requirements.md`). `.eslintrc.cjs` rejects any `vscode` import under `src/engine/**` (even type-only), and a functional test loads every `dist/engine/**` module in plain Node. Anything host-specific comes in through a parameter: `FileIo` (file access — Node `fs` or `src/context/vscodeFileIo.ts`), `AgentHost` (approval prompts, workspace root), `ConnectionManagerOptions.cliConsent`.
+
+| Path | Was (≤ v0.25.0) | Contents |
+|---|---|---|
+| `engine/types.ts` | `core/types.ts` | The type dictionary, plus `AgentHost` |
+| `engine/transforms/` | `core/transforms/` | Deterministic execution core (Tier 1 + Tier 2 primitives) |
+| `engine/pipelineSpec/` | `core/pipelineSpec/` | Pipeline Spec schema, validator, compiler, design doc |
+| `engine/skills/` | `core/skillRegistry.ts`, `core/toolSkills.ts` | Interview skills + `SKILL.md` tool skills loaders |
+| `engine/platform/` | `dqm/` (+ `core/providerRegistry.ts`) | Adapters, REST/CLI execution backends, credential resolvers (env, CLI config), `ConnectionManager`, platform registry |
+| `engine/context/` | `context/types.ts`, `Yaml.ts`, `fileIngestion.ts`, `ContextValidator.ts` | Graph types, YAML, file ingestion, validator, and the new `contextStore.ts` (revision-checked atomic writes over `FileIo`) |
+
+Stayed on the VS Code side: `core/credentials/` (the `vscode-secret-storage` resolver + `registerDefaultCredentialResolvers()`), and all managers in `src/context/` (they reach files through `createVscodeFileIo(vscode)` so remote/virtual workspaces keep working).
+
 ### `src/core/` — the brain
+
+> **v0.26.0:** the `transforms/`, `pipelineSpec/`, `skillRegistry.ts`, `toolSkills.ts`, `providerRegistry.ts` and `types.ts` rows below now live under `src/engine/` (see the table above); `providerRegistry.ts`'s deprecated LLM helpers were deleted. The rows are kept for their descriptions.
 
 | File | Why it exists | Called by | Depends on |
 |---|---|---|---|
@@ -232,7 +250,9 @@ AutoDE/
 | `ChatSessionManager.ts` | **Phase F (v0.9.0).** Persists chat sessions: `.ai-context/chats/<id>.meta.json` (atomic) + `<id>.jsonl` transcript. `createSession`/`getActiveSession`/`appendMessage`/`loadTranscript`/`archiveSession`/`discardSession`/`updateMeta`. Workspace-level, shared across business problems (v0.12.0 decision — a chat can span problems). | Gitignored — local/exploratory, unlike the committed BPS. Session identity is independent of `specId`/`specVersion` (recorded as a breadcrumb, not kept in sync). Transcript writes are read-modify-write, not a true append (`vscode.workspace.fs` has no append primitive). |
 | `types.ts` | Context node/edge types + the unified `Origin` (provenance) envelope + `RetrievalOptions` / `SubgraphResult` / `ContextEngineDiagnostics`. | `BaseNode` is `readonly`-heavy by design. |
 
-### `src/dqm/` — data-platform adapter layer ("dqm" 💡 likely "data query manager")
+### `src/dqm/` → `src/engine/platform/` — data-platform adapter layer
+
+> **v0.26.0:** moved to `src/engine/platform/` and made host-agnostic: cancellation is an `AbortSignal`, CLI-execution consent is passed in (`cliConsent`), and schema-graph persistence moved from the adapter to `ConnectionManager.persistSchemaContext(snapshot, workspaceRoot, fileIo)`. The `vscode-secret-storage` resolver moved to `src/core/credentials/`.
 
 | File | Purpose | State |
 |---|---|---|

@@ -1,7 +1,7 @@
-import { AgentExecutionContext, AgentExecutionResult, GeneratedArtifact, PlanStep } from '../core/types';
+import { AgentExecutionContext, AgentExecutionResult, GeneratedArtifact, PlanStep } from '../engine/types';
 import { SECRET_KEYS } from '../core/extensionIdentity';
-import { ConnectionManager } from '../dqm/ConnectionManager';
-import { SnowflakeAdapter } from '../dqm/adapters/SnowflakeAdapter';
+import { ConnectionManager } from '../engine/platform/ConnectionManager';
+import { SnowflakeAdapter } from '../engine/platform/adapters/SnowflakeAdapter';
 
 const VALIDATION_SQL = (stepId: string): string =>
   `SELECT '${stepId}' AS step_id, CURRENT_TIMESTAMP() AS executed_at, 1 AS validation_check;`;
@@ -48,7 +48,7 @@ export async function executeSnowflakeAgent(step: PlanStep, context: AgentExecut
     return skippedNoConnection(step, context, 'Snowflake account, username, and database must be configured');
   }
 
-  const adapter = new SnowflakeAdapter(credentials, (msg) => context.log(msg));
+  const adapter = new SnowflakeAdapter(credentials, (msg) => context.log(msg), { cliConsent: context.settings.dataPlatformCliConsent === true });
   try {
     await adapter.connect();
     const sql = VALIDATION_SQL(step.id);

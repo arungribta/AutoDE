@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { LlmAdapter, LlmAdapterContext, LlmCompleteOptions, LlmHistoryTurn, extractJsonText } from './llmAdapter';
-import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode } from './types';
+import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
 import { AgenticToolCall, JsonSchemaToolSpec, READ_ONLY_TOOL_SPECS, WRITE_TOOL_SPECS, executeAgenticTool } from './agenticTools';
 
 const MAX_TOOL_LOOP_TURNS = 12;

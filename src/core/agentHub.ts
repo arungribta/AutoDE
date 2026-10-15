@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ConfigurationManager } from './configManager';
+import { AgentHost } from '../engine/types';
+import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeIngestionAgent } from '../agents/build/IngestionPipelineAgent';
 import { executeSttmAgent } from '../agents/model/SttmMapperAgent';
 import { executeArchitectureAgent } from '../agents/validate/DocumentationAgent';
@@ -17,7 +19,7 @@ import { buildDiscoveryTurnPrompt, buildSynthesisPrompt } from './specOpsPrompts
 import { parseComprehensiveSpec } from './specSynthesis';
 import { buildAttachmentExtractionPrompt, fallbackAttachmentExtract, parseAttachmentExtract } from './attachmentExtraction';
 import { buildPipelineSpecSynthesisPrompt, parsePipelineSpecResponse, PipelineSpecSynthesisInputs } from '../agents/pipelineSpecSynthesis';
-import { PipelineSpec } from './pipelineSpec/types';
+import { PipelineSpec } from '../engine/pipelineSpec/types';
 import { LlmAdapterContext, LlmHistoryTurn, extractJsonText } from './llmAdapter';
 import { getLlmAdapter } from './llmProviders';
 import { contextWindowForModel, windowHistoryToBudget, RESERVED_PROMPT_TOKENS, RESERVED_RESPONSE_TOKENS } from './tokenBudget';
@@ -42,7 +44,7 @@ import {
   GeneratedArtifact,
   ToolExecutionMode,
   WorkflowPhase
-} from './types';
+} from '../engine/types';
 
 // NOTE: 'toolSkillAgent' is deliberately NOT in this allow-list. The auto-planner
 // LLM has no visibility into which skills are imported and could hallucinate a
@@ -184,6 +186,16 @@ export class DataAgentHubHub {
 
   private getWorkspaceRoot(): string | undefined {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  }
+
+  /** The extension's implementation of `AgentHost` (v0.26.0): modal approval, VS Code's file system. */
+  private buildAgentHost(): AgentHost {
+    return {
+      workspaceRoot: this.getWorkspaceRoot(),
+      confirm: async (message: string, actionLabel: string) =>
+        (await vscode.window.showWarningMessage(message, { modal: true }, actionLabel)) === actionLabel,
+      fileIo: createVscodeFileIo(vscode)
+    };
   }
 
   public setSpec(specId: string, specVersion: number): void {
@@ -500,6 +512,7 @@ export class DataAgentHubHub {
       currentPhase: 'build',
       workspaceRoot: this.getWorkspaceRoot(),
       extensionContext: this.configManager.getExtensionContext(),
+      host: this.buildAgentHost(),
       skillId,
       skillInstruction: instruction
     };
@@ -1084,6 +1097,7 @@ Message: ${message}`;
           currentPhase: phase,
           workspaceRoot: this.getWorkspaceRoot(),
           extensionContext: this.configManager.getExtensionContext(),
+          host: this.buildAgentHost(),
           skillId: readyStep.skillId,
           skillInstruction: readyStep.taskDescription,
           callLlm: (prompt: string, systemPrompt?: string) => this.callConfiguredLlm(prompt, systemPrompt)

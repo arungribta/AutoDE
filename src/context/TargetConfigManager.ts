@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { TargetEnvironment, TargetConfigFile, TargetProfile } from '../core/types';
-import { parseYaml, stringifyYaml } from './Yaml';
+import { TargetEnvironment, TargetConfigFile, TargetProfile } from '../engine/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
 
 /**
  * Manages the .ai-context/target-environment.yaml file.

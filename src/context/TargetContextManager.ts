@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { TargetContext } from '../core/types';
-import { parseYaml, stringifyYaml } from './Yaml';
-import { RevisionedFile, applyReload } from './RevisionedFile';
+import { TargetContext } from '../engine/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
+import { createVscodeFileIo } from './vscodeFileIo';
 
 /**
  * Manages the reviewed, approved Target Context for the current spec version.
@@ -31,8 +32,8 @@ export class TargetContextManager implements vscode.Disposable {
     private readonly log: (msg: string) => void
   ) {
     this.contextDir = vscode.Uri.joinPath(contextRoot, 'context');
-    this.file = new RevisionedFile(vscode, this.contextDir, 'target-context.yaml', 'Target Context');
-    this.fileUri = this.file.getUri();
+    this.fileUri = vscode.Uri.joinPath(this.contextDir, 'target-context.yaml');
+    this.file = new RevisionedFile(new ContextStore(createVscodeFileIo(vscode)), this.fileUri.fsPath, 'Target Context');
   }
 
   public dispose(): void {}

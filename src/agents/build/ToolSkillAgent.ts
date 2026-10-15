@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { AgentExecutionContext, AgentExecutionResult, PlanStep, ToolSkillDefinition } from '../../core/types';
-import { loadToolSkillsFromDirectory } from '../../core/toolSkills';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep, ToolSkillDefinition } from '../../engine/types';
+import { loadToolSkillsFromDirectory } from '../../engine/skills/toolSkills';
 
 /**
  * Runs an imported Claude Agent Skill (`SKILL.md` + resources) with real tool
  * access (Phase D). This is the one agent that breaks the "sub-agents import
  * only core/types" convention (see the note on `AgentExecutionContext` in
- * `core/types.ts`) — everything else in `src/agents/**` is a deterministic
+ * `engine/types.ts`) — everything else in `src/agents/**` is a deterministic
  * template generator; this one runs an actual multi-turn agentic loop with
  * file I/O and command execution, so it genuinely needs `vscode` + `child_process`.
  *
@@ -108,12 +108,11 @@ function buildSkillSystemPrompt(skill: ToolSkillDefinition, context: AgentExecut
 // ── Claude Code execution path ──
 
 async function runOnClaude(skill: ToolSkillDefinition, instruction: string, context: AgentExecutionContext): Promise<AgentExecutionResult> {
-  const proceed = await vscode.window.showWarningMessage(
+  const proceed = await context.host?.confirm(
     `Run skill "${skill.name}" via Claude Code with file write and command execution access, scoped to this workspace?`,
-    { modal: true },
     'Run'
   );
-  if (proceed !== 'Run') {
+  if (!proceed) {
     return { success: false, message: `Skill "${skill.name}" was not run — declined by the user.`, error: 'declined' };
   }
 

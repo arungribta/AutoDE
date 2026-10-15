@@ -1,7 +1,6 @@
-import * as vscode from 'vscode';
-import { AgentExecutionContext, AgentExecutionResult, GeneratedArtifact, PlanStep } from '../../core/types';
-import { ConnectionManager } from '../../dqm/ConnectionManager';
-import { SchemaSnapshot } from '../../dqm/types';
+import { AgentExecutionContext, AgentExecutionResult, GeneratedArtifact, PlanStep } from '../../engine/types';
+import { ConnectionManager } from '../../engine/platform/ConnectionManager';
+import { SchemaSnapshot } from '../../engine/platform/types';
 
 /**
  * Source Assessment Agent
@@ -58,7 +57,9 @@ export async function executeSourceAssessmentAgent(
     context.log(`Warning: Could not retrieve secrets: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const connectionManager = new ConnectionManager((msg: string) => context.log(msg));
+  const connectionManager = new ConnectionManager((msg: string) => context.log(msg), {
+    cliConsent: () => context.configManager.getSettings().dataPlatformCliConsent === true
+  });
 
   try {
     // Connect to the platform
@@ -79,9 +80,9 @@ export async function executeSourceAssessmentAgent(
     );
 
     // Persist to .ai-context/
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (workspaceRoot) {
-      await connectionManager.persistSchemaContext(snapshot, workspaceRoot);
+    const workspaceRoot = context.host?.workspaceRoot;
+    if (workspaceRoot && context.host) {
+      await connectionManager.persistSchemaContext(snapshot, workspaceRoot, context.host.fileIo);
       context.log('Schema context persisted to .ai-context/schema-graph.json');
     } else {
       context.log('Warning: No workspace folder found. Schema context was not persisted to disk.');

@@ -1,6 +1,6 @@
-import { AgentExecutionContext, PlanStep } from '../core/types';
-import { PrimitiveKind, TransformSpec, TargetEnvironmentSummary, SqlDialect } from '../core/transforms/types';
-import { TRANSFORM_PRIMITIVES, validateTransformSpec, compileTransformSpec, getPrimitive, isSelectable } from '../core/transforms/registry';
+import { AgentExecutionContext, PlanStep } from '../engine/types';
+import { PrimitiveKind, TransformSpec, TargetEnvironmentSummary, SqlDialect } from '../engine/transforms/types';
+import { TRANSFORM_PRIMITIVES, validateTransformSpec, compileTransformSpec, getPrimitive, isSelectable } from '../engine/transforms/registry';
 
 /**
  * Selects and parameterizes a deterministic transform primitive (Phase 2),

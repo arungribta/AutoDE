@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { SourceContext, SourceContextEntry } from '../core/types';
-import { parseYaml, stringifyYaml } from './Yaml';
-import { RevisionedFile, applyReload } from './RevisionedFile';
+import { SourceContext, SourceContextEntry } from '../engine/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
+import { createVscodeFileIo } from './vscodeFileIo';
 
 /**
  * Manages the reviewed Source Context for the current spec version —
@@ -25,8 +26,8 @@ export class SourceContextManager implements vscode.Disposable {
     private readonly log: (msg: string) => void
   ) {
     this.contextDir = vscode.Uri.joinPath(contextRoot, 'context');
-    this.file = new RevisionedFile(vscode, this.contextDir, 'source-context.yaml', 'Source Context');
-    this.fileUri = this.file.getUri();
+    this.fileUri = vscode.Uri.joinPath(this.contextDir, 'source-context.yaml');
+    this.file = new RevisionedFile(new ContextStore(createVscodeFileIo(vscode)), this.fileUri.fsPath, 'Source Context');
   }
 
   public dispose(): void {}

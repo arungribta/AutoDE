@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { CONFIG_SECTION, SECRET_KEYS } from './extensionIdentity';
-import { DataAgentHubSettings, DataPlatformProvider, LlmProvider, SnowflakeAuthMode } from './types';
+import { DataAgentHubSettings, DataPlatformProvider, LlmProvider, SnowflakeAuthMode } from '../engine/types';
 
 export class ConfigurationManager {
   public constructor(private readonly context: vscode.ExtensionContext) {}

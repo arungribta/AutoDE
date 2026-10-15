@@ -4,7 +4,7 @@ import { DataAgentHubHub } from './core/agentHub';
 import { ConfigurationManager } from './core/configManager';
 import { DataAgentHubWebviewProvider } from './core/webviewProvider';
 import { DataAgentHubPanelProvider } from './core/panelProvider';
-import { ConnectionManager } from './dqm/ConnectionManager';
+import { ConnectionManager } from './engine/platform/ConnectionManager';
 import { ArtifactWriter } from './context/ArtifactWriter';
 import { PlanManager } from './context/PlanManager';
 import { TargetConfigManager } from './context/TargetConfigManager';
@@ -15,9 +15,10 @@ import { ProfileEditorProvider } from './editors/ProfileEditorProvider';
 import { DocEditorProvider } from './editors/DocEditorProvider';
 import { EDITOR_DATA_MODEL, EDITOR_STTM, EDITOR_GRAPH, EDITOR_PROFILE, EDITOR_DOC } from './core/extensionIdentity';
 import { createDisposableRegistry } from './core/disposables';
-import { registerDefaultCredentialResolvers, resolveCredential } from './dqm/credentials';
-import { DataPlatformProvider, DataAgentHubSettings } from './core/types';
-import { parseFile, detectFileFormat } from './context/fileIngestion';
+import { createVscodeFileIo } from './context/vscodeFileIo';
+import { registerDefaultCredentialResolvers, resolveCredential } from './core/credentials';
+import { DataPlatformProvider, DataAgentHubSettings } from './engine/types';
+import { parseFile, detectFileFormat } from './engine/context/fileIngestion';
 import * as path from 'node:path';
 
 /**
@@ -367,7 +368,10 @@ export function activate(context: vscode.ExtensionContext): void {
         sidebarProvider.logToChat(msg);
         return;
       }
-      const newManager = new ConnectionManager((msg: string) => { console.log(`[AutoDE ${role} Connection] ${msg}`); sidebarProvider.logToChat(msg); });
+      const newManager = new ConnectionManager(
+        (msg: string) => { console.log(`[AutoDE ${role} Connection] ${msg}`); sidebarProvider.logToChat(msg); },
+        { cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true }
+      );
       if (role === 'target') { targetConnectionManager?.dispose(); targetConnectionManager = newManager; } else { connectionManager?.dispose(); connectionManager = newManager; }
       const info = await newManager.connect(platform, credentials);
       const successMsg = `Connected to ${role} ${platform}: ${info.databaseName}.${info.schemaName} (v${info.version})`;
@@ -427,7 +431,7 @@ export function activate(context: vscode.ExtensionContext): void {
         sidebarProvider.logToChat('Running source assessment…');
         const snapshot = await connectionManager.extractMetadata({ includeProfiling: true });
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-        if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot); }
+        if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot.fsPath, createVscodeFileIo(vscode)); }
         const doneMsg = `Source assessment complete: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`;
         vscode.window.showInformationMessage(doneMsg);
         sidebarProvider.logToChat(doneMsg);
@@ -728,7 +732,7 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage('Syncing metadata...');
       const snapshot = await connectionManager.extractMetadata({ includeProfiling: false });
       const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot); }
+      if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot.fsPath, createVscodeFileIo(vscode)); }
       vscode.window.showInformationMessage(`Metadata sync complete: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`);
     } catch (err) { vscode.window.showErrorMessage(`Metadata sync failed: ${err instanceof Error ? err.message : String(err)}`); }
   });
@@ -754,7 +758,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const id = sourceUri.fsPath.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^a-zA-Z0-9_-]+/g, '_') || `skill-${Date.now().toString(36)}`;
       const targetDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills', id);
       await copyDirectoryRecursive(sourceUri, targetDir);
-      const { loadToolSkill } = require('./core/toolSkills') as typeof import('./core/toolSkills');
+      const { loadToolSkill } = require('./engine/skills/toolSkills') as typeof import('./engine/skills/toolSkills');
       const skill = loadToolSkill(targetDir.fsPath, id);
       const toolsNote = skill.declaredTools?.length ? ` Declares tools: ${skill.declaredTools.join(', ')}.` : '';
       vscode.window.showInformationMessage(
@@ -770,7 +774,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const runToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.runToolSkill`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
-    const { loadToolSkillsFromDirectory } = require('./core/toolSkills') as typeof import('./core/toolSkills');
+    const { loadToolSkillsFromDirectory } = require('./engine/skills/toolSkills') as typeof import('./engine/skills/toolSkills');
     const toolSkillsDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills').fsPath;
     const skills = loadToolSkillsFromDirectory(toolSkillsDir);
     if (skills.length === 0) { vscode.window.showInformationMessage('No tool skills imported yet. Run "AutoDE: Import Tool Skill" first.'); return; }

@@ -1,4 +1,4 @@
-import { IntakeSession, SkillDefinition } from './types';
+import { IntakeSession, SkillDefinition } from '../engine/types';
 
 /**
  * A live snapshot of SpecOps discovery progress — surfaces what `IntakeSession`

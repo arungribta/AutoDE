@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
-import { SemanticLayerSnapshot, ContextStatus } from '../core/types';
+import { SemanticLayerSnapshot, ContextStatus } from '../engine/types';
 import { GraphManager } from './GraphManager';
-import { parseYaml, stringifyYaml } from './Yaml';
-import { RevisionedFile, applyReload } from './RevisionedFile';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
+import { createVscodeFileIo } from './vscodeFileIo';
 
 /**
  * Manages the Unified Semantic Layer snapshot — Step 6's second piece,
@@ -32,8 +33,8 @@ export class SemanticLayerManager implements vscode.Disposable {
     private readonly log: (msg: string) => void
   ) {
     this.contextDir = vscode.Uri.joinPath(contextRoot, 'context');
-    this.file = new RevisionedFile(vscode, this.contextDir, 'semantic-layer.yaml', 'Unified Semantic Layer snapshot');
-    this.metaFileUri = this.file.getUri();
+    this.metaFileUri = vscode.Uri.joinPath(this.contextDir, 'semantic-layer.yaml');
+    this.file = new RevisionedFile(new ContextStore(createVscodeFileIo(vscode)), this.metaFileUri.fsPath, 'Unified Semantic Layer snapshot');
     this.graphFileUri = vscode.Uri.joinPath(this.contextDir, 'semantic-layer.snapshot.json');
   }
 

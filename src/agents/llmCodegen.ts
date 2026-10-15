@@ -1,4 +1,4 @@
-import { AgentExecutionContext, PlanStep } from '../core/types';
+import { AgentExecutionContext, PlanStep } from '../engine/types';
 
 /**
  * Shared LLM-generation helper for the codegen agents (v0.11.0).

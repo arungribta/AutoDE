@@ -1,4 +1,4 @@
-import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../core/types';
+import { AgentExecutionContext, AgentExecutionResult, PlanStep } from '../engine/types';
 
 export async function executeArchitectureAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const schema = context.settings.defaultSnowflakeSchema || 'PUBLIC';

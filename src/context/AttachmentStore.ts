@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { IntakeAttachment } from '../core/types';
-import { parseYaml, stringifyYaml } from './Yaml';
+import { IntakeAttachment } from '../engine/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
 
 /**
  * Persists attachments (raw content + any structured extract) beyond the

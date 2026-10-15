@@ -1,4 +1,4 @@
-import { ChatMessage } from './types';
+import { ChatMessage } from '../engine/types';
 
 /**
  * Token-budget-aware history windowing (Phase 2). No official tokenizer is

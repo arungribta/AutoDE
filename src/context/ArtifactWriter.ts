@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GeneratedArtifact, WorkflowPhase } from '../core/types';
+import { GeneratedArtifact, WorkflowPhase } from '../engine/types';
 
 const PHASE_DIRS: Record<WorkflowPhase, string> = {
   discover: '01-discover',

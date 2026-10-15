@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ChatMessage, ChatSessionMeta } from '../core/types';
+import { ChatMessage, ChatSessionMeta } from '../engine/types';
 
 /**
  * Persists chat sessions — independent of Business Problem Specification

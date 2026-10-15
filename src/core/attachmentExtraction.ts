@@ -1,4 +1,4 @@
-import { AttachmentExtract, AttachmentExtractEntity, IntakeAttachment } from './types';
+import { AttachmentExtract, AttachmentExtractEntity, IntakeAttachment } from '../engine/types';
 
 /**
  * Structured extraction for spec-discovery attachments (Phase 2B-i). Pure

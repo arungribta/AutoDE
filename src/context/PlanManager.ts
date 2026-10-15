@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { PersistedPlan } from '../core/types';
-import { parseYaml, stringifyYaml } from './Yaml';
+import { PersistedPlan } from '../engine/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
 
 /**
  * Manages the persisted workflow plan — the durable counterpart to `AgentHub`'s

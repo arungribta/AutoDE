@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ToolCallAuditEntry, ToolExecutionMode } from './types';
+import { ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
 import { AgenticToolCall, READ_ONLY_TOOL_SPECS, WRITE_TOOL_SPECS, executeAgenticTool } from './agenticTools';
 import { LlmHistoryTurn } from './llmAdapter';
 

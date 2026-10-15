@@ -1,4 +1,4 @@
-import { BusinessProblemSpec, ImplementationType } from './types';
+import { BusinessProblemSpec, ImplementationType } from '../engine/types';
 import { matchesAnyKeyword } from './phaseInference';
 
 /**

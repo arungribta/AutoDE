@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BaseNode, GraphEdge, RetrievalOptions, SubgraphResult, ContextEngineDiagnostics } from './types';
+import { BaseNode, GraphEdge, RetrievalOptions, SubgraphResult, ContextEngineDiagnostics } from '../engine/context/types';
 
 /**
  * Thread-safe in-memory Graph Manager.

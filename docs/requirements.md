@@ -1164,6 +1164,11 @@ The full specification, phasing and acceptance criteria live in [mcp-engine-requ
 - An external switch of `.ai-context/active-problem.json` activates that problem.
 - A spec change during plan execution lets the running step finish and pauses before the next one.
 
+### 19.2 Engine boundary and context store (v0.26.0)
+
+- Data-platform access, transform primitives, the Pipeline Spec compiler, skill loaders and context-file persistence live in `src/engine/`, which never imports the VS Code API (lint-enforced and tested). This is the code the MCP server will expose from Phase 3.
+- No user-visible change: connections, Source Assessment, primitive preview, plan execution and spec saving behave as in v0.25.0.
+
 ---
 
 (End of requirements document)

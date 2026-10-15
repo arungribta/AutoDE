@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { GraphManager } from './GraphManager';
 import { RegisteredSource } from './SourceRegistry';
-import { BusinessProblemSpec } from '../core/types';
+import { BusinessProblemSpec } from '../engine/types';
 import {
   BaseNode,
   BusinessTermNode,
@@ -9,7 +9,7 @@ import {
   VerifiedQueryNode,
   GraphEdge,
   Origin
-} from './types';
+} from '../engine/context/types';
 
 /**
  * Ingests registered source files and derives semantic nodes/edges (with

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DataAgentHubSettings, LlmProvider, ToolExecutionMode } from './types';
+import { DataAgentHubSettings, LlmProvider, ToolExecutionMode } from '../engine/types';
 
 /**
  * The provider-agnostic contract every LLM provider implements (Phase C).

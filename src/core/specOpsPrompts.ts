@@ -1,4 +1,4 @@
-import { BusinessProblemSpec, IntakeAttachment, IntakeSession, SkillDefinition } from './types';
+import { BusinessProblemSpec, IntakeAttachment, IntakeSession, SkillDefinition } from '../engine/types';
 
 /**
  * Prompt assembly for the agentic spec-discovery loop. Pure functions only —

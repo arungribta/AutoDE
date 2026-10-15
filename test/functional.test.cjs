@@ -447,7 +447,7 @@ async function main() {
   const nodePath = require('node:path');
 
   await test('parseSkillDefinition() normalizes and validates', () => {
-    const { parseSkillDefinition } = require('../dist/core/skillRegistry.js');
+    const { parseSkillDefinition } = require('../dist/engine/skills/skillRegistry.js');
     const skill = parseSkillDefinition({ id: 'x', name: 'X', systemPrompt: 'p', specFields: ['a', 'b', 1, ''] });
     assert.strictEqual(skill.id, 'x');
     assert.deepStrictEqual(skill.specFields, ['a', 'b']);
@@ -457,7 +457,7 @@ async function main() {
   });
 
   await test('SkillRegistry orders skills and maps fields', () => {
-    const { SkillRegistry } = require('../dist/core/skillRegistry.js');
+    const { SkillRegistry } = require('../dist/engine/skills/skillRegistry.js');
     const reg = new SkillRegistry([
       { id: 'b', name: 'B', order: 2, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['dataFlows'] },
       { id: 'a', name: 'A', order: 1, description: '', systemPrompt: 'p', questionGuidance: '', specFields: ['objectives', 'dataFlows'] }
@@ -469,7 +469,7 @@ async function main() {
   });
 
   await test('loadSkillsFromDirectory() loads bundled skills', () => {
-    const { loadSkillsFromDirectory } = require('../dist/core/skillRegistry.js');
+    const { loadSkillsFromDirectory } = require('../dist/engine/skills/skillRegistry.js');
     const skills = loadSkillsFromDirectory(nodePath.join(__dirname, '..', 'skills'));
     assert.ok(skills.length >= 6, `expected >=6 bundled skills, got ${skills.length}`);
     assert.ok(skills.some((s) => s.id === 'synthesis'));
@@ -761,7 +761,7 @@ async function main() {
 
   // ── Phase 3 primitives: YAML, AJV validation, atomic graph persistence ──
   await test('parseYaml/stringifyYaml round-trips nested structures', () => {
-    const { parseYaml, stringifyYaml } = require('../dist/context/Yaml.js');
+    const { parseYaml, stringifyYaml } = require('../dist/engine/context/Yaml.js');
     const input = { business_terms: [{ term: 'revenue', description: 'net sales' }], flags: { enabled: true, n: 3 } };
     const parsed = parseYaml(stringifyYaml(input));
     assert.deepStrictEqual(parsed, input);
@@ -769,7 +769,7 @@ async function main() {
   });
 
   await test('ContextValidator validates the envelope schema', () => {
-    const { ContextValidator } = require('../dist/context/ContextValidator.js');
+    const { ContextValidator } = require('../dist/engine/context/ContextValidator.js');
     const schema = require('../docs/schemas/context-envelope.schema.json');
     const validator = new ContextValidator(schema);
     const valid = validator.validateEnvelope({
@@ -1228,7 +1228,7 @@ async function main() {
 
   await test('parseSkillMarkdown() splits YAML frontmatter from the instruction body, leniently', () => {
     const mock = createMock();
-    const { parseSkillMarkdown } = withMock(mock, () => require('../dist/core/toolSkills.js'));
+    const { parseSkillMarkdown } = withMock(mock, () => require('../dist/engine/skills/toolSkills.js'));
     const withFrontmatter = [
       '---',
       'name: PDF Filler',
@@ -1266,7 +1266,7 @@ async function main() {
     fs.mkdirSync(path.join(tmpRoot, 'not-a-skill'), { recursive: true });
 
     const mock = createMock();
-    const { loadToolSkillsFromDirectory } = withMock(mock, () => require('../dist/core/toolSkills.js'));
+    const { loadToolSkillsFromDirectory } = withMock(mock, () => require('../dist/engine/skills/toolSkills.js'));
     const skills = loadToolSkillsFromDirectory(tmpRoot);
     assert.strictEqual(skills.length, 1);
     assert.strictEqual(skills[0].id, 'pdf-filler');
@@ -1279,7 +1279,7 @@ async function main() {
 
   await test('loadToolSkillsFromDirectory() returns an empty list when the directory does not exist', () => {
     const mock = createMock();
-    const { loadToolSkillsFromDirectory } = withMock(mock, () => require('../dist/core/toolSkills.js'));
+    const { loadToolSkillsFromDirectory } = withMock(mock, () => require('../dist/engine/skills/toolSkills.js'));
     assert.deepStrictEqual(loadToolSkillsFromDirectory('/no/such/directory/at/all'), []);
   });
 
@@ -2379,7 +2379,7 @@ async function main() {
   // ── Phase 2: deterministic transform primitives ──
 
   await test('renameCastPrimitive.compile() produces exact, deterministic SQL for a view target', () => {
-    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const { TRANSFORM_PRIMITIVES } = require('../dist/engine/transforms/registry.js');
     const spec = {
       sourceObject: 'RAW_DB.PUBLIC.raw_customers',
       targetObject: 'CURATED_DB.STAGING.stg_customers',
@@ -2396,7 +2396,7 @@ async function main() {
   });
 
   await test('renameCastPrimitive.compile() produces a dbt staging model when objectKind is "dbt_model"', () => {
-    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const { TRANSFORM_PRIMITIVES } = require('../dist/engine/transforms/registry.js');
     const compiled = TRANSFORM_PRIMITIVES.rename_cast.compile({
       sourceObject: 'staging.raw_orders',
       targetObject: 'stg_orders',
@@ -2408,7 +2408,7 @@ async function main() {
   });
 
   await test('dedupPrimitive.compile() uses EXCLUDE on Snowflake and EXCEPT on every other dialect', () => {
-    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const { TRANSFORM_PRIMITIVES } = require('../dist/engine/transforms/registry.js');
     const spec = {
       sourceObject: 'src.customers',
       targetObject: 'tgt.customers_dedup',
@@ -2423,7 +2423,7 @@ async function main() {
   });
 
   await test('incrementalLoadPrimitive.compile() produces a deterministic MERGE keyed on keyColumns', () => {
-    const { TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const { TRANSFORM_PRIMITIVES } = require('../dist/engine/transforms/registry.js');
     const compiled = TRANSFORM_PRIMITIVES.incremental_load.compile({
       sourceObject: 'src.orders_cdc',
       targetObject: 'tgt.orders',
@@ -2437,7 +2437,7 @@ async function main() {
   });
 
   await test('validateTransformSpec() rejects params missing a required field, and an unknown primitive kind', () => {
-    const { validateTransformSpec } = require('../dist/core/transforms/registry.js');
+    const { validateTransformSpec } = require('../dist/engine/transforms/registry.js');
     const missingField = validateTransformSpec({ kind: 'dedup', params: { sourceObject: 's', targetObject: 't', partitionByColumns: ['id'] } });
     assert.strictEqual(missingField.valid, false, 'orderByColumn is required and was omitted');
     const unknownKind = validateTransformSpec({ kind: 'not_a_real_primitive', params: {} });
@@ -2552,7 +2552,7 @@ async function main() {
   }
 
   await test('renderTemplate() supports {{param}}, {{join}}, and {{#each}}, with no code-execution path', () => {
-    const { renderTemplate } = require('../dist/core/transforms/declarative/templateEngine.js');
+    const { renderTemplate } = require('../dist/engine/transforms/declarative/templateEngine.js');
 
     const simple = renderTemplate('SELECT {{col}} FROM {{tbl}}', { col: 'id', tbl: 'orders' });
     assert.strictEqual(simple, 'SELECT id FROM orders');
@@ -2572,7 +2572,7 @@ async function main() {
   });
 
   await test('validatePrimitiveDefinition() rejects a malformed definition with a specific error', () => {
-    const { validatePrimitiveDefinition } = require('../dist/core/transforms/declarative/schema.js');
+    const { validatePrimitiveDefinition } = require('../dist/engine/transforms/declarative/schema.js');
     const missingParamSchema = { kind: 'foo', version: 1, status: 'draft', description: 'x', platformTemplates: { default: 'x' }, previewParams: {} };
     const result = validatePrimitiveDefinition(missingParamSchema);
     assert.strictEqual(result.valid, false);
@@ -2583,7 +2583,7 @@ async function main() {
   });
 
   await test('createDeclarativePrimitive() compiles a Tier-2 definition through the exact same TransformPrimitive interface Tier 1 uses', () => {
-    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const { createDeclarativePrimitive } = require('../dist/engine/transforms/declarative/adapter.js');
     const yaml = require('yaml');
     const definition = yaml.parse(validPrimitiveDefinitionYaml('window_running_total'));
     const primitive = createDeclarativePrimitive(definition);
@@ -2595,7 +2595,7 @@ async function main() {
   });
 
   await test('createDeclarativePrimitive() throws when an outputCheck fails, rather than silently shipping bad output', () => {
-    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const { createDeclarativePrimitive } = require('../dist/engine/transforms/declarative/adapter.js');
     const primitive = createDeclarativePrimitive({
       kind: 'broken', version: 1, status: 'published', description: 'x',
       paramSchema: {}, platformTemplates: { default: 'SELECT 1;' }, previewParams: {},
@@ -2608,7 +2608,7 @@ async function main() {
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
-    const { loadPrimitiveDefinitionsFromDirectory } = require('../dist/core/transforms/declarative/loader.js');
+    const { loadPrimitiveDefinitionsFromDirectory } = require('../dist/engine/transforms/declarative/loader.js');
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primitives-'));
     fs.writeFileSync(path.join(dir, 'window_running_total.yaml'), validPrimitiveDefinitionYaml('window_running_total'));
@@ -2625,7 +2625,7 @@ async function main() {
   });
 
   await test('mergePrimitiveDefinitions() lets a later-loaded override win over a bundled default of the same kind', () => {
-    const { mergePrimitiveDefinitions } = require('../dist/core/transforms/declarative/loader.js');
+    const { mergePrimitiveDefinitions } = require('../dist/engine/transforms/declarative/loader.js');
     const yaml = require('yaml');
     const bundledDedup = yaml.parse(validPrimitiveDefinitionYaml('dedup', 1));
     const overrideDedup = yaml.parse(validPrimitiveDefinitionYaml('dedup', 2));
@@ -2638,8 +2638,8 @@ async function main() {
   });
 
   await test('registerPrimitives()/resetDeclarativePrimitives(): a new kind requires zero TypeScript changes, Tier 1 always wins a name collision, and reset only removes Tier 2', async () => {
-    const registry = require('../dist/core/transforms/registry.js');
-    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const registry = require('../dist/engine/transforms/registry.js');
+    const { createDeclarativePrimitive } = require('../dist/engine/transforms/declarative/adapter.js');
     const yaml = require('yaml');
 
     // Purely declarative — this "primitive" never appears in any .ts file.
@@ -2707,7 +2707,7 @@ async function main() {
   }
 
   await test('PIPELINE_SPEC_SCHEMA rejects an unrecognized key at the top level, entity level, and source/target level', () => {
-    const { validatePipelineSpec } = require('../dist/core/pipelineSpec/validator.js');
+    const { validatePipelineSpec } = require('../dist/engine/pipelineSpec/validator.js');
     const valid = validatePipelineSpec(samplePipelineSpec());
     assert.strictEqual(valid.valid, true, 'a well-formed spec passes');
 
@@ -2724,7 +2724,7 @@ async function main() {
   });
 
   await test('compilePipelineSpec() deterministically compiles every entity with zero LLM calls', () => {
-    const { compilePipelineSpec } = require('../dist/core/pipelineSpec/compiler.js');
+    const { compilePipelineSpec } = require('../dist/engine/pipelineSpec/compiler.js');
     const spec = samplePipelineSpec();
     const compiled = compilePipelineSpec(spec, 'snowflake');
     assert.strictEqual(compiled.length, 3);
@@ -2735,7 +2735,7 @@ async function main() {
   });
 
   await test('generateDesignDoc() is a pure, deterministic function of the spec — byte-identical across repeated calls', () => {
-    const { generateDesignDoc } = require('../dist/core/pipelineSpec/designDocGenerator.js');
+    const { generateDesignDoc } = require('../dist/engine/pipelineSpec/designDocGenerator.js');
     const spec = samplePipelineSpec();
     const first = generateDesignDoc(spec);
     const second = generateDesignDoc(spec);
@@ -2943,7 +2943,7 @@ async function main() {
   // ── Phase 2B-iii: primitive lifecycle management & UI-facing catalog ──
 
   await test('isSelectable(): Tier 1 (no status) and a "published" Tier 2 primitive are selectable; draft/deprecated/retired are not', () => {
-    const { isSelectable, TRANSFORM_PRIMITIVES } = require('../dist/core/transforms/registry.js');
+    const { isSelectable, TRANSFORM_PRIMITIVES } = require('../dist/engine/transforms/registry.js');
     assert.strictEqual(isSelectable(TRANSFORM_PRIMITIVES.dedup), true, 'Tier 1 has no status field and is always selectable');
     assert.strictEqual(isSelectable({ kind: 'x', status: 'published' }), true);
     assert.strictEqual(isSelectable({ kind: 'x', status: 'draft' }), false);
@@ -2952,8 +2952,8 @@ async function main() {
   });
 
   await test('selectTransformSpec() never offers a draft/deprecated Tier-2 primitive to the LLM as a candidate, but compileTransformSpec() still compiles it directly', async () => {
-    const registry = require('../dist/core/transforms/registry.js');
-    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const registry = require('../dist/engine/transforms/registry.js');
+    const { createDeclarativePrimitive } = require('../dist/engine/transforms/declarative/adapter.js');
     const { selectTransformSpec } = require('../dist/agents/llmParamSelector.js');
     const yaml = require('yaml');
 
@@ -2983,7 +2983,7 @@ async function main() {
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
-    const { publishPrimitiveDefinition } = require('../dist/core/transforms/declarative/lifecycle.js');
+    const { publishPrimitiveDefinition } = require('../dist/engine/transforms/declarative/lifecycle.js');
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primlife-'));
     const draftYaml = validPrimitiveDefinitionYaml('window_running_total').replace('status: published', 'status: draft');
@@ -3009,8 +3009,8 @@ async function main() {
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
-    const { deprecatePrimitiveDefinition } = require('../dist/core/transforms/declarative/lifecycle.js');
-    const { loadPrimitiveDefinitionsFromDirectory } = require('../dist/core/transforms/declarative/loader.js');
+    const { deprecatePrimitiveDefinition } = require('../dist/engine/transforms/declarative/lifecycle.js');
+    const { loadPrimitiveDefinitionsFromDirectory } = require('../dist/engine/transforms/declarative/loader.js');
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primlife-'));
     fs.writeFileSync(path.join(dir, 'window_running_total.yaml'), validPrimitiveDefinitionYaml('window_running_total'));
@@ -3028,8 +3028,8 @@ async function main() {
   // ── Phase 2B-iv: governance, validation & versioning ──
 
   await test('compileTransformSpec() with primitiveVersion pins compilation to that archived revision, even after a newer version is live', () => {
-    const registry = require('../dist/core/transforms/registry.js');
-    const { createDeclarativePrimitive } = require('../dist/core/transforms/declarative/adapter.js');
+    const registry = require('../dist/engine/transforms/registry.js');
+    const { createDeclarativePrimitive } = require('../dist/engine/transforms/declarative/adapter.js');
     const yaml = require('yaml');
 
     const v1Def = yaml.parse(validPrimitiveDefinitionYaml('window_running_total_pin', 1));
@@ -3055,7 +3055,7 @@ async function main() {
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
-    const { publishPrimitiveDefinition } = require('../dist/core/transforms/declarative/lifecycle.js');
+    const { publishPrimitiveDefinition } = require('../dist/engine/transforms/declarative/lifecycle.js');
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-primlife-'));
     const draftYaml = validPrimitiveDefinitionYaml('window_running_total').replace('status: published', 'status: draft');
@@ -3124,7 +3124,7 @@ async function main() {
     // Required directly with no vscode mock active at all: Module._load throws
     // 'no mock' on any require('vscode') attempt when `active` is null, so this
     // succeeding at all proves the resolver never touches the vscode module.
-    const { EnvVarCredentialResolver } = fresh('../dist/dqm/credentials/EnvVarCredentialResolver.js');
+    const { EnvVarCredentialResolver } = fresh('../dist/engine/platform/credentials/EnvVarCredentialResolver.js');
     const resolver = new EnvVarCredentialResolver({
       AUTODE_SNOWFLAKE_ACCOUNT: 'acme-prod',
       AUTODE_SNOWFLAKE_USERNAME: 'svc_autode',
@@ -3141,7 +3141,7 @@ async function main() {
   });
 
   await test('EnvVarCredentialResolver returns undefined when none of a platform\'s env vars are set, and supports a named-profile prefix', async () => {
-    const { EnvVarCredentialResolver } = fresh('../dist/dqm/credentials/EnvVarCredentialResolver.js');
+    const { EnvVarCredentialResolver } = fresh('../dist/engine/platform/credentials/EnvVarCredentialResolver.js');
     const empty = new EnvVarCredentialResolver({});
     assert.strictEqual(await empty.resolve({ platform: 'snowflake', principalType: 'service-account', ref: '', resolverId: 'env' }), undefined);
 
@@ -3156,7 +3156,7 @@ async function main() {
   });
 
   await test('registerCredentialResolver() lets a test register a fake vault resolver that participates in resolution untouched by ConnectionManager/adapters', async () => {
-    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/dqm/credentials/registry.js');
+    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/engine/platform/credentials/registry.js');
     const fakeVault = {
       id: 'fake-vault',
       supportedPrincipalTypes: ['service-account'],
@@ -3178,7 +3178,7 @@ async function main() {
 
   await test('providerRegistry authModes partition correctly by principalType for Snowflake and Databricks', () => {
     const mock = createMock();
-    const { getAuthModesForPrincipal } = withMock(mock, () => fresh('../dist/core/providerRegistry.js'));
+    const { getAuthModesForPrincipal } = withMock(mock, () => fresh('../dist/engine/platform/providerRegistry.js'));
     const modeNames = (list) => list.map((m) => m.mode);
 
     // Snowflake: key-pair is usable by both, but is the platform's own recommended
@@ -3194,10 +3194,10 @@ async function main() {
   });
 
   await test('No resolver-resolved secret is ever written to VS Code SecretStorage when the active resolver is cli or env', async () => {
-    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/dqm/credentials/registry.js');
-    const { EnvVarCredentialResolver } = fresh('../dist/dqm/credentials/EnvVarCredentialResolver.js');
-    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
-    const { VsCodeSecretStorageResolver } = withMock(createMock(), () => fresh('../dist/dqm/credentials/VsCodeSecretStorageResolver.js'));
+    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/engine/platform/credentials/registry.js');
+    const { EnvVarCredentialResolver } = fresh('../dist/engine/platform/credentials/EnvVarCredentialResolver.js');
+    const { CliConfigResolver } = fresh('../dist/engine/platform/credentials/CliConfigResolver.js');
+    const { VsCodeSecretStorageResolver } = withMock(createMock(), () => fresh('../dist/core/credentials/VsCodeSecretStorageResolver.js'));
 
     let storeCalls = 0;
     const spySecrets = { store: async () => { storeCalls++; }, get: async () => undefined, delete: async () => {} };
@@ -3230,7 +3230,7 @@ async function main() {
   });
 
   await test('CliConfigResolver reads named connections out of a real connections.toml without ever extracting secret field values', async () => {
-    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
+    const { CliConfigResolver } = fresh('../dist/engine/platform/credentials/CliConfigResolver.js');
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
@@ -3256,7 +3256,7 @@ async function main() {
   });
 
   await test('CliConfigResolver (Phase 3a-ii) confirms a Databricks profile exists in .databrickscfg, returning a pointer that never includes host/token field values', async () => {
-    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
+    const { CliConfigResolver } = fresh('../dist/engine/platform/credentials/CliConfigResolver.js');
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
@@ -3284,7 +3284,7 @@ async function main() {
   });
 
   await test('CliConfigResolver returns undefined (never throws) when no connections.toml exists', async () => {
-    const { CliConfigResolver } = fresh('../dist/dqm/credentials/CliConfigResolver.js');
+    const { CliConfigResolver } = fresh('../dist/engine/platform/credentials/CliConfigResolver.js');
     const os = require('node:os');
     const path = require('node:path');
     const prevHome = process.env.SNOWFLAKE_HOME;
@@ -3300,7 +3300,7 @@ async function main() {
 
   await test('VsCodeSecretStorageResolver reads only a platform\'s secret fields under the generalized key scheme', async () => {
     const mock = createMock();
-    const { VsCodeSecretStorageResolver, secretStorageKey } = withMock(mock, () => fresh('../dist/dqm/credentials/VsCodeSecretStorageResolver.js'));
+    const { VsCodeSecretStorageResolver, secretStorageKey } = withMock(mock, () => fresh('../dist/core/credentials/VsCodeSecretStorageResolver.js'));
     const store = new Map();
     store.set(secretStorageKey('snowflake', 'service-account', 'prod', 'password'), 'shh');
     const secrets = { store: async () => {}, get: async (k) => store.get(k), delete: async () => {} };
@@ -3343,7 +3343,7 @@ async function main() {
 
   await test('detectCliBinary() finds a CLI on PATH and reports its version, mirroring ClaudeCodeAdapter.resolve()\'s shape', async () => {
     const { mock, mockPath } = cliBinaryMock({ versionOut: '1.2.3\n' });
-    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/engine/platform/credentials/cliDetection.js'));
     const result = detectCliBinary({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, installHint: 'Install it.' });
     assert.strictEqual(result.found, true);
     assert.strictEqual(result.source, 'path');
@@ -3353,7 +3353,7 @@ async function main() {
 
   await test('detectCliBinary() reports found:false with actionable guidance text when the CLI is nowhere to be found', async () => {
     const { mock } = cliBinaryMock({ versionOut: null, onPath: false });
-    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/engine/platform/credentials/cliDetection.js'));
     const result = detectCliBinary({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, installHint: 'Install it from the docs.' });
     assert.strictEqual(result.found, false);
     assert.strictEqual(result.source, 'none');
@@ -3363,7 +3363,7 @@ async function main() {
   await test('detectCliBinary() prefers an explicit path setting over PATH, and reports a clear error when that setting is wrong', async () => {
     const explicitPath = process.platform === 'win32' ? 'C:\\custom\\snow.exe' : '/custom/snow';
     const { mock } = cliBinaryMock({ versionOut: '9.9.9', existsPaths: [explicitPath] });
-    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/engine/platform/credentials/cliDetection.js'));
     const found = detectCliBinary({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, explicitPathSetting: explicitPath, installHint: 'x' });
     assert.strictEqual(found.source, 'setting');
     assert.strictEqual(found.cliPath, explicitPath);
@@ -3371,7 +3371,7 @@ async function main() {
     // A separate mock where nothing resolves via `where`/`which` either — otherwise
     // this mock's own `where`/`which` stub would "find" the bad path regardless.
     const { mock: notFoundMock } = cliBinaryMock({ versionOut: null, onPath: false });
-    const { detectCliBinary: detectCliBinary2 } = withMock(notFoundMock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const { detectCliBinary: detectCliBinary2 } = withMock(notFoundMock, () => fresh('../dist/engine/platform/credentials/cliDetection.js'));
     const wrong = withMock(notFoundMock, () => detectCliBinary2({ displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, explicitPathSetting: '/nonexistent/snow', installHint: 'x' }));
     assert.strictEqual(wrong.found, false);
     assert.ok(wrong.error.includes('/nonexistent/snow'));
@@ -3391,7 +3391,7 @@ async function main() {
       }
     };
     mock.__childProcess = { spawnSync: () => ({ status: 0, stdout: '3.27.0\n' }) };
-    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/engine/platform/credentials/cliDetection.js'));
     const result = withMock(mock, () => detectCliBinary({
       displayName: 'Snowflake', binaryNames: { win32: 'snow.exe', default: 'snow' }, explicitPathSetting: folder, installHint: 'x'
     }));
@@ -3405,7 +3405,7 @@ async function main() {
     const wellKnownDir = process.platform === 'win32' ? 'D:\\Program Files\\Snowflake CLI' : '/opt/homebrew/bin';
     const wellKnownPath = require('path').join(wellKnownDir, binName);
     const { mock } = cliBinaryMock({ versionOut: '3.27.0', onPath: false, existsPaths: [wellKnownPath] });
-    const { detectCliBinary } = withMock(mock, () => fresh('../dist/dqm/credentials/cliDetection.js'));
+    const { detectCliBinary } = withMock(mock, () => fresh('../dist/engine/platform/credentials/cliDetection.js'));
 
     const found = detectCliBinary({
       displayName: 'Snowflake',
@@ -3434,7 +3434,7 @@ async function main() {
         return { status: 0, stdout: JSON.stringify([{ connection_name: 'default', is_default: true }, { connection_name: 'prod' }]) };
       }
     };
-    const { SnowflakeCli } = withMock(base, () => fresh('../dist/dqm/credentials/SnowflakeCli.js'));
+    const { SnowflakeCli } = withMock(base, () => fresh('../dist/engine/platform/credentials/SnowflakeCli.js'));
     const cli = new SnowflakeCli();
     const connections = await withMock(base, () => cli.listConnections('/mock/bin/snow'));
     assert.deepStrictEqual(connections, [{ name: 'default' }, { name: 'prod' }]);
@@ -3443,18 +3443,18 @@ async function main() {
   await test('SnowflakeCli.listConnections() degrades to an empty list (never throws) on a non-zero exit or malformed JSON', async () => {
     const base = createMock();
     base.__childProcess = { spawnSync: () => ({ status: 1, stdout: 'not json' }) };
-    const { SnowflakeCli } = withMock(base, () => fresh('../dist/dqm/credentials/SnowflakeCli.js'));
+    const { SnowflakeCli } = withMock(base, () => fresh('../dist/engine/platform/credentials/SnowflakeCli.js'));
     const cli = new SnowflakeCli();
     assert.deepStrictEqual(await withMock(base, () => cli.listConnections('/mock/bin/snow')), []);
 
     const base2 = createMock();
     base2.__childProcess = { spawnSync: () => ({ status: 0, stdout: '{not valid json' }) };
-    const { SnowflakeCli: SnowflakeCli2 } = withMock(base2, () => fresh('../dist/dqm/credentials/SnowflakeCli.js'));
+    const { SnowflakeCli: SnowflakeCli2 } = withMock(base2, () => fresh('../dist/engine/platform/credentials/SnowflakeCli.js'));
     assert.deepStrictEqual(await withMock(base2, () => new SnowflakeCli2().listConnections('/mock/bin/snow')), []);
   });
 
   await test('readDatabricksCfgProfiles() parses .databrickscfg sections without exposing them anywhere but as names, and respects DATABRICKS_CONFIG_FILE', async () => {
-    const { readDatabricksCfgProfiles, databricksConfigPath } = fresh('../dist/dqm/credentials/databricksCfg.js');
+    const { readDatabricksCfgProfiles, databricksConfigPath } = fresh('../dist/engine/platform/credentials/databricksCfg.js');
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
@@ -3478,7 +3478,7 @@ async function main() {
   });
 
   await test('DatabricksCli.listConnections() enumerates .databrickscfg profile names only — no CLI shell-out, so no consent gate applies', async () => {
-    const { DatabricksCli } = fresh('../dist/dqm/credentials/DatabricksCli.js');
+    const { DatabricksCli } = fresh('../dist/engine/platform/credentials/DatabricksCli.js');
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
@@ -3498,7 +3498,7 @@ async function main() {
   });
 
   await test('getCliDescriptor() returns a descriptor for snowflake/databricks and undefined for a platform with no CLI-reuse story yet', () => {
-    const { getCliDescriptor } = fresh('../dist/dqm/credentials/cliRegistry.js');
+    const { getCliDescriptor } = fresh('../dist/engine/platform/credentials/cliRegistry.js');
     assert.strictEqual(getCliDescriptor('snowflake').platform, 'snowflake');
     assert.strictEqual(getCliDescriptor('databricks').platform, 'databricks');
     assert.strictEqual(getCliDescriptor('bigquery'), undefined);
@@ -3511,7 +3511,7 @@ async function main() {
     mock.__childProcess = {
       spawnSync: () => ({ status: 1, stderr: noise + actionable, stdout: '' })
     };
-    const { SnowflakeCliBackend } = withMock(mock, () => fresh('../dist/dqm/executionBackends/SnowflakeCliBackend.js'));
+    const { SnowflakeCliBackend } = withMock(mock, () => fresh('../dist/engine/platform/executionBackends/SnowflakeCliBackend.js'));
     const backend = new SnowflakeCliBackend('/mock/bin/snow', { kind: 'named', connectionName: 'prod' }, () => {});
     await assert.rejects(
       () => withMock(mock, () => backend.executeQuery('SELECT 1')),
@@ -3522,16 +3522,16 @@ async function main() {
   function freshAdapterModule(mock, modulePath) {
     for (const p of [
       modulePath,
-      '../dist/dqm/BaseAdapter.js',
+      '../dist/engine/platform/BaseAdapter.js',
       '../dist/core/extensionIdentity.js',
-      '../dist/dqm/credentials/cliRegistry.js',
-      '../dist/dqm/credentials/SnowflakeCli.js',
-      '../dist/dqm/credentials/DatabricksCli.js',
-      '../dist/dqm/credentials/cliDetection.js',
-      '../dist/dqm/executionBackends/SnowflakeCliBackend.js',
-      '../dist/dqm/executionBackends/SnowflakeRestBackend.js',
-      '../dist/dqm/executionBackends/DatabricksRestBackend.js',
-      '../dist/dqm/adapters/snowflakeJwt.js'
+      '../dist/engine/platform/credentials/cliRegistry.js',
+      '../dist/engine/platform/credentials/SnowflakeCli.js',
+      '../dist/engine/platform/credentials/DatabricksCli.js',
+      '../dist/engine/platform/credentials/cliDetection.js',
+      '../dist/engine/platform/executionBackends/SnowflakeCliBackend.js',
+      '../dist/engine/platform/executionBackends/SnowflakeRestBackend.js',
+      '../dist/engine/platform/executionBackends/DatabricksRestBackend.js',
+      '../dist/engine/platform/adapters/snowflakeJwt.js'
     ]) {
       try { delete require.cache[require.resolve(p)]; } catch { /* not loaded */ }
     }
@@ -3554,8 +3554,8 @@ async function main() {
         return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'PROD_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
       }
     };
-    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
-    const adapter = new SnowflakeAdapter({ connectionName: 'prod' }, () => {});
+    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ connectionName: 'prod' }, () => {}, { cliConsent: true });
     const info = await withMock(consented, () => adapter.connect());
     assert.strictEqual(info.connected, true);
     assert.strictEqual(info.databaseName, 'PROD_DB');
@@ -3563,8 +3563,8 @@ async function main() {
 
     // Without consent, refused before any shell-out is attempted.
     const unconsented = createMock({ config: { dataPlatformCliConsent: false } });
-    const { SnowflakeAdapter: SnowflakeAdapterNoConsent } = freshAdapterModule(unconsented, '../dist/dqm/adapters/SnowflakeAdapter.js');
-    const adapter2 = new SnowflakeAdapterNoConsent({ connectionName: 'prod' }, () => {});
+    const { SnowflakeAdapter: SnowflakeAdapterNoConsent } = freshAdapterModule(unconsented, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const adapter2 = new SnowflakeAdapterNoConsent({ connectionName: 'prod' }, () => {}, { cliConsent: false });
     await assert.rejects(() => withMock(unconsented, () => adapter2.connect()), /CLI-execution consent/);
 
     const bare = new SnowflakeAdapterNoConsent({}, () => {});
@@ -3586,10 +3586,11 @@ async function main() {
         return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'RAW_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
       }
     };
-    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
     const adapter = new SnowflakeAdapter(
       { account: 'ACME', username: 'jdoe', password: 'secret-pw', database: 'RAW_DB', authMode: 'username-password' },
-      () => {}
+      () => {},
+      { cliConsent: true }
     );
     const info = await withMock(consented, () => adapter.connect());
     assert.strictEqual(info.connected, true);
@@ -3597,7 +3598,7 @@ async function main() {
 
     // Same auth mode but no password stored yet: falls through to the REST tier's
     // explicit, actionable rejection rather than a silent/bare failure.
-    const { SnowflakeAdapter: SnowflakeAdapter2 } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const { SnowflakeAdapter: SnowflakeAdapter2 } = freshAdapterModule(consented, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
     const noPassword = new SnowflakeAdapter2(
       { account: 'ACME', username: 'jdoe', database: 'RAW_DB', authMode: 'username-password' },
       () => {}
@@ -3607,7 +3608,7 @@ async function main() {
 
   await test('DatabricksAdapter.connect() (Phase 3b) rejects a CLI-derived profile credential with an explanation, since Databricks has no native-protocol CLI path unlike Snowflake', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const adapter = new DatabricksAdapter({ profile: 'FinanceIQ', authMode: 'databrickscfg' }, () => {});
     await assert.rejects(() => withMock(mock, () => adapter.connect()), /no CLI-based native execution path/);
 
@@ -3680,7 +3681,7 @@ async function main() {
   // ── Phase 3b: Data Platform Connectivity (execution-backend cascade) ──
 
   await test('buildSnowflakeKeyPairJwt() produces a verifiable RS256 JWT with Snowflake\'s documented claim shape, using only node:crypto', () => {
-    const { buildSnowflakeKeyPairJwt } = fresh('../dist/dqm/adapters/snowflakeJwt.js');
+    const { buildSnowflakeKeyPairJwt } = fresh('../dist/engine/platform/adapters/snowflakeJwt.js');
     const crypto = require('node:crypto');
     const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
       modulusLength: 2048,
@@ -3704,7 +3705,7 @@ async function main() {
   });
 
   await test('SnowflakeRestBackend executes a synchronous query, casts FIXED/BOOLEAN types, and prefers a token over key-pair auth', async () => {
-    const { SnowflakeRestBackend } = fresh('../dist/dqm/executionBackends/SnowflakeRestBackend.js');
+    const { SnowflakeRestBackend } = fresh('../dist/engine/platform/executionBackends/SnowflakeRestBackend.js');
     const origFetch = global.fetch;
     let capturedUrl, capturedHeaders;
     global.fetch = async (url, init) => {
@@ -3729,7 +3730,7 @@ async function main() {
   });
 
   await test('SnowflakeRestBackend polls a 202 response to a terminal state instead of assuming success after one check', async () => {
-    const { SnowflakeRestBackend } = fresh('../dist/dqm/executionBackends/SnowflakeRestBackend.js');
+    const { SnowflakeRestBackend } = fresh('../dist/engine/platform/executionBackends/SnowflakeRestBackend.js');
     const origFetch = global.fetch;
     let calls = 0;
     global.fetch = async () => {
@@ -3747,13 +3748,13 @@ async function main() {
   });
 
   await test('SnowflakeRestBackend rejects when no PAT/OAuth token or key-pair key is available', async () => {
-    const { SnowflakeRestBackend } = fresh('../dist/dqm/executionBackends/SnowflakeRestBackend.js');
+    const { SnowflakeRestBackend } = fresh('../dist/engine/platform/executionBackends/SnowflakeRestBackend.js');
     const backend = new SnowflakeRestBackend({ account: 'acme', username: 'u' }, () => {});
     await assert.rejects(() => backend.executeQuery('SELECT 1'), /Programmatic Access Token, OAuth token, or key-pair/);
   });
 
   await test('DatabricksRestBackend derives warehouse_id from the HTTP Path, executes synchronously, and casts numeric types', async () => {
-    const { DatabricksRestBackend } = fresh('../dist/dqm/executionBackends/DatabricksRestBackend.js');
+    const { DatabricksRestBackend } = fresh('../dist/engine/platform/executionBackends/DatabricksRestBackend.js');
     const origFetch = global.fetch;
     let capturedUrl, capturedBody;
     global.fetch = async (url, init) => {
@@ -3779,7 +3780,7 @@ async function main() {
   });
 
   await test('DatabricksRestBackend polls PENDING/RUNNING to a terminal state and surfaces a FAILED statement as a rejection', async () => {
-    const { DatabricksRestBackend } = fresh('../dist/dqm/executionBackends/DatabricksRestBackend.js');
+    const { DatabricksRestBackend } = fresh('../dist/engine/platform/executionBackends/DatabricksRestBackend.js');
     const origFetch = global.fetch;
     let calls = 0;
     global.fetch = async () => {
@@ -3796,7 +3797,7 @@ async function main() {
 
   await test('SnowflakeAdapter.connect() (Phase 3b) routes username/password auth through the CLI, not the REST tier, and requires the same CLI-execution consent a CLI-derived connection does', async () => {
     const mock = createMock();
-    const { SnowflakeAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const { SnowflakeAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
     const adapter = new SnowflakeAdapter({ account: 'acme', username: 'u', database: 'db', authMode: 'username-password', password: 'hunter2' }, () => {});
     // No dataPlatformCliConsent in this mock's config, and no fetch mock either —
     // if this ever silently fell through to REST (which cannot do password auth at
@@ -3806,7 +3807,7 @@ async function main() {
 
   await test('SnowflakeAdapter.connect() (Phase 3b) via the REST backend (tier 3) succeeds end-to-end with a PAT credential', async () => {
     const mock = createMock();
-    const { SnowflakeAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/SnowflakeAdapter.js');
+    const { SnowflakeAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
     const origFetch = global.fetch;
     global.fetch = async () => ({
       status: 200,
@@ -3826,7 +3827,7 @@ async function main() {
 
   await test('DatabricksAdapter.connect() (Phase 3b) succeeds end-to-end via REST given a workspace host, HTTP path, and token', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const origFetch = global.fetch;
     global.fetch = async () => ({
       status: 200,
@@ -3847,7 +3848,7 @@ async function main() {
 
   await test('ConnectionManager.getSupportedPlatforms() reads providerRegistry.ts, intersected with actually-registered adapter factories', () => {
     const mock = createMock();
-    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/engine/platform/ConnectionManager.js'));
     const manager = new ConnectionManager(() => {});
     const platforms = manager.getSupportedPlatforms();
     assert.ok(platforms.includes('snowflake'));
@@ -3857,7 +3858,7 @@ async function main() {
 
   await test('ConnectionManager.getCredentialsFromSettings() reads the real Databricks settings (a pre-existing gap: it used to reference a settings key that never existed)', () => {
     const mock = createMock();
-    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/engine/platform/ConnectionManager.js'));
     const creds = ConnectionManager.getCredentialsFromSettings('databricks', {
       defaultDatabricksWorkspaceUrl: 'acme.azuredatabricks.net',
       defaultDatabricksHttpPath: '/sql/1.0/warehouses/abc123',
@@ -3872,7 +3873,7 @@ async function main() {
 
   await test('ConnectionManager.getCredentialsFromSettings() passes snowflakeCliPath through (a real gap: it was silently dropped, so a configured explicit path never reached SnowflakeAdapter from the settings-panel flow)', () => {
     const mock = createMock();
-    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/engine/platform/ConnectionManager.js'));
     const creds = ConnectionManager.getCredentialsFromSettings('snowflake', {
       defaultSnowflakeAccount: 'ACME', defaultSnowflakeUsername: 'jdoe', snowflakeCliPath: 'D:/Program Files/Snowflake CLI/snow.exe'
     });
@@ -3884,7 +3885,7 @@ async function main() {
 
   await test('ConnectionManager.getCredentialsFromSettings() reads the parallel defaultTarget* settings when role="target" (v0.19.0), and both roles can hold different values simultaneously', () => {
     const mock = createMock();
-    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/engine/platform/ConnectionManager.js'));
     const settings = {
       defaultSnowflakeAccount: 'SOURCE_ACC', defaultSnowflakeUsername: 'source_user', snowflakeCliPath: '/src/snow',
       defaultTargetSnowflakeAccount: 'TARGET_ACC', defaultTargetSnowflakeUsername: 'target_user', targetSnowflakeCliPath: '/tgt/snow',
@@ -3907,7 +3908,7 @@ async function main() {
 
   await test('DatabricksAdapter.getMetadataQueries() branches on catalog: Unity-Catalog-style catalogs get information_schema, hive_metastore gets SHOW TABLES plus deliberately empty (never mis-mapped) column/FK/view queries', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const origFetch = global.fetch;
     global.fetch = async () => ({ status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG', type_name: 'STRING' }, { name: 'CURRENT_SCHEMA', type_name: 'STRING' }] } }, result: { data_array: [['hive_metastore', 'default']] } }) });
     try {
@@ -3922,7 +3923,7 @@ async function main() {
 
   await test('BaseDataSourceAdapter.assembleTables() (via extractMetadata) recognizes Databricks\' native SHOW TABLES column names (database/tableName) as a fallback, and degrades non-fatally instead of aborting when table/column listing fails', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const origFetch = global.fetch;
     let call = 0;
     global.fetch = async () => {
@@ -3950,7 +3951,7 @@ async function main() {
 
   await test('BaseDataSourceAdapter.extractMetadata()/snapshotToGraph() tag connectionId (not just platform) on the snapshot and every resulting graph node\'s Origin, so multiple connections of the same platform stay distinguishable', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const origFetch = global.fetch;
     let call = 0;
     global.fetch = async () => {
@@ -3983,7 +3984,7 @@ async function main() {
 
   await test('BaseDataSourceAdapter.extractMetadata() degrades non-fatally (never aborts the whole extraction) when table or column listing itself fails, not just FK/view/lineage', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const origFetch = global.fetch;
     let call = 0;
     global.fetch = async () => {
@@ -4005,7 +4006,7 @@ async function main() {
 
   await test('DatabricksAdapter\'s catalog-type detection is explicit-first: defaultDatabricksCatalogType overrides the hive_metastore-name heuristic in both directions, not just the auto-detected default', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const origFetch = global.fetch;
     let requestBody;
     global.fetch = async (url, init) => {
@@ -4031,7 +4032,7 @@ async function main() {
 
   await test('DatabricksAdapter.listDatabases()/listSchemas() run SHOW CATALOGS / SHOW SCHEMAS IN <catalog> and parse Databricks\' real column names (Step 4 — discovery-based selection, not blind typing)', async () => {
     const mock = createMock();
-    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/dqm/adapters/DatabricksAdapter.js');
+    const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const origFetch = global.fetch;
     let lastSql = '';
     global.fetch = async (url, init) => {
@@ -4076,8 +4077,8 @@ async function main() {
         return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'RAW_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
       }
     };
-    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/dqm/adapters/SnowflakeAdapter.js');
-    const adapter = new SnowflakeAdapter({ connectionName: 'prod' }, () => {});
+    const { SnowflakeAdapter } = freshAdapterModule(consented, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ connectionName: 'prod' }, () => {}, { cliConsent: true });
     await withMock(consented, () => adapter.connect());
     const databases = await withMock(consented, () => adapter.listDatabases());
     assert.deepStrictEqual(databases, ['RAW_DB', 'ANALYTICS_DB']);
@@ -4087,7 +4088,7 @@ async function main() {
   });
 
   await test('detectFileFormat() maps extensions to the 3 supported structural formats and rejects anything else (Step 5 — file-based ingestion)', () => {
-    const { detectFileFormat } = fresh('../dist/context/fileIngestion.js');
+    const { detectFileFormat } = fresh('../dist/engine/context/fileIngestion.js');
     assert.strictEqual(detectFileFormat('/x/orders.csv'), 'csv');
     assert.strictEqual(detectFileFormat('/x/orders.json'), 'json');
     assert.strictEqual(detectFileFormat('/x/schema.sql'), 'ddl');
@@ -4097,7 +4098,7 @@ async function main() {
   });
 
   await test('parseCsv() infers real column types from actual sample values (not an LLM guess) and tags every node with file provenance + confidence 1.0', () => {
-    const { parseCsv } = fresh('../dist/context/fileIngestion.js');
+    const { parseCsv } = fresh('../dist/engine/context/fileIngestion.js');
     const csv = [
       'id,name,price,is_active,signup_date',
       '1,Alice,19.99,true,2024-01-15',
@@ -4125,7 +4126,7 @@ async function main() {
   });
 
   await test('parseCsv() handles quoted fields with embedded commas (and escaped quotes) correctly, not naively splitting on every comma', () => {
-    const { parseCsv } = fresh('../dist/context/fileIngestion.js');
+    const { parseCsv } = fresh('../dist/engine/context/fileIngestion.js');
     const csv = [
       'id,description',
       '1,"Widget, Deluxe Edition"',
@@ -4138,7 +4139,7 @@ async function main() {
   });
 
   await test('parseJson() unions keys across records (a missing key means nullable, not "the field doesn\'t exist") and infers types from real values', () => {
-    const { parseJson } = fresh('../dist/context/fileIngestion.js');
+    const { parseJson } = fresh('../dist/engine/context/fileIngestion.js');
     const json = JSON.stringify([
       { id: 1, name: 'Alice', tags: ['a', 'b'] },
       { id: 2, name: 'Bob' } // no `tags` — should make `tags` nullable, not absent
@@ -4156,7 +4157,7 @@ async function main() {
   });
 
   await test('parseJson() degrades to a clear warning (never throws) on invalid JSON or a non-object-array shape', () => {
-    const { parseJson } = fresh('../dist/context/fileIngestion.js');
+    const { parseJson } = fresh('../dist/engine/context/fileIngestion.js');
     const badSyntax = parseJson('{not valid json', '/data/broken.json');
     assert.strictEqual(badSyntax.tableCount, 0);
     assert.ok(badSyntax.warnings[0].includes('Not valid JSON'));
@@ -4166,7 +4167,7 @@ async function main() {
   });
 
   await test('parseDdl() extracts columns from CREATE TABLE, honors NOT NULL/PRIMARY KEY, handles a DECIMAL(10,2)-style type without splitting on its internal comma, and skips constraint-only lines', () => {
-    const { parseDdl } = fresh('../dist/context/fileIngestion.js');
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
     const ddl = `
       CREATE TABLE orders (
         order_id INT NOT NULL PRIMARY KEY,
@@ -4195,7 +4196,7 @@ async function main() {
   });
 
   await test('parseDdl() reports a warning (never throws) when no CREATE TABLE statements are found', () => {
-    const { parseDdl } = fresh('../dist/context/fileIngestion.js');
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
     const result = parseDdl('SELECT * FROM orders;', '/data/query.sql');
     assert.strictEqual(result.tableCount, 0);
     assert.ok(result.warnings.some((w) => w.includes('No CREATE TABLE')));
@@ -4203,7 +4204,7 @@ async function main() {
 
   await test('ConnectionManager.getCredentialsFromSettings() passes defaultDatabricksCatalogType through as a credential field, defaulting to "auto"', () => {
     const mock = createMock();
-    const { ConnectionManager } = withMock(mock, () => fresh('../dist/dqm/ConnectionManager.js'));
+    const { ConnectionManager } = withMock(mock, () => fresh('../dist/engine/platform/ConnectionManager.js'));
     const creds = ConnectionManager.getCredentialsFromSettings('databricks', { defaultDatabricksWorkspaceUrl: 'x', defaultDatabricksHttpPath: 'y' });
     assert.strictEqual(creds.catalogType, 'auto');
     const creds2 = ConnectionManager.getCredentialsFromSettings('databricks', { defaultDatabricksCatalogType: 'hive_metastore' });
@@ -4337,7 +4338,7 @@ async function main() {
   // ── Step 7: Governance layer (provenance/reliability, staleness, re-verify) ──
 
   await test('parseCsv()/parseDdl() tag every node reliability: "best-effort-inferred" (Step 7) — a structural file parse is a real fact about the file, but has never been checked against the live source', () => {
-    const { parseCsv, parseDdl } = fresh('../dist/context/fileIngestion.js');
+    const { parseCsv, parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
     const csvResult = parseCsv('id,name\n1,alice\n', '/data/users.csv');
     assert.ok(csvResult.nodes.length > 0);
     assert.ok(csvResult.nodes.every((n) => n.origin.reliability === 'best-effort-inferred'));
@@ -4390,7 +4391,7 @@ async function main() {
     return { mock, store };
   }
   function loadFresh(mock, rel) {
-    delete require.cache[require.resolve('../dist/context/RevisionedFile.js')];
+    delete require.cache[require.resolve('../dist/engine/context/contextStore.js')];
     delete require.cache[require.resolve(rel)];
     return withMock(mock, () => require(rel));
   }
@@ -4426,7 +4427,7 @@ async function main() {
   await test('v0.25.0: saving a stale copy after an external edit is refused — disk unchanged, memory unchanged, conflict handler notified', async () => {
     const { mock, store } = revisionFsMock();
     const { SpecManager } = loadFresh(mock, '../dist/context/SpecManager.js');
-    const { setRevisionConflictHandler, RevisionConflictError } = withMock(mock, () => require('../dist/context/RevisionedFile.js'));
+    const { setRevisionConflictHandler, RevisionConflictError } = withMock(mock, () => require('../dist/engine/context/contextStore.js'));
     const conflicts = [];
     setRevisionConflictHandler((c) => conflicts.push(c));
     try {
@@ -4454,7 +4455,7 @@ async function main() {
   await test('v0.25.0: an unparseable external edit keeps the loaded copy, and the next save asks instead of clobbering it', async () => {
     const { mock, store } = revisionFsMock();
     const { PipelineSpecManager } = loadFresh(mock, '../dist/context/PipelineSpecManager.js');
-    const { RevisionConflictError } = withMock(mock, () => require('../dist/context/RevisionedFile.js'));
+    const { RevisionConflictError } = withMock(mock, () => require('../dist/engine/context/contextStore.js'));
     const file = '/ws/p1/spec/pipeline.yaml';
     store.set(file, '# AutoDE Pipeline Spec\nspecVersion: 0\nversion: 1\nstatus: draft\n');
     const mgr = new PipelineSpecManager({ fsPath: '/ws/p1' }, () => {});
@@ -4477,7 +4478,7 @@ async function main() {
     for (const [rel, cls, fileName, record] of cases) {
       const { mock, store } = revisionFsMock();
       const Ctor = loadFresh(mock, rel)[cls];
-      const { RevisionConflictError } = withMock(mock, () => require('../dist/context/RevisionedFile.js'));
+      const { RevisionConflictError } = withMock(mock, () => require('../dist/engine/context/contextStore.js'));
       const mgr = cls === 'SemanticLayerManager' ? new Ctor({ fsPath: '/ws/p1' }, { serializeSnapshot: () => ({ nodes: [], edges: [] }) }, () => {}) : new Ctor({ fsPath: '/ws/p1' }, () => {});
       await withMock(mock, () => mgr.initialize());
       await withMock(mock, () => mgr.save(record));
@@ -4525,6 +4526,69 @@ async function main() {
     hub.pauseForExternalChange('spec changed');
     assert.strictEqual(hub.executionPaused, true);
     assert.ok(logs.some((m) => m.includes('spec changed') && m.includes('after the current step')));
+  });
+
+  // ── v0.26.0: engine boundary (docs/mcp-engine-requirements.md §4) ──
+  await test('v0.26.0: every dist/engine module loads in plain Node with no vscode module available', () => {
+    const nodeFs = require('node:fs');
+    const nodePath = require('node:path');
+    const engineDir = nodePath.join(__dirname, '..', 'dist', 'engine');
+    const files = [];
+    const walk = (dir) => {
+      for (const e of nodeFs.readdirSync(dir, { withFileTypes: true })) {
+        const full = nodePath.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.js')) files.push(full);
+      }
+    };
+    walk(engineDir);
+    assert.ok(files.length >= 40, `expected the engine layer to be populated, found ${files.length} modules`);
+    for (const f of files) delete require.cache[f];
+    // With no active mock, the loader at the top of this file throws on require('vscode') —
+    // so any engine module (or anything it transitively imports) touching VS Code fails here.
+    const prev = active; active = null;
+    try {
+      for (const f of files) {
+        assert.doesNotThrow(() => require(f), `${nodePath.relative(engineDir, f)} must not depend on vscode`);
+      }
+    } finally {
+      active = prev;
+      for (const f of files) delete require.cache[f];
+    }
+  });
+
+  await test('v0.26.0: ContextStore over real Node fs — atomic write, revision check, conflict, overwrite', async () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    delete require.cache[require.resolve('../dist/engine/context/contextStore.js')];
+    const { ContextStore, RevisionedFile, RevisionConflictError, computeRevision } = require('../dist/engine/context/contextStore.js');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-store-'));
+    try {
+      const file = nodePath.join(dir, 'spec', 'business-problem.yaml');
+      const store = new ContextStore();
+      assert.deepStrictEqual(await store.read(file), {}, 'absent file reads as no content, no revision');
+      const rev1 = await store.write(file, 'a: 1\n', undefined);
+      assert.strictEqual(rev1, computeRevision('a: 1\n'));
+      assert.strictEqual(nodeFs.readFileSync(file, 'utf8'), 'a: 1\n');
+      assert.deepStrictEqual(nodeFs.readdirSync(nodePath.dirname(file)), ['business-problem.yaml'], 'no temp file left behind');
+      await assert.rejects(store.write(file, 'a: 2\n', undefined), (e) => e instanceof RevisionConflictError, 'expected-absent but present → conflict');
+
+      const owned = new RevisionedFile(store, file, 'Spec');
+      assert.strictEqual(await owned.read(), 'a: 1\n');
+      nodeFs.writeFileSync(file, 'a: external\n');
+      let conflict;
+      await assert.rejects(owned.write('a: stale\n'), (e) => { conflict = e; return e instanceof RevisionConflictError; });
+      assert.strictEqual(nodeFs.readFileSync(file, 'utf8'), 'a: external\n');
+      await conflict.overwrite();
+      assert.strictEqual(nodeFs.readFileSync(file, 'utf8'), 'a: stale\n');
+      const reloaded = await owned.reload((c) => c);
+      assert.deepStrictEqual(reloaded, { status: 'updated', value: 'a: stale\n' });
+      await owned.write('a: 3\n');
+      assert.deepStrictEqual(await owned.reload((c) => c), { status: 'unchanged' });
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   const failed = results.filter(r => !r.ok);

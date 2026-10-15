@@ -2,9 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { GraphManager } from './GraphManager';
-import { parseYaml } from './Yaml';
+import { parseYaml } from '../engine/context/Yaml';
 import { readGraphSnapshot, writeGraphSnapshot } from './GraphPersistence';
-import { ContextValidator } from './ContextValidator';
+import { ContextValidator } from '../engine/context/ContextValidator';
 import {
   BaseNode,
   BusinessTermNode,
@@ -12,7 +12,7 @@ import {
   VerifiedQueryNode,
   GraphEdge,
   NodeType
-} from './types';
+} from '../engine/context/types';
 
 interface BusinessContextEntry {
   term: string;
@@ -408,7 +408,7 @@ export class ContextFileManager implements vscode.Disposable {
 
     const tables = this.graphManager.getNodesByType('table');
     for (const t of tables) {
-      const tableNode = t as import('./types').TableNode;
+      const tableNode = t as import('../engine/context/types').TableNode;
       entities.push({
         icon: '📦',
         label: tableNode.label,
@@ -439,7 +439,7 @@ export class ContextFileManager implements vscode.Disposable {
 
     const rules = this.graphManager.getNodesByType('business_rule');
     for (const r of rules) {
-      const ruleNode = r as import('./types').BusinessRuleNode;
+      const ruleNode = r as import('../engine/context/types').BusinessRuleNode;
       entities.push({
         icon: '📏',
         label: r.label,
@@ -505,7 +505,7 @@ export class ContextFileManager implements vscode.Disposable {
     parts.push('## Enterprise Context Layer');
 
     // Business Rules (STRICT first)
-    const rules = this.graphManager.getNodesByType('business_rule') as import('./types').BusinessRuleNode[];
+    const rules = this.graphManager.getNodesByType('business_rule') as import('../engine/context/types').BusinessRuleNode[];
     const strictRules = rules.filter((r) => r.enforcementLevel === 'STRICT');
     if (strictRules.length > 0) {
       parts.push('### Business Rules (STRICT)');
@@ -515,7 +515,7 @@ export class ContextFileManager implements vscode.Disposable {
     }
 
     // Tables
-    const tables = this.graphManager.getNodesByType('table') as import('./types').TableNode[];
+    const tables = this.graphManager.getNodesByType('table') as import('../engine/context/types').TableNode[];
     if (tables.length > 0) {
       parts.push('### Database Tables');
       for (const t of tables.slice(0, 20)) {
@@ -531,7 +531,7 @@ export class ContextFileManager implements vscode.Disposable {
     }
 
     // Business Terms
-    const terms = this.graphManager.getNodesByType('business_term') as import('./types').BusinessTermNode[];
+    const terms = this.graphManager.getNodesByType('business_term') as import('../engine/context/types').BusinessTermNode[];
     if (terms.length > 0) {
       parts.push('### Business Terms');
       for (const t of terms) {
@@ -541,7 +541,7 @@ export class ContextFileManager implements vscode.Disposable {
     }
 
     // Verified Queries
-    const queries = this.graphManager.getNodesByType('verified_query') as import('./types').VerifiedQueryNode[];
+    const queries = this.graphManager.getNodesByType('verified_query') as import('../engine/context/types').VerifiedQueryNode[];
     if (queries.length > 0) {
       parts.push('### Verified SQL Queries');
       for (const q of queries.slice(0, 5)) {

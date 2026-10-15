@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { exec as execCb } from 'node:child_process';
-import { ToolCallAuditEntry } from './types';
+import { ToolCallAuditEntry } from '../engine/types';
 
 /**
  * Provider-agnostic tool layer shared by every LLM adapter's tool-calling loop

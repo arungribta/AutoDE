@@ -1,4 +1,4 @@
-import { BusinessProblemSpec, DataFlow, IntakeSession, SourceEntry, SpecProvenance } from './types';
+import { BusinessProblemSpec, DataFlow, IntakeSession, SourceEntry, SpecProvenance } from '../engine/types';
 
 /**
  * Parses and validates the LLM's comprehensive Business Problem Specification

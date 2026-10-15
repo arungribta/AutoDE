@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { MappingContext, EntityMapping, ColumnMapping, ContextStatus } from '../core/types';
-import { parseYaml, stringifyYaml } from './Yaml';
-import { RevisionedFile, applyReload } from './RevisionedFile';
+import { MappingContext, EntityMapping, ColumnMapping, ContextStatus } from '../engine/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
+import { createVscodeFileIo } from './vscodeFileIo';
 
 /**
  * Manages the Mapping Context — Step 6 of the Source & Target Context
@@ -24,8 +25,8 @@ export class MappingContextManager implements vscode.Disposable {
     private readonly log: (msg: string) => void
   ) {
     this.contextDir = vscode.Uri.joinPath(contextRoot, 'context');
-    this.file = new RevisionedFile(vscode, this.contextDir, 'mapping-context.yaml', 'Mapping Context');
-    this.fileUri = this.file.getUri();
+    this.fileUri = vscode.Uri.joinPath(this.contextDir, 'mapping-context.yaml');
+    this.file = new RevisionedFile(new ContextStore(createVscodeFileIo(vscode)), this.fileUri.fsPath, 'Mapping Context');
   }
 
   public dispose(): void {}

@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { BusinessProblemSpec, DataFlow, SourceEntry, SpecProvenance, SpecStatus } from '../core/types';
-import { parseYaml, stringifyYaml } from './Yaml';
-import { RevisionedFile, applyReload } from './RevisionedFile';
+import { BusinessProblemSpec, DataFlow, SourceEntry, SpecProvenance, SpecStatus } from '../engine/types';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
+import { createVscodeFileIo } from './vscodeFileIo';
 
 /**
  * Manages the Business Problem Specification — the versioned system of record.
@@ -22,8 +23,8 @@ export class SpecManager implements vscode.Disposable {
     private readonly log: (msg: string) => void
   ) {
     this.specDir = vscode.Uri.joinPath(contextRoot, 'spec');
-    this.file = new RevisionedFile(vscode, this.specDir, 'business-problem.yaml', 'Business Problem Specification');
-    this.specUri = this.file.getUri();
+    this.specUri = vscode.Uri.joinPath(this.specDir, 'business-problem.yaml');
+    this.file = new RevisionedFile(new ContextStore(createVscodeFileIo(vscode)), this.specUri.fsPath, 'Business Problem Specification');
   }
 
   public dispose(): void {}

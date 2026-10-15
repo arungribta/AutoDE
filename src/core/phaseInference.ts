@@ -1,4 +1,4 @@
-import { BusinessProblemSpec, ImplementationType, InferredPhase, PlanStep, SessionStatus, WorkflowPhase } from './types';
+import { BusinessProblemSpec, ImplementationType, InferredPhase, PlanStep, SessionStatus, WorkflowPhase } from '../engine/types';
 
 /**
  * Spec-driven phase inference + orchestration.

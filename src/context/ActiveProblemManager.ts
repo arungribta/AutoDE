@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ActiveProblemPointer, BusinessProblemSummary, SpecStatus } from '../core/types';
-import { parseYaml } from './Yaml';
+import { ActiveProblemPointer, BusinessProblemSummary, SpecStatus } from '../engine/types';
+import { parseYaml } from '../engine/context/Yaml';
 
 /**
  * Tracks which business problem is active (`.ai-context/active-problem.json`)
