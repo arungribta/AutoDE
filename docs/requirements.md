@@ -1,5 +1,7 @@
 # AutoDE — Requirements Specification
 
+> **Role (2026-10-15):** this document states WHAT AutoDE must do and WHY, and is authoritative for shipped behaviour. HOW it is built is in [technical-design.md](technical-design.md); planned work is specified in [mcp-engine-requirements.md](mcp-engine-requirements.md) and [context-layer-requirements.md](context-layer-requirements.md); order and status are in [roadmap.md](roadmap.md); see [README.md](README.md). A rewrite into that shape is in progress: until it lands, sections listed under "Requirements revisited" in the roadmap are known to be outdated or to contain HOW detail.
+
 This document is the authoritative reference for AutoDE's design, implementation, QA, and acceptance criteria. It covers: UI/UX, the Enterprise Context Layer (information architecture), the single-workspace artifact model, and local language model integration (GitHub Copilot via `vscode.lm`, and Claude Code via its CLI).
 
 Last updated: 2026-09-17
@@ -636,6 +638,8 @@ Only `copilot` and `claude` support running a tool skill at all (the five API-ke
 
 ## 11. Implementation Plan & Phasing
 
+> **Historical (to v0.24.0).** Kept for the record; the current plan is [roadmap.md](roadmap.md).
+
 Phase 0 — Single-workspace model & artifacts
 - ✅ Remove `ProjectManager`/`ProjectRegistry`; fold state into `.ai-context/state.json`.
 - ✅ Add `autoDE.artifactDirectory` setting (default `.ai-context/artifacts`).
@@ -748,6 +752,8 @@ Phase 9 — Deterministic Execution Core & Declarative Specification Framework (
 
 ## 15. Acceptance & Review Checklist
 
+> **Historical (to v0.14.0).** Open items from this checklist are triaged in [roadmap.md](roadmap.md) ("Not yet scheduled").
+
 - [ ] UI: context section surfaces Enterprise Context Layer (layers, terms, rules, queries, relationships); source-file registration form present.
 - [x] Webview: LLM settings show provider status (Copilot models / Claude Code CLI path+version) and consent checkbox; Test + Detect buttons present.
 - [x] Envelope: unified metadata envelope (identity + provenance + version + ownership) implemented in `src/context/types.ts` (per-kind `content` union deferred).
@@ -770,6 +776,8 @@ Phase 9 — Deterministic Execution Core & Declarative Specification Framework (
 ---
 
 ## 16. Pending Tasks Backlog
+
+> **Superseded (2026-10-15).** Every item below was triaged into [roadmap.md](roadmap.md): done (with the version), superseded by a phase, rejected, or still open and listed under "Not yet scheduled". This section is kept until the requirements rewrite; do not add to it.
 
 > **Last updated:** 2026-09-17 (v0.14.0). Phases 0–3 of the implementation plan (§11) are complete, plus the Phase 7 architecture-review follow-through (A–D), Phase 8 usability follow-through (E–F, §8a/§2), and Phase 9 (deterministic execution core + declarative specification framework, §17).
 > This section captures **all remaining work** with enough context (file pointers, current state,

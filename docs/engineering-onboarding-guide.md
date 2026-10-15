@@ -1,5 +1,7 @@
 # AutoDE — Engineering Mental Model & Onboarding Guide
 
+> **Out of date (2026-10-15):** this guide describes AutoDE as of v0.13.0. For what changed since, read [CHANGELOG.md](../CHANGELOG.md) from 0.14.0 up, and [technical-design.md](technical-design.md). A refresh is scheduled in [roadmap.md](roadmap.md).
+
 > **Audience:** A newly hired AI/Data Engineer joining the AutoDE team.
 > **Goal:** Give you enough of a mental model to navigate, debug, extend, and operate AutoDE without tribal knowledge.
 > **Status of this doc:** Updated 2026-09-16 against the codebase through `docs/requirements.md` §8.12 / `docs/technical-design.md` v0.13.0 (lifecycle orchestration + multi-business-problem workspace). Previously reverse-engineered at commit `9a6b672` (v0.8.0) and left unrevised through v0.9.0–v0.12.0 — this pass corrects the accumulated drift; anything the reviser was not fully certain about is marked **⚠ FLAG FOR REVIEW** inline rather than silently asserted. Where the code and the docs disagree, this guide follows the **code** and calls out the difference.

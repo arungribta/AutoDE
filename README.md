@@ -84,42 +84,23 @@ Commands (run from repository root):
 
 ---
 
-## Context Layer Engine (implemented)
+## Context layer
 
-A Context Layer Engine has been added under `src/context/`. **Note:** it is currently in-memory only — the vector/embedding engine, ContextRetriever, and worker-thread offloading are not yet implemented. The target information architecture (layered context, unified metadata envelope, provenance, versioning) is specified in `docs/requirements.md` §3–§5, with the envelope JSON Schema at `docs/schemas/context-envelope.schema.json`.
-
-- `src/context/types.ts` — strict TypeScript type definitions for nodes, edges, retrieval options, and diagnostics.
-- `src/context/GraphManager.ts` — a thread-safe in-memory graph manager that provides:
-  - fast lookup indexes for FQN, labels, and node types
-  - neighborhood traversal with decay-based relevance scoring (seeded BFS)
-  - snapshot serialization for worker transfer
-  - disposable lifecycle (implements `vscode.Disposable` semantics)
-
-The Context Layer is designed to be used with worker-thread-based engines (vectorization, hybrid retrieval) and to persist state atomically into the workspace `.ai-context/` directory.
+AutoDE keeps what it knows about a business problem and its data in `.ai-context/`. Every fact is an assertion in an append-only ledger with provenance, trust and status; the context graph is projected from it. Each LLM call receives a task-scoped context pack, every generated artifact carries a grounding manifest, and `npm run eval` measures how grounded the output is on a reference problem. Current behaviour and status: see the documentation below; release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Architecture Diagram
 
-A draw.io diagram depicting the Context Layer architecture and integration with the extension host and webview is available at `media/architecture.drawio`.
+A draw.io diagram depicting the Context Layer architecture and integration with the extension host and webview is available at `media/architecture.drawio` (drawn before v0.25.0; it predates the engine boundary and the ledger).
 
-## Changes since last update
+## Documentation
 
-- Synced docs and phase tracking to v0.5.0 (Phases 0–5 committed).
-- Added webview CSP nonce injection (`src/core/webviewSecurity.ts`) for the sidebar, panel, and custom editors.
-- Documented accurate implementation status (see caveats below).
+Start at [docs/README.md](docs/README.md), which says which document answers what:
 
-## Implementation status caveats
-
-- `SnowflakeAdapter`/`DatabricksAdapter` `connect()` and `executeQuery()` are **stubs** — no real connection/query execution (empty results); metadata extraction is non-functional end-to-end.
-- `GraphManager` is in-memory only; `isWorkerReady` is hardcoded and the ContextRetriever / vector engine / worker threads / `js-tiktoken` / `ajv` are not implemented.
-- `deactivate()` is empty (no watcher/dispose/cleanup).
-
-## Next steps (planned)
-
-- Implement real Snowflake/Databricks adapter execution (wire `snowflake-sdk` into the adapter layer).
-- Implement ContextRetriever + vector/worker engine (token-aware retrieval, embedding).
-- Replace hand-rolled YAML parsers with a real parser + AJV validation.
-- Implement `deactivate()` cleanup.
-- Add unit/integration tests for the context layer, adapters, and agents.
+- [docs/requirements.md](docs/requirements.md) — what AutoDE does and why (shipped behaviour)
+- [docs/mcp-engine-requirements.md](docs/mcp-engine-requirements.md), [docs/context-layer-requirements.md](docs/context-layer-requirements.md) — specifications for planned work
+- [docs/roadmap.md](docs/roadmap.md) — phase order, status, backlog and decisions
+- [docs/technical-design.md](docs/technical-design.md) — how it is built
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each version
 
 ---
 

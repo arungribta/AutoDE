@@ -1,0 +1,29 @@
+# AutoDE documentation map
+
+Each document answers one kind of question. When two disagree, the precedence rule below decides.
+
+| Question | Document | Notes |
+|---|---|---|
+| **What** must AutoDE do, and **why**? (shipped behaviour) | [requirements.md](requirements.md) | Authoritative for shipped behaviour. Being rewritten into WHAT/WHY-only form; until then, the sections listed in [roadmap.md §3](roadmap.md) are known to be outdated or to contain HOW detail. |
+| What and why, for **planned** work | [mcp-engine-requirements.md](mcp-engine-requirements.md) — MCP server, engine boundary, skills, platform access, governance · [context-layer-requirements.md](context-layer-requirements.md) — ledger, context packs, grounding, estate catalogs, business-problem documents, semantic model | Phase specifications: WHAT/WHY plus the implementation contract for phases not yet built. A migration-track spec (M1–M3) will join them. |
+| **When**, and is it done? | [roadmap.md](roadmap.md) | The only place for phase order and status, the unscheduled backlog, and the decision log. |
+| **How** is it built? | [technical-design.md](technical-design.md) | Architecture, modules, data formats, algorithms, trade-offs. |
+| What **changed** in each version? | [CHANGELOG.md](../CHANGELOG.md) | Newest first, including deliberate deviations from the specs. |
+| How do I get oriented as a new engineer? | [engineering-onboarding-guide.md](engineering-onboarding-guide.md) | Describes v0.13.0; refresh scheduled. |
+| How do I verify a release by hand? | [manual-verification.md](manual-verification.md) | Checklist for v0.25.0–v0.30.0. |
+| Data formats | [schemas/](schemas/) | JSON Schemas for context envelopes and primitive definitions. |
+| How is AutoDE measured? | [../test/reference/retail-orders/README.md](../test/reference/retail-orders/README.md) | Reference problem and `npm run eval`; frozen reports in `baselines/`. |
+
+## Precedence when documents disagree
+
+1. **Behaviour that has shipped:** the code, then the latest [CHANGELOG.md](../CHANGELOG.md) entry, then requirements.md. A disagreement is a documentation bug; record it in the roadmap.
+2. **Planned behaviour:** the phase specification, as ordered by roadmap.md.
+3. **Order and status:** roadmap.md, over any plan text elsewhere (requirements.md §11/§15/§16 and technical-design.md §10 are historical).
+
+## Rules for keeping these documents straight
+
+- **WHAT/WHY and HOW stay apart.** Requirements don't name files, classes or CLI flags; technical design doesn't restate requirements.
+- **When a phase ships:** its WHAT/WHY moves into requirements.md, its HOW into technical-design.md, its spec section shrinks to a pointer, it gets a CHANGELOG entry and a ✅ in the roadmap.
+- **New plans go in the roadmap,** never in a new section of another document. New phase specifications go in the relevant spec (or a new spec listed here).
+- **Phase identifiers are unique:** `1`–`6`, `S1`–`S3`, `DRV`, `GOV` (mcp-engine spec); `C1`–`C6`, `C4a`/`C4b`, `K` (context-layer spec); `M1`–`M3`, `RET` (to be specified). Shipped work is referred to by version.
+- **New documents are added to this map,** or they don't exist.

@@ -1,6 +1,6 @@
 # AutoDE — Context Layer, Semantic Model & Grounding: Requirements Specification
 
-**Status:** Proposed · **Baseline:** v0.24.0 (`6f09e62`) · **Companion to:** [mcp-engine-requirements.md](mcp-engine-requirements.md) (read §0 and §1 there first; its implementation rules and principles P1–P7 apply here unchanged)
+**Status:** In progress — order and status: [roadmap.md](roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion to:** [mcp-engine-requirements.md](mcp-engine-requirements.md) · **Document map:** [README.md](README.md) (read §0 and §1 there first; its implementation rules and principles P1–P7 apply here unchanged)
 **Audience:** the coding agent implementing this, and the reviewers approving each phase.
 
 ---
@@ -14,6 +14,8 @@ Industry direction this follows (adopt the principles, not the products):
 - **AtScale-style universal semantic layer**: agents consume a governed model of metrics, relationships and policies through MCP, and **do not infer joins or KPI definitions themselves**. AutoDE adopts this as principle C3.
 
 "Reasonably sized" (the design target for this spec): up to ~5 source connections, ~200 tables, ~5 000 columns, ~1 000 assertions per business problem. At this size everything stays in memory, with no vector database and no embeddings dependency (P6).
+
+*Revised 2026-10-15:* estates larger than this are common (estate merge, legacy migration). The target above now describes a business problem's **working set**; the estate around it is handled by Phase K's per-system catalogs and tiered working-set cache, and an embedded store is adopted only if K's scale measurements require it.
 
 ---
 
@@ -340,7 +342,7 @@ Harness (`npm run eval`):
 
 ## 11. Phases and acceptance criteria
 
-These phases interleave with the MCP phases; the combined order is in mcp-engine-requirements §9. Each is one minor version.
+These phases interleave with the MCP phases; the combined order and status are in [roadmap.md](roadmap.md). Each is one minor version.
 
 ### Phase C1: Reference problem, harness and baseline
 Scope: §10.3 (fixtures, replay harness, metrics computation), with grounding checks §10.1 items 1 and 3 run *post hoc* on baseline output.
@@ -357,16 +359,72 @@ Acceptance: migration is idempotent and graph-equivalent (test); folding is dete
 Scope: §7.1, §7.3, §8.3, §10.1 (all checks), Grounding Report; `buildContextPrompt()` becomes a wrapper; every hub/agent LLM call uses a pack.
 Acceptance: every artifact written has a manifest; "What the agent saw" and "Explain This Artifact" work; trap 4 (context gap) and trap 5 (dilution) pass in replay; identifier grounding rate is reported per run.
 
-### Phase C4: Enrichment from chat, interview and discovery; Context Inbox; probes
-Scope: §5 in full; §7.2 cited Q&A; MCP additions in §9. Depends on the MCP platform phase, since probes run through `autode_execute_query`. Also absorbs the open phase 5 of the earlier chat-memory plan, **tool-action memory**:
+### Phase K: Estate identity, per-system catalogs and the working-set cache
+Added 2026-10-15 (after C3). Estate merge and legacy migration/modernisation are the common engagements; both need several source systems and a target side by side, and estates larger than the §1 design target.
+
+**Gaps verified against the code (v0.30.0):**
+- Live table node ids are `table-<fqn>` with no system or connection in them (`BaseAdapter.snapshotToGraph`): two platforms that both hold `SALES.PUBLIC.CUSTOMERS` become one node.
+- Live extraction hard-codes `origin.environment: 'source'`, and the `schema-graph.json` merge (v0.29.0) replaces nodes by `origin.sourceRef`, which is only the platform name, so extracting a second schema of the same platform retracts the first one's tables.
+- Each extraction covers exactly one database and schema (`WHERE table_schema = '<schema>'`). `ExtractOptions.schemaFilter` exists but nothing reads it.
+- Column profiling runs one full-scan query per column, sequentially, with a 30-second timeout each (`BaseAdapter.profileColumns`).
+
+**Scope:**
+1. **Identity model.** `ObjectRef { system, environment, location: { platform, account?, database, schema, object, column? } }`. The canonical node id is `obj:<system>/<environment>/<database>.<schema>.<object>[.<column>]`. A *system* is a logical source or target (e.g. "Shop OMS", "CRM", "EDW target"). Roles (`source` | `target` | both) attach to a system, or to a schema within it, never to a connection, so in-place modernisation (RAW → CURATED in one account) and dev/test/prod are expressible. Recorded in a new `.ai-context/estate.yaml` (systems, environments, which connection and schemas feed which system, roles). Connections and file imports are assigned to a system when created; an unassigned one gets a system named after it.
+2. **Migration of existing ids.** Existing nodes are re-keyed to `obj:` ids. The ledger records an alias map (old id → new id), so assertion subjects, packs and grounding manifests written before K still resolve. Re-keying is idempotent, and the re-keyed graph is equivalent to the old one apart from ids (test).
+3. **Per-system catalogs.** Extraction is tagged with system and environment; one connection can feed several schemas (wire `schemaFilter`, accept a list). The `schema-graph.json` merge is keyed by `(system, environment, database.schema)`.
+4. **Tiered working-set cache, populated incrementally** (not a mirror of the estate):
+   - *Tier 0, name index*: database, schema and object names plus table comments, only for the databases/schemas the engineer selects.
+   - *Tier 1, structure*: columns, types, keys and tags, loaded when an object enters scope (named in a spec or document, a pack seed, browsed or mapped).
+   - *Tier 2, profile*: null rates, distinct counts, freshness, only for objects a step uses; sampled, in parallel with a bounded concurrency, within a per-run query budget. This replaces per-column sequential profiling.
+   - *Query-through on a miss*: a name in tier 0 whose structure isn't loaded is fetched live when a connection exists; offline, the pack raises a context gap (`structure of <object> not loaded`).
+   - *Eviction*: tier 1 and 2 entries referenced by no spec, assertion or pack for N days (setting, default 30) drop back to tier 0.
+   - Storage: in memory plus JSON under `.ai-context/catalog/<system>/<environment>/` (git-ignored, rebuildable). Whether an embedded database is needed is decided from the scale fixture's measurements (acceptance below), not up front (P6).
+5. **Refresh on use**, no background sync: an in-scope object older than its TTL (§8.2: schema facts 7 days) is re-checked by its last-altered timestamp when it is seeded and before plan execution; a change becomes supersession through the existing sync and dependency walk.
+6. **Catalog revision pinned in manifests**: `catalogRevisions: { "<system>/<environment>": <watermark> }` on every grounding manifest, so an artifact's context is reproducible after the catalog moves on.
+7. **Legacy catalog import** for sources with no live connector: column-dictionary exports as CSV (Teradata `DBC.ColumnsV`, Oracle `ALL_TAB_COLUMNS`, SQL Server `INFORMATION_SCHEMA.COLUMNS`, recognised by their header names), alongside the existing DDL import, each assigned to a system.
+8. **Visibility**: when tier 0 knows objects whose structure the engineer's grants don't reveal, packs say so (`N objects in scope are not visible with your current grants`) instead of omitting them silently.
+9. **Grounding per side**: identifier checks resolve source references against source systems, and target references against the target system plus the planned objects of the approved Pipeline Spec. Planned objects stay owned by the Pipeline Spec; the catalog holds only what exists.
+10. **Namespaced ids for every kind**, not only physical objects: `term:`, `rule:`, `metric:`, `query:` alongside `obj:` — the intent of requirements.md §3.6 (stable, readable, collision-free), which was never implemented. Same alias-map migration as item 2.
+11. **The extension host is never blocked for long** (requirements.md §1, carried over and made measurable): no single synchronous task during ingestion, catalog sync, ledger sync, projection or pack building runs longer than 100 ms on the large-estate fixture; long work yields, reports progress and can be cancelled. VS Code runs extensions in their own process, so the editor itself stays responsive regardless — what a blocked extension host freezes is AutoDE's panel and every other extension, Copilot included. How (chunking, a worker thread, or the engine process once the extension talks to it over MCP in Phase 5) is a design choice recorded in technical-design.md.
+12. **Retrieval that survives vocabulary mismatch** (the need behind requirements.md §3.11's embeddings, kept and restated): finding the right tables when the request's words differ from physical names — synonyms ("client" vs `customers`), abbreviations (`CUST_NO`, `TXN_AMT`), or the other organisation's terms in a merge. Deterministic signals first: glossary bindings and aliases, an abbreviation-expansion dictionary (governed, extensible per customer), column and table comments, and ranked full-text scoring over names and comments. Embeddings are not adopted in K; they become an optional, opt-in ranking signal (phase RET in the roadmap) only if the vocabulary-mismatch questions below still miss after this.
+
+**Fixtures:** retail-orders extended into a merge where both sources contain an identically named fully qualified table; a dev/prod pair of one system; a legacy dictionary export; a generated large estate (~2 000 tables, ~50 000 columns, with name collisions across schemas); and a **vocabulary-mismatch question set** (synonyms, abbreviations, cross-organisation terms) over the merge and legacy fixtures.
+
+**Acceptance:** identically named tables from two systems stay distinct end-to-end (graph, ledger subjects, packs, manifests); extracting a second schema does not retract the first; re-keying an existing workspace is idempotent and loses no assertion; profiling never exceeds its query budget; an offline miss raises a gap; manifests carry catalog revisions; the eval report records ingest time, memory, sync time, pack build time and the longest synchronous task on the large estate (≤ 100 ms), packs still exclude unrelated schemas there, and the embedded-database decision is recorded with those numbers; the vocabulary-mismatch questions' seed recall is reported, and the RET decision is made from it.
+
+### Phase C4a: Business-problem pack, discovery-first gap closing, conformance
+Added 2026-10-15; the document, discovery and validation half of the original C4, pulled ahead of the MCP track. A business problem is whatever the customer has: a paragraph, one document, or a set of documents (a BRD, KPI definitions, a data contract, a mapping workbook, a data dictionary). These are rarely in a standard format: the merger demo's data contract was YAML in a house format. AutoDE builds the specification from them, closes gaps by discovery and validation, and interviews only for what remains.
+
+**Scope:**
+1. **Business-problem pack.** Register documents with a *role* (`contract`, `brd`, `kpi_definitions`, `mapping`, `data_dictionary`, `other`), an *authority* (`signed` → assertions enter at `confirmed`; `draft` → `documented`) and a version. Text-based formats (txt, md, yaml, json, csv), as attachments are stored today; binary formats (docx, pdf) need a text-extraction step and are out of scope for C4a.
+2. **Interpretation profiles** for structured documents with a non-standard shape (YAML, JSON, CSV). The LLM reads the document's structure once and proposes a mapping from its paths to AutoDE's model (e.g. `entities[].fields[].name` → column, `.mandatory: yes` → not null, `rules[]` → quality expectations), returned as Ajv-validated JSON. The engineer confirms or corrects it once. It is then applied **deterministically** to every entry, and re-applied to later versions of the document, so a new version is a precise diff: only the changed clauses are superseded. Profiles are stored under `.ai-context/profiles/` and can be reused for documents of the same shape.
+3. **Free-text extraction** (BRDs, notes, unstructured documents) per fact, through the governed extractor prompt (§5.2), landing as `proposed` / `inferred`.
+4. **Provenance at clause level**: `Evidence.ref = <file>#<yaml-path | section | line-range>@<content-sha>`. "Explain This Artifact" and the inbox show the exact clause.
+5. **Normative vs descriptive.** Contract clauses are expectations (`quality_expectation`, and a new `contract_schema` predicate for expected column / type / nullability), never `schema_fact`. A contract never overwrites what a catalog observed; a difference is a conformance violation.
+6. **Computed gaps**: SpecOps' per-field coverage plus the required fact classes per in-scope entity (keys, grain, joins, metric definitions; §7.3 minimum trust).
+7. **Discover → validate → ask.** Gaps are closed by machines first:
+   - discovery fills structural facts (tables, columns, declared keys) through K's tiered cache;
+   - validation runs probes (§5.3) on claims the documents make;
+   - the interview then asks only about what is left: business intent, decisions, unresolved conflicts ("the contract says X, source B shows Y; which applies?"), and facts below the required trust.
+8. **Probes without the MCP dependency.** The §5.3 probes (fixed templates per kind and dialect, read-only, aggregates only — never row values) run through the engine's `ConnectionManager`. They need no sample-data consent because they return no row values; they move behind `autode_execute_query` when Phase 4 lands. Results are `verified` / `verification_failed` events.
+9. **Conformance report** (discover-phase artifact): each source system against the contract, clause by clause. Schema conformance comes from the catalog; data conformance (nulls, uniqueness, accepted values, join orphan rates) comes from probes.
+10. **Spec from the pack.** The generated Business Problem Specification records intent and scope (objectives, entities in scope, decisions, constraints) and *references* the assertion ids of detailed clauses instead of copying them, so the spec and the contract can't drift apart.
+
+**Fixtures:** a house-format contract YAML for the merge reference problem (source A conforms; source B violates it in known places: a type, a nullability, a missing column, a duplicate key), a second version of that contract with three changed clauses, and a free-text BRD.
+
+**Acceptance:** every planted violation in source B appears in the conformance report and no false one appears for source A; re-applying the profile to contract v2 supersedes exactly the three changed clauses; BRD facts land as proposed with section-level provenance; the interview asks no question that discovery or a probe answered (test: no question about a key the DDL declares); trap 3 (duplicate `member_id`) passes through a probe; a test asserts probes never return row values.
+
+### Phase C4b: Chat extraction, Context Inbox, tool-action memory
+The remainder of the original C4.
+Scope: what C4a doesn't cover of §5 (chat and interview extraction §5.2, Context Inbox §5.4); §7.2 cited Q&A; MCP additions in §9 (`autode_propose_assertion`, `autode_verify_assertion` — probes move behind `autode_execute_query` here). Context gaps (C3) pause the step from this phase on, since the inbox lets the engineer answer them. Also absorbs the open phase 5 of the earlier chat-memory plan, **tool-action memory**:
 - `AgentHub.chat()` returns the tool audit it already collects (`ToolCallAuditEntry[]`).
 - The chat handler appends one compact `log` message per meaningful action (file written, command run) to the transcript.
 - Structured history includes those entries. For Anthropic and Gemini they are folded into the adjacent assistant turn, because those APIs require strict user/assistant alternation.
 - Actions that change context (e.g. a written spec file) are also recorded as ledger evidence.
-Acceptance: the scripted chat produces the golden assertions (≥ 90% match, the rest surfaced in the inbox); traps 2 and 3 pass; extraction never blocks or fails a chat turn (fault-injection test); chat answers cite assertion ids.
+Acceptance: the scripted chat produces the golden assertions (≥ 90% match, the rest surfaced in the inbox); trap 2 passes; extraction never blocks or fails a chat turn (fault-injection test); chat answers cite assertion ids.
 
 ### Phase C5: Semantic model
-Scope: §6, including dbt and Snowflake semantic-view export primitives (Databricks metric views where supported) and C3 consumption by the modeling/STTM/transform agents. Depends on mcp-engine Phase G (governance-as-code): the model's `rules` and PII classifications come from G's governance assertions, and the reference problem's masking expectations need G's `mask` primitive.
+Scope: §6, including dbt and Snowflake semantic-view export primitives (Databricks metric views where supported) and C3 consumption by the modeling/STTM/transform agents. Depends on mcp-engine Phase GOV (governance-as-code): the model's `rules` and PII classifications come from GOV's governance assertions, and the reference problem's masking expectations need GOV's `mask` primitive.
 Acceptance: projected model equals `golden/semantic-model.yaml` after the scripted run; exports pass primitive conformance tests; no agent emits a join or metric absent from the model (a grounding check enforces this).
 
 ### Phase C6: Freshness, health and release evaluation
@@ -377,10 +435,13 @@ Acceptance: every metric target in §10.2 is met in replay mode; the live-mode r
 
 ## 12. Out of scope
 
-- Vector databases and embedding models (they'd add a dependency and runtime; lexical + alias + graph retrieval is sufficient at the target size, §1). This supersedes the earlier "Phase 5" plan's provider-sourced embeddings design. Revisit only if a C1/C6 evaluation shows retrieval misses that alias and graph expansion can't fix.
+- Vector databases and embedding models (they'd add a dependency and runtime; lexical + alias + graph retrieval is sufficient at the target size, §1). This supersedes the earlier "Phase 5" plan's provider-sourced embeddings design. Revisit only if a C1/C6 evaluation shows retrieval misses that alias and graph expansion can't fix. *(2026-10-15)* That evaluation is now part of Phase K (vocabulary-mismatch question set); if it shows such misses, embeddings come in through phase RET as an optional, opt-in ranking signal — never a requirement, and never the only way to find context.
 - Replacing an enterprise catalog (Horizon, Unity Catalog, Atlan, etc.). Importing from catalogs is a future *source* of `documented` assertions via the same ledger, not a reason to build one.
 - Auto-confirming LLM-proposed assertions, and confirmation over MCP.
 - LLM-written verification probes.
+- *(2026-10-15)* A full local mirror of a customer's catalog with periodic background sync. A per-laptop copy goes stale, differs between engineers (different sync times and grants) and so breaks reproducibility, loads the customer's warehouse once per engineer, and exports estate-wide metadata to laptops that security reviews often reject. Phase K's working-set cache with query-through and refresh-on-use replaces it. A shared, team-wide catalog cache would need a remote MCP deployment (mcp-engine §10) and is revisited only if a customer needs it.
+- *(2026-10-15)* Converting legacy code (stored procedures, BTEQ, PL/SQL, ETL-tool mappings). Mature converters exist (e.g. Snowflake SnowConvert, Databricks Lakebridge); the migration track imports their output and grounds, maps and reconciles it instead.
+- *(2026-10-15, parked)* ERP sources with cryptic physical names (SAP-style), which need the ERP's own text dictionary as aliases. Not rejected; deferred until a customer needs it.
 
 ## 13. Documentation deliverables
 

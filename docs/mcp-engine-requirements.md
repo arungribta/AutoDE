@@ -1,6 +1,7 @@
 # AutoDE — MCP Engine & Portable Skill Registry: Requirements Specification
 
-**Status:** Proposed · **Baseline:** v0.24.0 (`6f09e62`) · **Target:** v0.25.0 – v0.40.0 · **Companion:** [context-layer-requirements.md](context-layer-requirements.md)
+**Status:** In progress — order and status of every phase: [roadmap.md](roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion:** [context-layer-requirements.md](context-layer-requirements.md) · **Document map:** [README.md](README.md)
+**Kind:** phase specification — WHAT and WHY for planned work, plus the implementation contract the coding agent builds against. When a phase ships, its WHAT/WHY moves into [requirements.md](requirements.md), its HOW into [technical-design.md](technical-design.md), and its section here shrinks to a pointer.
 **Audience:** the coding agent (Claude Code, Gemini, Copilot) implementing this, and the reviewers approving each phase.
 
 ---
@@ -41,7 +42,7 @@ Non-negotiable principles (every phase MUST preserve them):
 | P3 | Human approval gates are enforced by the orchestrator, not only by the UI. | `agentHub.ts` `executePlan()` |
 | P4 | LLM-agnostic: `vscode.lm` (Copilot and others), Claude Code CLI, and API providers all keep working. | `src/core/llmProviders.ts`, `languageModelAdapter.ts`, `claudeCodeAdapter.ts` |
 | P5 | Credentials are pointers (`CredentialReference`), never secrets in LLM context, logs, or tool output. | `src/dqm/credentials/` |
-| P6 | Small footprint, works offline / on locked-down client networks: no **automatic** downloads, and no native modules or heavy SDKs in the VSIX. The one sanctioned download is the user-initiated, integrity-checked native-driver acquisition (Phase D), with CLI/REST as the offline fallback. | `package.json` (deps: `ajv`, `yaml` only) |
+| P6 | Small footprint, works offline / on locked-down client networks: no **automatic** downloads, and no native modules or heavy SDKs in the VSIX. The one sanctioned download is the user-initiated, integrity-checked native-driver acquisition (Phase DRV), with CLI/REST as the offline fallback. | `package.json` (deps: `ajv`, `yaml` only) |
 | P7 | Platform CLIs (`snow`, `databricks`) are optional accelerators, never prerequisites — REST backends work without them. | `src/dqm/executionBackends/` |
 
 ---
@@ -250,30 +251,9 @@ Until this phase ships, the MCP server MUST NOT be given write access to `.ai-co
 
 ### 9.0 Combined roadmap
 
-Implement strictly in this order; each row is one minor version.
-- Context-layer phases (C1–C6) are specified in [context-layer-requirements.md](context-layer-requirements.md) §11.
-- Phases S1–S3, D and G carry forward open items from the earlier AutoDE roadmap and are specified in §9.1: the Phase 4 skills library, Phase 3b-iv driver acquisition, and Phase 6 governance-as-code.
+The order, version and status of every phase — this spec's, the context-layer spec's, and the carried-forward ones — live in one place: [roadmap.md](roadmap.md). Implement in that order; each phase is one minor version. Phase identifiers: `1`–`6` (this spec), `C1`–`C6`, `C4a`/`C4b` and `K` (context-layer spec §11), `S1`–`S3`, `DRV` and `GOV` (§9.1 below). `DRV` and `GOV` were called D and G until 2026-10-15; they were renamed because those letters also name older, unrelated work (the v0.9.0 tool-skills "Phase D", and an unbuilt "Phase G" context-memory item).
 
-| Version | Phase | Why here |
-|---------|-------|----------|
-| v0.25.0 | **1** Spec state synchronization ✅ | Live bug; prerequisite for any second writer of `.ai-context/`. |
-| v0.26.0 | **2** Engine boundary and context store ✅ | Everything after this builds in `src/engine/`. |
-| v0.27.0 | **C1** Reference problem, eval harness, baseline ✅ | Measures the v0.26.0 baseline *before* the context layer changes, so improvement can be shown. |
-| v0.28.0 | **S1** Tool-skill execution on every provider + `allowed-tools` enforcement ✅ | Security prerequisite: skills later get engine tools (§7.4) and are exposed over MCP (§5.4). |
-| v0.29.0 | **C2** Assertion ledger and projection ✅ | System of record for context. |
-| v0.30.0 | **C3** Context packs, manifests, causality ✅ | Grounded delivery; the server should expose the final retrieval, not the old dump. |
-| v0.31.0 | **S2** Tool-skill lifecycle, provenance, review and trust tiers | Must exist before any skill is exposed to external agents over MCP. |
-| v0.32.0 | **3** MCP server: registry, spec, prompts, resources | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding` (context §9). |
-| v0.33.0 | **4** MCP server: data platform, plus sample-data consent and redaction | Prerequisite for verification probes and for driver acquisition. |
-| v0.34.0 | **D** Opt-in native driver acquisition + platform-onboarding UI | Lives in the engine; needs Phase 4's backend cascade there. |
-| v0.35.0 | **C4** Enrichment from chat/interview/discovery, Context Inbox, probes, chat tool-action memory | Remaining context MCP tools (`autode_propose_assertion`, `autode_verify_assertion`). |
-| v0.36.0 | **G** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | Required by the C5/C6 grounding checks and the reference problem's PII expectations. |
-| v0.37.0 | **C5** Semantic model | Built on confirmed/verified assertions. |
-| v0.38.0 | **5** Extension as MCP client; exposure to other agents | Done once the surface is complete, so it's routed once. |
-| v0.39.0 | **6** + **S3** Skill and primitive governance hardening; Git-URL skill import; docs and starter library | Opening the door to third-party skills ships last, once every safety rail exists. |
-| v0.40.0 | **C6** Freshness, context health, release evaluation | Final metric targets met; eval report becomes a release gate. |
-
-### 9.1 Carried-forward phases (S1, S2, D, G, S3)
+### 9.1 Carried-forward phases (S1, S2, DRV, GOV, S3)
 
 These come from the earlier AutoDE plans:
 - Phase 4, "Skill Onboarding, Versioning & Governance" (becomes S1–S3).
@@ -322,7 +302,7 @@ Acceptance:
 - Review unlocks read-only only; elevation unlocks full.
 - Publish/deprecate/archive round-trip tests mirror the primitive lifecycle tests.
 
-#### Phase D: Opt-in native driver acquisition + platform-onboarding UI
+#### Phase DRV: Opt-in native driver acquisition + platform-onboarding UI
 Scope (the earlier Phase 3b-iv design, moved into the engine):
 - **Backend cascade per connection.** Native-protocol CLI (Snowflake `snow sql`) → **opt-in native driver** (`snowflake-sdk` / `@databricks/sql`) → REST. All three return the existing `QueryResult` shape.
 - **Driver acquisition** in `src/engine/platform/driverAcquisition.ts`:
@@ -345,7 +325,7 @@ Acceptance (using a mocked registry and a local tarball fixture):
 - The VSIX contains neither driver.
 - Nothing downloads unless the user clicks the install action; a test asserts there is no fetch on activation or on connection.
 
-#### Phase G: Governance-as-code
+#### Phase GOV: Governance-as-code
 Scope (from the earlier Phase 6 plan):
 - `src/engine/governance/types.ts` (`PiiClassification`, `ColumnGovernance`). Fill in the `governance` block already reserved on each Pipeline Spec entity.
 - A `mask` primitive as a Tier-2 `PrimitiveDefinition`, with **non-reversible strategies only** (`hash`, `redact`). `tokenize` is out of scope because it needs an external vault.
@@ -402,7 +382,7 @@ Acceptance:
 - Manual: Claude Code configured with the server (by hand, per `docs/mcp-setup.md`) can search, describe and compile a primitive.
 
 ### Phase 4: MCP server — data platform
-Scope: §5.3, §6. (`ContextStore` already exists from Phase 2.) Plus **sample-data consent and redaction**: row samples from profiling, `autode_execute_query` results and CSV ingestion never enter an LLM prompt unless the per-connection setting `allowSampleDataInPrompts` is on (default off). When it is off, only schema, counts and aggregate statistics are used. Values in columns classified as PII (by Phase G, or by column-name heuristics until then) are masked in any sample that is allowed through.
+Scope: §5.3, §6. (`ContextStore` already exists from Phase 2.) Plus **sample-data consent and redaction**: row samples from profiling, `autode_execute_query` results and CSV ingestion never enter an LLM prompt unless the per-connection setting `allowSampleDataInPrompts` is on (default off). When it is off, only schema, counts and aggregate statistics are used. Values in columns classified as PII (by Phase GOV, or by column-name heuristics until then) are masked in any sample that is allowed through.
 Acceptance:
 - Read-only guard tests: `INSERT`, `MERGE`, `DROP`, `CREATE`, `GRANT`, `CALL`, multi-statement input, and comment-smuggled writes are rejected without `--allow-write`; `SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN` pass.
 - Redaction test: no tool response or log line contains any test secret value.
@@ -435,7 +415,7 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 |----------|--------------|
 | Moving the engine to a separate repository | Shared types (e.g. `SqlDialect` duplicated between `dqm/types.ts` and `transforms/types.ts`) would drift; one repo with a lint-enforced boundary gives the same isolation (D1). |
 | Native per-OS binaries (`pkg`, PyInstaller, Go) | `pkg` is archived; binaries are 40–80 MB each, need code signing, and are often blocked on client networks. A bundled JS file on VS Code's Node is a few hundred KB (D2). |
-| Downloading the server or CLIs at activation (JIT installer) | Breaks offline / air-gapped clients, slows activation, and introduces an unsigned download-and-execute path. The only sanctioned download is Phase D's user-initiated, integrity-checked driver acquisition, which has an offline fallback. |
+| Downloading the server or CLIs at activation (JIT installer) | Breaks offline / air-gapped clients, slows activation, and introduces an unsigned download-and-execute path. The only sanctioned download is Phase DRV's user-initiated, integrity-checked driver acquisition, which has an offline fallback. |
 | Blocking activation or the panel on `snow` / `databricks` being installed | REST backends need no CLI (P7); detection already exists in `cliDetection.ts` and runs lazily at connection time. |
 | Rewriting `skillRegistry.ts` as an MCP client or deleting it | It loads the interview prompt packs; they are exposed as MCP **prompts** (§5.4), and the client lives in `src/core/mcp/`. |
 | Making the extension a proxy between Claude Code / Copilot and the server | Both connect to MCP servers directly; the extension is one client among several (§7.5). |
