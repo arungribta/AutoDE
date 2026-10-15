@@ -1,6 +1,6 @@
-# Manual verification — v0.25.0 to v0.30.0
+# Manual verification — v0.25.0 to v0.31.0
 
-Hands-on checks for the features shipped in v0.25.0–v0.30.0, run in the VS Code Extension Development Host. Each check gives **Do** and **Expect**; tick the box when it holds, and note anything that doesn't in the results table at the end.
+Hands-on checks for the features shipped in v0.25.0–v0.31.0, run in the VS Code Extension Development Host. Each check gives **Do** and **Expect**; tick the box when it holds, and note anything that doesn't in the results table at the end.
 
 Automated coverage already exists (`npm test`, `npm run eval`); these checks cover what only a real VS Code session shows: the panel, prompts, commands, file watching and real LLM providers.
 
@@ -160,6 +160,34 @@ Uses real LLM calls (one per step plus spec and plan). Continue with the problem
 
 ---
 
+## Part 8 — v0.31.0 Estate identity
+
+- [ ] **8.1 Bind files to systems and environments first.**
+  Do: in a fresh scratch workspace run `AutoDE: Open Estate (Systems & Environments)` and replace the file's content with:
+  ```yaml
+  systems:
+    - { id: shop, name: Shop OMS, role: source }
+    - { id: crm, name: CRM, role: source }
+  bindings:
+    - { file: shop.ddl, system: shop, environment: prod }
+    - { file: shop_dev.ddl, system: shop, environment: dev }
+    - { file: crm.ddl, system: crm, environment: prod }
+  ```
+  Save, then import `sources/shop.ddl`, `sources/crm.ddl` and `sources/shop_dev.ddl` (Command Palette → `AutoDE: Ingest File as Source Context`), accepting the suggested system each time.
+  Expect: the suggestion for each file shows its bound system and environment.
+- [ ] **8.2 Same names stay apart.**
+  Do: open `.ai-context/derived/graph.json`.
+  Expect: `obj:shop/prod/ref.currency_codes` and `obj:crm/prod/ref.currency_codes` with different columns; `obj:shop/prod/shop.orders` and `obj:shop/dev/shop.orders`, the dev one with `gift_wrap`.
+- [ ] **8.3 Legacy dictionary.**
+  Do: import `sources/legacy/edw_dbc_columns.csv` as a new system `edw-dbc-columns` (suggested).
+  Expect: "Ingested …: 3 table(s), 12 column(s)" and a note that it was read as a Teradata DBC.ColumnsV dictionary; `CUST_NO` is `VARCHAR(20)` and not null.
+- [ ] **8.4 Old workspaces migrate in place.** (Only if you kept a workspace from Parts 5–7.)
+  Do: open it with this build.
+  Expect: log "Re-keyed N legacy id(s)…" and "Context ledger: N re-keyed…"; nothing reported as retracted; "Explain This Artifact" on an earlier artifact still shows its facts.
+- [ ] **8.5 Several schemas per connection.** (Needs a connection.)
+  Do: Browse… on the source card, pick two schemas, then Source Assessment.
+  Expect: tables from both schemas; `estate.yaml` lists both under the connection's binding; running Source Assessment again doesn't retract either schema.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -194,5 +222,10 @@ Uses real LLM calls (one per step plus spec and plan). Continue with the problem
 | 7.4 |  |  |
 | 7.5 |  |  |
 | 7.6 |  |  |
+| 8.1 |  |  |
+| 8.2 |  |  |
+| 8.3 |  |  |
+| 8.4 |  |  |
+| 8.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.ai-context` file, and for packs the What the Agent Saw document.

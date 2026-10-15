@@ -73,3 +73,11 @@ CREATE TABLE crm.support_tickets (
   priority VARCHAR(10),
   csat_score INTEGER
 );
+
+-- Same fully qualified name as in shop.ddl, different shape (Phase K1 trap).
+CREATE TABLE ref.currency_codes (
+  currency_code VARCHAR(3) PRIMARY KEY,
+  description VARCHAR(100),
+  is_active BOOLEAN,
+  updated_at TIMESTAMP
+);

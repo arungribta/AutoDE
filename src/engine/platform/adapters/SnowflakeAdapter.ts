@@ -211,9 +211,10 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
     };
   }
 
-  getMetadataQueries(): PlatformMetadataQueries {
-    const db = this.connectedDb;
-    const schema = this.connectedSchema || 'PUBLIC';
+  getMetadataQueries(scope?: string): PlatformMetadataQueries {
+    const parts = scope ? scope.split('.') : [];
+    const db = parts.length > 1 ? parts[0] : this.connectedDb;
+    const schema = parts.length > 0 ? parts[parts.length - 1] : (this.connectedSchema || 'PUBLIC');
 
     return {
       listTables: `

@@ -35,6 +35,8 @@ export interface ContextPackSources {
   assertions: readonly Assertion[];
   conflicts: readonly Conflict[];
   runtimeFacts?: ReadonlyArray<{ label: string; text: string }>;
+  /** Latest extraction per `system/environment` (Phase K1), pinned in grounding manifests. */
+  catalogRevisions?: Record<string, string>;
 }
 
 export interface PackManifest {
@@ -78,6 +80,8 @@ export interface ContextPackProvider {
   supplementary?(): string;
   /** Revision of the active Business Problem Specification. */
   specRevision?(): string | undefined;
+  /** Objects the approved Pipeline Spec plans to create (Phase K1: grounding treats them as known). */
+  plannedObjects?(): string[];
 }
 
 /** char/4, the same heuristic as `core/tokenBudget.ts`. */

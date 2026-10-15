@@ -9,6 +9,9 @@ import { AssertionLedger } from '../engine/context/ledger';
 import { projectGraph, syncGraphToLedger } from '../engine/context/projection';
 import { Conflict, detectConflicts, flagConflicts } from '../engine/context/conflicts';
 import { ContextPack, ContextPackRequest, ContextPackSources, buildContextPack } from '../engine/context/contextPack';
+import { DEFAULT_ENVIRONMENT, Estate, EstateBinding, ObjectIdentity, UNASSIGNED_SYSTEM, catalogWatermarks, edgeId, emptyEstate, parseEstate, queryId, rekeyLegacyGraph, resolveIdentity, ruleId, serializeEstate, termId } from '../engine/context/estate';
+import type { IngestIdentity } from '../engine/context/fileIngestion';
+import type { Origin } from '../engine/context/types';
 import {
   BaseNode,
   BusinessTermNode,
@@ -78,6 +81,11 @@ export class ContextFileManager implements vscode.Disposable {
   private activeSpecId: string | undefined;
   /** The most recent packs, newest first — what "AutoDE: What the Agent Saw" lists (C3). */
   private readonly recentPacks: Array<{ title: string; at: string; pack: ContextPack }> = [];
+  /** `.ai-context/estate.yaml` (Phase K1): systems, environments, bindings. */
+  private estate: Estate = emptyEstate();
+  private estateDirty = false;
+  /** Re-keyings found while loading, recorded in the ledger at the next persist. */
+  private pendingAliases = new Map<string, string>();
 
   constructor(
     private readonly workspaceRoot: vscode.Uri,
@@ -95,6 +103,92 @@ export class ContextFileManager implements vscode.Disposable {
    */
   public setActiveSpecId(specId: string | undefined): void {
     this.activeSpecId = specId;
+  }
+
+  private estatePath(): string {
+    return path.join(vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath, 'estate.yaml');
+  }
+
+  private loadEstate(): void {
+    try {
+      this.estate = parseEstate(fs.existsSync(this.estatePath()) ? fs.readFileSync(this.estatePath(), 'utf8') : undefined);
+    } catch (err) {
+      this.log(`Could not read estate.yaml (${err instanceof Error ? err.message : String(err)}); using an empty estate.`);
+      this.estate = emptyEstate();
+    }
+  }
+
+  private saveEstateIfChanged(): void {
+    if (!this.estateDirty) return;
+    try {
+      fs.mkdirSync(path.dirname(this.estatePath()), { recursive: true });
+      const tmp = `${this.estatePath()}.tmp.${Date.now()}`;
+      fs.writeFileSync(tmp, serializeEstate(this.estate), 'utf8');
+      fs.renameSync(tmp, this.estatePath());
+      this.estateDirty = false;
+    } catch (err) {
+      this.log(`Could not write estate.yaml: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** Re-reads `estate.yaml` unless there are unsaved changes, so edits made in the editor apply at once. */
+  private refreshEstate(): void {
+    if (!this.estateDirty) this.loadEstate();
+  }
+
+  /** The estate (systems, environments, bindings) — Phase K1. */
+  public getEstate(): Estate {
+    this.refreshEstate();
+    return this.estate;
+  }
+
+  /** Adds or replaces a binding (and its system, when new) and saves `estate.yaml`. */
+  public bindToSystem(binding: EstateBinding, systemName?: string, role: 'source' | 'target' | 'both' = 'source'): void {
+    this.refreshEstate();
+    const others = this.estate.bindings.filter((b) => !((binding.connection && b.connection === binding.connection) || (binding.file && b.file && b.file.toLowerCase() === binding.file.toLowerCase())));
+    const systems = this.estate.systems.some((s) => s.id === binding.system) ? this.estate.systems : [...this.estate.systems, { id: binding.system, name: systemName ?? binding.system, role }];
+    this.estate = { systems, bindings: [...others, binding] };
+    this.estateDirty = true;
+    this.saveEstateIfChanged();
+  }
+
+  /** Which system/environment a live connection feeds, and which schemas to extract. Creates a system for an unbound connection. */
+  public resolveConnection(connectionId: string): { identity: ObjectIdentity; schemas?: string[] } {
+    this.refreshEstate();
+    const r = resolveIdentity(this.estate, { connection: connectionId });
+    if (r.created) { this.estate = r.estate; this.estateDirty = true; this.saveEstateIfChanged(); }
+    const binding = this.estate.bindings.find((b) => b.connection === connectionId);
+    return { identity: r.identity, schemas: binding?.schemas };
+  }
+
+  /** Which system/environment an imported file belongs to. Creates a system named after the file when unbound. */
+  public resolveFile(filePath: string): IngestIdentity {
+    this.refreshEstate();
+    const r = resolveIdentity(this.estate, { file: filePath });
+    if (r.created) { this.estate = r.estate; this.estateDirty = true; this.saveEstateIfChanged(); }
+    return r.identity;
+  }
+
+  /** Identity for re-keying a legacy node from its provenance. */
+  private identityOfOrigin(origin: Origin | undefined): { system: string; environment: string } {
+    if (origin?.system) return { system: origin.system, environment: origin.systemEnvironment ?? DEFAULT_ENVIRONMENT };
+    const looksLikeFile = (ref: string) => /[\\/]|\.(csv|json|sql|ddl)$/i.test(ref);
+    let r: ReturnType<typeof resolveIdentity> | undefined;
+    if (origin?.connectionId) r = resolveIdentity(this.estate, { connection: origin.connectionId });
+    else if (origin?.sourceRef && looksLikeFile(origin.sourceRef)) r = resolveIdentity(this.estate, { file: origin.sourceRef });
+    if (!r) return { system: UNASSIGNED_SYSTEM, environment: DEFAULT_ENVIRONMENT };
+    if (r.created) { this.estate = r.estate; this.estateDirty = true; }
+    return { system: r.identity.system, environment: r.identity.environment };
+  }
+
+  /** Re-keys legacy ids in the live graph (Phase K1 item 2); remembers the aliases for the next persist. */
+  private async rekeyLiveGraph(): Promise<void> {
+    const snap = this.graphManager.serializeSnapshot();
+    const r = rekeyLegacyGraph(snap, (o) => this.identityOfOrigin(o));
+    if (r.aliases.size === 0) return;
+    for (const [from, to] of r.aliases) this.pendingAliases.set(from, to);
+    await this.graphManager.loadSnapshot({ nodes: r.nodes, edges: r.edges });
+    this.log(`Re-keyed ${r.aliases.size} legacy id(s) to the estate scheme.`);
   }
 
   public getActiveSpecId(): string | undefined {
@@ -182,6 +276,7 @@ export class ContextFileManager implements vscode.Disposable {
     // `derived/graph.json` instead, which the persist below then migrates into
     // the ledger. ──
     this.graphManager.clear();
+    this.loadEstate();
     const graphPath = path.join(contextPath, 'derived', 'graph.json');
     const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
     try {
@@ -203,6 +298,8 @@ export class ContextFileManager implements vscode.Disposable {
       }
     }
 
+    await this.rekeyLiveGraph();
+
     // ── A live extraction (Source Assessment, "Connect to build Source Context")
     // writes `schema-graph.json` via ConnectionManager.persistSchemaContext().
     // When it is newer than the compiled graph it is merged in: nodes from the
@@ -215,13 +312,35 @@ export class ContextFileManager implements vscode.Disposable {
     const legacyMtimeMs = fs.existsSync(legacySchemaPath) ? fs.statSync(legacySchemaPath).mtimeMs : -1;
     if (legacyMtimeMs > graphMtimeMs) {
       try {
-        const snapshot = JSON.parse(fs.readFileSync(legacySchemaPath, 'utf8')) as { nodes?: BaseNode[]; edges?: GraphEdge[] };
-        if (snapshot.nodes && snapshot.edges) {
-          const refs = new Set(snapshot.nodes.map((n) => n.origin?.sourceRef).filter((r): r is string => !!r));
+        const raw = JSON.parse(fs.readFileSync(legacySchemaPath, 'utf8')) as { nodes?: BaseNode[]; edges?: GraphEdge[] };
+        if (raw.nodes && raw.edges) {
+          // An extraction written before Phase K1 still has legacy ids.
+          const re = rekeyLegacyGraph({ nodes: raw.nodes, edges: raw.edges }, (o) => this.identityOfOrigin(o));
+          const snapshot = { nodes: re.nodes, edges: re.edges };
+          // Phase K1: replace exactly what this extraction covers — the same
+          // system, environment and database.schema (or the same connection
+          // and database.schema, should the connection have been re-bound) —
+          // so extracting a second schema never retracts the first.
+          const scopeKey = (n: BaseNode) => {
+            const t = n as unknown as { database?: string; schema?: string };
+            return `${n.origin?.system ?? ''}|${n.origin?.systemEnvironment ?? ''}|${(t.database ?? '').toLowerCase()}.${(t.schema ?? '').toLowerCase()}`;
+          };
+          const connScope = (n: BaseNode) => {
+            const t = n as unknown as { database?: string; schema?: string };
+            return `${n.origin?.connectionId ?? ''}|${(t.database ?? '').toLowerCase()}.${(t.schema ?? '').toLowerCase()}`;
+          };
+          const incomingTables = snapshot.nodes.filter((n) => n.type === 'table' || n.type === 'semantic_view');
+          const scopes = new Set(incomingTables.map(scopeKey));
+          const connScopes = new Set(incomingTables.filter((n) => n.origin?.connectionId).map(connScope));
+          const current = this.graphManager.serializeSnapshot();
+          const replacedTables = new Set(current.nodes.filter((n) => (n.type === 'table' || n.type === 'semantic_view') && (scopes.has(scopeKey(n)) || connScopes.has(connScope(n)))).map((n) => n.id));
+          const replaced = new Set(replacedTables);
+          for (const e of current.edges) if (e.type === 'contains' && replacedTables.has(e.source)) replaced.add(e.target);
           const ids = new Set(snapshot.nodes.map((n) => n.id));
-          await this.graphManager.removeNodesWhere((n) => ids.has(n.id) || (!!n.origin?.sourceRef && refs.has(n.origin.sourceRef)));
+          await this.graphManager.removeNodesWhere((n) => ids.has(n.id) || replaced.has(n.id));
           for (const n of snapshot.nodes) await this.graphManager.addNode(n);
           for (const e of snapshot.edges) await this.graphManager.addEdge(e);
+          for (const [from, to] of re.aliases) this.pendingAliases.set(from, to);
           this.log(`Loaded schema graph with ${snapshot.nodes.length} nodes and ${snapshot.edges.length} edges (newer than the compiled cache)`);
         }
       } catch (err) {
@@ -319,11 +438,17 @@ export class ContextFileManager implements vscode.Disposable {
    */
   public async persistCompiledGraph(): Promise<void> {
     try {
-      const sync = await syncGraphToLedger(this.ledger, this.graphManager.serializeSnapshot(), { activeSpecId: this.activeSpecId });
+      await this.rekeyLiveGraph();
+      const aliases = new Map(this.pendingAliases);
+      if (aliases.size > 0) await this.ledger.append(this.ledger.buildAliasEvents(aliases));
+      const sync = await syncGraphToLedger(this.ledger, this.graphManager.serializeSnapshot(), { activeSpecId: this.activeSpecId, aliases });
+      this.pendingAliases.clear();
+      this.graphManager.setAliases(this.ledger.aliases());
+      this.saveEstateIfChanged();
       this.conflicts = detectConflicts(this.ledger.assertions());
       const flagged = await flagConflicts(this.ledger, this.conflicts);
       if (sync.events > 0 || flagged.length > 0) {
-        this.log(`Context ledger: ${sync.asserted} asserted, ${sync.superseded} superseded, ${sync.retracted} retracted, ${sync.reverified} re-verified, ${sync.dependentsFlagged + flagged.length} flagged for review; ${this.conflicts.length} conflict(s).`);
+        this.log(`Context ledger: ${sync.rekeyed ? `${sync.rekeyed} re-keyed, ` : ''}${sync.asserted} asserted, ${sync.superseded} superseded, ${sync.retracted} retracted, ${sync.reverified} re-verified, ${sync.dependentsFlagged + flagged.length} flagged for review; ${this.conflicts.length} conflict(s).`);
       }
       await this.graphManager.loadSnapshot(projectGraph(this.ledger.assertions(), { activeSpecId: this.activeSpecId }));
     } catch (err) {
@@ -346,7 +471,6 @@ export class ContextFileManager implements vscode.Disposable {
   }
 
   private async loadBusinessContext(data: BusinessContextFile, sourceRef: string): Promise<void> {
-    let ruleIndex = 0;
     const usedIds = new Set<string>();
     const origin = { source: 'user' as const, sourceRef, extractor: 'business-context' };
 
@@ -354,7 +478,7 @@ export class ContextFileManager implements vscode.Disposable {
       for (const entry of data.business_terms) {
         // Keyed by the term's name (v0.29.0; was its position in the file), so
         // reordering the file changes nothing and redefining a term supersedes it.
-        const nodeId = uniqueId(`biz-term-${slugify(entry.term)}`, usedIds);
+        const nodeId = uniqueId(termId(entry.term), usedIds);
         const node: BusinessTermNode = {
           id: nodeId,
           type: 'business_term',
@@ -377,7 +501,7 @@ export class ContextFileManager implements vscode.Disposable {
           for (const n of byLabel) tableNodes.push(n);
           for (const tn of tableNodes) {
             const edge: GraphEdge = {
-              id: `edge-maps-${nodeId}-${tn.id}`,
+              id: edgeId('maps_to', nodeId, tn.id),
               source: nodeId,
               target: tn.id,
               type: 'maps_to',
@@ -391,7 +515,7 @@ export class ContextFileManager implements vscode.Disposable {
 
     if (data.business_rules) {
       for (const entry of data.business_rules) {
-        const nodeId = `biz-rule-${++ruleIndex}`;
+        const nodeId = uniqueId(ruleId(entry.rule), usedIds);
         const node: BusinessRuleNode = {
           id: nodeId,
           type: 'business_rule',
@@ -413,7 +537,7 @@ export class ContextFileManager implements vscode.Disposable {
           for (const n of byLabel) tableNodes.push(n);
           for (const tn of tableNodes) {
             const edge: GraphEdge = {
-              id: `edge-constrained-${nodeId}-${tn.id}`,
+              id: edgeId('constrained_by', nodeId, tn.id),
               source: nodeId,
               target: tn.id,
               type: 'constrained_by',
@@ -431,7 +555,7 @@ export class ContextFileManager implements vscode.Disposable {
 
     if (data.queries) {
       for (const entry of data.queries) {
-        const nodeId = uniqueId(`verified-query-${slugify(entry.name)}`, usedIds);
+        const nodeId = uniqueId(queryId(entry.name), usedIds);
         const node: VerifiedQueryNode = {
           id: nodeId,
           type: 'verified_query',
@@ -456,7 +580,7 @@ export class ContextFileManager implements vscode.Disposable {
           for (const n of byLabel) tableNodes.push(n);
           for (const tn of tableNodes) {
             const edge: GraphEdge = {
-              id: `edge-uses-${nodeId}-${tn.id}`,
+              id: edgeId('uses_table', nodeId, tn.id),
               source: nodeId,
               target: tn.id,
               type: 'uses_table',
@@ -559,7 +683,8 @@ export class ContextFileManager implements vscode.Disposable {
       graph: { nodes: snapshot.nodes, edges: snapshot.edges },
       assertions: this.ledger.assertions(),
       conflicts: this.conflicts,
-      runtimeFacts: [...this.runtimeFacts.values()]
+      runtimeFacts: [...this.runtimeFacts.values()],
+      catalogRevisions: catalogWatermarks(snapshot.nodes)
     };
   }
 
@@ -597,10 +722,6 @@ export class ContextFileManager implements vscode.Disposable {
 
 function toPosix(p: string): string {
   return p.split(path.sep).join('/');
-}
-
-function slugify(text: string): string {
-  return String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unnamed';
 }
 
 function uniqueId(base: string, used: Set<string>): string {

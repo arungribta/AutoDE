@@ -91,7 +91,7 @@ function createBaselineSut({ provider, chatContext, configureHub }) {
     logs,
     ingestion,
 
-    async setup({ workspaceDir, referenceDir, sourceOrder }) {
+    async setup({ workspaceDir, referenceDir, sourceOrder, identities }) {
       // Documents go where AutoDE reads them: .ai-context/context/business-context.yaml
       const ctxDir = path.join(workspaceDir, '.ai-context', 'context');
       fs.mkdirSync(ctxDir, { recursive: true });
@@ -101,7 +101,8 @@ function createBaselineSut({ provider, chatContext, configureHub }) {
       // Sources go in the way "Import File…" puts them: parseFile → the shared graph.
       for (const file of sourceOrder) {
         const full = path.join(referenceDir, 'sources', file);
-        const parsed = parseFile(fs.readFileSync(full, 'utf8'), full);
+        // Phase K1: a file's estate system/environment (default: a system named after the file).
+        const parsed = parseFile(fs.readFileSync(full, 'utf8'), full, identities && identities[file]);
         for (const n of parsed.nodes) await graph.addNode(n);
         for (const e of parsed.edges) await graph.addEdge(e);
         ingestion.push({ file, tables: parsed.nodes.filter((n) => n.type === 'table').length, warnings: parsed.warnings || [] });

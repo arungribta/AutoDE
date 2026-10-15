@@ -94,11 +94,11 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **STC-3 — Planning is blocked until context is ready,** with a clear statement of what is missing (P3). *Status:* Shipped v0.11.0.
 - **STC-4 — Source, target and mapping context are versioned;** revising an approved one creates a new version and keeps the old. *Status:* Shipped v0.20.0.
 - **STC-5 — Source and target can be connected at the same time,** with independent settings. *Status:* Shipped v0.20.0.
-- **STC-6 — The user chooses which databases and schemas matter;** AutoDE does not assume the whole account is relevant. *Status:* Shipped v0.21.0 (one database and schema per connection; several schemas per connection Planned (K)).
-- **STC-7 — Context can be built from files when there is no connectivity:** CSV, JSON and DDL, parsed structurally (a fact about the file, not a guess), keeping each table's own schema. *Status:* Shipped v0.22.0 (schemas kept v0.29.0, comments ignored v0.30.0). Legacy catalog exports Planned (K).
+- **STC-6 — The user chooses which databases and schemas matter;** AutoDE does not assume the whole account is relevant. *Status:* Shipped v0.21.0; several schemas per connection v0.31.0.
+- **STC-7 — Context can be built from files when there is no connectivity:** CSV, JSON and DDL, parsed structurally (a fact about the file, not a guess), keeping each table's own schema. *Status:* Shipped v0.22.0 (schemas kept v0.29.0, comments ignored v0.30.0, legacy column-dictionary exports v0.31.0).
 - **STC-8 — Source-to-target mappings are a reviewed, versioned object;** editing an approved mapping set requires re-review. *Status:* Shipped v0.23.0. Rule-based bulk mapping Planned (M2).
 - **STC-9 — Live-verified and file-derived facts are never blended silently;** the difference is shown to the user and to the model. An explicit re-verify reports what appeared and disappeared without deleting anything on its own. *Status:* Shipped v0.24.0.
-- **STC-10 — An estate is modelled as systems, environments and locations.** Several source systems and a target coexist; identically named tables in different systems stay distinct; roles (source, target, both) belong to a system or schema, so in-place modernisation and dev/test/prod are expressible. *Why:* estate merge and migration. *Status:* Planned (K).
+- **STC-10 — An estate is modelled as systems, environments and locations.** Several source systems and a target coexist; identically named tables in different systems stay distinct; roles (source, target, both) belong to a system or schema, so in-place modernisation and dev/test/prod are expressible. The estate is recorded in the repository and editable; a connection or imported file not yet assigned gets a system named after it. *Why:* estate merge and migration. *Status:* Shipped v0.31.0.
 
 ### 3.4 Data platforms and credentials (PLT)
 
@@ -107,7 +107,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **PLT-3 — Both interactive users and service accounts can authenticate,** through credential references resolved at use (environment, CLI configuration, the OS secret store, or a pluggable enterprise secrets manager). Secrets are never written to settings or the repository (P5). *Status:* Shipped v0.15.0 / v0.16.0.
 - **PLT-4 — Every auth mode offered in the UI works end to end,** and a missing consent is fixed in place rather than by editing settings by hand. *Status:* Shipped v0.17.0.
 - **PLT-5 — The assistant knows what is connected,** and the UI shows it. *Status:* Shipped v0.18.0.
-- **PLT-6 — Legacy sources without a live connector can still be described:** dictionary exports and DDL. *Status:* Partial — DDL shipped; dictionary exports Planned (K).
+- **PLT-6 — Legacy sources without a live connector can still be described:** dictionary exports (Teradata, Oracle, INFORMATION_SCHEMA) and DDL. *Status:* Shipped v0.31.0.
 - **PLT-7 — A user can opt in to a native driver** for platforms or performance the CLI-free path doesn't cover, fetched only on request and integrity-checked. *Status:* Planned (DRV).
 
 ### 3.5 Context layer (CTX)
@@ -134,7 +134,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **GRD-5 — Generated code is checked:** identifiers resolve to known objects, joins and casts use compatible types, STRICT rules are checked where they have a machine-checkable form (PII masking) and listed for review otherwise; each run produces a grounding report. *Status:* Shipped v0.30.0.
 - **GRD-6 — An artifact is reported stale when its specification version changed or a fact it relied on changed,** with the reason. *Status:* Shipped v0.9.0 (specification version), v0.30.0 (facts).
 - **GRD-7 — The engineer can see exactly what any recent LLM call received, and why any artifact looks the way it does.** *Status:* Shipped v0.30.0.
-- **GRD-8 — Retrieval finds the right objects when the request's vocabulary differs from physical names** — synonyms, abbreviations, another organisation's terms. Deterministic signals first; embeddings only as an optional signal if measurement shows they're needed. *Why:* merges and legacy estates. *Status:* Planned (K; RET conditional).
+- **GRD-8 — Retrieval finds the right objects when the request's vocabulary differs from physical names** — synonyms, abbreviations, another organisation's terms. Deterministic signals first; embeddings only as an optional signal if measurement shows they're needed. *Why:* merges and legacy estates. *Status:* Planned (K2; RET conditional).
 - **GRD-9 — Grounding and accuracy are measured on a reference problem for every release** (C7), with frozen baselines so every change shows its effect; the results become a release gate. *Status:* Shipped v0.27.0 (release gate Planned C6).
 
 ### 3.7 Planning and orchestration (ORC)
@@ -206,14 +206,14 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 
 ## 4. Non-functional requirements (NFR)
 
-- **NFR-1 — AutoDE never blocks the extension host for long:** no single synchronous task longer than 100 ms at large-estate size; long work yields, reports progress and can be cancelled. *Why:* a blocked extension host freezes AutoDE's panel and every other extension, Copilot included (the editor itself runs in another process). *Status:* Not met / unmeasured; measured and enforced from K.
+- **NFR-1 — AutoDE never blocks the extension host for long:** no single synchronous task longer than 100 ms at large-estate size; long work yields, reports progress and can be cancelled. *Why:* a blocked extension host freezes AutoDE's panel and every other extension, Copilot included (the editor itself runs in another process). *Status:* Not met / unmeasured; measured and enforced from K2.
 - **NFR-2 — Writes are atomic;** a crash never leaves a corrupt specification, context file or artifact. *Status:* Shipped.
 - **NFR-3 — Corrupt or partial files are tolerated:** logged, skipped or repaired when safe, never fatal. *Status:* Shipped.
 - **NFR-4 — Deactivation releases watchers, processes and handles promptly** (target: 200 ms). *Status:* Shipped v0.14.0 (timing not measured).
 - **NFR-5 — Footprint and dependencies** follow P6. *Status:* Shipped (runtime dependencies: `ajv`, `yaml`).
-- **NFR-6 — Works without a live connection** from cached and imported metadata, and says what it cannot see. *Status:* Partial — file ingestion shipped; cache and visibility Planned (K).
-- **NFR-7 — Reproducible:** the same inputs give the same context, projections and checks; artifacts pin the revisions they used. *Status:* Shipped v0.29.0 / v0.30.0 (catalog revisions Planned K).
-- **NFR-8 — Scale:** a business problem's working set (about 200 tables, 5 000 columns, 1 000 facts) stays responsive in memory; larger estates are handled by K's catalogs and cache, with any storage change decided from measurements. *Status:* Shipped for the working set; estates Planned (K).
+- **NFR-6 — Works without a live connection** from cached and imported metadata, and says what it cannot see. *Status:* Partial — file ingestion and dictionary exports shipped; cache and visibility Planned (K2).
+- **NFR-7 — Reproducible:** the same inputs give the same context, projections and checks; artifacts pin the revisions they used. *Status:* Shipped v0.29.0 / v0.30.0 (catalog revisions pinned in manifests v0.31.0).
+- **NFR-8 — Scale:** a business problem's working set (about 200 tables, 5 000 columns, 1 000 facts) stays responsive in memory; larger estates are handled by K's catalogs and cache, with any storage change decided from measurements. *Status:* Shipped for the working set; estates Planned (K2).
 - **NFR-9 — Every behaviour change is covered by automated tests,** and every release is evaluated on the reference problem. *Status:* Shipped (241 tests and eval at v0.30.0).
 
 ---

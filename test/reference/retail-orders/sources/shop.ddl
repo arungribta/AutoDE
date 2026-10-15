@@ -100,3 +100,11 @@ CREATE TABLE shop.shipments (
   delivered_at TIMESTAMP,
   status VARCHAR(20)
 );
+
+-- Reference data. crm.ddl has a table with the same fully qualified name (ref.currency_codes)
+-- but different columns: the two systems must not collapse into one table (Phase K1 trap).
+CREATE TABLE ref.currency_codes (
+  code CHAR(3) PRIMARY KEY,
+  name VARCHAR(50) NOT NULL,
+  minor_units INTEGER
+);

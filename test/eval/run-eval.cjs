@@ -51,6 +51,12 @@ function declaredTables(ddl) {
   return [...ddl.matchAll(/CREATE\s+TABLE\s+([\w.]+)/gi)].map((m) => m[1].toLowerCase());
 }
 
+/** schema.table names in a Teradata DBC.ColumnsV-style CSV export. */
+function dictionaryTables(csv) {
+  const rows = csv.trim().split(/\r?\n/).slice(1).map((l) => l.split(','));
+  return [...new Set(rows.map((r) => `${r[0]}.${r[1]}`.toLowerCase()))];
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -138,6 +144,23 @@ async function main() {
     await sutB.setup({ workspaceDir: path.join(scratch, 'noise-first'), referenceDir: REF, sourceOrder: [noiseFile, ...relevantFiles] });
     results.contextNoiseFirst = await measureSteps(sutB);
 
+    // ── Scenario E: estate identity (Phase K1) — the same table names in two systems,
+    // and in dev and prod of one system, plus a legacy dictionary export ──
+    fs.mkdirSync(path.join(scratch, 'estate'), { recursive: true });
+    const sutE = createSut({ provider: args.provider });
+    const estateFiles = ['shop.ddl', 'crm.ddl', 'shop_dev.ddl', 'legacy/edw_dbc_columns.csv'];
+    await sutE.setup({ workspaceDir: path.join(scratch, 'estate'), referenceDir: REF, sourceOrder: estateFiles,
+      identities: { 'shop.ddl': { system: 'shop', environment: 'prod' }, 'crm.ddl': { system: 'crm', environment: 'prod' }, 'shop_dev.ddl': { system: 'shop', environment: 'dev' }, 'legacy/edw_dbc_columns.csv': { system: 'edw', environment: 'prod' } } });
+    const estateGraph = sutE.schemaGraph();
+    const estateDeclared = estateFiles.reduce((n, f) => n + (f.endsWith('.csv') ? dictionaryTables(fs.readFileSync(path.join(REF, 'sources', f), 'utf8')).length : declaredTables(fs.readFileSync(path.join(REF, 'sources', f), 'utf8')).length), 0);
+    const estateTables = estateGraph.nodes.filter((n) => n.type === 'table');
+    results.estate = {
+      declared: estateDeclared,
+      distinct: new Set(estateTables.map((n) => n.id)).size,
+      systems: [...new Set(estateTables.map((n) => `${n.origin && n.origin.system}/${n.origin && n.origin.systemEnvironment}`))].sort(),
+      legacyIds: estateGraph.nodes.filter((n) => !/^(obj|term|rule|query|metric|rel):/.test(n.id)).length
+    };
+
     // ── The engineer's conversation ──
     results.chat = [];
     for (const turn of chatScript.turns) {
@@ -190,6 +213,7 @@ async function main() {
       decisions: manifests.reduce((n, m) => n + m.grounding.decisions.total, 0),
       decisionsBacked: manifests.reduce((n, m) => n + m.decisions.filter((d) => d.backedBy && !d.belowTrust).length, 0),
       gaps: manifests.reduce((n, m) => n + m.gaps.length, 0),
+      withCatalogRevisions: manifests.filter((m) => m.catalogRevisions && Object.keys(m.catalogRevisions).length > 0).length,
       written: run.manifestFiles ?? null,
       staleUse: run.staleUse ?? null
     };
@@ -265,6 +289,7 @@ function summaryRows(r) {
     ['Trap detection', '5/5', `${trapsCaught}/5`],
     ['Expected artifact properties', 'all', `${expPass}/${r.expected.length}`],
     ['Source tables kept distinct at ingestion', 'all', `${r.ingestion.represented}/${r.ingestion.declared}`],
+    ['Tables kept distinct across systems and environments', 'all', r.estate ? `${r.estate.distinct}/${r.estate.declared}` : 'n/a'],
     ['Stale-fact use', '0', r.manifests && r.manifests.staleUse !== null ? String(r.manifests.staleUse) : 'n/a — needs grounding manifests (C3)'],
     ['Plan-step context size', 'reported', `${r.contextNoiseLast.tokens} tokens median per step (max ${r.contextNoiseLast.tokensMax})`]
   ];
@@ -299,6 +324,7 @@ function renderReport(r) {
 
   L.push('', '## Ingestion', '');
   L.push(`Declared source tables (shop + crm): ${r.ingestion.declared}. Kept as distinct graph nodes: ${r.ingestion.represented}. Graph tables in total, including the noise schema: ${r.ingestion.graphTables}.`);
+  if (r.estate) L.push('', `**Estate identity:** ${r.estate.distinct} of ${r.estate.declared} declared tables kept distinct when shop (prod and dev), crm and a legacy EDW dictionary export are ingested together; systems/environments: ${r.estate.systems.join(', ')}; ${r.estate.legacyIds} node(s) with a pre-v0.31.0 id.`, '');
   for (const c of r.ingestion.collisions) {
     if (c.nodes.length < c.sources.length) L.push(`- **Collision:** ${c.sources.join(' and ')} became one node (${c.nodes.join(', ') || 'none'}). Their columns are merged and one source's table metadata is lost.`);
     else L.push(`- Same table name in two sources, kept distinct: ${c.nodes.join(', ')}.`);
@@ -319,7 +345,7 @@ function renderReport(r) {
     for (const g of r.contextGaps) L.push(`- **${g.needed}** (${g.reason}${g.foundTrust ? `, found ${g.foundTrust}` : ''}, needs ${g.minTrust})${g.stepId ? ` in step ${g.stepId}` : ' in chat'}: ${g.text}`);
   }
   if (r.manifests && r.manifests.artifacts) {
-    L.push('', '## Grounding manifests', '', `${r.manifests.artifacts} artifacts carry a manifest${r.manifests.written !== null ? ` (${r.manifests.written} \`.grounding.json\` files written)` : ''}. Primitive decisions: ${r.manifests.decisions} (${r.manifests.decisionsBacked} backed at the required trust). Gaps recorded in manifests: ${r.manifests.gaps}.`);
+    L.push('', '## Grounding manifests', '', `${r.manifests.artifacts} artifacts carry a manifest${r.manifests.written !== null ? ` (${r.manifests.written} \`.grounding.json\` files written)` : ''}. Primitive decisions: ${r.manifests.decisions} (${r.manifests.decisionsBacked} backed at the required trust). Gaps recorded in manifests: ${r.manifests.gaps}.${r.manifests.withCatalogRevisions !== undefined ? ` Manifests pinning catalog revisions: ${r.manifests.withCatalogRevisions}.` : ''}`);
   }
 
   const replied = r.chat.filter((c) => c.ok).length;

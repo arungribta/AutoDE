@@ -1,5 +1,27 @@
 import * as path from 'node:path';
 import { BaseNode, GraphEdge, TableNode, ColumnNode, Origin } from './types';
+import { DEFAULT_ENVIRONMENT, SystemRole, edgeId, objectId, originSideFor, slugifyId } from './estate';
+
+/**
+ * Which estate system and environment the file's objects belong to (Phase
+ * K1). Defaults: a system named after the file, environment "default",
+ * role source.
+ */
+export interface IngestIdentity {
+  system?: string;
+  environment?: string;
+  role?: SystemRole;
+}
+
+interface ResolvedIdentity { system: string; environment: string; role: SystemRole }
+
+function identityFor(filePath: string, identity?: IngestIdentity): ResolvedIdentity {
+  return {
+    system: identity?.system ? slugifyId(identity.system) : slugifyId(path.basename(filePath, path.extname(filePath))),
+    environment: identity?.environment ? slugifyId(identity.environment) : DEFAULT_ENVIRONMENT,
+    role: identity?.role ?? 'source'
+  };
+}
 
 /**
  * Step 5 of the Source & Target Context Architecture plan — real, structural
@@ -34,13 +56,16 @@ export interface IngestResult {
   warnings: string[];
 }
 
-function baseOrigin(filePath: string, confidence: number): Origin {
+function baseOrigin(filePath: string, confidence: number, ident: ResolvedIdentity): Origin {
+  const side = originSideFor(ident.role);
   return {
     source: 'derived',
     sourceRef: filePath,
     extractor: 'file-ingestion',
     extractedAt: new Date().toISOString(),
-    environment: 'source',
+    ...(side ? { environment: side } : {}),
+    system: ident.system,
+    systemEnvironment: ident.environment,
     confidence,
     // Step 7 (governance layer): a structural file parse is a real fact about
     // the file's own content (hence confidence 1.0), but it's never been
@@ -49,10 +74,6 @@ function baseOrigin(filePath: string, confidence: number): Origin {
     // and the user can tell the two apart instead of treating them the same.
     reliability: 'best-effort-inferred'
   };
-}
-
-function sanitizeId(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
 /**
@@ -67,11 +88,12 @@ function buildTableGraph(
   filePath: string,
   schemaLabel: string,
   confidence: number,
-  database?: string
+  database: string | undefined,
+  ident: ResolvedIdentity
 ): { nodes: BaseNode[]; edges: GraphEdge[] } {
   const fqn = database ? `${database}.${schemaLabel}.${tableName}` : `${schemaLabel}.${tableName}`;
-  const tableId = `table-${sanitizeId(fqn)}`;
-  const origin = baseOrigin(filePath, confidence);
+  const tableId = objectId(ident.system, ident.environment, fqn);
+  const origin = baseOrigin(filePath, confidence, ident);
   const nodes: BaseNode[] = [];
   const edges: GraphEdge[] = [];
 
@@ -91,7 +113,7 @@ function buildTableGraph(
 
   columns.forEach((col, idx) => {
     const colNode: ColumnNode = {
-      id: `col-${sanitizeId(fqn)}.${sanitizeId(col.name)}`,
+      id: objectId(ident.system, ident.environment, fqn, col.name),
       type: 'column',
       label: col.name,
       description: col.comment,
@@ -104,7 +126,7 @@ function buildTableGraph(
       origin
     };
     nodes.push(colNode);
-    edges.push({ id: `edge-contains-${tableNode.id}-${colNode.id}`, source: tableNode.id, target: colNode.id, type: 'contains', weight: 1.0 });
+    edges.push({ id: edgeId('contains', tableNode.id, colNode.id), source: tableNode.id, target: colNode.id, type: 'contains', weight: 1.0 });
   });
 
   return { nodes, edges };
@@ -151,13 +173,15 @@ function inferCsvColumnType(values: string[]): string {
   return 'STRING';
 }
 
-export function parseCsv(content: string, filePath: string): IngestResult {
+export function parseCsv(content: string, filePath: string, identity?: IngestIdentity): IngestResult {
   const warnings: string[] = [];
   const lines = content.split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length === 0) {
     return { nodes: [], edges: [], tableCount: 0, columnCount: 0, warnings: ['File is empty.'] };
   }
   const header = splitCsvLine(lines[0]);
+  const dictionary = detectColumnDictionary(header);
+  if (dictionary) return parseColumnDictionary(lines, header, dictionary, filePath, identity);
   const sampleRows = lines.slice(1, 201).map(splitCsvLine); // sample up to 200 data rows for type inference — real values, bounded cost
   const columns = header.map((name, idx) => ({
     name: name || `column_${idx + 1}`,
@@ -167,7 +191,7 @@ export function parseCsv(content: string, filePath: string): IngestResult {
   if (lines.length - 1 > 200) {
     warnings.push(`Type inference sampled the first 200 of ${lines.length - 1} data rows.`);
   }
-  const { nodes, edges } = buildTableGraph(tableName, columns, filePath, 'csv', 1.0);
+  const { nodes, edges } = buildTableGraph(tableName, columns, filePath, 'csv', 1.0, undefined, identityFor(filePath, identity));
   return { nodes, edges, tableCount: 1, columnCount: columns.length, warnings };
 }
 
@@ -180,7 +204,7 @@ function inferJsonColumnType(value: unknown): string {
   return 'STRING';
 }
 
-export function parseJson(content: string, filePath: string): IngestResult {
+export function parseJson(content: string, filePath: string, identity?: IngestIdentity): IngestResult {
   const warnings: string[] = [];
   let parsed: unknown;
   try {
@@ -218,7 +242,7 @@ export function parseJson(content: string, filePath: string): IngestResult {
   if (records.length > 200) {
     warnings.push(`Column inference sampled the first 200 of ${records.length} records.`);
   }
-  const { nodes, edges } = buildTableGraph(tableName, columns, filePath, 'json', 1.0);
+  const { nodes, edges } = buildTableGraph(tableName, columns, filePath, 'json', 1.0, undefined, identityFor(filePath, identity));
   return { nodes, edges, tableCount: 1, columnCount: columns.length, warnings };
 }
 
@@ -229,7 +253,8 @@ export function parseJson(content: string, filePath: string): IngestResult {
  * Constraint-only lines (`PRIMARY KEY (...)`, `FOREIGN KEY (...)`,
  * `CONSTRAINT ...`) are recognized and skipped rather than misparsed as columns.
  */
-export function parseDdl(content: string, filePath: string): IngestResult {
+export function parseDdl(content: string, filePath: string, identity?: IngestIdentity): IngestResult {
+  const ident = identityFor(filePath, identity);
   // Comments go first (v0.30.0): a trailing `-- A, B, C` comment's commas used to split
   // into bogus "columns", swallowing the next real column's name.
   const sql = content.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, '');
@@ -269,7 +294,7 @@ export function parseDdl(content: string, filePath: string): IngestResult {
       warnings.push(`CREATE TABLE ${rawName}: no parseable column definitions — skipped.`);
       continue;
     }
-    const { nodes: tNodes, edges: tEdges } = buildTableGraph(tableName, columns, filePath, schemaLabel, 1.0, database);
+    const { nodes: tNodes, edges: tEdges } = buildTableGraph(tableName, columns, filePath, schemaLabel, 1.0, database, ident);
     nodes.push(...tNodes);
     edges.push(...tEdges);
     tableCount++;
@@ -319,10 +344,106 @@ function parseDdlColumnDefs(body: string): Array<{ name: string; dataType: strin
   return columns;
 }
 
-export function parseFile(content: string, filePath: string): IngestResult {
+export function parseFile(content: string, filePath: string, identity?: IngestIdentity): IngestResult {
   const format = detectFileFormat(filePath);
-  if (format === 'csv') return parseCsv(content, filePath);
-  if (format === 'json') return parseJson(content, filePath);
-  if (format === 'ddl') return parseDdl(content, filePath);
+  if (format === 'csv') return parseCsv(content, filePath, identity);
+  if (format === 'json') return parseJson(content, filePath, identity);
+  if (format === 'ddl') return parseDdl(content, filePath, identity);
   return { nodes: [], edges: [], tableCount: 0, columnCount: 0, warnings: [`Unsupported file type: ${path.extname(filePath) || '(no extension)'}. Supported: .csv, .json, .sql, .ddl.`] };
+}
+
+// ── Legacy column-dictionary exports (Phase K1 item 7) ─────────────────────────
+
+type DictionaryFlavor = 'teradata' | 'oracle' | 'information_schema';
+
+interface DictionaryColumns {
+  flavor: DictionaryFlavor;
+  catalog?: number;
+  schema: number;
+  table: number;
+  column: number;
+  type: number;
+  length?: number;
+  precision?: number;
+  scale?: number;
+  nullable?: number;
+  ordinal?: number;
+}
+
+/**
+ * Recognises a column-dictionary export by its header names: Teradata
+ * `DBC.ColumnsV` (DatabaseName, TableName, ColumnName, ColumnType …), Oracle
+ * `ALL_TAB_COLUMNS` (OWNER, TABLE_NAME, COLUMN_NAME, DATA_TYPE …) and
+ * `INFORMATION_SCHEMA.COLUMNS` (TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME,
+ * DATA_TYPE …; SQL Server, Snowflake, Postgres, MySQL).
+ */
+function detectColumnDictionary(header: string[]): DictionaryColumns | undefined {
+  const h = header.map((x) => x.trim().toLowerCase());
+  const at = (...names: string[]) => { const i = h.findIndex((x) => names.includes(x)); return i >= 0 ? i : undefined; };
+  const table = at('tablename', 'table_name');
+  const column = at('columnname', 'column_name');
+  if (table === undefined || column === undefined) return undefined;
+  const common = { table, column, length: at('columnlength', 'data_length', 'character_maximum_length'), precision: at('decimaltotaldigits', 'data_precision', 'numeric_precision'), scale: at('decimalfractionaldigits', 'data_scale', 'numeric_scale'), nullable: at('nullable', 'is_nullable'), ordinal: at('columnid', 'column_id', 'ordinal_position') };
+  const tdSchema = at('databasename');
+  const tdType = at('columntype');
+  if (tdSchema !== undefined && tdType !== undefined) return { flavor: 'teradata', schema: tdSchema, type: tdType, ...common };
+  const owner = at('owner');
+  const dataType = at('data_type');
+  if (owner !== undefined && dataType !== undefined) return { flavor: 'oracle', schema: owner, type: dataType, ...common };
+  const isSchema = at('table_schema');
+  if (isSchema !== undefined && dataType !== undefined) return { flavor: 'information_schema', catalog: at('table_catalog'), schema: isSchema, type: dataType, ...common };
+  return undefined;
+}
+
+/** Teradata `ColumnType` codes → SQL type names (the common ones; anything else is kept as given). */
+const TERADATA_TYPES: Record<string, string> = {
+  CV: 'VARCHAR', CF: 'CHAR', CO: 'CLOB', BO: 'BLOB', BF: 'BYTE', BV: 'VARBYTE',
+  I: 'INTEGER', I1: 'BYTEINT', I2: 'SMALLINT', I8: 'BIGINT', F: 'FLOAT', D: 'DECIMAL', N: 'NUMBER',
+  DA: 'DATE', AT: 'TIME', TS: 'TIMESTAMP', TZ: 'TIME WITH TIME ZONE', SZ: 'TIMESTAMP WITH TIME ZONE', JN: 'JSON', XM: 'XML'
+};
+
+function dictionaryType(flavor: DictionaryFlavor, row: string[], c: DictionaryColumns): string {
+  const raw = (row[c.type] ?? '').trim();
+  const len = c.length !== undefined ? (row[c.length] ?? '').trim() : '';
+  const prec = c.precision !== undefined ? (row[c.precision] ?? '').trim() : '';
+  const scale = c.scale !== undefined ? (row[c.scale] ?? '').trim() : '';
+  const base = flavor === 'teradata' ? (TERADATA_TYPES[raw.toUpperCase()] ?? raw.toUpperCase()) : raw.toUpperCase();
+  if (/^(DECIMAL|NUMBER|NUMERIC)$/.test(base) && prec && /^\d+$/.test(prec)) return `${base}(${prec}${scale && /^\d+$/.test(scale) ? `,${scale}` : ''})`;
+  if (/CHAR|BYTE|BINARY/.test(base) && !/CHAR\(/.test(base) && len && /^\d+$/.test(len) && len !== '-1') return `${base}(${len})`;
+  return base || 'UNKNOWN';
+}
+
+function parseColumnDictionary(lines: string[], header: string[], c: DictionaryColumns, filePath: string, identity?: IngestIdentity): IngestResult {
+  const ident = identityFor(filePath, identity);
+  const tables = new Map<string, { catalog?: string; schema: string; table: string; cols: Array<{ ord: number; name: string; dataType: string; isNullable: boolean }> }>();
+  const warnings: string[] = [];
+  let skipped = 0;
+  for (const line of lines.slice(1)) {
+    const row = splitCsvLine(line);
+    const schema = (row[c.schema] ?? '').trim();
+    const table = (row[c.table] ?? '').trim();
+    const column = (row[c.column] ?? '').trim();
+    if (!schema || !table || !column) { skipped++; continue; }
+    const catalog = c.catalog !== undefined ? (row[c.catalog] ?? '').trim() || undefined : undefined;
+    const key = `${catalog ?? ''}|${schema}|${table}`.toLowerCase();
+    const entry = tables.get(key) ?? { catalog, schema, table, cols: [] };
+    const nullRaw = c.nullable !== undefined ? (row[c.nullable] ?? '').trim().toUpperCase() : '';
+    const ordRaw = c.ordinal !== undefined ? Number((row[c.ordinal] ?? '').trim()) : NaN;
+    entry.cols.push({ ord: Number.isFinite(ordRaw) ? ordRaw : entry.cols.length + 1, name: column, dataType: dictionaryType(c.flavor, row, c), isNullable: !(nullRaw === 'N' || nullRaw === 'NO') });
+    tables.set(key, entry);
+  }
+  if (skipped) warnings.push(`${skipped} row(s) without a schema, table or column name were skipped.`);
+  const nodes: BaseNode[] = [];
+  const edges: GraphEdge[] = [];
+  let columnCount = 0;
+  for (const t of tables.values()) {
+    const cols = t.cols.sort((a, b) => a.ord - b.ord).map(({ name, dataType, isNullable }) => ({ name, dataType, isNullable }));
+    const g = buildTableGraph(t.table, cols, filePath, t.schema, 1.0, t.catalog, ident);
+    for (const n of g.nodes) if (n.type === 'table') (n.metadata as Record<string, unknown>).dictionaryFlavor = c.flavor;
+    nodes.push(...g.nodes);
+    edges.push(...g.edges);
+    columnCount += cols.length;
+  }
+  warnings.push(`Read as a ${c.flavor === 'teradata' ? 'Teradata DBC.ColumnsV' : c.flavor === 'oracle' ? 'Oracle ALL_TAB_COLUMNS' : 'INFORMATION_SCHEMA.COLUMNS'} column dictionary (${header.length} columns in the export).`);
+  return { nodes, edges, tableCount: tables.size, columnCount, warnings };
 }

@@ -57,6 +57,14 @@ export interface Origin {
    * source becomes a correctness risk once specs/code are generated off it.
    */
   lastVerifiedAt?: string;
+  /**
+   * The estate system this object belongs to (Phase K1, v0.31.0) — a logical
+   * source or target such as "shop" or "crm"; see `src/engine/context/estate.ts`.
+   * Distinct from `environment` above, which is the older source/target tag.
+   */
+  system?: string;
+  /** The system's environment (dev, test, prod, or "default"). */
+  systemEnvironment?: string;
 }
 
 export interface BaseNode {

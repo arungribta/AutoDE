@@ -1,3 +1,4 @@
+import { emptyEstate, resolveIdentity, serializeEstate } from './engine/context/estate';
 import * as vscode from 'vscode';
 import { EXTENSION_ID, EXTENSION_VIEW_ID, EXTENSION_PANEL_VIEW_ID } from './core/extensionIdentity';
 import { DataAgentHubHub } from './core/agentHub';
@@ -372,6 +373,8 @@ export function activate(context: vscode.ExtensionContext): void {
         (msg: string) => { console.log(`[AutoDE ${role} Connection] ${msg}`); sidebarProvider.logToChat(msg); },
         { cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true }
       );
+      // Phase K1: extractions are tagged with the estate system this connection feeds.
+      newManager.setEstateResolver((id) => sidebarProvider.resolveConnectionIdentity(id, role));
       if (role === 'target') { targetConnectionManager?.dispose(); targetConnectionManager = newManager; } else { connectionManager?.dispose(); connectionManager = newManager; }
       const info = await newManager.connect(platform, credentials);
       const successMsg = `Connected to ${role} ${platform}: ${info.databaseName}.${info.schemaName} (v${info.version})`;
@@ -541,9 +544,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const schemas = await mgr.listSchemas(database);
       let schema: string | undefined;
+      let picked: string[] = [];
       if (schemas.length > 0) {
-        schema = await vscode.window.showQuickPick(schemas, { title: `Choose a ${role} schema`, placeHolder: `${schemas.length} found in ${database}` });
-        if (!schema) return; // database alone is still useful to save, but stay consistent with "cancel means cancel"
+        // Phase K1: several schemas per connection. The first becomes the connection's
+        // default schema; all of them are recorded on the connection's estate binding
+        // and extracted by Source Assessment.
+        picked = (await vscode.window.showQuickPick(schemas, { title: `Choose ${role} schema(s)`, placeHolder: `${schemas.length} found in ${database} — pick one or more`, canPickMany: true })) ?? [];
+        if (picked.length === 0) return; // cancel means cancel
+        schema = picked[0];
       }
 
       const platform = (role === 'target' ? configManager.getSettings().defaultTargetProvider : configManager.getSettings().defaultProvider) ?? 'snowflake';
@@ -560,7 +568,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       await configManager.updateSettings(patch);
       await sidebarProvider.refreshSettingsInWebview();
-      const msg = `Selected ${role} ${platform} scope: ${database}${schema ? '.' + schema : ''}.`;
+      const connId = mgr.activeConnectionId();
+      if (connId && picked.length > 0) {
+        const r = sidebarProvider.resolveConnectionIdentity(connId, role);
+        if (r) sidebarProvider.bindToSystem({ connection: connId, system: r.identity.system, environment: r.identity.environment, schemas: picked.map((s) => `${database}.${s}`) }, undefined, role);
+      }
+      const msg = `Selected ${role} ${platform} scope: ${database}.${picked.length > 1 ? `{${picked.join(', ')}}` : (schema ?? '')}.`;
       vscode.window.showInformationMessage(msg);
       sidebarProvider.logToChat(msg);
     } catch (err) {
@@ -603,10 +616,22 @@ export function activate(context: vscode.ExtensionContext): void {
       sidebarProvider.logToChat(msg);
       return;
     }
+    // Phase K1: which system (and environment) does this file describe?
+    const estate = sidebarProvider.getEstate();
+    const suggested = resolveIdentity(estate ?? emptyEstate(), { file: fileUri.fsPath }).identity; // a suggestion only — nothing is saved until the user picks
+    const systemPick = await vscode.window.showQuickPick(
+      [
+        ...(suggested ? [{ label: suggested.system ?? '', description: `environment ${suggested.environment ?? 'default'} (suggested)`, system: suggested.system ?? '', environment: suggested.environment }] : []),
+        ...(estate?.systems ?? []).filter((s) => s.id !== suggested?.system).map((s) => ({ label: s.id, description: `${s.name} · ${s.role}`, system: s.id, environment: undefined as string | undefined }))
+      ],
+      { title: `Which system does ${fileName} describe?`, placeHolder: 'Pick a system (edit .ai-context/estate.yaml to add systems, environments or roles)' }
+    );
+    if (!systemPick) return;
+    sidebarProvider.bindToSystem({ file: fileName, system: systemPick.system, ...(systemPick.environment ? { environment: systemPick.environment } : {}) });
     try {
       const contentBytes = await vscode.workspace.fs.readFile(fileUri);
       const content = Buffer.from(contentBytes).toString('utf8');
-      const result = parseFile(content, fileUri.fsPath);
+      const result = parseFile(content, fileUri.fsPath, { system: systemPick.system, environment: systemPick.environment });
       if (result.tableCount === 0) {
         const msg = `Could not parse any tables from ${fileName}: ${result.warnings.join(' ') || 'unknown reason'}`;
         vscode.window.showErrorMessage(msg);
@@ -724,6 +749,18 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showErrorMessage(msg);
       sidebarProvider.logToChat(msg);
     }
+  });
+
+  // Phase K1 (v0.31.0): the estate — systems, environments, roles and which
+  // connections/files feed them — lives in .ai-context/estate.yaml.
+  const openEstate = vscode.commands.registerCommand(`${EXTENSION_ID}.openEstate`, async () => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
+    const uri = vscode.Uri.joinPath(wsRoot, '.ai-context', 'estate.yaml');
+    try { await vscode.workspace.fs.stat(uri); } catch {
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(serializeEstate(sidebarProvider.getEstate() ?? emptyEstate()), 'utf8'));
+    }
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
   });
 
   // C3 (v0.30.0, docs/context-layer-requirements.md §7.1): the exact context a
@@ -894,7 +931,7 @@ export function activate(context: vscode.ExtensionContext): void {
     openSidebar, generatePlan, executePlan, generatePipelineSpec, resetSession,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
-    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, syncMetadata, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
     importToolSkill, runToolSkill,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential

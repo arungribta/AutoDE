@@ -54,6 +54,8 @@ export interface GroundingManifest {
   specId?: string;
   specVersion?: number;
   specRevision?: string;
+  /** Latest extraction per `system/environment` when the artifact was built (Phase K1). */
+  catalogRevisions?: Record<string, string>;
   planStepId?: string;
   agent: string;
   generation: PrimitiveUse['source'] | 'unknown';
@@ -182,6 +184,9 @@ export function checkRules(content: string, rules: readonly BusinessRuleNode[], 
 export interface BuildManifestInput {
   artifact: { path: string; content: string; language: string; agent: string; specId?: string; specVersion?: number };
   specRevision?: string;
+  catalogRevisions?: Record<string, string>;
+  /** Objects the approved Pipeline Spec plans to create — known, though not yet in any catalog (Phase K1 item 9). */
+  plannedObjects?: readonly string[];
   stepId?: string;
   pack?: PackManifest;
   primitiveUses: readonly PrimitiveUse[];
@@ -206,7 +211,7 @@ export function buildGroundingManifest(input: BuildManifestInput): GroundingMani
   }
 
   const isSql = input.artifact.language === 'sql';
-  const g = isSql ? checkSqlGrounding([{ name: input.artifact.path, content: input.artifact.content }], input.schemaIndex) : undefined;
+  const g = isSql ? checkSqlGrounding([{ name: input.artifact.path, content: input.artifact.content }], input.schemaIndex, input.plannedObjects) : undefined;
   const knownColumns = new Set(input.graph.nodes.filter((n) => n.type === 'column').map((n) => n.label.toLowerCase()));
   const rules = input.artifact.language === 'markdown'
     ? []
@@ -235,6 +240,7 @@ export function buildGroundingManifest(input: BuildManifestInput): GroundingMani
     specId: input.artifact.specId,
     specVersion: input.artifact.specVersion,
     specRevision: input.specRevision,
+    ...(input.catalogRevisions ? { catalogRevisions: input.catalogRevisions } : {}),
     planStepId: input.stepId,
     agent: input.artifact.agent,
     generation,

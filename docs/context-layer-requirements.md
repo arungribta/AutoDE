@@ -351,6 +351,8 @@ Scope: §7.1, §7.3, §8.3, §10.1 (all checks), Grounding Report; `buildContext
 Acceptance: every artifact written has a manifest; "What the agent saw" and "Explain This Artifact" work; trap 4 (context gap) and trap 5 (dilution) pass in replay; identifier grounding rate is reported per run.
 
 ### Phase K: Estate identity, per-system catalogs and the working-set cache
+**Status:** split into **K1** — items 1–3, 6, 7, 9, 10 — ✅ shipped in v0.31.0 (see CHANGELOG.md; WHAT/WHY in requirements.md STC-6, STC-10, PLT-6, NFR-7; HOW in technical-design.md §5.11), and **K2** — items 4, 5, 8, 11, 12 and the large-estate and vocabulary fixtures — planned for v0.32.0. The text below stays as K2's specification and K1's record.
+
 Added 2026-10-15 (after C3). Estate merge and legacy migration/modernisation are the common engagements; both need several source systems and a target side by side, and estates larger than the §1 design target.
 
 **Gaps verified against the code (v0.30.0):**

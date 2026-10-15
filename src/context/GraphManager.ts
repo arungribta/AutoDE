@@ -22,6 +22,8 @@ export class GraphManager implements vscode.Disposable {
   private mutex: Promise<void> = Promise.resolve();
 
   private lastIndexedAt: Date | null = null;
+  /** Re-keyed ids (old → current, Phase K1): lookups by an old id still find the object. */
+  private aliases: ReadonlyMap<string, string> = new Map();
 
   constructor() {}
 
@@ -106,7 +108,11 @@ export class GraphManager implements vscode.Disposable {
   }
 
   public getNodeById(id: string): BaseNode | undefined {
-    return this.nodes.get(id);
+    return this.nodes.get(id) ?? this.nodes.get(this.aliases.get(id) ?? '');
+  }
+
+  public setAliases(aliases: ReadonlyMap<string, string>): void {
+    this.aliases = aliases;
   }
 
   public findByFqn(fqn: string): BaseNode | undefined {

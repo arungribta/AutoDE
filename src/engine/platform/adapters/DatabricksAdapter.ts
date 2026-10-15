@@ -139,9 +139,10 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
     };
   }
 
-  getMetadataQueries(): PlatformMetadataQueries {
-    const catalog = this.connectedCatalog || 'main';
-    const schema = this.connectedSchema || 'default';
+  getMetadataQueries(scope?: string): PlatformMetadataQueries {
+    const parts = scope ? scope.split('.') : [];
+    const catalog = parts.length > 1 ? parts[0] : (this.connectedCatalog || 'main');
+    const schema = parts.length > 0 ? parts[parts.length - 1] : (this.connectedSchema || 'default');
 
     // The legacy Hive metastore catalog (Databricks' pre-Unity-Catalog compatibility
     // layer, still the default on older workspaces) has no `information_schema`

@@ -5251,8 +5251,8 @@ async function main() {
     assert.deepStrictEqual(tables.map((t) => t.fqn), ['shop.customers', 'crm.customers', 'analytics.sales.order_lines', 'ddl.loose']);
     assert.strictEqual(new Set(tables.map((t) => t.id)).size, 4);
     assert.deepStrictEqual([tables[2].database, tables[2].schema], ['analytics', 'sales']);
-    assert.strictEqual(r.nodes.filter((n) => n.type === 'column' && n.id.startsWith('col-crm_customers.')).length, 2, 'columns are not merged across the two customers tables');
-    const lines = r.nodes.filter((n) => n.type === 'column' && n.id.startsWith('col-analytics_sales_order_lines.'));
+    assert.strictEqual(r.nodes.filter((n) => n.type === 'column' && n.id.startsWith('obj:all/default/crm.customers.')).length, 2, 'columns are not merged across the two customers tables');
+    const lines = r.nodes.filter((n) => n.type === 'column' && n.id.startsWith('obj:all/default/analytics.sales.order_lines.'));
     assert.deepStrictEqual(lines.map((c) => [c.label, c.isPrimaryKey, c.isNullable]), [['order_id', true, false], ['line_no', true, false]]);
   });
 
@@ -5278,7 +5278,7 @@ async function main() {
       const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
       await cfm.initialize();
       const term = () => graph.getNodesByType('business_term').find((n) => n.label === 'Revenue');
-      assert.strictEqual(term().id, 'biz-term-revenue', 'term ids are keyed by name, not position');
+      assert.strictEqual(term().id, 'term:revenue', 'term ids are keyed by name, not position (namespaced since v0.31.0)');
       assert.strictEqual(term().origin.confidence, 0.8);
       assert.strictEqual(term().supportedBy.length, 1);
       const firstId = term().supportedBy[0];
@@ -5335,7 +5335,7 @@ async function main() {
       const graph2 = new GraphManager();
       const cfm2 = new ContextFileManager({ fsPath: dir }, graph2, () => {});
       await cfm2.initialize();
-      assert.deepStrictEqual(graph2.getNodesByType('table').map((t) => t.id).sort(), ['t1', 'table-csv_events']);
+      assert.deepStrictEqual(graph2.getNodesByType('table').map((t) => t.id).sort(), ['obj:events/default/csv.events', 'obj:sf/default/db.public.orders'], 'legacy ids are re-keyed to the estate scheme (v0.31.0)');
       const a = cfm2.getLedger().get(graph2.getNodeById('t1').supportedBy[0]);
       assert.deepStrictEqual([a.kind, a.trust, a.status, a.specId, a.evidence[0].type], ['schema_fact', 'verified', 'active', undefined, 'introspection'], 'project-wide schema_fact when no problem is active');
     } finally {
@@ -5345,6 +5345,8 @@ async function main() {
 
   // ---------- v0.30.0: context-layer C3 — context packs, manifests, causality ----------
 
+  // Phase K1: file-ingested ids are estate-qualified — system 'all' (from /ref/all.ddl), environment 'default'.
+  const T = (fqn, col) => `obj:all/default/${fqn}${col ? '.' + col : ''}`;
   const c3 = {
     /** shop (orders, order_items, refunds, customers), crm (customers, support_tickets), hr (employees) — via the real DDL parser. */
     graph() {
@@ -5363,7 +5365,7 @@ async function main() {
         { id: 'biz-rule-1', type: 'business_rule', label: 'PII masking', ruleText: 'Customer email and phone are PII and must be masked (SHA-256) in every analytics layer.', enforcementLevel: 'STRICT', metadata: {}, version: 1, origin: { source: 'user', sourceRef: 'context/business-context.yaml', extractor: 'business-context' } },
         { id: 'biz-rule-2', type: 'business_rule', label: 'Daily load', ruleText: 'Loads finish by 06:00.', enforcementLevel: 'STRICT', metadata: {}, version: 1, origin: { source: 'user', sourceRef: 'x', extractor: 'business-context' } }
       ];
-      const edges = [...parsed.edges, { id: 'edge-maps-revenue-items', source: 'biz-term-revenue', target: 'table-shop_order_items', type: 'maps_to', weight: 0.8 }];
+      const edges = [...parsed.edges, { id: 'edge-maps-revenue-items', source: 'biz-term-revenue', target: T('shop.order_items'), type: 'maps_to', weight: 0.8 }];
       return { nodes, edges };
     },
     async ledgerFor(graph) {
@@ -5385,27 +5387,27 @@ async function main() {
     const { resolveText } = require('../dist/engine/context/retrieval.js');
     const g = c3.graph();
     const ids = (t) => [...new Set(resolveText(t, g).map((m) => m.nodeId))].sort();
-    assert.deepStrictEqual(ids('Map shop.orders and crm.customers.email'), ['col-crm_customers.email', 'table-crm_customers', 'table-shop_orders']);
-    assert.deepStrictEqual(ids('Assess the shop and crm source schemas'), ['table-crm_customers', 'table-crm_support_tickets', 'table-shop_customers', 'table-shop_order_items', 'table-shop_orders', 'table-shop_refunds']);
-    assert.deepStrictEqual(ids('number of support tickets per order'), ['table-crm_support_tickets', 'table-shop_orders']);
-    assert.deepStrictEqual(ids('one row per order item, net of refunds'), ['table-shop_order_items', 'table-shop_refunds']);
-    assert.deepStrictEqual(ids('dedupe customers'), ['table-crm_customers', 'table-shop_customers'], 'an ambiguous label matches every candidate');
-    assert.deepStrictEqual(ids('what does revenue mean?'), ['biz-term-revenue']);
-    assert.deepStrictEqual(ids('build it with dbt on snowflake'), []);
+    assert.deepStrictEqual(ids('Map shop.orders and crm.customers.email'), [T('crm.customers', 'email'), T('crm.customers'), T('shop.orders')].sort());
+    assert.deepStrictEqual(ids('Assess the shop and crm source schemas'), [T('crm.customers'), T('crm.support_tickets'), T('shop.customers'), T('shop.order_items'), T('shop.orders'), T('shop.refunds')].sort());
+    assert.deepStrictEqual(ids('number of support tickets per order'), [T('crm.support_tickets'), T('shop.orders')].sort());
+    assert.deepStrictEqual(ids('one row per order item, net of refunds'), [T('shop.order_items'), T('shop.refunds')].sort());
+    assert.deepStrictEqual(ids('dedupe customers'), [T('crm.customers'), T('shop.customers')], 'an ambiguous label matches every candidate');
+    assert.deepStrictEqual(ids('what does revenue mean?'), ['biz-term-revenue'].sort());
+    assert.deepStrictEqual(ids('build it with dbt on snowflake'), [].sort());
   });
 
   await test('v0.30.0: expandNeighborhood() walks edges both ways with distance decay (GraphManager.traverseNeighborhood delegates to it)', async () => {
     const { expandNeighborhood } = require('../dist/engine/context/retrieval.js');
     const g = c3.graph();
-    const r = expandNeighborhood(g, ['table-shop_order_items'], { maxHops: 1, decay: 0.5 });
-    assert.strictEqual(r.get('table-shop_order_items').relevance, 1);
+    const r = expandNeighborhood(g, [T('shop.order_items')], { maxHops: 1, decay: 0.5 });
+    assert.strictEqual(r.get(T('shop.order_items')).relevance, 1);
     assert.strictEqual(r.get('biz-term-revenue').relevance, 0.5, 'reached against the edge direction (term → table)');
-    assert.ok(r.has('col-shop_order_items.quantity'));
-    assert.ok(!r.has('table-shop_orders'));
+    assert.ok(r.has(T('shop.order_items', 'quantity')));
+    assert.ok(!r.has(T('shop.orders')));
     const { GraphManager } = withMock(createMock(), () => fresh('../dist/context/GraphManager.js'));
     const gm = new GraphManager();
     await gm.loadSnapshot(g);
-    const sub = gm.traverseNeighborhood(['table-shop_order_items'], { maxHops: 1 });
+    const sub = gm.traverseNeighborhood([T('shop.order_items')], { maxHops: 1 });
     assert.ok(sub.nodes.some((n) => n.id === 'biz-term-revenue' && n.metadata.__relevance > 0));
   });
 
@@ -5446,7 +5448,7 @@ async function main() {
       assert.ok(a.text.includes('PII masking'), 'the STRICT rule naming a seed table\'s columns... is included');
       assert.ok(/Conflict \(definition\)/.test(a.text), 'a conflict on a term in scope is a warning in the pack');
       assert.ok(a.manifest.assertions.length > 5 && a.manifest.assertions.every((x) => /^sha256:/.test(x.revision)));
-      assert.ok(a.manifest.nodeIds.includes('table-shop_order_items'));
+      assert.ok(a.manifest.nodeIds.includes(T('shop.order_items')));
       const tiny = buildContextPack({ ...req, maxTokens: 60 }, sources);
       assert.ok(tiny.manifest.truncated.tables >= 1 || tiny.manifest.truncated.columns >= 1, JSON.stringify(tiny.manifest.truncated));
       assert.ok(/Not shown \(token budget\)/.test(tiny.text));
@@ -5461,10 +5463,10 @@ async function main() {
       let gaps = ask('Also show the number of support tickets per order on the dashboard.');
       assert.strictEqual(gaps.length, 1);
       assert.deepStrictEqual([gaps[0].needed, gaps[0].reason, gaps[0].minTrust], ['relationship', 'absent', 'confirmed']);
-      assert.deepStrictEqual(gaps[0].subject.sort(), ['table-crm_support_tickets', 'table-shop_orders']);
+      assert.deepStrictEqual(gaps[0].subject.sort(), [T('crm.support_tickets'), T('shop.orders')]);
       assert.strictEqual(ask('Join shop.refunds to shop.orders').length, 1);
       assert.strictEqual(ask('fct_order_lines has one row per order line').length, 0);
-      const rel = await env.ledger.assert({ kind: 'relationship', subject: ['table-shop_refunds', 'table-shop_orders'], predicate: 'joins_to', value: { from: { entity: 'shop.refunds', columns: ['order_id'] }, to: { entity: 'shop.orders', columns: ['order_id'] }, cardinality: 'N:1' }, statement: 'refunds join orders', evidence: [{ type: 'chat_message', ref: 't' }] });
+      const rel = await env.ledger.assert({ kind: 'relationship', subject: [T('shop.refunds'), T('shop.orders')], predicate: 'joins_to', value: { from: { entity: 'shop.refunds', columns: ['order_id'] }, to: { entity: 'shop.orders', columns: ['order_id'] }, cardinality: 'N:1' }, statement: 'refunds join orders', evidence: [{ type: 'chat_message', ref: 't' }] });
       gaps = ask('Join shop.refunds to shop.orders');
       assert.deepStrictEqual([gaps[0].reason, gaps[0].foundTrust], ['below_trust', 'inferred']);
       await env.ledger.confirm(rel.id, 'user:arun');
@@ -5480,11 +5482,11 @@ async function main() {
       const use = { kind: 'dedup', source: 'primitive', params: { sourceObject: 'RAW.SHOP.ORDERS', targetObject: 'stg_orders', partitionByColumns: ['order_id'], orderByColumn: 'updated_at' } };
       let d = backDecisions(use, env.project(), env.ledger.assertions());
       const part = d.find((x) => x.usedFor === 'dedup.partitionByColumns');
-      assert.strictEqual(part.subject, 'table-shop_orders', 'RAW.SHOP.ORDERS resolves to shop.orders');
+      assert.strictEqual(part.subject, T('shop.orders'), 'RAW.SHOP.ORDERS resolves to shop.orders');
       assert.deepStrictEqual([part.backedBy.trust, part.belowTrust], ['documented', true], 'the DDL\'s declared PK backs it, below the confirmed keys need');
       assert.strictEqual(d.find((x) => x.usedFor === 'dedup.orderByColumn').unbacked, true);
-      const key = await env.ledger.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['ORDER_ID'], statement: 'order_id is the key', evidence: [{ type: 'chat_message', ref: 't3' }], status: 'active', trust: 'confirmed' });
-      const inc = await env.ledger.assert({ kind: 'decision', subject: ['table-shop_orders'], predicate: 'load_strategy', value: { strategy: 'incremental', column: 'updated_at' }, statement: 'load incrementally on updated_at', evidence: [{ type: 'chat_message', ref: 't9' }], status: 'active', trust: 'confirmed' });
+      const key = await env.ledger.assert({ kind: 'key', subject: [T('shop.orders')], predicate: 'primary', value: ['ORDER_ID'], statement: 'order_id is the key', evidence: [{ type: 'chat_message', ref: 't3' }], status: 'active', trust: 'confirmed' });
+      const inc = await env.ledger.assert({ kind: 'decision', subject: [T('shop.orders')], predicate: 'load_strategy', value: { strategy: 'incremental', column: 'updated_at' }, statement: 'load incrementally on updated_at', evidence: [{ type: 'chat_message', ref: 't9' }], status: 'active', trust: 'confirmed' });
       d = backDecisions(use, env.project(), env.ledger.assertions());
       assert.deepStrictEqual(d.map((x) => [x.usedFor, x.backedBy && x.backedBy.id, !!x.belowTrust, !!x.unbacked]), [
         ['dedup.partitionByColumns', key.id, false, false],
@@ -5511,7 +5513,7 @@ async function main() {
     const { buildSchemaIndex } = require('../dist/engine/grounding/sqlGrounding.js');
     const env = await c3.ledgerFor(c3.graph());
     try {
-      const key = await env.ledger.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key of shop.orders', evidence: [{ type: 'chat_message', ref: 'chat#t3', excerpt: 'An order is uniquely identified by order_id' }], status: 'active', trust: 'confirmed' });
+      const key = await env.ledger.assert({ kind: 'key', subject: [T('shop.orders')], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key of shop.orders', evidence: [{ type: 'chat_message', ref: 'chat#t3', excerpt: 'An order is uniquely identified by order_id' }], status: 'active', trust: 'confirmed' });
       const graph = env.project();
       const pack = buildContextPack({ purpose: 'step', query: 'stg_orders: dedup shop.orders', stepId: 's5' }, c3.sources(env.ledger, graph));
       const sql = 'CREATE OR REPLACE VIEW stg_orders AS SELECT o.order_id, o.status, c.email FROM shop.orders o JOIN shop.customers c ON o.customer_id = c.customer_id JOIN shop.nonexistent n ON n.id = o.order_id';
@@ -5530,7 +5532,7 @@ async function main() {
       assert.ok(m.grounding.warnings.some((w) => w.startsWith('RULE_VIOLATION') && w.includes('email')));
       assert.deepStrictEqual(manifestStaleReasons(m, (id) => env.ledger.get(id)), []);
 
-      await env.ledger.supersede(key.id, { kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id', 'line_no'], statement: 'the key is (order_id, line_no)', evidence: [{ type: 'chat_message', ref: 'chat#t12' }], status: 'active', trust: 'confirmed' });
+      await env.ledger.supersede(key.id, { kind: 'key', subject: [T('shop.orders')], predicate: 'primary', value: ['order_id', 'line_no'], statement: 'the key is (order_id, line_no)', evidence: [{ type: 'chat_message', ref: 'chat#t12' }], status: 'active', trust: 'confirmed' });
       const reasons = manifestStaleReasons(m, (id) => env.ledger.get(id));
       assert.strictEqual(reasons.length, 1);
       assert.ok(/^dedup\.partitionByColumns changed: "order_id is the key of shop\.orders" was superseded by \S+ \(chat message chat#t3\)$/.test(reasons[0]), reasons[0]);
@@ -5580,6 +5582,288 @@ async function main() {
     const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
     const r = parseDdl('CREATE TABLE shop.orders (\n  status VARCHAR(20) NOT NULL, -- PLACED, SHIPPED, RETURNED\n  channel VARCHAR(20), /* web, app */\n  updated_at TIMESTAMP\n);', '/x.sql');
     assert.deepStrictEqual(r.nodes.filter((n) => n.type === 'column').map((c) => `${c.label} ${c.dataType}`), ['status VARCHAR(20)', 'channel VARCHAR(20)', 'updated_at TIMESTAMP']);
+  });
+
+  // ---------- v0.31.0: Phase K1 — estate identity and catalogs ----------
+
+  await test('v0.31.0: ids are estate-qualified and namespaced; estate.yaml round-trips; unbound sources get a system named after them', () => {
+    const e = require('../dist/engine/context/estate.js');
+    assert.strictEqual(e.objectId('shop', 'prod', 'SALES.PUBLIC.Orders'), 'obj:shop/prod/sales.public.orders');
+    assert.strictEqual(e.objectId('shop', 'prod', 'SALES.PUBLIC.Orders', 'Order_ID'), 'obj:shop/prod/sales.public.orders.order_id');
+    assert.strictEqual(e.edgeId('contains', 'a', 'b'), 'edge:contains:a->b');
+    assert.deepStrictEqual([e.termId('Net Revenue'), e.queryId('Monthly Revenue'), e.ruleId('Customer email and phone are PII and must be masked')], ['term:net-revenue', 'query:monthly-revenue', 'rule:customer-email-and-phone-are-pii']);
+    assert.deepStrictEqual(e.parseObjectId('obj:crm/dev/crm.customers.email'), { system: 'crm', environment: 'dev', path: 'crm.customers.email' });
+    assert.ok(e.isCanonicalId('term:x') && !e.isCanonicalId('table-shop_orders'));
+
+    const estate = e.parseEstate('systems:\n  - id: Shop OMS\n    name: Shop OMS\n    role: source\n  - id: edw\n    role: target\n    schemaRoles: { "EDW.RAW": source }\nbindings:\n  - connection: "snowflake:acme"\n    system: shop-oms\n    environment: PROD\n    schemas: [SALES.PUBLIC, SALES.ORDERS]\n  - file: crm.ddl\n    system: crm\n');
+    assert.deepStrictEqual(estate.systems.map((s) => s.id), ['shop-oms', 'edw']);
+    assert.deepStrictEqual(e.parseEstate(e.serializeEstate(estate)), estate, 'round-trips');
+    const bound = e.resolveIdentity(estate, { connection: 'snowflake:acme' });
+    assert.deepStrictEqual([bound.identity, bound.created], [{ system: 'shop-oms', environment: 'prod', role: 'source' }, false]);
+    assert.strictEqual(e.resolveIdentity(estate, { file: 'C:\\data\\CRM.ddl' }).identity.system, 'crm', 'files match by name, case-insensitively');
+    const fresh = e.resolveIdentity(estate, { connection: 'databricks:adb-1.azure.net' });
+    assert.strictEqual(fresh.created, true);
+    assert.strictEqual(fresh.identity.system, 'databricks-adb-1-azure-net');
+    assert.ok(fresh.estate.systems.some((s) => s.id === 'databricks-adb-1-azure-net') && fresh.estate.bindings.some((b) => b.connection === 'databricks:adb-1.azure.net'));
+    assert.deepStrictEqual([e.roleFor(estate, 'edw', 'EDW', 'RAW'), e.roleFor(estate, 'edw', 'EDW', 'MARTS')], ['source', 'target'], 'a schema can override its system\'s role (in-place modernisation)');
+  });
+
+  await test('v0.31.0: identically named tables in two systems — or in dev and prod of one — stay distinct, with system and environment on their origin', () => {
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+    const ddl = 'CREATE TABLE ref.currency_codes (code CHAR(3) PRIMARY KEY, name VARCHAR(50));';
+    const shop = parseDdl(ddl, '/src/shop.ddl', { system: 'shop', environment: 'prod' });
+    const crm = parseDdl(ddl, '/src/crm.ddl', { system: 'crm', environment: 'prod' });
+    const shopDev = parseDdl(ddl, '/src/shop_dev.ddl', { system: 'shop', environment: 'dev' });
+    const ids = [shop, crm, shopDev].flatMap((r) => r.nodes.map((n) => n.id));
+    assert.strictEqual(new Set(ids).size, ids.length, 'no collisions');
+    const t = shopDev.nodes.find((n) => n.type === 'table');
+    assert.deepStrictEqual([t.id, t.origin.system, t.origin.systemEnvironment, t.origin.environment], ['obj:shop/dev/ref.currency_codes', 'shop', 'dev', 'source']);
+    assert.strictEqual(parseDdl(ddl, '/src/target.ddl', { system: 'edw', role: 'target' }).nodes[0].origin.environment, 'target');
+    assert.strictEqual(parseDdl(ddl, '/x/legacy_export.sql').nodes[0].id, 'obj:legacy-export/default/ref.currency_codes', 'default system: the file name');
+  });
+
+  await test('v0.31.0: legacy column-dictionary CSVs (Teradata DBC.ColumnsV, Oracle ALL_TAB_COLUMNS, INFORMATION_SCHEMA.COLUMNS) become tables and typed columns', () => {
+    const { parseCsv } = fresh('../dist/engine/context/fileIngestion.js');
+    const td = parseCsv('DatabaseName,TableName,ColumnName,ColumnType,ColumnLength,DecimalTotalDigits,DecimalFractionalDigits,Nullable,ColumnId\nEDW,CUSTOMER,CUST_NO,CV,20,,,N,1\nEDW,CUSTOMER,BAL_AMT,D,,18,2,Y,2\nEDW,TXN,TXN_TS,TS,,,,N,1\n', '/x/dbc.csv', { system: 'edw' });
+    assert.strictEqual(td.tableCount, 2);
+    const cols = Object.fromEntries(td.nodes.filter((n) => n.type === 'column').map((c) => [c.label, `${c.dataType}${c.isNullable ? '' : ' NOT NULL'}`]));
+    assert.deepStrictEqual(cols, { CUST_NO: 'VARCHAR(20) NOT NULL', BAL_AMT: 'DECIMAL(18,2)', TXN_TS: 'TIMESTAMP NOT NULL' });
+    assert.ok(td.nodes.some((n) => n.id === 'obj:edw/default/edw.customer'));
+    assert.ok(td.warnings.some((w) => /Teradata/.test(w)));
+    const ora = parseCsv('OWNER,TABLE_NAME,COLUMN_NAME,DATA_TYPE,DATA_LENGTH,DATA_PRECISION,DATA_SCALE,NULLABLE,COLUMN_ID\nSALES,ORDERS,ORDER_ID,NUMBER,22,10,0,N,1\nSALES,ORDERS,NOTE,VARCHAR2,200,,,Y,2\n', '/x/oracle.csv');
+    assert.deepStrictEqual(ora.nodes.filter((n) => n.type === 'column').map((c) => c.dataType), ['NUMBER(10,0)', 'VARCHAR2(200)']);
+    const mssql = parseCsv('TABLE_CATALOG,TABLE_SCHEMA,TABLE_NAME,COLUMN_NAME,ORDINAL_POSITION,IS_NULLABLE,DATA_TYPE,CHARACTER_MAXIMUM_LENGTH\nERP,dbo,Invoice,Id,1,NO,int,\nERP,dbo,Invoice,Memo,2,YES,nvarchar,-1\n', '/x/is.csv', { system: 'erp' });
+    assert.ok(mssql.nodes.some((n) => n.id === 'obj:erp/default/erp.dbo.invoice'));
+    assert.deepStrictEqual(mssql.nodes.filter((n) => n.type === 'column').map((c) => `${c.label} ${c.dataType} ${c.isNullable}`), ['Id INT false', 'Memo NVARCHAR true'], '-1 (MAX) length is not rendered');
+    assert.strictEqual(parseCsv('a,b\n1,2\n', '/x/plain.csv').tableCount, 1, 'an ordinary CSV is still a data file');
+  });
+
+  await test('v0.31.0: re-keying legacy ids is pure, idempotent and graph-equivalent apart from ids', () => {
+    const { rekeyLegacyGraph } = require('../dist/engine/context/estate.js');
+    const fileO = { source: 'derived', sourceRef: '/data/shop.ddl', extractor: 'file-ingestion' };
+    const live = { source: 'derived', sourceRef: 'snowflake', connectionId: 'snowflake:acme', reliability: 'live-verified' };
+    const legacy = {
+      nodes: [
+        { id: 'table-shop_orders', type: 'table', label: 'orders', fqn: 'shop.orders', database: 'ingested_files', schema: 'shop', isView: false, metadata: {}, version: 1, origin: fileO },
+        { id: 'col-shop_orders.order_id', type: 'column', label: 'order_id', dataType: 'INT', isNullable: false, isPrimaryKey: true, isForeignKey: false, metadata: {}, version: 1, origin: fileO },
+        { id: 'table-DB_PUBLIC_ORDERS', type: 'table', label: 'ORDERS', fqn: 'DB.PUBLIC.ORDERS', database: 'DB', schema: 'PUBLIC', isView: false, metadata: {}, version: 1, origin: live },
+        { id: 'biz-term-revenue', type: 'business_term', label: 'Revenue', formula: 'SUM(x)', mappedNodeIds: [], metadata: {}, version: 1 },
+        { id: 'biz-rule-1', type: 'business_rule', label: 'PII', ruleText: 'Email must be masked always', enforcementLevel: 'STRICT', metadata: {}, version: 1 },
+        { id: 'spec-term-bps-1-obj0', type: 'business_term', label: 'Grow revenue', mappedNodeIds: [], metadata: {}, version: 1, origin: { source: 'derived', sourceRef: 'spec:bps-1', specId: 'bps-1' } }
+      ],
+      edges: [
+        { id: 'edge-contains-table-shop_orders-col-shop_orders.order_id', source: 'table-shop_orders', target: 'col-shop_orders.order_id', type: 'contains' },
+        { id: 'edge-maps-biz-term-revenue-table-shop_orders', source: 'biz-term-revenue', target: 'table-shop_orders', type: 'maps_to' }
+      ]
+    };
+    const identityOf = (o) => o && o.connectionId ? { system: 'acme', environment: 'prod' } : o && o.sourceRef && /\.ddl$/.test(o.sourceRef) ? { system: 'shop', environment: 'default' } : { system: 'unassigned', environment: 'default' };
+    const r = rekeyLegacyGraph(legacy, identityOf);
+    assert.deepStrictEqual(r.nodes.map((n) => n.id), ['obj:shop/default/shop.orders', 'obj:shop/default/shop.orders.order_id', 'obj:acme/prod/db.public.orders', 'term:revenue', 'rule:email-must-be-masked-always', 'term:spec.bps-1.obj0']);
+    assert.deepStrictEqual(r.edges.map((e) => [e.id, e.source, e.target]), [
+      ['edge:contains:obj:shop/default/shop.orders->obj:shop/default/shop.orders.order_id', 'obj:shop/default/shop.orders', 'obj:shop/default/shop.orders.order_id'],
+      ['edge:maps_to:term:revenue->obj:shop/default/shop.orders', 'term:revenue', 'obj:shop/default/shop.orders']
+    ]);
+    assert.strictEqual(r.aliases.get('table-shop_orders'), 'obj:shop/default/shop.orders');
+    assert.strictEqual(r.aliases.size, 8, '6 nodes + 2 edges');
+    assert.deepStrictEqual([r.nodes[2].origin.system, r.nodes[2].origin.systemEnvironment], ['acme', 'prod']);
+    const strip = (n) => { const c = JSON.parse(JSON.stringify(n)); delete c.id; delete c.source; delete c.target; if (c.origin) { delete c.origin.system; delete c.origin.systemEnvironment; } return c; };
+    assert.deepStrictEqual(r.nodes.map(strip), legacy.nodes.map(strip), 'equivalent apart from ids');
+    const again = rekeyLegacyGraph({ nodes: r.nodes, edges: r.edges }, identityOf);
+    assert.strictEqual(again.aliases.size, 0, 'idempotent');
+  });
+
+  await test('v0.31.0: a re-keying supersedes mirrors as "re-keyed" — no retraction, no review flags — and old subjects resolve through the ledger\'s alias map (also after compaction)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger, projectGraph } = require('../dist/engine/context/projection.js');
+    const { rekeyLegacyGraph } = require('../dist/engine/context/estate.js');
+    const root = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k1-'));
+    try {
+      const fileO = { source: 'derived', sourceRef: '/data/shop.ddl' };
+      const legacy = {
+        nodes: [
+          { id: 'table-shop_orders', type: 'table', label: 'orders', fqn: 'shop.orders', database: 'x', schema: 'shop', isView: false, metadata: {}, version: 1, origin: fileO },
+          { id: 'col-shop_orders.order_id', type: 'column', label: 'order_id', dataType: 'INT', isNullable: false, isPrimaryKey: true, isForeignKey: false, metadata: {}, version: 1, origin: fileO }
+        ],
+        edges: [{ id: 'edge-contains-table-shop_orders-col-shop_orders.order_id', source: 'table-shop_orders', target: 'col-shop_orders.order_id', type: 'contains' }]
+      };
+      const ledger = new AssertionLedger(p.join(root, 'ledger'));
+      await syncGraphToLedger(ledger, legacy);
+      const key = await ledger.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key', evidence: [{ type: 'chat_message', ref: 't3' }], status: 'active', trust: 'confirmed' });
+
+      const r = rekeyLegacyGraph(legacy, () => ({ system: 'shop', environment: 'default' }));
+      await ledger.append(ledger.buildAliasEvents(r.aliases));
+      const sync = await syncGraphToLedger(ledger, { nodes: r.nodes, edges: r.edges }, { aliases: r.aliases });
+      assert.deepStrictEqual([sync.rekeyed, sync.asserted, sync.superseded, sync.retracted, sync.dependentsFlagged], [3, 0, 0, 0, 0]);
+      assert.deepStrictEqual(ledger.get(key.id).subject, ['obj:shop/default/shop.orders'], 'the key assertion now points at the new id');
+      assert.strictEqual(ledger.get(key.id).status, 'active', 'and was not sent to review');
+      const projected = projectGraph(ledger.assertions());
+      assert.deepStrictEqual(projected.nodes.map((n) => n.id).sort(), ['obj:shop/default/shop.orders', 'obj:shop/default/shop.orders.order_id']);
+      assert.strictEqual((await syncGraphToLedger(ledger, projected, { aliases: r.aliases })).events, 0, 'idempotent');
+      assert.strictEqual(ledger.buildAliasEvents(r.aliases).length, 0, 'aliases are recorded once');
+
+      await ledger.compact({ prune: true });
+      const reread = new AssertionLedger(p.join(root, 'ledger'));
+      await reread.load();
+      assert.strictEqual(reread.aliases().get('table-shop_orders'), 'obj:shop/default/shop.orders', 'compaction keeps the alias map');
+      assert.deepStrictEqual(reread.get(key.id).subject, ['obj:shop/default/shop.orders']);
+    } finally {
+      nodeFs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.31.0: ContextFileManager migrates a pre-K1 workspace in place — no assertion lost, old ids still resolve, estate.yaml written, second load appends nothing', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k1-cfm-'));
+    const ctx = p.join(dir, '.ai-context');
+    try {
+      // A v0.30.0 workspace: a ledger holding legacy-id mirrors and a key assertion about one of them.
+      const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+      const { syncGraphToLedger } = require('../dist/engine/context/projection.js');
+      const fileO = { source: 'derived', sourceRef: '/data/shop.ddl', extractor: 'file-ingestion', reliability: 'best-effort-inferred' };
+      const old = new AssertionLedger(p.join(ctx, 'ledger'));
+      await syncGraphToLedger(old, { nodes: [{ id: 'table-shop_orders', type: 'table', label: 'orders', fqn: 'shop.orders', database: 'ingested_files', schema: 'shop', isView: false, metadata: {}, version: 1, origin: fileO }], edges: [] });
+      const key = await old.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key', evidence: [{ type: 'chat_message', ref: 't3' }], status: 'active', trust: 'confirmed' });
+      const mock = {
+        Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+        workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
+        RelativePattern: class {}
+      };
+      delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+      delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+      const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+      const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+      const graph = new GraphManager();
+      const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+      await cfm.initialize();
+      assert.deepStrictEqual(graph.getNodesByType('table').map((t) => t.id), ['obj:shop/default/shop.orders']);
+      assert.strictEqual(graph.getNodeById('table-shop_orders').id, 'obj:shop/default/shop.orders', 'old ids still resolve (mapping contexts hold them)');
+      const ledger = cfm.getLedger();
+      assert.deepStrictEqual([ledger.get(key.id).status, ledger.get(key.id).subject], ['active', ['obj:shop/default/shop.orders']]);
+      assert.ok(!ledger.assertions().some((a) => a.status === 'rejected'), 'nothing retracted by the migration');
+      assert.ok(/system: shop/.test(nodeFs.readFileSync(p.join(ctx, 'estate.yaml'), 'utf8')), 'the file-derived system is recorded in estate.yaml');
+      const events = ledger.allEvents().length;
+      const graph2 = new GraphManager();
+      const cfm2 = new ContextFileManager({ fsPath: dir }, graph2, () => {});
+      await cfm2.initialize();
+      assert.strictEqual(cfm2.getLedger().allEvents().length, events, 'a second load appends nothing');
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.31.0: extracting a second schema of the same connection does not retract the first; re-extracting a schema replaces only it', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k1-merge-'));
+    const ctx = p.join(dir, '.ai-context');
+    nodeFs.mkdirSync(ctx, { recursive: true });
+    const mock = {
+      Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+      workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
+      RelativePattern: class {}
+    };
+    delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+    delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    const { SnowflakeAdapter } = require('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ account: 'acme', username: 'u' }, () => {});
+    const extraction = (schema, tables) => adapter.snapshotToGraph({ platform: 'snowflake', connectionId: 'snowflake:acme', extractedAt: '2026-10-15T00:00:00Z', views: [], foreignKeys: [],
+      tables: tables.map((t) => ({ catalog: 'SALES', schema, name: t, fqn: `SALES.${schema}.${t}`, type: 'BASE TABLE', columns: [{ name: 'ID', dataType: 'NUMBER', isNullable: false, isPrimaryKey: true, isForeignKey: false, ordinalPosition: 1 }] })) }, { system: 'shop', environment: 'prod', role: 'source' });
+    const write = async (g) => {
+      const f = p.join(ctx, 'schema-graph.json');
+      nodeFs.writeFileSync(f, JSON.stringify(g));
+      const future = new Date(Date.now() + 60000 + Math.random() * 1000);
+      nodeFs.utimesSync(f, future, future);
+      const graph = new GraphManager();
+      const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+      await cfm.initialize();
+      return { graph, cfm };
+    };
+    try {
+      await write(extraction('PUBLIC', ['ORDERS', 'CUSTOMERS']));
+      const { graph, cfm } = await write(extraction('FINANCE', ['INVOICES']));
+      assert.deepStrictEqual(graph.getNodesByType('table').map((t) => t.id).sort(), ['obj:shop/prod/sales.finance.invoices', 'obj:shop/prod/sales.public.customers', 'obj:shop/prod/sales.public.orders']);
+      assert.ok(!cfm.getLedger().assertions().some((a) => a.status === 'rejected'), 'nothing retracted');
+      const third = await write(extraction('PUBLIC', ['ORDERS']));
+      assert.deepStrictEqual(third.graph.getNodesByType('table').map((t) => t.id).sort(), ['obj:shop/prod/sales.finance.invoices', 'obj:shop/prod/sales.public.orders'], 'CUSTOMERS was dropped from PUBLIC; FINANCE is untouched');
+      const gone = third.cfm.getLedger().assertions().find((a) => a.predicate === 'node' && a.value.node.id === 'obj:shop/prod/sales.public.customers');
+      assert.strictEqual(gone.status, 'rejected');
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.31.0: extractMetadata() extracts every schema in schemaFilter (lineage once) and ConnectionManager applies the estate binding\'s schemas and identity', async () => {
+    const { SnowflakeAdapter } = require('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const adapter = new SnowflakeAdapter({ account: 'acme', username: 'u', database: 'SALES' }, () => {});
+    const seen = [];
+    adapter.connectedDb = 'SALES';
+    adapter.executeQuery = async (sql) => {
+      seen.push(sql);
+      const m = /table_schema = '([A-Z_]+)'/i.exec(sql);
+      if (/INFORMATION_SCHEMA\.TABLES/i.test(sql)) return { columns: [], rows: [{ TABLE_CATALOG: 'SALES', TABLE_SCHEMA: m[1], TABLE_NAME: `T_${m[1]}`, TABLE_TYPE: 'BASE TABLE' }], rowCount: 1, executionTimeMs: 0 };
+      if (/INFORMATION_SCHEMA\.COLUMNS/i.test(sql)) return { columns: [], rows: [{ TABLE_CATALOG: 'SALES', TABLE_SCHEMA: m[1], TABLE_NAME: `T_${m[1]}`, COLUMN_NAME: 'ID', DATA_TYPE: 'NUMBER', IS_NULLABLE: 'NO', ORDINAL_POSITION: 1 }], rowCount: 1, executionTimeMs: 0 };
+      return { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
+    };
+    adapter.getCapabilities = () => ({ supportsColumnProfiling: false, supportsLineageExtraction: true });
+    const snap = await adapter.extractMetadata({ schemaFilter: ['PUBLIC', 'SALES.FINANCE'] });
+    assert.deepStrictEqual(snap.tables.map((t) => t.fqn).sort(), ['SALES.FINANCE.T_FINANCE', 'SALES.PUBLIC.T_PUBLIC']);
+    assert.strictEqual(seen.filter((q) => /QUERY_HISTORY/i.test(q)).length, 1, 'account-wide lineage is read once');
+
+    const { ConnectionManager } = require('../dist/engine/platform/ConnectionManager.js');
+    const cm = new ConnectionManager(() => {});
+    cm.activeAdapter = adapter;
+    let asked;
+    cm.setEstateResolver((id) => { asked = id; return { identity: { system: 'shop', environment: 'prod', role: 'source' }, schemas: ['PUBLIC'] }; });
+    seen.length = 0;
+    const bound = await cm.extractMetadata({});
+    assert.strictEqual(asked, 'snowflake:acme');
+    assert.deepStrictEqual(bound.tables.map((t) => t.schema), ['PUBLIC'], 'the binding\'s schemas are extracted when the caller names none');
+    const g = adapter.snapshotToGraph(bound, cm.activeIdentity());
+    assert.strictEqual(g.nodes[0].id, 'obj:shop/prod/sales.public.t_public');
+  });
+
+  await test('v0.31.0: manifests pin catalog revisions per system/environment, and objects the approved Pipeline Spec plans count as known', () => {
+    const { catalogWatermarks } = require('../dist/engine/context/estate.js');
+    const { buildGroundingManifest } = require('../dist/engine/grounding/manifest.js');
+    const { buildSchemaIndex } = require('../dist/engine/grounding/sqlGrounding.js');
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+    const g = parseDdl('CREATE TABLE shop.orders (order_id INT PRIMARY KEY);', '/x/shop.ddl', { system: 'shop', environment: 'prod' });
+    const rev = catalogWatermarks(g.nodes);
+    assert.deepStrictEqual(Object.keys(rev), ['shop/prod']);
+    assert.ok(/^\d{4}-/.test(rev['shop/prod']));
+    const m = buildGroundingManifest({
+      artifact: { path: 'x.sql', content: 'INSERT INTO marts.fct_orders SELECT o.order_id FROM shop.orders o JOIN marts.dim_customer c ON 1=1', language: 'sql', agent: 'a' },
+      primitiveUses: [], graph: g, schemaIndex: buildSchemaIndex(g.nodes, g.edges), assertions: [], catalogRevisions: rev, plannedObjects: ['MARTS.DIM_CUSTOMER']
+    });
+    assert.deepStrictEqual(m.catalogRevisions, rev);
+    assert.deepStrictEqual(m.grounding.identifiers.unresolved, [], 'dim_customer is planned, so it is not an unresolved identifier');
+  });
+
+  await test('v0.31.0: estate.yaml edited in the editor applies to the next lookup (no reload needed)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k1-estate-'));
+    try {
+      const mock = {
+        Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+        workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
+        RelativePattern: class {}
+      };
+      delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+      delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+      const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+      const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+      const cfm = new ContextFileManager({ fsPath: dir }, new GraphManager(), () => {});
+      await cfm.initialize();
+      nodeFs.writeFileSync(p.join(dir, '.ai-context', 'estate.yaml'), 'systems:\n  - { id: shop, name: Shop, role: source }\nbindings:\n  - { file: shop_dev.ddl, system: shop, environment: dev }\n');
+      assert.deepStrictEqual(cfm.resolveFile('C:\\src\\shop_dev.ddl'), { system: 'shop', environment: 'dev', role: 'source' });
+      assert.strictEqual(cfm.resolveFile('/src/other.ddl').system, 'other');
+      assert.ok(/other\.ddl/.test(nodeFs.readFileSync(p.join(dir, '.ai-context', 'estate.yaml'), 'utf8')), 'the new binding is saved, the edited ones kept');
+      assert.ok(/environment: dev/.test(nodeFs.readFileSync(p.join(dir, '.ai-context', 'estate.yaml'), 'utf8')));
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   const failed = results.filter(r => !r.ok);

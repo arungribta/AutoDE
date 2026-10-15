@@ -140,11 +140,12 @@ export interface GroundingArtifact {
  * Checks a set of SQL artifacts together, so a model created in one artifact
  * and referenced in another (a dbt `ref`) counts as internal.
  */
-export function checkSqlGrounding(artifacts: readonly GroundingArtifact[], index: SchemaIndex): GroundingResult {
+export function checkSqlGrounding(artifacts: readonly GroundingArtifact[], index: SchemaIndex, plannedObjects: readonly string[] = []): GroundingResult {
   const result: GroundingResult = { tablesChecked: 0, tablesResolved: 0, columnsChecked: 0, columnsResolved: 0, unresolved: [], ambiguous: [], typeIssues: [] };
 
-  // Pass 1: everything the artifact set itself defines.
-  const internal = new Set<string>();
+  // Pass 1: everything the artifact set itself defines, plus objects the approved
+  // Pipeline Spec plans to create (Phase K1: known, though in no catalog yet).
+  const internal = new Set<string>(plannedObjects.map((o) => lastPart(clean(o)).toLowerCase()));
   const pre = artifacts.map((a) => ({ a, ...preprocess(a.content) }));
   for (const { a, text } of pre) {
     const base = a.name.replace(/\\/g, '/').split('/').pop()!.replace(/\.(sql|yml|yaml)$/i, '').toLowerCase();

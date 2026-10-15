@@ -243,7 +243,7 @@ Until this phase ships, the MCP server MUST NOT be given write access to `.ai-co
 
 ### 9.0 Combined roadmap
 
-The order, version and status of every phase — this spec's, the context-layer spec's, and the carried-forward ones — live in one place: [roadmap.md](roadmap.md). Implement in that order; each phase is one minor version. Phase identifiers: `1`–`6` (this spec), `C1`–`C6`, `C4a`/`C4b` and `K` (context-layer spec §11), `S1`–`S3`, `DRV` and `GOV` (§9.1 below). `DRV` and `GOV` were called D and G until 2026-10-15; they were renamed because those letters also name older, unrelated work (the v0.9.0 tool-skills "Phase D", and an unbuilt "Phase G" context-memory item).
+The order, version and status of every phase — this spec's, the context-layer spec's, and the carried-forward ones — live in one place: [roadmap.md](roadmap.md). Implement in that order; each phase is one minor version. Phase identifiers: `1`–`6` (this spec), `C1`–`C6`, `C4a`/`C4b` and `K1`/`K2` (context-layer spec §11), `S1`–`S3`, `DRV` and `GOV` (§9.1 below). `DRV` and `GOV` were called D and G until 2026-10-15; they were renamed because those letters also name older, unrelated work (the v0.9.0 tool-skills "Phase D", and an unbuilt "Phase G" context-memory item).
 
 ### 9.1 Carried-forward phases (S1, S2, DRV, GOV, S3)
 

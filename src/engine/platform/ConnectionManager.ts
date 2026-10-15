@@ -1,3 +1,4 @@
+import type { ObjectIdentity } from '../context/estate';
 import { DataPlatformProvider } from '../types';
 import { Disposable, IDataSourceAdapter, ConnectionInfo, SchemaSnapshot, ExtractOptions, QueryOptions, QueryResult, PlatformCapabilities } from './types';
 import { SnowflakeAdapter } from './adapters/SnowflakeAdapter';
@@ -19,12 +20,19 @@ export interface ConnectionManagerOptions {
 }
 
 /**
+ * Where a connection's objects belong in the estate, and which schemas to
+ * extract (Phase K1). Supplied by the host from `.ai-context/estate.yaml`.
+ */
+export type EstateResolver = (connectionId: string) => { identity: ObjectIdentity; schemas?: string[] } | undefined;
+
+/**
  * Manages the lifecycle of data platform connections.
  * Owns the active adapter and provides a unified interface for sub-agents.
  */
 export class ConnectionManager implements Disposable {
   private activeAdapter: IDataSourceAdapter | null = null;
   private adapterFactories: Map<DataPlatformProvider, AdapterFactory> = new Map();
+  private estateResolver?: EstateResolver;
 
   constructor(private readonly log: (msg: string) => void, options: ConnectionManagerOptions = {}) {
     const cliConsent = options.cliConsent ?? (() => false);
@@ -112,11 +120,31 @@ export class ConnectionManager implements Disposable {
   /**
    * Extract metadata from the connected platform.
    */
+  /** Phase K1: lets the host say which system a connection feeds and which schemas to extract. */
+  setEstateResolver(resolver: EstateResolver | undefined): void {
+    this.estateResolver = resolver;
+  }
+
+  /** The active connection's id (e.g. `snowflake:acme`), for estate lookups. */
+  activeConnectionId(): string | undefined {
+    return this.activeAdapter?.getConnectionId?.();
+  }
+
+  /** The estate identity of the active connection, when the host supplied a resolver. */
+  activeIdentity(): ObjectIdentity | undefined {
+    const id = this.activeConnectionId();
+    return id && this.estateResolver ? this.estateResolver(id)?.identity : undefined;
+  }
+
   async extractMetadata(options?: ExtractOptions): Promise<SchemaSnapshot> {
     if (!this.activeAdapter) {
       throw new Error('No active connection. Connect to a data platform first.');
     }
-    return this.activeAdapter.extractMetadata(options);
+    // Schemas from the estate binding apply unless the caller named its own.
+    const id = this.activeConnectionId();
+    const binding = id && this.estateResolver ? this.estateResolver(id) : undefined;
+    const effective = !options?.schemaFilter?.length && binding?.schemas?.length ? { ...options, schemaFilter: binding.schemas } : options;
+    return this.activeAdapter.extractMetadata(effective);
   }
 
   /** Lists databases/catalogs visible to the connected principal (Step 4 — discovery-based selection, not blind typing). */
@@ -171,7 +199,7 @@ export class ConnectionManager implements Disposable {
     if (!this.activeAdapter) {
       throw new Error('No active connection.');
     }
-    const graphData = this.activeAdapter.snapshotToGraph(snapshot);
+    const graphData = this.activeAdapter.snapshotToGraph(snapshot, this.activeIdentity());
     const sep = workspaceRoot.includes('\\') && !workspaceRoot.includes('/') ? '\\' : '/';
     const target = [workspaceRoot.replace(/[\\/]+$/, ''), '.ai-context', 'schema-graph.json'].join(sep);
     await writeFileAtomic(io, target, JSON.stringify(graphData, null, 2));

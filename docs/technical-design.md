@@ -1,7 +1,7 @@
 # AutoDE — Technical Design Document
 
 **Last Updated:** 2026-10-15
-**Version:** 0.30.0
+**Version:** 0.31.0
 **Scope:** HOW AutoDE is built — architecture, modules, data formats, algorithms and design trade-offs. What AutoDE must do and why: [requirements.md](requirements.md) and the forward specifications. Order and status: [roadmap.md](roadmap.md). Release history (moved out of this document on 2026-10-15): [CHANGELOG.md](../CHANGELOG.md). Document map: [README.md](README.md).
 
 > Restructured on 2026-10-15: sections 1, 2, 5, 7, 10.1–10.2, 11 and 12 were rewritten against the code at v0.30.0; the others were carried over with paths updated for the v0.26.0 move to `src/engine/`, and some still describe their version's design in narrative form. The historical phase list (old §10) was removed — release history is in CHANGELOG.md. Where this document and the code disagree, the code and the latest CHANGELOG entry win; corrections are tracked in the roadmap.
@@ -114,6 +114,7 @@ Everything AutoDE keeps lives under `.ai-context/` in the open workspace. Proble
 │   └── snapshot.json                #   optional, written by compaction
 ├── derived/graph.json               # projection cache (git-ignored, rebuildable)
 ├── schema-graph.json                # last live extraction (input to the next reindex)
+├── estate.yaml                      # systems, environments, roles; which connections/files feed them (§5.11)
 ├── sources.yaml                     # registered business-context source files
 ├── skills/                          # interview-skill overrides; tool-skills/<id>/ imports
 ├── primitives/                      # Tier-2 primitive overrides (+ history/)
@@ -121,7 +122,7 @@ Everything AutoDE keeps lives under `.ai-context/` in the open workspace. Proble
 └── target-environment.yaml          # tool-preference profiles (TargetConfigManager)
 ```
 
-Planned: `.ai-context/estate.yaml` and `.ai-context/catalog/<system>/<environment>/` (Phase K); `.ai-context/profiles/` (C4a).
+Planned: `.ai-context/catalog/<system>/<environment>/` (K2); `.ai-context/profiles/` (C4a).
 
 **Committed vs ignored.** Specifications, context documents, the ledger and artifacts are deliverables and are committed; `derived/`, `chats/` and temp files are git-ignored (`.gitignore`).
 
@@ -485,7 +486,7 @@ Edges (`GraphEdge`): `contains` (table → column), `foreign_key`, `maps_to` (te
 
 **`Origin`** (provenance on nodes and edges): `source` (`user | derived | system | llm | template`), `sourceRef`, `confidence?` (filled from trust by the projection), `extractor?`, `extractedAt?`, `specId?`/`specVersion?`, `environment?` (`source | target`), `connectionId?`, `reliability?` (`live-verified | best-effort-inferred`), `lastVerifiedAt?`.
 
-**Current node ids** — `table-<fqn>` and `col-<fqn>.<column>` (sanitised), `biz-term-<slug>`, `biz-rule-<n>`, `verified-query-<slug>`, `spec-term-<specId>-…`/`spec-rule-<specId>-…`, `term:<slug>`/`metric:<slug>`/`rule:<assertionId>`/`rel:<assertionId>` for projected definitions. Phase K replaces these with namespaced, system-qualified ids and an alias map.
+**Ids** (since v0.31.0, `src/engine/context/estate.ts`): physical objects `obj:<system>/<environment>/<fqn>[.<column>]` (lower-case); glossary terms `term:<slug>`, rules `rule:<slug of the first six words>`, verified queries `query:<slug>`, spec-derived `term:spec.<specId>.<suffix>` / `rule:spec.<specId>.<suffix>`; edges `edge:<type>:<source>-><target>`; projected definitions `term:`/`metric:<slug>`, `rule:<assertionId>`, `rel:<assertionId>`. Ids from before v0.31.0 (`table-…`, `col-…`, `biz-term-…`, `biz-rule-N`, `verified-query-…`, `spec-term-…`, `edge-…`) are re-keyed on load (§5.11). `Origin` carries `system` and `systemEnvironment` for physical objects.
 
 **Assertions** (`src/engine/context/assertions.ts`): `{ id (ULID), kind, subject[], predicate, value, statement, status, trust, evidence[], supersedes?, supersededBy?, validFrom, validTo?, verification?, specId?, createdBy, createdAt, flags?, reviewReason? }`. Kinds: `schema_fact, data_fact, key, grain, relationship, business_term, metric, business_rule, mapping, quality_expectation, decision, assumption, constraint, naming_convention, verified_query`. Each kind's `value` has an Ajv schema (`assertionSchemas.ts`; `validateAssertion()`). Trust → confidence: verified 1.0, confirmed 0.9, documented 0.8, inferred 0.5.
 
@@ -494,8 +495,8 @@ Edges (`GraphEdge`): `contains` (table → column), `foreign_key`, `maps_to` (te
 ### 5.2 Loading and reindexing (`ContextFileManager`)
 
 `src/context/ContextFileManager.ts`, constructed per workspace by `webviewProvider`. `loadAllFiles()`:
-1. Clears the graph and loads the ledger. If the ledger has content, the graph starts as its projection; otherwise from `derived/graph.json` (the one-time migration source).
-2. If `schema-graph.json` is newer than `derived/graph.json` (a live extraction happened), merges it: nodes with the same id or the same `origin.sourceRef` are replaced, everything else is kept. *(Keying by bare platform name is why a second schema of the same platform replaces the first — fixed in K.)*
+1. Clears the graph, loads `estate.yaml` and the ledger. If the ledger has content, the graph starts as its projection; otherwise from `derived/graph.json` (the one-time migration source). Legacy ids in the base graph are re-keyed (§5.11).
+2. If `schema-graph.json` is newer than `derived/graph.json` (a live extraction happened), it is re-keyed if needed and merged *by scope*: existing tables in the same `(system, environment, database.schema)` — or the same `(connection, database.schema)`, should the connection have been re-bound — are replaced together with their columns; everything else is kept, so extracting a second schema never retracts the first.
 3. Drops nodes previously loaded from business-context and verified-query files, and re-reads `context/business-context.yaml` and `context/verified-queries.yaml` (legacy root as fallback): terms keyed by name (`biz-term-<slug>`), rules by position, queries by name; `maps_to`/`constrained_by`/`uses_table` edges to tables found by fqn or label.
 4. Calls `persistCompiledGraph()` (§5.3).
 
@@ -507,7 +508,8 @@ Edges (`GraphEdge`): `contains` (table → column), `foreign_key`, `maps_to` (te
 - **Sync** (`projection.ts#syncGraphToLedger`): every node and edge producers put in the graph is recorded as a *mirror* assertion (predicate `node`/`edge`, the node or edge itself as value). Trust comes from provenance (`live-verified` → verified, `llm` → inferred, from an approved spec → confirmed, otherwise documented); evidence from the origin (introspection, spec field, file). New → `asserted`; changed (comparing without timestamps and confidence) → new assertion with `supersedes` plus a `superseded` event; vanished → `rejected` with "no longer present in …"; a newer `lastVerifiedAt` from a live extraction → `verified`. Live business assertions about a changed or removed node are flagged for review (dependency walk). Unchanged graphs append nothing (idempotent migration).
 - **Spec scoping:** an assertion with a `specId` is in scope only while that problem is active (`inSpecScope`): out-of-scope assertions are neither retracted by a sync nor projected.
 - **Projection** (`projectGraph`): nodes and edges from live (`active`, `needs_review`) mirror assertions, in assertion-id order; live non-mirror terms, metrics, rules and relationships add `term:`/`metric:`/`rule:` nodes and `related_to` edges (or support an existing node). Each node/edge gets `supportedBy` and `origin.confidence` from its strongest supporter, and `lastVerifiedAt` from an introspection verification.
-- **Choke point:** `ContextFileManager.persistCompiledGraph()` = sync → detect + flag conflicts → re-project into `GraphManager` → write `derived/graph.json`. Live discovery and Source Assessment (via the reindex after `schema-graph.json`), file ingestion (`ingestFileIntoGraph`), spec synthesis and the business-context files all reach the ledger through it. A ledger failure is logged; the graph is persisted regardless.
+- **Re-keying** (v0.31.0): `sync` takes the alias map; a live mirror whose id was re-keyed is carried to the new id as an `asserted` (with `supersedes`) + `superseded` (reason `re-keyed`) pair — counted as `rekeyed`, not as a change or retraction, and dependents are not flagged. The ledger stores `aliased` events (`from`, `to`; `assertionId` = `alias:<from>`); `foldAliases()` resolves chains; `AssertionLedger.assertions()` reports non-mirror subjects under the current id; compaction keeps the map in `snapshot.json`.
+- **Choke point:** `ContextFileManager.persistCompiledGraph()` = re-key legacy ids → record aliases → sync → detect + flag conflicts → re-project into `GraphManager` → write `derived/graph.json`. Live discovery and Source Assessment (via the reindex after `schema-graph.json`), file ingestion (`ingestFileIntoGraph`), spec synthesis and the business-context files all reach the ledger through it. A ledger failure is logged; the graph is persisted regardless.
 - **Subject resolution** (`createSubjectResolver`): node id, `term:`/`metric:` name, table fqn, `<fqn>.<column>`, or a label naming exactly one table; anything else stays as given and is flagged `unresolved_subject`.
 
 ### 5.4 Conflict detection (CTX-3)
@@ -535,7 +537,7 @@ Edges (`GraphEdge`): `contains` (table → column), `foreign_key`, `maps_to` (te
 `src/engine/grounding/manifest.ts`:
 - **`backDecisions(use, graph, assertions)`** — for each decision-bearing primitive parameter (name matches key/partition/grain/orderBy/incremental/watermark/join/dedup/merge), resolves the source table from `params.sourceObject` and finds the backing: a live key or grain assertion with the same columns, else the declared primary key's column mirror (key-like parameters); a live `decision` assertion naming the column (ordering/incremental). Records `backedBy`, `belowTrust` (keys need confirmed, other decisions documented) or `unbacked`.
 - **`checkRules(content, rules, knownColumns)`** — STRICT masking rules naming known columns are machine-checked (every reference must sit inside a hash/mask function, or be an alias of one); other STRICT rules are `manual_review`.
-- **`buildGroundingManifest()`** — artifact path, spec id/version/revision, step, agent, generation method, primitives, pack id, assertions with `usedFor` (decision parameter or `context`), decisions, overrides, gaps (pack gaps + decision gaps), and checks: identifiers and type compatibility via `sqlGrounding.ts` (pattern scanner, §11.2), decision counts, rule checks, warnings (`GROUNDING_UNRESOLVED`, `GROUNDING_TYPE`, `GROUNDING_UNBACKED`, `RULE_VIOLATION`).
+- **`buildGroundingManifest()`** — artifact path, spec id/version/revision, catalog revisions (latest extraction per `system/environment`, `catalogWatermarks()`), step, agent, generation method, primitives, pack id, assertions with `usedFor` (decision parameter or `context`), decisions, overrides, gaps (pack gaps + decision gaps), and checks: identifiers and type compatibility via `sqlGrounding.ts` (pattern scanner, §11.2; objects the approved Pipeline Spec plans to create count as known), decision counts, rule checks, warnings (`GROUNDING_UNRESOLVED`, `GROUNDING_TYPE`, `GROUNDING_UNBACKED`, `RULE_VIOLATION`).
 - **`manifestStaleReasons()`** — a relied-on assertion that is superseded, rejected, under review or gone; **`explainManifest()`** — artifact → decisions → assertions → evidence; **`renderGroundingReport()`** — per-run summary.
 - **Host side:** `ArtifactWriter.writeManifest()` writes `<file>.grounding.json` beside the artifact (archived like it); `webviewProvider.reportFactStaleness()` walks the problem's artifact folder for manifests (skipping `history/`) whenever staleness is checked and logs/posts `artifactFactStaleness`; spec-version staleness stays in `ArtifactStalenessScanner` (folder names `<specId>.v<n>`). Commands: `AutoDE: What the Agent Saw`, `AutoDE: Explain This Artifact`.
 
@@ -552,13 +554,22 @@ Edges (`GraphEdge`): `contains` (table → column), `foreign_key`, `maps_to` (te
 `src/engine/context/fileIngestion.ts`, no dependencies, structural only:
 - **CSV** — header + type inference from up to 200 rows (INTEGER, FLOAT, BOOLEAN, TIMESTAMP, STRING); quoted fields with commas and `""` escapes (no embedded newlines).
 - **JSON** — an array of objects or one object; columns are the union of keys over up to 200 records (missing key → nullable).
+- **Column dictionaries** (v0.31.0) — a CSV whose header is a Teradata `DBC.ColumnsV`, Oracle `ALL_TAB_COLUMNS` or `INFORMATION_SCHEMA.COLUMNS` export is read as a dictionary: rows grouped into tables by (catalog, schema, table), ordered by column position, types rendered with length/precision (Teradata type codes mapped, e.g. `CV` → `VARCHAR`), nullability from `Y/N` or `YES/NO`.
 - **DDL** — `CREATE TABLE` statements after stripping `--` and `/* */` comments; qualified names keep their schema/database (`shop.customers` ≠ `crm.customers`; unqualified → `ddl.<name>`); column defs split on top-level commas; constraint lines skipped; table-level `[CONSTRAINT x] PRIMARY KEY (a, b)` marks key columns.
 
-Nodes carry `extractor: 'file-ingestion'`, `reliability: 'best-effort-inferred'`. `AutoDE: Ingest File as Source Context` parses, adds to the shared graph and persists through `ingestFileIntoGraph()` → `persistCompiledGraph()`.
+Every parser takes an `IngestIdentity { system?, environment?, role? }` (default: a system named after the file, environment `default`, role source); ids are `obj:` ids in that system. Nodes carry `extractor: 'file-ingestion'`, `reliability: 'best-effort-inferred'`, `origin.system`/`systemEnvironment`. `AutoDE: Ingest File as Source Context` asks which system the file describes (suggestion: its binding, or one named after the file), records the binding in `estate.yaml`, parses, adds to the shared graph and persists through `ingestFileIntoGraph()` → `persistCompiledGraph()`.
 
 ### 5.10 Graph manager
 
-`src/context/GraphManager.ts`: maps of nodes and edges with fqn, label and type indexes; a promise-chain mutex serialises mutations; `serializeSnapshot()`/`loadSnapshot()`; `removeNodesBySourceRef()`/`removeNodesWhere()`; `traverseNeighborhood()` (§5.5). The graph is a projection: the ledger is the system of record.
+`src/context/GraphManager.ts`: maps of nodes and edges with fqn, label and type indexes; a promise-chain mutex serialises mutations; `serializeSnapshot()`/`loadSnapshot()`; `removeNodesBySourceRef()`/`removeNodesWhere()`; `traverseNeighborhood()` (§5.5). `getNodeById()` falls back through the ledger's alias map (`setAliases()`), so documents that store pre-v0.31.0 ids (mapping contexts) still resolve. The graph is a projection: the ledger is the system of record.
+
+### 5.11 Estate identity (v0.31.0; STC-10, PLT-6)
+
+- **Model** (`src/engine/context/estate.ts`): `Estate { systems: EstateSystem[]; bindings: EstateBinding[] }`; `EstateSystem { id (slug), name, role: source | target | both, schemaRoles? }` (a schema can override its system's role — in-place modernisation); `EstateBinding { connection? | file?, system, environment?, schemas? }`. `parseEstate()`/`serializeEstate()` over `.ai-context/estate.yaml`.
+- **Resolution:** `resolveIdentity(estate, { connection | file })` returns `{ system, environment, role }` from the binding (files match by name, case-insensitively); an unbound source gets a system named after it (connection id or file name), added to the estate. `ContextFileManager` owns the estate (`getEstate`, `bindToSystem`, `resolveConnection`, `resolveFile`) and writes it when it changes.
+- **Live extraction:** `ConnectionManager.setEstateResolver(fn)` (set by the extension and by the webview's own connection checks) supplies the identity for `snapshotToGraph(snapshot, identity)` and the binding's `schemas` as `schemaFilter` when the caller names none. `Origin.environment` (source/target) follows the system's role.
+- **Re-keying legacy ids:** `rekeyLegacyGraph(graph, identityOf)` is pure and idempotent: tables and columns get `obj:` ids from their origin's system (origin.system, else the connection's or file's binding, else `unassigned`), business kinds their namespaced ids, edges ids from their re-keyed endpoints; it returns the alias map. `ContextFileManager` applies it to the base graph on load and before every persist; the aliases go to the ledger (§5.3).
+- **Commands:** `AutoDE: Open Estate (Systems & Environments)` opens (creating if needed) `estate.yaml`; Browse… lets the user pick several schemas, recorded on the connection's binding.
 
 ---
 
@@ -880,6 +891,11 @@ No generic pub/sub `EventEmitter` bus was introduced — confirmed zero usages a
 
 See the architecture plan (`after-phase-3b-are-graceful-lagoon.md`, Part 1) for the full context inventory and design rationale this implementation followed.
 
+### 6.11 Several schemas per connection (v0.31.0)
+
+`getMetadataQueries(scope?)` takes `SCHEMA` or `DATABASE.SCHEMA` (Snowflake, Databricks); `BaseDataSourceAdapter.extractMetadata()` runs the per-scope extraction for every entry of `schemaFilter` and concatenates the results, reading account-wide lineage once. `getConnectionId()` is public so the host can look up the connection's binding.
+Which system and environment a connection feeds, and its schema list, come from the estate (§5.11) through `ConnectionManager.setEstateResolver()`.
+
 ---
 
 ## 7. Agent Orchestration
@@ -1191,7 +1207,7 @@ type PrimitiveLifecycleStatus = 'draft' | 'published' | 'deprecated' | 'retired'
 1. Creates `ConfigurationManager` and the orchestrator (`DataAgentHubHub`); registers credential resolvers (`registerDefaultCredentialResolvers(context.secrets)`: environment, CLI configuration, VS Code SecretStorage).
 2. Defines `applyProblemRoot(contextRoot)` — re-points the hub's `PlanManager` and `ArtifactWriter` at a problem folder — and applies `problems/_unscoped` until a problem is activated, so command-palette entry points work before the sidebar resolves.
 3. Creates the sidebar provider (`DataAgentHubWebviewProvider`) and the parked dashboard panel; source and target `ConnectionManager`s are created lazily per role and disposed through the `DisposableRegistry`.
-4. Registers every command (the full list is `contributes.commands` in `package.json`, all prefixed `autoDataEngineeringHub.`): plan and pipeline-spec generation, execution, reset; source/target connect, browse, assess, re-verify, disconnect; file ingestion; mapping and semantic-layer snapshot; ledger compaction; What the Agent Saw; Explain This Artifact; language-model tests and listings; Copilot handoff; tool-skill import/run; chat new/history/discard; Connect to Data Platform; service-account test.
+4. Registers every command (the full list is `contributes.commands` in `package.json`, all prefixed `autoDataEngineeringHub.`): plan and pipeline-spec generation, execution, reset; source/target connect, browse, assess, re-verify, disconnect; file ingestion; mapping and semantic-layer snapshot; ledger compaction; What the Agent Saw; Explain This Artifact; Open Estate; language-model tests and listings; Copilot handoff; tool-skill import/run; chat new/history/discard; Connect to Data Platform; service-account test.
 
 The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileManager`, `ContextFileWatcher`), registers the hub's `ContextPackProvider`, activates the problem named by `active-problem.json`, and folds a non-empty active chat into history (CHT-2).
 

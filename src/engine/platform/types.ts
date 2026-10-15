@@ -1,3 +1,4 @@
+import type { ObjectIdentity } from '../context/estate';
 import { BaseNode, GraphEdge } from '../context/types';
 import { DataPlatformProvider } from '../types';
 
@@ -145,9 +146,12 @@ export interface IDataSourceAdapter extends Disposable {
   executeQuery(sql: string, options?: QueryOptions): Promise<QueryResult>;
   getCapabilities(): PlatformCapabilities;
   translateDialect(sql: string, targetDialect: SqlDialect): string;
-  getMetadataQueries(): PlatformMetadataQueries;
+  /** `scope` (`SCHEMA` or `DATABASE.SCHEMA`) overrides the connected schema (Phase K1: several schemas per connection). */
+  getMetadataQueries(scope?: string): PlatformMetadataQueries;
+  /** Stable id of this connection (e.g. `snowflake:acme`). */
+  getConnectionId?(): string;
   /** Converts an extracted snapshot to graph nodes/edges with live-verified provenance. Pure — persisting it is the caller's job. */
-  snapshotToGraph(snapshot: SchemaSnapshot): { nodes: BaseNode[]; edges: GraphEdge[] };
+  snapshotToGraph(snapshot: SchemaSnapshot, identity?: ObjectIdentity): { nodes: BaseNode[]; edges: GraphEdge[] };
   /**
    * Lists the databases/catalogs visible to the connected principal — lets a
    * user pick from what's actually there instead of typing a name blindly, and

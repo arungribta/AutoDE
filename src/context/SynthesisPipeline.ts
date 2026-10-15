@@ -1,3 +1,4 @@
+import { specRuleId, specTermId } from '../engine/context/estate';
 import * as vscode from 'vscode';
 import { GraphManager } from './GraphManager';
 import { RegisteredSource } from './SourceRegistry';
@@ -81,7 +82,7 @@ export class SynthesisPipeline {
       const trimmed = text.trim();
       if (!trimmed) return;
       const node: BusinessTermNode = {
-        id: `spec-term-${spec.id}-${idSuffix}`,
+        id: specTermId(spec.id, idSuffix),
         type: 'business_term',
         label: trimmed.slice(0, 80),
         description: trimmed,
@@ -103,7 +104,7 @@ export class SynthesisPipeline {
       const trimmed = ruleText.trim();
       if (!trimmed) return;
       const node: BusinessRuleNode = {
-        id: `spec-rule-${spec.id}-${idSuffix}`,
+        id: specRuleId(spec.id, idSuffix),
         type: 'business_rule',
         label: trimmed.slice(0, 80),
         ruleText: trimmed,

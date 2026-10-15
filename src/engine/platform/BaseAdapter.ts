@@ -1,3 +1,4 @@
+import { DEFAULT_ENVIRONMENT, ObjectIdentity, edgeId, objectId, originSideFor, slugifyId } from '../context/estate';
 import { DataPlatformProvider } from '../types';
 import { BaseNode, TableNode, ColumnNode, GraphEdge } from '../context/types';
 import {
@@ -41,7 +42,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
    * when nothing more specific is available. Used to tag extracted schema so
    * multiple source connections of the same platform type stay distinguishable.
    */
-  protected getConnectionId(): string {
+  public getConnectionId(): string {
     const ref = this.credentials['connectionName'] || this.credentials['profile'] || this.credentials['account']
       || this.credentials['workspaceUrl'] || this.credentials['username'] || '';
     return ref ? `${this.platform}:${ref}` : this.platform;
@@ -72,13 +73,38 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
   abstract dispose(): void;
   abstract executeQuery(sql: string, options?: QueryOptions): Promise<QueryResult>;
   abstract getCapabilities(): PlatformCapabilities;
-  abstract getMetadataQueries(): PlatformMetadataQueries;
+  abstract getMetadataQueries(scope?: string): PlatformMetadataQueries;
   abstract translateDialect(sql: string, targetDialect: SqlDialect): string;
 
   // ── Common Metadata Extraction (platform-agnostic orchestration) ──
 
+  /**
+   * Extracts every schema in `options.schemaFilter` (`SCHEMA` or
+   * `DATABASE.SCHEMA`), or the connected one when none is given (Phase K1).
+   * Account-wide lineage is read once.
+   */
   async extractMetadata(options?: ExtractOptions): Promise<SchemaSnapshot> {
-    const queries = this.getMetadataQueries();
+    const scopes: Array<string | undefined> = options?.schemaFilter && options.schemaFilter.length > 0 ? [...options.schemaFilter] : [undefined];
+    const parts: SchemaSnapshot[] = [];
+    for (let i = 0; i < scopes.length; i++) {
+      if (options?.signal?.aborted) break;
+      if (scopes[i]) this.log(`[${this.platform}] Schema ${scopes[i]} (${i + 1}/${scopes.length})`);
+      parts.push(await this.extractScope(this.getMetadataQueries(scopes[i]), options, i === 0));
+    }
+    if (parts.length === 1) return parts[0];
+    const lineage = parts.flatMap((p) => p.lineage ?? []);
+    return {
+      platform: this.platform,
+      connectionId: this.getConnectionId(),
+      extractedAt: parts[0]?.extractedAt ?? new Date().toISOString(),
+      tables: parts.flatMap((p) => p.tables),
+      views: parts.flatMap((p) => p.views),
+      foreignKeys: parts.flatMap((p) => p.foreignKeys),
+      lineage: lineage.length > 0 ? lineage : undefined
+    };
+  }
+
+  private async extractScope(queries: PlatformMetadataQueries, options: ExtractOptions | undefined, withLineage: boolean): Promise<SchemaSnapshot> {
     const startTime = new Date().toISOString();
 
     this.log(`[${this.platform}] Extracting metadata...`);
@@ -150,7 +176,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
 
     // 9. Optional: extract lineage
     let lineage: import('./types').LineageEdge[] | undefined;
-    if (queries.extractLineage && this.getCapabilities().supportsLineageExtraction) {
+    if (withLineage && queries.extractLineage && this.getCapabilities().supportsLineageExtraction) {
       try {
         const lineageResult = await this.executeQuery(queries.extractLineage, {
           timeoutMs: 60000,
@@ -320,10 +346,18 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
 
   // ── Graph Conversion ──
 
-  public snapshotToGraph(snapshot: SchemaSnapshot): { nodes: BaseNode[]; edges: GraphEdge[] } {
+  /**
+   * Graph form of a snapshot. Ids are estate-qualified (Phase K1):
+   * `identity` says which system and environment the connection feeds; by
+   * default a system named after the connection.
+   */
+  public snapshotToGraph(snapshot: SchemaSnapshot, identity?: ObjectIdentity): { nodes: BaseNode[]; edges: GraphEdge[] } {
     const nodes: BaseNode[] = [];
     const edges: GraphEdge[] = [];
     const now = new Date().toISOString();
+    const ident: ObjectIdentity = identity ?? { system: slugifyId(snapshot.connectionId ?? snapshot.platform), environment: DEFAULT_ENVIRONMENT, role: 'source' };
+    const side = originSideFor(ident.role);
+    const idOf = (fqn: string, column?: string) => objectId(ident.system, ident.environment, fqn, column);
     // Every node here comes from introspecting a live, connected platform — in
     // AutoDE's current model that is always the *source* side of a Brownfield
     // implementation (nothing introspects a target platform; target intent is
@@ -334,7 +368,9 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
       connectionId: snapshot.connectionId,
       extractor: 'source-assessment',
       extractedAt: now,
-      environment: 'source' as const,
+      ...(side ? { environment: side } : {}),
+      system: ident.system,
+      systemEnvironment: ident.environment,
       // Step 7 (governance layer): a live connection's introspection is the
       // most trustworthy provenance this codebase has — `confidence`/
       // `reliability` were never actually set here before, a confirmed gap
@@ -346,7 +382,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
 
     for (const table of snapshot.tables) {
       const tableNode: TableNode = {
-        id: `table-${table.fqn.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+        id: idOf(table.fqn),
         type: table.type === 'VIEW' || table.type === 'MATERIALIZED_VIEW' ? 'semantic_view' : 'table',
         label: table.name,
         description: table.comment,
@@ -366,7 +402,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
 
       for (const col of table.columns) {
         const colNode: ColumnNode = {
-          id: `col-${table.fqn.replace(/[^a-zA-Z0-9_]/g, '_')}.${col.name}`,
+          id: idOf(table.fqn, col.name),
           type: 'column',
           label: col.name,
           description: col.comment,
@@ -384,7 +420,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
         nodes.push(colNode);
 
         edges.push({
-          id: `edge-contains-${tableNode.id}-${colNode.id}`,
+          id: edgeId('contains', tableNode.id, colNode.id),
           source: tableNode.id,
           target: colNode.id,
           type: 'contains',
@@ -396,7 +432,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     // Add views as table nodes
     for (const view of snapshot.views) {
       const viewNode: TableNode = {
-        id: `table-${view.fqn.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+        id: idOf(view.fqn),
         type: 'semantic_view',
         label: view.name,
         description: view.comment,
@@ -424,9 +460,9 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
         : `${fk.targetSchema}.${fk.targetTable}`;
 
       edges.push({
-        id: `edge-fk-${sourceFqn.replace(/[^a-zA-Z0-9_]/g, '_')}-${targetFqn.replace(/[^a-zA-Z0-9_]/g, '_')}`,
-        source: `table-${sourceFqn.replace(/[^a-zA-Z0-9_]/g, '_')}`,
-        target: `table-${targetFqn.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+        id: edgeId('foreign_key', idOf(sourceFqn), idOf(targetFqn)),
+        source: idOf(sourceFqn),
+        target: idOf(targetFqn),
         type: 'foreign_key',
         weight: 0.9
       });

@@ -168,6 +168,8 @@ export function inSpecScope(a: Pick<Assertion, 'specId'>, activeSpecId: string |
 }
 
 export interface SyncResult {
+  /** Mirrors carried over to a new id after a re-keying (Phase K1) — not a change, not a retraction. */
+  rekeyed: number;
   asserted: number;
   superseded: number;
   retracted: number;
@@ -185,7 +187,7 @@ export interface SyncResult {
 export async function syncGraphToLedger(
   ledger: AssertionLedger,
   graph: GraphSnapshotLike,
-  options: { causedBy?: string; activeSpecId?: string } = {}
+  options: { causedBy?: string; activeSpecId?: string; aliases?: ReadonlyMap<string, string> } = {}
 ): Promise<SyncResult> {
   const live = new Map<string, Assertion>();
   for (const a of ledger.assertions()) {
@@ -201,12 +203,31 @@ export async function syncGraphToLedger(
 
   const events: LedgerEvent[] = [];
   const changedSubjects = new Map<string, string>(); // node id → reason
-  const result: SyncResult = { asserted: 0, superseded: 0, retracted: 0, reverified: 0, dependentsFlagged: 0, events: 0 };
+  const result: SyncResult = { rekeyed: 0, asserted: 0, superseded: 0, retracted: 0, reverified: 0, dependentsFlagged: 0, events: 0 };
   const seen = new Set<string>();
+  // Re-keyed ids: the new key's predecessor is the old key's live mirror.
+  const predecessor = new Map<string, Assertion>();
+  for (const [from, to] of options.aliases ?? []) {
+    for (const prefix of ['node:', 'edge:']) {
+      const old = live.get(prefix + from);
+      if (old && !live.has(prefix + to)) predecessor.set(prefix + to, old);
+    }
+  }
 
   for (const { key, item, build } of observed) {
     if (seen.has(key)) continue;
     seen.add(key);
+    const carried = predecessor.get(key);
+    if (carried) {
+      // Re-keying: same fact under a new id. Supersede the old mirror without
+      // flagging dependents (their subjects follow through the alias map).
+      const oldKey = mirrorKey(carried)!;
+      seen.add(oldKey);
+      const asserted = ledger.buildAsserted({ ...build(), supersedes: carried.id }, options.causedBy);
+      events.push(asserted, ledger.buildEvent('superseded', carried.id, 'system', { by: asserted.assertionId, causedBy: asserted.id, reason: 're-keyed' }));
+      result.rekeyed++;
+      continue;
+    }
     const existing = live.get(key);
     if (!existing) {
       events.push(ledger.buildAsserted(build(), options.causedBy));

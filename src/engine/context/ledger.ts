@@ -15,7 +15,9 @@ import { validateAssertion } from './assertionSchemas';
  */
 
 export type LedgerEventType =
-  | 'asserted' | 'confirmed' | 'rejected' | 'superseded' | 'verified' | 'verification_failed' | 'flagged_needs_review';
+  | 'asserted' | 'confirmed' | 'rejected' | 'superseded' | 'verified' | 'verification_failed' | 'flagged_needs_review'
+  /** Phase K1: a graph id was re-keyed (`from` → `to`); `assertionId` is `alias:<from>`. */
+  | 'aliased';
 
 export interface LedgerEvent {
   /** ULID; folding order. */
@@ -36,6 +38,9 @@ export interface LedgerEvent {
   verification?: Verification;
   /** `rejected` / `flagged_needs_review`: why. */
   reason?: string;
+  /** `aliased`: the old and new graph id. */
+  from?: string;
+  to?: string;
 }
 
 export interface LedgerSnapshot {
@@ -43,6 +48,25 @@ export interface LedgerSnapshot {
   lastEventId: string;
   foldedAt: string;
   assertions: Assertion[];
+  /** Graph id aliases (old → new) folded so far (Phase K1). */
+  aliases?: Record<string, string>;
+}
+
+/** The alias map (old graph id → current id), following chains. */
+export function foldAliases(events: readonly LedgerEvent[], snapshot?: LedgerSnapshot): Map<string, string> {
+  const raw = new Map<string, string>(Object.entries(snapshot?.aliases ?? {}));
+  const after = snapshot?.lastEventId ?? '';
+  for (const e of [...events].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))) {
+    if (e.type === 'aliased' && e.id > after && e.from && e.to && e.from !== e.to) raw.set(e.from, e.to);
+  }
+  const resolved = new Map<string, string>();
+  for (const from of raw.keys()) {
+    let to = raw.get(from)!;
+    const seen = new Set([from]);
+    while (raw.has(to) && !seen.has(to)) { seen.add(to); to = raw.get(to)!; }
+    resolved.set(from, to);
+  }
+  return resolved;
 }
 
 /**
@@ -145,6 +169,7 @@ export class AssertionLedger {
   private snapshot: LedgerSnapshot | undefined;
   private ownLines: string[] = [];
   private folded: Assertion[] | undefined;
+  private foldedAliases: Map<string, string> | undefined;
   private loaded = false;
 
   public constructor(
@@ -164,6 +189,7 @@ export class AssertionLedger {
     this.events = [];
     this.snapshot = undefined;
     this.folded = undefined;
+    this.foldedAliases = undefined;
     let skippedLines = 0;
     const snapBytes = await this.io.readFile(joinPath(this.ledgerDir, 'snapshot.json'));
     if (snapBytes) {
@@ -192,10 +218,32 @@ export class AssertionLedger {
     return this.events.length === 0 && !this.snapshot;
   }
 
-  /** The current assertion set (every status), sorted by id. */
+  /**
+   * The current assertion set (every status), sorted by id. Subjects that
+   * name a re-keyed graph id are reported under the current id (Phase K1),
+   * so assertions written before a re-keying still point at their objects.
+   */
   public assertions(): Assertion[] {
-    if (!this.folded) this.folded = foldEvents(this.events, this.snapshot);
+    if (!this.folded) {
+      const aliases = this.aliases();
+      const folded = foldEvents(this.events, this.snapshot);
+      this.folded = aliases.size === 0 ? folded : folded.map((a) => (a.subject.some((s) => aliases.has(s)) ? { ...a, subject: a.subject.map((s) => aliases.get(s) ?? s) } : a));
+    }
     return this.folded;
+  }
+
+  /** Graph id aliases recorded so far (old → current). */
+  public aliases(): Map<string, string> {
+    if (!this.foldedAliases) this.foldedAliases = foldAliases(this.events, this.snapshot);
+    return this.foldedAliases;
+  }
+
+  /** Builds `aliased` events for a re-keying (one per id). */
+  public buildAliasEvents(aliases: ReadonlyMap<string, string>, actor = 'system'): LedgerEvent[] {
+    const known = this.aliases();
+    return [...aliases].filter(([from, to]) => known.get(from) !== to).map(([from, to]) => ({
+      id: this.ulid(), type: 'aliased' as const, assertionId: `alias:${from}`, at: this.now().toISOString(), actor, from, to
+    }));
   }
 
   public get(id: string): Assertion | undefined {
@@ -257,6 +305,7 @@ export class AssertionLedger {
     this.ownLines.push(...lines);
     this.events.push(...events);
     this.folded = undefined;
+    this.foldedAliases = undefined;
   }
 
   // ── Convenience mutators (each appends immediately) ──
@@ -304,7 +353,8 @@ export class AssertionLedger {
     if (!this.loaded) await this.load();
     const assertions = this.assertions();
     const lastEventId = this.events.reduce((max, e) => (e.id > max ? e.id : max), this.snapshot?.lastEventId ?? '');
-    const snapshot: LedgerSnapshot = { lastEventId, foldedAt: this.now().toISOString(), assertions };
+    const aliasMap = this.aliases();
+    const snapshot: LedgerSnapshot = { lastEventId, foldedAt: this.now().toISOString(), assertions: foldEvents(this.events, this.snapshot), ...(aliasMap.size ? { aliases: Object.fromEntries([...aliasMap].sort(([a], [b]) => (a < b ? -1 : 1))) } : {}) };
     await writeFileAtomic(this.io, joinPath(this.ledgerDir, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
     this.snapshot = snapshot;
     let prunedFiles = 0;

@@ -1193,6 +1193,8 @@ Message: ${message}`;
                   specId: artifact.specId, specVersion: artifact.specVersion
                 },
                 specRevision: this.contextProvider?.specRevision?.(),
+                catalogRevisions: sources.catalogRevisions,
+                plannedObjects: this.contextProvider?.plannedObjects?.(),
                 stepId: readyStep.id,
                 pack: pack?.manifest,
                 primitiveUses: generations,

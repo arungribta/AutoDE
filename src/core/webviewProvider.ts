@@ -1257,6 +1257,24 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return contextRoot ? ArtifactWriter.resolveArtifactDirectory(contextRoot) : undefined;
   }
 
+  /** Estate bridges for `extension.ts` (Phase K1). */
+  public getEstate() {
+    return this.contextFileManager?.getEstate();
+  }
+
+  public resolveConnectionIdentity(connectionId: string, role: 'source' | 'target' = 'source') {
+    const r = this.contextFileManager?.resolveConnection(connectionId);
+    return r ? { ...r, identity: { ...r.identity, role: this.contextFileManager?.getEstate().systems.find((s) => s.id === r.identity.system)?.role ?? role } } : undefined;
+  }
+
+  public resolveFileIdentity(filePath: string) {
+    return this.contextFileManager?.resolveFile(filePath);
+  }
+
+  public bindToSystem(binding: import('../engine/context/estate').EstateBinding, systemName?: string, role: 'source' | 'target' | 'both' = 'source'): void {
+    this.contextFileManager?.bindToSystem(binding, systemName, role);
+  }
+
   /** "AutoDE: What the Agent Saw" — the recent context packs, newest first. */
   public getRecentContextPacks(): ReadonlyArray<{ title: string; at: string; pack: ContextPack }> {
     return this.contextFileManager?.getRecentPacks() ?? [];
@@ -1670,6 +1688,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       specRevision: () => {
         const spec = this.specManager?.getSpec();
         return spec ? 'sha256:' + createHash('sha256').update(JSON.stringify(spec)).digest('hex').slice(0, 16) : undefined;
+      },
+      plannedObjects: () => {
+        const ps = this.pipelineSpecManager?.getSpec();
+        return ps && ps.status === 'approved' ? ps.entities.map((e) => e.target.object) : [];
       }
     };
   }
@@ -1783,6 +1805,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), { cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true });
+    connectionManager.setEstateResolver((id) => this.resolveConnectionIdentity(id));
     try {
       this.postLog(`Connecting to ${platform} to build Source Context…`);
       const info = await connectionManager.connect(platform, credentials);
@@ -1898,6 +1921,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
     this.postLog(`Testing the connection "${connectionPicked.connectionName}"…`);
     const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), { cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true });
+    connectionManager.setEstateResolver((id) => this.resolveConnectionIdentity(id));
     try {
       const info = await connectionManager.connect(platform, resolved);
       this.postLog(`Connected: ${info.databaseName}.${info.schemaName} (${info.version}).`);

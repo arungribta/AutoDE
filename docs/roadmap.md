@@ -2,7 +2,7 @@
 
 **The single place for order and status.** Specifications say *what* each phase delivers and *why*; this document says *when*, and whether it's done. If another document's plan disagrees with this one, this one wins. Document map: [README.md](README.md).
 
-Last updated: 2026-10-15 · Current version: **0.30.0** · Branch: `feature/engine-boundary`
+Last updated: 2026-10-15 · Current version: **0.31.0** · Branch: `feature/engine-boundary`
 
 ---
 
@@ -18,22 +18,23 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.28.0 | ✅ **S1** Tool skills on every provider + `allowed-tools` | [mcp-engine §9.1](mcp-engine-requirements.md) | Security prerequisite for exposing skills. |
 | v0.29.0 | ✅ **C2** Assertion ledger and projection | [context-layer §4, §11](context-layer-requirements.md) | System of record for context. |
 | v0.30.0 | ✅ **C3** Context packs, manifests, causality | [context-layer §7, §8.3, §11](context-layer-requirements.md) | Grounded delivery. |
-| v0.31.0 | **K** Estate identity, per-system catalogs, working-set cache | [context-layer §11 Phase K](context-layer-requirements.md) | Estate merge and migration need several systems side by side and estates beyond the original size target; every later phase attaches facts to these ids. |
-| v0.32.0 | **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
-| v0.33.0 | **S2** Tool-skill lifecycle, provenance, review, trust tiers | [mcp-engine §9.1](mcp-engine-requirements.md) | Must exist before any skill is exposed to external agents over MCP. |
-| v0.34.0 | **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
-| v0.35.0 | **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
-| v0.36.0 | **DRV** Opt-in native driver acquisition + platform-onboarding UI | [mcp-engine §9.1](mcp-engine-requirements.md) | How legacy sources (Oracle, SQL Server …) get a live connection without breaking P6. |
-| v0.37.0 | **C4b** Chat extraction, Context Inbox, tool-action memory | [context-layer §11 Phase C4b](context-layer-requirements.md) | Remaining context MCP tools; context gaps start pausing steps. |
-| v0.38.0 | **GOV** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | [mcp-engine §9.1](mcp-engine-requirements.md) | Required by C5/C6 grounding checks and PII expectations. |
-| v0.39.0 | **C5** Semantic model | [context-layer §6, §11](context-layer-requirements.md) | Built on confirmed/verified assertions; also carries the merge semantics (correspondence, survivorship, conformed dimensions). |
-| v0.40.0 | **5** Extension as MCP client; exposure to other agents | [mcp-engine §7, §9](mcp-engine-requirements.md) | Done once the surface is complete. Also moves heavy work out of the extension host process. |
-| v0.41.0 | **6** + **S3** Skill and primitive governance hardening; Git-URL skill import; docs and starter library | [mcp-engine §9](mcp-engine-requirements.md) | Third-party skills open last, once every safety rail exists. |
-| v0.42.0 | **C6** Freshness, context health, release evaluation | [context-layer §8, §11](context-layer-requirements.md) | Final metric targets; eval report becomes a release gate. |
+| v0.31.0 | ✅ **K1** Estate identity and catalogs: system/environment-qualified, namespaced ids with alias-map migration; `estate.yaml`; several schemas per connection; schema-scoped merges; catalog revisions in manifests; legacy dictionary import; planned objects in grounding | [context-layer §11 Phase K](context-layer-requirements.md) (items 1–3, 6, 7, 9, 10) | Every later phase attaches facts to these ids. |
+| v0.32.0 | **K2** Working-set cache and scale: tiered cache with query-through, refresh on use, visibility, the 100 ms responsiveness budget, vocabulary-robust retrieval; large-estate fixture; embedded-store and RET decisions | [context-layer §11 Phase K](context-layer-requirements.md) (items 4, 5, 8, 11, 12) | Estates beyond the working-set size. |
+| v0.33.0 | **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
+| v0.34.0 | **S2** Tool-skill lifecycle, provenance, review, trust tiers | [mcp-engine §9.1](mcp-engine-requirements.md) | Must exist before any skill is exposed to external agents over MCP. |
+| v0.35.0 | **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
+| v0.36.0 | **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
+| v0.37.0 | **DRV** Opt-in native driver acquisition + platform-onboarding UI | [mcp-engine §9.1](mcp-engine-requirements.md) | How legacy sources (Oracle, SQL Server …) get a live connection without breaking P6. |
+| v0.38.0 | **C4b** Chat extraction, Context Inbox, tool-action memory | [context-layer §11 Phase C4b](context-layer-requirements.md) | Remaining context MCP tools; context gaps start pausing steps. |
+| v0.39.0 | **GOV** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | [mcp-engine §9.1](mcp-engine-requirements.md) | Required by C5/C6 grounding checks and PII expectations. |
+| v0.40.0 | **C5** Semantic model | [context-layer §6, §11](context-layer-requirements.md) | Built on confirmed/verified assertions; also carries the merge semantics (correspondence, survivorship, conformed dimensions). |
+| v0.41.0 | **5** Extension as MCP client; exposure to other agents | [mcp-engine §7, §9](mcp-engine-requirements.md) | Done once the surface is complete. Also moves heavy work out of the extension host process. |
+| v0.42.0 | **6** + **S3** Skill and primitive governance hardening; Git-URL skill import; docs and starter library | [mcp-engine §9](mcp-engine-requirements.md) | Third-party skills open last, once every safety rail exists. |
+| v0.43.0 | **C6** Freshness, context health, release evaluation | [context-layer §8, §11](context-layer-requirements.md) | Final metric targets; eval report becomes a release gate. |
 | tbd | **M1–M3** Migration track: assessment; bulk mapping and generation (importing external code-converter output); reconciliation and cutover | not yet written | Agreed in outline 2026-10-15; specified and positioned after K and C4a. |
 | tbd | **RET** Embeddings as an optional, opt-in ranking signal | not yet written | Only if K's vocabulary-mismatch eval shows misses that the deterministic signals can't fix (see §3). |
 
-**Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `C1`–`C6`, `C4a`/`C4b`, `K` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in the plan sections of earlier versions of requirements.md (§11) and technical-design.md (§10), both at `fc16b0d`.
+**Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `C1`–`C6`, `C4a`/`C4b`, `K1`/`K2` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in the plan sections of earlier versions of requirements.md (§11) and technical-design.md (§10), both at `fc16b0d`.
 
 **Workflow per phase:** spec section verified against the code → implementation with tests → `npm test`, `npm run lint`, `npm run eval` → CHANGELOG entry (with deviations) → requirements.md: the affected requirements' status and wording (WHAT/WHY only) → technical-design.md for the HOW → spec section shrinks to a pointer → ✅ here → version bump → commit and push.
 
@@ -123,6 +124,7 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 | 2026-10-15 | Rejected: building legacy code converters; import their output instead (context-layer §12). |
 | 2026-10-15 | Parked: SAP-style sources with cryptic physical names. |
 | 2026-10-15 | Embedded database only if K's scale measurements require it; embeddings only via RET, if K's vocabulary-mismatch eval requires it. |
+| 2026-10-15 | Phase K split into K1 (identity and catalogs, v0.31.0) and K2 (working-set cache and scale, v0.32.0) — twelve scope items are two reviewable phases; later phases move down one version. |
 | 2026-10-15 | Documents reorganised: requirements answer WHAT/WHY, technical design answers HOW, this roadmap answers WHEN, CHANGELOG.md records what changed. Phases D and G renamed DRV and GOV. |
 
 **Superseded planning documents.** The plan files under `~/.claude/plans/` used before v0.25.0 were folded into this roadmap and are no longer maintained. The plan and backlog sections of the previous requirements.md (§11, §15, §16) and technical-design.md (§10), both at `fc16b0d`, are historical; the technical-design phase list was removed on 2026-10-15 and lives on in git and CHANGELOG.md.
