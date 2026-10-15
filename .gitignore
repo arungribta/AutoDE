@@ -19,3 +19,7 @@ mock_*.js
 # separately via the normal context layer; the note file itself is not meant
 # to be shared/committed).
 .ai-context/chats/
+
+# Eval harness: rolling outputs (baselines/ is committed)
+test/reference/retail-orders/eval-report.md
+test/reference/retail-orders/eval-results.json

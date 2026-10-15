@@ -1,0 +1,9 @@
+# Target environment for the reference problem (shape of TargetEnvironment in src/engine/types.ts).
+platform: snowflake
+transformationTool: dbt
+modelingApproach: dimensional
+namingConvention: snake_case
+environment: development
+platformConfig:
+  database: ANALYTICS
+  schema: MARTS

@@ -1,0 +1,40 @@
+# The engineer's side of the conversation, in order. `facts` names what each turn
+# asserts (golden/assertions.yaml ids); `trap` marks the turns the system must catch.
+turns:
+  - id: t1
+    text: We need daily net revenue and 90-day customer retention reporting in Snowflake, built with dbt on a dimensional model.
+    facts: [A-constraint-platform]
+  - id: t2
+    text: Revenue for us means net revenue — order line amount minus line discounts, minus refunds, and cancelled orders are excluded.
+    facts: [A-metric-net-revenue]
+    trap: 1  # conflicts with the glossary's gross "Revenue"
+  - id: t3
+    text: An order is uniquely identified by order_id; shop.orders has one row per order.
+    facts: [A-grain-orders, A-key-orders]
+  - id: t4
+    text: shop.order_items is one row per order line, keyed by order_item_id, and links to orders on order_id.
+    facts: [A-grain-order-items, A-rel-items-orders]
+  - id: t5
+    text: The customer key across both systems is customer_id.
+    facts: [A-key-customer-v1]
+  - id: t6
+    text: Correction — in the CRM the customer key is cust_no, not customer_id. crm.customers.shop_customer_id links to shop.customers.customer_id.
+    facts: [A-key-crm-customer, A-rel-crm-shop-customer]
+    supersedes: [A-key-customer-v1]
+    trap: 2  # supersession: anything built on t5 is now stale
+  - id: t7
+    text: crm.loyalty_members.member_id is unique per member.
+    facts: [A-key-loyalty-member]
+    trap: 3  # the sample data has a duplicate member_id (LM-1004)
+  - id: t8
+    text: The customer dimension must keep history — SCD type 2 on segment_code and lifecycle_stage.
+    facts: [A-decision-scd2-customer]
+  - id: t9
+    text: Load orders incrementally on updated_at.
+    facts: [A-decision-incremental-orders]
+  - id: t10
+    text: Also show the number of support tickets per order on the revenue dashboard.
+    trap: 4  # there is no ticket-to-order relationship; only ticket → customer
+  - id: t11
+    text: A customer is retained if they place another non-cancelled order within 90 days of a previous one.
+    facts: [A-metric-retention-90d]

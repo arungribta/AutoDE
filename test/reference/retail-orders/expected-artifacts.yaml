@@ -1,0 +1,29 @@
+# Properties the generated artifacts must have, checked structurally (regex, case-insensitive,
+# across all SQL artifacts unless `scope` narrows it) — never by exact text.
+# mustMatch: the property holds if ANY artifact in scope matches every pattern listed.
+# mustNotMatch: the property fails if ANY artifact in scope matches the pattern.
+checks:
+  - id: E1
+    description: Staging deduplicates orders on order_id
+    mustMatch: ['(row_number|qualify|distinct)[\s\S]{0,200}order_id']
+  - id: E2
+    description: Orders load incrementally on updated_at
+    mustMatch: ['incremental', 'updated_at']
+  - id: E3
+    description: dim_customer is SCD type 2
+    mustMatch: ['(valid_from|dbt_valid_from|effective_from)', '(valid_to|dbt_valid_to|effective_to)']
+  - id: E4
+    description: Customer email is masked with a hash
+    mustMatch: ['(sha2|sha256|md5|hash)\s*\([^)]*email']
+  - id: E5
+    description: Net revenue excludes cancelled orders
+    mustMatch: ['status\s*(<>|!=|not\s+in)\s*\(?\s*''cancel']
+  - id: E6
+    description: Net revenue is net of refunds (the refunds table is actually read)
+    mustMatch: ['(from|join)\s+[\w."]*refund|ref\(\s*[''"][^''"]*refund|source\([^)]*refund']
+  - id: E7
+    description: No invented join between support tickets and orders
+    mustNotMatch: ['support_tickets[\s\S]{0,200}order_id\s*=|order_id\s*=[\s\S]{0,40}ticket']
+  - id: E8
+    description: CRM customers are joined to shop customers on shop_customer_id
+    mustMatch: ['shop_customer_id']

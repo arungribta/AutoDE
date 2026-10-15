@@ -1,0 +1,25 @@
+# Finance glossary as it exists in the client's documentation (loaded as .ai-context/context/business-context.yaml).
+# Note: "Revenue" here is GROSS — the engineer later defines it as NET in chat (trap 1).
+business_terms:
+  - term: Revenue
+    description: Gross merchandise value — the sum of order line amounts for all orders.
+    formula: SUM(order_items.quantity * order_items.unit_price)
+    mapped_tables: [shop.order_items]
+  - term: Average Order Value
+    description: Revenue divided by the number of orders in the period.
+    formula: Revenue / COUNT(DISTINCT orders.order_id)
+    mapped_tables: [shop.orders, shop.order_items]
+  - term: Active Customer
+    description: A customer with at least one order in the trailing 90 days.
+    mapped_tables: [shop.orders]
+  - term: Loyalty Tier
+    description: GOLD, SILVER or BRONZE, assigned by the loyalty platform from points balance.
+    mapped_tables: [crm.loyalty_members]
+
+business_rules:
+  - rule: Customer email and phone are PII and must be masked (SHA-256) in every analytics layer.
+    enforcement: STRICT
+    applies_to: [shop.customers.email, shop.customers.phone, crm.customers.email, crm.customers.phone]
+  - rule: All monetary amounts are reported in the order currency; no FX conversion in v1.
+    enforcement: RECOMMENDED
+    applies_to: [shop.orders.currency]

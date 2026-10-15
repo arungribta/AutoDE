@@ -4591,6 +4591,82 @@ async function main() {
     }
   });
 
+  // ── v0.27.0: grounding checks + eval harness (docs/context-layer-requirements.md §10) ──
+  function groundingIndex() {
+    const { buildSchemaIndex } = require('../dist/engine/grounding/sqlGrounding.js');
+    const nodes = [];
+    const edges = [];
+    const table = (fqn, cols) => {
+      const id = `t-${fqn}`;
+      nodes.push({ id, type: 'table', label: fqn.split('.').pop(), fqn, database: 'd', schema: 's', isView: false, metadata: {}, version: 1 });
+      for (const [name, dataType] of cols) {
+        const cid = `${id}.${name}`;
+        nodes.push({ id: cid, type: 'column', label: name, dataType, isNullable: true, isPrimaryKey: false, isForeignKey: false, metadata: {}, version: 1 });
+        edges.push({ id: `e-${cid}`, source: id, target: cid, type: 'contains' });
+      }
+    };
+    table('shop.orders', [['order_id', 'BIGINT'], ['customer_id', 'INTEGER'], ['order_ts', 'TIMESTAMP'], ['status', 'VARCHAR(20)']]);
+    table('shop.order_items', [['order_item_id', 'BIGINT'], ['order_id', 'BIGINT'], ['unit_price', 'DECIMAL(10,2)']]);
+    return buildSchemaIndex(nodes, edges);
+  }
+
+  await test('v0.27.0: checkSqlGrounding resolves tables, aliases and qualified columns, and flags invented ones', () => {
+    const { checkSqlGrounding } = require('../dist/engine/grounding/sqlGrounding.js');
+    const sql = `
+      -- FROM not_a_table is a comment and must be ignored
+      SELECT o.order_id, i.unit_price, o.revenue_band, 'FROM fake_in_string' AS note
+      FROM shop.orders o
+      JOIN shop.order_items AS i ON i.order_id = o.order_id
+      LEFT JOIN shop.payments p ON p.order_id = o.order_id`;
+    const r = checkSqlGrounding([{ name: 'a.sql', content: sql }], groundingIndex());
+    assert.strictEqual(r.tablesChecked, 3);
+    assert.strictEqual(r.tablesResolved, 2, 'orders and order_items resolve; payments does not exist');
+    assert.deepStrictEqual(r.unresolved.map((u) => `${u.kind}:${u.ref}`).sort(), ['column:shop.orders.revenue_band', 'table:shop.payments']);
+    assert.ok(r.columnsResolved >= 4, 'o.order_id, i.unit_price, i.order_id, o.order_id resolve');
+  });
+
+  await test('v0.27.0: checkSqlGrounding treats CTEs, created objects and dbt models as internal, and resolves dbt source()', () => {
+    const { checkSqlGrounding } = require('../dist/engine/grounding/sqlGrounding.js');
+    const r = checkSqlGrounding([
+      { name: 'models/staging/stg_orders.sql', content: "with src as (select * from {{ source('shop', 'orders') }}) select * from src" },
+      { name: 'models/marts/fct_orders.sql', content: "select * from {{ ref('stg_orders') }} s join {{ ref('stg_missing') }} m on 1=1" },
+      { name: 'ddl.sql', content: 'CREATE OR REPLACE TABLE analytics.marts.dim_x (id int); INSERT INTO analytics.marts.dim_x SELECT 1 FROM dim_x' }
+    ], groundingIndex());
+    assert.deepStrictEqual(r.unresolved.map((u) => u.ref), ['stg_missing'], 'only the ref to a model nobody created is unresolved');
+    assert.strictEqual(r.tablesResolved, 1, "source('shop','orders') resolves against the schema");
+  });
+
+  await test('v0.27.0: checkSqlGrounding flags joins and casts across incompatible type classes', () => {
+    const { checkSqlGrounding } = require('../dist/engine/grounding/sqlGrounding.js');
+    const r = checkSqlGrounding([{ name: 'bad.sql', content: 'SELECT CAST(o.order_ts AS INTEGER) FROM shop.orders o JOIN shop.order_items i ON o.order_ts = i.order_id' }], groundingIndex());
+    assert.deepStrictEqual(r.typeIssues.map((t) => t.kind).sort(), ['cast', 'join']);
+    const ok = checkSqlGrounding([{ name: 'ok.sql', content: 'SELECT CAST(o.status AS DATE) FROM shop.orders o JOIN shop.order_items i ON o.order_id = i.order_id' }], groundingIndex());
+    assert.strictEqual(ok.typeIssues.length, 0, 'string→date casts and same-class joins are allowed');
+  });
+
+  await test('v0.27.0: the offline eval harness runs end to end and writes a report with every section', () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    const { spawnSync } = require('node:child_process');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-eval-test-'));
+    try {
+      const out = nodePath.join(dir, 'report.md');
+      const run = spawnSync(process.execPath, [nodePath.join(__dirname, 'eval', 'run-eval.cjs'), '--out', out], { encoding: 'utf8' });
+      assert.strictEqual(run.status, 0, run.stderr);
+      const report = nodeFs.readFileSync(out, 'utf8');
+      for (const section of ['## Summary', '## Traps', '## Ingestion', '## Context delivery', '## Answerability', '## Generated artifacts']) {
+        assert.ok(report.includes(section), `report has ${section}`);
+      }
+      const results = JSON.parse(nodeFs.readFileSync(nodePath.join(dir, 'eval-results.json'), 'utf8'));
+      assert.strictEqual(results.traps.length, 5);
+      assert.strictEqual(results.answerability.length, 26);
+      assert.ok(results.llm.calls > 0 && results.llm.recorded === 0, 'offline mode makes no real LLM calls');
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

@@ -319,7 +319,7 @@ Results go into the manifest and into a per-run **Grounding Report** artifact (v
 
 Add `test/reference/retail-orders/`. It must be small enough to run offline in CI and realistic enough to be convincing:
 - `problem.md`: business problem statement (daily net revenue and customer retention reporting on Snowflake from 2 sources).
-- `sources/`: DDL for 2 source systems (~18 tables, ~180 columns) plus small CSV samples, ingested through `fileIngestion.ts` offline; an optional live mode loads them into a sandbox schema.
+- `sources/`: DDL for 2 source systems (18 tables, 122 columns, deliberately sharing one table name across the two systems) plus small CSV samples, and a 40-table irrelevant schema for the dilution trap, ingested through `fileIngestion.ts` offline; an optional live mode loads them into a sandbox schema.
 - `chat-script.yaml`: scripted engineer turns, including the traps below.
 - `golden/assertions.yaml`, `golden/semantic-model.yaml`: expected confirmed context after the script.
 - `questions.yaml`: ~30 questions with expected answers (grain, keys, join paths, metric definitions, rule applicability, and "unknown" cases).

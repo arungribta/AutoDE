@@ -1,0 +1,151 @@
+# Expected context after the scripted conversation (docs/context-layer-requirements.md §4.1 shape).
+# Scored from Phase C4 on; recorded here from C1 so the target is fixed before the system changes.
+# `status`/`trust` are the expected end state; schema facts from the DDL are implied and not listed.
+assertions:
+  - id: A-constraint-platform
+    kind: constraint
+    subject: [target]
+    predicate: platform
+    value: { platform: snowflake, transformationTool: dbt, modelingApproach: dimensional }
+    status: active
+    trust: confirmed
+    evidence: [{ type: chat_message, ref: t1 }]
+
+  - id: A-metric-net-revenue
+    kind: metric
+    subject: [metric:net_revenue]
+    predicate: defined_as
+    value:
+      expression: SUM(order_items.quantity * order_items.unit_price - COALESCE(order_items.discount_amount, 0)) - SUM(refunds.amount)
+      filters: ["orders.status <> 'CANCELLED'"]
+      grain: [order_items]
+    status: active
+    trust: confirmed
+    evidence: [{ type: chat_message, ref: t2 }]
+    conflictsWith: [D-revenue-gross]   # the glossary's gross "Revenue" must be flagged, not merged (trap 1)
+
+  - id: A-grain-orders
+    kind: grain
+    subject: [shop.orders]
+    predicate: grain
+    value: [order_id]
+    status: active
+    trust: verified   # confirmable by probe (COUNT vs COUNT DISTINCT)
+    evidence: [{ type: chat_message, ref: t3 }]
+
+  - id: A-key-orders
+    kind: key
+    subject: [shop.orders]
+    predicate: primary
+    value: [order_id]
+    status: active
+    trust: verified
+    evidence: [{ type: chat_message, ref: t3 }, { type: introspection, ref: shop.ddl }]
+
+  - id: A-grain-order-items
+    kind: grain
+    subject: [shop.order_items]
+    predicate: grain
+    value: [order_item_id]
+    status: active
+    trust: verified
+    evidence: [{ type: chat_message, ref: t4 }]
+
+  - id: A-rel-items-orders
+    kind: relationship
+    subject: [shop.order_items, shop.orders]
+    predicate: joins_to
+    value: { from: { entity: shop.order_items, columns: [order_id] }, to: { entity: shop.orders, columns: [order_id] }, cardinality: 'N:1', optional: false }
+    status: active
+    trust: verified
+    evidence: [{ type: chat_message, ref: t4 }]
+
+  - id: A-key-customer-v1
+    kind: key
+    subject: [crm.customers]
+    predicate: primary
+    value: [customer_id]
+    status: superseded   # replaced by A-key-crm-customer (trap 2)
+    trust: inferred
+    evidence: [{ type: chat_message, ref: t5 }]
+
+  - id: A-key-crm-customer
+    kind: key
+    subject: [crm.customers]
+    predicate: primary
+    value: [cust_no]
+    supersedes: A-key-customer-v1
+    status: active
+    trust: verified
+    evidence: [{ type: chat_message, ref: t6 }, { type: introspection, ref: crm.ddl }]
+
+  - id: A-rel-crm-shop-customer
+    kind: relationship
+    subject: [crm.customers, shop.customers]
+    predicate: joins_to
+    value: { from: { entity: crm.customers, columns: [shop_customer_id] }, to: { entity: shop.customers, columns: [customer_id] }, cardinality: '1:1', optional: true }
+    status: active
+    trust: confirmed
+    evidence: [{ type: chat_message, ref: t6 }]
+
+  - id: A-key-loyalty-member
+    kind: key
+    subject: [crm.loyalty_members]
+    predicate: unique
+    value: [member_id]
+    status: needs_review   # probe finds a duplicate (LM-1004) in the sample (trap 3)
+    trust: inferred
+    evidence: [{ type: chat_message, ref: t7 }]
+    verification: { method: probe, result: fail, detail: 'member_id LM-1004 appears twice' }
+
+  - id: A-decision-scd2-customer
+    kind: decision
+    subject: [dim_customer]
+    predicate: history
+    value: { scdType: 2, trackedColumns: [segment_code, lifecycle_stage] }
+    status: active
+    trust: confirmed
+    evidence: [{ type: chat_message, ref: t8 }]
+
+  - id: A-decision-incremental-orders
+    kind: decision
+    subject: [shop.orders]
+    predicate: load_strategy
+    value: { strategy: incremental, column: updated_at }
+    status: active
+    trust: confirmed
+    evidence: [{ type: chat_message, ref: t9 }]
+
+  - id: A-metric-retention-90d
+    kind: metric
+    subject: [metric:retention_90d]
+    predicate: defined_as
+    value: { definition: customer places another non-cancelled order within 90 days of a previous one, grain: [customer] }
+    status: active
+    trust: confirmed
+    evidence: [{ type: chat_message, ref: t11 }]
+
+  # From the glossary document (documented tier)
+  - id: D-revenue-gross
+    kind: business_term
+    subject: [term:revenue]
+    predicate: defined_as
+    value: { formula: SUM(order_items.quantity * order_items.unit_price) }
+    status: needs_review   # in conflict with A-metric-net-revenue (trap 1)
+    trust: documented
+    evidence: [{ type: file, ref: documents/business-context.yaml }]
+
+  - id: D-rule-pii
+    kind: business_rule
+    subject: [shop.customers.email, shop.customers.phone, crm.customers.email, crm.customers.phone]
+    predicate: masking
+    value: { level: STRICT, strategy: sha256 }
+    status: active
+    trust: documented
+    evidence: [{ type: file, ref: documents/business-context.yaml }]
+
+# Trap 4 (t10) must produce a context gap, not an assertion:
+expectedContextGaps:
+  - needed: relationship
+    subject: [crm.support_tickets, shop.orders]
+    reason: no ticket-to-order key exists; tickets relate to customers via cust_no only

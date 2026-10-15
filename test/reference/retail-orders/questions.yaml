@@ -1,0 +1,135 @@
+# Questions a data engineer would ask after the scripted conversation.
+#
+# evidence:    strings that must ALL appear (case-insensitive) in the context AutoDE delivers for the
+#              question to be answerable from the context layer alone (offline "answerability" metric).
+# mustInclude: tokens a correct answer must contain (scored in replay/record mode).
+# unknown:     true when the context does not and should not contain the answer — a correct answer
+#              says so instead of guessing (scored against UNKNOWN_PHRASES in the harness).
+questions:
+  # ── grain and keys ──
+  - id: q01
+    question: What is the grain of shop.orders?
+    evidence: [orders, order_id, one row per order]
+    mustInclude: [order]
+  - id: q02
+    question: What uniquely identifies an order line?
+    evidence: [order_items, order_item_id]
+    mustInclude: [order_item_id]
+  - id: q03
+    question: What is the customer key in the CRM?
+    evidence: [cust_no]
+    mustInclude: [cust_no]
+  - id: q04
+    question: How do CRM customers link to shop customers?
+    evidence: [shop_customer_id, customer_id]
+    mustInclude: [shop_customer_id, customer_id]
+  - id: q05
+    question: Is member_id unique in crm.loyalty_members?
+    evidence: [member_id, duplicate]
+    mustInclude: [duplicate]
+  - id: q06
+    question: Which column should orders be loaded incrementally on?
+    evidence: [updated_at, incremental]
+    mustInclude: [updated_at]
+  # ── relationships ──
+  - id: q07
+    question: How does order_items join to orders?
+    evidence: [order_items, order_id]
+    mustInclude: [order_id]
+  - id: q08
+    question: How do refunds relate to orders?
+    evidence: [refunds, order_id]
+    mustInclude: [order_id]
+  - id: q09
+    question: How do loyalty transactions relate to orders?
+    evidence: [loyalty_transactions, order_ref]
+    mustInclude: [order_ref]
+  - id: q10
+    question: Can support tickets be joined to individual orders?
+    evidence: [support_tickets, cust_no]
+    mustInclude: [no]
+  - id: q11
+    question: Which table holds product categories, and how do products reference it?
+    evidence: [product_categories, category_id]
+    mustInclude: [category_id]
+  # ── metrics ──
+  - id: q12
+    question: How is revenue defined for this project?
+    evidence: [net revenue, refund, cancel]
+    mustInclude: [refund, cancel]
+  - id: q13
+    question: Are cancelled orders included in revenue?
+    evidence: [cancel]
+    mustInclude: [exclude]
+  - id: q14
+    question: Is there a conflict in how revenue is defined anywhere in the context?
+    evidence: [gross, net revenue]
+    mustInclude: [gross, net]
+  - id: q15
+    question: How is 90-day retention defined?
+    evidence: [retained, 90 days]
+    mustInclude: ["90"]
+  - id: q16
+    question: What is average order value?
+    evidence: [average order value]
+    mustInclude: [order]
+  # ── columns and types ──
+  - id: q17
+    question: What is the data type of shop.orders.order_ts?
+    evidence: [order_ts, timestamp]
+    mustInclude: [timestamp]
+  - id: q18
+    question: Which columns hold monetary amounts on order_items?
+    evidence: [unit_price, discount_amount]
+    mustInclude: [unit_price]
+  - id: q19
+    question: What values can shop.orders.status take?
+    evidence: [status, cancelled]
+    mustInclude: [cancelled]
+  - id: q20
+    question: Which columns on crm.customers drive the SCD2 history?
+    evidence: [segment_code, lifecycle_stage]
+    mustInclude: [segment_code, lifecycle_stage]
+  - id: q21
+    question: Where is the order currency stored?
+    evidence: [currency]
+    mustInclude: [currency]
+  # ── governance ──
+  - id: q22
+    question: Which columns are PII and how must they be handled?
+    evidence: [email, phone, sha-256]
+    mustInclude: [email, phone]
+  - id: q23
+    question: Is FX conversion required in v1?
+    evidence: [fx conversion]
+    mustInclude: ["no"]
+  # ── modelling decisions ──
+  - id: q24
+    question: Which dimension keeps history, and how?
+    evidence: [dim_customer, scd type 2]
+    mustInclude: [scd]
+  - id: q25
+    question: What is the target platform and transformation tool?
+    evidence: [snowflake, dbt]
+    mustInclude: [snowflake, dbt]
+  - id: q26
+    question: Which loyalty tiers exist?
+    evidence: [gold, silver, bronze]
+    mustInclude: [gold]
+  # ── things the context does not know (must not be guessed) ──
+  - id: q27
+    question: What is the SLA for the daily revenue table to be ready?
+    unknown: true
+    evidence: []
+  - id: q28
+    question: What is the expected daily order volume?
+    unknown: true
+    evidence: []
+  - id: q29
+    question: Which BI tool will consume the marts?
+    unknown: true
+    evidence: []
+  - id: q30
+    question: What is the data retention period for raw order data?
+    unknown: true
+    evidence: []

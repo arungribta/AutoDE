@@ -1,0 +1,51 @@
+# Expected semantic model after the scripted conversation (docs/context-layer-requirements.md §6 shape).
+# Scored from Phase C5 on.
+specId: retail-orders
+entities:
+  - name: order
+    table: shop.orders
+    grain: [order_id]
+    keys: { primary: [order_id] }
+    dimensions:
+      - { name: order_date, column: order_ts, type: time, granularity: day }
+      - { name: channel, column: channel, type: categorical }
+      - { name: status, column: status, type: categorical }
+  - name: order_line
+    table: shop.order_items
+    grain: [order_item_id]
+    keys: { primary: [order_item_id] }
+    measures:
+      - { name: gross_line_amount, expression: quantity * unit_price, aggregation: sum }
+      - { name: line_discount, expression: discount_amount, aggregation: sum }
+  - name: refund
+    table: shop.refunds
+    grain: [refund_id]
+    measures:
+      - { name: refund_amount, expression: amount, aggregation: sum }
+  - name: customer
+    table: shop.customers
+    grain: [customer_id]
+    keys: { primary: [customer_id] }
+  - name: crm_customer
+    table: crm.customers
+    grain: [cust_no]
+    keys: { primary: [cust_no] }
+    dimensions:
+      - { name: segment, column: segment_code, type: categorical }
+      - { name: lifecycle_stage, column: lifecycle_stage, type: categorical }
+relationships:
+  - { from: order_line, to: order, on: [[order_id, order_id]], cardinality: 'N:1' }
+  - { from: refund, to: order, on: [[order_id, order_id]], cardinality: 'N:1' }
+  - { from: order, to: customer, on: [[customer_id, customer_id]], cardinality: 'N:1' }
+  - { from: crm_customer, to: customer, on: [[shop_customer_id, customer_id]], cardinality: '1:1' }
+metrics:
+  - name: net_revenue
+    expression: gross_line_amount - line_discount - refund_amount
+    filters: ["status <> 'CANCELLED'"]
+    grain: [order]
+  - name: retention_90d
+    definition: share of customers who place another non-cancelled order within 90 days of a previous one
+    grain: [customer]
+rules:
+  - { id: PII, level: STRICT, text: Customer email and phone are masked (SHA-256) in every analytics layer }
+# Must NOT appear: any relationship between crm.support_tickets and shop.orders (trap 4).

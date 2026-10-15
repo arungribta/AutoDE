@@ -1169,6 +1169,16 @@ The full specification, phasing and acceptance criteria live in [mcp-engine-requ
 - Data-platform access, transform primitives, the Pipeline Spec compiler, skill loaders and context-file persistence live in `src/engine/`, which never imports the VS Code API (lint-enforced and tested). This is the code the MCP server will expose from Phase 3.
 - No user-visible change: connections, Source Assessment, primitive preview, plan execution and spec saving behave as in v0.25.0.
 
+## 20. Context Layer, Semantic Model & Grounding (v0.27.0 onward)
+
+Full specification: [context-layer-requirements.md](context-layer-requirements.md). This section records what has shipped.
+
+### 20.1 Reference problem and evaluation harness (v0.27.0)
+
+- `npm run eval` measures AutoDE against a realistic reference problem (`test/reference/retail-orders/`) and writes a report: identifier grounding of generated SQL, answerability from the context layer, trap detection, artifact properties, ingestion fidelity, and context size.
+- Runs offline with no credentials; can record and replay real LLM responses per provider.
+- The v0.26.0 baseline is frozen in `test/reference/retail-orders/baselines/` so every later phase can show its effect.
+
 ---
 
 (End of requirements document)
