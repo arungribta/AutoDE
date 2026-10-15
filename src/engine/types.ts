@@ -815,6 +815,17 @@ export interface AgentHost {
   fileIo: FileIo;
 }
 
+/** Options for `AgentExecutionContext.runWithTools` (v0.28.0). */
+export interface AgentToolRunOptions {
+  systemPrompt: string;
+  toolExecutionMode: ToolExecutionMode;
+  /** AutoDE tool names the run may use; omitted = the mode's full catalog. */
+  allowedToolNames?: string[];
+  justification?: string;
+  /** Claude Code only: the whole-run approval text (it can't approve per call). */
+  approvalPrompt?: string;
+}
+
 export interface AgentExecutionContext {
   objective: string;
   schemaContext?: string;
@@ -835,19 +846,15 @@ export interface AgentExecutionContext {
    * promise, same as any other LLM call in the hub.
    */
   callLlm?: (prompt: string, systemPrompt?: string) => Promise<string>;
+  /**
+   * Runs one LLM turn with AutoDE tool access through the configured provider (v0.28.0) and returns
+   * the tool-call audit with the text. The tool-skill path: every provider's own tool loop, one call.
+   */
+  runWithTools?: (prompt: string, opts: AgentToolRunOptions) => Promise<{ text: string; audit: ToolCallAuditEntry[]; provider: LlmProvider }>;
   /** The hosting environment (v0.26.0). Optional so hand-built contexts in tests keep compiling. */
   host?: AgentHost;
   /** Only populated for `toolSkillAgent` — the workspace root, for sandboxing tool execution. */
   workspaceRoot?: string;
-  /**
-   * Only populated for `toolSkillAgent` — the real `vscode.ExtensionContext`, needed for
-   * `vscode.lm` access-information checks. Left untyped here so this pure type file keeps
-   * its no-`vscode`-import rule; the executor that reads it casts back to the real type.
-   * This is the one sub-agent that breaks the "agents import only core/types" convention,
-   * because it does real tool execution (file I/O, process spawn, approval dialogs) rather
-   * than deterministic templating — see `src/agents/build/ToolSkillAgent.ts`.
-   */
-  extensionContext?: unknown;
   /** Which skill to run + the user's instruction — populated by the caller (plan step or chat). */
   skillId?: string;
   skillInstruction?: string;

@@ -122,6 +122,12 @@ export function buildDiscoveryTurnPrompt(
     lines.push('\n## Available skills (use these to decide what to ask)');
     for (const skill of questionSkills) {
       lines.push(`- ${skill.id}: ${skill.questionGuidance}`);
+      // v0.28.0: each skill's own interviewing approach — parsed and required since the skills
+      // format shipped, but never sent to the model until now. The MCP server exposes the same
+      // text as the skill's prompt (docs/mcp-engine-requirements.md §5.4), so both paths match.
+      if (skill.systemPrompt) {
+        lines.push(`  approach: ${skill.systemPrompt}`);
+      }
       if (skill.exampleQuestions && skill.exampleQuestions.length > 0) {
         lines.push(`  e.g. "${skill.exampleQuestions[0]}"`);
       }

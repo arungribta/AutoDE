@@ -259,7 +259,7 @@ Implement strictly in this order; each row is one minor version.
 | v0.25.0 | **1** Spec state synchronization ✅ | Live bug; prerequisite for any second writer of `.ai-context/`. |
 | v0.26.0 | **2** Engine boundary and context store ✅ | Everything after this builds in `src/engine/`. |
 | v0.27.0 | **C1** Reference problem, eval harness, baseline ✅ | Measures the v0.26.0 baseline *before* the context layer changes, so improvement can be shown. |
-| v0.28.0 | **S1** Tool-skill execution on every provider + `allowed-tools` enforcement | Security prerequisite: skills later get engine tools (§7.4) and are exposed over MCP (§5.4). |
+| v0.28.0 | **S1** Tool-skill execution on every provider + `allowed-tools` enforcement ✅ | Security prerequisite: skills later get engine tools (§7.4) and are exposed over MCP (§5.4). |
 | v0.29.0 | **C2** Assertion ledger and projection | System of record for context. |
 | v0.30.0 | **C3** Context packs, manifests, causality | Grounded delivery; the server should expose the final retrieval, not the old dump. |
 | v0.31.0 | **S2** Tool-skill lifecycle, provenance, review and trust tiers | Must exist before any skill is exposed to external agents over MCP. |

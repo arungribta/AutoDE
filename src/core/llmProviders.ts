@@ -1,15 +1,19 @@
 import * as vscode from 'vscode';
 import { LlmAdapter, LlmAdapterContext, LlmCompleteOptions, LlmHistoryTurn, extractJsonText } from './llmAdapter';
 import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
-import { AgenticToolCall, JsonSchemaToolSpec, READ_ONLY_TOOL_SPECS, WRITE_TOOL_SPECS, executeAgenticTool } from './agenticTools';
+import { AgenticToolCall, executeAgenticTool, toolSpecsForMode } from './agenticTools';
 
 const MAX_TOOL_LOOP_TURNS = 12;
 
-/** Read-only tools for `'read-only'`, read-only + write/exec for `'full'`, none otherwise. */
-function toolSpecsForMode(mode: ToolExecutionMode | undefined): JsonSchemaToolSpec[] {
-  if (mode === 'full') { return [...READ_ONLY_TOOL_SPECS, ...WRITE_TOOL_SPECS]; }
-  if (mode === 'read-only') { return READ_ONLY_TOOL_SPECS; }
-  return [];
+/** What a tool loop may use and where it reports: the mode, an optional allow-list, an optional audit sink (v0.28.0). */
+interface ToolRun {
+  mode: ToolExecutionMode;
+  allowed?: string[];
+  audit?: ToolCallAuditEntry[];
+}
+
+function toolRunFrom(opts: LlmCompleteOptions): ToolRun {
+  return { mode: opts.toolExecutionMode ?? 'none', allowed: opts.allowedToolNames, audit: opts.auditSink };
 }
 
 interface OpenAiStyleToolCall {
@@ -37,12 +41,12 @@ function historyToOpenAiStyle(history?: LlmHistoryTurn[]): OpenAiStyleMessage[] 
 async function runOpenAiStyleToolLoop(
   systemPrompt: string,
   userPrompt: string,
-  mode: ToolExecutionMode,
+  run: ToolRun,
   workspaceRoot: string | undefined,
   history: LlmHistoryTurn[] | undefined,
   sendChat: (messages: OpenAiStyleMessage[], tools: unknown[]) => Promise<{ content?: string | null; tool_calls?: OpenAiStyleToolCall[] }>
 ): Promise<string> {
-  const toolSpecs = toolSpecsForMode(mode);
+  const toolSpecs = toolSpecsForMode(run.mode, run.allowed);
   if (toolSpecs.length === 0) {
     const message = await sendChat(
       [{ role: 'system', content: systemPrompt }, ...historyToOpenAiStyle(history), { role: 'user', content: userPrompt }],
@@ -60,7 +64,8 @@ async function runOpenAiStyleToolLoop(
     ...historyToOpenAiStyle(history),
     { role: 'user', content: userPrompt }
   ];
-  const audit: ToolCallAuditEntry[] = [];
+  const audit: ToolCallAuditEntry[] = run.audit ?? [];
+  const offered = new Set(toolSpecs.map((t) => t.name));
 
   for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
     const message = await sendChat(messages, tools);
@@ -79,7 +84,7 @@ async function runOpenAiStyleToolLoop(
         input = call.function.arguments ?? {};
       }
       const toolCall: AgenticToolCall = { id, name: call.function.name, input };
-      const output = await executeAgenticTool(toolCall, workspaceRoot, audit);
+      const output = await executeAgenticTool(toolCall, workspaceRoot, audit, offered);
       messages.push({ role: 'tool', tool_call_id: id, content: output });
     }
   }
@@ -140,7 +145,8 @@ class CopilotLlmAdapter implements LlmAdapter {
       if (mode === 'none') {
         return await adapter.complete(prompt, { model: opts.model, timeoutMs: 60000, systemPrompt: opts.systemPrompt, justification: opts.justification, history: opts.history });
       }
-      const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history });
+      const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history, allowedToolNames: opts.allowedToolNames });
+      if (opts.auditSink) opts.auditSink.push(...result.audit);
       return result.text;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -163,7 +169,7 @@ class ClaudeLlmAdapter implements LlmAdapter {
       const mode: ToolExecutionMode = opts.toolExecutionMode ?? 'none';
       if (mode === 'full') {
         const proceed = await vscode.window.showWarningMessage(
-          'Allow the assistant to write files and run commands in this workspace for this request? Claude Code will ask again only once per request, not per file.',
+          opts.approvalPrompt ?? 'Allow the assistant to write files and run commands in this workspace for this request? Claude Code will ask again only once per request, not per file.',
           { modal: true },
           'Allow'
         );
@@ -183,7 +189,8 @@ class ClaudeLlmAdapter implements LlmAdapter {
         toolMode: mode,
         cwd: ctx.getWorkspaceRoot(),
         sessionId: opts.claudeSessionId,
-        isNewSession: opts.isNewClaudeSession
+        isNewSession: opts.isNewClaudeSession,
+        allowedTools: opts.allowedToolNames
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -205,7 +212,7 @@ class OpenAiLlmAdapter implements LlmAdapter {
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error('OpenAI API key is missing. Add it in the settings panel.');
     }
-    return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, opts.toolExecutionMode ?? 'none', ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
+    return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, toolRunFrom(opts), ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
       const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -234,7 +241,8 @@ class AnthropicLlmAdapter implements LlmAdapter {
       throw new Error('Anthropic API key is missing. Add it in the settings panel.');
     }
 
-    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode);
+    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode, opts.allowedToolNames);
+    const offered = new Set(toolSpecs.map((t) => t.name));
     const tools = toolSpecs.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
     const workspaceRoot = ctx.getWorkspaceRoot();
     if (toolSpecs.length > 0 && !workspaceRoot) {
@@ -246,7 +254,7 @@ class AnthropicLlmAdapter implements LlmAdapter {
       ...(opts.history ?? []).map((turn) => ({ role: turn.role, content: turn.content })),
       { role: 'user' as const, content: prompt }
     ];
-    const audit: ToolCallAuditEntry[] = [];
+    const audit: ToolCallAuditEntry[] = opts.auditSink ?? [];
 
     for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
       const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
@@ -271,7 +279,7 @@ class AnthropicLlmAdapter implements LlmAdapter {
       messages.push({ role: 'assistant', content: blocks });
       const resultBlocks: AnthropicBlock[] = [];
       for (const tu of toolUses) {
-        const output = await executeAgenticTool({ id: tu.id ?? tu.name ?? 'tool', name: tu.name ?? '', input: tu.input ?? {} }, workspaceRoot!, audit);
+        const output = await executeAgenticTool({ id: tu.id ?? tu.name ?? 'tool', name: tu.name ?? '', input: tu.input ?? {} }, workspaceRoot!, audit, offered);
         resultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content: output });
       }
       messages.push({ role: 'user', content: resultBlocks });
@@ -296,7 +304,7 @@ class AzureOpenAiLlmAdapter implements LlmAdapter {
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error('Azure OpenAI API key is missing. Add it in the settings panel.');
     }
-    return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, opts.toolExecutionMode ?? 'none', ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
+    return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, toolRunFrom(opts), ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
       const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
@@ -325,7 +333,8 @@ class GeminiLlmAdapter implements LlmAdapter {
       throw new Error('Gemini API key is missing. Add it in the settings panel.');
     }
 
-    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode);
+    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode, opts.allowedToolNames);
+    const offered = new Set(toolSpecs.map((t) => t.name));
     const tools = toolSpecs.length > 0 ? [{ functionDeclarations: toolSpecs.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) }] : undefined;
     const workspaceRoot = ctx.getWorkspaceRoot();
     if (toolSpecs.length > 0 && !workspaceRoot) {
@@ -337,7 +346,7 @@ class GeminiLlmAdapter implements LlmAdapter {
       ...(opts.history ?? []).map((turn) => ({ role: (turn.role === 'assistant' ? 'model' : 'user') as 'user' | 'model', parts: [{ text: turn.content }] })),
       { role: 'user', parts: [{ text: prompt }] }
     ];
-    const audit: ToolCallAuditEntry[] = [];
+    const audit: ToolCallAuditEntry[] = opts.auditSink ?? [];
 
     for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
       const response = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${apiKey}`, {
@@ -365,7 +374,7 @@ class GeminiLlmAdapter implements LlmAdapter {
       const responseParts: GeminiPart[] = [];
       for (const p of funcCalls) {
         const call = p.functionCall!;
-        const output = await executeAgenticTool({ id: call.name, name: call.name, input: call.args ?? {} }, workspaceRoot!, audit);
+        const output = await executeAgenticTool({ id: call.name, name: call.name, input: call.args ?? {} }, workspaceRoot!, audit, offered);
         responseParts.push({ functionResponse: { name: call.name, response: { result: output } } });
       }
       contents.push({ role: 'user', parts: responseParts });
@@ -408,7 +417,7 @@ class OllamaLlmAdapter implements LlmAdapter {
       return extractJsonText(data.message?.content ?? '');
     }
 
-    return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, mode, ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
+    return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, toolRunFrom(opts), ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
       const response = await fetchWithTimeout('http://localhost:11434/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

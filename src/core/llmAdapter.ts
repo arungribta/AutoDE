@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DataAgentHubSettings, LlmProvider, ToolExecutionMode } from '../engine/types';
+import { DataAgentHubSettings, LlmProvider, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
 
 /**
  * The provider-agnostic contract every LLM provider implements (Phase C).
@@ -49,6 +49,16 @@ export interface LlmCompleteOptions {
   /** Claude-only: true when `claudeSessionId` was just minted and hasn't been used yet (first
    *  call for this chat) — selects `--session-id` over `--resume`. */
   isNewClaudeSession?: boolean;
+  /** Narrows the mode's tool catalog to these AutoDE tool names (v0.28.0 — a skill's resolved
+   *  `allowed-tools`, see `resolveAllowedToolNames`). Omitted = the mode's full catalog. Enforced by
+   *  every AutoDE-owned tool loop, and by the Claude adapter through the CLI's `--tools` list. */
+  allowedToolNames?: string[];
+  /** When given, every tool call the adapter's loop makes is appended here, so the caller gets the
+   *  audit trail instead of it being discarded. The Claude CLI runs its own loop and appends nothing. */
+  auditSink?: ToolCallAuditEntry[];
+  /** Claude-only: replaces the generic whole-run approval text in `'full'` mode, so the caller can say
+   *  what is being approved (e.g. which skill). */
+  approvalPrompt?: string;
 }
 
 /**

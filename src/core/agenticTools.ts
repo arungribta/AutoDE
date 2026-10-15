@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { exec as execCb } from 'node:child_process';
-import { ToolCallAuditEntry } from '../engine/types';
+import { ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
+export { resolveAllowedToolNames } from '../engine/skills/toolAllowList';
 
 /**
  * Provider-agnostic tool layer shared by every LLM adapter's tool-calling loop
@@ -75,6 +76,19 @@ export const WRITE_TOOL_SPECS: JsonSchemaToolSpec[] = [
     parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }
   }
 ];
+
+/** Narrows a tool catalog to an allow-list; `undefined` leaves it unchanged. */
+export function filterToolSpecsByAllowList(specs: JsonSchemaToolSpec[], allowed: readonly string[] | undefined): JsonSchemaToolSpec[] {
+  if (!allowed) return specs;
+  const set = new Set(allowed);
+  return specs.filter((s) => set.has(s.name));
+}
+
+/** Read-only tools for `'read-only'`, read-only + write/exec for `'full'`, none otherwise — then narrowed to `allowed`. */
+export function toolSpecsForMode(mode: ToolExecutionMode | undefined, allowed?: readonly string[]): JsonSchemaToolSpec[] {
+  const base = mode === 'full' ? [...READ_ONLY_TOOL_SPECS, ...WRITE_TOOL_SPECS] : mode === 'read-only' ? READ_ONLY_TOOL_SPECS : [];
+  return filterToolSpecsByAllowList(base, allowed);
+}
 
 /** Resolves a model-supplied relative path against the workspace root, rejecting any escape (`..`, absolute paths elsewhere). */
 export function resolveSandboxedPath(workspaceRoot: string, requestedPath: string): string {
@@ -159,10 +173,17 @@ function searchFiles(root: string, startDir: string, pattern: string): string {
 export async function executeAgenticTool(
   call: AgenticToolCall,
   workspaceRoot: string,
-  audit: ToolCallAuditEntry[]
+  audit: ToolCallAuditEntry[],
+  /** The tool names this run was offered. A call to anything else is refused and audited as denied (v0.28.0) —
+   *  models normally only call offered tools, but an allow-list must not depend on that. */
+  offered?: ReadonlySet<string>
 ): Promise<string> {
   const input = call.input ?? {};
   const at = new Date().toISOString();
+  if (offered && !offered.has(call.name)) {
+    audit.push({ tool: call.name, input, outcome: 'denied', detail: 'tool not offered to this run', at });
+    return `Error: the tool "${call.name}" is not available in this run.`;
+  }
   try {
     switch (call.name) {
       case 'autode_read_file': {

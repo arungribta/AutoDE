@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ConfigurationManager } from './configManager';
-import { AgentHost } from '../engine/types';
+import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry } from '../engine/types';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeIngestionAgent } from '../agents/build/IngestionPipelineAgent';
 import { executeSttmAgent } from '../agents/model/SttmMapperAgent';
@@ -511,7 +511,7 @@ export class DataAgentHubHub {
       },
       currentPhase: 'build',
       workspaceRoot: this.getWorkspaceRoot(),
-      extensionContext: this.configManager.getExtensionContext(),
+      runWithTools: (prompt: string, opts: AgentToolRunOptions) => this.runConfiguredLlmWithTools(prompt, opts),
       host: this.buildAgentHost(),
       skillId,
       skillInstruction: instruction
@@ -1096,7 +1096,7 @@ Message: ${message}`;
           },
           currentPhase: phase,
           workspaceRoot: this.getWorkspaceRoot(),
-          extensionContext: this.configManager.getExtensionContext(),
+          runWithTools: (prompt: string, opts: AgentToolRunOptions) => this.runConfiguredLlmWithTools(prompt, opts),
           host: this.buildAgentHost(),
           skillId: readyStep.skillId,
           skillInstruction: readyStep.taskDescription,
@@ -1344,6 +1344,31 @@ Message: ${message}`;
       const message = error instanceof Error ? error.message : 'The selected LLM provider is unavailable.';
       throw new Error(`LLM request failed: ${message}`);
     }
+  }
+
+  /**
+   * One LLM turn with AutoDE tool access through the configured provider (v0.28.0) — the single
+   * path tool-executing skills use on every provider. The adapter appends each tool call to `audit`
+   * (Claude Code's CLI runs its own loop and appends nothing; its run is approved as a whole).
+   */
+  private async runConfiguredLlmWithTools(prompt: string, opts: AgentToolRunOptions): Promise<{ text: string; audit: ToolCallAuditEntry[]; provider: LlmProvider }> {
+    const settings = this.configManager.getSettings();
+    const provider = settings.activeLlmProvider ?? 'copilot';
+    const audit: ToolCallAuditEntry[] = [];
+    const text = await getLlmAdapter(provider).complete(
+      prompt,
+      {
+        model: settings.activeLlmModel ?? 'gpt-4o-mini',
+        systemPrompt: opts.systemPrompt,
+        justification: opts.justification,
+        toolExecutionMode: opts.toolExecutionMode,
+        allowedToolNames: opts.allowedToolNames,
+        auditSink: audit,
+        approvalPrompt: opts.approvalPrompt
+      },
+      this.buildLlmContext()
+    );
+    return { text, audit, provider };
   }
 
   private parseJsonObject(text: string): Record<string, unknown> {

@@ -37,6 +37,14 @@ export interface ClaudeCodeInfo {
 }
 
 const EXTENSION_ID_CANDIDATES = ['Anthropic.claude-code', 'anthropic.claude-code'];
+/** AutoDE tool → the Claude Code CLI tools that provide the same capability (v0.28.0 allow-list mapping). */
+const CLAUDE_TOOLS_FOR_AUTODE_TOOL: Record<string, string[]> = {
+  autode_read_file: ['Read'],
+  autode_search_files: ['Grep'],
+  autode_list_dir: ['Glob'],
+  autode_write_file: ['Edit', 'Write'],
+  autode_run_command: ['Bash']
+};
 const CLAUDE_MODEL_HINT = /^(claude[-\w.]*|sonnet|opus|haiku)([-\w.]*)?$/i;
 
 function binName(): string {
@@ -198,6 +206,8 @@ export class ClaudeCodeAdapter {
       cwd?: string;
       sessionId?: string;
       isNewSession?: boolean;
+      /** AutoDE tool names this run may use (a skill's `allowed-tools`); narrows the CLI's `--tools` list. */
+      allowedTools?: string[];
       cancellationToken?: vscode.CancellationToken;
     }
   ): Promise<string> {
@@ -218,7 +228,15 @@ export class ClaudeCodeAdapter {
       args.push(opts.isNewSession ? '--session-id' : '--resume', opts.sessionId);
     }
 
-    if (mode === 'full') {
+    const narrow = (cliTools: string[]): string[] => {
+      if (!opts?.allowedTools) return cliTools;
+      const permitted = new Set(opts.allowedTools.flatMap((t) => CLAUDE_TOOLS_FOR_AUTODE_TOOL[t] ?? []));
+      return cliTools.filter((t) => permitted.has(t));
+    };
+    const fullTools = narrow(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash']);
+    const readTools = narrow(['Read', 'Grep', 'Glob']);
+
+    if (mode === 'full' && fullTools.some((t) => t === 'Edit' || t === 'Write' || t === 'Bash')) {
       // 'default' permission-mode blocks Edit/Write/Bash outright in headless (-p) runs — there is
       // no interactive session to answer the prompt, and no permission-prompt-tool is wired up (see
       // the design note on ToolSkillAgent). 'acceptEdits' auto-approves file edits unattended;
@@ -226,9 +244,9 @@ export class ClaudeCodeAdapter {
       // NOT verified — in local testing the model described the command as text rather than
       // invoking the tool, for reasons not fully diagnosed (Windows tool-name/session quirk, or
       // model choice) — treat command execution via this path as best-effort, not guaranteed.
-      args.push('--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', '--permission-mode', 'acceptEdits', '--max-turns', '30');
-    } else if (mode === 'read-only') {
-      args.push('--tools', 'Read', 'Grep', 'Glob', '--permission-mode', 'default', '--max-turns', '16');
+      args.push('--tools', ...fullTools, '--permission-mode', 'acceptEdits', '--max-turns', '30');
+    } else if (mode !== 'none' && readTools.length > 0) {
+      args.push('--tools', ...readTools, '--permission-mode', 'default', '--max-turns', '16');
     } else {
       args.push('--tools', '', '--max-turns', '1');
     }

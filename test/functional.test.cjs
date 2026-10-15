@@ -4667,6 +4667,225 @@ async function main() {
     }
   });
 
+  // ── v0.28.0: tool skills on every provider + allowed-tools enforcement (Phase S1) ──
+  await test('v0.28.0: resolveAllowedToolNames maps declared tools onto AutoDE tools; toolModeCeiling never grants full to a read-only skill', () => {
+    const { resolveAllowedToolNames, toolModeCeiling } = require('../dist/engine/skills/toolAllowList.js');
+    assert.strictEqual(resolveAllowedToolNames(undefined), undefined, 'nothing declared = no extra restriction');
+    assert.strictEqual(resolveAllowedToolNames([]), undefined);
+    assert.deepStrictEqual(resolveAllowedToolNames(['Read']), ['autode_read_file']);
+    assert.deepStrictEqual(resolveAllowedToolNames(['Bash(git:*)', 'grep', 'autode_list_dir']).sort(), ['autode_list_dir', 'autode_run_command', 'autode_search_files']);
+    assert.deepStrictEqual(resolveAllowedToolNames(['WebFetch']), [], 'declared but unrecognized = no tools, not every tool');
+    assert.strictEqual(toolModeCeiling(['autode_read_file']), 'read-only');
+    assert.strictEqual(toolModeCeiling(['autode_read_file', 'autode_write_file']), 'full');
+    assert.strictEqual(toolModeCeiling(undefined), 'full');
+  });
+
+  await test('v0.28.0: the engine allow-list names match the agentic tool catalog exactly', () => {
+    const allow = require('../dist/engine/skills/toolAllowList.js');
+    const tools = withMock(createMock(), () => fresh('../dist/core/agenticTools.js'));
+    assert.deepStrictEqual([...allow.AUTODE_READ_TOOLS].sort(), tools.READ_ONLY_TOOL_SPECS.map((t) => t.name).sort());
+    assert.deepStrictEqual([...allow.AUTODE_WRITE_TOOLS].sort(), tools.WRITE_TOOL_SPECS.map((t) => t.name).sort());
+    assert.deepStrictEqual(tools.toolSpecsForMode('full', ['autode_read_file']).map((t) => t.name), ['autode_read_file']);
+    assert.strictEqual(tools.toolSpecsForMode('full').length, 5, 'no allow-list = the full catalog, as before');
+  });
+
+  function toolLoopCtx(workspaceRoot) {
+    return { getLlmApiKey: async () => 'test-key', getSettings: () => ({ llmEndpoint: 'https://example.invalid/chat', languageModelProgrammaticConsent: true }), getWorkspaceRoot: () => workspaceRoot, getExtensionContext: () => undefined, log: () => {} };
+  }
+
+  await test('v0.28.0: every fetch-based provider offers only the allowed tools (openai, azure-openai, ollama, anthropic, gemini)', async () => {
+    const mock = createMock();
+    const { LLM_ADAPTERS } = withMock(mock, () => fresh('../dist/core/llmProviders.js'));
+    const toolNames = (body) => {
+      if (!body.tools) return [];
+      if (body.tools[0] && body.tools[0].functionDeclarations) return body.tools[0].functionDeclarations.map((t) => t.name);
+      return body.tools.map((t) => (t.function ? t.function.name : t.name));
+    };
+    const finalReply = {
+      openai: { choices: [{ message: { content: 'done' } }] },
+      'azure-openai': { choices: [{ message: { content: 'done' } }] },
+      ollama: { message: { content: 'done' } },
+      anthropic: { content: [{ type: 'text', text: 'done' }] },
+      gemini: { candidates: [{ content: { parts: [{ text: 'done' }] } }] }
+    };
+    const realFetch = global.fetch;
+    try {
+      for (const provider of Object.keys(finalReply)) {
+        for (const [allowed, expected] of [[['autode_read_file'], ['autode_read_file']], [undefined, ['autode_list_dir', 'autode_read_file', 'autode_run_command', 'autode_search_files', 'autode_write_file']]]) {
+          let offered;
+          global.fetch = async (_url, init) => { offered = toolNames(JSON.parse(init.body)); return { ok: true, json: async () => finalReply[provider], text: async () => '' }; };
+          const out = await withMock(mock, () => LLM_ADAPTERS[provider].complete('go', { model: 'm', systemPrompt: 's', toolExecutionMode: 'full', allowedToolNames: allowed }, toolLoopCtx('/ws')));
+          assert.strictEqual(out, 'done');
+          assert.deepStrictEqual(offered.sort(), expected, `${provider} with allow-list ${JSON.stringify(allowed)}`);
+        }
+      }
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
+
+  await test('v0.28.0: a tool call outside the allow-list is refused and audited, and the audit reaches the caller', async () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-tools-'));
+    nodeFs.writeFileSync(nodePath.join(dir, 'a.txt'), 'hello');
+    const mock = createMock();
+    mock.workspace.fs.readFile = async (uri) => nodeFs.readFileSync(uri.fsPath);
+    delete require.cache[require.resolve('../dist/core/agenticTools.js')];
+    const { LLM_ADAPTERS } = withMock(mock, () => fresh('../dist/core/llmProviders.js'));
+    const replies = [
+      { choices: [{ message: { content: '', tool_calls: [
+        { id: 'c1', function: { name: 'autode_write_file', arguments: JSON.stringify({ path: 'x.txt', content: 'pwned' }) } },
+        { id: 'c2', function: { name: 'autode_read_file', arguments: JSON.stringify({ path: 'a.txt' }) } }
+      ] } }] },
+      { choices: [{ message: { content: 'read it' } }] }
+    ];
+    const realFetch = global.fetch;
+    global.fetch = async () => ({ ok: true, json: async () => replies.shift(), text: async () => '' });
+    try {
+      const audit = [];
+      const out = await withMock(mock, () => LLM_ADAPTERS.openai.complete('go', { model: 'm', systemPrompt: 's', toolExecutionMode: 'full', allowedToolNames: ['autode_read_file'], auditSink: audit }, toolLoopCtx(dir)));
+      assert.strictEqual(out, 'read it');
+      assert.deepStrictEqual(audit.map((a) => `${a.tool}:${a.outcome}`), ['autode_write_file:denied', 'autode_read_file:ok']);
+      assert.ok(!nodeFs.existsSync(nodePath.join(dir, 'x.txt')), 'the refused write never happened');
+    } finally {
+      global.fetch = realFetch;
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.28.0: the Copilot tool loop offers only the allowed tools and returns its audit', async () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-copilot-'));
+    nodeFs.writeFileSync(nodePath.join(dir, 'a.txt'), 'hello');
+    class TextPart { constructor(value) { this.value = value; } }
+    class ToolCallPart { constructor(callId, name, input) { this.callId = callId; this.name = name; this.input = input; } }
+    class ToolResultPart { constructor(callId, content) { this.callId = callId; this.content = content; } }
+    const offeredPerTurn = [];
+    let turn = 0;
+    const model = {
+      name: 'Copilot-4o', id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', maxInputTokens: 128000,
+      sendRequest: async (_messages, options) => {
+        offeredPerTurn.push((options.tools || []).map((t) => t.name));
+        const parts = turn++ === 0 ? [new ToolCallPart('c1', 'autode_read_file', { path: 'a.txt' })] : [new TextPart('done')];
+        return { stream: (async function* () { for (const p of parts) yield p; })(), text: (async function* () {})() };
+      }
+    };
+    const mock = createMock({ models: [model], config: { languageModelProgrammaticConsent: true } });
+    Object.assign(mock, { LanguageModelTextPart: TextPart, LanguageModelToolCallPart: ToolCallPart, LanguageModelToolResultPart: ToolResultPart });
+    mock.workspace.fs.readFile = async (uri) => nodeFs.readFileSync(uri.fsPath);
+    try {
+      delete require.cache[require.resolve('../dist/core/agenticTools.js')];
+      const lib = freshAdapter(mock);
+      const { adapter } = await withMock(mock, () => lib.LanguageModelAdapter.detect(mockContext(), { provider: 'copilot' }));
+      assert.ok(adapter, 'expected a Copilot adapter');
+      const { text, audit } = await withMock(mock, () => adapter.completeWithTools('go', { mode: 'full', workspaceRoot: dir, allowedToolNames: ['autode_read_file'] }));
+      assert.strictEqual(text, 'done');
+      assert.deepStrictEqual(offeredPerTurn[0], ['autode_read_file']);
+      assert.deepStrictEqual(audit.map((a) => `${a.tool}:${a.outcome}`), ['autode_read_file:ok']);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.28.0: Claude Code receives the allow-list as its --tools list, and a read-only allow-list never gets write mode', async () => {
+    const mock = claudeCodeMock({ versionOut: '2.1.0', spawnResult: { result: 'ok', subtype: 'success' } });
+    const lib = freshClaude(mock);
+    const { adapter } = await withMock(mock, () => lib.ClaudeCodeAdapter.detect(''));
+    const toolsArg = (args) => { const i = args.indexOf('--tools'); const out = []; for (let j = i + 1; j < args.length && !args[j].startsWith('--'); j++) out.push(args[j]); return out; };
+
+    await withMock(mock, () => adapter.complete('x', { toolMode: 'full', allowedTools: ['autode_read_file', 'autode_write_file'] }));
+    assert.deepStrictEqual(toolsArg(mock.__lastSpawn.args), ['Read', 'Edit', 'Write']);
+    assert.ok(mock.__lastSpawn.args.includes('acceptEdits'));
+
+    await withMock(mock, () => adapter.complete('x', { toolMode: 'full', allowedTools: ['autode_read_file'] }));
+    assert.deepStrictEqual(toolsArg(mock.__lastSpawn.args), ['Read']);
+    assert.ok(!mock.__lastSpawn.args.includes('acceptEdits'), 'no write tools allowed → no auto-accepting edit mode');
+
+    await withMock(mock, () => adapter.complete('x', { toolMode: 'full' }));
+    assert.deepStrictEqual(toolsArg(mock.__lastSpawn.args), ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'], 'no allow-list = unchanged');
+  });
+
+  await test('v0.28.0: ToolSkillAgent runs a skill on a non-Copilot provider through the hub, capped by its allowed-tools, with the audit returned', async () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-skill-'));
+    const skillDir = nodePath.join(ws, '.ai-context', 'skills', 'tool-skills', 'reader');
+    nodeFs.mkdirSync(skillDir, { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(skillDir, 'SKILL.md'), '---\nname: reader\ndescription: reads things\nallowed-tools: [Read]\n---\nRead a.txt and summarise it.\n');
+    const mock = createMock();
+    try {
+      const { DataAgentHubHub } = withMock(mock, () => fresh('../dist/core/agentHub.js'));
+      const { LLM_ADAPTERS } = withMock(mock, () => require('../dist/core/llmProviders.js'));
+      const { executeToolSkillAgent } = withMock(mock, () => fresh('../dist/agents/build/ToolSkillAgent.js'));
+      const settings = { activeLlmProvider: 'openai', activeLlmModel: 'gpt-x', languageModelProgrammaticConsent: true };
+      const hub = new DataAgentHubHub(fakeCm(settings));
+      let seen;
+      const realComplete = LLM_ADAPTERS.openai.complete;
+      LLM_ADAPTERS.openai.complete = async (prompt, opts) => {
+        seen = opts;
+        opts.auditSink.push({ tool: 'autode_read_file', input: { path: 'a.txt' }, outcome: 'ok', at: 'now' });
+        return 'summary';
+      };
+      try {
+        const context = {
+          objective: '', settings, workspaceRoot: ws, log: () => {},
+          configManager: { getSecret: async () => undefined, getSettings: () => settings },
+          runWithTools: (p, o) => hub.runConfiguredLlmWithTools(p, o)
+        };
+        const result = await withMock(mock, () => executeToolSkillAgent({ id: 's', assignedAgent: 'toolSkillAgent', taskDescription: 'summarise a.txt', status: 'running', skillId: 'reader' }, context));
+        assert.strictEqual(result.success, true, result.message);
+        assert.strictEqual(result.message, 'summary');
+        assert.strictEqual(seen.toolExecutionMode, 'read-only', 'a skill declaring only Read never runs in full mode');
+        assert.deepStrictEqual(seen.allowedToolNames, ['autode_read_file']);
+        assert.strictEqual(seen.approvalPrompt, undefined, 'no whole-run approval text outside the Claude path');
+        assert.strictEqual(result.details.audit.length, 1, 'the provider loop audit comes back with the result');
+      } finally {
+        LLM_ADAPTERS.openai.complete = realComplete;
+      }
+    } finally {
+      nodeFs.rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.28.0: on the Claude path the skill approval text says individual tool calls cannot be audited', async () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-skill-'));
+    const skillDir = nodePath.join(ws, '.ai-context', 'skills', 'tool-skills', 'writer');
+    nodeFs.mkdirSync(skillDir, { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(skillDir, 'SKILL.md'), '---\nname: writer\n---\nWrite a file.\n');
+    try {
+      const { executeToolSkillAgent } = withMock(createMock(), () => fresh('../dist/agents/build/ToolSkillAgent.js'));
+      let seen;
+      const settings = { activeLlmProvider: 'claude', languageModelProgrammaticConsent: true };
+      const result = await executeToolSkillAgent({ id: 's', assignedAgent: 'toolSkillAgent', taskDescription: 'write it', status: 'running', skillId: 'writer' }, {
+        objective: '', settings, workspaceRoot: ws, log: () => {}, configManager: { getSecret: async () => undefined, getSettings: () => settings },
+        runWithTools: async (_p, o) => { seen = o; return { text: 'ok', audit: [], provider: 'claude' }; }
+      });
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(seen.toolExecutionMode, 'full', 'no declared tools = no extra restriction, as before');
+      assert.strictEqual(seen.allowedToolNames, undefined);
+      assert.ok(/whole run once/.test(seen.approvalPrompt) && /cannot audit or block individual tool calls/.test(seen.approvalPrompt), seen.approvalPrompt);
+    } finally {
+      nodeFs.rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  await test('v0.28.0: the discovery prompt now carries each interview skill\'s systemPrompt', () => {
+    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { buildDiscoveryTurnPrompt } = require('../dist/core/specOpsPrompts.js');
+    const skill = { id: 'data-flow', name: 'Data Flow', order: 1, description: '', systemPrompt: 'Ask one flow at a time.', questionGuidance: 'Target dataFlows.', specFields: ['dataFlows'], exampleQuestions: [] };
+    const { user } = buildDiscoveryTurnPrompt(createIntakeSession('move orders to snowflake'), [skill]);
+    assert.ok(user.includes('- data-flow: Target dataFlows.'));
+    assert.ok(user.includes('approach: Ask one flow at a time.'));
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

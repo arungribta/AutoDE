@@ -1169,6 +1169,13 @@ The full specification, phasing and acceptance criteria live in [mcp-engine-requ
 - Data-platform access, transform primitives, the Pipeline Spec compiler, skill loaders and context-file persistence live in `src/engine/`, which never imports the VS Code API (lint-enforced and tested). This is the code the MCP server will expose from Phase 3.
 - No user-visible change: connections, Source Assessment, primitive preview, plan execution and spec saving behave as in v0.25.0.
 
+### 19.3 Tool skills on every provider (v0.28.0)
+
+- Imported tool skills run on all seven LLM providers (Copilot, Claude Code, OpenAI, Azure OpenAI, Anthropic, Gemini, Ollama), not just Copilot and Claude Code.
+- A skill's declared `allowed-tools` is enforced: it is offered only those tools, a call to any other tool is refused and logged, and a skill that declared only read tools never gets write or command access. On Claude Code the allow-list is applied through the CLI's tool list.
+- Every run on an AutoDE-owned tool loop returns a full audit of its tool calls. Claude Code runs are approved once as a whole, and the approval says individual calls can't be audited.
+- Interview skills' `systemPrompt` (their interviewing approach) now reaches the model.
+
 ## 20. Context Layer, Semantic Model & Grounding (v0.27.0 onward)
 
 Full specification: [context-layer-requirements.md](context-layer-requirements.md). This section records what has shipped.
