@@ -30,6 +30,9 @@ import { PipelineSpecManager } from '../context/PipelineSpecManager';
 import { ContextFileWatcher, normalizeFsPath } from '../context/ContextFileWatcher';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { RevisionConflictError, setRevisionConflictHandler } from '../engine/context/contextStore';
+import { ContextPack, ContextPackProvider, PackPurpose, renderPackManifest } from '../engine/context/contextPack';
+import { explainManifest, GroundingManifest, manifestStaleReasons } from '../engine/grounding/manifest';
+import { createHash } from 'node:crypto';
 import { generateDesignDoc } from '../engine/pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
 import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, registerPrimitiveVersion, resetVersionedPrimitives, compileTransformSpec } from '../engine/transforms/registry';
@@ -143,7 +146,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         bps: spec,
         targetContext: this.targetContextManager?.getContext(),
         sourceContext: this.sourceContextManager?.getContext(),
-        contextLayerText: this.contextFileManager?.buildContextPrompt(),
+        contextLayerText: this.contextPackText('spec', [spec.problemStatement, ...(spec.objectives ?? [])].join('\n'), 'Pipeline Spec synthesis'),
         attachmentExtracts: attachments.map((a) => a.extract).filter((e): e is NonNullable<typeof e> => !!e),
         previous: this.pipelineSpecManager.getSpec()
       });
@@ -212,6 +215,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     } catch (err) {
       this.postLog(`Context initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+    // C3 (v0.30.0): plan steps get task-scoped context packs and grounding manifests.
+    this.hub.setContextProvider(this.createContextPackProvider(), (title, pack) => this.contextFileManager?.recordPack(title, pack));
 
     // Initialize source registry + synthesis pipeline
     this.sourceRegistry = new SourceRegistry(workspaceRoot, (msg: string) => this.postLog(msg));
@@ -354,7 +359,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             await this.synthesisPipeline.synthesizeFromSpec(existingSpec);
             await this.contextFileManager?.persistCompiledGraph();
           }
-          this.hub.inferPhasesFromSpec(existingSpec, this.contextFileManager?.buildContextPrompt());
+          this.hub.inferPhasesFromSpec(existingSpec, this.contextPackText('spec', existingSpec.problemStatement, 'Phase inference'));
           // A previously-approved Target Context becomes the plan's live target
           // environment again — closes the gap where a generic
           // TargetConfigManager default silently seeded it instead.
@@ -459,7 +464,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
             // Connection status (both roles) reaches this for free via
             // ContextFileManager's runtime facts — see notifyConnectionStatus().
-            const combinedContext = this.contextFileManager?.buildContextPrompt() ?? '';
+            const combinedContext = this.contextPackText('chat', chatMessage, `Chat: ${chatMessage.slice(0, 60)}`);
             const result = await this.hub.chat(chatMessage, combinedContext, toolMode, {
               history: priorHistory,
               priorSummary: priorMeta?.summary,
@@ -483,7 +488,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (!objective.trim()) { this.postLog('A plan requires a user objective.'); return; }
           // Same shared source as chat — connection status (both roles) is
           // included automatically via ContextFileManager's runtime facts.
-          const combinedContext = this.contextFileManager?.buildContextPrompt() ?? '';
+          const combinedContext = this.contextPackText('plan', objective, 'Plan generation');
           const plan = await this.hub.generatePlan(objective, combinedContext);
           this.postPlan(plan);
           break;
@@ -639,7 +644,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (!skillId || !instruction) { this.postLog('Usage: /skill <skillId> <instruction>'); break; }
           this.postLog(`Running skill "${skillId}"…`);
           try {
-            const result = await this.hub.runToolSkill(skillId, instruction, this.contextFileManager?.buildContextPrompt());
+            const result = await this.hub.runToolSkill(skillId, instruction, this.contextPackText('step', instruction, `Skill ${skillId}: ${instruction.slice(0, 50)}`));
             this.postMessage('chatResponse', { message: result.success ? result.message : `Skill failed: ${result.error || result.message}`, error: !result.success });
           } catch (err) {
             const message2 = err instanceof Error ? err.message : String(err);
@@ -765,7 +770,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (approved) {
             this.hub.setSpec(approved.id, approved.version);
             await this.syncContextFromApprovedSpec(approved);
-            const contextSummary = this.contextFileManager?.buildContextPrompt();
+            const contextSummary = this.contextPackText('spec', approved.problemStatement, 'Phase inference');
             this.hub.inferPhasesFromSpec(approved, contextSummary);
             await this.initializeContextForApprovedSpec(approved);
             this.postMessage('specApproved', { spec: approved });
@@ -787,7 +792,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           await this.specManager!.saveSpec(spec);
           this.postSpec();
           if (spec.status === 'approved') {
-            this.hub.inferPhasesFromSpec(spec, this.contextFileManager?.buildContextPrompt());
+            this.hub.inferPhasesFromSpec(spec, this.contextPackText('spec', spec.problemStatement, 'Phase inference'));
             await this.initializeContextForApprovedSpec(spec);
           }
           this.postLog(`Implementation type set to ${value}.`);
@@ -1145,6 +1150,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const spec = this.specManager?.getSpec();
           const report = await scanArtifactStaleness(workspaceRoot, spec ? { id: spec.id, version: spec.version } : undefined);
           this.postMessage('artifactStaleness', { report });
+          await this.reportFactStaleness();
           break;
         }
         case 'viewSpecHistory': {
@@ -1219,7 +1225,58 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (this.workspaceRoot) {
       const report = await scanArtifactStaleness(this.workspaceRoot, spec ? { id: spec.id, version: spec.version } : undefined);
       this.postMessage('artifactStaleness', { report });
+      await this.reportFactStaleness();
     }
+  }
+
+  /**
+   * Fact-level staleness (C3, §8.3): every artifact whose grounding manifest
+   * relies on an assertion that has since been superseded, rejected or sent
+   * to review, with the reason — e.g. "stg_orders.sql is stale: grain changed".
+   */
+  public async reportFactStaleness(): Promise<Array<{ artifact: string; reasons: string[] }>> {
+    const root = this.artifactRootForProblem();
+    const ledger = this.contextFileManager?.getLedger();
+    if (!root || !ledger) return [];
+    const stale: Array<{ artifact: string; reasons: string[] }> = [];
+    for (const uri of await findManifests(root)) {
+      try {
+        const manifest = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8')) as GroundingManifest;
+        const reasons = manifestStaleReasons(manifest, (id) => ledger.get(id));
+        if (reasons.length) stale.push({ artifact: manifest.artifact, reasons });
+      } catch { /* unreadable manifest — skipped */ }
+    }
+    for (const s of stale) this.postLog(`${s.artifact} is stale: ${s.reasons.join('; ')}`);
+    if (stale.length) this.postMessage('artifactFactStaleness', { stale });
+    return stale;
+  }
+
+  /** The active problem's artifact directory (where manifests live). */
+  private artifactRootForProblem(): vscode.Uri | undefined {
+    const contextRoot = this.activeProblemId && this.activeProblemManager ? this.activeProblemManager.problemRoot(this.activeProblemId) : this.workspaceRoot;
+    return contextRoot ? ArtifactWriter.resolveArtifactDirectory(contextRoot) : undefined;
+  }
+
+  /** "AutoDE: What the Agent Saw" — the recent context packs, newest first. */
+  public getRecentContextPacks(): ReadonlyArray<{ title: string; at: string; pack: ContextPack }> {
+    return this.contextFileManager?.getRecentPacks() ?? [];
+  }
+
+  public renderContextPack(entry: { title: string; pack: ContextPack }): string {
+    return renderPackManifest(entry.pack, entry.title);
+  }
+
+  /** "AutoDE: Explain This Artifact" for a file: its manifest, as a readable chain. Undefined when it has none. */
+  public async explainArtifact(fileUri: vscode.Uri): Promise<string | undefined> {
+    const manifestUri = fileUri.fsPath.endsWith('.grounding.json') ? fileUri : vscode.Uri.file(`${fileUri.fsPath}.grounding.json`);
+    let manifest: GroundingManifest;
+    try {
+      manifest = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(manifestUri)).toString('utf8')) as GroundingManifest;
+    } catch {
+      return undefined;
+    }
+    const ledger = this.contextFileManager?.getLedger();
+    return explainManifest(manifest, (id) => ledger?.get(id));
   }
 
   /**
@@ -1586,8 +1643,40 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** Merges the Context Layer, Source Context, and approved Target Context into one prompt block for plan generation. */
   private buildContextSummaryForPlan(spec: BusinessProblemSpec): string {
     const parts: string[] = [];
-    const base = this.contextFileManager?.buildContextPrompt();
+    const base = this.contextPackText('plan', [spec.problemStatement, ...(spec.objectives ?? [])].join('\n'), 'Plan generation');
     if (base) parts.push(base);
+    const supplementary = this.buildSupplementaryContext(spec);
+    if (supplementary) parts.push(supplementary);
+    return parts.join('\n\n');
+  }
+
+  /**
+   * The text of a task-scoped context pack (C3, v0.30.0), recorded for
+   * "What the agent saw". With nothing to scope by it is the project
+   * overview — what every call received before C3.
+   */
+  private contextPackText(purpose: PackPurpose, query: string | undefined, title: string): string {
+    return this.contextFileManager?.buildContextPack({ purpose, query }, title).text ?? '';
+  }
+
+  private createContextPackProvider(): ContextPackProvider {
+    return {
+      buildPack: (request) => this.contextFileManager!.buildContextPack(request),
+      sources: () => this.contextFileManager!.getPackSources(),
+      supplementary: () => {
+        const spec = this.specManager?.getSpec();
+        return spec ? this.buildSupplementaryContext(spec) : '';
+      },
+      specRevision: () => {
+        const spec = this.specManager?.getSpec();
+        return spec ? 'sha256:' + createHash('sha256').update(JSON.stringify(spec)).digest('hex').slice(0, 16) : undefined;
+      }
+    };
+  }
+
+  /** Approved Source and Target Context for the given spec revision — the non-graph context every step gets. */
+  private buildSupplementaryContext(spec: BusinessProblemSpec): string {
+    const parts: string[] = [];
     const sc = this.sourceContextManager?.getContext();
     if (sc && sc.specId === spec.id && sc.specVersion === spec.version && sc.status !== 'not_applicable') {
       const lines = ['## Source Context'];
@@ -1916,7 +2005,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    * This is the first responsibility of AutoDE in the spec-driven flow.
    */
   private async draftSpec(prompt: string, previous?: BusinessProblemSpec): Promise<void> {
-    const spec = await this.hub.generateSpec(prompt, previous, this.contextFileManager?.buildContextPrompt());
+    const spec = await this.hub.generateSpec(prompt, previous, this.contextPackText('spec', prompt, 'Specification draft'));
     await this.ensureActiveProblem(spec.problemStatement);
     if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
     this.applyImplementationType(spec, previous);
@@ -1936,7 +2025,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private async reviseSpec(refinement: string): Promise<void> {
     if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return; }
     const previous = this.specManager.getSpec();
-    const spec = await this.hub.generateSpec(refinement, previous, this.contextFileManager?.buildContextPrompt());
+    const spec = await this.hub.generateSpec(refinement, previous, this.contextPackText('spec', refinement, 'Specification refinement'));
     this.applyImplementationType(spec, previous);
     await this.specManager.saveSpec(spec);
     this.hub.setSpec(spec.id, spec.version);
@@ -2065,7 +2154,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      const extraContext = this.contextFileManager?.buildContextPrompt();
+      const extraContext = this.contextPackText('interview', engine.getSession().problemStatement, 'Interview turn');
       const action: SpecEngineAction = await this.hub.discoverNextAction(engine.getSession(), this.ensureSkills(), extraContext);
       if (action.action === 'ask' || action.action === 'ask_many') {
         const ids = engine.applyAction(action);
@@ -2098,7 +2187,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       : 'Requirements collected. Synthesizing the comprehensive Business Problem Specification...');
     try {
       const previous = this.specManager?.getSpec();
-      const extraContext = this.contextFileManager?.buildContextPrompt();
+      const extraContext = this.contextPackText('spec', engine.getSession().problemStatement, 'Specification synthesis');
       const spec = await this.hub.synthesizeComprehensiveSpec(engine.getSession(), previous, extraContext);
       await this.ensureActiveProblem(spec.problemStatement);
       this.applyImplementationType(spec, previous);
@@ -2167,4 +2256,24 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'sidebar.html');
     return applyCspNonce(fs.readFileSync(htmlPath.fsPath, 'utf8'), webview.cspSource);
   }
+}
+
+/** Every `*.grounding.json` under a directory, skipping `history/` archives. */
+async function findManifests(dir: vscode.Uri): Promise<vscode.Uri[]> {
+  let entries: [string, vscode.FileType][];
+  try {
+    entries = await vscode.workspace.fs.readDirectory(dir);
+  } catch {
+    return [];
+  }
+  const out: vscode.Uri[] = [];
+  for (const [name, type] of entries) {
+    const uri = vscode.Uri.joinPath(dir, name);
+    if (type === vscode.FileType.Directory) {
+      if (name !== 'history') out.push(...(await findManifests(uri)));
+    } else if (name.endsWith('.grounding.json')) {
+      out.push(uri);
+    }
+  }
+  return out;
 }

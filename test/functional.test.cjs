@@ -5343,6 +5343,245 @@ async function main() {
     }
   });
 
+  // ---------- v0.30.0: context-layer C3 — context packs, manifests, causality ----------
+
+  const c3 = {
+    /** shop (orders, order_items, refunds, customers), crm (customers, support_tickets), hr (employees) — via the real DDL parser. */
+    graph() {
+      const { parseDdl } = require('../dist/engine/context/fileIngestion.js');
+      const parsed = parseDdl(`
+        CREATE TABLE shop.orders (order_id BIGINT PRIMARY KEY, customer_id INT NOT NULL, status VARCHAR(20), updated_at TIMESTAMP);
+        CREATE TABLE shop.order_items (order_item_id BIGINT PRIMARY KEY, order_id BIGINT, quantity INT, unit_price DECIMAL(10,2));
+        CREATE TABLE shop.refunds (refund_id BIGINT PRIMARY KEY, order_id BIGINT, amount DECIMAL(10,2));
+        CREATE TABLE shop.customers (customer_id INT PRIMARY KEY, email VARCHAR(255), phone VARCHAR(32));
+        CREATE TABLE crm.customers (cust_no VARCHAR(20) PRIMARY KEY, email VARCHAR(255), shop_customer_id INT);
+        CREATE TABLE crm.support_tickets (ticket_id BIGINT PRIMARY KEY, cust_no VARCHAR(20));
+        CREATE TABLE hr_legacy.employees (employee_id INT PRIMARY KEY, salary DECIMAL(10,2));
+      `, '/ref/all.ddl');
+      const nodes = [...parsed.nodes,
+        { id: 'biz-term-revenue', type: 'business_term', label: 'Revenue', description: 'Gross', formula: 'SUM(order_items.quantity * order_items.unit_price)', mappedNodeIds: [], metadata: {}, version: 1, origin: { source: 'user', sourceRef: 'context/business-context.yaml', extractor: 'business-context' } },
+        { id: 'biz-rule-1', type: 'business_rule', label: 'PII masking', ruleText: 'Customer email and phone are PII and must be masked (SHA-256) in every analytics layer.', enforcementLevel: 'STRICT', metadata: {}, version: 1, origin: { source: 'user', sourceRef: 'context/business-context.yaml', extractor: 'business-context' } },
+        { id: 'biz-rule-2', type: 'business_rule', label: 'Daily load', ruleText: 'Loads finish by 06:00.', enforcementLevel: 'STRICT', metadata: {}, version: 1, origin: { source: 'user', sourceRef: 'x', extractor: 'business-context' } }
+      ];
+      const edges = [...parsed.edges, { id: 'edge-maps-revenue-items', source: 'biz-term-revenue', target: 'table-shop_order_items', type: 'maps_to', weight: 0.8 }];
+      return { nodes, edges };
+    },
+    async ledgerFor(graph) {
+      const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+      const root = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-c3-'));
+      const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+      const { syncGraphToLedger, projectGraph } = require('../dist/engine/context/projection.js');
+      const ledger = new AssertionLedger(p.join(root, 'ledger'));
+      await syncGraphToLedger(ledger, graph);
+      const project = () => projectGraph(ledger.assertions());
+      return { root, ledger, project, cleanup: () => nodeFs.rmSync(root, { recursive: true, force: true }) };
+    },
+    sources(ledger, graph, conflicts = []) {
+      return { graph, assertions: ledger.assertions(), conflicts };
+    }
+  };
+
+  await test('v0.30.0: resolveText() finds qualified names, schema mentions, prose labels (singular/plural, multi-word) and terms — and nothing in unrelated text', () => {
+    const { resolveText } = require('../dist/engine/context/retrieval.js');
+    const g = c3.graph();
+    const ids = (t) => [...new Set(resolveText(t, g).map((m) => m.nodeId))].sort();
+    assert.deepStrictEqual(ids('Map shop.orders and crm.customers.email'), ['col-crm_customers.email', 'table-crm_customers', 'table-shop_orders']);
+    assert.deepStrictEqual(ids('Assess the shop and crm source schemas'), ['table-crm_customers', 'table-crm_support_tickets', 'table-shop_customers', 'table-shop_order_items', 'table-shop_orders', 'table-shop_refunds']);
+    assert.deepStrictEqual(ids('number of support tickets per order'), ['table-crm_support_tickets', 'table-shop_orders']);
+    assert.deepStrictEqual(ids('one row per order item, net of refunds'), ['table-shop_order_items', 'table-shop_refunds']);
+    assert.deepStrictEqual(ids('dedupe customers'), ['table-crm_customers', 'table-shop_customers'], 'an ambiguous label matches every candidate');
+    assert.deepStrictEqual(ids('what does revenue mean?'), ['biz-term-revenue']);
+    assert.deepStrictEqual(ids('build it with dbt on snowflake'), []);
+  });
+
+  await test('v0.30.0: expandNeighborhood() walks edges both ways with distance decay (GraphManager.traverseNeighborhood delegates to it)', async () => {
+    const { expandNeighborhood } = require('../dist/engine/context/retrieval.js');
+    const g = c3.graph();
+    const r = expandNeighborhood(g, ['table-shop_order_items'], { maxHops: 1, decay: 0.5 });
+    assert.strictEqual(r.get('table-shop_order_items').relevance, 1);
+    assert.strictEqual(r.get('biz-term-revenue').relevance, 0.5, 'reached against the edge direction (term → table)');
+    assert.ok(r.has('col-shop_order_items.quantity'));
+    assert.ok(!r.has('table-shop_orders'));
+    const { GraphManager } = withMock(createMock(), () => fresh('../dist/context/GraphManager.js'));
+    const gm = new GraphManager();
+    await gm.loadSnapshot(g);
+    const sub = gm.traverseNeighborhood(['table-shop_order_items'], { maxHops: 1 });
+    assert.ok(sub.nodes.some((n) => n.id === 'biz-term-revenue' && n.metadata.__relevance > 0));
+  });
+
+  await test('v0.30.0: with no seeds a pack is the project overview — byte-for-byte the pre-C3 buildContextPrompt() format', async () => {
+    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
+    const g = c3.graph();
+    const pack = buildContextPack({ purpose: 'chat' }, { graph: g, assertions: [], conflicts: [], runtimeFacts: [{ label: 'Source', text: 'connected' }] });
+    const tables = g.nodes.filter((n) => n.type === 'table');
+    const expected = [
+      '## Live Session Facts', '- **Source**: connected',
+      '## Enterprise Context Layer',
+      '### Business Rules (STRICT)', '- **PII masking**: Customer email and phone are PII and must be masked (SHA-256) in every analytics layer.', '- **Daily load**: Loads finish by 06:00.',
+      '### Database Tables', ...tables.map((t) => `- \`${t.fqn}\` _(file-derived, not live-verified)_`),
+      '### Business Terms', '- **Revenue** (formula: SUM(order_items.quantity * order_items.unit_price)): Gross'
+    ].join('\n');
+    assert.strictEqual(pack.text, expected);
+    assert.strictEqual(pack.manifest.mode, 'overview');
+    assert.strictEqual(buildContextPack({ purpose: 'chat', query: 'build it with dbt' }, { graph: g, assertions: [], conflicts: [] }).manifest.mode, 'overview', 'nothing resolved = overview');
+  });
+
+  await test('v0.30.0: a seeded step pack is task-scoped — seed columns, STRICT rules and conflicts in scope, no unrelated tables — and deterministic', async () => {
+    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
+    const { detectConflicts } = require('../dist/engine/context/conflicts.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      await env.ledger.assert({ kind: 'metric', subject: ['metric:net'], predicate: 'defined_as', value: { name: 'Revenue', expression: 'SUM(x - y)' }, statement: 'Revenue is net', evidence: [{ type: 'chat_message', ref: 't2' }] });
+      const graph = env.project();
+      const sources = c3.sources(env.ledger, graph, detectConflicts(env.ledger.assertions()));
+      const req = { purpose: 'step', query: 'Map shop.order_items and shop.customers to the target, masking email.', stepId: 's3' };
+      const a = buildContextPack(req, sources);
+      const b = buildContextPack(req, sources);
+      assert.strictEqual(a.text, b.text);
+      assert.strictEqual(a.manifest.packId, b.manifest.packId);
+      assert.strictEqual(a.manifest.mode, 'seeded');
+      assert.ok(a.text.includes('`shop.order_items`') && a.text.includes('order_item_id BIGINT PK'), a.text);
+      assert.ok(a.text.includes('`shop.customers`') && a.text.includes('email VARCHAR(255)'));
+      assert.ok(!/employees|hr_legacy|support_tickets/.test(a.text), 'unrelated tables are not delivered');
+      assert.ok(a.text.includes('PII masking'), 'the STRICT rule naming a seed table\'s columns... is included');
+      assert.ok(/Conflict \(definition\)/.test(a.text), 'a conflict on a term in scope is a warning in the pack');
+      assert.ok(a.manifest.assertions.length > 5 && a.manifest.assertions.every((x) => /^sha256:/.test(x.revision)));
+      assert.ok(a.manifest.nodeIds.includes('table-shop_order_items'));
+      const tiny = buildContextPack({ ...req, maxTokens: 60 }, sources);
+      assert.ok(tiny.manifest.truncated.tables >= 1 || tiny.manifest.truncated.columns >= 1, JSON.stringify(tiny.manifest.truncated));
+      assert.ok(/Not shown \(token budget\)/.test(tiny.text));
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.30.0: context gaps — "tickets per order" with no join is a gap; a proposed join is below trust; a confirmed one closes it; "one row per order line" is not a request to join', async () => {
+    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      const ask = (q) => buildContextPack({ purpose: 'chat', query: q }, c3.sources(env.ledger, env.project())).manifest.gaps;
+      let gaps = ask('Also show the number of support tickets per order on the dashboard.');
+      assert.strictEqual(gaps.length, 1);
+      assert.deepStrictEqual([gaps[0].needed, gaps[0].reason, gaps[0].minTrust], ['relationship', 'absent', 'confirmed']);
+      assert.deepStrictEqual(gaps[0].subject.sort(), ['table-crm_support_tickets', 'table-shop_orders']);
+      assert.strictEqual(ask('Join shop.refunds to shop.orders').length, 1);
+      assert.strictEqual(ask('fct_order_lines has one row per order line').length, 0);
+      const rel = await env.ledger.assert({ kind: 'relationship', subject: ['table-shop_refunds', 'table-shop_orders'], predicate: 'joins_to', value: { from: { entity: 'shop.refunds', columns: ['order_id'] }, to: { entity: 'shop.orders', columns: ['order_id'] }, cardinality: 'N:1' }, statement: 'refunds join orders', evidence: [{ type: 'chat_message', ref: 't' }] });
+      gaps = ask('Join shop.refunds to shop.orders');
+      assert.deepStrictEqual([gaps[0].reason, gaps[0].foundTrust], ['below_trust', 'inferred']);
+      await env.ledger.confirm(rel.id, 'user:arun');
+      assert.strictEqual(ask('Join shop.refunds to shop.orders').length, 0, 'a confirmed relationship (projected as an edge) closes the gap');
+      assert.strictEqual(ask('show refunds per order').length, 0);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.30.0: decision backing maps primitive parameters to assertions — declared PK (documented, below trust), confirmed key, decision, or unbacked', async () => {
+    const { backDecisions } = require('../dist/engine/grounding/manifest.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      const use = { kind: 'dedup', source: 'primitive', params: { sourceObject: 'RAW.SHOP.ORDERS', targetObject: 'stg_orders', partitionByColumns: ['order_id'], orderByColumn: 'updated_at' } };
+      let d = backDecisions(use, env.project(), env.ledger.assertions());
+      const part = d.find((x) => x.usedFor === 'dedup.partitionByColumns');
+      assert.strictEqual(part.subject, 'table-shop_orders', 'RAW.SHOP.ORDERS resolves to shop.orders');
+      assert.deepStrictEqual([part.backedBy.trust, part.belowTrust], ['documented', true], 'the DDL\'s declared PK backs it, below the confirmed keys need');
+      assert.strictEqual(d.find((x) => x.usedFor === 'dedup.orderByColumn').unbacked, true);
+      const key = await env.ledger.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['ORDER_ID'], statement: 'order_id is the key', evidence: [{ type: 'chat_message', ref: 't3' }], status: 'active', trust: 'confirmed' });
+      const inc = await env.ledger.assert({ kind: 'decision', subject: ['table-shop_orders'], predicate: 'load_strategy', value: { strategy: 'incremental', column: 'updated_at' }, statement: 'load incrementally on updated_at', evidence: [{ type: 'chat_message', ref: 't9' }], status: 'active', trust: 'confirmed' });
+      d = backDecisions(use, env.project(), env.ledger.assertions());
+      assert.deepStrictEqual(d.map((x) => [x.usedFor, x.backedBy && x.backedBy.id, !!x.belowTrust, !!x.unbacked]), [
+        ['dedup.partitionByColumns', key.id, false, false],
+        ['dedup.orderByColumn', inc.id, false, false]
+      ]);
+      assert.deepStrictEqual(backDecisions({ ...use, source: 'primitive', params: { ...use.params, sourceObject: 'nowhere' } }, env.project(), env.ledger.assertions()).map((x) => !!x.unbacked), [true, true]);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.30.0: STRICT masking rules are machine-checked against artifact SQL; other STRICT rules are listed for manual review', () => {
+    const { checkRules } = require('../dist/engine/grounding/manifest.js');
+    const rules = c3.graph().nodes.filter((n) => n.type === 'business_rule');
+    const cols = new Set(['email', 'phone', 'customer_id']);
+    const status = (sql) => checkRules(sql, rules, cols).map((r) => r.status);
+    assert.deepStrictEqual(status('select customer_id, sha2(email, 256) as email, sha2(phone, 256) as phone from c'), ['pass', 'manual_review']);
+    const bad = checkRules('select customer_id, email, sha2(phone) as phone from c', rules, cols)[0];
+    assert.deepStrictEqual([bad.status, bad.detail], ['violation', 'unmasked: email']);
+    assert.deepStrictEqual(status('select order_id from o -- email is not here'), ['not_applicable', 'manual_review'], 'comments are ignored');
+  });
+
+  await test('v0.30.0: a grounding manifest records spec, step, pack, decisions and checks; a superseded backing fact makes it stale; Explain shows the chain', async () => {
+    const { buildGroundingManifest, manifestStaleReasons, explainManifest, renderGroundingReport } = require('../dist/engine/grounding/manifest.js');
+    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
+    const { buildSchemaIndex } = require('../dist/engine/grounding/sqlGrounding.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      const key = await env.ledger.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key of shop.orders', evidence: [{ type: 'chat_message', ref: 'chat#t3', excerpt: 'An order is uniquely identified by order_id' }], status: 'active', trust: 'confirmed' });
+      const graph = env.project();
+      const pack = buildContextPack({ purpose: 'step', query: 'stg_orders: dedup shop.orders', stepId: 's5' }, c3.sources(env.ledger, graph));
+      const sql = 'CREATE OR REPLACE VIEW stg_orders AS SELECT o.order_id, o.status, c.email FROM shop.orders o JOIN shop.customers c ON o.customer_id = c.customer_id JOIN shop.nonexistent n ON n.id = o.order_id';
+      const m = buildGroundingManifest({
+        artifact: { path: '03-build/retail.v1/stg_orders.sql', content: sql, language: 'sql', agent: 'transformScaffoldAgent', specId: 'retail', specVersion: 1 },
+        specRevision: 'sha256:abc', stepId: 's5', pack: pack.manifest,
+        primitiveUses: [{ kind: 'dedup', version: 2, source: 'primitive', params: { sourceObject: 'shop.orders', targetObject: 'stg_orders', partitionByColumns: ['order_id'], orderByColumn: 'updated_at' } }],
+        graph, schemaIndex: buildSchemaIndex(graph.nodes, graph.edges), assertions: env.ledger.assertions(), model: 'openai/gpt', now: () => new Date('2026-10-14T00:00:00Z')
+      });
+      assert.deepStrictEqual([m.planStepId, m.packId, m.specRevision, m.generation, m.primitives[0].kind, m.model], ['s5', pack.manifest.packId, 'sha256:abc', 'primitive', 'dedup', 'openai/gpt']);
+      assert.ok(m.assertions.some((a) => a.id === key.id && a.usedFor === 'dedup.partitionByColumns'));
+      assert.ok(m.assertions.some((a) => a.usedFor === 'context'));
+      assert.strictEqual(m.grounding.decisions.unbacked, 1, 'orderByColumn has no backing');
+      assert.ok(m.gaps.some((g) => g.needed === 'decision' && /orderByColumn/.test(g.text)));
+      assert.ok(m.grounding.warnings.some((w) => w.startsWith('GROUNDING_UNRESOLVED') && w.includes('shop.nonexistent')));
+      assert.ok(m.grounding.warnings.some((w) => w.startsWith('RULE_VIOLATION') && w.includes('email')));
+      assert.deepStrictEqual(manifestStaleReasons(m, (id) => env.ledger.get(id)), []);
+
+      await env.ledger.supersede(key.id, { kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id', 'line_no'], statement: 'the key is (order_id, line_no)', evidence: [{ type: 'chat_message', ref: 'chat#t12' }], status: 'active', trust: 'confirmed' });
+      const reasons = manifestStaleReasons(m, (id) => env.ledger.get(id));
+      assert.strictEqual(reasons.length, 1);
+      assert.ok(/^dedup\.partitionByColumns changed: "order_id is the key of shop\.orders" was superseded by \S+ \(chat message chat#t3\)$/.test(reasons[0]), reasons[0]);
+      const why = explainManifest(m, (id) => env.ledger.get(id));
+      assert.ok(why.includes('**Stale:**') && why.includes('← "order_id is the key of shop.orders" (confirmed, superseded)') && why.includes('"An order is uniquely identified by order_id"'), why);
+      assert.ok(why.includes('**dedup.orderByColumn** = `"updated_at"` — **unbacked**'));
+      const report = renderGroundingReport([m]);
+      assert.ok(report.includes('| Unbacked decisions | 1 |') && report.includes('| STRICT rule violations | 1 |') && report.includes('Loads finish by 06:00.'), report);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.30.0: executePlan() gives each step its own pack, writes no duplicate artifacts, builds manifests and a Grounding Report', async () => {
+    const { hub } = hubForPlanResponse('# Architecture\n\nOrders flow from shop.orders into the marts.');
+    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      const built = [];
+      hub.setContextProvider({
+        buildPack: (req) => { const p = buildContextPack(req, c3.sources(env.ledger, env.project())); return p; },
+        sources: () => c3.sources(env.ledger, env.project()),
+        supplementary: () => '## Target Context\nPlatform: snowflake.',
+        specRevision: () => 'sha256:spec'
+      }, (title, pack) => built.push(title));
+      hub.loadPersistedPlan({
+        id: 'p', version: 1, objective: 'revenue', schemaContext: 'GLOBAL DUMP',
+        steps: [
+          { id: 's1', assignedAgent: 'architectureAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
+          { id: 's2', assignedAgent: 'architectureAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
+        ],
+        status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1
+      });
+      await hub.executePlan();
+      assert.deepStrictEqual(built, ['Plan step s1 (architectureAgent)', 'Plan step s2 (architectureAgent)']);
+      const p1 = hub.getStepPack('s1'), p2 = hub.getStepPack('s2');
+      assert.ok(p1.text.includes('shop.refunds') && !p1.text.includes('support_tickets'));
+      assert.ok(p2.text.includes('support_tickets') && !p2.text.includes('shop.refunds'));
+      const arts = hub.getPlan().artifacts;
+      assert.strictEqual(new Set(arts.map((a) => a.id)).size, arts.length, 'no duplicate entries');
+      const manifests = hub.getLastRunManifests();
+      assert.ok(manifests.length >= 2);
+      assert.ok(manifests.every((m) => m.specRevision === 'sha256:spec' && (m.planStepId === 's1' || m.planStepId === 's2') && m.packId));
+      assert.ok(arts.some((a) => a.title === 'Grounding Report' && a.phase === 'validate' && a.content.includes('Identifier grounding rate')));
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.30.0: parseDdl() ignores SQL comments (a trailing "-- A, B, C" used to swallow the next column)', () => {
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+    const r = parseDdl('CREATE TABLE shop.orders (\n  status VARCHAR(20) NOT NULL, -- PLACED, SHIPPED, RETURNED\n  channel VARCHAR(20), /* web, app */\n  updated_at TIMESTAMP\n);', '/x.sql');
+    assert.deepStrictEqual(r.nodes.filter((n) => n.type === 'column').map((c) => `${c.label} ${c.dataType}`), ['status VARCHAR(20)', 'channel VARCHAR(20)', 'updated_at TIMESTAMP']);
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

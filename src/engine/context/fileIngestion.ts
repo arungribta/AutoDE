@@ -230,6 +230,9 @@ export function parseJson(content: string, filePath: string): IngestResult {
  * `CONSTRAINT ...`) are recognized and skipped rather than misparsed as columns.
  */
 export function parseDdl(content: string, filePath: string): IngestResult {
+  // Comments go first (v0.30.0): a trailing `-- A, B, C` comment's commas used to split
+  // into bogus "columns", swallowing the next real column's name.
+  const sql = content.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, '');
   const warnings: string[] = [];
   const nodes: BaseNode[] = [];
   const edges: GraphEdge[] = [];
@@ -238,7 +241,7 @@ export function parseDdl(content: string, filePath: string): IngestResult {
 
   const createTableRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_."`[\]]+)\s*\(/gi;
   let match: RegExpExecArray | null;
-  while ((match = createTableRe.exec(content)) !== null) {
+  while ((match = createTableRe.exec(sql)) !== null) {
     const rawName = match[1].replace(/["`[\]]/g, '');
     // Keep the declared schema (and database): `shop.customers` and `crm.customers`
     // are different tables. Only an unqualified name falls back to the `ddl` label.
@@ -251,16 +254,16 @@ export function parseDdl(content: string, filePath: string): IngestResult {
     const bodyStart = createTableRe.lastIndex;
     let depth = 1;
     let i = bodyStart;
-    while (i < content.length && depth > 0) {
-      if (content[i] === '(') depth++;
-      else if (content[i] === ')') depth--;
+    while (i < sql.length && depth > 0) {
+      if (sql[i] === '(') depth++;
+      else if (sql[i] === ')') depth--;
       i++;
     }
     if (depth !== 0) {
       warnings.push(`CREATE TABLE ${rawName}: unbalanced parentheses — skipped.`);
       continue;
     }
-    const body = content.slice(bodyStart, i - 1);
+    const body = sql.slice(bodyStart, i - 1);
     const columns = parseDdlColumnDefs(body);
     if (columns.length === 0) {
       warnings.push(`CREATE TABLE ${rawName}: no parseable column definitions — skipped.`);

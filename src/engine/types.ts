@@ -1,3 +1,4 @@
+import type { PrimitiveUse } from './grounding/manifest';
 import { TransformSpec } from './transforms/types';
 import { FileIo } from './context/contextStore';
 
@@ -866,6 +867,13 @@ export interface AgentExecutionContext {
    * the LLM to choose one.
    */
   transformSpec?: TransformSpec;
+  /**
+   * Called by the shared codegen path (`generateViaPrimitiveOrFallback`) with
+   * what it generated from — which primitive and parameters, or the freehand /
+   * template fallback (C3, v0.30.0). The orchestrator turns these into the
+   * artifact's grounding manifest; agents never call it themselves.
+   */
+  recordGeneration?: (use: PrimitiveUse) => void;
 }
 
 export interface AgentExecutionResult {

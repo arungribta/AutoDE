@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "publisher": "Arun Gribta",
   "license": "MIT",
   "icon": "media/logo.svg",
@@ -107,6 +107,14 @@
       {
         "command": "autoDataEngineeringHub.compactContextLedger",
         "title": "AutoDE: Compact Context Ledger"
+      },
+      {
+        "command": "autoDataEngineeringHub.whatTheAgentSaw",
+        "title": "AutoDE: What the Agent Saw"
+      },
+      {
+        "command": "autoDataEngineeringHub.explainArtifact",
+        "title": "AutoDE: Explain This Artifact"
       },
       {
         "command": "autoDataEngineeringHub.reVerifySourceSchema",

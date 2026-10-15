@@ -23,6 +23,9 @@ import { PipelineSpec } from '../engine/pipelineSpec/types';
 import { LlmAdapterContext, LlmHistoryTurn, extractJsonText } from './llmAdapter';
 import { getLlmAdapter } from './llmProviders';
 import { contextWindowForModel, windowHistoryToBudget, RESERVED_PROMPT_TOKENS, RESERVED_RESPONSE_TOKENS } from './tokenBudget';
+import { ContextPack, ContextPackProvider } from '../engine/context/contextPack';
+import { GroundingManifest, PrimitiveUse, buildGroundingManifest, renderGroundingReport } from '../engine/grounding/manifest';
+import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
 import {
   AgentExecutionContext,
   AgentType,
@@ -93,6 +96,11 @@ export class DataAgentHubHub {
   private logListener?: (message: string) => void;
   private artifactWriter?: ArtifactWriter;
   private planManager?: PlanManager;
+  /** Where task-scoped context packs come from (C3, v0.30.0). Unset = the plan-time context, as before. */
+  private contextProvider?: ContextPackProvider;
+  private packListener?: (title: string, pack: ContextPack) => void;
+  private readonly stepPacks = new Map<string, ContextPack>();
+  private lastRunManifests: GroundingManifest[] = [];
   /** Stable across re-plans of the same lineage; reset whenever `resetPlan()` runs. */
   private planLineageId?: string;
   /** Set by `handleFailure` immediately before its internal re-plan call; read once and reset by `generatePlan`. */
@@ -114,6 +122,27 @@ export class DataAgentHubHub {
 
   public setPlanManager(manager: PlanManager): void {
     this.planManager = manager;
+  }
+
+  /**
+   * C3 (v0.30.0): every plan step gets its own context pack from this
+   * provider instead of the one plan-time context string, and every artifact
+   * written gets a grounding manifest. `onPack` sees each pack built (for
+   * "What the agent saw").
+   */
+  public setContextProvider(provider: ContextPackProvider | undefined, onPack?: (title: string, pack: ContextPack) => void): void {
+    this.contextProvider = provider;
+    this.packListener = onPack;
+  }
+
+  /** The context pack the given plan step ran with, in the last execution. */
+  public getStepPack(stepId: string): ContextPack | undefined {
+    return this.stepPacks.get(stepId);
+  }
+
+  /** Grounding manifests of the artifacts the last execution produced. */
+  public getLastRunManifests(): readonly GroundingManifest[] {
+    return this.lastRunManifests;
   }
 
   /**
@@ -1019,6 +1048,8 @@ Message: ${message}`;
     const completedIds = new Set<string>();
     const failedIds = new Set<string>();
     let anyFailure = false;
+    this.lastRunManifests = [];
+    this.stepPacks.clear();
 
     for (const step of this.state.steps) {
       step.status = 'pending';
@@ -1077,9 +1108,22 @@ Message: ${message}`;
         readyStep.phase = phase;
         this.state.currentPhase = phase;
 
+        // C3: this step's own context pack (task-scoped), plus the approved
+        // Source/Target Context, instead of the plan-time context string.
+        const pack = this.contextProvider?.buildPack({ purpose: 'step', query: readyStep.taskDescription, stepId: readyStep.id });
+        if (pack) {
+          this.stepPacks.set(readyStep.id, pack);
+          this.packListener?.(`Plan step ${readyStep.id} (${readyStep.assignedAgent})`, pack);
+          for (const gap of pack.manifest.gaps) this.log(`Context gap in step ${readyStep.id}: ${gap.needed} ${gap.text} — ${gap.reason === 'absent' ? 'not known' : `only ${gap.foundTrust}`}.`);
+        }
+        const stepContext = pack
+          ? [pack.text, this.contextProvider?.supplementary?.()].filter((p): p is string => !!p && p.trim().length > 0).join('\n\n')
+          : this.state.schemaContext;
+        const generations: PrimitiveUse[] = [];
+
         const context: AgentExecutionContext = {
           objective: this.state.objective,
-          schemaContext: this.state.schemaContext,
+          schemaContext: stepContext,
           sourceProvider: this.state.sourceProvider,
           targetEnvironment: this.state.targetEnvironment,
           settings: this.configManager.getSettings(),
@@ -1100,7 +1144,8 @@ Message: ${message}`;
           host: this.buildAgentHost(),
           skillId: readyStep.skillId,
           skillInstruction: readyStep.taskDescription,
-          callLlm: (prompt: string, systemPrompt?: string) => this.callConfiguredLlm(prompt, systemPrompt)
+          callLlm: (prompt: string, systemPrompt?: string) => this.callConfiguredLlm(prompt, systemPrompt),
+          recordGeneration: (use: PrimitiveUse) => { generations.push(use); }
         };
 
         const executor = AGENT_EXECUTORS[readyStep.assignedAgent];
@@ -1119,16 +1164,48 @@ Message: ${message}`;
 
         if (result.artifacts && result.artifacts.length > 0) {
           if (!this.state.artifacts) this.state.artifacts = [];
+          const sources = this.contextProvider?.sources();
+          const schemaIndex = sources ? buildSchemaIndex(sources.graph.nodes, sources.graph.edges) : undefined;
           for (const artifact of result.artifacts) {
             artifact.phase = phase;
             artifact.specId = this.state.specId;
             artifact.specVersion = this.state.specVersion;
-            this.state.artifacts.push(artifact);
-            this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
+            // An agent that already called context.addArtifact() and also returns the
+            // artifact must not produce a second entry (found by the C1 eval).
+            const existing = this.state.artifacts.findIndex((a) => a === artifact || a.id === artifact.id);
+            if (existing >= 0) this.state.artifacts[existing] = artifact;
+            else {
+              this.state.artifacts.push(artifact);
+              this.log(`Artifact generated: ${artifact.title} (${artifact.type})`);
+            }
 
+            const relativeName = artifact.filePath || artifact.title;
+            let written: vscode.Uri | undefined;
             if (this.artifactWriter) {
-              const written = await this.artifactWriter.write(artifact);
+              written = await this.artifactWriter.write(artifact);
               artifact.filePath = written.fsPath;
+            }
+            if (sources && schemaIndex) {
+              const manifest = buildGroundingManifest({
+                artifact: {
+                  path: written && this.artifactWriter ? this.artifactWriter.relativePath(written) : relativeName,
+                  content: artifact.content, language: artifact.language, agent: artifact.generatedBy,
+                  specId: artifact.specId, specVersion: artifact.specVersion
+                },
+                specRevision: this.contextProvider?.specRevision?.(),
+                stepId: readyStep.id,
+                pack: pack?.manifest,
+                primitiveUses: generations,
+                graph: sources.graph,
+                schemaIndex,
+                assertions: sources.assertions,
+                model: this.describeModel()
+              });
+              this.lastRunManifests.push(manifest);
+              for (const w of manifest.grounding.warnings) this.log(`${artifact.title}: ${w}`);
+              if (written && this.artifactWriter) {
+                try { await this.artifactWriter.writeManifest(written, manifest); } catch (err) { this.log(`Could not write the grounding manifest for ${artifact.title}: ${err instanceof Error ? err.message : String(err)}`); }
+              }
             }
           }
         }
@@ -1151,6 +1228,7 @@ Message: ${message}`;
     }
 
     this.state.runningStepId = undefined;
+    await this.emitGroundingReport();
 
     if (anyFailure) {
       this.state.status = 'failed';
@@ -1167,6 +1245,46 @@ Message: ${message}`;
     this.state.status = 'completed';
     this.log('Execution completed successfully.');
     this.emitState();
+  }
+
+  /** `provider/model` as configured — recorded in grounding manifests. */
+  private describeModel(): string {
+    const settings = this.configManager.getSettings();
+    return `${settings.activeLlmProvider ?? 'copilot'}/${settings.activeLlmModel ?? 'default'}`;
+  }
+
+  /**
+   * The per-run Grounding Report (C3, §10.1): one validation-phase artifact
+   * summarising every manifest this execution wrote. Never fails the run.
+   */
+  private async emitGroundingReport(): Promise<void> {
+    if (this.lastRunManifests.length === 0) return;
+    try {
+      const artifact: GeneratedArtifact = {
+        id: `grounding-report-${Date.now().toString(36)}`,
+        type: 'validation_report',
+        title: 'Grounding Report',
+        description: 'Identifier grounding, decision backing, rule compliance and context gaps for every artifact this run produced.',
+        content: renderGroundingReport(this.lastRunManifests),
+        language: 'markdown',
+        generatedBy: 'architectureAgent',
+        generatedAt: new Date().toISOString(),
+        approved: false,
+        phase: 'validate',
+        specId: this.state.specId,
+        specVersion: this.state.specVersion,
+        filePath: 'grounding-report.md'
+      };
+      if (!this.state.artifacts) this.state.artifacts = [];
+      this.state.artifacts.push(artifact);
+      if (this.artifactWriter) {
+        const written = await this.artifactWriter.write(artifact);
+        artifact.filePath = written.fsPath;
+      }
+      this.log(`Grounding Report: ${this.lastRunManifests.length} artifact(s) checked.`);
+    } catch (err) {
+      this.log(`Could not write the Grounding Report: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   public async pauseExecution(): Promise<void> {

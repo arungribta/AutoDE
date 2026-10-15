@@ -70,7 +70,11 @@ function targetContextBlock(t) {
   ].filter((l) => l.trim()).join('\n');
 }
 
-function createBaselineSut({ provider }) {
+/**
+ * Hooks for adapters that build on this one: `chatContext(text)` replaces the context a chat
+ * turn is sent with; `configureHub(hub, target)` runs before plan execution.
+ */
+function createBaselineSut({ provider, chatContext, configureHub }) {
   const { GraphManager } = dist('context/GraphManager.js');
   const { ContextFileManager } = dist('context/ContextFileManager.js');
   const { parseFile } = dist('engine/context/fileIngestion.js');
@@ -113,7 +117,7 @@ function createBaselineSut({ provider }) {
       const hub = new DataAgentHubHub(fakeConfigManager(settings));
       hub.setLogListener((m) => logs.push(m));
       try {
-        const res = await hub.chat(text, cfm.buildContextPrompt());
+        const res = await hub.chat(text, chatContext ? chatContext(text) : cfm.buildContextPrompt());
         return { reply: res.message };
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) };
@@ -130,9 +134,10 @@ function createBaselineSut({ provider }) {
         status: 'ready', targetEnvironment: toTargetEnvironment(target),
         planApproved: true, stagesConfirmed: true
       });
+      if (configureHub) await configureHub(hub, target);
       await hub.executePlan();
       const state = hub.getPlan();
-      return { artifacts: state.artifacts || [], steps: state.steps, schemaContext };
+      return { artifacts: state.artifacts || [], steps: state.steps, schemaContext, manifests: hub.getLastRunManifests ? [...hub.getLastRunManifests()] : [], hub };
     },
 
     schemaGraph() {
@@ -149,4 +154,4 @@ function createBaselineSut({ provider }) {
   };
 }
 
-module.exports = { createBaselineSut };
+module.exports = { createBaselineSut, targetContextBlock };

@@ -8,6 +8,7 @@ import { ContextValidator } from '../engine/context/ContextValidator';
 import { AssertionLedger } from '../engine/context/ledger';
 import { projectGraph, syncGraphToLedger } from '../engine/context/projection';
 import { Conflict, detectConflicts, flagConflicts } from '../engine/context/conflicts';
+import { ContextPack, ContextPackRequest, ContextPackSources, buildContextPack } from '../engine/context/contextPack';
 import {
   BaseNode,
   BusinessTermNode,
@@ -75,6 +76,8 @@ export class ContextFileManager implements vscode.Disposable {
   private conflicts: Conflict[] = [];
   /** The active business problem's spec id — scopes spec-derived assertions (see `inSpecScope`). */
   private activeSpecId: string | undefined;
+  /** The most recent packs, newest first — what "AutoDE: What the Agent Saw" lists (C3). */
+  private readonly recentPacks: Array<{ title: string; at: string; pack: ContextPack }> = [];
 
   constructor(
     private readonly workspaceRoot: vscode.Uri,
@@ -549,73 +552,46 @@ export class ContextFileManager implements vscode.Disposable {
     };
   }
 
+  /** What packs are built from: the projected graph, the ledger and the current conflicts. */
+  public getPackSources(): ContextPackSources {
+    const snapshot = this.graphManager.serializeSnapshot();
+    return {
+      graph: { nodes: snapshot.nodes, edges: snapshot.edges },
+      assertions: this.ledger.assertions(),
+      conflicts: this.conflicts,
+      runtimeFacts: [...this.runtimeFacts.values()]
+    };
+  }
+
   /**
-   * Build a formatted context string for inclusion in LLM prompts.
+   * A task-scoped context pack (C3, v0.30.0; docs/context-layer-requirements.md
+   * §7.1) — what every LLM call should receive instead of the global dump.
+   * Recorded for "What the agent saw" when `title` is given.
+   */
+  public buildContextPack(request: ContextPackRequest, title?: string): ContextPack {
+    const pack = buildContextPack(request, this.getPackSources());
+    if (title) this.recordPack(title, pack);
+    return pack;
+  }
+
+  /** Remembers a pack built elsewhere (e.g. a plan step's, built by the hub). */
+  public recordPack(title: string, pack: ContextPack): void {
+    this.recentPacks.unshift({ title, at: new Date().toISOString(), pack });
+    if (this.recentPacks.length > 50) this.recentPacks.length = 50;
+  }
+
+  public getRecentPacks(): ReadonlyArray<{ title: string; at: string; pack: ContextPack }> {
+    return this.recentPacks;
+  }
+
+  /**
+   * The project overview: a pack with no seeds, which renders exactly what
+   * this method produced before C3. Kept as a thin wrapper so callers that
+   * have nothing to scope by keep working; callers with a task use
+   * `buildContextPack()`.
    */
   public buildContextPrompt(maxTokens?: number): string {
-    const parts: string[] = [];
-    const stats = this.getContextStats();
-    const hasGraphContent = stats.tables > 0 || stats.terms > 0 || stats.queries > 0;
-
-    if (this.runtimeFacts.size > 0) {
-      parts.push('## Live Session Facts');
-      for (const fact of this.runtimeFacts.values()) {
-        parts.push(`- **${fact.label}**: ${fact.text}`);
-      }
-    }
-
-    if (!hasGraphContent) {
-      return parts.join('\n');
-    }
-
-    parts.push('## Enterprise Context Layer');
-
-    // Business Rules (STRICT first)
-    const rules = this.graphManager.getNodesByType('business_rule') as import('../engine/context/types').BusinessRuleNode[];
-    const strictRules = rules.filter((r) => r.enforcementLevel === 'STRICT');
-    if (strictRules.length > 0) {
-      parts.push('### Business Rules (STRICT)');
-      for (const r of strictRules) {
-        parts.push(`- **${r.label}**: ${r.ruleText}`);
-      }
-    }
-
-    // Tables
-    const tables = this.graphManager.getNodesByType('table') as import('../engine/context/types').TableNode[];
-    if (tables.length > 0) {
-      parts.push('### Database Tables');
-      for (const t of tables.slice(0, 20)) {
-        // Step 7 (governance layer): never silently blend a live-verified fact
-        // with a best-effort one — flag file/LLM-derived tables explicitly so
-        // downstream generation (and the user) can weigh them differently.
-        const reliabilityNote = t.origin?.reliability === 'best-effort-inferred' ? ' _(file-derived, not live-verified)_' : '';
-        parts.push(`- \`${t.fqn || t.label}\`${t.description ? ' — ' + t.description : ''}${reliabilityNote}`);
-      }
-      if (tables.length > 20) {
-        parts.push(`- ... and ${tables.length - 20} more tables`);
-      }
-    }
-
-    // Business Terms
-    const terms = this.graphManager.getNodesByType('business_term') as import('../engine/context/types').BusinessTermNode[];
-    if (terms.length > 0) {
-      parts.push('### Business Terms');
-      for (const t of terms) {
-        const formula = t.formula ? ` (formula: ${t.formula})` : '';
-        parts.push(`- **${t.label}**${formula}${t.description ? ': ' + t.description : ''}`);
-      }
-    }
-
-    // Verified Queries
-    const queries = this.graphManager.getNodesByType('verified_query') as import('../engine/context/types').VerifiedQueryNode[];
-    if (queries.length > 0) {
-      parts.push('### Verified SQL Queries');
-      for (const q of queries.slice(0, 5)) {
-        parts.push(`- **${q.label}** (${q.dialect})`);
-      }
-    }
-
-    return parts.join('\n');
+    return this.buildContextPack({ purpose: 'chat', maxTokens }).text;
   }
 }
 

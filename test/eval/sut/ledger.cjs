@@ -28,8 +28,8 @@ function dist(rel) {
 
 const WITHHELD = ['status', 'trust', 'supersedes', 'conflictsWith', 'verification', 'id', 'evidence'];
 
-function createLedgerSut({ provider }) {
-  const base = createBaselineSut({ provider });
+function createLedgerSut(opts) {
+  const base = createBaselineSut(opts);
   const { parseYaml } = dist('engine/context/Yaml.js');
   const { createSubjectResolver, resolveSubjects } = dist('engine/context/projection.js');
   const { detectConflicts } = dist('engine/context/conflicts.js');

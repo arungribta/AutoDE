@@ -7,7 +7,7 @@
  *   npm run eval -- --mode record --provider openai   call the real provider, record a cassette
  *                                                 (needs AUTODE_EVAL_API_KEY; AUTODE_EVAL_MODEL optional)
  *   --out <file>   report path (default: test/reference/retail-orders/eval-report.md)
- *   --sut <name>   system under test: `ledger` (default, C2 v0.29.0) or `baseline` (v0.26.0 behaviour)
+ *   --sut <name>   system under test: `packs` (default, C3 v0.30.0), `ledger` (C2 v0.29.0) or `baseline` (v0.26.0)
  *
  * Measures how grounded AutoDE is on the reference problem in test/reference/retail-orders and
  * writes a Markdown report plus eval-results.json. It measures; it does not pass/fail — the
@@ -23,12 +23,13 @@ const ROOT = path.join(__dirname, '..', '..');
 const REF = path.join(ROOT, 'test', 'reference', 'retail-orders');
 const SUTS = {
   baseline: () => require('./sut/baseline.cjs').createBaselineSut,
-  ledger: () => require('./sut/ledger.cjs').createLedgerSut
+  ledger: () => require('./sut/ledger.cjs').createLedgerSut,
+  packs: () => require('./sut/packs.cjs').createPacksSut
 };
 const UNKNOWN_RE = /\b(not (known|specified|provided|available|defined|stated|mentioned)|unknown|no information|don'?t know|do not know|cannot determine|can't determine|isn'?t (specified|defined|stated)|not in the context)\b/i;
 
 function parseArgs(argv) {
-  const args = { mode: 'offline', provider: 'openai', sut: 'ledger', out: path.join(REF, 'eval-report.md') };
+  const args = { mode: 'offline', provider: 'openai', sut: 'packs', out: path.join(REF, 'eval-report.md') };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--mode') args.mode = argv[++i];
@@ -110,14 +111,32 @@ async function main() {
         columnsShown: /\bcolumns?\b|\(\s*\w+\s+(int|integer|varchar|timestamp)/i.test(ctx)
       };
     };
-    const stepContext = await sut.contextFor({ purpose: 'step' });
-    results.contextNoiseLast = measureContext(stepContext);
+    // Every plan step's own context (a system without task scoping returns the same text for each).
+    const measureSteps = async (s) => {
+      const per = [];
+      for (const step of plan.steps) per.push(measureContext(await s.contextFor({ purpose: 'step', step })));
+      const lowerAll = [];
+      for (const step of plan.steps) lowerAll.push((await s.contextFor({ purpose: 'step', step })).toLowerCase());
+      const shownAny = (names) => names.filter((n) => lowerAll.some((t) => new RegExp(`\\b${n}\\b`).test(t))).length;
+      const tokens = per.map((p) => p.tokens).sort((a, b) => a - b);
+      return {
+        tokens: tokens[Math.floor(tokens.length / 2)],
+        tokensMax: tokens[tokens.length - 1],
+        relevantTablesShown: shownAny(relevantNames),
+        relevantTablesTotal: relevantNames.length,
+        noiseTablesShown: shownAny(noiseNames),
+        noiseTablesTotal: noiseNames.length,
+        columnsShown: per.some((p) => p.columnsShown),
+        perStep: plan.steps.map((st, i) => ({ id: st.id, tokens: per[i].tokens, noise: per[i].noiseTablesShown }))
+      };
+    };
+    results.contextNoiseLast = await measureSteps(sut);
 
     // ── Scenario B: same inputs, noise schema imported first — order sensitivity of delivery ──
     fs.mkdirSync(path.join(scratch, 'noise-first'), { recursive: true });
     const sutB = createSut({ provider: args.provider });
     await sutB.setup({ workspaceDir: path.join(scratch, 'noise-first'), referenceDir: REF, sourceOrder: [noiseFile, ...relevantFiles] });
-    results.contextNoiseFirst = measureContext(await sutB.contextFor({ purpose: 'step' }));
+    results.contextNoiseFirst = await measureSteps(sutB);
 
     // ── The engineer's conversation ──
     results.chat = [];
@@ -127,12 +146,12 @@ async function main() {
     }
 
     // ── Answerability: can the context layer alone answer each question? ──
-    const afterChatContext = await sut.contextFor({ purpose: 'qa' });
-    const lowerCtx = afterChatContext.toLowerCase();
-    results.answerability = questions.filter((q) => !q.unknown).map((q) => {
+    results.answerability = [];
+    for (const q of questions.filter((x) => !x.unknown)) {
+      const lowerCtx = (await sut.contextFor({ purpose: 'qa', question: q.question })).toLowerCase();
       const missing = (q.evidence || []).filter((e) => !lowerCtx.includes(String(e).toLowerCase()));
-      return { id: q.id, answerable: missing.length === 0, missing };
-    });
+      results.answerability.push({ id: q.id, answerable: missing.length === 0, missing });
+    }
 
     // ── QA accuracy (needs answers from a model: replay or record) ──
     results.qa = [];
@@ -165,6 +184,15 @@ async function main() {
     const g = checkSqlGrounding(sqlArtifacts, index);
     results.grounding = { ...g, sqlArtifacts: sqlArtifacts.length };
     results.planContextTokens = estimateTokens(run.schemaContext);
+    const manifests = (run.manifests || []).filter((m) => m.agent);
+    results.manifests = {
+      artifacts: manifests.length,
+      decisions: manifests.reduce((n, m) => n + m.grounding.decisions.total, 0),
+      decisionsBacked: manifests.reduce((n, m) => n + m.decisions.filter((d) => d.backedBy && !d.belowTrust).length, 0),
+      gaps: manifests.reduce((n, m) => n + m.gaps.length, 0),
+      written: run.manifestFiles ?? null,
+      staleUse: run.staleUse ?? null
+    };
 
     // A property that only appears in a comment (e.g. the task description echoed into a
     // header) doesn't hold — checks run on code with comments removed.
@@ -192,6 +220,8 @@ async function main() {
     results.notes = sut.notes || [];
     results.conflicts = cap.conflicts ? await cap.conflicts() : null;
     results.ledger = sut.ledgerSummary ? sut.ledgerSummary() : null;
+    results.contextGaps = cap.contextGaps ? await cap.contextGaps() : null;
+    const ticketGap = (results.contextGaps || []).find((g) => g.needed === 'relationship' && g.subject.some((x) => /support_tickets/.test(x)) && g.subject.some((x) => /orders$/.test(x)));
     const revenueConflict = (results.conflicts || []).find((c) => /revenue/i.test(c.key) || c.sides.some((x) => /revenue/i.test(x)));
     const e7 = results.expected.find((e) => e.id === 'E7');
     const noiseFree = results.contextNoiseLast.noiseTablesShown === 0 && results.contextNoiseFirst.noiseTablesShown === 0;
@@ -199,7 +229,7 @@ async function main() {
       { id: 1, name: 'Revenue defined two ways (glossary gross vs chat net)', detected: !!revenueConflict, how: cap.conflicts ? (revenueConflict ? `conflict detector (${revenueConflict.rule} rule)` : 'conflict detector ran; no revenue conflict found') : 'not supported: no conflict detection' },
       { id: 2, name: 'Customer key corrected mid-chat (customer_id → cust_no)', detected: !!(cap.superseded && (await cap.superseded()).length), how: cap.superseded ? 'supersession' : ((sut.trapNotes || {})[2] || 'not supported: chat facts are not recorded, so nothing can be superseded') },
       { id: 3, name: 'Claimed-unique member_id has duplicates', detected: !!(cap.verify && (await cap.verify({ table: 'crm.loyalty_members', column: 'member_id', predicate: 'unique' }))?.result === 'fail'), how: cap.verify ? 'verification probe' : 'not supported: no verification probes' },
-      { id: 4, name: 'Ticket-to-order join requested with no relationship', detected: !!(cap.contextGaps && (await cap.contextGaps()).length), how: cap.contextGaps ? 'context gap' : `not supported: no context gaps (artifacts ${e7 && e7.pass ? 'did not' : 'did'} invent the join)` },
+      { id: 4, name: 'Ticket-to-order join requested with no relationship', detected: !!ticketGap, how: cap.contextGaps ? (ticketGap ? `context gap (${ticketGap.reason}): ${ticketGap.text}` : 'context gaps supported; none raised for tickets ↔ orders') : `not supported: no context gaps (artifacts ${e7 && e7.pass ? 'did not' : 'did'} invent the join)` },
       { id: 5, name: 'Irrelevant 40-table schema ingested', detected: noiseFree, how: `noise tables in step context: ${results.contextNoiseLast.noiseTablesShown} (noise last), ${results.contextNoiseFirst.noiseTablesShown} (noise first)` }
     ];
     results.llm = router.stats;
@@ -228,15 +258,15 @@ function summaryRows(r) {
     ['Identifier grounding rate', '100%', `${pct(idResolved, idTotal)} (${idResolved}/${idTotal})`],
     ['Unresolved identifiers', '0', String(g.unresolved.length)],
     ['Type-compatibility issues', '0', String(g.typeIssues.length)],
-    ['Decision backing rate', '≥ 95%', 'n/a — no grounding manifests yet (C3)'],
+    ['Decision backing rate', '≥ 95%', !r.manifests || r.manifests.artifacts === 0 ? 'n/a — no grounding manifests (before C3)' : (r.manifests.decisions ? `${pct(r.manifests.decisionsBacked, r.manifests.decisions)} (${r.manifests.decisionsBacked}/${r.manifests.decisions})` : `n/a — no primitive decisions in this run (${r.manifests.artifacts} manifests)`)],
     ['Answerability from the context layer', 'reported', `${pct(ans, r.answerability.length)} (${ans}/${r.answerability.length})`],
     ['QA accuracy', '≥ 90%', qaScored.length ? `${pct(qaCorrect, qaScored.length)} (${qaCorrect}/${qaScored.length})` : 'not measured offline — needs replay or record'],
     ['Confident wrong answers', '0', qaScored.length ? String(qaScored.filter((q) => q.confidentWrong).length) : 'not measured offline'],
     ['Trap detection', '5/5', `${trapsCaught}/5`],
     ['Expected artifact properties', 'all', `${expPass}/${r.expected.length}`],
     ['Source tables kept distinct at ingestion', 'all', `${r.ingestion.represented}/${r.ingestion.declared}`],
-    ['Stale-fact use', '0', 'n/a — needs grounding manifests (C3)'],
-    ['Plan-step context size', 'reported', `${r.planContextTokens} tokens`]
+    ['Stale-fact use', '0', r.manifests && r.manifests.staleUse !== null ? String(r.manifests.staleUse) : 'n/a — needs grounding manifests (C3)'],
+    ['Plan-step context size', 'reported', `${r.contextNoiseLast.tokens} tokens median per step (max ${r.contextNoiseLast.tokensMax})`]
   ];
 }
 
@@ -276,11 +306,21 @@ function renderReport(r) {
 
   L.push('', '## Context delivery', '', '| | Noise imported last | Noise imported first |', '|---|---|---|');
   const a = r.contextNoiseLast, b = r.contextNoiseFirst;
-  L.push(`| Tokens | ${a.tokens} | ${b.tokens} |`);
+  L.push(`| Tokens (median per step) | ${a.tokens} | ${b.tokens} |`);
   L.push(`| Relevant tables named | ${a.relevantTablesShown}/${a.relevantTablesTotal} | ${b.relevantTablesShown}/${b.relevantTablesTotal} |`);
   L.push(`| Noise tables named | ${a.noiseTablesShown}/${a.noiseTablesTotal} | ${b.noiseTablesShown}/${b.noiseTablesTotal} |`);
   L.push(`| Column details included | ${a.columnsShown ? 'yes' : 'no'} | ${b.columnsShown ? 'yes' : 'no'} |`);
-  L.push('', 'The same text is delivered for every purpose (interview, plan, each step, chat): there is no task-specific retrieval yet.');
+  L.push('', r.sut.startsWith('baseline') || r.sut.startsWith('assertion ledger')
+    ? 'The same text is delivered for every purpose (interview, plan, each step, chat): there is no task-specific retrieval yet.'
+    : `Each plan step gets its own context pack. Counts are over all ${a.perStep.length} steps (a table counts if any step's pack names it). Per step (noise last): ${a.perStep.map((p) => `${p.id} ${p.tokens} tokens${p.noise ? `, ${p.noise} noise` : ''}`).join('; ')}.`);
+  if (r.contextGaps) {
+    L.push('', '## Context gaps', '');
+    if (!r.contextGaps.length) L.push('None.');
+    for (const g of r.contextGaps) L.push(`- **${g.needed}** (${g.reason}${g.foundTrust ? `, found ${g.foundTrust}` : ''}, needs ${g.minTrust})${g.stepId ? ` in step ${g.stepId}` : ' in chat'}: ${g.text}`);
+  }
+  if (r.manifests && r.manifests.artifacts) {
+    L.push('', '## Grounding manifests', '', `${r.manifests.artifacts} artifacts carry a manifest${r.manifests.written !== null ? ` (${r.manifests.written} \`.grounding.json\` files written)` : ''}. Primitive decisions: ${r.manifests.decisions} (${r.manifests.decisionsBacked} backed at the required trust). Gaps recorded in manifests: ${r.manifests.gaps}.`);
+  }
 
   const replied = r.chat.filter((c) => c.ok).length;
   L.push('', '## Conversation', '', `${r.chat.length} scripted engineer turns sent; ${replied} got a reply${replied === r.chat.length ? '' : ` (${r.chat.length - replied} failed${r.mode === 'offline' ? ' — expected offline, no LLM' : ''})`}. Whether anything said in them reached the context layer is what the answerability table below shows.`);
@@ -315,7 +355,7 @@ function renderReport(r) {
   L.push('- Grounding checks scan SQL with patterns, not a parser: `FROM`/`JOIN` targets and `alias.column` references are checked, unqualified columns are not.');
   L.push('- Offline mode measures AutoDE with its LLM paths disabled, so artifacts come from the template fallbacks. Replay/record runs measure the LLM paths.');
   L.push('- The plan is the fixed reference plan in `plan.yaml`, so planning quality itself is not scored here.');
-  L.push('- The ablation run (context packs vs. the baseline dump) becomes meaningful once context packs exist (Phase C3).');
+  L.push('- Ablation: run with `--sut ledger` (the global dump, same ledger) or `--sut baseline` to compare against context packs on identical inputs.');
   for (const n of r.notes || []) L.push(`- ${n}`);
   return L.join('\n') + '\n';
 }

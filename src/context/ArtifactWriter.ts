@@ -76,6 +76,29 @@ export class ArtifactWriter {
     return artifact.specId ? `${artifact.specId}.v${artifact.specVersion ?? 1}` : undefined;
   }
 
+  /**
+   * Writes an artifact's grounding manifest (C3, v0.30.0) beside it as
+   * `<file>.grounding.json`, archiving the previous one like the artifact.
+   */
+  public async writeManifest(artifactUri: vscode.Uri, manifest: unknown): Promise<vscode.Uri> {
+    const name = artifactUri.fsPath.split(/[\\/]/).pop() || 'artifact';
+    const dirUri = vscode.Uri.joinPath(artifactUri, '..');
+    const manifestName = `${name}.grounding.json`;
+    const targetUri = vscode.Uri.joinPath(dirUri, manifestName);
+    const tempUri = vscode.Uri.joinPath(dirUri, `.${manifestName}.tmp.${Date.now()}`);
+    await this.archiveExisting(dirUri, manifestName);
+    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
+    await vscode.workspace.fs.rename(tempUri, targetUri, { overwrite: true });
+    return targetUri;
+  }
+
+  /** `artifactUri` relative to the artifact directory, with `/` separators — how manifests name their artifact. */
+  public relativePath(artifactUri: vscode.Uri): string {
+    const root = this.getArtifactDirectory().fsPath.replace(/[\\/]+$/, '');
+    const full = artifactUri.fsPath;
+    return (full.startsWith(root) ? full.slice(root.length + 1) : full).replace(/\\/g, '/');
+  }
+
   public async writeAll(artifacts: GeneratedArtifact[]): Promise<vscode.Uri[]> {
     const written: vscode.Uri[] = [];
     for (const artifact of artifacts) {

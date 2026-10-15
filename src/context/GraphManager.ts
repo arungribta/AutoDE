@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { BaseNode, GraphEdge, RetrievalOptions, SubgraphResult, ContextEngineDiagnostics } from '../engine/context/types';
+import { expandNeighborhood } from '../engine/context/retrieval';
 
 /**
  * Thread-safe in-memory Graph Manager.
@@ -187,95 +188,25 @@ export class GraphManager implements vscode.Disposable {
   }
 
   /**
-   * Neighborhood traversal using BFS up to maxHops, computing relevance per seed
+   * Neighborhood traversal with distance decay. Since v0.30.0 the logic lives
+   * in the engine (`expandNeighborhood`, used by context packs) and walks
+   * edges in both directions, so a table reaches the terms and rules that
+   * point at it.
    */
   public traverseNeighborhood(seedIds: string[], options?: RetrievalOptions & { decayFactor?: number; seedScore?: number }): SubgraphResult {
     const start = Date.now();
-    const maxHops = (options && options.maxHops) ? options.maxHops : 2;
-    const decay = (options && options['decayFactor']) ? options['decayFactor']! : 0.6;
-    const seedScore = (options && options['seedScore']) ? options['seedScore']! : 1.0;
-
-    const visited = new Map<string, number>(); // nodeId -> min distance
-    const queue: Array<{ id: string; dist: number }> = [];
-
-    for (const sid of seedIds) {
-      if (!this.nodes.has(sid)) continue;
-      visited.set(sid, 0);
-      queue.push({ id: sid, dist: 0 });
-    }
-
-    const edgesOutMap = this.buildAdjacency();
-
-    while (queue.length > 0) {
-      const { id, dist } = queue.shift()!;
-      if (dist >= maxHops) continue;
-      const neighbors = edgesOutMap.get(id) || [];
-      for (const neighId of neighbors) {
-        const prev = visited.get(neighId);
-        const nd = dist + 1;
-        if (prev === undefined || nd < prev) {
-          visited.set(neighId, nd);
-          queue.push({ id: neighId, dist: nd });
-        }
-      }
-    }
-
-    // build nodes and edges list
+    const seedScore = options?.seedScore ?? 1.0;
+    const reached = expandNeighborhood(
+      { nodes: [...this.nodes.values()], edges: [...this.edges.values()] },
+      seedIds,
+      { maxHops: options?.maxHops ?? 2, decay: options?.decayFactor ?? 0.6 }
+    );
     const nodes: BaseNode[] = [];
-    const edges: GraphEdge[] = [];
-
-    for (const nodeId of visited.keys()) {
-      const n = this.nodes.get(nodeId);
-      if (n) nodes.push(n);
+    for (const [id, r] of reached) {
+      const n = this.nodes.get(id);
+      if (n) nodes.push(Object.assign({}, n, { metadata: Object.assign({}, n.metadata, { __relevance: seedScore * r.relevance }) }));
     }
-
-    for (const e of this.edges.values()) {
-      if (visited.has(e.source) && visited.has(e.target)) edges.push(e);
-    }
-
-    // compute relevance scores
-    const relevance = new Map<string, number>();
-    for (const sid of seedIds) {
-      if (!visited.has(sid)) continue;
-      // seed has distance 0
-      relevance.set(sid, (relevance.get(sid) || 0) + seedScore);
-    }
-
-    for (const [nid, dist] of visited.entries()) {
-      if (seedIds.includes(nid)) continue;
-      // approximate seed contribution: pick shortest distance to any seed
-      // find minimal dist from seeds by walking back via visited map distances
-      const minDist = dist; // we recorded min distances already
-      const score = seedScore * Math.pow(decay, minDist);
-      relevance.set(nid, (relevance.get(nid) || 0) + score);
-    }
-
-    // attach relevance to nodes as metadata for downstream pruning (non-destructive)
-    const nodesWithMeta = nodes.map((n) => (
-      Object.assign({}, n, { metadata: Object.assign({}, n.metadata, { __relevance: relevance.get(n.id) || 0 }) })
-    ));
-
-    const latencyMs = Date.now() - start;
-
-    const result: SubgraphResult = {
-      nodes: nodesWithMeta,
-      edges,
-      formattedContext: '', // formatting is left to the retriever/formatter
-      tokenCount: 0,
-      latencyMs
-    };
-
-    return result;
-  }
-
-  private buildAdjacency(): Map<string, string[]> {
-    const map = new Map<string, string[]>();
-    for (const e of this.edges.values()) {
-      if (!map.has(e.source)) map.set(e.source, []);
-      map.get(e.source)!.push(e.target);
-      // if undirected semantics desired, also add reverse
-      // map.set(e.target, (map.get(e.target) || []).concat([e.source]));
-    }
-    return map;
+    const edges = [...this.edges.values()].filter((e) => reached.has(e.source) && reached.has(e.target));
+    return { nodes, edges, formattedContext: '', tokenCount: 0, latencyMs: Date.now() - start };
   }
 }

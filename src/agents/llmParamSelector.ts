@@ -116,6 +116,7 @@ export async function generateViaPrimitiveOrFallback(
   if (spec) {
     try {
       const compiled = compileTransformSpec(spec, target, dialect);
+      context.recordGeneration?.({ kind: spec.kind, version: spec.primitiveVersion ?? getPrimitive(spec.kind)?.version, params: spec.params, source: 'primitive' });
       return { content: compiled.content, source: 'primitive' };
     } catch (err) {
       context.log(`Primitive compilation failed for step ${step.id} (${err instanceof Error ? err.message : String(err)}) — falling back.`);
@@ -124,7 +125,9 @@ export async function generateViaPrimitiveOrFallback(
 
   const freehand = await freehandFallback();
   if (freehand) {
+    context.recordGeneration?.({ kind: candidateKinds[0] ?? 'none', params: {}, source: 'freehand' });
     return { content: freehand, source: 'freehand' };
   }
+  context.recordGeneration?.({ kind: candidateKinds[0] ?? 'none', params: {}, source: 'template' });
   return { content: template(), source: 'template' };
 }

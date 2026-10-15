@@ -1197,6 +1197,16 @@ Full specification: [context-layer-requirements.md](context-layer-requirements.m
 - `AutoDE: Compact Context Ledger` writes a snapshot of the current state; history is deleted only if the user explicitly chooses to prune it.
 - DDL import keeps each table's schema, so same-named tables from different systems (e.g. `shop.customers`, `crm.customers`) stay separate.
 
+### 20.3 Context packs, grounding manifests and causality (v0.30.0)
+
+- Each LLM call — every plan step, chat reply, plan, specification and interview turn — receives context selected for its task instead of one fixed summary of the whole project: the tables the task names (with their columns), related tables, the business terms, STRICT rules, conflicts and items under review that touch them, within a token budget. Unrelated schemas are left out.
+- When nothing in the request can be matched to known context, the call receives the project overview, exactly as before.
+- When a request needs two entities combined and AutoDE knows no confirmed relationship between them (e.g. "support tickets per order"), it raises a context gap — a question to the engineer — instead of letting the model invent a join. In this release gaps are reported in the prompt, the log and the artifact's manifest; steps are not paused yet.
+- Every generated artifact gets a grounding manifest (`<file>.grounding.json`) recording the specification revision, plan step, agent, model, primitive, the context it was given, and which facts justified each design decision (or that none did). A Grounding Report summarises every run: identifier grounding, decision backing, STRICT-rule checks (PII masking is checked automatically) and context gaps.
+- When a fact an artifact relied on is later superseded, rejected or sent to review, the artifact is reported as stale with the reason.
+- `AutoDE: What the Agent Saw` shows the exact context any recent LLM call received; `AutoDE: Explain This Artifact` shows why an artifact looks the way it does — its decisions, the facts behind them, and their evidence.
+- An artifact that an agent both registers and returns is no longer listed twice. SQL comments in imported DDL no longer corrupt column lists.
+
 ---
 
 (End of requirements document)
