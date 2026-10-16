@@ -10,6 +10,7 @@ Each document answers one kind of question. When two disagree, the precedence ru
 | **How** is it built? | [technical-design.md](technical-design.md) | Architecture, modules, data formats, algorithms, trade-offs. |
 | What **changed** in each version? | [CHANGELOG.md](../CHANGELOG.md) | Newest first, including deliberate deviations from the specs. |
 | How do I get oriented as a new engineer? | [engineering-onboarding-guide.md](engineering-onboarding-guide.md) | Describes v0.13.0; refresh scheduled. |
+| How do I use AutoDE from Claude Code, VS Code agent mode or Cursor? | [mcp-setup.md](mcp-setup.md) | MCP server configuration and what it offers (v0.35.0). |
 | How do I verify a release by hand? | [manual-verification.md](manual-verification.md) | Checklist for v0.25.0–v0.31.0. |
 | Data formats | [schemas/](schemas/) | JSON Schemas for context envelopes and primitive definitions. |
 | How is AutoDE measured? | [../test/reference/retail-orders/README.md](../test/reference/retail-orders/README.md) | Reference problem and `npm run eval`; frozen reports in `baselines/`. |

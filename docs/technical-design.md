@@ -1252,7 +1252,7 @@ The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileMa
 
 ### 10.2 Engine boundary (v0.26.0)
 
-- **Rule:** nothing under `src/engine/**` imports `vscode` — not even types (`.eslintrc.cjs`); a functional test loads every `dist/engine/**` module in plain Node. The engine is what the MCP server will expose (mcp-engine-requirements §4).
+- **Rule:** nothing under `src/engine/**` or `src/mcp/**` imports `vscode` — not even types (`.eslintrc.cjs`); a functional test loads every `dist/engine/**` module in plain Node, and the MCP tests run the bundled server in a plain Node child process (§10.6).
 - **Host concerns pass in as parameters or interfaces:** `FileIo` for files (§2.3); `AgentHost { workspaceRoot, confirm(message, actionLabel), fileIo }` for agents; `AbortSignal` instead of VS Code cancellation tokens in platform `QueryOptions`/`ExtractOptions`; Snowflake CLI consent as a constructor option; the VS Code SecretStorage credential resolver lives in `src/core/credentials/`, the engine registers only `env` and `cli`.
 - **Persistence of live schema** moved from the adapter into `ConnectionManager.persistSchemaContext(snapshot, workspaceRoot, io)` (writes `schema-graph.json`; `snapshotToGraph()` is public).
 - **Mocks in tests:** modules that import `vscode` capture the mock at load time; shared helpers that need the VS Code API take it as a parameter (e.g. `createVscodeFileIo(vscode)`) so per-module mocks don't leak.
@@ -1367,6 +1367,19 @@ All properties are under the `autoDataEngineeringHub` section:
 - **Outputs:** `eval-report.md` and `eval-results.json` (rolling, git-ignored); frozen per-release copies in `baselines/`.
 
 ---
+### 10.6 MCP server (v0.35.0; MCP-1)
+
+- **Entry:** `src/mcp/server.ts` → bundled `dist/mcp-server.js`; `node dist/mcp-server.js --workspace <root> [--resources <extension root>]`. `findResourcesRoot()` walks up from the bundle to AutoDE's `package.json` (bundled `skills/`, `primitive-definitions/`, version). Uses the SDK's low-level `Server` with plain JSON Schemas (no zod in our code) over `StdioServerTransport`; stdout carries the protocol, logs go to stderr through `redact()`. `createAutodeServer(options)` is exported for in-process hosts (phase 5).
+- **Read-only by construction** (`src/mcp/workspace.ts`, `EngineWorkspace`): reads `.ai-context/**` and the extension's resources, never writes. Tool skills load with `loadToolSkillStates(..., { migrate: false })` (an unmigrated pre-S2 skill is unreviewed here). Context: `contextSources()` loads the ledger, projects the graph for the active spec (`active-problem.json` → `spec/business-problem.yaml` `id`), detects conflicts, loads the catalog with vocabulary and `glossaryAliases()` and builds its index in memory — the same `ContextPackSources` the extension builds, minus runtime facts; packs do not promote into the working set. Each source is cached by a fingerprint of path + size + mtime of its files. Primitives are re-registered (bundled + `.ai-context/primitives` + `history/`) when those folders change.
+- **Tools** (`src/mcp/tools.ts`, `TOOLS`): `autode_search_primitives`, `autode_describe_primitive`, `autode_validate_transform`, `autode_compile_transform` (registry, `getPrimitiveVersion()`); `autode_validate_pipeline_spec`, `autode_compile_pipeline_spec` (adds `suggestedPath` = `artifacts/build/<spec>.v<n>/<entity>/<nn>_<kind>.sql`), `autode_generate_design_doc`; `autode_resolve` (`resolveText` over the working set + `Catalog.search`), `autode_get_context_pack` (`buildContextPack`), `autode_list_assertions` (mirrors excluded unless `includeMirrors`), `autode_check_grounding` (`checkSqlGrounding` over `buildSchemaIndex(graph)`). All annotated `readOnlyHint: true, destructiveHint: false, idempotentHint: true`. Arguments are Ajv-validated against `inputSchema` before a handler runs. Workspace paths are refused if they leave the workspace.
+- **Prompts and resources** (`src/mcp/catalogs.ts`): `autode_interview_<id>` (bundled skills overridden by `.ai-context/skills/*.json`; body = systemPrompt + questionGuidance + spec fields + examples + optional `answers_so_far`); `autode_skill_<id>` only when `isSkillExposable()` (S2) — the body states the declared tools and the tier's limits. Resources: `autode://spec/business-problem`, `spec/pipeline`, `context/{source,target,mapping,semantic-layer}` (listed only if the file exists) and `autode://primitives/{kind}` (also a resource template); contents carry `_meta.revision` (SHA-256 of the bytes) and are redacted.
+- **Errors** (`src/mcp/errors.ts`): tool failures return `isError: true` with `{ code, message, retryable, details }` as `structuredContent` and text; codes are the §5.6 set plus `NOT_FOUND` and `INTERNAL_ERROR`; string details are truncated at 2 000 characters. Prompt and resource failures are JSON-RPC errors (`InvalidParams` / `InternalError`) carrying the envelope as `data`. `redact()` removes PEM private keys, bearer/basic tokens, JWTs, `key=value` secrets, URL credentials, Databricks PATs, GitHub/OpenAI/Anthropic/AWS-style keys and `AUTODE_*` credential variables; `redactValue()` also blanks values of secret-named keys.
+
+### 10.7 Build and packaging (v0.35.0; NFR-5)
+
+- `npm run compile` = `tsc -p ./` (every module to `dist/**`, used by tests and the eval) then `scripts/bundle.cjs` (esbuild, CJS, `node18`): `dist/extension.js` (external `vscode`; replaces tsc's file) and `dist/mcp-server.js` (no externals). Development bundles are readable with linked maps; `vscode:prepublish` builds `--production` (minified, no maps): 740 KB and 470 KB. `--analyze` prints what each bundle contains.
+- `.vscodeignore` ships only the two bundles from `dist/`, plus `media/`, `skills/`, `docs/schemas/`, README, CHANGELOG and LICENSE — no `node_modules/` (before v0.35.0 the package excluded `node_modules/` while `ajv` and `yaml` were runtime dependencies, so a packaged extension could not load). Package with `vsce package --no-dependencies`.
+- The `activate()` functional test loads the bundled `dist/extension.js`, so the bundle itself is smoke-tested on every `npm test`.
 
 ## 12. Source Tree
 
@@ -1417,11 +1430,13 @@ src/engine/transforms/declarative/    # Tier 2 declarative primitives
   adapter.ts, lifecycle.ts, loader.ts, schema.ts, templateEngine.ts, types.ts
 src/engine/transforms/primitives/    # Tier 1 primitives
   dedup.ts, incrementalLoad.ts, renameCast.ts
+src/mcp/    # MCP server (no vscode; §10.6)
+  catalogs.ts, errors.ts, server.ts, tools.ts, workspace.ts
 src/spokes/    # Snowflake executor (other files unused)
   architectureAgent.ts, ingestionAgent.ts, snowflakeExecutor.ts, sttmAgent.ts
 ```
 
-Outside `src/`: `media/` (webviews: `sidebar.html`, `panel.html`, `editors/`), `skills/` (bundled interview skills), `primitive-definitions/` (bundled Tier-2 primitives), `docs/schemas/` (JSON Schemas), `test/` (`functional.test.cjs`, `eval/`, `reference/`).
+Outside `src/`: `scripts/bundle.cjs` (esbuild, §10.7), `media/` (webviews: `sidebar.html`, `panel.html`, `editors/`), `skills/` (bundled interview skills), `primitive-definitions/` (bundled Tier-2 primitives), `docs/schemas/` (JSON Schemas), `test/` (`functional.test.cjs`, `eval/`, `reference/`, `golden/mcp-compile/` — compile snapshots, rewritten with `AUTODE_UPDATE_GOLDEN=1`).
 
 ---
 

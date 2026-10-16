@@ -6,3 +6,17 @@ node_modules/**
 .gitignore
 .vscodeignore
 src/**
+scripts/**
+test/**
+tsconfig.json
+.eslintrc.cjs
+mock_*.js
+tmp_*.js
+.ai-context/**
+*.vsix
+# Only the two esbuild bundles ship (phase 3): tsc's per-module output stays local for tests.
+dist/**
+!dist/extension.js
+!dist/mcp-server.js
+docs/*.md
+media/architecture.drawio

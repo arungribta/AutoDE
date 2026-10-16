@@ -9,9 +9,9 @@ import { AssertionLedger } from '../engine/context/ledger';
 import { projectGraph, syncGraphToLedger } from '../engine/context/projection';
 import { Conflict, detectConflicts, flagConflicts } from '../engine/context/conflicts';
 import { ContextPack, ContextPackRequest, ContextPackSources, buildContextPack } from '../engine/context/contextPack';
-import { DEFAULT_ENVIRONMENT, Estate, EstateBinding, ObjectIdentity, UNASSIGNED_SYSTEM, catalogWatermarks, edgeId, emptyEstate, parseEstate, queryId, rekeyLegacyGraph, resolveIdentity, ruleId, serializeEstate, termId } from '../engine/context/estate';
+import { DEFAULT_ENVIRONMENT, Estate, mergeWatermarks, EstateBinding, ObjectIdentity, UNASSIGNED_SYSTEM, catalogWatermarks, edgeId, emptyEstate, parseEstate, queryId, rekeyLegacyGraph, resolveIdentity, ruleId, serializeEstate, termId } from '../engine/context/estate';
 import type { IngestIdentity } from '../engine/context/fileIngestion';
-import { Catalog, CatalogEntry, CatalogFetcher, DEFAULT_WORKING_SET_POLICY, WorkingSetPolicy, entriesFromGraph, isStale, selectEvictions, selectSeedHits } from '../engine/context/catalog';
+import { Catalog, CatalogEntry, CatalogFetcher, DEFAULT_WORKING_SET_POLICY, WorkingSetPolicy, entriesFromGraph, glossaryAliases, isStale, selectEvictions, selectSeedHits } from '../engine/context/catalog';
 import { buildVocabulary, parseVocabularyFile } from '../engine/context/vocabulary';
 import { isLive } from '../engine/context/assertions';
 import { isMirror } from '../engine/context/projection';
@@ -300,23 +300,7 @@ export class ContextFileManager implements vscode.Disposable {
   private async syncCatalog(): Promise<void> {
     const snap = this.graphManager.serializeSnapshot();
     this.catalog.upsert(entriesFromGraph(snap.nodes, snap.edges));
-    // Glossary aliases: a term's name and definition index the tables it names —
-    // resolved against the catalog, so they bind to tables outside the working set too.
-    const byName = new Map<string, string[]>();
-    for (const e of this.catalog.all()) {
-      for (const k of [e.table.fqn, `${e.table.schema}.${e.table.label}`, e.table.label].map((x) => String(x ?? '').toLowerCase())) {
-        if (k) byName.set(k, [...new Set([...(byName.get(k) ?? []), e.id])]);
-      }
-    }
-    const aliases = new Map<string, string[]>();
-    for (const term of snap.nodes) {
-      if (term.type !== 'business_term' && term.type !== 'metric') continue;
-      const text = [term.label, term.description].filter(Boolean).join(' ');
-      for (const ref of (term as BusinessTermNode).mappedNodeIds ?? []) {
-        for (const id of byName.get(String(ref).toLowerCase()) ?? []) aliases.set(id, [...new Set([...(aliases.get(id) ?? []), text])]);
-      }
-    }
-    this.catalog.setAliases(aliases);
+    this.catalog.setAliases(glossaryAliases(this.catalog.all(), snap.nodes));
     if (this.catalog.isIndexStale()) await this.catalog.buildIndex();
     await this.catalog.save();
   }
@@ -998,12 +982,6 @@ export class ContextFileManager implements vscode.Disposable {
 }
 
 /** Latest watermark per key across two maps (`unknown` loses to any timestamp). */
-function mergeWatermarks(a: Record<string, string>, b: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = { ...a };
-  for (const [k, v] of Object.entries(b)) if (!(k in out) || out[k] === 'unknown' || (v !== 'unknown' && v > out[k])) out[k] = v;
-  return Object.fromEntries(Object.entries(out).sort(([x], [y]) => (x < y ? -1 : 1)));
-}
-
 function toPosix(p: string): string {
   return p.split(path.sep).join('/');
 }

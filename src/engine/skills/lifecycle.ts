@@ -233,9 +233,14 @@ function defaultSidecar(skillDir: string): ToolSkillSidecar {
   return { status: 'published', version: 1, trustTier: 'unreviewed', publishedChecksum: checksum, provenance: { source: 'local', contentChecksum: checksum, importedAt: '' }, transitions: [] };
 }
 
-/** Every imported skill with its lifecycle state (migrating pre-S2 skills first). */
-export function loadToolSkillStates(toolSkillsDir: string, by = 'autode'): ToolSkillState[] {
-  migrateToolSkills(toolSkillsDir, by);
+/**
+ * Every imported skill with its lifecycle state (migrating pre-S2 skills
+ * first). `migrate: false` is for readers that must not write — the MCP
+ * server: there, an unmigrated pre-S2 skill counts as unreviewed until the
+ * extension has migrated it.
+ */
+export function loadToolSkillStates(toolSkillsDir: string, by = 'autode', options: { migrate?: boolean } = {}): ToolSkillState[] {
+  if (options.migrate !== false) migrateToolSkills(toolSkillsDir, by);
   return loadToolSkillsFromDirectory(toolSkillsDir).map((skill) => stateOf(skill, readSidecar(skill.sourceDir) ?? defaultSidecar(skill.sourceDir)));
 }
 

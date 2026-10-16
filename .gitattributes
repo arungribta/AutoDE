@@ -1,0 +1,2 @@
+# Golden snapshots are compared byte for byte with compiler output (LF): never convert line endings.
+test/golden/** -text

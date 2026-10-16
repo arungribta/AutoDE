@@ -96,6 +96,11 @@ function resolvePrimitive(spec: TransformSpec): TransformPrimitive<any> | undefi
   return TRANSFORM_PRIMITIVES[spec.kind];
 }
 
+/** The primitive a `kind` (+ optional version pin) compiles against — the same resolution as `compileTransformSpec`. */
+export function getPrimitiveVersion(kind: string, version?: number): TransformPrimitive<unknown> | undefined {
+  return resolvePrimitive({ kind, params: {}, primitiveVersion: version });
+}
+
 /** Every registered primitive, Tier 1 and Tier 2 alike — the UI's catalog listing (Phase 2B-iii). */
 export function listPrimitives(): TransformPrimitive<any>[] {
   return Object.values(TRANSFORM_PRIMITIVES);

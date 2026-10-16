@@ -2,7 +2,7 @@
 
 **The single place for order and status.** Specifications say *what* each phase delivers and *why*; this document says *when*, and whether it's done. If another document's plan disagrees with this one, this one wins. Document map: [README.md](README.md).
 
-Last updated: 2026-10-15 · Current version: **0.34.0** · Branch: `feature/engine-boundary`
+Last updated: 2026-10-15 · Current version: **0.35.0** · Branch: `feature/engine-boundary`
 
 ---
 
@@ -22,7 +22,7 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.32.0 | ✅ **K2** Working-set cache and scale: tiered cache with query-through, refresh on use, visibility, the 100 ms responsiveness budget, vocabulary-robust retrieval; large-estate fixture; embedded-store and RET decisions | [context-layer §11 Phase K](context-layer-requirements.md) (items 4, 5, 8, 11, 12) | Estates beyond the working-set size. |
 | v0.33.0 | ✅ **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report, vocabulary capture | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
 | v0.34.0 | ✅ **S2** Tool-skill lifecycle, provenance, review, trust tiers | [mcp-engine §9.1](mcp-engine-requirements.md) | Must exist before any skill is exposed to external agents over MCP. |
-| v0.35.0 | **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
+| v0.35.0 | ✅ **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
 | v0.36.0 | **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
 | v0.37.0 | **DRV** Opt-in native driver acquisition + platform-onboarding UI | [mcp-engine §9.1](mcp-engine-requirements.md) | How legacy sources (Oracle, SQL Server …) get a live connection without breaking P6. |
 | v0.38.0 | **C4b** Chat extraction, Context Inbox, tool-action memory | [context-layer §11 Phase C4b](context-layer-requirements.md) | Remaining context MCP tools; context gaps start pausing steps. |
@@ -48,6 +48,8 @@ Every item from the retired backlog and checklist of the previous requirements.m
 
 | Item | From | Notes |
 |---|---|---|
+| **Packaging: marketplace publisher id and PNG icon** | — | Found in v0.35.0: `vsce` refuses `"publisher": "Arun Gribta"` (a display name, not a publisher id) and `media/logo.svg` (icons must be PNG), so no VSIX could be built at any earlier version either. Changing the publisher changes the extension id, and VS Code keys stored secrets (SecretStorage) by it — users would re-enter platform credentials. Needs the owner's decision. |
+| **Tier-1 primitives emit Snowflake syntax for every dialect** | — | Found by v0.35.0's golden snapshots: `dedup` uses `SELECT * EXCEPT (…)` (Snowflake, BigQuery and Databricks only) and `CREATE OR REPLACE VIEW` (not T-SQL) for every dialect. The snapshots pin today's output; phase 6 (per-dialect `platforms` and the conformance suite) is where it gets fixed and the snapshots updated. |
 | One-time consent dialog for programmatic LLM use | §16.4 | Today only an opt-in setting exists. |
 | Opt-in telemetry + privacy/data-flow note | §16.4 | `telemetryEnabled` is read; nothing reports. |
 | Interview (intake) session survives a reload | §16.5 | Still in memory only (BPS-7). Not done in C4a; fits C4b, which persists chat-derived facts. |
@@ -130,6 +132,8 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 | 2026-10-15 | K2: **RET not scheduled.** Deterministic signals found 17 of 21 vocabulary-mismatch questions (3 of 21 from names alone) and 8 of 8 on the large estate; all 4 misses are free paraphrases. Counter-measure first: C4a's vocabulary capture (LLM-proposed, engineer-reviewed `vocabulary.yaml` entries) keeps run-time retrieval deterministic and provider-independent. RET is reconsidered if real engagements' questions show paraphrase misses that this does not fix. |
 | 2026-10-15 | C4a: probes also run over **sample files the customer supplies** (same templates, same aggregates), because merge and migration sources often have no live connector yet; only counts leave the probe either way. |
 | 2026-10-15 | C4a: probes stay **fixed templates in code** (`probes.ts`), reviewed like code, until phase 6 brings Tier-2 governance for them; a passed probe raises trust to verified but does **not** confirm the claim — confirming stays the engineer's (Inbox, C4b). |
+| 2026-10-16 | Phase 3: new runtime dependency **`@modelcontextprotocol/sdk` 1.31.0** (MIT; with zod, ajv and its other dependencies, all MIT) — bundled into `dist/mcp-server.js`, 470 KB minified against a 1.5 MB budget; dev-only `esbuild` 0.28.2 and `@vscode/vsce` 4.0.0 (MIT). Versions pinned exactly and chosen at least two weeks old. The package shrank from 871 KB / 220 files (and broken: no `ajv`/`yaml`) to 453 KB / 25 files. |
+| 2026-10-16 | Phase 3: the MCP server is **strictly read-only**, including for skills (no S2 migration from the server) and packs (no working-set promotion); context is re-read when its files change rather than watched. `notifications/resources/updated` (a SHOULD in §5.5) moves to phase 5, where the extension becomes a client and needs it. |
 | 2026-10-15 | S2: **trust belongs to content**, not to a skill id: a review records the checksum of what was read, and changed files are unreviewed again. "No sidecar = trusted" (the spec's back-compat rule) applies only once, at upgrade, so a skill folder copied in by hand later cannot bypass review. Snapshots live in `.autode-history/` rather than `history/`, which a foreign skill may use itself. |
 | 2026-10-15 | C4a: vocabulary captured from the reference glossary lifts paraphrase recall from 0/4 to 2/4 (19/21 overall, no regressions). Of the two misses, one shares no word with its table ("money customers got back" → refunds) and one ranks a sibling table first (loyalty members over loyalty transactions). **RET stays unscheduled**: two misses on a four-question set don't justify a ranking dependency; revisit with real engagements' questions. Multi-word synonym proposals are dropped (retrieval is word by word) rather than adding phrase matching, which would not have caught the miss either. |
 | 2026-10-15 | C4a: the interviewer is told what discovery established and a question discovery answers is dropped deterministically (logged), rather than trusting the LLM to skip it. |

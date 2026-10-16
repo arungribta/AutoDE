@@ -259,3 +259,10 @@ export function rekeyLegacyGraph(
   });
   return { nodes, edges, aliases };
 }
+
+/** Merges two catalog watermark maps (system/environment → revision), keeping the newer known revision per key. */
+export function mergeWatermarks(a: Record<string, string>, b: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = { ...a };
+  for (const [k, v] of Object.entries(b)) if (!(k in out) || out[k] === 'unknown' || (v !== 'unknown' && v > out[k])) out[k] = v;
+  return Object.fromEntries(Object.entries(out).sort(([x], [y]) => (x < y ? -1 : 1)));
+}

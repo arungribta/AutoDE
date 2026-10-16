@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "publisher": "Arun Gribta",
   "license": "MIT",
   "icon": "media/logo.svg",
@@ -673,10 +673,12 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "compile": "tsc -p ./ && node scripts/bundle.cjs",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile",
+    "bundle": "node scripts/bundle.cjs",
+    "vscode:prepublish": "tsc -p ./ && node scripts/bundle.cjs --production",
     "package": "vsce package",
+    "mcp": "node dist/mcp-server.js",
     "test": "npm run compile && node test/functional.test.cjs",
     "eval": "npm run compile && node test/eval/run-eval.cjs",
     "lint": "eslint src --ext .ts"
@@ -686,10 +688,13 @@
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
     "eslint": "^8.57.0",
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
     "ajv": "^8.20.0",
     "yaml": "^2.9.0"
   }

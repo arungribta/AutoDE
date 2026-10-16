@@ -440,6 +440,29 @@ export interface CatalogLookup {
  * Which hits become pack seeds: the best few, within a margin of the best
  * score — a ranked list's long tail is noise, not context.
  */
+/**
+ * Glossary aliases (Phase K2): a business term's or metric's name and
+ * definition index the tables it maps to — resolved against the catalog, so
+ * they bind to tables outside the working set too.
+ */
+export function glossaryAliases(entries: readonly CatalogEntry[], nodes: readonly BaseNode[]): Map<string, string[]> {
+  const byName = new Map<string, string[]>();
+  for (const e of entries) {
+    for (const k of [e.table.fqn, `${e.table.schema}.${e.table.label}`, e.table.label].map((x) => String(x ?? '').toLowerCase())) {
+      if (k) byName.set(k, [...new Set([...(byName.get(k) ?? []), e.id])]);
+    }
+  }
+  const aliases = new Map<string, string[]>();
+  for (const term of nodes) {
+    if (term.type !== 'business_term' && term.type !== 'metric') continue;
+    const text = [term.label, term.description].filter(Boolean).join(' ');
+    for (const ref of (term as BaseNode & { mappedNodeIds?: string[] }).mappedNodeIds ?? []) {
+      for (const id of byName.get(String(ref).toLowerCase()) ?? []) aliases.set(id, [...new Set([...(aliases.get(id) ?? []), text])]);
+    }
+  }
+  return aliases;
+}
+
 export function selectSeedHits(hits: readonly CatalogHit[], options: { max?: number; margin?: number; minScore?: number } = {}): CatalogHit[] {
   if (hits.length === 0) return [];
   const best = hits[0].score;

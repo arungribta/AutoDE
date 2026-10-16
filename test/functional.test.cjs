@@ -6623,6 +6623,230 @@ async function main() {
     } finally { t.done(); }
   });
 
+  // ── v0.35.0: MCP server — registry, Pipeline Spec, prompts, resources (phase 3) ──
+  const mcpSession = async (workspace, extraArgs = []) => {
+    const nodePath = require('node:path');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+    const transport = new StdioClientTransport({ command: process.execPath, args: [nodePath.join(__dirname, '..', 'dist', 'mcp-server.js'), '--workspace', workspace, ...extraArgs], stderr: 'pipe' });
+    const client = new Client({ name: 'autode-tests', version: '1' });
+    await client.connect(transport);
+    return client;
+  };
+  const treeState = (dir) => {
+    const nodeFs = require('node:fs');
+    const nodePath = require('node:path');
+    const out = [];
+    const walk = (d) => { for (const e of nodeFs.readdirSync(d, { withFileTypes: true })) { const p = nodePath.join(d, e.name); if (e.isDirectory()) walk(p); else { const st = nodeFs.statSync(p); out.push(`${nodePath.relative(dir, p)}:${st.size}:${st.mtimeMs}`); } } };
+    walk(dir);
+    return out.sort().join('\n');
+  };
+  const mcpWorkspace = async () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-mcp-'));
+    const ctx = nodePath.join(ws, '.ai-context');
+    const prob = nodePath.join(ctx, 'problems', 'retail-ab12');
+    nodeFs.mkdirSync(nodePath.join(prob, 'spec'), { recursive: true });
+    nodeFs.mkdirSync(nodePath.join(prob, 'context'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ctx, 'active-problem.json'), JSON.stringify({ problemId: 'retail-ab12' }));
+    nodeFs.writeFileSync(nodePath.join(prob, 'spec', 'business-problem.yaml'), 'id: bps-1\nversion: 1\nstatus: draft\nproblemStatement: Retail analytics\n');
+    nodeFs.writeFileSync(nodePath.join(prob, 'spec', 'pipeline.yaml'), JSON.stringify(samplePipelineSpec()));
+    nodeFs.writeFileSync(nodePath.join(prob, 'context', 'semantic-layer.yaml'), `notes: connect with password=hunter2 and token: ${['gh', 'p_', 'q'.repeat(36)].join('')}\n`);
+    // Ledger: a small estate, mirrored the way the extension mirrors it.
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+    const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+    const { syncGraphToLedger } = fresh('../dist/engine/context/projection.js');
+    const g = parseDdl('CREATE TABLE shop.customers (customer_id INTEGER PRIMARY KEY, email VARCHAR(200));\nCREATE TABLE shop.orders (order_id INTEGER PRIMARY KEY, customer_id INTEGER, amount NUMBER(12,2));', nodePath.join(ws, 'shop.ddl'), { system: 'shop', environment: 'prod' });
+    const ledger = new AssertionLedger(nodePath.join(ctx, 'ledger'));
+    await ledger.load();
+    await syncGraphToLedger(ledger, { nodes: g.nodes, edges: g.edges });
+    // Tool skills: one reviewed, one unreviewed, one pre-S2 folder without a sidecar (and no migration marker).
+    const L = fresh('../dist/engine/skills/lifecycle.js');
+    const tsDir = nodePath.join(ctx, 'skills', 'tool-skills');
+    const mk = (id, md) => { const d = nodePath.join(tsDir, id); nodeFs.mkdirSync(d, { recursive: true }); nodeFs.writeFileSync(nodePath.join(d, 'SKILL.md'), md); return d; };
+    L.recordImport(mk('reviewed-one', '---\nname: reviewed-one\nallowed-tools: [Read]\n---\nSummarise the data.\n'), { source: 'local' }, 't');
+    L.setTrustTier(nodePath.join(tsDir, 'reviewed-one'), 'reviewed', 't');
+    L.recordImport(mk('fresh-one', '---\nname: fresh-one\n---\nDo things.\n'), { source: 'local' }, 't');
+    nodeFs.rmSync(nodePath.join(tsDir, L.MIGRATION_MARKER), { force: true });
+    mk('legacy-one', 'Pre-S2 skill.\n');
+    return { ws, done: () => nodeFs.rmSync(ws, { recursive: true, force: true }) };
+  };
+
+  await test('v0.35.0: redact() removes known secret shapes and keeps ordinary text', () => {
+    const { redact, redactValue, toEnvelope, EngineToolError } = fresh('../dist/mcp/errors.js');
+    // Fake secrets, assembled at run time so no token-shaped literal sits in the source (secret scanners block pushes).
+    const fake = (...parts) => parts.join('');
+    const secrets = ['hunter2pass', fake('eyJhbGciOiJIUzI1NiJ9', '.', 'eyJzdWIiOiJ0ZXN0In0', '.', 'c2lnbmF0dXJlLXRlc3Q'), fake('da', 'pi', 'f'.repeat(32)), fake('gh', 'p_', 'x'.repeat(36)), fake('sk', '-ant-', 'y'.repeat(24)), fake('AK', 'IA', 'Z'.repeat(16)), 's3cr3tTok', fake('MIIEvQ', 'IBADANBg')];
+    const text = [
+      'password=hunter2pass', `Authorization: Bearer ${secrets[1]}`, `token ${secrets[2]}`, secrets[3], secrets[4], secrets[5],
+      'https://user:s3cr3tTok@acme.snowflakecomputing.com/x', fake('-----BEGIN ', 'PRIVATE KEY-----\n', secrets[7], '\n-----END ', 'PRIVATE KEY-----'),
+      'AUTODE_SNOWFLAKE_PASSWORD=hunter2pass'
+    ].join('\n');
+    const out = redact(text);
+    for (const s of secrets) assert.ok(!out.includes(s), `leaked ${s}: ${out}`);
+    assert.strictEqual(redact('SELECT customer_id FROM shop.customers'), 'SELECT customer_id FROM shop.customers');
+    assert.deepStrictEqual(redactValue({ apiKey: 'abc', nested: { password: 'x', name: 'ok' } }), { apiKey: '[REDACTED]', nested: { password: '[REDACTED]', name: 'ok' } });
+    const env = toEnvelope(new EngineToolError('PLATFORM_ERROR', 'boom', { body: 'x'.repeat(5000) }));
+    assert.ok(env.details.body.length < 2100 && /truncated/.test(env.details.body), 'raw output is truncated in details');
+    assert.deepStrictEqual(Object.keys(toEnvelope(new Error('kaput password=hunter2pass'))).sort(), ['code', 'details', 'message', 'retryable']);
+    assert.ok(!JSON.stringify(toEnvelope(new Error('kaput password=hunter2pass'))).includes('hunter2pass'));
+  });
+
+  await test('v0.35.0: the bundled server starts in plain Node and lists the expected tools, prompts and resources; every tool is read-only', async () => {
+    const f = await mcpWorkspace();
+    const client = await mcpSession(f.ws);
+    try {
+      const pkg = require('../package.json');
+      assert.deepStrictEqual(client.getServerVersion(), { name: 'autode', version: pkg.version });
+      const tools = (await client.listTools()).tools;
+      assert.deepStrictEqual(tools.map((t) => t.name), ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding']);
+      for (const t of tools) assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], [true, false], t.name);
+      const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
+      assert.ok(prompts.includes('autode_interview_data-flow') && prompts.includes('autode_interview_requirements-discovery'), prompts.join());
+      assert.deepStrictEqual(prompts.filter((p) => p.startsWith('autode_skill_')), ['autode_skill_reviewed-one'], 'unreviewed and unmigrated pre-S2 skills are not exposed');
+      const uris = (await client.listResources()).resources.map((r) => r.uri);
+      for (const u of ['autode://spec/business-problem', 'autode://spec/pipeline', 'autode://context/semantic-layer', 'autode://primitives/dedup']) assert.ok(uris.includes(u), u);
+      assert.ok(!uris.includes('autode://context/source'), 'documents that do not exist are not listed');
+      assert.deepStrictEqual((await client.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate), ['autode://primitives/{kind}']);
+    } finally { await client.close(); f.done(); }
+  });
+
+  await test('v0.35.0: each tool\'s inputSchema accepts a known-good payload and rejects a known-bad one (server returns VALIDATION_FAILED)', async () => {
+    const Ajv = require('ajv');
+    const ajv = new Ajv({ allErrors: true, strict: false });
+    const target = { platform: 'snowflake', database: 'D', schema: 'S' };
+    const dd = { sourceObject: 'a', targetObject: 'b', partitionByColumns: ['k'], orderByColumn: 'u' };
+    const cases = {
+      autode_search_primitives: [{ query: 'dedup' }, { includeDeprecated: 'yes' }],
+      autode_describe_primitive: [{ kind: 'dedup' }, {}],
+      autode_validate_transform: [{ kind: 'dedup', params: dd }, { kind: 'dedup' }],
+      autode_compile_transform: [{ transform: { kind: 'dedup', params: dd }, target, dialect: 'snowflake' }, { transform: { kind: 'dedup', params: dd }, target, dialect: 'oracle' }],
+      autode_validate_pipeline_spec: [{}, { path: 42 }],
+      autode_compile_pipeline_spec: [{ dialect: 'ansi' }, {}],
+      autode_generate_design_doc: [{}, { extra: true }],
+      autode_resolve: [{ text: 'customers' }, { text: '' }],
+      autode_get_context_pack: [{ purpose: 'qa', query: 'orders' }, { purpose: 'gossip' }],
+      autode_list_assertions: [{ kind: 'key', status: ['active'] }, { status: ['maybe'] }],
+      autode_check_grounding: [{ content: 'select 1' }, { dialect: 'ansi' }]
+    };
+    const f = await mcpWorkspace();
+    const client = await mcpSession(f.ws);
+    try {
+      const tools = (await client.listTools()).tools;
+      assert.deepStrictEqual(Object.keys(cases).sort(), tools.map((t) => t.name).sort(), 'every tool has a case');
+      for (const t of tools) {
+        const [good, bad] = cases[t.name];
+        const validate = ajv.compile(t.inputSchema);
+        assert.ok(validate(good), `${t.name} rejects its good payload: ${ajv.errorsText(validate.errors)}`);
+        assert.ok(!validate(bad), `${t.name} accepts its bad payload`);
+        const r = await client.callTool({ name: t.name, arguments: bad });
+        assert.ok(r.isError && r.structuredContent.code === 'VALIDATION_FAILED', `${t.name}: ${JSON.stringify(r.structuredContent)}`);
+        assert.deepStrictEqual(Object.keys(r.structuredContent).sort(), ['code', 'details', 'message', 'retryable']);
+      }
+    } finally { await client.close(); f.done(); }
+  });
+
+  await test('v0.35.0: golden — autode_compile_transform output for every Tier-1 primitive and dialect matches the committed snapshots byte for byte', async () => {
+    const nodeFs = require('node:fs');
+    const nodePath = require('node:path');
+    const dir = nodePath.join(__dirname, 'golden', 'mcp-compile');
+    const update = process.env.AUTODE_UPDATE_GOLDEN === '1';
+    if (update) nodeFs.mkdirSync(dir, { recursive: true });
+    const params = {
+      dedup: { sourceObject: 'RAW.PUBLIC.ORDERS', targetObject: 'CURATED.STAGING.ORDERS_DEDUP', partitionByColumns: ['ORDER_ID'], orderByColumn: 'UPDATED_AT', orderDirection: 'DESC', objectKind: 'view' },
+      incremental_load: { sourceObject: 'RAW.PUBLIC.ORDERS', targetObject: 'CURATED.STAGING.ORDERS', keyColumns: ['ORDER_ID'], updateColumns: ['STATUS', 'AMOUNT'] },
+      rename_cast: { sourceObject: 'RAW.PUBLIC.CUSTOMERS', targetObject: 'CURATED.STAGING.STG_CUSTOMERS', objectKind: 'view', columns: [{ source: 'CUST_ID', target: 'customer_id', type: 'INTEGER' }, { source: 'EMAIL_ADDR', target: 'email' }] }
+    };
+    const os = require('node:os');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-mcp-g-'));
+    const client = await mcpSession(ws);
+    try {
+      const kinds = (await client.callTool({ name: 'autode_search_primitives', arguments: {} })).structuredContent.items.filter((p) => p.tier === 1).map((p) => p.kind);
+      assert.deepStrictEqual(kinds.sort(), Object.keys(params).sort(), 'a fixture for every Tier-1 primitive');
+      let n = 0;
+      for (const kind of kinds) {
+        for (const dialect of ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'ansi']) {
+          const r = await client.callTool({ name: 'autode_compile_transform', arguments: { transform: { kind, params: params[kind] }, target: { platform: 'snowflake', database: 'CURATED', schema: 'STAGING' }, dialect } });
+          assert.ok(!r.isError, JSON.stringify(r.structuredContent));
+          const file = nodePath.join(dir, `${kind}.${dialect}.${r.structuredContent.language}`);
+          if (update) nodeFs.writeFileSync(file, r.structuredContent.content);
+          assert.ok(nodeFs.existsSync(file), `missing snapshot ${file} (run with AUTODE_UPDATE_GOLDEN=1)`);
+          assert.strictEqual(r.structuredContent.content, nodeFs.readFileSync(file, 'utf8'), `${kind}/${dialect} drifted from its snapshot`);
+          n++;
+        }
+      }
+      assert.strictEqual(n, 18);
+    } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.35.0: Pipeline Spec tools, prompts and resources over the active problem; resources carry revisions and are redacted', async () => {
+    const f = await mcpWorkspace();
+    const client = await mcpSession(f.ws);
+    try {
+      let r = await client.callTool({ name: 'autode_validate_pipeline_spec', arguments: {} });
+      assert.ok(!r.isError && r.structuredContent.valid === true, JSON.stringify(r.structuredContent));
+      r = await client.callTool({ name: 'autode_compile_pipeline_spec', arguments: { dialect: 'snowflake' } });
+      assert.ok(!r.isError, JSON.stringify(r.structuredContent));
+      assert.deepStrictEqual(r.structuredContent.entities.map((e) => e.name), ['customers', 'orders', 'products']);
+      assert.strictEqual(r.structuredContent.entities[0].artifacts[0].suggestedPath, 'artifacts/build/pipeline_test.v1/customers/01_rename_cast.sql');
+      r = await client.callTool({ name: 'autode_generate_design_doc', arguments: {} });
+      assert.ok(/customers/.test(r.structuredContent.markdown));
+      r = await client.callTool({ name: 'autode_validate_pipeline_spec', arguments: { spec: { id: 'x' } } });
+      assert.strictEqual(r.structuredContent.valid, false);
+      r = await client.callTool({ name: 'autode_compile_pipeline_spec', arguments: { dialect: 'ansi', path: '../outside.yaml' } });
+      assert.strictEqual(r.structuredContent.code, 'PERMISSION_DENIED');
+      r = await client.callTool({ name: 'autode_describe_primitive', arguments: { kind: 'no_such' } });
+      assert.strictEqual(r.structuredContent.code, 'UNKNOWN_PRIMITIVE');
+
+      const p = await client.getPrompt({ name: 'autode_interview_data-flow', arguments: { answers_so_far: 'Daily batch from shop.' } });
+      assert.ok(/Answers so far[\s\S]*Daily batch from shop\./.test(p.messages[0].content.text));
+      const sp = await client.getPrompt({ name: 'autode_skill_reviewed-one', arguments: { instruction: 'Summarise orders.' } });
+      assert.ok(/declares these tools[^\n]*Read/.test(sp.messages[0].content.text) && /read-only/.test(sp.messages[0].content.text) && /Summarise the data\./.test(sp.messages[0].content.text));
+      await assert.rejects(client.getPrompt({ name: 'autode_skill_fresh-one' }), /No skill prompt/, 'an unreviewed skill cannot be fetched by name either');
+
+      const spec = await client.readResource({ uri: 'autode://spec/business-problem' });
+      assert.ok(/Retail analytics/.test(spec.contents[0].text) && /^[0-9a-f]{64}$/.test(spec.contents[0]._meta.revision));
+      const sem = await client.readResource({ uri: 'autode://context/semantic-layer' });
+      assert.ok(!/hunter2|qqqqqqqqqq/.test(sem.contents[0].text), sem.contents[0].text);
+      const prim = await client.readResource({ uri: 'autode://primitives/dedup' });
+      assert.ok(JSON.parse(prim.contents[0].text).paramSchema.required.includes('partitionByColumns'));
+      await assert.rejects(client.readResource({ uri: 'autode://context/source' }), /no Source context/);
+    } finally { await client.close(); f.done(); }
+  });
+
+  await test('v0.35.0: context tools — resolve, context pack, assertions and grounding read the ledger the extension wrote; the server writes nothing', async () => {
+    const f = await mcpWorkspace();
+    const before = treeState(f.ws);
+    const client = await mcpSession(f.ws);
+    try {
+      let r = await client.callTool({ name: 'autode_resolve', arguments: { text: 'orders by customer' } });
+      const ids = r.structuredContent.matches.map((m) => m.id);
+      assert.ok(ids.includes('obj:shop/prod/shop.orders'), JSON.stringify(r.structuredContent));
+      r = await client.callTool({ name: 'autode_get_context_pack', arguments: { purpose: 'qa', query: 'orders amount per customer' } });
+      assert.ok(r.structuredContent.manifest.seeds.includes('obj:shop/prod/shop.orders') && /orders/.test(r.structuredContent.text), JSON.stringify(r.structuredContent.manifest));
+      r = await client.callTool({ name: 'autode_list_assertions', arguments: { includeMirrors: true } });
+      assert.ok(r.structuredContent.total > 0);
+      r = await client.callTool({ name: 'autode_list_assertions', arguments: {} });
+      assert.strictEqual(r.structuredContent.total, 0, 'mirrors are left out by default');
+      r = await client.callTool({ name: 'autode_check_grounding', arguments: { content: 'SELECT o.order_id, o.discount FROM shop.orders o JOIN shop.payments p ON p.order_id = o.order_id' } });
+      const unresolved = JSON.stringify(r.structuredContent.unresolved);
+      assert.ok(/payments/.test(unresolved) && /discount/.test(unresolved) && !/order_id"/.test(unresolved.replace(/payments[^}]*/g, '')), unresolved);
+      assert.strictEqual(r.structuredContent.knownTables, 2);
+    } finally { await client.close(); }
+    assert.strictEqual(treeState(f.ws), before, 'no file under the workspace was created or changed (no migration marker, no catalog, no ledger session file)');
+    f.done();
+  });
+
+  await test('v0.35.0: src/engine and src/mcp never import vscode (the bundle has no vscode reference)', () => {
+    const nodeFs = require('node:fs');
+    const nodePath = require('node:path');
+    const bundle = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'mcp-server.js'), 'utf8');
+    assert.ok(!/require\(["']vscode["']\)/.test(bundle), 'the MCP bundle requires vscode');
+    assert.ok(bundle.length < 1.5 * 1024 * 1024, `mcp-server.js is ${Math.round(bundle.length / 1024)} KB (budget 1.5 MB)`);
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

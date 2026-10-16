@@ -345,15 +345,9 @@ Acceptance:
 - Plan execution, connection test, source assessment and primitive preview work manually exactly as at v0.25.0.
 
 ### Phase 3: MCP server — registry, spec, prompts, resources
-Scope: `src/mcp/server.ts`; §5.1, §5.2, §5.4, §5.5, §5.6; esbuild bundling of both entry points; packaging fix.
-Packaging requirements:
-- Add `esbuild` (dev dependency) and `@modelcontextprotocol/sdk` (runtime, bundled). Build scripts produce `dist/extension.js` (external: `vscode`) and `dist/mcp-server.js` (no externals), both minified with source maps excluded from the VSIX.
-- `npx vsce ls` shows no `node_modules/` content and both bundles present.
-- Record the bundle and VSIX sizes in the changelog entry. Budget: `mcp-server.js` ≤ 1.5 MB; VSIX growth vs. the previous release ≤ 2 MB. If the budget is exceeded, report what is responsible before proceeding.
-Acceptance:
-- Contract tests (plain Node, spawning the bundle over stdio): `tools/list`, `prompts/list` and `resources/list` return the expected names; each tool's `inputSchema` validates a known-good and rejects a known-bad payload.
-- Golden tests: `autode_compile_transform` for every Tier 1 primitive and every bundled Tier 2 definition, per supported dialect, matches committed snapshots byte-for-byte (determinism).
-- Manual: Claude Code configured with the server (by hand, per `docs/mcp-setup.md`) can search, describe and compile a primitive.
+**Status:** ✅ shipped in v0.35.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, NFR-5; HOW: technical-design.md §10.6, §10.7; setup: [mcp-setup.md](mcp-setup.md). The full specification text is in git (this file at v0.34.0).
+
+In short: `dist/mcp-server.js`, bundled with esbuild and runnable in plain Node, exposes §5.1 and §5.2 as tools, §5.4 prompts and §5.5 resources, plus the read-only context tools of context-layer §9 (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), under the §5.6 error contract with redaction. The extension is bundled the same way and the package ships no `node_modules/`. Contract tests run the bundle over stdio; golden snapshots pin every Tier-1 primitive's output per dialect.
 
 ### Phase 4: MCP server — data platform
 Scope: §5.3, §6. (`ContextStore` already exists from Phase 2.) Plus **sample-data consent and redaction**: row samples from profiling, `autode_execute_query` results and CSV ingestion never enter an LLM prompt unless the per-connection setting `allowSampleDataInPrompts` is on (default off). When it is off, only schema, counts and aggregate statistics are used. Values in columns classified as PII (by Phase GOV, or by column-name heuristics until then) are masked in any sample that is allowed through.
