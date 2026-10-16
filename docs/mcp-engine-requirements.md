@@ -350,13 +350,9 @@ Acceptance:
 In short: `dist/mcp-server.js`, bundled with esbuild and runnable in plain Node, exposes §5.1 and §5.2 as tools, §5.4 prompts and §5.5 resources, plus the read-only context tools of context-layer §9 (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), under the §5.6 error contract with redaction. The extension is bundled the same way and the package ships no `node_modules/`. Contract tests run the bundle over stdio; golden snapshots pin every Tier-1 primitive's output per dialect.
 
 ### Phase 4: MCP server — data platform
-Scope: §5.3, §6. (`ContextStore` already exists from Phase 2.) Plus **sample-data consent and redaction**: row samples from profiling, `autode_execute_query` results and CSV ingestion never enter an LLM prompt unless the per-connection setting `allowSampleDataInPrompts` is on (default off). When it is off, only schema, counts and aggregate statistics are used. Values in columns classified as PII (by Phase GOV, or by column-name heuristics until then) are masked in any sample that is allowed through.
-Acceptance:
-- Read-only guard tests: `INSERT`, `MERGE`, `DROP`, `CREATE`, `GRANT`, `CALL`, multi-statement input, and comment-smuggled writes are rejected without `--allow-write`; `SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN` pass.
-- Redaction test: no tool response or log line contains any test secret value.
-- Manual, live: Snowflake via CLI connection and via key-pair REST; Databricks via PAT REST — list schemas, extract metadata, explain, select.
-- A machine without `snow`/`databricks` CLIs installed can still use the REST paths (P7).
-- Test: with `allowSampleDataInPrompts` off, no sampled row value appears in any assembled prompt; with it on, PII-named columns are masked.
+**Status:** ✅ shipped in v0.37.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, SEC-5; HOW: technical-design.md §6.12, §10.6; setup: [mcp-setup.md](mcp-setup.md) (Data platforms). The full specification text is in git (this file at v0.36.0).
+
+In short: the §5.3 tools over connections defined in `.autode/config/connections.yaml` (pointers and non-secret settings; secrets from env vars or the platform CLI's configuration, §6). `autode_execute_query` runs one statement, read-only unless the server is started with `--allow-write`, behind a lexical guard that reads the SQL under two quoting conventions. Row values — query results, profile minimums and maximums, query-history text — reach a prompt only when the connection's `allowSampleDataInPrompts` is on; personal-data columns are masked when it is. The live acceptance checks (Snowflake CLI and key-pair, Databricks PAT, a machine without CLIs) are in manual-verification.md Part 14.
 
 ### Phase 5: Extension as an MCP client; exposure to other agents
 Scope: §7.1–7.3, §7.5.

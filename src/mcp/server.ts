@@ -9,16 +9,18 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { EngineToolError, redact, redactValue, toEnvelope } from './errors';
 import { EngineWorkspace } from './workspace';
-import { TOOLS } from './tools';
+import { EngineTool, TOOLS } from './tools';
+import { PlatformSession, platformTools } from './platform';
 import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, readResource } from './catalogs';
 
 /**
- * The AutoDE MCP server (docs/mcp-engine-requirements.md §3, §5; phase 3):
- * the engine's registry, Pipeline Spec, prompts, resources and the read-only
- * context-layer tools over stdio. Deterministic and read-only — no LLM calls
- * (D5), no writes to the workspace (§8).
+ * The AutoDE MCP server (docs/mcp-engine-requirements.md §3, §5; phases 3
+ * and 4): the engine's registry, Pipeline Spec, prompts, resources, the
+ * read-only context-layer tools and the data-platform tools over stdio.
+ * Deterministic — no LLM calls (D5) — and it never writes to the workspace
+ * (§8). Platform statements are read-only unless started with --allow-write.
  *
- *   node dist/mcp-server.js --workspace <root> [--resources <extension root>]
+ *   node dist/mcp-server.js --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli]
  *
  * stdout carries the protocol; logs go to stderr, redacted.
  */
@@ -52,6 +54,12 @@ export interface ServerOptions {
   resourcesRoot: string;
   version: string;
   log?: (line: string) => void;
+  /** `--allow-write`: platform statements other than SELECT / WITH / SHOW / DESCRIBE / EXPLAIN may run. */
+  allowWrite?: boolean;
+  /** `--allow-cli`: consent to run the platform CLI for connections that need it. */
+  allowCli?: boolean;
+  /** Tests: a session with fake platform adapters. */
+  platform?: PlatformSession;
 }
 
 /** AutoDE's icon for clients that show one next to the server name — embedded as a data URI, so nothing is fetched (P6). */
@@ -65,7 +73,12 @@ export function serverIcons(resourcesRoot: string): Array<{ src: string; mimeTyp
 }
 
 const ajv = new Ajv({ allErrors: true, strict: false });
-const validators = new Map<string, ValidateFunction>(TOOLS.map((t) => [t.name, ajv.compile(t.inputSchema)]));
+const validators = new Map<string, ValidateFunction>();
+function validatorFor(tool: EngineTool): ValidateFunction {
+  let v = validators.get(tool.name);
+  if (!v) { v = ajv.compile(tool.inputSchema); validators.set(tool.name, v); }
+  return v;
+}
 
 function textResult(value: Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   const safe = redactValue(value);
@@ -86,25 +99,29 @@ function protocolError(err: unknown): McpError {
 export function createAutodeServer(options: ServerOptions): Server {
   const ws = new EngineWorkspace({ workspaceRoot: options.workspaceRoot, resourcesRoot: options.resourcesRoot });
   const log = (line: string) => (options.log ?? ((l: string) => process.stderr.write(l + '\n')))(redact(line));
+  const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: options.allowWrite === true, allowCli: options.allowCli === true, log });
+  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform)];
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {
       capabilities: { tools: {}, prompts: {}, resources: {} },
-      instructions: 'AutoDE data-engineering engine. Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. All tools are read-only.'
+      instructions: `AutoDE data-engineering engine. Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms; autode_explain_sql dry-runs SQL without executing it. ${platform.options.allowWrite ? 'This server was started with --allow-write: autode_execute_query also runs statements that change data or objects — confirm with the user before running one.' : 'Every tool is read-only; autode_execute_query refuses anything but SELECT, WITH, SHOW, DESCRIBE and EXPLAIN.'}`
     }
   );
+  const previousOnClose = server.onclose;
+  server.onclose = () => { platform.dispose(); previousOnClose?.(); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS.map((t) => ({ name: t.name, title: t.annotations.title, description: t.description, inputSchema: t.inputSchema as { type: 'object' }, annotations: t.annotations }))
+    tools: tools.map((t) => ({ name: t.name, title: t.annotations.title, description: t.description, inputSchema: t.inputSchema as { type: 'object' }, annotations: t.annotations }))
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const tool = TOOLS.find((t) => t.name === request.params.name);
+    const tool = tools.find((t) => t.name === request.params.name);
     if (!tool) throw new McpError(ErrorCode.InvalidParams, `Unknown tool "${request.params.name}".`);
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
     const started = Date.now();
     try {
-      const validate = validators.get(tool.name)!;
+      const validate = validatorFor(tool);
       if (!validate(args)) {
         throw new EngineToolError('VALIDATION_FAILED', `Invalid arguments for ${tool.name}.`, { errors: (validate.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`) });
       }
@@ -157,12 +174,12 @@ export function createAutodeServer(options: ServerOptions): Server {
   return server;
 }
 
-export function parseArgs(argv: readonly string[]): { workspaceRoot: string; resourcesRoot?: string } {
+export function parseArgs(argv: readonly string[]): { workspaceRoot: string; resourcesRoot?: string; allowWrite: boolean; allowCli: boolean } {
   const get = (flag: string) => {
     const i = argv.indexOf(flag);
     return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
   };
-  return { workspaceRoot: path.resolve(get('--workspace') ?? process.cwd()), resourcesRoot: get('--resources') };
+  return { workspaceRoot: path.resolve(get('--workspace') ?? process.cwd()), resourcesRoot: get('--resources'), allowWrite: argv.includes('--allow-write'), allowCli: argv.includes('--allow-cli') };
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -170,9 +187,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const resourcesRoot = args.resourcesRoot ? path.resolve(args.resourcesRoot) : findResourcesRoot();
   if (!resourcesRoot) process.stderr.write('autode: extension resources not found (pass --resources <extension root>); bundled interview prompts and primitives are unavailable.\n');
   const version = readVersion(resourcesRoot);
-  const server = createAutodeServer({ workspaceRoot: args.workspaceRoot, resourcesRoot: resourcesRoot ?? args.workspaceRoot, version });
+  const server = createAutodeServer({ workspaceRoot: args.workspaceRoot, resourcesRoot: resourcesRoot ?? args.workspaceRoot, version, allowWrite: args.allowWrite, allowCli: args.allowCli });
   await server.connect(new StdioServerTransport());
-  process.stderr.write(`autode MCP server ${version} — workspace ${args.workspaceRoot}\n`);
+  process.stderr.write(`autode MCP server ${version} — workspace ${args.workspaceRoot}${args.allowWrite ? ' — platform writes allowed (--allow-write)' : ''}\n`);
 }
 
 if (require.main === module) {

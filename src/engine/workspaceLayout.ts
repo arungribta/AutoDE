@@ -12,7 +12,8 @@ import * as path from 'node:path';
  *     problems/<id>/    per business problem: spec, plan, context, pack, attachments
  *     knowledge/        shared project knowledge: ledger, estate, sources, profiles,
  *                       business context, vocabulary, verified queries, snapshots
- *     config/           team customisations: skills, primitives, target environment
+ *     config/           team customisations: skills, primitives, target environment,
+ *                       connections (pointers and sample-data consent, never secrets)
  *     local/            per engineer and rebuildable: never committed
  *   autode-output/<id>/ generated deliverables (setting `artifactDirectory`)
  *
@@ -43,6 +44,7 @@ export const LAYOUT = {
   toolSkills: [AUTODE_DIR, 'config', 'skills', 'tool-skills'],
   primitives: [AUTODE_DIR, 'config', 'primitives'],
   targetEnvironment: [AUTODE_DIR, 'config', 'target-environment.yaml'],
+  connections: [AUTODE_DIR, 'config', 'connections.yaml'],
   local: [AUTODE_DIR, 'local'],
   activeProblem: [AUTODE_DIR, 'local', 'active-problem.json'],
   chats: [AUTODE_DIR, 'local', 'chats'],

@@ -35,6 +35,14 @@ function sanitize(segment: string): string {
   return segment.toUpperCase().replace(/[^A-Z0-9]/g, '_');
 }
 
+/** The environment variable that carries one credential field (`AUTODE_SNOWFLAKE_PROD_ACCOUNT`), or `undefined` for a field the platform doesn't have. */
+export function envCredentialVariable(platform: DataPlatformProvider, ref: string | undefined, field: string): string | undefined {
+  const suffix = FIELD_SUFFIXES[platform]?.[field];
+  if (!suffix) return undefined;
+  const profile = ref && ref.trim().length > 0 && ref !== 'default' ? `_${sanitize(ref)}` : '';
+  return `AUTODE_${sanitize(platform)}${profile}_${suffix}`;
+}
+
 /**
  * Resolves credentials from a documented, namespaced set of environment variables —
  * `AUTODE_<PLATFORM>_<FIELD>`, or `AUTODE_<PLATFORM>_<REF>_<FIELD>` when `reference.ref`

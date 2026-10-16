@@ -6,6 +6,7 @@ import { ConfigurationManager } from './core/configManager';
 import { DataAgentHubWebviewProvider } from './core/webviewProvider';
 import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './engine/platform/ConnectionManager';
+import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
 import { ArtifactWriter } from './context/ArtifactWriter';
 import { PlanManager } from './context/PlanManager';
 import { TargetConfigManager } from './context/TargetConfigManager';
@@ -396,7 +397,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const newManager = new ConnectionManager(
         (msg: string) => { console.log(`[AutoDE ${role} Connection] ${msg}`); sidebarProvider.logToChat(msg); },
-        { cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true }
+        {
+          cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true,
+          // Phase 4: row values reach prompts only if .autode/config/connections.yaml allows it for this connection.
+          sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
+        }
       );
       // Phase K1: extractions are tagged with the estate system this connection feeds.
       newManager.setEstateResolver((id) => sidebarProvider.resolveConnectionIdentity(id, role));

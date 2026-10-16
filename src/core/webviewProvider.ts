@@ -46,6 +46,7 @@ import { createDeclarativePrimitive } from '../engine/transforms/declarative/ada
 import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from '../engine/transforms/declarative/lifecycle';
 import { PrimitiveDefinition } from '../engine/transforms/declarative/types';
 import { ConnectionManager } from '../engine/platform/ConnectionManager';
+import { sampleDataConsentFromWorkspace } from '../engine/platform/connectionsConfig';
 import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
 import { applyCspNonce } from './webviewSecurity';
 import { classifyImplementationType } from './implementationType';
@@ -1985,7 +1986,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), { cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true });
+    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), {
+      cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true,
+      sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
+    });
     connectionManager.setEstateResolver((id) => this.resolveConnectionIdentity(id));
     try {
       this.postLog(`Connecting to ${platform} to build Source Context…`);

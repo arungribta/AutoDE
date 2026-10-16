@@ -6708,7 +6708,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      assert.deepStrictEqual(tools.map((t) => t.name), ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding']);
+      assert.deepStrictEqual(tools.map((t) => t.name), ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query']);
       for (const t of tools) assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], [true, false], t.name);
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
       assert.ok(prompts.includes('autode_interview_data-flow') && prompts.includes('autode_interview_requirements-discovery'), prompts.join());
@@ -6736,7 +6736,14 @@ async function main() {
       autode_resolve: [{ text: 'customers' }, { text: '' }],
       autode_get_context_pack: [{ purpose: 'qa', query: 'orders' }, { purpose: 'gossip' }],
       autode_list_assertions: [{ kind: 'key', status: ['active'] }, { status: ['maybe'] }],
-      autode_check_grounding: [{ content: 'select 1' }, { dialect: 'ansi' }]
+      autode_check_grounding: [{ content: 'select 1' }, { dialect: 'ansi' }],
+      autode_list_connections: [{}, { all: true }],
+      autode_test_connection: [{ connectionId: 'snowflake:prod' }, {}],
+      autode_list_databases: [{ connectionId: 'snowflake:prod' }, { connectionId: '' }],
+      autode_list_schemas: [{ connectionId: 'snowflake:prod', database: 'D' }, { connectionId: 'snowflake:prod' }],
+      autode_extract_metadata: [{ connectionId: 'snowflake:prod', database: 'D', schema: 'S', profile: true }, { connectionId: 'snowflake:prod', database: 'D', schema: 'S', profile: 'yes' }],
+      autode_explain_sql: [{ connectionId: 'snowflake:prod', sql: 'SELECT 1' }, { connectionId: 'snowflake:prod' }],
+      autode_execute_query: [{ connectionId: 'snowflake:prod', sql: 'SELECT 1', maxRows: 10 }, { connectionId: 'snowflake:prod', sql: 'SELECT 1', maxRows: 0 }]
     };
     const f = await mcpWorkspace();
     const client = await mcpSession(f.ws);
@@ -7052,6 +7059,293 @@ async function main() {
       assert.ok(graph.serializeSnapshot().nodes.some((n) => n.type === 'business_term' && /churn/i.test(n.label)), 'the edited term is loaded');
       cfm.dispose();
     } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  // ── v0.37.0: MCP server — data platform, sample-data consent and redaction (phase 4) ──
+  await test('v0.37.0: the read-only guard rejects writes, multi-statement input and comment- or quote-smuggled writes; reads pass', () => {
+    const { checkReadOnlySql, checkSingleStatement } = fresh('../dist/engine/platform/sqlGuard.js');
+    const rejected = [
+      'INSERT INTO t VALUES (1)', 'MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE', 'DROP TABLE t', 'CREATE TABLE t (id INT)',
+      'GRANT SELECT ON t TO ROLE r', 'CALL my_proc()', 'update t set a = 1', 'TRUNCATE TABLE t', 'ALTER TABLE t ADD COLUMN c INT', 'USE DATABASE prod',
+      'SELECT 1; DROP TABLE t', 'SELECT 1;\nSELECT 2', 'SELECT 1 /* ; */ ; DROP TABLE t', 'SELECT 1 -- harmless\n; DELETE FROM t', '/* just a comment */ DROP TABLE t',
+      'WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x', 'SELECT * INTO t2 FROM t', 'EXPLAIN ANALYZE DELETE FROM t', 'EXPLAIN INSERT INTO t VALUES (1)',
+      "SELECT 'x\\'' ; DROP TABLE t; --'", 'SELECT $$ x $$; DROP TABLE t', "SELECT 'unterminated", 'SELECT 1 /* never closed', ''
+    ];
+    for (const sql of rejected) assert.ok(!checkReadOnlySql(sql).ok, `accepted: ${sql}`);
+    const passed = [
+      ['SELECT * FROM shop.orders', 'query'], ['select \';\' as semi, "drop" from t', 'query'], ['WITH x AS (SELECT 1 AS a) SELECT a FROM x', 'query'],
+      ['SHOW TABLES IN SCHEMA shop', 'metadata'], ['DESCRIBE TABLE shop.orders', 'metadata'], ['DESC TABLE t', 'metadata'], ['EXPLAIN SELECT 1', 'metadata'],
+      ['SELECT 1;', 'query'], ['-- leading comment\nSELECT last_update, delete_flag FROM t', 'query'], ["SELECT 'it''s' AS s", 'query'], ['(SELECT 1)', 'query']
+    ];
+    for (const [sql, kind] of passed) {
+      const r = checkReadOnlySql(sql);
+      assert.ok(r.ok && r.kind === kind, `${sql}: ${JSON.stringify(r)}`);
+    }
+    assert.ok(!checkSingleStatement('SELECT 1; SELECT 2').ok && checkSingleStatement('SELECT 1; SELECT 2').statements === 2);
+    assert.ok(checkSingleStatement('CREATE OR REPLACE VIEW v AS SELECT 1').ok, 'a single write is one statement (for --allow-write and EXPLAIN)');
+  });
+
+  await test('v0.37.0: sample data — personal-data columns are recognised by name and value shape; results are withheld without consent and masked with it', () => {
+    const S = fresh('../dist/engine/platform/sampleData.js');
+    for (const c of ['email', 'EMAIL_ADDRESS', 'customerEmail', 'phone_number', 'first_name', 'LastName', 'date_of_birth', 'dob', 'ssn', 'iban', 'card_number', 'street_address', 'postcode', 'ip_address', 'customer_name'])
+      assert.ok(S.isPiiColumnName(c), `not PII: ${c}`);
+    for (const c of ['order_id', 'amount', 'product_name', 'status', 'created_at', 'store_code', 'quantity'])
+      assert.ok(!S.isPiiColumnName(c), `PII: ${c}`);
+    assert.ok(S.looksLikePiiValue('pat@example.com') && S.looksLikePiiValue('4111 1111 1111 1111') && !S.looksLikePiiValue('4111 1111 1111 1112') && !S.looksLikePiiValue('ORD-42'));
+    const result = { columns: ['order_id', 'email', 'note'], rows: [{ order_id: 1, email: 'a@b.io', note: 'call pat@example.com' }, { order_id: 2, email: null, note: 'ok' }], rowCount: 2, executionTimeMs: 3 };
+    const off = S.gateQueryResult(result, { allowSampleData: false, metadata: false, connectionId: 'snowflake:prod' });
+    assert.ok(off.rows === undefined && /withheld/.test(off.withheld) && /connections\.yaml/.test(off.withheld) && off.rowCount === 2 && off.columns.length === 3);
+    assert.ok(!JSON.stringify(off).includes('a@b.io'));
+    const on = S.gateQueryResult(result, { allowSampleData: true, metadata: false, connectionId: 'snowflake:prod' });
+    assert.deepStrictEqual(on.rows, [{ order_id: 1, email: S.MASK, note: S.MASK }, { order_id: 2, email: null, note: 'ok' }]);
+    assert.deepStrictEqual([on.maskedColumns, on.maskedValues], [['email'], 1]);
+    const meta = S.gateQueryResult({ columns: ['name'], rows: [{ name: 'ORDERS' }], rowCount: 1, executionTimeMs: 1 }, { allowSampleData: false, metadata: true, connectionId: 'x' });
+    assert.deepStrictEqual(meta.rows, [{ name: 'ORDERS' }], 'SHOW / DESCRIBE / EXPLAIN describe objects and pass');
+    const snap = { platform: 'snowflake', extractedAt: 't', views: [], foreignKeys: [], tables: [{ schema: 'S', name: 'C', fqn: 'D.S.C', type: 'TABLE', columns: [
+      { name: 'email', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 1, profile: { distinctCount: 9, nullCount: 0, minValue: 'a@b.io', maxValue: 'z@y.io' } },
+      { name: 'amount', dataType: 'NUMBER', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2, profile: { distinctCount: 5, minValue: '1.5', maxValue: '99.5' } }] }],
+      lineage: [{ sourceFqn: 'a', targetFqn: 'b', queryText: "INSERT INTO b SELECT * FROM a WHERE email = 'q@r.io'" }] };
+    const stripped = S.sanitizeSnapshot(snap, false);
+    assert.deepStrictEqual(stripped.tables[0].columns.map((c) => c.profile), [{ distinctCount: 9, nullCount: 0 }, { distinctCount: 5 }]);
+    assert.ok(!/q@r\.io|a@b\.io|99\.5/.test(JSON.stringify(stripped)) && stripped.lineage[0].sourceFqn === 'a');
+    const masked = S.sanitizeSnapshot(snap, true);
+    assert.deepStrictEqual([masked.tables[0].columns[0].profile.minValue, masked.tables[0].columns[1].profile.maxValue], [S.MASK, '99.5']);
+    assert.ok(snap.tables[0].columns[0].profile.minValue === 'a@b.io', 'the input snapshot is not mutated');
+  });
+
+  await test('v0.37.0: connections.yaml — pointers and non-secret fields only; ids match the live connection ids; the environment defines a CI connection', () => {
+    const C = fresh('../dist/engine/platform/connectionsConfig.js');
+    const yaml = [
+      'connections:',
+      '  - platform: snowflake',
+      '    credentials: { resolver: cli, ref: prod }',
+      '    allowSampleDataInPrompts: true',
+      '  - platform: snowflake',
+      '    role: target',
+      '    account: ACME-TGT',
+      '    username: deploy',
+      '    warehouse: WH',
+      '    credentials: { resolver: env, ref: target }',
+      '  - platform: databricks',
+      '    workspaceUrl: adb-1.azuredatabricks.net',
+      '    httpPath: /sql/1.0/warehouses/abc',
+      '    token: do-not-commit',
+      '  - platform: oracle',
+      '  - platform: snowflake',
+      '    credentials: { resolver: cli, ref: prod }',
+      '  - platform: snowflake',
+      '    account: X',
+      '    colour: blue',
+      '    credentials: { resolver: vault }'
+    ].join('\n');
+    const env = { AUTODE_DATABRICKS_WORKSPACE_URL: 'adb-9.azuredatabricks.net', AUTODE_DATABRICKS_TOKEN: 'never-listed' };
+    const cfg = C.parseConnectionsConfig(yaml, env);
+    assert.deepStrictEqual(cfg.connections.map((c) => [c.id, c.role, c.credentials.resolver, c.allowSampleDataInPrompts, c.origin]), [
+      ['snowflake:prod', 'source', 'cli', true, 'file'],
+      ['snowflake:ACME-TGT', 'target', 'env', false, 'file'],
+      ['databricks:adb-9.azuredatabricks.net', 'source', 'env', false, 'environment']
+    ]);
+    assert.ok(cfg.errors.some((e) => /connections\[2\].*token must not be in this file/.test(e)), 'a secret in the committed file invalidates the entry');
+    assert.ok(cfg.errors.some((e) => /oracle.*not supported/.test(e)) && cfg.errors.some((e) => /duplicate connection id "snowflake:prod"/.test(e)) && cfg.errors.some((e) => /resolver must be env or cli/.test(e)));
+    assert.ok(!JSON.stringify(cfg).includes('never-listed') && !JSON.stringify(cfg).includes('do-not-commit'));
+    // The id is the one the adapter reports once connected, so estate bindings and consent line up.
+    const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    assert.strictEqual(new SnowflakeAdapter({ connectionName: 'prod' }, () => {}).getConnectionId(), 'snowflake:prod');
+    assert.strictEqual(new SnowflakeAdapter({ account: 'ACME-TGT', username: 'deploy' }, () => {}).getConnectionId(), 'snowflake:ACME-TGT');
+    // The extension reads consent from the same file.
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-conn-'));
+    try {
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), yaml);
+      const consent = C.sampleDataConsentFromWorkspace(ws);
+      assert.deepStrictEqual([consent('snowflake:prod'), consent('SNOWFLAKE:PROD'), consent('snowflake:ACME-TGT'), consent('snowflake:other'), consent(undefined)], [true, true, false, false, false]);
+      assert.strictEqual(C.sampleDataConsentFromWorkspace(undefined)('snowflake:prod'), false);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // An in-process server with a fake Snowflake adapter: records what reaches the platform.
+  const platformHarness = async ({ yaml, allowWrite = false, connectError } = {}) => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+    const { createAutodeServer } = fresh('../dist/mcp/server.js');
+    const { PlatformSession } = fresh('../dist/mcp/platform.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-plat-'));
+    nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), yaml ?? 'connections:\n  - platform: snowflake\n    account: ACME\n    username: me\n');
+    const executed = [];
+    const logs = [];
+    const fakeAdapter = (creds) => ({
+      async connect() { if (connectError) throw new Error(connectError); return { connected: true, platform: 'snowflake', databaseName: 'D', schemaName: 'S', version: '9', capabilities: {} }; },
+      async disconnect() {}, dispose() {},
+      getConnectionId: () => `snowflake:${creds.account}`,
+      getCapabilities: () => ({}),
+      async listDatabases() { return ['D', 'E']; },
+      async listSchemas(db) { return [`${db}_RAW`, `${db}_MART`]; },
+      async executeQuery(sql, opts) {
+        executed.push({ sql, opts });
+        if (/^SHOW/i.test(sql)) return { columns: ['name'], rows: [{ name: 'ORDERS' }], rowCount: 1, executionTimeMs: 1 };
+        if (/^EXPLAIN/i.test(sql)) return { columns: ['plan'], rows: [{ plan: 'TableScan ORDERS' }], rowCount: 1, executionTimeMs: 1 };
+        return { columns: ['order_id', 'email'], rows: [{ order_id: 7, email: 'pat@example.com' }], rowCount: 1, executionTimeMs: 2 };
+      },
+      async extractMetadata(o) {
+        executed.push({ extract: o });
+        return { platform: 'snowflake', extractedAt: 't', views: [], foreignKeys: [], lineage: [{ sourceFqn: 'a', targetFqn: 'b', queryText: "WHERE email='q@r.io'" }], tables: [{ schema: 'S', name: 'CUSTOMERS', fqn: 'D.S.CUSTOMERS', type: 'TABLE', columns: [
+          { name: 'email', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 1, profile: { distinctCount: 3, minValue: 'a@b.io', maxValue: 'z@y.io' } }] }] };
+      }
+    });
+    const session = new PlatformSession({
+      workspaceRoot: ws, allowWrite, allowCli: false, log: (l) => logs.push(l),
+      createManager: (log, options) => { const m = new ConnectionManager(log, options); m.registerAdapterFactory('snowflake', (c) => fakeAdapter(c)); return m; }
+    });
+    const server = createAutodeServer({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..'), version: 't', platform: session, log: (l) => logs.push(l) });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(a);
+    const client = new Client({ name: 't', version: '1' });
+    await client.connect(b);
+    const call = async (name, args) => (await client.callTool({ name, arguments: args }));
+    return { ws, client, call, executed, logs, done: async () => { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); } };
+  };
+
+  await test('v0.37.0: autode_execute_query refuses writes and multiple statements before anything reaches the platform; reads run with maxRows capped', async () => {
+    const h = await platformHarness();
+    try {
+      const tools = (await h.client.listTools()).tools;
+      const exec = tools.find((t) => t.name === 'autode_execute_query');
+      assert.deepStrictEqual([exec.annotations.readOnlyHint, exec.annotations.destructiveHint, exec.annotations.openWorldHint], [true, false, true]);
+      for (const sql of ['INSERT INTO t VALUES (1)', 'MERGE INTO t USING s ON 1=1 WHEN MATCHED THEN DELETE', 'DROP TABLE t', 'CREATE TABLE t (a INT)', 'GRANT ROLE r TO USER u', 'CALL p()', 'SELECT 1 /* ; */ ; DROP TABLE t']) {
+        const r = await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql });
+        assert.ok(r.isError && ['WRITE_NOT_ALLOWED', 'VALIDATION_FAILED'].includes(r.structuredContent.code), `${sql}: ${JSON.stringify(r.structuredContent)}`);
+      }
+      assert.strictEqual((await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'SELECT 1; SELECT 2' })).structuredContent.code, 'VALIDATION_FAILED');
+      assert.strictEqual(h.executed.length, 0, 'nothing was sent to the platform');
+      const ok = await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'SELECT order_id, email FROM orders;' });
+      assert.ok(!ok.isError, JSON.stringify(ok.structuredContent));
+      assert.deepStrictEqual([h.executed.at(-1).sql, h.executed.at(-1).opts.maxRows], ['SELECT order_id, email FROM orders', 100]);
+      assert.ok((await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'SELECT 1', maxRows: 10001 })).structuredContent.code === 'VALIDATION_FAILED', 'hard cap 10 000');
+      const unknown = await h.call('autode_execute_query', { connectionId: 'snowflake:nope', sql: 'SELECT 1' });
+      assert.ok(unknown.structuredContent.code === 'NOT_FOUND' && unknown.structuredContent.details.known.includes('snowflake:ACME'));
+      const listed = (await h.call('autode_list_connections', {})).structuredContent;
+      assert.deepStrictEqual(listed.connections.map((c) => [c.id, c.authMode, c.credentials.resolver, c.allowSampleDataInPrompts]), [['snowflake:ACME', 'key-pair', 'env', false]]);
+      assert.deepStrictEqual([listed.writeAllowed, listed.cliAllowed], [false, false]);
+      assert.deepStrictEqual((await h.call('autode_list_schemas', { connectionId: 'snowflake:ACME', database: 'D' })).structuredContent.schemas, ['D_RAW', 'D_MART']);
+      const plan = (await h.call('autode_explain_sql', { connectionId: 'snowflake:ACME', sql: 'CREATE OR REPLACE VIEW v AS SELECT 1' })).structuredContent;
+      assert.ok(h.executed.at(-1).sql === 'EXPLAIN USING TEXT CREATE OR REPLACE VIEW v AS SELECT 1' && plan.plan[0].plan === 'TableScan ORDERS', 'EXPLAIN dry-runs a write without running it');
+      assert.strictEqual((await h.call('autode_explain_sql', { connectionId: 'snowflake:ACME', sql: 'SELECT 1; DROP TABLE t' })).structuredContent.code, 'VALIDATION_FAILED');
+    } finally { await h.done(); }
+  });
+
+  await test('v0.37.0: without consent query rows and profile values are withheld (metadata statements pass); with consent personal data is masked', async () => {
+    const h = await platformHarness();
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    try {
+      const off = (await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'SELECT order_id, email FROM orders' })).structuredContent;
+      assert.ok(off.rows === undefined && /withheld/.test(off.withheld) && off.rowCount === 1 && !JSON.stringify(off).includes('pat@example.com'));
+      assert.deepStrictEqual((await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'SHOW TABLES' })).structuredContent.rows, [{ name: 'ORDERS' }]);
+      const meta = (await h.call('autode_extract_metadata', { connectionId: 'snowflake:ACME', database: 'D', schema: 'S', profile: true })).structuredContent;
+      assert.ok(!/a@b\.io|z@y\.io|q@r\.io/.test(JSON.stringify(meta)) && meta.tables[0].columns[0].profile.distinctCount === 3, JSON.stringify(meta.tables[0].columns[0]));
+      assert.deepStrictEqual(h.executed.at(-1).extract.schemaFilter, ['D.S']);
+      // Consent is read when the call runs: no restart needed.
+      nodeFs.writeFileSync(nodePath.join(h.ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    allowSampleDataInPrompts: true\n');
+      const on = (await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'SELECT order_id, email FROM orders' })).structuredContent;
+      assert.deepStrictEqual([on.rows, on.maskedColumns], [[{ order_id: 7, email: '[masked]' }], ['email']]);
+      const metaOn = (await h.call('autode_extract_metadata', { connectionId: 'snowflake:ACME', database: 'D', schema: 'S', profile: true })).structuredContent;
+      assert.strictEqual(metaOn.tables[0].columns[0].profile.minValue, '[masked]');
+    } finally { await h.done(); }
+  });
+
+  await test('v0.37.0: --allow-write marks autode_execute_query destructive and lets a single write through; connect failures map to the error contract', async () => {
+    const h = await platformHarness({ allowWrite: true });
+    try {
+      const exec = (await h.client.listTools()).tools.find((t) => t.name === 'autode_execute_query');
+      assert.deepStrictEqual([exec.annotations.readOnlyHint, exec.annotations.destructiveHint], [false, true]);
+      assert.ok(!(await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1)' })).isError);
+      assert.strictEqual((await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1); DROP TABLE t' })).structuredContent.code, 'VALIDATION_FAILED', 'one statement, even with --allow-write');
+    } finally { await h.done(); }
+    for (const [error, code] of [['Snowflake SQL API error (401): JWT token is invalid', 'AUTH_FAILED'], ['Insufficient privileges to operate on warehouse', 'PERMISSION_DENIED'], ['fetch failed: ECONNREFUSED', 'CONNECTION_FAILED'], ['Executing queries via the Snowflake CLI requires CLI-execution consent', 'PERMISSION_DENIED']]) {
+      const f = await platformHarness({ connectError: error });
+      try {
+        const r = (await f.call('autode_test_connection', { connectionId: 'snowflake:ACME' })).structuredContent;
+        assert.strictEqual(r.code, code, `${error}: ${JSON.stringify(r)}`);
+        if (/consent/.test(error)) assert.ok(/--allow-cli/.test(r.message));
+      } finally { await f.done(); }
+    }
+  });
+
+  await test('v0.37.0: redaction — no tool response or server log line carries a credential from the environment (bundled server over stdio)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+    const fake = (...parts) => parts.join('');
+    const token = fake('da', 'pi', '0123456789abcdef'.repeat(2));
+    const password = fake('Pw-', 'x7Q', '-never-shown');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-redact-'));
+    const env = { ...process.env, AUTODE_DATABRICKS_WORKSPACE_URL: '127.0.0.1:1', AUTODE_DATABRICKS_HTTP_PATH: '/sql/1.0/warehouses/abc', AUTODE_DATABRICKS_TOKEN: token, AUTODE_SNOWFLAKE_ACCOUNT: 'ACME', AUTODE_SNOWFLAKE_USERNAME: 'me', AUTODE_SNOWFLAKE_AUTH_MODE: 'username-password', AUTODE_SNOWFLAKE_PASSWORD: password };
+    const transport = new StdioClientTransport({ command: process.execPath, args: [nodePath.join(__dirname, '..', 'dist', 'mcp-server.js'), '--workspace', ws], env, stderr: 'pipe' });
+    let stderr = '';
+    transport.stderr.on('data', (d) => { stderr += String(d); });
+    const client = new Client({ name: 't', version: '1' });
+    await client.connect(transport);
+    try {
+      const responses = [];
+      const listed = await client.callTool({ name: 'autode_list_connections', arguments: {} });
+      responses.push(listed);
+      assert.deepStrictEqual(listed.structuredContent.connections.map((c) => c.id).sort(), ['databricks:127.0.0.1:1', 'snowflake:ACME']);
+      const db = await client.callTool({ name: 'autode_test_connection', arguments: { connectionId: 'databricks:127.0.0.1:1' } });
+      responses.push(db);
+      assert.ok(db.isError && db.structuredContent.code === 'CONNECTION_FAILED', JSON.stringify(db.structuredContent));
+      const sf = await client.callTool({ name: 'autode_execute_query', arguments: { connectionId: 'snowflake:ACME', sql: 'SELECT 1' } });
+      responses.push(sf);
+      assert.ok(sf.isError && sf.structuredContent.code === 'PERMISSION_DENIED' && /--allow-cli/.test(sf.structuredContent.message), 'username/password needs the CLI, which needs consent');
+      await new Promise((r) => setTimeout(r, 100));
+      const all = JSON.stringify(responses) + stderr;
+      assert.ok(stderr.includes('autode_test_connection failed'), 'the failure was logged');
+      for (const s of [token, password]) assert.ok(!all.includes(s), `leaked ${s.slice(0, 6)}…`);
+    } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.37.0: with allowSampleDataInPrompts off no sampled value reaches the persisted schema graph or an assembled context pack; with it on, personal-data columns are masked', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const { buildContextPack } = fresh('../dist/engine/context/contextPack.js');
+    const { parseCsv } = fresh('../dist/engine/context/fileIngestion.js');
+    class Fake extends SnowflakeAdapter {
+      async connect() { return { connected: true, platform: 'snowflake', databaseName: 'D', schemaName: 'S', version: '9', capabilities: this.getCapabilities() }; }
+      async extractMetadata() {
+        return { platform: 'snowflake', connectionId: this.getConnectionId(), extractedAt: 't', views: [], foreignKeys: [],
+          lineage: [{ sourceFqn: 'D.S.RAW', targetFqn: 'D.S.CUSTOMERS', queryText: "INSERT INTO CUSTOMERS SELECT * FROM RAW WHERE EMAIL='zz-sample-1@corp.example'" }],
+          tables: [{ schema: 'S', name: 'CUSTOMERS', fqn: 'D.S.CUSTOMERS', type: 'TABLE', columns: [
+            { name: 'EMAIL', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 1, profile: { distinctCount: 2, nullCount: 0, minValue: 'zz-sample-2@corp.example', maxValue: 'zz-sample-3@corp.example' } },
+            { name: 'TIER', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2, profile: { distinctCount: 2, nullCount: 0, minValue: 'ZZSAMPLEGOLD', maxValue: 'ZZSAMPLESILVER' } }] }] };
+      }
+    }
+    const values = ['zz-sample-1@corp.example', 'zz-sample-2@corp.example', 'zz-sample-3@corp.example', 'ZZSAMPLEGOLD', 'ZZSAMPLESILVER'];
+    const run = async (consent) => {
+      const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-consent-'));
+      try {
+        const m = new ConnectionManager(() => {}, { sampleDataConsent: (id) => consent && id === 'snowflake:ACME' });
+        m.registerAdapterFactory('snowflake', (c, l) => new Fake(c, l));
+        await m.connect('snowflake', { account: 'ACME', username: 'me' });
+        const snapshot = await m.extractMetadata({ includeProfiling: true });
+        await m.persistSchemaContext(snapshot, ws);
+        const persisted = nodeFs.readFileSync(nodePath.join(ws, '.autode', 'local', 'schema-graph.json'), 'utf8');
+        const graph = JSON.parse(persisted);
+        const pack = buildContextPack({ purpose: 'step', query: 'customers email tier' }, { graph, assertions: [], conflicts: [] });
+        return { text: persisted + JSON.stringify(snapshot) + pack.text, pack: pack.text };
+      } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    };
+    const off = await run(false);
+    assert.ok(/CUSTOMERS/i.test(off.pack), 'the pack still describes the table');
+    for (const v of values) assert.ok(!off.text.includes(v), `sample value ${v} leaked with consent off`);
+    const on = await run(true);
+    assert.ok(on.text.includes('ZZSAMPLESILVER'), 'with consent, non-personal values are kept');
+    for (const v of values.slice(1, 3)) assert.ok(!on.text.includes(v), `personal value ${v} not masked`);
+    // CSV ingestion infers types from the rows but keeps no values.
+    const csv = parseCsv('customer_id,email,tier\n1,zz-csv@corp.example,ZZCSVGOLD\n2,b@corp.example,SILVER\n', 'customers.csv', { system: 'shop', environment: 'prod' });
+    assert.ok(!/zz-csv@corp\.example|ZZCSVGOLD/.test(JSON.stringify(csv)), 'CSV ingestion keeps no row values');
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

@@ -1,5 +1,6 @@
 import { AgentExecutionContext, AgentExecutionResult, GeneratedArtifact, PlanStep } from '../../engine/types';
 import { ConnectionManager } from '../../engine/platform/ConnectionManager';
+import { sampleDataConsentFromWorkspace } from '../../engine/platform/connectionsConfig';
 import { SchemaSnapshot } from '../../engine/platform/types';
 import { layoutRel } from '../../engine/workspaceLayout';
 
@@ -46,7 +47,7 @@ export async function executeSourceAssessmentAgent(
       }
       const passphrase = await context.configManager.getSecret('autoDataEngineeringHub.snowflakePrivateKeyPassphrase');
       if (passphrase) {
-        credentials['passphrase'] = passphrase;
+        credentials['privateKeyPassphrase'] = passphrase;
       }
     } else if (platform === 'databricks') {
       const token = await context.configManager.getSecret('autoDataEngineeringHub.databricksToken');
@@ -59,7 +60,8 @@ export async function executeSourceAssessmentAgent(
   }
 
   const connectionManager = new ConnectionManager((msg: string) => context.log(msg), {
-    cliConsent: () => context.configManager.getSettings().dataPlatformCliConsent === true
+    cliConsent: () => context.configManager.getSettings().dataPlatformCliConsent === true,
+    sampleDataConsent: sampleDataConsentFromWorkspace(context.host?.workspaceRoot)
   });
 
   try {

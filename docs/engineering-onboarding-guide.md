@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.36.0 (2026-10-16). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.37.0 (2026-10-16). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -123,10 +123,10 @@ The customer's documents — contract, BRD, KPI definitions, mapping, data dicti
 Imported Claude Agent Skills (`SKILL.md` folders) that run with real tools on any of the seven LLM providers. What a skill can use is capped by its declared `allowed-tools` and by its **trust tier**: `unreviewed` (doesn't run), `reviewed` (read-only, not via Claude Code), `trusted` (full). Trust belongs to the reviewed content's checksum — change a file and it's unreviewed again. *Design §7.6.*
 
 ### 4.10 The MCP server
-`dist/mcp-server.js` exposes the engine to other agents: primitives, Pipeline Spec, context tools (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), interview and reviewed-skill prompts, and resources. Read-only, no LLM calls, secrets redacted. *Design §10.6; setup: [mcp-setup.md](mcp-setup.md).*
+`dist/mcp-server.js` exposes the engine to other agents: primitives, Pipeline Spec, context tools (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), data-platform tools (`autode_list_connections` … `autode_execute_query`, since v0.37.0), interview and reviewed-skill prompts, and resources. No workspace writes, no LLM calls, secrets redacted. Platform connections come from `.autode/config/connections.yaml` (no secrets; credentials from `AUTODE_*` env vars or the CLI's configuration); queries are read-only unless started with `--allow-write`; row values are withheld unless the connection sets `allowSampleDataInPrompts`. *Design §6.12, §10.6; setup: [mcp-setup.md](mcp-setup.md).*
 
 ### 4.11 Where AutoDE keeps things
-`.autode/` holds AutoDE's working state, grouped by lifecycle: `problems/<id>/` (spec, plan, context documents, pack — committed), `knowledge/` (ledger, estate, sources, profiles, business context, vocabulary — committed), `config/` (skills, primitives, target environment — committed) and `local/` (active problem, chats, derived graph, catalog — never committed; AutoDE writes `.autode/.gitignore` for it). Generated deliverables go to the visible `autode-output/<problem-id>/` (setting `artifactDirectory`). Every path comes from `src/engine/workspaceLayout.ts`; never build one by hand. A workspace from before v0.36.0 (`.ai-context/`) is moved over on activation (`workspaceMigration.ts`). *Design §2.1–2.2.*
+`.autode/` holds AutoDE's working state, grouped by lifecycle: `problems/<id>/` (spec, plan, context documents, pack — committed), `knowledge/` (ledger, estate, sources, profiles, business context, vocabulary — committed), `config/` (skills, primitives, target environment, connections — committed) and `local/` (active problem, chats, derived graph, catalog — never committed; AutoDE writes `.autode/.gitignore` for it). Generated deliverables go to the visible `autode-output/<problem-id>/` (setting `artifactDirectory`). Every path comes from `src/engine/workspaceLayout.ts`; never build one by hand. A workspace from before v0.36.0 (`.ai-context/`) is moved over on activation (`workspaceMigration.ts`). *Design §2.1–2.2.*
 
 ## 5. The main flows
 
@@ -244,7 +244,7 @@ Each recipe lists the touch points; the design section has the detail.
 
 **A data platform.** An adapter extending `BaseDataSourceAdapter` in `src/engine/platform/adapters/`, a factory and credentials case in `ConnectionManager`, settings in `package.json`, a probe dialect in `probes.ts` if the SQL differs. *Design §6.*
 
-**An MCP tool.** Add an `EngineTool` to `TOOLS` in `src/mcp/tools.ts` (JSON Schema input, annotations, a handler that throws `EngineToolError` for expected failures). Keep it read-only unless the spec says otherwise; add good/bad payloads to the contract test and update [mcp-setup.md](mcp-setup.md). *Design §10.6.*
+**An MCP tool.** Add an `EngineTool` to `TOOLS` in `src/mcp/tools.ts` (JSON Schema input, annotations, a handler that throws `EngineToolError` for expected failures), or to `platformTools()` in `src/mcp/platform.ts` if it talks to a platform (run SQL only through the `sqlGuard.ts` checks and return rows only through `gateQueryResult()`). Keep it read-only unless the spec says otherwise; add good/bad payloads to the contract test and update [mcp-setup.md](mcp-setup.md). *Design §10.6.*
 
 **A setting.** Declare it in `package.json`, read it in `ConfigurationManager`, add it to `DataAgentHubSettings`, then `npm run docs:generate`. *Design §10.4–10.5.*
 

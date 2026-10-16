@@ -295,6 +295,32 @@ Read README.md and summarise it in three bullet points.
   Do: set `autoDataEngineeringHub.artifactDirectory` to `deliverables`, run a step; then set it to `../outside`.
   Expect: the first run writes to `deliverables/<problem-id>/…`; the second falls back to `autode-output/` (paths that leave the workspace are refused).
 
+## Part 14 — v0.37.0 MCP data-platform tools, read-only guard, sample-data consent
+
+Needs real accounts. Use a role that can only read. Configure the server as in [mcp-setup.md](mcp-setup.md) (Data platforms) for a scratch workspace, and keep the client's MCP log open.
+
+- [ ] **14.1 Snowflake through a CLI connection.**
+  Do: add `{ platform: snowflake, credentials: { resolver: cli, ref: <your connection> } }` to `.autode/config/connections.yaml`; start the server with `--allow-cli`. In Claude Code: "list AutoDE connections", then list databases and schemas, "extract metadata for <DB>.<SCHEMA>", "explain SELECT * FROM <table>", "run SELECT COUNT(*) FROM <table>".
+  Expect: the connection id is `snowflake:<connection>`; each call answers; the SELECT returns columns and `rowCount` but no rows, with a `withheld` note; the explain returns a plan. Without `--allow-cli` the first call fails with `PERMISSION_DENIED` naming `--allow-cli`.
+- [ ] **14.2 Snowflake key-pair over the SQL API.**
+  Do: an entry with `account`, `username`, `authMode: key-pair`, `credentials: { resolver: env, ref: kp }`; set `AUTODE_SNOWFLAKE_KP_PRIVATE_KEY_PATH` (and `…_PRIVATE_KEY_PASSPHRASE` if the key is encrypted) in the client's `env`. Repeat 14.1's calls without `--allow-cli`.
+  Expect: the same results. `autode_list_connections` shows `authMode: key-pair`, `resolver: env`, and no key path or passphrase.
+- [ ] **14.3 Databricks with a token.**
+  Do: an entry with `workspaceUrl`, `httpPath`, `credentials: { resolver: env }`; `AUTODE_DATABRICKS_TOKEN` in `env`. List catalogs and schemas, extract metadata, explain, select.
+  Expect: all answer; a wrong token gives `AUTH_FAILED`, and the token appears in neither the response nor the server's stderr.
+- [ ] **14.4 No CLIs installed.**
+  Do: on a machine (or a shell with `PATH` trimmed) where neither `snow` nor `databricks` resolves, run 14.2 and 14.3.
+  Expect: both work.
+- [ ] **14.5 Writes are refused, then allowed only on request.**
+  Do: ask the agent to run `CREATE TABLE autode_probe (id INT)`, then `SELECT 1; DROP TABLE x`, then `SELECT 1 /* ; */ ; DELETE FROM x`. Restart the server with `--allow-write` and ask again for the CREATE (in a schema where that's harmless; drop it afterwards).
+  Expect: `WRITE_NOT_ALLOWED`, then `VALIDATION_FAILED` twice, and nothing reaches the platform (its query history shows none of them). With `--allow-write` the client asks for confirmation before the CREATE runs.
+- [ ] **14.6 Sample data with consent.**
+  Do: set `allowSampleDataInPrompts: true` on one connection (no restart) and run a SELECT that includes an e-mail or name column and an ordinary one.
+  Expect: rows come back; the personal-data column shows `[masked]`, the ordinary column its values; `maskedColumns` lists the masked one. Set it back to `false`: rows are withheld again on the next call.
+- [ ] **14.7 The extension honours the same consent.**
+  Do: in the AutoDE panel, connect the source and run Source Assessment with profiling; open `.autode/local/schema-graph.json`.
+  Expect: column profiles have distinct and null counts but no `minValue`/`maxValue` unless the connection's entry allows sample data.
+
 ## Results
 
 | Check | Pass / Fail | Notes |

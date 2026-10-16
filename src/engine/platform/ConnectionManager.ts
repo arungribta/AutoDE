@@ -11,8 +11,10 @@ import { ProbeExecutor, createSqlProbeExecutor } from '../context/probes';
 import { BaseDataSourceAdapter } from './BaseAdapter';
 import type { BaseNode, GraphEdge } from '../context/types';
 import { LAYOUT, layoutRel } from '../workspaceLayout';
+import { sanitizeSnapshot } from './sampleData';
+import { checkReadOnlySql } from './sqlGuard';
 
-type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
+export type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
 
 export interface ConnectionManagerOptions {
   /**
@@ -23,6 +25,14 @@ export interface ConnectionManagerOptions {
    * dependency (v0.26.0). Defaults to no consent.
    */
   cliConsent?: () => boolean;
+  /**
+   * Phase 4: whether row values from this connection may reach a prompt (the
+   * per-connection `allowSampleDataInPrompts` in `.autode/config/connections.yaml`,
+   * see `sampleDataConsentFromWorkspace()`). Off — the default — extraction
+   * keeps schema, counts and aggregates and drops profile min/max values and
+   * lineage query text; on, personal-data columns are still masked.
+   */
+  sampleDataConsent?: (connectionId: string | undefined) => boolean;
 }
 
 /**
@@ -39,13 +49,25 @@ export class ConnectionManager implements Disposable {
   private activeAdapter: IDataSourceAdapter | null = null;
   private adapterFactories: Map<DataPlatformProvider, AdapterFactory> = new Map();
   private estateResolver?: EstateResolver;
+  private readonly sampleDataConsent: (connectionId: string | undefined) => boolean;
 
   constructor(private readonly log: (msg: string) => void, options: ConnectionManagerOptions = {}) {
+    this.sampleDataConsent = options.sampleDataConsent ?? (() => false);
     const cliConsent = options.cliConsent ?? (() => false);
     // Register adapter factories for supported platforms
     this.adapterFactories.set('snowflake', (creds, l) => new SnowflakeAdapter(creds, l, { cliConsent: cliConsent() }));
     this.adapterFactories.set('databricks', (creds, l) => new DatabricksAdapter(creds, l));
     // Future: bigquery, redshift, synapse
+  }
+
+  /** Registers (or replaces) the adapter for a platform — further platforms, and fakes in tests. */
+  registerAdapterFactory(platform: DataPlatformProvider, factory: AdapterFactory): void {
+    this.adapterFactories.set(platform, factory);
+  }
+
+  /** Whether row values from the active connection may reach a prompt (phase 4). */
+  allowsSampleData(): boolean {
+    return this.sampleDataConsent(this.activeConnectionId());
   }
 
   dispose(): void {
@@ -150,7 +172,7 @@ export class ConnectionManager implements Disposable {
     const id = this.activeConnectionId();
     const binding = id && this.estateResolver ? this.estateResolver(id) : undefined;
     const effective = !options?.schemaFilter?.length && binding?.schemas?.length ? { ...options, schemaFilter: binding.schemas } : options;
-    return this.activeAdapter.extractMetadata(effective);
+    return sanitizeSnapshot(await this.activeAdapter.extractMetadata(effective), this.sampleDataConsent(id));
   }
 
   /**
@@ -210,7 +232,12 @@ export class ConnectionManager implements Disposable {
     if (!adapter || !platform) return undefined;
     const identity = this.activeIdentity();
     return createSqlProbeExecutor(
-      async (sql) => (await adapter.executeQuery(sql, { maxRows: 1, timeoutMs: 60000 })).rows,
+      async (sql) => {
+        // Probe templates are fixed and read-only; the guard makes sure nothing else ever runs through here.
+        const check = checkReadOnlySql(sql);
+        if (!check.ok) throw new Error(`Probe refused: ${check.reason}`);
+        return (await adapter.executeQuery(sql, { maxRows: 1, timeoutMs: 60000 })).rows;
+      },
       platform === 'snowflake' ? 'snowflake' : platform === 'databricks' ? 'spark_sql' : 'ansi',
       {
         sampleRows: options.sampleRows ?? 50_000,
