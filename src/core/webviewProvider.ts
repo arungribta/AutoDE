@@ -27,6 +27,10 @@ import { MappingContextManager } from '../context/MappingContextManager';
 import { SemanticLayerManager } from '../context/SemanticLayerManager';
 import { ActiveProblemManager } from '../context/ActiveProblemManager';
 import { AttachmentStore } from '../context/AttachmentStore';
+import { BusinessPackManager } from '../context/BusinessPackManager';
+import { DOCUMENT_ROLES, DocumentRole } from '../engine/context/pack';
+import type { ProbeExecutor } from '../engine/context/probes';
+import { filterInterviewQuestions, knownFacts, knownFactsBlock } from '../engine/context/discoveryGaps';
 import { PipelineSpecManager } from '../context/PipelineSpecManager';
 import { ContextFileWatcher, normalizeFsPath } from '../context/ContextFileWatcher';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
@@ -89,6 +93,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   };
   private pipelineSpecManager?: PipelineSpecManager;
   private attachmentStore?: AttachmentStore;
+  /** Phase C4a: the active problem's business-problem pack. */
+  private packManager?: BusinessPackManager;
+  private problemRoot?: vscode.Uri;
+  /** Phase C4a: probes on the source connection (set by extension.ts when it connects). */
+  private liveProbes?: ProbeExecutor;
   private activeProblemManager?: ActiveProblemManager;
   /** `undefined` = no active business problem yet (fresh workspace, or "Start New" before the first draft). */
   private activeProblemId?: string;
@@ -329,6 +338,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.semanticLayerManager = undefined;
       this.pipelineSpecManager = undefined;
       this.attachmentStore = undefined;
+      this.packManager = undefined;
+      this.problemRoot = undefined;
       this.postSpec();
       this.postContextGateStatus();
       this.postContextUpdate();
@@ -346,6 +357,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.semanticLayerManager = new SemanticLayerManager(contextRoot, this.graphManager, (msg: string) => this.postLog(msg));
     this.pipelineSpecManager = new PipelineSpecManager(contextRoot, (msg: string) => this.postLog(msg));
     this.attachmentStore = new AttachmentStore(contextRoot);
+    this.problemRoot = contextRoot;
+    this.packManager = this.contextFileManager ? this.createPackManager(contextRoot) : undefined;
+    try {
+      await this.packManager?.load();
+    } catch (err) {
+      this.postLog(`Business-problem pack could not be read: ${err instanceof Error ? err.message : String(err)}`);
+    }
     try {
       await this.specManager.initialize();
       await this.targetContextManager.initialize();
@@ -1379,6 +1397,116 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.contextFileManager?.setCatalogFetcher(fetcher);
   }
 
+  /** Phase C4a: probes over the source connection; `undefined` when disconnected. */
+  public setLiveProbes(executor: ProbeExecutor | undefined): void {
+    this.liveProbes = executor;
+  }
+
+  private createPackManager(contextRoot: vscode.Uri): BusinessPackManager {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+    return new BusinessPackManager(path.join(contextRoot.fsPath, 'pack'), workspaceRoot.fsPath, () => this.contextFileManager!, (m) => this.postLog(m),
+      (system, user, purpose) => this.hub.completeJson(system, user, purpose));
+  }
+
+  private requirePack(): BusinessPackManager | undefined {
+    if (!this.packManager && this.problemRoot && this.contextFileManager) this.packManager = this.createPackManager(this.problemRoot);
+    if (!this.packManager) void vscode.window.showErrorMessage('Start or open a business problem first — the pack belongs to a problem.');
+    return this.packManager;
+  }
+
+  /** `AutoDE: Add Document to Business-Problem Pack` — pick a file, say what it is, and read it in. */
+  public async runAddPackDocument(): Promise<void> {
+    const pm = this.requirePack();
+    if (!pm) return;
+    const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Add to pack', title: 'Add a document that describes this business problem' });
+    const file = picked?.[0];
+    if (!file) return;
+    const role = await vscode.window.showQuickPick(DOCUMENT_ROLES.map((r) => ({ label: r })), { title: 'What is this document?', placeHolder: 'contract, BRD, KPI definitions, mapping, data dictionary, a sample of a table…' });
+    if (!role) return;
+    let table: string | undefined;
+    if (role.label === 'sample') {
+      const t = await vscode.window.showQuickPick(this.listMappableTables().map((x) => ({ label: x.label, description: x.fqn, id: x.id })), { title: 'Which table are these rows a sample of?' });
+      if (!t) return;
+      table = t.id;
+    }
+    const authority = await vscode.window.showQuickPick([{ label: 'signed', description: 'the customer stands behind it — facts enter as confirmed' }, { label: 'draft', description: 'facts enter as documented' }], { title: 'How authoritative is it?' });
+    if (!authority) return;
+    const version = await vscode.window.showInputBox({ title: 'Document version', value: '1' });
+    if (version === undefined) return;
+    const doc = await pm.addDocument({ path: file.fsPath, role: role.label as DocumentRole, authority: authority.label as 'signed' | 'draft', version: version.trim() || '1', table });
+    this.postLog(`Added ${doc.path} to the business-problem pack (${doc.role}, ${doc.authority}, v${doc.version}).`);
+    await this.applyPackDocument(pm, doc.id);
+  }
+
+  private async applyPackDocument(pm: BusinessPackManager, id: string): Promise<void> {
+    const r = await pm.applyDocument(id);
+    const doc = pm.getPack().documents.find((d) => d.id === id);
+    switch (r.status) {
+      case 'applied': this.postLog(`${doc?.path}: read with profile "${r.profileId}" — ${r.reconcile.asserted} new clause(s), ${r.reconcile.superseded} changed, ${r.reconcile.retracted} removed, ${r.reconcile.unchanged} unchanged.${r.warnings.length ? ` Not read: ${r.warnings.join('; ')}` : ''}`); break;
+      case 'profile_proposed': {
+        this.postLog(`${doc?.path}: AutoDE proposed a reading profile. Check it, set "status: confirmed", then run "AutoDE: Apply Business-Problem Pack".`);
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(r.profilePath)));
+        break;
+      }
+      case 'extracted': this.postLog(`${doc?.path}: ${r.proposed} fact(s) proposed for review${r.dropped.length ? `; ${r.dropped.length} dropped (${r.dropped.slice(0, 3).join('; ')})` : ''}.`); break;
+      case 'registered': this.postLog(`${doc?.path}: registered as a sample — probes will use it.`); break;
+      default: this.postLog(`${doc?.path}: ${r.reason}`);
+    }
+    this.postContextUpdate();
+  }
+
+  /** `AutoDE: Apply Business-Problem Pack` — re-read every document (after a profile was confirmed, or a document changed). */
+  public async runApplyPack(): Promise<void> {
+    const pm = this.requirePack();
+    if (!pm) return;
+    await pm.load();
+    if (!pm.getPack().documents.length) { this.postLog('The business-problem pack is empty — add documents first.'); return; }
+    for (const d of pm.getPack().documents) await this.applyPackDocument(pm, d.id);
+  }
+
+  /** `AutoDE: Run Conformance Check` — each source against the pack's contracts; written as a discover-phase artifact. */
+  public async runConformanceCheck(): Promise<void> {
+    const pm = this.requirePack();
+    if (!pm || !this.problemRoot) return;
+    const { reports, markdown } = await pm.conformance(pm.probeExecutor(this.liveProbes));
+    if (!reports.length) { this.postLog('No contract in the pack has a confirmed profile yet — nothing to check.'); return; }
+    const spec = this.specManager?.getSpec();
+    const uri = await new ArtifactWriter(this.problemRoot, (m) => this.postLog(m)).write({
+      id: `conformance-${Date.now().toString(36)}`, type: 'validation_report', title: 'Conformance Report', description: 'Source systems against the business-problem pack\'s contracts', content: markdown,
+      language: 'markdown', generatedBy: 'sourceAssessmentAgent', generatedAt: new Date().toISOString(), approved: false, filePath: 'conformance-report.md', phase: 'discover', specId: spec?.id, specVersion: spec?.version
+    });
+    const fails = reports.reduce((n, r) => n + r.tables.reduce((m, t) => m + t.results.filter((x) => x.status === 'fail').length, 0), 0);
+    this.postLog(`Conformance report written: ${fails} failing clause(s) across ${reports.reduce((n, r) => n + r.tables.length, 0)} table(s).`);
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
+  }
+
+  /** `AutoDE: Verify Claims with Probes` — keys, grains, joins and expectations checked against data (aggregates only). */
+  public async runVerifyClaims(): Promise<void> {
+    const pm = this.requirePack();
+    if (!pm) return;
+    const executor = pm.probeExecutor(this.liveProbes);
+    if (!executor) { this.postLog('Nothing to probe with: connect the source, or add a sample of the table to the pack.'); return; }
+    const out = await pm.verifyClaims(executor);
+    const decided = out.filter((o) => o.result && o.result.pass !== undefined);
+    for (const o of decided) this.postLog(`${o.result!.pass ? '✓ verified' : '✗ failed'}: ${o.statement} — ${o.result!.detail}`);
+    this.postLog(`Probes: ${decided.filter((o) => o.result!.pass).length} verified, ${decided.filter((o) => !o.result!.pass).length} failed (now under review), ${out.length - decided.length} not verified.`);
+    this.postContextUpdate();
+  }
+
+  /** `AutoDE: Propose Vocabulary` — abbreviations mined from names and comments, plus the LLM's reading of the pack; the engineer picks. */
+  public async runProposeVocabulary(): Promise<void> {
+    const pm = this.requirePack();
+    if (!pm) return;
+    const proposals = await pm.proposeVocabulary();
+    if (!proposals.length) { this.postLog('No vocabulary to propose.'); return; }
+    const picked = await vscode.window.showQuickPick(
+      proposals.map((p) => ({ label: p.kind === 'abbreviation' ? `${p.from.toUpperCase()} = ${p.to}` : `${p.from} means ${p.to}`, description: p.source === 'comments' ? `from ${p.support} comment(s)` : 'proposed from documents', detail: p.example, picked: p.source === 'comments' && p.support > 1, proposal: p })),
+      { canPickMany: true, title: 'Add to the vocabulary (.ai-context/context/vocabulary.yaml)', placeHolder: 'Select the entries that are right for this customer' });
+    if (!picked?.length) return;
+    await pm.acceptVocabulary(picked.map((x) => x.proposal));
+    this.postLog(`Vocabulary: ${picked.length} entr${picked.length === 1 ? 'y' : 'ies'} added; retrieval re-indexed.`);
+  }
+
   /** Applies the working-set settings and the current connection to a (re)created ContextFileManager. */
   private configureContextFileManager(cfm: ContextFileManager): void {
     const cfg = vscode.workspace.getConfiguration('autoDataEngineeringHub');
@@ -2222,8 +2350,19 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      const extraContext = this.contextPackText('interview', engine.getSession().problemStatement, 'Interview turn');
-      const action: SpecEngineAction = await this.hub.discoverNextAction(engine.getSession(), this.ensureSkills(), extraContext);
+      // Phase C4a: discover → validate → ask — tell the interviewer what discovery
+      // established, and drop any question it already answers.
+      const pack = this.contextFileManager?.buildContextPack({ purpose: 'interview', query: engine.getSession().problemStatement }, 'Interview turn');
+      const sources = this.contextFileManager?.getPackSources();
+      const known = pack && sources ? knownFactsBlock(knownFacts(sources.graph, sources.assertions, pack.manifest.nodeIds)) : '';
+      const extraContext = [pack?.text ?? '', known].filter((x) => x.trim()).join('\n\n');
+      let action: SpecEngineAction = await this.hub.discoverNextAction(engine.getSession(), this.ensureSkills(), extraContext);
+      if ((action.action === 'ask' || action.action === 'ask_many') && sources) {
+        const asked = action.action === 'ask' ? [action.question] : action.questions;
+        const { ask, answered } = filterInterviewQuestions(asked, sources.graph, sources.assertions);
+        for (const a of answered) this.postLog(`Not asking "${a.question.prompt}" — discovery already answers it: ${a.reason}.`);
+        if (answered.length) action = ask.length === 0 ? { action: 'synthesize' } : ask.length === 1 ? { action: 'ask', question: ask[0] } : { action: 'ask_many', questions: ask };
+      }
       if (action.action === 'ask' || action.action === 'ask_many') {
         const ids = engine.applyAction(action);
         this.pendingSpecQuestions = engine.getSession().questions.filter((question) => ids.includes(question.id));
@@ -2255,8 +2394,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       : 'Requirements collected. Synthesizing the comprehensive Business Problem Specification...');
     try {
       const previous = this.specManager?.getSpec();
-      const extraContext = this.contextPackText('spec', engine.getSession().problemStatement, 'Specification synthesis');
+      const extraContext = [this.contextPackText('spec', engine.getSession().problemStatement, 'Specification synthesis'), this.packManager?.summary() ?? ''].filter((x) => x.trim()).join('\n\n');
       const spec = await this.hub.synthesizeComprehensiveSpec(engine.getSession(), previous, extraContext);
+      const packRefs = this.packManager?.clauseIds() ?? [];
+      if (packRefs.length) spec.packRefs = packRefs;
       await this.ensureActiveProblem(spec.problemStatement);
       this.applyImplementationType(spec, previous);
       if (this.specManager) {

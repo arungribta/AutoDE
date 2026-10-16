@@ -1,0 +1,24 @@
+# Interpretation profile for the data office's contract format — as AutoDE would propose it from
+# the document's structure and the engineer confirmed it (status: confirmed).
+id: house-contract
+name: Data office contract format
+status: confirmed
+signature: [contract_header, data_objects]
+entities:
+  each: data_objects
+  name: object
+  description: summary
+  tables: realised_by
+  fields:
+    each: elements
+    name: element
+    type: kind
+    required: { path: mandatory, yes: [Y, yes, "true"] }
+    unique: { path: unique_id, yes: [Y, yes, "true"] }
+    columns: physical
+  rules:
+    each: checks
+    field: "on"
+    check: rule
+    checkMap: { no blanks: not_null, unique: unique, allowed values: accepted_values }
+    values: allowed

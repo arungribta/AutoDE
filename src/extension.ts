@@ -387,6 +387,8 @@ export function activate(context: vscode.ExtensionContext): void {
       sidebarProvider.notifyConnectionStatus(role, { connected: true, platform, detail: `${info.databaseName}.${info.schemaName}` });
       // Phase K2: the source connection answers catalog query-through and refresh on use.
       if (role === 'source') sidebarProvider.setCatalogFetcher(newManager.catalogFetcher());
+      // Phase C4a: probes (read-only, aggregates only) run on the source connection.
+      if (role === 'source') sidebarProvider.setLiveProbes(newManager.probeExecutor());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // CLI-execution consent is an easy first-connection trip-up now that
@@ -771,6 +773,13 @@ export function activate(context: vscode.ExtensionContext): void {
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
   });
 
+  // Phase C4a (docs/context-layer-requirements.md §11): the business-problem pack.
+  const addPackDocument = vscode.commands.registerCommand(`${EXTENSION_ID}.addPackDocument`, () => sidebarProvider.runAddPackDocument());
+  const applyPack = vscode.commands.registerCommand(`${EXTENSION_ID}.applyPack`, () => sidebarProvider.runApplyPack());
+  const runConformance = vscode.commands.registerCommand(`${EXTENSION_ID}.runConformance`, () => sidebarProvider.runConformanceCheck());
+  const verifyClaims = vscode.commands.registerCommand(`${EXTENSION_ID}.verifyClaims`, () => sidebarProvider.runVerifyClaims());
+  const proposeVocabulary = vscode.commands.registerCommand(`${EXTENSION_ID}.proposeVocabulary`, () => sidebarProvider.runProposeVocabulary());
+
   // C3 (v0.30.0, docs/context-layer-requirements.md §7.1): the exact context a
   // plan step, chat reply or spec call was given, with its manifest.
   const whatTheAgentSaw = vscode.commands.registerCommand(`${EXTENSION_ID}.whatTheAgentSaw`, async () => {
@@ -940,6 +949,7 @@ export function activate(context: vscode.ExtensionContext): void {
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
     testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
+    addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, runToolSkill,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential

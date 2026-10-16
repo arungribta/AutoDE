@@ -186,7 +186,32 @@ async function main() {
           return { id: q.id, kind: q.kind, question: q.question, found: q.expect.some((e) => seeds.has(e)), byLevel: levels.map(([, sig]) => { const s = seedsAt(q.question, sig); return q.expect.some((e) => s.has(e)); }) };
         })
       };
+
+      // Phase C4a item 11: vocabulary captured from the customer's glossary through the pack, all
+      // proposals accepted, then every question re-measured. Offline, a fixture stands in for the LLM.
+      const { BusinessPackManager } = dist('context/BusinessPackManager.js');
+      const wsE = path.join(scratch, 'estate');
+      fs.mkdirSync(path.join(wsE, 'docs'), { recursive: true });
+      fs.copyFileSync(path.join(REF, 'documents', 'pack', 'glossary.md'), path.join(wsE, 'docs', 'glossary.md'));
+      const standIn = JSON.parse(fs.readFileSync(path.join(REF, 'documents', 'pack', 'vocabulary-proposal.offline.json'), 'utf8'));
+      const complete = llmComplete(args, dist) || (async () => standIn);
+      const pm = new BusinessPackManager(path.join(wsE, '.ai-context', 'problems', 'eval', 'pack'), wsE, () => cfmE, () => {}, complete);
+      await pm.load();
+      await pm.addDocument({ path: 'docs/glossary.md', role: 'data_dictionary', authority: 'draft', version: '1' });
+      const proposals = (await pm.proposeVocabulary()).filter((p) => p.source === 'llm');
+      await pm.acceptVocabulary(proposals);
+      results.vocabulary.capture = {
+        llm: args.mode === 'offline' ? 'offline stand-in (documents/pack/vocabulary-proposal.offline.json)' : args.provider,
+        accepted: proposals.map((p) => `${p.kind} ${p.from} → ${p.to}`),
+        found: load('vocabulary-questions.yaml').questions.map((q) => {
+          const seeds = new Set(cfmE.buildContextPack({ purpose: 'qa', query: q.question }).manifest.seeds);
+          return { id: q.id, kind: q.kind, found: q.expect.some((e) => seeds.has(e)) };
+        })
+      };
     }
+
+    // ── Scenario P: the business-problem pack (Phase C4a) ──
+    results.pack = await measurePack({ createSut, args, scratch, dist, load, router });
 
     // ── Scenario L: the large estate (Phase K2) — scale, responsiveness, scoping ──
     results.large = await measureLargeEstate(dist, scratch);
@@ -282,7 +307,10 @@ async function main() {
     results.traps = [
       { id: 1, name: 'Revenue defined two ways (glossary gross vs chat net)', detected: !!revenueConflict, how: cap.conflicts ? (revenueConflict ? `conflict detector (${revenueConflict.rule} rule)` : 'conflict detector ran; no revenue conflict found') : 'not supported: no conflict detection' },
       { id: 2, name: 'Customer key corrected mid-chat (customer_id → cust_no)', detected: !!(cap.superseded && (await cap.superseded()).length), how: cap.superseded ? 'supersession' : ((sut.trapNotes || {})[2] || 'not supported: chat facts are not recorded, so nothing can be superseded') },
-      { id: 3, name: 'Claimed-unique member_id has duplicates', detected: !!(cap.verify && (await cap.verify({ table: 'crm.loyalty_members', column: 'member_id', predicate: 'unique' }))?.result === 'fail'), how: cap.verify ? 'verification probe' : 'not supported: no verification probes' },
+      await (async () => {
+        const v = cap.verify ? await cap.verify({ table: 'crm.loyalty_members', column: 'member_id', predicate: 'unique' }) : undefined;
+        return { id: 3, name: 'Claimed-unique member_id has duplicates', detected: !!v && v.result === 'fail', how: v ? `verification probe (${v.result}${v.status ? `, claim now ${v.status}` : ''}): ${v.detail}` : 'not supported: no verification probes' };
+      })(),
       { id: 4, name: 'Ticket-to-order join requested with no relationship', detected: !!ticketGap, how: cap.contextGaps ? (ticketGap ? `context gap (${ticketGap.reason}): ${ticketGap.text}` : 'context gaps supported; none raised for tickets ↔ orders') : `not supported: no context gaps (artifacts ${e7 && e7.pass ? 'did not' : 'did'} invent the join)` },
       { id: 5, name: 'Irrelevant 40-table schema ingested', detected: noiseFree, how: `noise tables in step context: ${results.contextNoiseLast.noiseTablesShown} (noise last), ${results.contextNoiseFirst.noiseTablesShown} (noise first)` }
     ];
@@ -384,6 +412,74 @@ async function measureLargeEstate(dist, scratch) {
   };
 }
 
+/** The LLM, when the run has one (replay/record): the same structured call the extension makes. Undefined offline. */
+function llmComplete(args, dist) {
+  if (args.mode === 'offline') return undefined;
+  const { DataAgentHubHub } = dist('core/agentHub.js');
+  const hub = new DataAgentHubHub({ getSettings: () => ({ defaultProvider: args.provider, autoApprove: false, logLevel: 'info', languageModelProgrammaticConsent: true }), getExtensionContext: () => ({ subscriptions: [], extensionUri: { fsPath: '.' }, secrets: { get: async () => undefined } }), getLlmApiKey: async () => process.env.AUTODE_EVAL_API_KEY, getSecret: async () => undefined });
+  return (system, user, purpose) => hub.completeJson(system, user, purpose);
+}
+
+/**
+ * Phase C4a acceptance: a house-format contract read through a confirmed interpretation profile,
+ * conformance of both sources (planted violations in source B, none in source A), contract v2
+ * superseding exactly its changed clauses, free-text BRD extraction (needs an LLM), interview
+ * questions that discovery answers, and vocabulary capture.
+ */
+async function measurePack({ createSut, args, scratch, dist, load, router }) {
+  const ws = path.join(scratch, 'pack');
+  fs.mkdirSync(path.join(ws, '.ai-context', 'profiles'), { recursive: true });
+  fs.mkdirSync(path.join(ws, 'docs'), { recursive: true });
+  const sut = createSut({ provider: args.provider });
+  await sut.setup({ workspaceDir: ws, referenceDir: REF, sourceOrder: ['shop.ddl', 'crm.ddl'], identities: { 'shop.ddl': { system: 'shop', environment: 'prod' }, 'crm.ddl': { system: 'crm', environment: 'prod' } } });
+  const cfm = sut.internals && sut.internals().cfm;
+  if (!cfm || !cfm.getCatalog) return null;
+  const { BusinessPackManager } = dist('context/BusinessPackManager.js');
+  const { filterInterviewQuestions } = dist('engine/context/discoveryGaps.js');
+  const expected = load('documents/pack/expected.yaml');
+  const copy = (from, to) => fs.copyFileSync(path.join(REF, from), path.join(ws, to));
+  copy('documents/pack/profile.house-contract.yaml', '.ai-context/profiles/house-contract.yaml');
+  copy('documents/pack/customer-contract.v1.yaml', 'docs/customer-contract.yaml');
+  copy('documents/pack/brd.md', 'docs/brd.md');
+  copy('sources/samples/shop_customers.csv', 'docs/shop_customers.csv');
+  copy('sources/samples/crm_customers.csv', 'docs/crm_customers.csv');
+  const complete = llmComplete(args, dist);
+  void router;
+  const pm = new BusinessPackManager(path.join(ws, '.ai-context', 'problems', 'eval', 'pack'), ws, () => cfm, () => {}, complete);
+  await pm.load();
+  await pm.addDocument({ path: 'docs/customer-contract.yaml', role: 'contract', authority: 'signed', version: '1' });
+  await pm.addDocument({ path: 'docs/brd.md', role: 'brd', authority: 'draft', version: '1' });
+  await pm.addDocument({ path: 'docs/shop_customers.csv', role: 'sample', authority: 'signed', version: '1', table: 'obj:shop/prod/shop.customers' });
+  await pm.addDocument({ path: 'docs/crm_customers.csv', role: 'sample', authority: 'signed', version: '1', table: 'obj:crm/prod/crm.customers' });
+  const v1 = await pm.applyDocument('customer-contract');
+  const { reports } = await pm.conformance(pm.probeExecutor());
+  const fails = (reports[0] ? reports[0].tables : []).flatMap((t) => t.results.filter((x) => x.status === 'fail').map((x) => ({ table: t.fqn, field: x.field, clause: x.clause, observed: x.observed })));
+  const found = expected.conformance.violations.map((v) => ({ ...v, found: fails.some((f) => f.table === v.table && f.field === v.field && f.clause === v.clause) }));
+  const falseInA = fails.filter((f) => expected.conformance.conforming.includes(f.table));
+  const unplanned = fails.filter((f) => !expected.conformance.conforming.includes(f.table) && !expected.conformance.violations.some((v) => v.table === f.table && v.field === f.field && v.clause === f.clause));
+  copy('documents/pack/customer-contract.v2.yaml', 'docs/customer-contract.yaml');
+  await pm.addDocument({ path: 'docs/customer-contract.yaml', role: 'contract', authority: 'signed', version: '2' });
+  const v2 = await pm.applyDocument('customer-contract');
+  const brd = await pm.applyDocument('brd');
+  const brdFacts = cfm.getLedger().assertions().filter((a) => a.createdBy === 'extractor:brd');
+  const graph = cfm.getPackSources().graph;
+  const qs = [...expected.interview.answered.map((q) => ({ prompt: q, expect: 'answered' })), ...expected.interview.ask.map((q) => ({ prompt: q, expect: 'ask' }))];
+  const filtered = filterInterviewQuestions(qs, graph, cfm.getLedger().assertions());
+  const vocab = await pm.proposeVocabulary();
+  return {
+    v1: v1.status === 'applied' ? v1.reconcile : { status: v1.status, reason: v1.reason },
+    v2: v2.status === 'applied' ? v2.reconcile : { status: v2.status, reason: v2.reason },
+    changedInV2Expected: expected.changedInV2,
+    violations: found,
+    falseInA,
+    unplanned,
+    tables: (reports[0] ? reports[0].tables : []).map((t) => ({ table: `${t.system}/${t.environment} ${t.fqn}`, pass: t.results.filter((x) => x.status === 'pass').length, fail: t.results.filter((x) => x.status === 'fail').length, notVerified: t.results.filter((x) => x.status === 'not_verified').length })),
+    brd: { status: brd.status, proposed: brdFacts.length, withSectionProvenance: brdFacts.filter((a) => a.status === 'proposed' && a.evidence.some((e) => /#[a-z0-9-]+:L\d+-L\d+@[0-9a-f]{12}$/.test(e.ref))).length, reason: brd.reason },
+    interview: qs.map((q) => ({ question: q.prompt, expect: q.expect, got: filtered.answered.some((a) => a.question === q) ? 'answered' : 'ask', reason: (filtered.answered.find((a) => a.question === q) || {}).reason })),
+    vocabulary: { proposals: vocab.length, mined: vocab.filter((p) => p.source === 'comments').length, fromDocuments: vocab.filter((p) => p.source === 'llm').length }
+  };
+}
+
 function summaryRows(r) {
   const g = r.grounding;
   const idTotal = g.tablesChecked + g.columnsChecked;
@@ -406,7 +502,12 @@ function summaryRows(r) {
     ['Source tables kept distinct at ingestion', 'all', `${r.ingestion.represented}/${r.ingestion.declared}`],
     ['Tables kept distinct across systems and environments', 'all', r.estate ? `${r.estate.distinct}/${r.estate.declared}` : 'n/a'],
     ['Stale-fact use', '0', r.manifests && r.manifests.staleUse !== null ? String(r.manifests.staleUse) : 'n/a — needs grounding manifests (C3)'],
+    ['Contract violations found (source B, planted)', 'all', r.pack ? `${r.pack.violations.filter((v) => v.found).length}/${r.pack.violations.length}; false in source A: ${r.pack.falseInA.length}` : 'n/a — no pack (before C4a)'],
+    ['Contract v2 clauses superseded', 'exactly the changed ones', r.pack && r.pack.v2.superseded !== undefined ? `${r.pack.v2.superseded} (expected ${r.pack.changedInV2Expected}); ${r.pack.v2.asserted} added, ${r.pack.v2.retracted} removed` : 'n/a'],
+    ['Interview questions handled correctly (discovery-answered dropped, others kept)', 'all', r.pack ? `${r.pack.interview.filter((q) => q.got === q.expect).length}/${r.pack.interview.length}` : 'n/a'],
+    ['BRD facts proposed with section provenance', 'reported', r.pack ? (r.pack.brd.status === 'extracted' ? `${r.pack.brd.withSectionProvenance}/${r.pack.brd.proposed}` : `not measured offline — ${r.pack.brd.reason}`) : 'n/a'],
     ['Vocabulary-mismatch seed recall', 'reported', r.vocabulary ? `${r.vocabulary.questions.filter((q) => q.found).length}/${r.vocabulary.questions.length} (paraphrases: ${r.vocabulary.questions.filter((q) => q.kind === 'paraphrase' && q.found).length}/${r.vocabulary.questions.filter((q) => q.kind === 'paraphrase').length})` : 'n/a — no catalog (before K2)'],
+    ['Paraphrase recall with captured vocabulary', 'reported', r.vocabulary && r.vocabulary.capture ? `${r.vocabulary.capture.found.filter((q) => q.kind === 'paraphrase' && q.found).length}/${r.vocabulary.capture.found.filter((q) => q.kind === 'paraphrase').length} (all questions: ${r.vocabulary.capture.found.filter((q) => q.found).length}/${r.vocabulary.capture.found.length})` : 'n/a — no vocabulary capture (before C4a)'],
     ['Large-estate seed recall', 'reported', r.large ? `${r.large.packs.filter((p) => p.found).length}/${r.large.packs.length}` : 'n/a'],
     ['Longest synchronous task, large estate', '≤ 100 ms', r.large ? `${Math.round(r.large.longestSyncMs)} ms` : 'n/a'],
     ['Plan-step context size', 'reported', `${r.contextNoiseLast.tokens} tokens median per step (max ${r.contextNoiseLast.tokensMax})`]
@@ -448,6 +549,21 @@ function renderReport(r) {
     else L.push(`- Same table name in two sources, kept distinct: ${c.nodes.join(', ')}.`);
   }
 
+  if (r.pack) {
+    const p = r.pack;
+    L.push('', '## Business-problem pack (Phase C4a)', '');
+    L.push('A house-format data contract (`documents/pack/customer-contract.v1.yaml`) read through a confirmed interpretation profile, checked against shop (source A) and crm (source B) with sample rows for the data clauses; then revision 2 of the contract; a draft BRD; the interview filter; vocabulary capture.', '');
+    L.push(`**Contract v1:** ${p.v1.asserted !== undefined ? `${p.v1.asserted} clauses recorded` : `${p.v1.status} (${p.v1.reason})`}. **Contract v2:** ${p.v2.superseded !== undefined ? `${p.v2.superseded} superseded, ${p.v2.asserted} added, ${p.v2.retracted} removed, ${p.v2.unchanged} unchanged (expected ${p.changedInV2Expected} superseded)` : `${p.v2.status}`}.`, '');
+    L.push('| Table | Pass | Fail | Not verified |', '|---|---|---|---|');
+    for (const t of p.tables) L.push(`| ${t.table} | ${t.pass} | ${t.fail} | ${t.notVerified} |`);
+    L.push('', '| Planted violation (source B) | Found |', '|---|---|');
+    for (const v of p.violations) L.push(`| ${v.table} ${v.field} — ${v.clause} | ${v.found ? 'yes' : 'no'} |`);
+    L.push('', `False violations in source A: ${p.falseInA.length}${p.falseInA.length ? ` (${p.falseInA.map((f) => `${f.field} ${f.clause}`).join(', ')})` : ''}. Other failures in source B: ${p.unplanned.length}${p.unplanned.length ? ` (${p.unplanned.map((f) => `${f.field} ${f.clause}`).join(', ')})` : ''}.`);
+    L.push('', `**BRD:** ${p.brd.status === 'extracted' ? `${p.brd.proposed} facts proposed, ${p.brd.withSectionProvenance} with section-level provenance` : `${p.brd.status} — ${p.brd.reason}`}.`);
+    L.push('', '| Interview question | Expected | Got | Why |', '|---|---|---|---|');
+    for (const q of p.interview) L.push(`| ${q.question} | ${q.expect} | ${q.got} | ${q.reason || ''} |`);
+    L.push('', `**Vocabulary capture:** ${p.vocabulary.proposals} proposal(s) — ${p.vocabulary.mined} mined from names and comments, ${p.vocabulary.fromDocuments} from the documents (LLM).`);
+  }
   if (r.large) {
     const g = r.large;
     L.push('', '## Large estate (Phase K2)', '');
@@ -470,6 +586,10 @@ function renderReport(r) {
     L.push(`| Question | Kind | Seeded | ${v.levels.join(' | ')} |`, `|---|---|---|${v.levels.map(() => '---').join('|')}|`);
     for (const q of v.questions) L.push(`| ${q.id} ${q.question} | ${q.kind} | ${q.found ? 'yes' : 'no'} | ${q.byLevel.map((b) => (b ? 'yes' : 'no')).join(' | ')} |`);
     L.push(`| **Total** | | **${v.questions.filter((q) => q.found).length}/${v.questions.length}** | ${v.levels.map((_, i) => `${v.questions.filter((q) => q.byLevel[i]).length}/${v.questions.length}`).join(' | ')} |`);
+    if (v.capture) {
+      const c = v.capture, n = c.found.filter((q) => q.found).length, para = c.found.filter((q) => q.kind === 'paraphrase');
+      L.push('', `**With captured vocabulary (Phase C4a):** the customer's glossary (\`documents/pack/glossary.md\`) added to a pack, vocabulary proposed by ${c.llm}, all ${c.accepted.length} proposal(s) accepted (${c.accepted.join('; ') || 'none'}). Seeded: ${n}/${c.found.length}, paraphrases ${para.filter((q) => q.found).length}/${para.length}${c.found.some((q) => !q.found) ? ` — still missed: ${c.found.filter((q) => !q.found).map((q) => q.id).join(', ')}` : ''}. Offline this measures the capture → accept → retrieval path, not the LLM's reading.`);
+    }
   }
 
   L.push('', '## Context delivery', '', '| | Noise imported last | Noise imported first |', '|---|---|---|');

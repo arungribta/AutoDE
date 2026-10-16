@@ -110,6 +110,12 @@ export interface BusinessProblemSpec {
   acceptanceCriteria?: string[];
   implementationConsiderations?: string[];
   sourceCatalog?: SourceEntry[];
+  /**
+   * Phase C4a: ledger ids of the business-problem pack's contract clauses this
+   * specification rests on — referenced, not copied, so the spec and the
+   * contract can't drift apart.
+   */
+  packRefs?: string[];
   /** Traceability: which question/skill/assumption produced each spec field. */
   provenance?: SpecProvenance[];
 

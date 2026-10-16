@@ -71,7 +71,7 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
   quality_expectation: {
     type: 'object',
     required: ['check'],
-    properties: { check: { enum: ['not_null', 'accepted_values', 'freshness', 'unique', 'range'] }, values: { type: 'array' }, maxAgeHours: { type: 'number' } }
+    properties: { check: { enum: ['not_null', 'accepted_values', 'freshness', 'unique', 'range', 'schema'] }, values: { type: 'array' }, maxAgeHours: { type: 'number' }, dataType: { type: 'string' }, isNullable: { type: 'boolean' }, columns: { type: 'object' } }
   },
   decision: { type: 'object' },
   assumption: { type: 'object' },

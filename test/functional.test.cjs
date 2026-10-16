@@ -6179,6 +6179,292 @@ async function main() {
     } finally { env.cleanup(); }
   });
 
+  // ---------- v0.33.0: Phase C4a — business-problem pack, discover → validate → ask, conformance ----------
+
+  const c4a = {
+    REF: require('node:path').join(__dirname, 'reference', 'retail-orders'),
+    read(rel) { return require('node:fs').readFileSync(require('node:path').join(c4a.REF, rel), 'utf8'); },
+    catalog() {
+      const { Catalog, entriesFromGraph } = require('../dist/engine/context/catalog.js');
+      const { parseFile } = require('../dist/engine/context/fileIngestion.js');
+      const cat = new Catalog('/unused');
+      for (const [f, sys] of [['shop.ddl', 'shop'], ['crm.ddl', 'crm']]) {
+        const r = parseFile(c4a.read(`sources/${f}`), f, { system: sys, environment: 'prod' });
+        cat.upsert(entriesFromGraph(r.nodes, r.edges));
+      }
+      return cat;
+    },
+    profile() { return require('../dist/engine/context/profiles.js').parseProfile(c4a.read('documents/pack/profile.house-contract.yaml')).profile; },
+    model(rel) { const pr = require('../dist/engine/context/profiles.js'); return pr.applyProfile(pr.parseStructured(c4a.read(rel)), c4a.profile()); },
+    doc(over = {}) { return { id: 'customer-contract', path: 'docs/customer-contract.yaml', role: 'contract', authority: 'signed', version: '1', addedAt: '2026-10-15T00:00:00Z', ...over }; },
+    async ledger() {
+      const os = require('node:os'); const fs = require('node:fs'); const p = require('node:path');
+      const dir = fs.mkdtempSync(p.join(os.tmpdir(), 'autode-c4a-'));
+      const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+      const ledger = new AssertionLedger(dir);
+      await ledger.load();
+      return { ledger, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+    },
+    samples() {
+      const { parseSampleCsv, createSampleProbeExecutor } = require('../dist/engine/context/probes.js');
+      return createSampleProbeExecutor(new Map([
+        ['obj:shop/prod/shop.customers', parseSampleCsv(c4a.read('sources/samples/shop_customers.csv'))],
+        ['obj:crm/prod/crm.customers', parseSampleCsv(c4a.read('sources/samples/crm_customers.csv'))]
+      ]));
+    }
+  };
+
+  await test('v0.33.0: the pack records documents by path with role, authority and version; clause refs pin the content hash', () => {
+    const pk = require('../dist/engine/context/pack.js');
+    let pack = pk.upsertDocument(pk.emptyPack(), { path: 'docs\\Customer Contract.yaml', role: 'contract', authority: 'signed', version: '1' });
+    pack = pk.upsertDocument(pack, { path: 'docs/Customer Contract.yaml', role: 'contract', authority: 'signed', version: '2' });
+    assert.strictEqual(pack.documents.length, 1, 'same path → same document');
+    assert.strictEqual(pack.documents[0].id, 'customer-contract');
+    assert.strictEqual(pack.documents[0].version, '2');
+    const back = pk.parsePack(pk.serializePack(pack));
+    assert.deepStrictEqual(back.documents.map((d) => [d.path, d.role, d.authority, d.version]), [['docs/Customer Contract.yaml', 'contract', 'signed', '2']]);
+    assert.strictEqual(pk.clauseRef('c.yaml', 'a[0].b[1]', 'abcdef0123456789'), 'c.yaml#a[0].b[1]@abcdef012345');
+    assert.strictEqual(pk.trustFor('signed'), 'confirmed');
+    assert.strictEqual(pk.trustFor('draft'), 'documented');
+    assert.deepStrictEqual(pk.parsePack('documents: [{ path: x.md, role: bogus }]').documents[0].role, 'other');
+  });
+
+  await test('v0.33.0: an interpretation profile reads a house-format contract deterministically; a proposal is validated and always starts "proposed"', () => {
+    const pr = require('../dist/engine/context/profiles.js');
+    const profile = c4a.profile();
+    assert.ok(profile && profile.status === 'confirmed');
+    const doc = pr.parseStructured(c4a.read('documents/pack/customer-contract.v1.yaml'));
+    assert.ok(pr.profileMatches(doc, profile) && !pr.profileMatches({ other: 1 }, profile));
+    const m = pr.applyProfile(doc, profile);
+    assert.deepStrictEqual(m.warnings, []);
+    const e = m.entities[0];
+    assert.deepStrictEqual([e.name, e.tables], ['customer', ['shop.customers', 'crm.customers']]);
+    assert.deepStrictEqual(e.fields.map((f) => [f.name, f.type, f.nullable, !!f.unique]), [['customer_ref', undefined, false, true], ['email', 'text(255)', false, false], ['phone', 'text(32)', true, false], ['country', 'text(2)', true, false], ['created', 'timestamp', true, false]]);
+    assert.deepStrictEqual(e.fields[0].columns, { shop: 'customer_id', crm: 'cust_no' });
+    assert.deepStrictEqual(e.rules, [{ field: 'email', check: 'not_null', path: 'data_objects[0].checks[0]' }]);
+    assert.deepStrictEqual(pr.applyProfile(doc, profile), m, 'deterministic');
+    const odd = pr.applyProfile({ contract_header: {}, data_objects: [{ object: 'x', checks: [{ on: 'a', rule: 'looks plausible' }] }] }, profile);
+    assert.ok(odd.warnings.some((w) => /not mapped by the profile/.test(w)), 'an unmapped rule is reported, not guessed');
+    const proposal = pr.parseProfileProposal({ ...profile, status: 'confirmed' });
+    assert.strictEqual(proposal.profile.status, 'proposed', 'the LLM cannot confirm its own profile');
+    assert.ok(pr.parseProfileProposal({ id: 'Bad Id', entities: {} }).errors.length > 0);
+    assert.ok(JSON.stringify(pr.buildProfileProposalPrompt(doc, 'c.yaml').user).includes('data_objects'));
+  });
+
+  await test('v0.33.0: contract clauses are expectations with clause provenance; revision 2 supersedes exactly the changed clauses; a removed clause is retracted', async () => {
+    const { reconcileContract, contractClauses } = require('../dist/engine/context/contracts.js');
+    const { contentSha } = require('../dist/engine/context/pack.js');
+    const env = await c4a.ledger();
+    try {
+      const v1 = c4a.read('documents/pack/customer-contract.v1.yaml');
+      const clauses = contractClauses(c4a.doc(), c4a.model('documents/pack/customer-contract.v1.yaml'), contentSha(v1));
+      assert.ok(clauses.every((c) => c.assertion.kind === 'quality_expectation' && c.assertion.trust === 'confirmed' && c.assertion.subject[0].startsWith('contract:customer-contract/customer.')));
+      assert.ok(clauses.every((c) => /^docs\/customer-contract\.yaml#data_objects\[0\]\.(elements|checks)\[\d\]@[0-9a-f]{12}$/.test(c.assertion.evidence[0].ref)));
+      assert.deepStrictEqual(await reconcileContract(env.ledger, c4a.doc(), c4a.model('documents/pack/customer-contract.v1.yaml'), contentSha(v1)), { asserted: 7, superseded: 0, retracted: 0, unchanged: 0 });
+      assert.deepStrictEqual(await reconcileContract(env.ledger, c4a.doc(), c4a.model('documents/pack/customer-contract.v1.yaml'), contentSha(v1)), { asserted: 0, superseded: 0, retracted: 0, unchanged: 7 }, 're-applying the same version changes nothing');
+      const v2 = c4a.read('documents/pack/customer-contract.v2.yaml');
+      assert.deepStrictEqual(await reconcileContract(env.ledger, c4a.doc({ version: '2' }), c4a.model('documents/pack/customer-contract.v2.yaml'), contentSha(v2)), { asserted: 0, superseded: 3, retracted: 0, unchanged: 4 });
+      const superseded = env.ledger.assertions().filter((a) => a.status === 'superseded').map((a) => a.subject[0]).sort();
+      assert.deepStrictEqual(superseded, ['contract:customer-contract/customer.country', 'contract:customer-contract/customer.created', 'contract:customer-contract/customer.phone']);
+      const m3 = c4a.model('documents/pack/customer-contract.v2.yaml');
+      m3.entities[0].rules = [];
+      const r3 = await reconcileContract(env.ledger, c4a.doc({ version: '3', authority: 'draft' }), m3, 'f'.repeat(64));
+      assert.strictEqual(r3.retracted, 1, 'the dropped check is retracted');
+      assert.strictEqual(r3.superseded, 6, 'a draft revision changes every remaining clause\'s trust (confirmed → documented)');
+      const gone = env.ledger.assertions().find((a) => a.predicate === 'not_null' && a.status === 'rejected');
+      assert.ok(/no longer in docs\/customer-contract\.yaml v3/.test(gone.reviewReason));
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.33.0: conformance — every planted violation in source B, none in source A; without probes data clauses are "not verified", never passed', async () => {
+    const { checkConformance, renderConformanceReport, typeFamily, physicalColumn } = require('../dist/engine/context/conformance.js');
+    const cat = c4a.catalog();
+    const model = c4a.model('documents/pack/customer-contract.v1.yaml');
+    const r = await checkConformance(c4a.doc(), model, cat, c4a.samples());
+    const fails = (fqn) => r.tables.find((t) => t.fqn === fqn).results.filter((x) => x.status === 'fail').map((x) => `${x.field}:${x.clause}`).sort();
+    assert.deepStrictEqual(fails('crm.customers'), ['country:present', 'created:type', 'customer_ref:unique', 'email:nullability']);
+    assert.deepStrictEqual(fails('shop.customers'), []);
+    const dup = r.tables.find((t) => t.fqn === 'crm.customers').results.find((x) => x.clause === 'unique');
+    assert.ok(!/C-20003/.test(dup.observed), 'counts only — no key values in the report');
+    const md = renderConformanceReport(r);
+    assert.ok(/\*\*FAIL\*\*/.test(md) && /docs\/customer-contract\.yaml#data_objects\[0\]\.elements\[3\]/.test(md));
+    const offline = await checkConformance(c4a.doc(), model, cat, undefined);
+    const uniq = offline.tables.flatMap((t) => t.results).filter((x) => x.clause === 'unique' || x.clause === 'not_null');
+    assert.ok(uniq.length > 0 && uniq.every((x) => x.status === 'not_verified'));
+    assert.deepStrictEqual(['VARCHAR(10)', 'text(2)', 'TIMESTAMP_NTZ', 'DATE', 'NUMBER(10,2)', 'BIGINT', 'VARIANT'].map(typeFamily), ['string', 'string', 'timestamp', 'date', 'number', 'integer', undefined]);
+    const crm = cat.all().find((e) => e.id === 'obj:crm/prod/crm.customers');
+    assert.strictEqual(physicalColumn(model.entities[0].fields[0], crm), 'cust_no');
+    const bound = await checkConformance(c4a.doc({ bindings: { customer: ['obj:shop/prod/shop.customers'] } }), model, cat);
+    assert.deepStrictEqual(bound.tables.map((t) => t.fqn), ['shop.customers'], 'an explicit pack binding wins');
+  });
+
+  await test('v0.33.0: probes are fixed aggregate-only templates per dialect, refuse non-identifiers, and agree between live SQL and sample rows', async () => {
+    const pr = require('../dist/engine/context/probes.js');
+    const spec = { check: 'unique', table: { fqn: 'CRM.PUBLIC.CUSTOMERS', id: 'obj:crm/prod/crm.customers' }, columns: ['CUST_NO'] };
+    assert.strictEqual(pr.renderProbeSql(spec, 'snowflake', { sampleRows: 1000 }), 'SELECT COUNT(*) AS row_count, COUNT(DISTINCT CUST_NO) AS distinct_count, SUM(CASE WHEN CUST_NO IS NULL THEN 1 ELSE 0 END) AS null_count FROM CRM.PUBLIC.CUSTOMERS SAMPLE (1000 ROWS)');
+    assert.ok(/TABLESAMPLE \(10 ROWS\)/.test(pr.renderProbeSql(spec, 'spark_sql', { sampleRows: 10 })));
+    assert.ok(/NOT IN \('A', 'O''B'\)/.test(pr.renderProbeSql({ ...spec, check: 'accepted_values', values: ['A', "O'B"] }, 'ansi')));
+    assert.ok(/LEFT JOIN \(SELECT DISTINCT ID FROM SHOP\.C\) t ON f\.SHOP_ID = t\.ID/.test(pr.renderProbeSql({ check: 'orphans', table: { fqn: 'CRM.C' }, columns: ['SHOP_ID'], to: { fqn: 'SHOP.C', columns: ['ID'] } }, 'snowflake')));
+    assert.throws(() => pr.renderProbeSql({ ...spec, columns: ['x; DROP TABLE y'] }, 'snowflake'), /not a plain identifier/);
+    for (const check of ['unique', 'not_null', 'accepted_values', 'orphans', 'freshness']) {
+      const sql = pr.renderProbeSql({ check, table: { fqn: 'T' }, columns: ['C'], values: ['A'], to: { fqn: 'U', columns: ['D'] } }, 'snowflake');
+      assert.ok(/^SELECT COUNT\(\*\) AS row_count/.test(sql) && !/SELECT \*(?! FROM)/.test(sql.replace('COUNT(*)', '')), `${check} returns aggregates only`);
+    }
+    // The same aggregates from live SQL and from the sample agree.
+    const rows = pr.parseSampleCsv(c4a.read('sources/samples/crm_customers.csv'));
+    const sample = await pr.createSampleProbeExecutor(new Map([[spec.table.id, rows]])).run({ ...spec, columns: ['cust_no'] });
+    const live = await pr.createSqlProbeExecutor(async () => [{ ROW_COUNT: 4, DISTINCT_COUNT: 3, NULL_COUNT: 0 }], 'snowflake').run(spec);
+    assert.deepStrictEqual([sample.pass, sample.observed.duplicates, sample.source], [false, 1, 'sample']);
+    assert.deepStrictEqual([live.pass, live.observed.duplicates, live.source], [false, 1, 'live']);
+    const values = new Set(rows.flatMap((r) => Object.values(r)).filter((v) => v.length > 3));
+    assert.ok(![...values].some((v) => JSON.stringify(sample).includes(v)), 'no sample value leaves the probe');
+    // combined: live where it reaches the table, else the sample
+    const combined = pr.combineProbeExecutors([{ kind: 'live', covers: () => false, run: async () => { throw new Error('not here'); } }, pr.createSampleProbeExecutor(new Map([[spec.table.id, rows]]))]);
+    assert.strictEqual((await combined.run({ ...spec, columns: ['cust_no'] })).source, 'sample');
+    assert.strictEqual(await combined.run({ ...spec, table: { fqn: 'X', id: 'obj:x/y/z' } }), undefined);
+  });
+
+  await test('v0.33.0: verifying claims records verified (trust → verified) or verification_failed (→ needs_review, numbers as the reason); contract subjects are not probed', async () => {
+    const pr = require('../dist/engine/context/probes.js');
+    const env = await c4a.ledger();
+    try {
+      const ev = [{ type: 'chat_message', ref: 't7' }];
+      const bad = await env.ledger.assert({ kind: 'key', subject: ['obj:crm/prod/crm.customers'], predicate: 'unique', value: ['cust_no'], statement: 'cust_no is unique', evidence: ev, trust: 'inferred', status: 'proposed' });
+      const good = await env.ledger.assert({ kind: 'key', subject: ['obj:shop/prod/shop.customers'], predicate: 'unique', value: ['customer_id'], statement: 'customer_id is unique', evidence: ev, trust: 'inferred', status: 'proposed' });
+      const nn = await env.ledger.assert({ kind: 'quality_expectation', subject: ['obj:shop/prod/shop.customers.email'], predicate: 'not_null', value: { check: 'not_null' }, statement: 'email is never blank', evidence: ev, trust: 'documented', status: 'active' });
+      const resolve = (id) => !id.startsWith('obj:') ? undefined : id.endsWith('.email') ? { table: { fqn: 'shop.customers', id: 'obj:shop/prod/shop.customers' }, column: 'email' } : id.startsWith('obj:') ? { table: { fqn: id.split('/').pop(), id } } : undefined;
+      const out = await pr.verifyAssertions(env.ledger, [bad, good, nn], c4a.samples(), resolve);
+      assert.deepStrictEqual(out.map((o) => o.result && o.result.pass), [false, true, true]);
+      const after = (a) => env.ledger.get(a.id);
+      assert.deepStrictEqual([after(bad).status, after(bad).verification.result], ['needs_review', 'fail']);
+      assert.ok(/not unique: 1 duplicate/.test(after(bad).reviewReason) && /\(sample data\)$/.test(after(bad).reviewReason));
+      assert.deepStrictEqual([after(good).trust, after(good).status], ['verified', 'proposed'], 'verified evidence, still the engineer\'s call to confirm');
+      assert.strictEqual(after(nn).trust, 'verified');
+      assert.deepStrictEqual(pr.probesFor({ kind: 'quality_expectation', subject: ['contract:x/customer.email'], value: { check: 'not_null' } }, resolve), []);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.33.0: free-text extraction proposes facts with section-level provenance; bad facts are dropped, unresolved subjects flagged, re-extraction adds nothing', async () => {
+    const dx = require('../dist/engine/context/documentExtraction.js');
+    const brd = c4a.read('documents/pack/brd.md');
+    const sections = dx.splitSections(brd);
+    assert.deepStrictEqual(sections.map((s) => s.path), ['retail-analytics-business-requirements-draft:L1-L1', '1-purpose:L3-L4', '2-definitions:L6-L8', '3-data-rules:L10-L12', '4-constraints:L14-L15']);
+    assert.ok(dx.buildDocumentExtractionPrompt({ path: 'brd.md', role: 'brd' }, sections).user.includes('[2-definitions:L6-L8]'));
+    const raw = { facts: [
+      { section: '2-definitions:L6-L8', kind: 'metric', subject: ['net revenue'], predicate: 'defined_as', value: { name: 'net revenue', definition: 'gross minus discounts and refunds, excluding cancelled orders' }, statement: 'Net revenue is gross order line value minus discounts and refunds, excluding cancelled orders.' },
+      { section: '3-data-rules:L10-L12', kind: 'quality_expectation', subject: ['shop.orders.status'], predicate: 'accepted_values', value: { check: 'accepted_values', values: ['PLACED', 'SHIPPED', 'CANCELLED', 'RETURNED'] }, statement: 'Order status is one of PLACED, SHIPPED, CANCELLED or RETURNED.' },
+      { section: '9-nowhere', kind: 'decision', subject: ['x'], value: {}, statement: 'invented' },
+      { section: '1-purpose:L3-L4', kind: 'key', subject: ['shop.orders'], predicate: 'unique', value: 'not a list', statement: 'bad value' }
+    ] };
+    const resolve = (r) => (r === 'shop.orders.status' ? 'obj:shop/prod/shop.orders.status' : undefined);
+    const out = dx.parseDocumentExtraction(raw, { id: 'brd', path: 'docs/brd.md' }, sections, 'a'.repeat(64), resolve);
+    assert.strictEqual(out.proposed.length, 2);
+    assert.strictEqual(out.dropped.length, 2);
+    assert.ok(out.proposed.every((p) => p.status === 'proposed' && p.trust === 'inferred' && /^docs\/brd\.md#[a-z0-9-]+:L\d+-L\d+@a{12}$/.test(p.evidence[0].ref)));
+    assert.deepStrictEqual(out.proposed[0].flags, ['unresolved_subject']);
+    assert.deepStrictEqual(out.proposed[1].subject, ['obj:shop/prod/shop.orders.status']);
+    const env = await c4a.ledger();
+    try {
+      assert.strictEqual(await dx.recordExtraction(env.ledger, out), 2);
+      assert.strictEqual(await dx.recordExtraction(env.ledger, out), 0, 'equal proposals are not recorded twice');
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.33.0: discover → validate → ask — questions discovery answers are dropped with the reason; the rest are asked', () => {
+    const dg = require('../dist/engine/context/discoveryGaps.js');
+    const { parseDdl } = require('../dist/engine/context/fileIngestion.js');
+    const g = parseDdl(c4a.read('sources/shop.ddl'), '/shop.ddl', { system: 'shop', environment: 'prod' });
+    const graph = { nodes: g.nodes, edges: g.edges };
+    const grain = { id: 'G1', kind: 'grain', subject: ['obj:shop/prod/shop.order_items'], predicate: 'grain', value: ['order_item_id'], status: 'active', trust: 'confirmed', evidence: [], statement: '', validFrom: '', createdBy: 'u', createdAt: '' };
+    const qs = ['What is the primary key of shop.customers?', 'What is the grain of shop.order_items?', 'What is the grain of shop.orders?', 'How should refunds after the reporting day be treated?', 'What is the key of dim_customer?'].map((prompt) => ({ prompt }));
+    const r = dg.filterInterviewQuestions(qs, graph, [grain]);
+    assert.deepStrictEqual(r.answered.map((a) => a.question.prompt), ['What is the primary key of shop.customers?', 'What is the grain of shop.order_items?']);
+    assert.ok(/declared in its schema/.test(r.answered[0].reason) && /confirmed/.test(r.answered[1].reason));
+    assert.strictEqual(r.ask.length, 3);
+    const block = dg.knownFactsBlock(dg.knownFacts(graph, [grain]));
+    assert.ok(/do not ask/.test(block) && /the key of shop\.customers is \(customer_id\)/.test(block));
+  });
+
+  await test('v0.33.0: vocabulary capture — abbreviations mined from names and comments without an LLM; LLM proposals filtered; accepted entries merged into vocabulary.yaml', () => {
+    const v = require('../dist/engine/context/vocabulary.js');
+    const vocab = v.buildVocabulary();
+    const mined = v.mineAbbreviations([
+      { name: 'PTRN_NO', comment: 'Patron number' }, { name: 'PTRN_TIER', comment: 'Patron loyalty tier' },
+      { name: 'ENGMT_ID', comment: 'Engagement identifier' }, { name: 'CUST_NO', comment: 'Customer number' }, { name: 'X_Y', comment: 'nothing to see' }
+    ], vocab);
+    assert.deepStrictEqual(mined.map((p) => [p.from, p.to, p.support]), [['ptrn', 'patron', 2], ['engmt', 'engagement', 1]], 'CUST is already known; unsupported tokens are not guessed');
+    const llm = v.parseVocabularyProposal({ abbreviations: { CUST: 'customer', PTRN: 'patron', 'bad key!': 'x' }, synonyms: [['campaign', 'engagement'], ['customer', 'client']] }, vocab);
+    assert.deepStrictEqual(llm.map((p) => `${p.kind}:${p.from}->${p.to}`), ['abbreviation:ptrn->patron', 'synonym:engagement->campaign'], 'known entries are skipped');
+    const phrases = v.parseVocabularyProposal({ synonyms: [['refund', 'money back'], ['ticket', 'complaint', 'service request']] }, vocab);
+    assert.deepStrictEqual(phrases.map((p) => `${p.from}->${p.to}`), ['complaint->ticket'], 'multi-word synonyms are dropped: retrieval matches single words, so they could never apply');
+    const text = v.mergeVocabularyFile('synonyms:\n  - [customer, patron]\n', [...mined, ...llm]);
+    const merged = v.buildVocabulary(v.parseVocabularyFile(text));
+    assert.deepStrictEqual(v.concepts('PTRN_NO ENGMT engagement', merged), ['customer', 'number', 'campaign', 'campaign']);
+  });
+
+  await test('v0.33.0: BusinessPackManager — a contract with no confirmed profile gets one proposed for review (not applied); once confirmed it is applied; samples feed probes', async () => {
+    const os = require('node:os'); const fs = require('node:fs'); const p = require('node:path');
+    const env = await k2.cfm();
+    try {
+      const big = require('../dist/engine/context/fileIngestion.js').parseFile(c4a.read('sources/crm.ddl'), 'crm.ddl', { system: 'crm', environment: 'prod' });
+      await env.cfm.ingestParsed(big.nodes, big.edges);
+      fs.mkdirSync(p.join(env.dir, 'docs'), { recursive: true });
+      fs.writeFileSync(p.join(env.dir, 'docs', 'contract.yaml'), c4a.read('documents/pack/customer-contract.v1.yaml'));
+      fs.writeFileSync(p.join(env.dir, 'docs', 'crm.csv'), c4a.read('sources/samples/crm_customers.csv'));
+      const asked = [];
+      const complete = async (system, user, purpose) => { asked.push(purpose); return { ...c4a.profile(), id: 'house-contract' }; };
+      const { BusinessPackManager } = require('../dist/context/BusinessPackManager.js');
+      const pm = new BusinessPackManager(p.join(env.dir, '.ai-context', 'problems', 'x', 'pack'), env.dir, () => env.cfm, () => {}, complete);
+      await pm.load();
+      const doc = await pm.addDocument({ path: p.join(env.dir, 'docs', 'contract.yaml'), role: 'contract', authority: 'signed', version: '1' });
+      assert.strictEqual(doc.path, 'docs/contract.yaml', 'stored workspace-relative');
+      const first = await pm.applyDocument(doc.id);
+      assert.strictEqual(first.status, 'profile_proposed');
+      assert.ok(/status: proposed/.test(fs.readFileSync(first.profilePath, 'utf8')));
+      assert.strictEqual((await pm.applyDocument(doc.id)).status, 'needs_profile', 'a proposed profile is not applied until confirmed');
+      assert.strictEqual(asked.length, 1);
+      fs.writeFileSync(first.profilePath, fs.readFileSync(first.profilePath, 'utf8').replace('status: proposed', 'status: confirmed'));
+      await pm.load();
+      const applied = await pm.applyDocument(doc.id);
+      assert.strictEqual(applied.status, 'applied');
+      assert.strictEqual(applied.reconcile.asserted, 7);
+      assert.strictEqual(pm.clauseIds().length, 7);
+      assert.ok(/Contract clauses/.test(pm.summary()));
+      await pm.addDocument({ path: 'docs/crm.csv', role: 'sample', authority: 'signed', version: '1', table: 'obj:crm/prod/crm.customers' });
+      const { reports } = await pm.conformance(pm.probeExecutor());
+      const crm = reports[0].tables.find((t) => t.fqn === 'crm.customers');
+      assert.ok(crm.results.some((x) => x.clause === 'unique' && x.status === 'fail'));
+      const noLlm = new BusinessPackManager(p.join(env.dir, 'p2'), env.dir, () => env.cfm, () => {});
+      await noLlm.addDocument({ path: 'docs/brd.md', role: 'brd', authority: 'draft', version: '1' });
+      fs.writeFileSync(p.join(env.dir, 'docs', 'brd.md'), c4a.read('documents/pack/brd.md'));
+      assert.strictEqual((await noLlm.applyDocument('brd')).status, 'needs_llm');
+      void os;
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.33.0: ConnectionManager.probeExecutor() runs one-row aggregate SQL on its own system only', async () => {
+    const { ConnectionManager } = require('../dist/engine/platform/ConnectionManager.js');
+    const { SnowflakeAdapter } = require('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const sf = new SnowflakeAdapter({ account: 'acme', username: 'u' }, () => {});
+    const seen = [];
+    sf.executeQuery = async (sql, opts) => { seen.push([sql, opts.maxRows]); return { columns: [], rows: [{ ROW_COUNT: 10, NULL_COUNT: 0 }], rowCount: 1, executionTimeMs: 0 }; };
+    const cm = new ConnectionManager(() => {});
+    assert.strictEqual(cm.probeExecutor(), undefined);
+    cm.activeAdapter = sf;
+    cm.setEstateResolver(() => ({ identity: { system: 'shop', environment: 'prod', role: 'source' } }));
+    const ex = cm.probeExecutor({ sampleRows: 500 });
+    assert.ok(ex.covers('obj:shop/prod/sales.public.orders') && !ex.covers('obj:crm/prod/crm.customers'));
+    const r = await ex.run({ check: 'not_null', table: { fqn: 'SALES.PUBLIC.ORDERS', id: 'obj:shop/prod/sales.public.orders' }, columns: ['ORDER_ID'] });
+    assert.deepStrictEqual([r.pass, r.source, r.sampled], [true, 'live', true]);
+    assert.deepStrictEqual(seen, [['SELECT COUNT(*) AS row_count, SUM(CASE WHEN ORDER_ID IS NULL THEN 1 ELSE 0 END) AS null_count FROM SALES.PUBLIC.ORDERS SAMPLE (500 ROWS)', 1]]);
+  });
+
+  await test('v0.33.0: an inline PRIMARY KEY column is NOT NULL (it was recorded as nullable)', () => {
+    const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+    const cols = parseDdl('CREATE TABLE s.t (id INTEGER PRIMARY KEY, v VARCHAR(5));', '/x.ddl').nodes.filter((n) => n.type === 'column');
+    assert.deepStrictEqual(cols.map((c) => [c.label, c.isNullable]), [['id', false], ['v', true]]);
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

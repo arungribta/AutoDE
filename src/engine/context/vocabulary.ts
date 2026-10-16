@@ -153,3 +153,99 @@ export function concepts(text: string, vocab: Vocabulary, signals: VocabularySig
   }
   return out;
 }
+
+// ── Vocabulary capture (Phase C4a, item 11) ──────────────────────────────────
+
+/** A proposed vocabulary entry, for the engineer to accept or reject. */
+export interface VocabularyProposal {
+  kind: 'abbreviation' | 'synonym';
+  /** The abbreviation, or the word to fold. */
+  from: string;
+  /** The expansion, or the word it means. */
+  to: string;
+  source: 'comments' | 'llm';
+  /** How many names/comments support it (mined) — 0 for LLM proposals. */
+  support: number;
+  example?: string;
+}
+
+/**
+ * Mines abbreviations from names whose comments spell them out —
+ * `CUST_NO` "Customer number" → CUST = customer — without an LLM: a token is
+ * proposed for a comment word that starts with the same letter and contains
+ * the token's letters in order. Tokens the vocabulary already expands, and
+ * tokens that are themselves words of the comments, are skipped.
+ */
+export function mineAbbreviations(items: ReadonlyArray<{ name: string; comment?: string }>, vocab: Vocabulary): VocabularyProposal[] {
+  const votes = new Map<string, Map<string, { n: number; example: string }>>();
+  const commentWords = new Set<string>();
+  for (const it of items) for (const w of splitWords(it.comment ?? '')) commentWords.add(w);
+  const subsequence = (t: string, w: string) => { let i = 0; for (const ch of w) if (ch === t[i]) i++; return i === t.length; };
+  for (const it of items) {
+    if (!it.comment) continue;
+    const words = splitWords(it.comment).filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
+    for (const t of splitWords(it.name)) {
+      if (t.length < 2 || t.length > 6 || vocab.abbreviations.has(t) || commentWords.has(t)) continue;
+      const w = words.find((x) => x.length > t.length && x[0] === t[0] && subsequence(t, x));
+      if (!w) continue;
+      const m = votes.get(t) ?? new Map<string, { n: number; example: string }>();
+      const cur = m.get(w) ?? { n: 0, example: `${it.name} "${it.comment}"` };
+      cur.n++;
+      m.set(w, cur);
+      votes.set(t, m);
+    }
+  }
+  const out: VocabularyProposal[] = [];
+  for (const [t, m] of votes) {
+    const ranked = [...m.entries()].sort((a, b) => b[1].n - a[1].n || (a[0] < b[0] ? -1 : 1));
+    if (ranked.length > 1 && ranked[0][1].n === ranked[1][1].n) continue; // ambiguous: leave it to the engineer
+    out.push({ kind: 'abbreviation', from: t, to: singularize(ranked[0][0]), source: 'comments', support: ranked[0][1].n, example: ranked[0][1].example });
+  }
+  return out.sort((a, b) => b.support - a.support || (a.from < b.from ? -1 : 1));
+}
+
+export function buildVocabularyProposalPrompt(documents: ReadonlyArray<{ path: string; text: string }>, existing: Vocabulary): { system: string; user: string } {
+  return {
+    system: [
+      'You read a customer\'s business documents and list the vocabulary a search over their data estate needs: abbreviations used in physical names, and words this organisation uses for concepts other organisations name differently (e.g. "patron" for customer, "engagement" for campaign).',
+      'Respond with one JSON object only: { "abbreviations": { "<ABBR>": "<expansion>" }, "synonyms": [ ["<common word>", "<their word>"] ] }.',
+      'Synonyms are single words: retrieval matches word by word, so a phrase ("money back") can never match and is dropped.',
+      'Only entries the documents support. Skip anything already known.'
+    ].join('\n'),
+    user: `Already known abbreviations: ${[...existing.abbreviations.keys()].slice(0, 200).join(', ')}\n\n${documents.map((d) => `## ${d.path}\n${d.text.slice(0, 20_000)}`).join('\n\n')}\n\nList the vocabulary now.`
+  };
+}
+
+export function parseVocabularyProposal(raw: unknown, existing: Vocabulary): VocabularyProposal[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const r = raw as { abbreviations?: Record<string, unknown>; synonyms?: unknown[] };
+  const out: VocabularyProposal[] = [];
+  for (const [k, v] of Object.entries(r.abbreviations ?? {})) {
+    const from = k.toLowerCase().trim();
+    if (typeof v === 'string' && /^[a-z0-9]{1,10}$/.test(from) && !existing.abbreviations.has(from) && v.trim()) out.push({ kind: 'abbreviation', from, to: v.trim().toLowerCase(), source: 'llm', support: 0 });
+  }
+  for (const g of Array.isArray(r.synonyms) ? r.synonyms : []) {
+    if (!Array.isArray(g) || g.length < 2) continue;
+    // Single words only: concepts() matches word by word, so an accepted phrase would silently do nothing.
+    const words = g.map((x) => String(x).toLowerCase().trim()).filter((x) => /^[a-z]+$/.test(x)).map(singularize);
+    if (words.length < 2) continue;
+    const [to, ...rest] = words;
+    for (const from of rest) if (from !== to && existing.synonyms.get(from) !== (existing.synonyms.get(to) ?? to)) out.push({ kind: 'synonym', from, to, source: 'llm', support: 0 });
+  }
+  return out;
+}
+
+/** Adds accepted proposals to a vocabulary file's text (theirs first, then ours), keeping what was there. */
+export function mergeVocabularyFile(existingText: string | undefined, accepted: readonly VocabularyProposal[]): string {
+  const file = parseVocabularyFile(existingText);
+  const abbreviations = { ...(file.abbreviations ?? {}) };
+  const synonyms = [...(file.synonyms ?? [])];
+  for (const p of accepted) {
+    if (p.kind === 'abbreviation') abbreviations[p.from.toUpperCase()] = p.to;
+    else synonyms.push([p.to, p.from]);
+  }
+  const lines = ['# Vocabulary for retrieval: abbreviations and synonyms (extends AutoDE\'s defaults; yours win). Edited by hand or via "AutoDE: Propose Vocabulary".'];
+  if (synonyms.length) lines.push('synonyms:', ...synonyms.map((g) => `  - [${g.map((w) => JSON.stringify(w)).join(', ')}]`));
+  if (Object.keys(abbreviations).length) lines.push('abbreviations:', ...Object.entries(abbreviations).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)}`));
+  return lines.join('\n') + '\n';
+}

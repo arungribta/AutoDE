@@ -25,6 +25,7 @@ function createPacksSut({ provider }) {
   let sut;
   const cfm = () => sut.internals().cfm;
   let workspace;
+  let referenceDir;
   const run = { manifestFiles: 0 };
 
   sut = createLedgerSut({
@@ -61,6 +62,7 @@ function createPacksSut({ provider }) {
 
     async setup(opts) {
       workspace = opts.workspaceDir;
+      referenceDir = opts.referenceDir;
       await setup(opts);
     },
 
@@ -81,6 +83,27 @@ function createPacksSut({ provider }) {
 
     capabilities: {
       ...sut.capabilities,
+      /**
+       * Phase C4a: a claim checked by a probe. The reference problem ships sample rows
+       * (sources/samples/<table>.csv); the probe computes aggregates over them and the
+       * outcome is recorded in the ledger (verified / verification_failed).
+       */
+      async verify({ table, column, predicate }) {
+        const { createSampleProbeExecutor, parseSampleCsv, verifyAssertions } = dist('engine/context/probes.js');
+        const { BusinessPackManager } = dist('context/BusinessPackManager.js');
+        const graph = cfm().getPackSources().graph;
+        const node = graph.nodes.find((n) => n.type === 'table' && String(n.fqn || '').toLowerCase() === table.toLowerCase());
+        const sample = node && path.join(referenceDir, 'sources', 'samples', `${node.label}.csv`);
+        if (!node || !fs.existsSync(sample)) return { result: 'not_verified', detail: 'no sample of this table' };
+        const executor = createSampleProbeExecutor(new Map([[node.id, parseSampleCsv(fs.readFileSync(sample, 'utf8'))]]));
+        const resolver = new BusinessPackManager(path.join(workspace, 'pack'), workspace, cfm, () => {}).probeResolver();
+        const ledger = cfm().getLedger();
+        const claim = ledger.assertions().find((a) => a.kind === 'key' && a.subject[0] === node.id && Array.isArray(a.value) && a.value.includes(column) && predicate === 'unique');
+        if (!claim) return { result: 'not_verified', detail: 'no such claim in the ledger' };
+        const [outcome] = await verifyAssertions(ledger, [claim], executor, resolver);
+        const r = outcome && outcome.result;
+        return { result: r && r.pass === false ? 'fail' : r && r.pass ? 'pass' : 'not_verified', detail: r ? r.detail : outcome && outcome.skipped, status: ledger.get(claim.id).status };
+      },
       async contextGaps() {
         const seen = new Set();
         return gaps.filter((g) => {

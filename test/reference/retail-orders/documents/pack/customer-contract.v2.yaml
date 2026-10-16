@@ -1,0 +1,33 @@
+# Customer 360 — data contract, in the client data office's own format (not a standard).
+# Revision 2: three clauses changed (phone, country, created types). The conformance findings are the same as for revision 1.
+contract_header:
+  title: Customer 360 merge
+  revision: 2
+  steward: Data Office
+  status: signed
+data_objects:
+  - object: customer
+    summary: One record per customer across the shop and CRM systems.
+    realised_by: [shop.customers, crm.customers]
+    elements:
+      - element: customer_ref
+        mandatory: Y
+        unique_id: Y
+        physical: { shop: customer_id, crm: cust_no }
+      - element: email
+        kind: text(255)
+        mandatory: Y
+      - element: phone
+        kind: text(40)
+        mandatory: N
+      - element: country
+        kind: text(3)
+        mandatory: N
+        physical: { shop: country_code, crm: country_code }
+      - element: created
+        kind: timestamp_tz
+        mandatory: N
+        physical: { shop: created_at, crm: created_date }
+    checks:
+      - on: email
+        rule: no blanks

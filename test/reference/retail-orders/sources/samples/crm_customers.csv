@@ -1,0 +1,5 @@
+cust_no,shop_customer_id,full_name,email,phone,segment_code,lifecycle_stage,created_date,last_modified
+C-20001,1,Ana Lopez,ana@example.com,+44 20 7946 0001,RETAIL,ACTIVE,2025-01-02,2025-06-01 09:00:00
+C-20002,2,Ben Okafor,ben@example.com,,RETAIL,ACTIVE,2025-01-05,2025-05-12 14:00:00
+C-20003,3,Chen Wei,chen@example.com,+1 415 555 0103,SMB,PROSPECT,2025-02-11,2025-02-11 08:15:00
+C-20003,4,Dara Byrne,dara@example.com,+353 1 555 0104,RETAIL,ACTIVE,2025-03-03,2025-07-01 10:20:00

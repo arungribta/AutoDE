@@ -1,0 +1,5 @@
+customer_id,email,phone,first_name,last_name,created_at,updated_at,marketing_opt_in,country_code
+1,ana@example.com,+44 20 7946 0001,Ana,Lopez,2025-01-02 10:00:00,2025-06-01 09:00:00,true,GB
+2,ben@example.com,,Ben,Okafor,2025-01-05 11:30:00,2025-05-12 14:00:00,false,GB
+3,chen@example.com,+1 415 555 0103,Chen,Wei,2025-02-11 08:15:00,2025-02-11 08:15:00,true,US
+4,dara@example.com,+353 1 555 0104,Dara,Byrne,2025-03-03 16:45:00,2025-07-01 10:20:00,false,IE

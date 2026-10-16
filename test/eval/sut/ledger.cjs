@@ -16,7 +16,7 @@
  * withheld, so whatever the ledger concludes — conflicts in particular — is its own work.
  *
  * Capabilities: conflicts() only. Supersession from chat (trap 2) needs the extractor to
- * recognise a correction, so it stays unsupported until C4.
+ * recognise a correction, so it stays unsupported until C4b.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -44,10 +44,10 @@ function createLedgerSut(opts) {
     ...base,
     name: 'assertion ledger (v0.29.0, C2)',
     notes: [
-      'Chat extraction arrives in C4. This run proposes each turn\'s scripted facts to the ledger as an extractor would (outcomes such as status, trust, supersession and conflicts withheld), so trap 1 measures the conflict detector, not extraction.'
+      'Chat extraction arrives in C4b. This run proposes each turn\'s scripted facts to the ledger as an extractor would (outcomes such as status, trust, supersession and conflicts withheld), so trap 1 measures the conflict detector, not extraction.'
     ],
     proposals,
-    trapNotes: { 2: 'not yet: the ledger supersedes, but telling that a chat turn corrects an earlier one is extraction (C4) — here t5 and t6 surface as a key conflict instead' },
+    trapNotes: { 2: 'not yet: the ledger supersedes, but telling that a chat turn corrects an earlier one is chat extraction (C4b) — here t5 and t6 surface as a key conflict instead' },
 
     async setup(opts) {
       await base.setup(opts);

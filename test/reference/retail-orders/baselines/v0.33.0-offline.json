@@ -1,0 +1,1314 @@
+{
+  "version": "0.33.0",
+  "mode": "offline",
+  "provider": null,
+  "generatedAt": "2026-10-16T02:35:02.269Z",
+  "sut": "context packs (v0.30.0, C3)",
+  "ingestion": {
+    "declared": 20,
+    "represented": 20,
+    "collisions": [
+      {
+        "name": "customers",
+        "sources": [
+          "shop.customers",
+          "crm.customers"
+        ],
+        "nodes": [
+          "shop.customers",
+          "crm.customers"
+        ]
+      },
+      {
+        "name": "currency_codes",
+        "sources": [
+          "ref.currency_codes",
+          "ref.currency_codes"
+        ],
+        "nodes": [
+          "ref.currency_codes",
+          "ref.currency_codes"
+        ]
+      }
+    ],
+    "graphTables": 60,
+    "files": [
+      {
+        "file": "shop.ddl",
+        "tables": 11,
+        "warnings": []
+      },
+      {
+        "file": "crm.ddl",
+        "tables": 9,
+        "warnings": []
+      },
+      {
+        "file": "hr_legacy.ddl",
+        "tables": 40,
+        "warnings": []
+      }
+    ]
+  },
+  "contextNoiseLast": {
+    "tokens": 529,
+    "tokensMax": 1295,
+    "relevantTablesShown": 17,
+    "relevantTablesTotal": 18,
+    "noiseTablesShown": 0,
+    "noiseTablesTotal": 40,
+    "columnsShown": true,
+    "perStep": [
+      {
+        "id": "s1",
+        "tokens": 1295,
+        "noise": 0
+      },
+      {
+        "id": "s2",
+        "tokens": 272,
+        "noise": 0
+      },
+      {
+        "id": "s3",
+        "tokens": 529,
+        "noise": 0
+      },
+      {
+        "id": "s4",
+        "tokens": 529,
+        "noise": 0
+      },
+      {
+        "id": "s5",
+        "tokens": 271,
+        "noise": 0
+      },
+      {
+        "id": "s6",
+        "tokens": 272,
+        "noise": 0
+      }
+    ]
+  },
+  "contextNoiseFirst": {
+    "tokens": 529,
+    "tokensMax": 1295,
+    "relevantTablesShown": 17,
+    "relevantTablesTotal": 18,
+    "noiseTablesShown": 0,
+    "noiseTablesTotal": 40,
+    "columnsShown": true,
+    "perStep": [
+      {
+        "id": "s1",
+        "tokens": 1295,
+        "noise": 0
+      },
+      {
+        "id": "s2",
+        "tokens": 272,
+        "noise": 0
+      },
+      {
+        "id": "s3",
+        "tokens": 529,
+        "noise": 0
+      },
+      {
+        "id": "s4",
+        "tokens": 529,
+        "noise": 0
+      },
+      {
+        "id": "s5",
+        "tokens": 271,
+        "noise": 0
+      },
+      {
+        "id": "s6",
+        "tokens": 272,
+        "noise": 0
+      }
+    ]
+  },
+  "estate": {
+    "declared": 25,
+    "distinct": 25,
+    "systems": [
+      "crm/prod",
+      "edw/prod",
+      "shop/dev",
+      "shop/prod"
+    ],
+    "legacyIds": 0
+  },
+  "vocabulary": {
+    "levels": [
+      "names only",
+      "+ comments",
+      "+ abbreviations",
+      "+ synonyms, vocabulary file, glossary"
+    ],
+    "questions": [
+      {
+        "id": "v01",
+        "kind": "synonym",
+        "question": "Which clients bought something last month?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v02",
+        "kind": "synonym",
+        "question": "Where are purchases recorded?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v03",
+        "kind": "synonym",
+        "question": "Show the reimbursements given to shoppers",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v04",
+        "kind": "synonym",
+        "question": "Which deliveries arrived late?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v05",
+        "kind": "synonym",
+        "question": "List the goods we sell",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v06",
+        "kind": "synonym",
+        "question": "Who are the rewards programme members?",
+        "found": true,
+        "byLevel": [
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "id": "v07",
+        "kind": "synonym",
+        "question": "How many help desk cases are still open?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v08",
+        "kind": "synonym",
+        "question": "Settlements received against each order",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v09",
+        "kind": "abbreviation",
+        "question": "Where is the legacy customer master?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          true,
+          true
+        ]
+      },
+      {
+        "id": "v10",
+        "kind": "abbreviation",
+        "question": "Order headers in the enterprise warehouse",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          true,
+          true
+        ]
+      },
+      {
+        "id": "v11",
+        "kind": "abbreviation",
+        "question": "Order lines in the legacy warehouse",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          true,
+          true
+        ]
+      },
+      {
+        "id": "v12",
+        "kind": "abbreviation",
+        "question": "Client master in the old warehouse",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          true,
+          true
+        ]
+      },
+      {
+        "id": "v13",
+        "kind": "cross-org",
+        "question": "Engagement responses from the acquired CRM",
+        "found": true,
+        "byLevel": [
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "id": "v14",
+        "kind": "cross-org",
+        "question": "Which engagements ran this quarter?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v15",
+        "kind": "cross-org",
+        "question": "Patron segments",
+        "found": true,
+        "byLevel": [
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      {
+        "id": "v16",
+        "kind": "glossary",
+        "question": "Where is the GOLD / SILVER / BRONZE status kept?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v17",
+        "kind": "glossary",
+        "question": "What feeds gross merchandise value?",
+        "found": true,
+        "byLevel": [
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "id": "v18",
+        "kind": "paraphrase",
+        "question": "Money customers got back after returning things",
+        "found": false,
+        "byLevel": [
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "id": "v19",
+        "kind": "paraphrase",
+        "question": "Points members earned or spent",
+        "found": false,
+        "byLevel": [
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "id": "v20",
+        "kind": "paraphrase",
+        "question": "Complaints raised with the service team",
+        "found": false,
+        "byLevel": [
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "id": "v21",
+        "kind": "paraphrase",
+        "question": "Where do parcels get sent?",
+        "found": false,
+        "byLevel": [
+          false,
+          false,
+          false,
+          false
+        ]
+      }
+    ],
+    "capture": {
+      "llm": "offline stand-in (documents/pack/vocabulary-proposal.offline.json)",
+      "accepted": [
+        "synonym complaint → ticket",
+        "synonym point → loyalty",
+        "synonym parcel → shipment"
+      ],
+      "found": [
+        {
+          "id": "v01",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v02",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v03",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v04",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v05",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v06",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v07",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v08",
+          "kind": "synonym",
+          "found": true
+        },
+        {
+          "id": "v09",
+          "kind": "abbreviation",
+          "found": true
+        },
+        {
+          "id": "v10",
+          "kind": "abbreviation",
+          "found": true
+        },
+        {
+          "id": "v11",
+          "kind": "abbreviation",
+          "found": true
+        },
+        {
+          "id": "v12",
+          "kind": "abbreviation",
+          "found": true
+        },
+        {
+          "id": "v13",
+          "kind": "cross-org",
+          "found": true
+        },
+        {
+          "id": "v14",
+          "kind": "cross-org",
+          "found": true
+        },
+        {
+          "id": "v15",
+          "kind": "cross-org",
+          "found": true
+        },
+        {
+          "id": "v16",
+          "kind": "glossary",
+          "found": true
+        },
+        {
+          "id": "v17",
+          "kind": "glossary",
+          "found": true
+        },
+        {
+          "id": "v18",
+          "kind": "paraphrase",
+          "found": false
+        },
+        {
+          "id": "v19",
+          "kind": "paraphrase",
+          "found": false
+        },
+        {
+          "id": "v20",
+          "kind": "paraphrase",
+          "found": true
+        },
+        {
+          "id": "v21",
+          "kind": "paraphrase",
+          "found": true
+        }
+      ]
+    }
+  },
+  "pack": {
+    "v1": {
+      "asserted": 7,
+      "superseded": 0,
+      "retracted": 0,
+      "unchanged": 0
+    },
+    "v2": {
+      "asserted": 0,
+      "superseded": 3,
+      "retracted": 0,
+      "unchanged": 4
+    },
+    "changedInV2Expected": 3,
+    "violations": [
+      {
+        "table": "crm.customers",
+        "field": "customer_ref",
+        "clause": "unique",
+        "found": true
+      },
+      {
+        "table": "crm.customers",
+        "field": "email",
+        "clause": "nullability",
+        "found": true
+      },
+      {
+        "table": "crm.customers",
+        "field": "country",
+        "clause": "present",
+        "found": true
+      },
+      {
+        "table": "crm.customers",
+        "field": "created",
+        "clause": "type",
+        "found": true
+      }
+    ],
+    "falseInA": [],
+    "unplanned": [],
+    "tables": [
+      {
+        "table": "crm/prod crm.customers",
+        "pass": 8,
+        "fail": 4,
+        "notVerified": 0
+      },
+      {
+        "table": "shop/prod shop.customers",
+        "pass": 13,
+        "fail": 0,
+        "notVerified": 0
+      }
+    ],
+    "brd": {
+      "status": "needs_llm",
+      "proposed": 0,
+      "withSectionProvenance": 0,
+      "reason": "extracting facts from free text needs the LLM"
+    },
+    "interview": [
+      {
+        "question": "What is the primary key of shop.customers?",
+        "expect": "answered",
+        "got": "answered",
+        "reason": "the key of shop.customers is (customer_id) — declared in its schema"
+      },
+      {
+        "question": "Which column uniquely identifies a row in crm.segments?",
+        "expect": "answered",
+        "got": "answered",
+        "reason": "the key of crm.segments is (segment_code) — declared in its schema"
+      },
+      {
+        "question": "How should net revenue treat refunds issued after the reporting day?",
+        "expect": "ask",
+        "got": "ask"
+      },
+      {
+        "question": "What is the primary key of the planned dim_customer?",
+        "expect": "ask",
+        "got": "ask"
+      }
+    ],
+    "vocabulary": {
+      "proposals": 0,
+      "mined": 0,
+      "fromDocuments": 0
+    }
+  },
+  "large": {
+    "tables": 2008,
+    "columns": 49393,
+    "systems": 4,
+    "schemas": 20,
+    "catalogued": 2008,
+    "workingSet": 14,
+    "heapMB": 24,
+    "stages": {
+      "ingest": {
+        "ms": 330,
+        "maxBlockMs": 49
+      },
+      "packs": {
+        "ms": 13,
+        "maxBlockMs": 0
+      },
+      "promotion sync": {
+        "ms": 156,
+        "maxBlockMs": 17
+      },
+      "reload": {
+        "ms": 403,
+        "maxBlockMs": 21
+      }
+    },
+    "parseMaxMs": 33,
+    "packMaxMs": 2.9,
+    "longestSyncMs": 49,
+    "catalogKB": 11194,
+    "ledgerKB": 409,
+    "packs": [
+      {
+        "id": "L1",
+        "kind": "abbreviation",
+        "question": "Which table holds customer order headers in the legacy warehouse?",
+        "ms": 2.9,
+        "found": true,
+        "tables": 3,
+        "schemas": 3,
+        "tokens": 488
+      },
+      {
+        "id": "L2",
+        "kind": "abbreviation",
+        "question": "Where are general ledger journal lines with debit and credit amounts?",
+        "ms": 2.2,
+        "found": true,
+        "tables": 1,
+        "schemas": 1,
+        "tokens": 69
+      },
+      {
+        "id": "L3",
+        "kind": "abbreviation",
+        "question": "Show the warehouse inventory snapshot with on-hand quantity",
+        "ms": 1.7,
+        "found": true,
+        "tables": 1,
+        "schemas": 1,
+        "tokens": 68
+      },
+      {
+        "id": "L4",
+        "kind": "cross-org",
+        "question": "Find the customer master in the acquired CRM",
+        "ms": 1,
+        "found": true,
+        "tables": 2,
+        "schemas": 2,
+        "tokens": 219
+      },
+      {
+        "id": "L5",
+        "kind": "cross-org",
+        "question": "Which table tracks loyalty points for members?",
+        "ms": 0.7,
+        "found": true,
+        "tables": 1,
+        "schemas": 1,
+        "tokens": 76
+      },
+      {
+        "id": "L6",
+        "kind": "synonym",
+        "question": "Where are refund requests recorded?",
+        "ms": 0.9,
+        "found": true,
+        "tables": 1,
+        "schemas": 1,
+        "tokens": 83
+      },
+      {
+        "id": "L7",
+        "kind": "abbreviation",
+        "question": "List the purchase order headers sent to suppliers",
+        "ms": 1.4,
+        "found": true,
+        "tables": 3,
+        "schemas": 2,
+        "tokens": 481
+      },
+      {
+        "id": "L8",
+        "kind": "cross-org",
+        "question": "Which support tickets were escalated?",
+        "ms": 1.9,
+        "found": true,
+        "tables": 3,
+        "schemas": 3,
+        "tokens": 462
+      }
+    ]
+  },
+  "chat": [
+    {
+      "id": "t1",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t2",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t3",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t4",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t5",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t6",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t7",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t8",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t9",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t10",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    },
+    {
+      "id": "t11",
+      "ok": false,
+      "error": "LLM request failed: LLM disabled (eval offline mode)."
+    }
+  ],
+  "answerability": [
+    {
+      "id": "q01",
+      "answerable": false,
+      "missing": [
+        "one row per order"
+      ]
+    },
+    {
+      "id": "q02",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q03",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q04",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q05",
+      "answerable": false,
+      "missing": [
+        "duplicate"
+      ]
+    },
+    {
+      "id": "q06",
+      "answerable": false,
+      "missing": [
+        "incremental"
+      ]
+    },
+    {
+      "id": "q07",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q08",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q09",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q10",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q11",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q12",
+      "answerable": false,
+      "missing": [
+        "net revenue"
+      ]
+    },
+    {
+      "id": "q13",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q14",
+      "answerable": false,
+      "missing": [
+        "net revenue"
+      ]
+    },
+    {
+      "id": "q15",
+      "answerable": false,
+      "missing": [
+        "retained"
+      ]
+    },
+    {
+      "id": "q16",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q17",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q18",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q19",
+      "answerable": false,
+      "missing": [
+        "cancelled"
+      ]
+    },
+    {
+      "id": "q20",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q21",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q22",
+      "answerable": true,
+      "missing": []
+    },
+    {
+      "id": "q23",
+      "answerable": false,
+      "missing": [
+        "fx conversion"
+      ]
+    },
+    {
+      "id": "q24",
+      "answerable": false,
+      "missing": [
+        "dim_customer",
+        "scd type 2"
+      ]
+    },
+    {
+      "id": "q25",
+      "answerable": false,
+      "missing": [
+        "snowflake",
+        "dbt"
+      ]
+    },
+    {
+      "id": "q26",
+      "answerable": true,
+      "missing": []
+    }
+  ],
+  "qa": [],
+  "artifactDuplicates": 0,
+  "steps": [
+    {
+      "id": "s1",
+      "agent": "sourceAssessmentAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s2",
+      "agent": "dataModelerAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s3",
+      "agent": "sttmAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s4",
+      "agent": "ingestionAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s5",
+      "agent": "transformScaffoldAgent",
+      "status": "completed"
+    },
+    {
+      "id": "s6",
+      "agent": "architectureAgent",
+      "status": "completed"
+    }
+  ],
+  "artifacts": [
+    {
+      "title": "Source Assessment (Context-Derived)",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\01-discover\\Source_Assessment_Context-Derived.md",
+      "type": "discovery_report",
+      "language": "markdown",
+      "generatedBy": "sourceAssessmentAgent"
+    },
+    {
+      "title": "Dimensional Model: ANALYTICS.MARTS",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\02-model\\Dimensional_Model_ANALYTICS_MARTS.sql",
+      "type": "data_model",
+      "language": "sql",
+      "generatedBy": "dataModelerAgent"
+    },
+    {
+      "title": "STTM Mapping: s3_mapped",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\02-model\\STTM_Mapping_s3_mapped.sql",
+      "type": "sttm_mapping",
+      "language": "sql",
+      "generatedBy": "sttmAgent"
+    },
+    {
+      "title": "Ingestion: s4_landing",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\Ingestion_s4_landing.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "ingestionAgent"
+    },
+    {
+      "title": "dbt_project.yml",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\dbt_project.yml",
+      "type": "sql_script",
+      "language": "yaml",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "stg_source.sql",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\models\\staging\\stg_source.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "int_sales_aggregated.sql",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\models\\intermediate\\int_sales_aggregated.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "fct_main.sql",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\models\\marts\\fct_main.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "schema.yml",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\models\\marts\\schema.yml",
+      "type": "sql_script",
+      "language": "yaml",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "assert_positive_amounts.sql",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\tests\\generic\\assert_positive_amounts.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "generate_schema_name.sql",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\macros\\generate_schema_name.sql",
+      "type": "sql_script",
+      "language": "sql",
+      "generatedBy": "transformScaffoldAgent"
+    },
+    {
+      "title": "DDL: s6_curated",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\04-validate\\DDL_s6_curated.sql",
+      "type": "ddl_script",
+      "language": "sql",
+      "generatedBy": "architectureAgent"
+    },
+    {
+      "title": "Architecture Doc: s6_curated",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\04-validate\\Architecture_Doc_s6_curated.md",
+      "type": "architecture_diagram",
+      "language": "markdown",
+      "generatedBy": "architectureAgent"
+    },
+    {
+      "title": "Grounding Report",
+      "path": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\04-validate\\grounding-report.md",
+      "type": "validation_report",
+      "language": "markdown",
+      "generatedBy": "architectureAgent"
+    }
+  ],
+  "grounding": {
+    "tablesChecked": 3,
+    "tablesResolved": 0,
+    "columnsChecked": 0,
+    "columnsResolved": 0,
+    "unresolved": [
+      {
+        "kind": "table",
+        "ref": "RAW_DB.PUBLIC.landing",
+        "artifact": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\02-model\\STTM_Mapping_s3_mapped.sql"
+      },
+      {
+        "kind": "table",
+        "ref": "raw_sales",
+        "artifact": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\models\\staging\\stg_source.sql"
+      },
+      {
+        "kind": "table",
+        "ref": "stg_sales",
+        "artifact": "C:\\Users\\ARUN~1.GRI\\AppData\\Local\\Temp\\autode-eval-5g9gdP\\main\\artifacts\\03-build\\models\\intermediate\\int_sales_aggregated.sql"
+      }
+    ],
+    "ambiguous": [],
+    "typeIssues": [],
+    "sqlArtifacts": 9
+  },
+  "planContextTokens": 530,
+  "manifests": {
+    "artifacts": 13,
+    "decisions": 0,
+    "decisionsBacked": 0,
+    "gaps": 0,
+    "withCatalogRevisions": 13,
+    "written": 13,
+    "staleUse": 0
+  },
+  "expected": [
+    {
+      "id": "E1",
+      "description": "Staging deduplicates orders on order_id",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E2",
+      "description": "Orders load incrementally on updated_at",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E3",
+      "description": "dim_customer is SCD type 2",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E4",
+      "description": "Customer email is masked with a hash",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E5",
+      "description": "Net revenue excludes cancelled orders",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E6",
+      "description": "Net revenue is net of refunds (the refunds table is actually read)",
+      "pass": false,
+      "matchedIn": []
+    },
+    {
+      "id": "E7",
+      "description": "No invented join between support tickets and orders",
+      "pass": true,
+      "matchedIn": []
+    },
+    {
+      "id": "E8",
+      "description": "CRM customers are joined to shop customers on shop_customer_id",
+      "pass": false,
+      "matchedIn": []
+    }
+  ],
+  "notes": [
+    "Chat extraction arrives in C4b. This run proposes each turn's scripted facts to the ledger as an extractor would (outcomes such as status, trust, supersession and conflicts withheld), so trap 1 measures the conflict detector, not extraction.",
+    "Plan steps and questions each get their own context pack. The fixed reference plan is executed with the hub's context provider and an ArtifactWriter, exactly as the extension wires them."
+  ],
+  "conflicts": [
+    {
+      "rule": "declared_key",
+      "key": "declared_key|obj:crm/default/crm.customers|01M5190816FCPYXZYC7QQZ0VAD",
+      "subject": [
+        "obj:crm/default/crm.customers"
+      ],
+      "ids": [
+        "01M51906E54PBTWK4MQDKBT23E",
+        "01M5190816FCPYXZYC7QQZ0VAD"
+      ],
+      "sides": [
+        "The customer key across both systems is customer_id. (inferred, proposed)",
+        "Schema declares primary key (cust_no) (documented)"
+      ]
+    },
+    {
+      "rule": "definition",
+      "key": "definition|revenue",
+      "subject": [
+        "metric:net_revenue",
+        "term:revenue"
+      ],
+      "ids": [
+        "01M51906D9F2JQE3R21RRXPCWD",
+        "01M51907XM3E8XRTJ8X75MVNZG"
+      ],
+      "sides": [
+        "Revenue = SUM(order_items.quantity * order_items.unit_price) (documented, needs_review)",
+        "Revenue = SUM(order_items.quantity * order_items.unit_price - COALESCE(order_items.discount_amount, 0)) - SUM(refunds.amount) WHERE orders.status <> 'CANCELLED' (inferred, proposed)"
+      ]
+    },
+    {
+      "rule": "value",
+      "key": "value|key|obj:crm/default/crm.customers|primary",
+      "subject": [
+        "obj:crm/default/crm.customers"
+      ],
+      "ids": [
+        "01M5190816FCPYXZYC7QQZ0VAD",
+        "01M519082979NTXWBWN6VTM8WC"
+      ],
+      "sides": [
+        "The customer key across both systems is customer_id. (inferred, proposed)",
+        "Correction — in the CRM the customer key is cust_no, not customer_id. crm.customers.shop_customer_id links to shop.customers.customer_id. (inferred, proposed)"
+      ]
+    }
+  ],
+  "ledger": {
+    "assertions": 742,
+    "events": 743,
+    "active": 728,
+    "proposed": 13,
+    "needsReview": 1,
+    "byTrust": [
+      [
+        "verified",
+        0
+      ],
+      [
+        "confirmed",
+        0
+      ],
+      [
+        "documented",
+        729
+      ],
+      [
+        "inferred",
+        13
+      ]
+    ],
+    "unresolvedProposals": [
+      {
+        "fact": "A-constraint-platform",
+        "unresolved": [
+          "target"
+        ]
+      },
+      {
+        "fact": "A-metric-net-revenue",
+        "unresolved": [
+          "metric:net_revenue"
+        ]
+      },
+      {
+        "fact": "A-decision-scd2-customer",
+        "unresolved": [
+          "dim_customer"
+        ]
+      },
+      {
+        "fact": "A-metric-retention-90d",
+        "unresolved": [
+          "metric:retention_90d"
+        ]
+      }
+    ]
+  },
+  "contextGaps": [
+    {
+      "needed": "relationship",
+      "subject": [
+        "obj:crm/default/crm.support_tickets",
+        "obj:shop/default/shop.orders"
+      ],
+      "text": "support tickets ↔ order",
+      "reason": "absent",
+      "minTrust": "confirmed"
+    }
+  ],
+  "traps": [
+    {
+      "id": 1,
+      "name": "Revenue defined two ways (glossary gross vs chat net)",
+      "detected": true,
+      "how": "conflict detector (definition rule)"
+    },
+    {
+      "id": 2,
+      "name": "Customer key corrected mid-chat (customer_id → cust_no)",
+      "detected": false,
+      "how": "not yet: the ledger supersedes, but telling that a chat turn corrects an earlier one is chat extraction (C4b) — here t5 and t6 surface as a key conflict instead"
+    },
+    {
+      "id": 3,
+      "name": "Claimed-unique member_id has duplicates",
+      "detected": true,
+      "how": "verification probe (fail, claim now needs_review): member_id is not unique: 1 duplicate(s) (12.5%) and 0 null(s) in 8 sampled row(s) of crm.loyalty_members"
+    },
+    {
+      "id": 4,
+      "name": "Ticket-to-order join requested with no relationship",
+      "detected": true,
+      "how": "context gap (absent): support tickets ↔ order"
+    },
+    {
+      "id": 5,
+      "name": "Irrelevant 40-table schema ingested",
+      "detected": true,
+      "how": "noise tables in step context: 0 (noise last), 0 (noise first)"
+    }
+  ],
+  "llm": {
+    "calls": 32,
+    "hits": 0,
+    "misses": 0,
+    "recorded": 0,
+    "failures": 32
+  }
+}

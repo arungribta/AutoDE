@@ -322,6 +322,12 @@ export class ContextFileManager implements vscode.Disposable {
   }
 
   /** `.ai-context/context/vocabulary.yaml` (or the legacy root): the customer's abbreviations and synonyms. */
+  /** Re-reads `vocabulary.yaml` and rebuilds the retrieval index (after "Propose Vocabulary" wrote to it). */
+  public async reloadVocabulary(): Promise<void> {
+    this.loadVocabulary(vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath);
+    await this.catalog.buildIndex();
+  }
+
   private loadVocabulary(contextPath: string): void {
     const file = this.firstExisting([path.join(contextPath, 'context', 'vocabulary.yaml'), path.join(contextPath, 'vocabulary.yaml')]);
     try {

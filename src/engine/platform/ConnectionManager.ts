@@ -6,7 +6,8 @@ import { DatabricksAdapter } from './adapters/DatabricksAdapter';
 import { getSupportedProviders } from './providerRegistry';
 import { FileIo, nodeFileIo, writeFileAtomic } from '../context/contextStore';
 import type { CatalogEntry, CatalogFetcher } from '../context/catalog';
-import { DEFAULT_ENVIRONMENT, slugifyId } from '../context/estate';
+import { DEFAULT_ENVIRONMENT, parseObjectId, slugifyId } from '../context/estate';
+import { ProbeExecutor, createSqlProbeExecutor } from '../context/probes';
 import { BaseDataSourceAdapter } from './BaseAdapter';
 import type { BaseNode, GraphEdge } from '../context/types';
 
@@ -195,6 +196,29 @@ export class ConnectionManager implements Disposable {
         return out;
       } : undefined
     };
+  }
+
+  /**
+   * Phase C4a: verification probes on this connection — read-only aggregate
+   * queries from fixed templates (`probes.ts`), sampled, one row back. Covers
+   * only tables of the system and environment this connection feeds.
+   */
+  probeExecutor(options: { sampleRows?: number } = {}): ProbeExecutor | undefined {
+    const adapter = this.activeAdapter;
+    const platform = this.getActivePlatform();
+    if (!adapter || !platform) return undefined;
+    const identity = this.activeIdentity();
+    return createSqlProbeExecutor(
+      async (sql) => (await adapter.executeQuery(sql, { maxRows: 1, timeoutMs: 60000 })).rows,
+      platform === 'snowflake' ? 'snowflake' : platform === 'databricks' ? 'spark_sql' : 'ansi',
+      {
+        sampleRows: options.sampleRows ?? 50_000,
+        covers: (tableId) => {
+          const p = tableId ? parseObjectId(tableId) : undefined;
+          return !!p && (!identity || (p.system === identity.system && p.environment === identity.environment));
+        }
+      }
+    );
   }
 
   /** Lists databases/catalogs visible to the connected principal (Step 4 — discovery-based selection, not blind typing). */

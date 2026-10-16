@@ -376,6 +376,16 @@ export class DataAgentHubHub {
    * summary of the attachment's own text, matching `generateWithLlm()`'s own
    * "generation must never become a hard failure point" discipline.
    */
+  /**
+   * One structured LLM call (Phase C4a: profile proposals, document extraction,
+   * vocabulary proposals): the reply parsed as a JSON object. Throws when no
+   * LLM answers; callers degrade.
+   */
+  public async completeJson(system: string, user: string, purpose: string): Promise<Record<string, unknown>> {
+    const raw = await this.callConfiguredLlm(user, system, purpose);
+    return this.parseJsonObject(extractJsonText(raw));
+  }
+
   public async extractAttachmentFacts(attachment: IntakeAttachment): Promise<AttachmentExtract> {
     try {
       const { system, user } = buildAttachmentExtractionPrompt(attachment);

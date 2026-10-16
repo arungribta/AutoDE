@@ -1,0 +1,20 @@
+# What the C4a pack scenario must find (scored by test/eval/run-eval.cjs).
+conformance:
+  # Source B — every planted violation must be reported as a failing clause.
+  violations:
+    - { table: crm.customers, field: customer_ref, clause: unique }      # duplicate cust_no in the sample
+    - { table: crm.customers, field: email, clause: nullability }       # nullable, contract says mandatory
+    - { table: crm.customers, field: country, clause: present }         # no country column
+    - { table: crm.customers, field: created, clause: type }            # DATE, contract says timestamp
+  # Source A — no failing clause at all.
+  conforming: [shop.customers]
+# Revision 2 changes exactly these clauses' content.
+changedInV2: 3
+# Interview questions: discovery answers the first group; the second must still be asked.
+interview:
+  answered:
+    - What is the primary key of shop.customers?
+    - Which column uniquely identifies a row in crm.segments?
+  ask:
+    - How should net revenue treat refunds issued after the reporting day?
+    - What is the primary key of the planned dim_customer?

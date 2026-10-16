@@ -349,8 +349,9 @@ function parseDdlColumnDefs(body: string): Array<{ name: string; dataType: strin
     if (!colMatch) continue;
     const name = colMatch[1];
     const dataType = colMatch[2].trim().toUpperCase();
-    const isNullable = !/NOT\s+NULL/i.test(part);
     const isPrimaryKey = /PRIMARY\s+KEY/i.test(part);
+    // A primary key column is never null, declared NOT NULL or not (as with a table-level PRIMARY KEY below).
+    const isNullable = !/NOT\s+NULL/i.test(part) && !isPrimaryKey;
     const comment = /\bCOMMENT\s+'((?:[^']|'')*)'/i.exec(part)?.[1]?.replace(/''/g, "'");
     columns.push({ name, dataType, isNullable, isPrimaryKey, ...(comment ? { comment } : {}) });
   }

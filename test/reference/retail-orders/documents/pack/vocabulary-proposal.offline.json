@@ -1,0 +1,10 @@
+{
+  "_comment": "Offline stand-in for the LLM's answer to the vocabulary-proposal prompt over glossary.md (C4a item 11), in the prompt's response shape. Replay/record mode uses the real LLM instead. Written as a model would read the glossary, not tuned to the questions: 'money back' is a phrase, which single-word synonym groups cannot match.",
+  "abbreviations": {},
+  "synonyms": [
+    ["ticket", "complaint"],
+    ["loyalty", "point"],
+    ["shipment", "parcel"],
+    ["refund", "money back"]
+  ]
+}

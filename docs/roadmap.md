@@ -2,7 +2,7 @@
 
 **The single place for order and status.** Specifications say *what* each phase delivers and *why*; this document says *when*, and whether it's done. If another document's plan disagrees with this one, this one wins. Document map: [README.md](README.md).
 
-Last updated: 2026-10-15 · Current version: **0.32.0** · Branch: `feature/engine-boundary`
+Last updated: 2026-10-15 · Current version: **0.33.0** · Branch: `feature/engine-boundary`
 
 ---
 
@@ -20,7 +20,7 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.30.0 | ✅ **C3** Context packs, manifests, causality | [context-layer §7, §8.3, §11](context-layer-requirements.md) | Grounded delivery. |
 | v0.31.0 | ✅ **K1** Estate identity and catalogs: system/environment-qualified, namespaced ids with alias-map migration; `estate.yaml`; several schemas per connection; schema-scoped merges; catalog revisions in manifests; legacy dictionary import; planned objects in grounding | [context-layer §11 Phase K](context-layer-requirements.md) (items 1–3, 6, 7, 9, 10) | Every later phase attaches facts to these ids. |
 | v0.32.0 | ✅ **K2** Working-set cache and scale: tiered cache with query-through, refresh on use, visibility, the 100 ms responsiveness budget, vocabulary-robust retrieval; large-estate fixture; embedded-store and RET decisions | [context-layer §11 Phase K](context-layer-requirements.md) (items 4, 5, 8, 11, 12) | Estates beyond the working-set size. |
-| v0.33.0 | **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report, vocabulary capture | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
+| v0.33.0 | ✅ **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report, vocabulary capture | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
 | v0.34.0 | **S2** Tool-skill lifecycle, provenance, review, trust tiers | [mcp-engine §9.1](mcp-engine-requirements.md) | Must exist before any skill is exposed to external agents over MCP. |
 | v0.35.0 | **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
 | v0.36.0 | **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
@@ -50,7 +50,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 |---|---|---|
 | One-time consent dialog for programmatic LLM use | §16.4 | Today only an opt-in setting exists. |
 | Opt-in telemetry + privacy/data-flow note | §16.4 | `telemetryEnabled` is read; nothing reports. |
-| Interview (intake) session survives a reload | §16.5 | Still in memory only. Natural fit for C4a. |
+| Interview (intake) session survives a reload | §16.5 | Still in memory only (BPS-7). Not done in C4a; fits C4b, which persists chat-derived facts. |
 | Spec revision fallback keeps the comprehensive fields | §16.5 | The emergency path re-drafts with the older single-shot generator. |
 | Search, tags and export in the chat history browser | §16.7 | The sidebar history dropdown with resume exists (v0.13.0). |
 | Context drawer surfaces layers, rules, relationships read-only | §16.6, §15 | Partly done. |
@@ -72,7 +72,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Lineage persisted as graph edges | §16.3a | M1 (dependency graph) |
 | Data Lineage Mapper and Data Quality Profiler agents | §16.3 | M1, and K tier-2 profiles + C4a probes |
 | SQL validator agent | §16.3 | C3 grounding checks (done for identifiers/types) + M3 |
-| Business glossary builder agent | §16.3 | C4a/C4b extraction |
+| Business glossary builder agent | §16.3 | C4b extraction (C4a reads glossaries in documents) |
 | "Distill this chat" into context | §16.7 | C4b chat extraction |
 | Skills authoring guidance | §16.5 | S3 docs |
 | Git-URL / vendor skill import | §16.8 | S3 |
@@ -128,6 +128,10 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 | 2026-10-15 | K2: the ledger and graph hold only the **working set**; the estate lives in per-system catalogs. Measured on 2 008 tables / 49 393 columns: mirroring everything cost 713 MB of extension-host heap and a 2.1 s sync; the catalog costs 24 MB and the longest synchronous task is 46 ms. Imports enter the working set whole while it stays within 200 tables, so estates of the original target size behave as before. |
 | 2026-10-15 | K2: **no embedded database.** The catalog at 2 000 tables is 11 MB of JSON and 24 MB of heap, packs build in ≤ 2.2 ms and every budget holds with margin. Revisit at roughly ten times that size (about 20 000 tables), where JSON load and heap would approach the limits. |
 | 2026-10-15 | K2: **RET not scheduled.** Deterministic signals found 17 of 21 vocabulary-mismatch questions (3 of 21 from names alone) and 8 of 8 on the large estate; all 4 misses are free paraphrases. Counter-measure first: C4a's vocabulary capture (LLM-proposed, engineer-reviewed `vocabulary.yaml` entries) keeps run-time retrieval deterministic and provider-independent. RET is reconsidered if real engagements' questions show paraphrase misses that this does not fix. |
+| 2026-10-15 | C4a: probes also run over **sample files the customer supplies** (same templates, same aggregates), because merge and migration sources often have no live connector yet; only counts leave the probe either way. |
+| 2026-10-15 | C4a: probes stay **fixed templates in code** (`probes.ts`), reviewed like code, until phase 6 brings Tier-2 governance for them; a passed probe raises trust to verified but does **not** confirm the claim — confirming stays the engineer's (Inbox, C4b). |
+| 2026-10-15 | C4a: vocabulary captured from the reference glossary lifts paraphrase recall from 0/4 to 2/4 (19/21 overall, no regressions). Of the two misses, one shares no word with its table ("money customers got back" → refunds) and one ranks a sibling table first (loyalty members over loyalty transactions). **RET stays unscheduled**: two misses on a four-question set don't justify a ranking dependency; revisit with real engagements' questions. Multi-word synonym proposals are dropped (retrieval is word by word) rather than adding phrase matching, which would not have caught the miss either. |
+| 2026-10-15 | C4a: the interviewer is told what discovery established and a question discovery answers is dropped deterministically (logged), rather than trusting the LLM to skip it. |
 | 2026-10-15 | Documents reorganised: requirements answer WHAT/WHY, technical design answers HOW, this roadmap answers WHEN, CHANGELOG.md records what changed. Phases D and G renamed DRV and GOV. |
 
 **Superseded planning documents.** The plan files under `~/.claude/plans/` used before v0.25.0 were folded into this roadmap and are no longer maintained. The plan and backlog sections of the previous requirements.md (§11, §15, §16) and technical-design.md (§10), both at `fc16b0d`, are historical; the technical-design phase list was removed on 2026-10-15 and lives on in git and CHANGELOG.md.
