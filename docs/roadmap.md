@@ -65,6 +65,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Style guide; keyboard and screen-reader verification (UI-4, UI-5) | §2 | |
 | Make command-only features discoverable from the panel: a Skills section in the Workflow Palette (import, run, list) and chat slash commands for import, "What the Agent Saw" and "Explain This Artifact" (UI-1) | manual testing 2026-10-15 | Today they exist only in the Command Palette. |
 | Remove unused `src/spokes/{architectureAgent,ingestionAgent,sttmAgent}.ts` | found 2026-10-15 | Not imported anywhere; superseded by `src/agents/`. |
+| AutoDE beyond VS Code | discussed 2026-10-16, parked | Option 1: a headless, deterministic `autode` CLI (`validate`, `compile`, `grounding`, `extract`, `conformance`, `probe`, `doctor`, `mcp`; exit codes for CI), mostly reuse of `src/engine` and the MCP tool handlers. Option 2: the conversational assistant outside VS Code through existing harnesses (a Claude Code plugin, plus MCP write and approval tools with gates held by the engine), after phase 5 makes orchestration host-agnostic. Building AutoDE's own harness is not recommended. Orchestration's VS Code coupling is shallow (file I/O, settings, watchers, dialogs). |
 
 **Covered by a planned phase**
 
