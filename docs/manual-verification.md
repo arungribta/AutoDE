@@ -321,6 +321,35 @@ Needs real accounts. Use a role that can only read. Configure the server as in [
   Do: in the AutoDE panel, connect the source and run Source Assessment with profiling; open `.autode/local/schema-graph.json`.
   Expect: column profiles have distinct and null counts but no `minValue`/`maxValue` unless the connection's entry allows sample data.
 
+## Part 15 — v0.38.0 Platform prerequisites, Oracle driver install, Oracle as a source
+
+Needs an Oracle Database 19c (or any 12.1+) you can reach, a read-only user, and a tnsnames.ora with an alias for it.
+
+- [ ] **15.1 Nothing happens until you ask.**
+  Do: reload the window and connect an existing Snowflake source as usual.
+  Expect: no "AutoDE" terminal, and nothing new under `~/.autode/drivers`.
+- [ ] **15.2 Prerequisites are listed.**
+  Do: **AutoDE: Check Platform Prerequisites**.
+  Expect: Snowflake CLI and Databricks CLI (optional; ready or missing with their install guides) and the Oracle driver (`missing`), each with a reason.
+- [ ] **15.3 The install is explained and runs only on click.**
+  Do: pick the Oracle driver (or run **AutoDE: Install Oracle Driver**). Read the dialog, then press **Copy command** once, and run the command again with **Run in AutoDE terminal**.
+  Expect: the dialog shows the `npm install --prefix "…/oracle" --ignore-scripts … "oracledb@^6.0.0"` command, the folder, size, licence and the 12.1+ note. Copy puts exactly that on the clipboard and runs nothing. Run opens a terminal named "AutoDE" and npm installs from your usual registry (check `npm config get registry` if you have an internal one). Afterwards **Verify** reports "ready" with the version, and `.autode-driver.json` exists in the folder.
+- [ ] **15.4 A changed folder must be verified again.**
+  Do: run `npm install --prefix ~/.autode/drivers/oracle "oracledb@^6.0.0"` once more yourself (or edit `package-lock.json`), then connect Oracle (15.5).
+  Expect: if the lockfile changed, the connection fails with "changed after it was verified … Verify Oracle Driver"; after verifying, it connects.
+- [ ] **15.5 Connect through a tnsnames alias.**
+  Do: set `defaultProvider` = `oracle`, `defaultOracleConnectString` = your alias, `defaultOracleUsername`, and (if tnsnames.ora isn't under TNS_ADMIN) `oracleConfigDir`; **AutoDE: Set Oracle Password**; Test Connection.
+  Expect: "Connected to source oracle: <PDB>.<USER> (v19…)". A wrong alias names the tnsnames.ora that was searched and the aliases found.
+- [ ] **15.6 Easy Connect and Source Assessment.**
+  Do: switch the connect string to `host:1521/service`, test again, then run Source Assessment with profiling on a schema with keys.
+  Expect: it connects; `.autode/local/schema-graph.json` has the schema's tables and views with comments; primary-key and foreign-key columns are flagged; LOB columns have no profile.
+- [ ] **15.7 Oracle over MCP.**
+  Do: add an Oracle entry to `.autode/config/connections.yaml` (as in mcp-setup.md, password in `AUTODE_ORACLE_PASSWORD`), restart the server, and in Claude Code list connections, extract metadata for the schema, explain a SELECT, and run one.
+  Expect: all answer; the explain shows a DBMS_XPLAN plan; the SELECT returns no rows (consent off); `SELECT q'[a']' ; DROP …` is refused.
+- [ ] **15.8 No npm.**
+  Do: on a machine (or a shell with `PATH` trimmed) without npm, run **AutoDE: Install Oracle Driver**.
+  Expect: a dialog saying npm is missing, offering Node.js and the `driversDirectory` setting; nothing runs.
+
 ## Results
 
 | Check | Pass / Fail | Notes |

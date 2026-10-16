@@ -159,6 +159,8 @@ export interface PlatformMetadataQueries {
    * has `row_count` and, per column i, `d_<i>` (distinct) and `n_<i>` (nulls).
    */
   readonly profileTable?: (fqn: string, columns: string[], sampleRows: number) => string;
+  /** v0.38.0: `table_schema`, `table_name`, `column_name` of primary-key columns (filtered like listTables). Optional. */
+  readonly listPrimaryKeys?: string;
   /** Phase K2: `table_schema`, `table_name`, `last_altered` for the scope's tables (filtered like listTables). */
   readonly lastAltered?: string;
   readonly extractLineage?: string;

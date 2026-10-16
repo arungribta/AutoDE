@@ -45,7 +45,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
    */
   public getConnectionId(): string {
     const ref = this.credentials['connectionName'] || this.credentials['profile'] || this.credentials['account']
-      || this.credentials['workspaceUrl'] || this.credentials['username'] || '';
+      || this.credentials['workspaceUrl'] || this.credentials['connectString'] || this.credentials['username'] || '';
     return ref ? `${this.platform}:${ref}` : this.platform;
   }
 
@@ -168,13 +168,33 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     // 5. Assemble tables with columns (a table filter also applies client-side, for
     // platforms whose listing can't be filtered, e.g. Hive metastore's SHOW TABLES)
     const wanted = options?.tableFilter && options.tableFilter.length > 0 ? new Set(options.tableFilter.map((t) => t.toLowerCase())) : undefined;
-    const tables = this.assembleTables(tablesResult, columnsResult).filter((t) => !wanted || wanted.has(t.name.toLowerCase()));
+    const assembled = this.assembleTables(tablesResult, columnsResult).filter((t) => !wanted || wanted.has(t.name.toLowerCase()));
 
     // 6. Assemble views
     const views = this.assembleViews(viewsResult);
 
     // 7. Assemble foreign keys
     const foreignKeys = this.assembleForeignKeys(fkResult);
+
+    // 7b. Key flags (v0.38.0): primary keys where the platform lists them, foreign keys from step 3.
+    let pkRows: QueryResult['rows'] = [];
+    if (queries.listPrimaryKeys) {
+      try {
+        pkRows = (await this.executeQuery(queries.listPrimaryKeys, { timeoutMs: 30000, signal: options?.signal })).rows;
+      } catch (err) {
+        this.log(`[${this.platform}] Primary key extraction failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const keyOf = (schema: unknown, table: unknown, column: unknown) => `${String(schema)}.${String(table)}.${String(column)}`.toLowerCase();
+    const pks = new Set(pkRows.map((r) => { const x = r as Record<string, unknown>; return keyOf(x['table_schema'] ?? x['TABLE_SCHEMA'], x['table_name'] ?? x['TABLE_NAME'], x['column_name'] ?? x['COLUMN_NAME']); }));
+    const fks = new Set(foreignKeys.map((f) => keyOf(f.sourceSchema, f.sourceTable, f.sourceColumn)));
+    const tables = pks.size === 0 && fks.size === 0 ? assembled : assembled.map((t) => ({
+      ...t,
+      columns: t.columns.map((c) => {
+        const k = keyOf(t.schema, t.name, c.name);
+        return pks.has(k) || fks.has(k) ? { ...c, isPrimaryKey: c.isPrimaryKey || pks.has(k), isForeignKey: c.isForeignKey || fks.has(k) } : c;
+      })
+    }));
 
     // 8. Optional: profile columns (Phase K2: sampled, bounded, budgeted)
     let profiling: ProfilingReport | undefined;
@@ -323,6 +343,8 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     const concurrency = Math.max(1, options.profile?.concurrency ?? 4);
     const sampleRows = Math.max(1, options.profile?.sampleRows ?? 10_000);
     const skipTypes = ['VARIANT', 'OBJECT', 'ARRAY', 'GEOGRAPHY', 'GEOMETRY', 'BINARY', 'STRUCT', 'MAP'];
+    // Oracle types COUNT(DISTINCT) can't take (v0.38.0), matched whole so Spark's LONG isn't caught.
+    const oracleLobs = /^(N?CLOB|BLOB|BFILE|LONG|LONG RAW|RAW(\(\d+\))?|XMLTYPE|SDO_\w+)$/;
     const num = (r: Record<string, unknown>, k: string): number | undefined => {
       const v = r[k] ?? r[k.toUpperCase()];
       const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
@@ -331,7 +353,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     type Task = { table: TableMetadata; run: () => Promise<void> };
     const tasks: Task[] = [];
     for (const table of tables) {
-      const cols = table.columns.filter((c) => !skipTypes.some((t) => c.dataType.toUpperCase().includes(t)));
+      const cols = table.columns.filter((c) => !skipTypes.some((t) => c.dataType.toUpperCase().includes(t)) && !(this.platform === 'oracle' && oracleLobs.test(c.dataType.toUpperCase())));
       if (cols.length === 0) continue;
       if (queries.profileTable) {
         tasks.push({ table, run: async () => {

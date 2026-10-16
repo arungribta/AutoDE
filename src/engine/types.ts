@@ -3,7 +3,7 @@ import { TransformSpec } from './transforms/types';
 import { FileIo } from './context/contextStore';
 
 export type LlmProvider = 'azure-openai' | 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'copilot' | 'claude';
-export type DataPlatformProvider = 'snowflake' | 'databricks' | 'bigquery' | 'redshift' | 'synapse' | 'other';
+export type DataPlatformProvider = 'snowflake' | 'databricks' | 'oracle' | 'bigquery' | 'redshift' | 'synapse' | 'other';
 export type SnowflakeAuthMode = 'username-password' | 'oauth' | 'key-pair' | 'external-browser' | 'mcp';
 /** An interactive-user is a human at a workstation; a service-account is a headless principal (CI, a scheduled job, a server deployment). */
 export type PrincipalType = 'interactive-user' | 'service-account';
@@ -623,6 +623,15 @@ export interface DataAgentHubSettings {
    * out to share the legacy catalog's limitations.
    */
   defaultDatabricksCatalogType?: 'auto' | 'unity' | 'hive_metastore';
+  /** Oracle source (v0.38.0, Thin mode): a tnsnames alias or an Easy Connect string (`host:port/service`). */
+  defaultOracleConnectString?: string;
+  defaultOracleUsername?: string;
+  /** Folder holding tnsnames.ora; empty = TNS_ADMIN, then $ORACLE_HOME/network/admin. */
+  oracleConfigDir?: string;
+  /** TLS wallet folder (e.g. Autonomous Database); its password is a secret. */
+  oracleWalletLocation?: string;
+  /** Where user-installed drivers live (phase DRV1); empty = AUTODE_DRIVERS_DIR, else ~/.autode/drivers. */
+  driversDirectory?: string;
 
   // ── Target connection (v0.19.0 Source/Target Panel split) ──
   // Doubled flat settings, deliberately additive rather than a symmetric

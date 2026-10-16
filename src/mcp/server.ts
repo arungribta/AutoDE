@@ -20,7 +20,7 @@ import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, rea
  * Deterministic — no LLM calls (D5) — and it never writes to the workspace
  * (§8). Platform statements are read-only unless started with --allow-write.
  *
- *   node dist/mcp-server.js --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli]
+ *   node dist/mcp-server.js --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli] [--drivers <folder>]
  *
  * stdout carries the protocol; logs go to stderr, redacted.
  */
@@ -58,6 +58,8 @@ export interface ServerOptions {
   allowWrite?: boolean;
   /** `--allow-cli`: consent to run the platform CLI for connections that need it. */
   allowCli?: boolean;
+  /** `--drivers <folder>`: user-installed drivers (phase DRV1). */
+  driversRoot?: string;
   /** Tests: a session with fake platform adapters. */
   platform?: PlatformSession;
 }
@@ -99,7 +101,7 @@ function protocolError(err: unknown): McpError {
 export function createAutodeServer(options: ServerOptions): Server {
   const ws = new EngineWorkspace({ workspaceRoot: options.workspaceRoot, resourcesRoot: options.resourcesRoot });
   const log = (line: string) => (options.log ?? ((l: string) => process.stderr.write(l + '\n')))(redact(line));
-  const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: options.allowWrite === true, allowCli: options.allowCli === true, log });
+  const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: options.allowWrite === true, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform)];
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
@@ -174,12 +176,12 @@ export function createAutodeServer(options: ServerOptions): Server {
   return server;
 }
 
-export function parseArgs(argv: readonly string[]): { workspaceRoot: string; resourcesRoot?: string; allowWrite: boolean; allowCli: boolean } {
+export function parseArgs(argv: readonly string[]): { workspaceRoot: string; resourcesRoot?: string; allowWrite: boolean; allowCli: boolean; driversRoot?: string } {
   const get = (flag: string) => {
     const i = argv.indexOf(flag);
     return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
   };
-  return { workspaceRoot: path.resolve(get('--workspace') ?? process.cwd()), resourcesRoot: get('--resources'), allowWrite: argv.includes('--allow-write'), allowCli: argv.includes('--allow-cli') };
+  return { workspaceRoot: path.resolve(get('--workspace') ?? process.cwd()), resourcesRoot: get('--resources'), allowWrite: argv.includes('--allow-write'), allowCli: argv.includes('--allow-cli'), driversRoot: get('--drivers') };
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -187,7 +189,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const resourcesRoot = args.resourcesRoot ? path.resolve(args.resourcesRoot) : findResourcesRoot();
   if (!resourcesRoot) process.stderr.write('autode: extension resources not found (pass --resources <extension root>); bundled interview prompts and primitives are unavailable.\n');
   const version = readVersion(resourcesRoot);
-  const server = createAutodeServer({ workspaceRoot: args.workspaceRoot, resourcesRoot: resourcesRoot ?? args.workspaceRoot, version, allowWrite: args.allowWrite, allowCli: args.allowCli });
+  const server = createAutodeServer({ workspaceRoot: args.workspaceRoot, resourcesRoot: resourcesRoot ?? args.workspaceRoot, version, allowWrite: args.allowWrite, allowCli: args.allowCli, driversRoot: args.driversRoot });
   await server.connect(new StdioServerTransport());
   process.stderr.write(`autode MCP server ${version} — workspace ${args.workspaceRoot}${args.allowWrite ? ' — platform writes allowed (--allow-write)' : ''}\n`);
 }

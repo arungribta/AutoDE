@@ -2,7 +2,7 @@
 
 **The single place for order and status.** Specifications say *what* each phase delivers and *why*; this document says *when*, and whether it's done. If another document's plan disagrees with this one, this one wins. Document map: [README.md](README.md).
 
-Last updated: 2026-10-16 · Current version: **0.37.0** · Branch: `feature/engine-boundary`
+Last updated: 2026-10-16 · Current version: **0.38.0** · Branch: `feature/engine-boundary`
 
 ---
 
@@ -25,7 +25,7 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.35.0 | ✅ **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
 | v0.36.0 | ✅ **LAY** Workspace layout: `.ai-context/` → `.autode/` grouped by lifecycle (problems, knowledge, config, git-ignored local), deliverables in a visible `autode-output/`, migration of existing workspaces | [technical-design §2.1–2.2](technical-design.md) | Decided 2026-10-16 before the MCP data-platform work: the name confused users, per-engineer state leaked into commits, and deliverables were hidden. |
 | v0.37.0 | ✅ **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
-| v0.38.0 | **DRV1** Platform prerequisites, moderated driver installation, Oracle as a source (Thin mode, 12.1+, tnsnames) | [mcp-engine §9.1](mcp-engine-requirements.md) | How legacy sources get a live connection without breaking P6: AutoDE moderates the install, the user's own npm does it. |
+| v0.38.0 | ✅ **DRV1** Platform prerequisites, moderated driver installation, Oracle as a source (Thin mode, 12.1+, tnsnames) | [mcp-engine §9.1](mcp-engine-requirements.md) | How legacy sources get a live connection without breaking P6: AutoDE moderates the install, the user's own npm does it. |
 | v0.39.0 | **DRV2** Platform-onboarding UI ("Data Platforms") | [mcp-engine §9.1](mcp-engine-requirements.md) | Renders DRV1's prerequisite model; writes `connections.yaml`. |
 | v0.40.0 | **C4b** Chat extraction, Context Inbox, tool-action memory | [context-layer §11 Phase C4b](context-layer-requirements.md) | Remaining context MCP tools; context gaps start pausing steps. |
 | v0.41.0 | **GOV** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | [mcp-engine §9.1](mcp-engine-requirements.md) | Required by C5/C6 grounding checks and PII expectations. |

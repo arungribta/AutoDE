@@ -26,8 +26,8 @@ import { envCredentialVariable } from './credentials/EnvVarCredentialResolver';
  * or `cli` (the platform CLI's own configuration). `allowSampleDataInPrompts`
  * is the per-connection sample-data consent, read by the extension too.
  *
- * Without a file entry, `AUTODE_SNOWFLAKE_ACCOUNT` or
- * `AUTODE_DATABRICKS_WORKSPACE_URL` in the environment defines one source
+ * Without a file entry, `AUTODE_SNOWFLAKE_ACCOUNT`, `AUTODE_DATABRICKS_WORKSPACE_URL`
+ * or `AUTODE_ORACLE_CONNECT_STRING` in the environment defines one source
  * connection (resolver `env`, consent off) — the CI and service-account path.
  */
 
@@ -56,11 +56,12 @@ export interface ConnectionsConfig {
 
 export const CONNECTION_FIELDS: Readonly<Partial<Record<DataPlatformProvider, readonly string[]>>> = {
   snowflake: ['account', 'username', 'warehouse', 'database', 'schema', 'role', 'authMode', 'keyPath', 'snowflakeCliPath'],
-  databricks: ['workspaceUrl', 'httpPath', 'catalog', 'schema', 'catalogType']
+  databricks: ['workspaceUrl', 'httpPath', 'catalog', 'schema', 'catalogType'],
+  oracle: ['connectString', 'username', 'configDir', 'walletLocation']
 };
 
 /** Fields that hold secrets: refused in the file, supplied only by a resolver. */
-export const SECRET_FIELDS: readonly string[] = ['password', 'token', 'privateKey', 'privateKeyPassphrase', 'passphrase', 'clientSecret', 'secret', 'accessToken'];
+export const SECRET_FIELDS: readonly string[] = ['password', 'token', 'privateKey', 'privateKeyPassphrase', 'passphrase', 'clientSecret', 'secret', 'accessToken', 'walletPassword'];
 
 const KNOWN_KEYS = new Set(['id', 'platform', 'role', 'credentials', 'allowSampleDataInPrompts']);
 const RESOLVERS = new Set(['env', 'cli']);
@@ -68,7 +69,7 @@ const RESOLVERS = new Set(['env', 'cli']);
 /** The id a connection gets — mirrors `BaseDataSourceAdapter.getConnectionId()` over the non-secret fields. */
 export function connectionIdFor(platform: DataPlatformProvider, fields: Readonly<Record<string, string>>, credentials: { resolver: string; ref: string }): string {
   const cliRef = credentials.resolver === 'cli' ? credentials.ref || (platform === 'databricks' ? 'DEFAULT' : 'default') : '';
-  const ref = cliRef || fields.account || fields.workspaceUrl || fields.username || '';
+  const ref = cliRef || fields.account || fields.workspaceUrl || fields.connectString || fields.username || '';
   return ref ? `${platform}:${ref}` : platform;
 }
 
@@ -100,7 +101,7 @@ export function parseConnectionsConfig(text: string | undefined, env: NodeJS.Pro
     const e = item as Record<string, unknown>;
     const platform = String(e.platform ?? '') as DataPlatformProvider;
     const allowed = CONNECTION_FIELDS[platform];
-    if (!allowed) { errors.push(`${where}: platform "${String(e.platform ?? '')}" is not supported (snowflake, databricks).`); return; }
+    if (!allowed) { errors.push(`${where}: platform "${String(e.platform ?? '')}" is not supported (snowflake, databricks, oracle).`); return; }
     const secrets = Object.keys(e).filter((k) => SECRET_FIELDS.some((s) => s.toLowerCase() === k.toLowerCase()));
     if (secrets.length) { errors.push(`${where}: ${secrets.join(', ')} must not be in this file — it is committed. Supply secrets through the credentials resolver (env vars or the platform CLI's configuration).`); return; }
     const role = e.role === undefined ? 'source' : String(e.role);
@@ -116,15 +117,16 @@ export function parseConnectionsConfig(text: string | undefined, env: NodeJS.Pro
       if (v !== undefined && v !== null && String(v) !== '') fields[k] = String(v);
     }
     const credentials = { resolver, ref };
+    if (platform === 'oracle' && !fields.connectString && !(resolver === 'env' && envFields(platform, ref, env).connectString)) { errors.push(`${where}: an Oracle connection needs connectString (a tnsnames alias or host:port/service).`); return; }
     const idFields = resolver === 'env' ? { ...envFields(platform, ref, env), ...fields } : fields;
     const id = e.id !== undefined && String(e.id).trim() ? String(e.id).trim() : connectionIdFor(platform, idFields, credentials);
     if (connections.some((c) => c.id === id)) { errors.push(`${where}: duplicate connection id "${id}" (ignored).`); return; }
     connections.push({ id, platform, role, fields, credentials, allowSampleDataInPrompts: e.allowSampleDataInPrompts === true, origin: 'file' });
   });
   // The environment-only connection, when the file doesn't already describe it.
-  for (const platform of ['snowflake', 'databricks'] as const) {
+  for (const platform of ['snowflake', 'databricks', 'oracle'] as const) {
     const fields = envFields(platform, '', env);
-    if (!(platform === 'snowflake' ? fields.account : fields.workspaceUrl)) continue;
+    if (!(platform === 'snowflake' ? fields.account : platform === 'databricks' ? fields.workspaceUrl : fields.connectString)) continue;
     const credentials = { resolver: 'env', ref: '' };
     const id = connectionIdFor(platform, fields, credentials);
     if (connections.some((c) => c.id === id)) continue;
@@ -164,6 +166,7 @@ export async function resolveConnectionCredentials(entry: ConnectionEntry): Prom
   const reference: CredentialReference = { platform: entry.platform, principalType: 'interactive-user', ref: entry.credentials.ref, resolverId: entry.credentials.resolver };
   const resolved = await resolveCredential(reference);
   if (!resolved && entry.credentials.resolver === 'cli') {
+    if (entry.platform === 'oracle') throw new Error('Oracle connections take credentials from environment variables (resolver env); the connect string (a tnsnames alias or Easy Connect) is a field of the entry.');
     const where = entry.platform === 'snowflake' ? 'connections.toml' : '.databrickscfg';
     throw new Error(`The ${entry.platform} CLI configuration (${where}) has no connection named "${entry.credentials.ref || 'default'}".`);
   }

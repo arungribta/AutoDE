@@ -48,6 +48,11 @@ export class ConfigurationManager {
       defaultDatabricksCatalog: config.get<string>('defaultDatabricksCatalog', 'main'),
       defaultDatabricksSchema: config.get<string>('defaultDatabricksSchema', 'default'),
       defaultDatabricksCatalogType: config.get<'auto' | 'unity' | 'hive_metastore'>('defaultDatabricksCatalogType', 'auto'),
+      defaultOracleConnectString: config.get<string>('defaultOracleConnectString', ''),
+      defaultOracleUsername: config.get<string>('defaultOracleUsername', ''),
+      oracleConfigDir: config.get<string>('oracleConfigDir', ''),
+      oracleWalletLocation: config.get<string>('oracleWalletLocation', ''),
+      driversDirectory: config.get<string>('driversDirectory', ''),
 
       // ── Target connection (v0.19.0) — see DataAgentHubSettings' own doc comment ──
       defaultTargetProvider: config.get<DataPlatformProvider>('defaultTargetProvider', 'snowflake'),
@@ -206,5 +211,21 @@ export class ConfigurationManager {
 
   public async getTargetDatabricksToken(): Promise<string | undefined> {
     return this.getSecret(SECRET_KEYS.targetDatabricksToken);
+  }
+
+  public async setOraclePassword(value: string): Promise<void> {
+    await this.setSecret(SECRET_KEYS.oraclePassword, value);
+  }
+
+  public async getOraclePassword(): Promise<string | undefined> {
+    return this.getSecret(SECRET_KEYS.oraclePassword);
+  }
+
+  public async setOracleWalletPassword(value: string): Promise<void> {
+    await this.setSecret(SECRET_KEYS.oracleWalletPassword, value);
+  }
+
+  public async getOracleWalletPassword(): Promise<string | undefined> {
+    return this.getSecret(SECRET_KEYS.oracleWalletPassword);
   }
 }

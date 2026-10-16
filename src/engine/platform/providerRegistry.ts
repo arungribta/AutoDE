@@ -35,6 +35,15 @@ export const PROVIDER_REGISTRY: Record<DataPlatformProvider, ProviderDefinition>
       { mode: 'service-principal-token', principalTypes: ['service-account'] }
     ]
   },
+  oracle: {
+    displayName: 'Oracle Database',
+    capabilities: ['metadata', 'query-execution'],
+    configKeys: ['defaultOracleConnectString', 'defaultOracleUsername', 'oracleConfigDir', 'oracleWalletLocation'],
+    authModes: [
+      // Thin mode (DRV1): database username and password; a TLS wallet is a transport option, not an auth mode.
+      { mode: 'username-password', principalTypes: ['interactive-user', 'service-account'] }
+    ]
+  },
   bigquery: {
     displayName: 'BigQuery',
     capabilities: ['metadata', 'query-execution', 'warehouse-insights'],

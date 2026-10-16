@@ -694,6 +694,8 @@ Provides:
 | Redshift | `PG_CATALOG` + `SVV_*` tables | PostgreSQL-based, different system tables |
 | Synapse | `sys.tables`, `sys.columns` | T-SQL dialect, dedicated SQL pool vs serverless |
 
+Oracle shipped in v0.38.0 (§6.13).
+
 ### 6.5 ConnectionManager
 
 **File:** `src/engine/platform/ConnectionManager.ts`
@@ -869,7 +871,7 @@ interface PlatformCliDescriptor {
 
 **Known verification gap:** neither `snow` nor `databricks` was installed in the environment this phase was implemented in, so the "CLI found, real detection" path (`detect()` returning `found: true` against a genuine installed CLI) is implemented per each vendor's documented behavior but not verified against a live install. The "CLI not found" cascade, `.databrickscfg` parsing, and the Snowflake `connections.toml` presence-check are all verified against real files/mocked process output. The Databricks CLI-subcommand risk flagged in the original design is sidestepped by design (reading the stable config file instead of shelling out), not resolved by verification.
 
-Requirement PLT-7; scheduled as phase DRV (roadmap).
+Requirement PLT-7. The on-demand driver design sketched here and in §6.9 was replaced in v0.38.0 by moderated installs (§6.13).
 
 ### 6.9 Real Snowflake/Databricks Execution (Phase 3b, core implemented v0.17.0; on-demand driver + onboarding UI not yet implemented)
 
@@ -961,6 +963,36 @@ Which system and environment a connection feeds, and its schema list, come from 
 **Read-only guard** (`src/engine/platform/sqlGuard.ts`). `lex()` skips `--` and `/* */` comments, quoted strings and identifiers, and splits on the remaining `;`. It runs twice: ANSI (no backslash escapes, no backticks, no `$$`) and Snowflake/Spark (backslash escapes, backtick identifiers, `$$` strings). Text is accepted only if both readings find exactly one non-empty statement with the same first keyword, so input that two dialects read differently (`'x\'' ; DROP …`) is refused, at the price of rejecting some valid but unusual quoting. Only `--` and `/* */` count as comments, and block comments don't nest: wherever the guard's reading differs from a platform's, the guard sees more code than the platform, never less. `checkSingleStatement()` classifies a statement as `query` (SELECT/WITH), `metadata` (SHOW/DESCRIBE/DESC/EXPLAIN) or `write` (any other first keyword, or a `WRITE_KEYWORDS` word anywhere outside literals: DML, DDL, GRANT, CALL, COPY, PUT, INTO, ANALYZE, USE, transaction control …); `checkReadOnlySql()` accepts `query` and `metadata`. `REPLACE`, `GET` and `SET` are deliberately not write words (they are also function names). Functions with side effects are invisible to it; the platform role is the boundary.
 
 **Sample data** (`src/engine/platform/sampleData.ts`). `isPiiColumnName()` splits a name into snake_case words (camelCase is split first) and matches `PII_WORDS` and two-word `PII_PHRASES`; `looksLikePiiValue()` catches e-mail addresses and Luhn-valid 13–19-digit card numbers. `gateQueryResult()`: `metadata` results pass; without consent rows are dropped (`withheld` says why and how to allow it); with consent `maskRows()` replaces PII-named columns and PII-shaped values by `[masked]`. `sanitizeSnapshot()` drops (no consent) or masks (consent) profile `minValue`/`maxValue` and drops lineage `queryText` without consent; counts and structure stay. CSV ingestion (`fileIngestion.ts`) already kept only inferred types; a test pins that.
+
+### 6.13 Platform prerequisites, driver store and Oracle (v0.38.0; PLT-1, PLT-7)
+
+**Moderated installation.** AutoDE never downloads, bundles or hosts a driver.
+- **Prerequisites** (`src/engine/platform/prerequisites.ts`): `checkPrerequisites()` returns, per platform, `Prerequisite { kind: cli|driver|client-library, required, state, version, detail, why, install }`. CLIs come from the existing `getCliDescriptor().detect()` and are optional (P7). The Oracle driver comes from `driverStatus()`. The `install` step carries the command, its folder, size, licence and notes, and `blocked` when `detectNpm()` (`npm --version` through the shell, fixed arguments) finds no npm. The check runs version probes, so it is only called from a command.
+- **Driver store** (`src/engine/platform/driverStore.ts`): `DRIVERS.oracle` = `oracledb`, range `^6.0.0`, Thin-mode check. The root comes from `driversRoot(setting)`: the `driversDirectory` setting, then `AUTODE_DRIVERS_DIR`, then `~/.autode/drivers`. It is a user-level folder rather than VS Code's global storage because an MCP server started by another client must find it. `installCommand()` = `npm install --prefix "<root>/<id>" --ignore-scripts --no-audit --no-fund "<pkg>@<range>"`, with paths and range double-quoted for PowerShell, cmd and POSIX shells; a path containing `"` or a newline is refused. `verifyDriver()` loads the package with `createRequire(<folder>/package.json)`, checks the major version and the spec's `check()`, and writes `.autode-driver.json` `{ package, version, lockfileSha256, verifiedAt }`. `driverStatus()` reads files only and returns `missing | unsupported | unverified | changed | ready`; `changed` means the lockfile hash, version or package no longer match the record. `loadDriver()` throws `DriverNotReadyError` (with the next command to run) unless the status is `ready`, and caches the module per folder and version. Because the require path is only known at run time, esbuild leaves it alone and nothing of the driver enters a bundle.
+- **Extension** (`src/core/platformPrerequisites.ts`, VS Code API passed in): **AutoDE: Check Platform Prerequisites** (a QuickPick of states; picking one installs, verifies or opens the vendor's guide), **AutoDE: Install Oracle Driver** (a modal with the command, folder, size, licence and notes, and the buttons *Run in AutoDE terminal* / *Copy command*; on Run it creates the folder, reuses or creates the terminal "AutoDE", sends the command, then offers *Verify*), **AutoDE: Verify Oracle Driver**, and **AutoDE: Set Oracle Password** (SecretStorage). Without npm, the modal offers the Node.js download or the `driversDirectory` setting. A test asserts no `spawn*`/`exec*`/`fetch` at activation or on connect, and that the command reaches a terminal only through the Run button.
+
+**Oracle** (`src/engine/platform/adapters/OracleAdapter.ts`). It receives a `loadDriver` function (`ConnectionManager` passes `loadDriver(driversRoot(options.driversRoot()), 'oracle')`), so nothing loads before the first `connect()`. Connecting works as follows:
+1. `resolveConnectString()` (`credentials/tnsnames.ts`) accepts Easy Connect as is. For an alias it finds `tnsnames.ora` (`configDir` → `TNS_ADMIN` → `$ORACLE_HOME/network/admin`), checks the alias case-insensitively (`parseTnsAliases()`: depth-0 `alias[, alias] =` entries, `#` comments, `IFILE` collected but not followed; with an `IFILE` an unknown alias is a warning, not an error), and passes the folder as `configDir`.
+2. Then `getConnection({ user, password, connectString, configDir?, walletLocation?, walletPassword? })`; `fetchAsString` is set for CLOB/NCLOB. `NJS-138` (server older than 12.1) is rewritten into a "needs Thick mode" message.
+
+Queries run with `outFormat: OBJECT`, `maxRows` and `callTimeout`. `Date` values become ISO strings, and a trailing `;` is stripped except for PL/SQL blocks. Metadata:
+- `listTables`: `ALL_TABLES` (non-nested, non-secondary) ∪ `ALL_VIEWS`, with `ALL_TAB_COMMENTS` and `ALL_OBJECTS.LAST_DDL_TIME` as `last_altered`.
+- `listColumns`: `ALL_TAB_COLUMNS` with formatted types (`VARCHAR2(n)`, `NUMBER(p,s)`, `RAW(n)`) and `ALL_COL_COMMENTS`.
+- `listPrimaryKeys` (new optional query): `ALL_CONSTRAINTS` type `P`.
+- `listForeignKeys`: type `R` joined by `position`.
+- `listViews`: `ALL_VIEWS.TEXT`.
+- `profileTable`: `FETCH FIRST n ROWS ONLY` over quoted identifiers.
+
+All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper-cased) with aliases quoted in lower case to match `assembleTables()`. `listDatabases()` returns the connected container (`CON_NAME`); `listSchemas()` lists `ALL_USERS WHERE ORACLE_MAINTAINED = 'N'`. Profiling skips LOB, LONG, RAW, XMLTYPE and spatial columns.
+
+**Shared changes:**
+- `BaseDataSourceAdapter.extractScope()` now sets `isPrimaryKey` from `listPrimaryKeys` and `isForeignKey` from the foreign keys it already read. Before this, both were always false on every platform.
+- `getConnectionId()` and `connectionIdFor()` also use `connectString` (`oracle:PRODDB`).
+- Probes gain dialect `oracle`: a `FETCH FIRST` sample, the subquery form for multi-column `unique`, and `1`/`0` for booleans.
+- The read-only guard gains a third reading convention for `q'<d>…<d>'` / `nq'…'`.
+- `connections.yaml` and the `AUTODE_ORACLE_*` variables accept `connectString`, `username`, `configDir`, `walletLocation`; `walletPassword` is a secret field; an Oracle entry without a connect string is refused.
+- MCP: `--drivers <folder>`; `autode_explain_sql` runs `EXPLAIN PLAN FOR` then `DBMS_XPLAN.DISPLAY()`; `autode_test_connection` reads `CON_NAME`, `CURRENT_SCHEMA` and `PRODUCT_COMPONENT_VERSION`.
+- Extension: the settings `defaultOracleConnectString`, `defaultOracleUsername`, `oracleConfigDir`, `oracleWalletLocation`, `driversDirectory`; `oracle` in `defaultProvider`; secrets `oraclePassword`, `oracleWalletPassword`; the connection test, Source Assessment and the source connection check handle Oracle (as a source only). The settings panel's UI for Oracle comes with DRV2.
 
 ## 7. Agent Orchestration
 
@@ -1358,7 +1390,7 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 <!-- generated:settings -->
 | Setting | Type | Default | What it does |
 |---|---|---|---|
-| `defaultProvider` | enum: `snowflake`, `databricks`, `bigquery`, `redshift`, `synapse`, `other` | `"snowflake"` | Default data platform provider. |
+| `defaultProvider` | enum: `snowflake`, `databricks`, `oracle`, `bigquery`, `redshift`, `synapse`, `other` | `"snowflake"` | Default data platform provider. |
 | `defaultDatabricksWorkspaceUrl` | string | `""` | Default Databricks workspace host (e.g. adb-1234567890123456.7.azuredatabricks.net). |
 | `defaultDatabricksHttpPath` | string | `""` | The target SQL warehouse's HTTP Path (e.g. /sql/1.0/warehouses/0123456789abcdef), copied from its Connection Details page. |
 | `defaultDatabricksCatalog` | string | `"main"` | Default Databricks (Unity Catalog) catalog. |
@@ -1413,6 +1445,11 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 | `dataPlatformCliConsent` | boolean | `false` | Allow AutoDE to shell out to a data-platform CLI (currently: 'snow connection list') to enumerate configured connections for 'AutoDE: Connect to Data Platform' (opt-in). |
 | `snowflakeCliPath` | string | `""` | Path to the Snowflake CLI ('snow' / 'snow.exe'). |
 | `databricksCliPath` | string | `""` | Path to the Databricks CLI ('databricks' / 'databricks.exe'). |
+| `defaultOracleConnectString` | string | `""` | Oracle source: a tnsnames.ora alias (e.g. |
+| `defaultOracleUsername` | string | `""` | Oracle source: the database user. |
+| `oracleConfigDir` | string | `""` | Folder containing tnsnames.ora. |
+| `oracleWalletLocation` | string | `""` | Folder of an Oracle TLS wallet (e.g. for Autonomous Database). |
+| `driversDirectory` | string | `""` | Where drivers you install with AutoDE's guidance live. |
 | `serviceAccountCredentialRef` | string | `""` | A service-account credential pointer, set once by a platform team — deliberately a plain settings value, no interactive UI. |
 <!-- /generated:settings -->
 
@@ -1439,7 +1476,7 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 ---
 ### 10.6 MCP server (v0.35.0; MCP-1)
 
-- **Entry:** `src/mcp/server.ts` → bundled `dist/mcp-server.js`; `node dist/mcp-server.js --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli]`. `findResourcesRoot()` walks up from the bundle to AutoDE's `package.json` (bundled `skills/`, `primitive-definitions/`, version). Uses the SDK's low-level `Server` with plain JSON Schemas (no zod in our code) over `StdioServerTransport`; stdout carries the protocol, logs go to stderr through `redact()`. `createAutodeServer(options)` is exported for in-process hosts (phase 5).
+- **Entry:** `src/mcp/server.ts` → bundled `dist/mcp-server.js`; `node dist/mcp-server.js --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli] [--drivers <folder>]`. `findResourcesRoot()` walks up from the bundle to AutoDE's `package.json` (bundled `skills/`, `primitive-definitions/`, version). Uses the SDK's low-level `Server` with plain JSON Schemas (no zod in our code) over `StdioServerTransport`; stdout carries the protocol, logs go to stderr through `redact()`. `createAutodeServer(options)` is exported for in-process hosts (phase 5).
 - **Read-only by construction** (`src/mcp/workspace.ts`, `EngineWorkspace`): reads `.autode/**` and the extension's resources, never writes. Tool skills load with `loadToolSkillStates(..., { migrate: false })` (an unmigrated pre-S2 skill is unreviewed here). Context: `contextSources()` loads the ledger, projects the graph for the active spec (`active-problem.json` → `spec/business-problem.yaml` `id`), detects conflicts, loads the catalog with vocabulary and `glossaryAliases()` and builds its index in memory — the same `ContextPackSources` the extension builds, minus runtime facts; packs do not promote into the working set. Each source is cached by a fingerprint of path + size + mtime of its files. Primitives are re-registered (bundled + `.autode/config/primitives` + `history/`) when those folders change.
 - **Tools** (`src/mcp/tools.ts`, `TOOLS`): `autode_search_primitives`, `autode_describe_primitive`, `autode_validate_transform`, `autode_compile_transform` (registry, `getPrimitiveVersion()`); `autode_validate_pipeline_spec`, `autode_compile_pipeline_spec` (adds `suggestedPath` = `autode-output/<active problem>/03-build/<specId>.v<n>/<entity>/<nn>_<kind>.sql`, where `ArtifactWriter` puts build artifacts; the server assumes the default output folder), `autode_generate_design_doc`; `autode_resolve` (`resolveText` over the working set + `Catalog.search`), `autode_get_context_pack` (`buildContextPack`), `autode_list_assertions` (mirrors excluded unless `includeMirrors`), `autode_check_grounding` (`checkSqlGrounding` over `buildSchemaIndex(graph)`). All annotated `readOnlyHint: true, destructiveHint: false, idempotentHint: true`. Arguments are Ajv-validated against `inputSchema` before a handler runs (validators compiled per tool on first use, since platform tools' schemas are built per server). Workspace paths are refused if they leave the workspace.
 - **Platform tools** (v0.37.0, `src/mcp/platform.ts`): `platformTools(session)` adds `autode_list_connections`, `autode_test_connection`, `autode_list_databases`, `autode_list_schemas`, `autode_extract_metadata` (`schemaFilter: ['<database>.<schema>']`, optional `tables`, `profile` → `includeProfiling`), `autode_explain_sql` (one statement via `checkSingleStatement()`, prefixed `EXPLAIN USING TEXT` on Snowflake and `EXPLAIN` on Databricks; writes may be explained, since EXPLAIN compiles without running) and `autode_execute_query` (`checkSingleStatement()` always, `checkReadOnlySql()` unless `--allow-write`; `maxRows` default 100, schema maximum 10 000; `timeoutSeconds` default 60; result through `gateQueryResult()` with the connection's current consent). All are `openWorldHint: true`; `autode_execute_query` is `readOnlyHint: false, destructiveHint: true` when the server allows writes, and the server's `instructions` say so. `PlatformSession` holds one `ConnectionManager` per connection id, opened on first use (a failed connect is forgotten so the next call retries; `autode_test_connection` reconnects), and disposes them when the transport closes; it registers the engine's built-in resolvers (`env`, `cli`) only, and passes `cliConsent: --allow-cli` and `sampleDataConsent` (the file, re-read per call). `classifyPlatformError()` maps failures to `AUTH_FAILED` / `PERMISSION_DENIED` / `TIMEOUT` / `CONNECTION_FAILED` (connect) / `PLATFORM_ERROR` (statement), with the raw text in `details`; a missing CLI consent becomes `PERMISSION_DENIED` naming `--allow-cli`.
@@ -1448,7 +1485,7 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 
 ### 10.7 Build and packaging (v0.35.0; NFR-5)
 
-- `npm run compile` = `tsc -p ./` (every module to `dist/**`, used by tests and the eval) then `scripts/bundle.cjs` (esbuild, CJS, `node18`): `dist/extension.js` (external `vscode`; replaces tsc's file) and `dist/mcp-server.js` (no externals). Development bundles are readable with linked maps; `vscode:prepublish` builds `--production` (minified, no maps): 753 KB and 538 KB (v0.37.0; 740 and 470 KB at v0.35.0). `--analyze` prints what each bundle contains.
+- `npm run compile` = `tsc -p ./` (every module to `dist/**`, used by tests and the eval) then `scripts/bundle.cjs` (esbuild, CJS, `node18`): `dist/extension.js` (external `vscode`; replaces tsc's file) and `dist/mcp-server.js` (no externals). Development bundles are readable with linked maps; `vscode:prepublish` builds `--production` (minified, no maps): 776 KB and 554 KB (v0.38.0; 740 and 470 KB at v0.35.0). `--analyze` prints what each bundle contains.
 - `.vscodeignore` is an **allowlist** (`**`, then `!` per shipped file): the two bundles and `dist/THIRD-PARTY-NOTICES.md`, the icons (`media/autode-icon-256.png` marketplace, `media/autode-icon-64.png` MCP, `media/autode-activitybar.svg` single-colour glyph for the activity bar and panel), webviews, `skills/*.json`, `primitive-definitions/**`, `docs/schemas/*.json`, README, CHANGELOG and LICENSE — so local folders (`.claude/`, `.venv/`, `.autode/`) can never ship; no `node_modules/` (before v0.35.0 the package excluded `node_modules/` while `ajv` and `yaml` were runtime dependencies, so a packaged extension could not load). Package with `vsce package --no-dependencies`.
 - **Licences of bundled code:** the bundles strip comments, so `scripts/bundle.cjs` writes `dist/THIRD-PARTY-NOTICES.md` from esbuild's metafile — every package actually bundled (innermost `node_modules/<pkg>` of each input), with its version, declared licence and full licence file.
 - **Identity:** publisher `arun-gribta` (extension id `arun-gribta.auto-data-engineering-hub`); the MCP server reports `title: 'AutoDE'` and the 64 px icon as a data URI (`serverIcons()`).
@@ -1475,7 +1512,7 @@ src/agents/validate/    # documentation and Grounding Report
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
   ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, panelProvider.ts, phaseInference.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts
+  agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, panelProvider.ts, phaseInference.ts, platformPrerequisites.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
@@ -1489,11 +1526,11 @@ src/engine/grounding/    # SQL grounding checks, manifests, reports
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters
-  BaseAdapter.ts, ConnectionManager.ts, connectionsConfig.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
+  BaseAdapter.ts, ConnectionManager.ts, connectionsConfig.ts, driverStore.ts, prerequisites.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
 src/engine/platform/adapters/    # Snowflake and Databricks adapters
-  DatabricksAdapter.ts, SnowflakeAdapter.ts, snowflakeJwt.ts
+  DatabricksAdapter.ts, OracleAdapter.ts, SnowflakeAdapter.ts, snowflakeJwt.ts
 src/engine/platform/credentials/    # credential resolvers and CLI detection
-  CliConfigResolver.ts, cliDetection.ts, cliRegistry.ts, databricksCfg.ts, DatabricksCli.ts, EnvVarCredentialResolver.ts, index.ts, PlatformCliDescriptor.ts, registry.ts, SnowflakeCli.ts, types.ts
+  CliConfigResolver.ts, cliDetection.ts, cliRegistry.ts, databricksCfg.ts, DatabricksCli.ts, EnvVarCredentialResolver.ts, index.ts, PlatformCliDescriptor.ts, registry.ts, SnowflakeCli.ts, tnsnames.ts, types.ts
 src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust

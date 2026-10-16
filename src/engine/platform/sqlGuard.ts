@@ -6,10 +6,12 @@
  *
  * Dialects disagree about quoting — Snowflake and Spark SQL honour backslash
  * escapes in strings, Spark quotes identifiers with backticks and strings with
- * double quotes, Snowflake has `$$…$$` strings; ANSI SQL has none of these. A
- * guard that reads a string where the platform reads code can be bypassed
- * (`'x\'' ; DROP …`), so the text is tokenised under **both** conventions and
- * accepted only when both agree it is one read-only statement.
+ * double quotes, Snowflake has `$$…$$` strings, Oracle has `q'[…]'` strings
+ * with a delimiter of the writer's choice; ANSI SQL has none of these. A guard
+ * that reads a string where the platform reads code can be bypassed
+ * (`'x\'' ; DROP …`, `q'[a']' ; DROP …`), so the text is tokenised under
+ * **each** convention and accepted only when all agree it is one read-only
+ * statement.
  *
  * This is a guard, not a security boundary: functions with side effects
  * (some `SYSTEM$…` functions, procedures behind views) are invisible to it. A
@@ -39,12 +41,17 @@ interface Convention {
   backtick: boolean;
   /** `$$…$$` strings. */
   dollar: boolean;
+  /** Oracle's alternative quoting `q'<d>…<d>'` (also `nq'…'`); `[ { < (` close with `] } > )`. */
+  qQuote?: boolean;
 }
 
 const CONVENTIONS: readonly Convention[] = [
   { backslash: false, backtick: false, dollar: false },
-  { backslash: true, backtick: true, dollar: true }
+  { backslash: true, backtick: true, dollar: true },
+  { backslash: false, backtick: false, dollar: false, qQuote: true }
 ];
+
+const Q_CLOSE: Readonly<Record<string, string>> = { '[': ']', '{': '}', '<': '>', '(': ')' };
 
 interface Lexed {
   /** Words outside comments, literals and quoted identifiers, per statement (upper case). */
@@ -100,7 +107,16 @@ function lex(sql: string, c: Convention): Lexed {
     if (/[A-Za-z_]/.test(ch)) {
       let j = i + 1;
       while (j < n && /[A-Za-z0-9_$]/.test(sql[j])) j++;
-      statements[statements.length - 1].push(sql.slice(i, j).toUpperCase());
+      const word = sql.slice(i, j).toUpperCase();
+      if (c.qQuote && (word === 'Q' || word === 'NQ') && sql[j] === "'") {
+        const open = sql[j + 1];
+        if (open === undefined || /\s/.test(open)) return { statements, unterminated: "a q' quote" };
+        const end = sql.indexOf(`${Q_CLOSE[open] ?? open}'`, j + 2);
+        if (end < 0) return { statements, unterminated: "a q' quote" };
+        i = end + 2;
+        continue;
+      }
+      statements[statements.length - 1].push(word);
       i = j;
       continue;
     }

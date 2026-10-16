@@ -19,6 +19,7 @@ The server takes these arguments:
 | `--workspace <folder>` | The project whose `.autode/` the server reads. Defaults to the current directory. |
 | `--resources <folder>` | The extension's root folder, which holds the bundled interview prompts and primitives. Found automatically next to the server file, so pass it only if you copied `mcp-server.js` somewhere else. |
 | `--allow-cli` | Lets the server run the Snowflake CLI (`snow`). Needed for connections from `connections.toml` and for username/password sign-in; key-pair and Databricks connections don't need it. |
+| `--drivers <folder>` | Where drivers you installed with AutoDE's guidance live (the Oracle driver). Defaults to `AUTODE_DRIVERS_DIR`, else `~/.autode/drivers`, which is the same folder the extension uses. |
 | `--allow-write` | Lets `autode_execute_query` run statements that change data or objects. Leave it off unless you need it; see [Read-only by default](#read-only-by-default). |
 
 ## Claude Code
@@ -124,7 +125,7 @@ connections:
 
 | Key | Meaning |
 |---|---|
-| `platform` | `snowflake` or `databricks`. |
+| `platform` | `snowflake`, `databricks` or `oracle` (a source; see [Oracle](#oracle)). |
 | `role` | `source` (default) or `target`. |
 | `credentials.resolver` | `env`: environment variables `AUTODE_<PLATFORM>_<FIELD>`, or `AUTODE_<PLATFORM>_<REF>_<FIELD>` when `ref` is set. `cli`: a named connection in the Snowflake CLI's `connections.toml`. |
 | `credentials.ref` | The CLI connection name, or the infix of the environment variables. |
@@ -132,7 +133,7 @@ connections:
 | `allowSampleDataInPrompts` | Whether row values from this connection may reach a language model. Default `false`. See [Sample data](#sample-data). |
 | other keys | Settings that aren't secret: Snowflake `account`, `username`, `warehouse`, `database`, `schema`, `role`, `authMode`, `keyPath`; Databricks `workspaceUrl`, `httpPath`, `catalog`, `schema`. |
 
-Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATABASE`, `SCHEMA`, `ROLE`, `AUTH_MODE`, `PASSWORD`, `PRIVATE_KEY_PATH`, `PRIVATE_KEY`, `PRIVATE_KEY_PASSPHRASE`; Databricks `WORKSPACE_URL`, `HTTP_PATH`, `TOKEN`, `CATALOG`, `SCHEMA`. Pass them in the client's `env` block or set them in the shell that starts the client:
+Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATABASE`, `SCHEMA`, `ROLE`, `AUTH_MODE`, `PASSWORD`, `PRIVATE_KEY_PATH`, `PRIVATE_KEY`, `PRIVATE_KEY_PASSPHRASE`; Databricks `WORKSPACE_URL`, `HTTP_PATH`, `TOKEN`, `CATALOG`, `SCHEMA`; Oracle `CONNECT_STRING`, `USERNAME`, `PASSWORD`, `CONFIG_DIR`, `WALLET_LOCATION`, `WALLET_PASSWORD`. Pass them in the client's `env` block or set them in the shell that starts the client:
 
 ```json
 {
@@ -151,6 +152,30 @@ Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATA
 **VS Code's secret store.** A server started by Claude Code or Cursor can't read the passwords and tokens you saved in AutoDE's settings panel. Use environment variables or the CLI's configuration. (When the AutoDE extension starts the server itself, in a later release, it passes those secrets as environment variables.)
 
 **Without the platform CLIs.** Snowflake key-pair and Databricks token connections go over HTTPS and need no CLI.
+
+### Oracle
+
+AutoDE reads Oracle Database **12.1 and later** as a source, using the `oracledb` driver in Thin mode (pure JavaScript, no Oracle Instant Client). Oracle 11g and older need Thick mode, which AutoDE doesn't support. AutoDE doesn't ship the driver: in VS Code, run **AutoDE: Install Oracle Driver**. It shows the `npm` command, runs it in a terminal named "AutoDE" when you click, and then verifies the result. npm uses your own registry settings (`.npmrc`). Without VS Code, run the same command yourself:
+
+```bash
+npm install --prefix ~/.autode/drivers/oracle --ignore-scripts --no-audit --no-fund "oracledb@^6.0.0"
+```
+
+The server only uses a driver that AutoDE has verified. Run **AutoDE: Verify Oracle Driver** once. If the folder changes later, verify it again.
+
+```yaml
+connections:
+  - platform: oracle
+    connectString: PRODDB              # a tnsnames.ora alias, or Easy Connect: dbhost:1521/ORCLPDB1
+    configDir: /opt/oracle/network/admin   # optional; otherwise TNS_ADMIN, then $ORACLE_HOME/network/admin
+    username: AUTODE_RO
+    credentials: { resolver: env }     # password in AUTODE_ORACLE_PASSWORD
+```
+
+- **tnsnames.ora** is found the way Oracle's own tools find it. AutoDE reads only the alias names, and lists them if the alias you gave isn't there; the driver resolves the alias. Aliases from files pulled in with `IFILE` are passed to the driver unchecked.
+- **Credentials.** tnsnames.ora holds no credentials, and Oracle's wallet-based password store needs Thick mode, so the password comes from `AUTODE_ORACLE_PASSWORD` (or `AUTODE_ORACLE_<REF>_PASSWORD`). For a TLS wallet (e.g. Autonomous Database), set `walletLocation` and pass `AUTODE_ORACLE_WALLET_PASSWORD`.
+- A schema is an owner; `autode_list_databases` returns the database (PDB) you are connected to. `autode_explain_sql` uses `EXPLAIN PLAN FOR`, which writes the plan to your session's `PLAN_TABLE`.
+- Oracle's `q'[…]'` quoting is understood by the read-only guard. A q-quoted string that contains an apostrophe is refused; write it with doubled quotes (`'it''s'`) instead.
 
 ### Read-only by default
 
@@ -216,5 +241,7 @@ The following arrive in later releases:
 - **No tools show up.** Run the configured command yourself. The server prints `autode MCP server <version> — workspace <folder>` to stderr and then waits for input; press Ctrl+C to stop it.
 - **The context tools return nothing.** Check that `--workspace` points at the folder that contains `.autode/`.
 - **`autode_list_connections` is empty.** Add `.autode/config/connections.yaml`, or set `AUTODE_SNOWFLAKE_ACCOUNT` / `AUTODE_DATABRICKS_WORKSPACE_URL` in the client's `env`. Entries that were refused, and why, are listed in `configErrors`.
+- **"Oracle driver … is not ready".** Install it (above), then verify it. If you installed it in another folder, pass `--drivers <folder>` (the folder that contains `oracle/`).
+- **"older than Oracle 12.1 … Thick mode".** The database is too old for Thin mode, which AutoDE doesn't support yet.
 - **`PERMISSION_DENIED` mentioning `--allow-cli`.** The connection goes through the Snowflake CLI (a `cli` reference, or username/password). Add `--allow-cli` to the server's arguments, or switch to key-pair.
 - **A skill prompt is missing.** It has not been reviewed for its current content. Review it in AutoDE: any change to a skill's files requires a new review.

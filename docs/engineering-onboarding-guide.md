@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.37.0 (2026-10-16). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.38.0 (2026-10-16). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -242,7 +242,7 @@ Each recipe lists the touch points; the design section has the detail.
 
 **An LLM provider.** One `LlmAdapter` class plus an entry in `LLM_ADAPTERS` (`src/core/llmProviders.ts`); add the enum value to `activeLlmProvider` in `package.json` and to the guard in `webviewProvider.updateSettings`; a provider card in `sidebar.html`. Tool loops: see the existing adapters and `agenticTools.ts`. *Design §8.*
 
-**A data platform.** An adapter extending `BaseDataSourceAdapter` in `src/engine/platform/adapters/`, a factory and credentials case in `ConnectionManager`, settings in `package.json`, a probe dialect in `probes.ts` if the SQL differs. *Design §6.*
+**A data platform.** An adapter extending `BaseDataSourceAdapter` in `src/engine/platform/adapters/`, a factory and credentials case in `ConnectionManager`, settings in `package.json`, a probe dialect in `probes.ts` if the SQL differs, fields in `connectionsConfig.ts` and `EnvVarCredentialResolver`. If it needs a driver, never add it to `package.json`: describe it in `DRIVERS` (`driverStore.ts`; package, version range, check) and as a prerequisite, and have the adapter take a `loadDriver` function, as `OracleAdapter` does. Users install it with AutoDE's guidance. Check that the guard (`sqlGuard.ts`) understands the dialect's quoting. *Design §6, §6.13.*
 
 **An MCP tool.** Add an `EngineTool` to `TOOLS` in `src/mcp/tools.ts` (JSON Schema input, annotations, a handler that throws `EngineToolError` for expected failures), or to `platformTools()` in `src/mcp/platform.ts` if it talks to a platform (run SQL only through the `sqlGuard.ts` checks and return rows only through `gateQueryResult()`). Keep it read-only unless the spec says otherwise; add good/bad payloads to the contract test and update [mcp-setup.md](mcp-setup.md). *Design §10.6.*
 

@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.37.0",
+  "version": "0.38.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -226,6 +226,22 @@
       {
         "command": "autoDataEngineeringHub.testServiceAccountCredential",
         "title": "AutoDE: Test Service Account Credential"
+      },
+      {
+        "command": "autoDataEngineeringHub.checkPlatformPrerequisites",
+        "title": "AutoDE: Check Platform Prerequisites"
+      },
+      {
+        "command": "autoDataEngineeringHub.installOracleDriver",
+        "title": "AutoDE: Install Oracle Driver"
+      },
+      {
+        "command": "autoDataEngineeringHub.verifyOracleDriver",
+        "title": "AutoDE: Verify Oracle Driver"
+      },
+      {
+        "command": "autoDataEngineeringHub.setOraclePassword",
+        "title": "AutoDE: Set Oracle Password"
       }
     ],
     "menus": {
@@ -342,6 +358,7 @@
           "enum": [
             "snowflake",
             "databricks",
+            "oracle",
             "bigquery",
             "redshift",
             "synapse",
@@ -666,6 +683,31 @@
           "type": "string",
           "default": "",
           "description": "Path to the Databricks CLI ('databricks' / 'databricks.exe'). Leave empty to auto-detect via PATH. Not required for connection enumeration, which reads '.databrickscfg' directly."
+        },
+        "autoDataEngineeringHub.defaultOracleConnectString": {
+          "type": "string",
+          "default": "",
+          "description": "Oracle source: a tnsnames.ora alias (e.g. PRODDB) or an Easy Connect string (host:port/service). Needs the Oracle driver (AutoDE: Install Oracle Driver); Oracle Database 12.1 or later (Thin mode)."
+        },
+        "autoDataEngineeringHub.defaultOracleUsername": {
+          "type": "string",
+          "default": "",
+          "description": "Oracle source: the database user. The password is stored with 'AutoDE: Set Oracle Password' (secret storage)."
+        },
+        "autoDataEngineeringHub.oracleConfigDir": {
+          "type": "string",
+          "default": "",
+          "description": "Folder containing tnsnames.ora. Empty: TNS_ADMIN, then $ORACLE_HOME/network/admin, as Oracle's own tools do."
+        },
+        "autoDataEngineeringHub.oracleWalletLocation": {
+          "type": "string",
+          "default": "",
+          "description": "Folder of an Oracle TLS wallet (e.g. for Autonomous Database). Leave empty for connections without a wallet."
+        },
+        "autoDataEngineeringHub.driversDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Where drivers you install with AutoDE's guidance live. Empty: the AUTODE_DRIVERS_DIR environment variable, else ~/.autode/drivers (shared with the MCP server)."
         },
         "autoDataEngineeringHub.serviceAccountCredentialRef": {
           "type": "string",

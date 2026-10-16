@@ -74,7 +74,7 @@ export function combineProbeExecutors(executors: ReadonlyArray<ProbeExecutor | u
   };
 }
 
-export type ProbeDialect = 'snowflake' | 'spark_sql' | 'ansi';
+export type ProbeDialect = 'snowflake' | 'spark_sql' | 'oracle' | 'ansi';
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)*$/;
 
@@ -83,9 +83,10 @@ function ident(name: string): string {
   return name;
 }
 
-function literal(v: unknown): string {
+function literal(v: unknown, dialect?: ProbeDialect): string {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
-  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  // Oracle SQL has no boolean literals before 23ai.
+  if (typeof v === 'boolean') return dialect === 'oracle' ? (v ? '1' : '0') : v ? 'TRUE' : 'FALSE';
   return `'${String(v).replace(/'/g, "''")}'`;
 }
 
@@ -94,6 +95,7 @@ function sampled(table: string, dialect: ProbeDialect, sampleRows: number | unde
   const n = Math.max(1, Math.floor(sampleRows));
   if (dialect === 'snowflake') return `${ident(table)} SAMPLE (${n} ROWS)`;
   if (dialect === 'spark_sql') return `${ident(table)} TABLESAMPLE (${n} ROWS)`;
+  if (dialect === 'oracle') return `(SELECT * FROM ${ident(table)} FETCH FIRST ${n} ROWS ONLY) s0`;
   return `(SELECT * FROM ${ident(table)} LIMIT ${n}) s0`;
 }
 
@@ -105,7 +107,7 @@ export function renderProbeSql(spec: ProbeSpec, dialect: ProbeDialect, options: 
   const anyNull = cols.map((c) => `${c} IS NULL`).join(' OR ');
   switch (spec.check) {
     case 'unique': {
-      const distinct = dialect === 'ansi' && cols.length > 1
+      const distinct = (dialect === 'ansi' || dialect === 'oracle') && cols.length > 1
         ? `(SELECT COUNT(*) FROM (SELECT DISTINCT ${cols.join(', ')} FROM ${from} WHERE NOT (${anyNull})) d)`
         : `COUNT(DISTINCT ${cols.join(', ')})`;
       return `SELECT COUNT(*) AS row_count, ${distinct} AS distinct_count, SUM(CASE WHEN ${anyNull} THEN 1 ELSE 0 END) AS null_count FROM ${from}`;
@@ -113,7 +115,7 @@ export function renderProbeSql(spec: ProbeSpec, dialect: ProbeDialect, options: 
     case 'not_null':
       return `SELECT COUNT(*) AS row_count, SUM(CASE WHEN ${anyNull} THEN 1 ELSE 0 END) AS null_count FROM ${from}`;
     case 'accepted_values': {
-      const list = (spec.values ?? []).map(literal).join(', ');
+      const list = (spec.values ?? []).map((v) => literal(v, dialect)).join(', ');
       if (!list) throw new Error('Probe refused: accepted_values needs values.');
       return `SELECT COUNT(*) AS row_count, SUM(CASE WHEN ${cols[0]} IS NOT NULL AND ${cols[0]} NOT IN (${list}) THEN 1 ELSE 0 END) AS violation_count FROM ${from}`;
     }

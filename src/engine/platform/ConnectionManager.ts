@@ -3,6 +3,8 @@ import { DataPlatformProvider } from '../types';
 import { Disposable, IDataSourceAdapter, ConnectionInfo, SchemaSnapshot, ExtractOptions, QueryOptions, QueryResult, PlatformCapabilities } from './types';
 import { SnowflakeAdapter } from './adapters/SnowflakeAdapter';
 import { DatabricksAdapter } from './adapters/DatabricksAdapter';
+import { OracleAdapter, OracleDriver } from './adapters/OracleAdapter';
+import { driversRoot, loadDriver } from './driverStore';
 import { getSupportedProviders } from './providerRegistry';
 import { FileIo, nodeFileIo, writeFileAtomic } from '../context/contextStore';
 import type { CatalogEntry, CatalogFetcher } from '../context/catalog';
@@ -33,6 +35,12 @@ export interface ConnectionManagerOptions {
    * lineage query text; on, personal-data columns are still masked.
    */
   sampleDataConsent?: (connectionId: string | undefined) => boolean;
+  /**
+   * Phase DRV1: where user-installed drivers live (`driversDirectory` setting,
+   * `AUTODE_DRIVERS_DIR`, else `~/.autode/drivers`). Read at connect time; a
+   * driver is loaded on first connect, never earlier, and only once verified.
+   */
+  driversRoot?: () => string | undefined;
 }
 
 /**
@@ -57,6 +65,7 @@ export class ConnectionManager implements Disposable {
     // Register adapter factories for supported platforms
     this.adapterFactories.set('snowflake', (creds, l) => new SnowflakeAdapter(creds, l, { cliConsent: cliConsent() }));
     this.adapterFactories.set('databricks', (creds, l) => new DatabricksAdapter(creds, l));
+    this.adapterFactories.set('oracle', (creds, l) => new OracleAdapter(creds, l, { loadDriver: () => loadDriver<OracleDriver>(driversRoot(options.driversRoot?.()), 'oracle') }));
     // Future: bigquery, redshift, synapse
   }
 
@@ -142,6 +151,7 @@ export class ConnectionManager implements Disposable {
     // Infer platform from adapter type
     if (this.activeAdapter instanceof SnowflakeAdapter) return 'snowflake';
     if (this.activeAdapter instanceof DatabricksAdapter) return 'databricks';
+    if (this.activeAdapter instanceof OracleAdapter) return 'oracle';
     return null;
   }
 
@@ -238,7 +248,7 @@ export class ConnectionManager implements Disposable {
         if (!check.ok) throw new Error(`Probe refused: ${check.reason}`);
         return (await adapter.executeQuery(sql, { maxRows: 1, timeoutMs: 60000 })).rows;
       },
-      platform === 'snowflake' ? 'snowflake' : platform === 'databricks' ? 'spark_sql' : 'ansi',
+      platform === 'snowflake' ? 'snowflake' : platform === 'databricks' ? 'spark_sql' : platform === 'oracle' ? 'oracle' : 'ansi',
       {
         sampleRows: options.sampleRows ?? 50_000,
         covers: (tableId) => {
@@ -344,6 +354,15 @@ export class ConnectionManager implements Disposable {
         creds['catalog'] = String(settings[`default${p}DatabricksCatalog`] ?? 'main');
         creds['schema'] = String(settings[`default${p}DatabricksSchema`] ?? 'default');
         creds['catalogType'] = String(settings[`default${p}DatabricksCatalogType`] ?? 'auto');
+        break;
+      case 'oracle':
+        // DRV1: Oracle is a source only; the password comes from SecretStorage or AUTODE_ORACLE_PASSWORD.
+        if (role === 'source') {
+          creds['connectString'] = String(settings['defaultOracleConnectString'] ?? '');
+          creds['username'] = String(settings['defaultOracleUsername'] ?? '');
+          creds['configDir'] = String(settings['oracleConfigDir'] ?? '');
+          creds['walletLocation'] = String(settings['oracleWalletLocation'] ?? '');
+        }
         break;
       default:
         break;

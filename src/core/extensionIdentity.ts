@@ -31,5 +31,8 @@ export const SECRET_KEYS = {
   // ── Target connection secrets (v0.19.0) — see DataAgentHubSettings' doc comment ──
   targetSnowflakePassword: 'autoDataEngineeringHub.targetSnowflakePassword',
   targetSnowflakePrivateKeyPassphrase: 'autoDataEngineeringHub.targetSnowflakePrivateKeyPassphrase',
-  targetDatabricksToken: 'autoDataEngineeringHub.targetDatabricksToken'
+  targetDatabricksToken: 'autoDataEngineeringHub.targetDatabricksToken',
+  // ── Oracle source (v0.38.0) ──
+  oraclePassword: 'autoDataEngineeringHub.oraclePassword',
+  oracleWalletPassword: 'autoDataEngineeringHub.oracleWalletPassword'
 } as const;

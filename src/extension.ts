@@ -7,6 +7,7 @@ import { DataAgentHubWebviewProvider } from './core/webviewProvider';
 import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './engine/platform/ConnectionManager';
 import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
+import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, PrerequisiteHost } from './core/platformPrerequisites';
 import { ArtifactWriter } from './context/ArtifactWriter';
 import { PlanManager } from './context/PlanManager';
 import { TargetConfigManager } from './context/TargetConfigManager';
@@ -241,6 +242,23 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
+  // Phase DRV1: moderated driver installation — nothing runs until the user clicks.
+  const prerequisiteHost: PrerequisiteHost = {
+    driversDirectory: () => configManager.getSettings().driversDirectory,
+    snowflakeCliPath: () => configManager.getSettings().snowflakeCliPath,
+    databricksCliPath: () => configManager.getSettings().databricksCliPath,
+    log: (line) => sidebarProvider.logToChat(line)
+  };
+  const checkPlatformPrerequisites = vscode.commands.registerCommand(`${EXTENSION_ID}.checkPlatformPrerequisites`, () => checkPrerequisitesCommand(vscode, prerequisiteHost));
+  const installOracleDriver = vscode.commands.registerCommand(`${EXTENSION_ID}.installOracleDriver`, () => installDriverCommand(vscode, prerequisiteHost, 'oracle'));
+  const verifyOracleDriver = vscode.commands.registerCommand(`${EXTENSION_ID}.verifyOracleDriver`, () => verifyDriverCommand(vscode, prerequisiteHost, 'oracle'));
+  const setOraclePassword = vscode.commands.registerCommand(`${EXTENSION_ID}.setOraclePassword`, async () => {
+    const value = await vscode.window.showInputBox({ title: 'Oracle password', prompt: `Password for ${configManager.getSettings().defaultOracleUsername || 'the Oracle user'} — stored in VS Code's secret storage, never in settings`, password: true, ignoreFocusOut: true });
+    if (value === undefined) return;
+    await configManager.setOraclePassword(value);
+    vscode.window.showInformationMessage('Oracle password saved in secret storage.');
+  });
+
   const asLmProvider = (v: unknown): 'copilot' | 'claude' | undefined =>
     v === 'claude' || v === 'copilot' ? v : undefined;
 
@@ -379,6 +397,11 @@ export function activate(context: vscode.ExtensionContext): void {
       } else if (platform === 'databricks') {
         const token = role === 'target' ? await configManager.getTargetDatabricksToken() : await configManager.getDatabricksToken();
         if (token) credentials['token'] = token;
+      } else if (platform === 'oracle' && role === 'source') {
+        const password = await configManager.getOraclePassword();
+        if (password) credentials['password'] = password;
+        const walletPassword = await configManager.getOracleWalletPassword();
+        if (walletPassword) credentials['walletPassword'] = walletPassword;
       }
       // Only what every Snowflake execution path genuinely requires up front —
       // Warehouse/Database used to be hardcoded here too, but that drifted out of
@@ -389,6 +412,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const missing: string[] = [];
       if (platform === 'snowflake') { if (!credentials['account']) missing.push('Account'); if (!credentials['username']) missing.push('Username'); }
       else if (platform === 'databricks') { if (!credentials['workspaceUrl']) missing.push('Workspace URL'); if (!credentials['httpPath']) missing.push('SQL Warehouse HTTP Path'); if (!credentials['token']) missing.push('Token'); }
+      else if (platform === 'oracle') {
+        if (role === 'target') { const msg = 'Oracle is supported as a source only.'; vscode.window.showErrorMessage(msg); sidebarProvider.logToChat(msg); return; }
+        if (!credentials['connectString']) missing.push('Connect string (defaultOracleConnectString)'); if (!credentials['username']) missing.push('Username (defaultOracleUsername)'); if (!credentials['password']) missing.push('Password (AutoDE: Set Oracle Password)');
+      }
       if (missing.length > 0) {
         const msg = `Missing ${role} credentials for ${platform}: ${missing.join(', ')}`;
         vscode.window.showErrorMessage(msg);
@@ -400,7 +427,8 @@ export function activate(context: vscode.ExtensionContext): void {
         {
           cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true,
           // Phase 4: row values reach prompts only if .autode/config/connections.yaml allows it for this connection.
-          sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
+          sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
+          driversRoot: () => configManager.getSettings().driversDirectory
         }
       );
       // Phase K1: extractions are tagged with the estate system this connection feeds.
@@ -1059,7 +1087,8 @@ export function activate(context: vscode.ExtensionContext): void {
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,
-    connectToDataPlatform, testServiceAccountCredential
+    connectToDataPlatform, testServiceAccountCredential,
+    checkPlatformPrerequisites, installOracleDriver, verifyOracleDriver, setOraclePassword
   );
 }
 

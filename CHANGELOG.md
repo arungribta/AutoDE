@@ -6,6 +6,34 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.38.0
+
+- **Phase DRV1: AutoDE moderates driver installs, and reads Oracle as a source** (`docs/mcp-engine-requirements.md` §9.1, rewritten before implementation, commit 77d02c3; requirements PLT-1, PLT-7; technical-design §6.13; setup: `docs/mcp-setup.md`, *Oracle*).
+- **Platform prerequisites** (`src/engine/platform/prerequisites.ts`). For each platform, what it needs (CLI, driver, client library), whether it's there, why it matters, and the exact install step. **AutoDE: Check Platform Prerequisites** lists them; picking one installs it, verifies it or opens the vendor's guide.
+- **Moderated driver installation** (`src/engine/platform/driverStore.ts`, `src/core/platformPrerequisites.ts`). AutoDE never downloads or bundles a driver.
+  - **AutoDE: Install Oracle Driver** explains the install (package, folder, size, licence, the 12.1+ limit) and shows the command: `npm install --prefix "<drivers>/oracle" --ignore-scripts --no-audit --no-fund "oracledb@^6.0.0"`.
+  - **Run in AutoDE terminal** runs it in a visible terminal named "AutoDE", with the user's own npm and `.npmrc`, so an internal registry, proxy and lockfile integrity work as they do elsewhere. **Copy command** copies it instead.
+  - **AutoDE: Verify Oracle Driver** loads the package, checks its version and that it's in Thin mode, and records the lockfile's SHA-256. A driver loads only while that record matches; a folder that changes afterwards is `changed` and must be verified again.
+  - Drivers live in `~/.autode/drivers` (setting `driversDirectory`, or `AUTODE_DRIVERS_DIR`), which is also where the MCP server looks (`--drivers`).
+  - Without npm, AutoDE says so and offers Node.js or the setting.
+  - Tested: no process and no network request at activation or on connect; the command reaches a terminal only through the Run button; neither the package manifest nor either bundle contains `oracledb`.
+- **Oracle Database 12.1+ as a source** (`src/engine/platform/adapters/OracleAdapter.ts`, Thin mode).
+  - Connections go through a **tnsnames alias** (found as Oracle's tools find it: `oracleConfigDir`, `TNS_ADMIN`, `$ORACLE_HOME/network/admin`) or Easy Connect. A TLS wallet is optional. An unknown alias is reported with the file searched and the aliases found.
+  - Metadata comes from the `ALL_*` views: tables and views with comments and last DDL time, columns with formatted types, primary and foreign keys, view text, and sampled profiling with `FETCH FIRST`.
+  - Oracle works in `connections.yaml` (`AUTODE_ORACLE_*`), in every MCP data-platform tool (`autode_explain_sql` via `EXPLAIN PLAN` + `DBMS_XPLAN`), in probes (new `oracle` dialect) and in the extension's connection flow: settings `defaultOracleConnectString`, `defaultOracleUsername`, `oracleConfigDir`, `oracleWalletLocation`; **AutoDE: Set Oracle Password**; Test Connection; Source Assessment.
+  - An older server gets a plain "needs Thick mode" message.
+  - The read-only guard now also reads Oracle's `q'[…]'` quoting, so a write hidden behind one is refused.
+- **Fixed for every platform:** extracted columns were never flagged as primary or foreign keys (`isPrimaryKey` and `isForeignKey` were always false). Foreign-key columns are now flagged from the foreign keys already read, and primary keys on platforms that list them (Oracle so far; Snowflake's and Databricks' `information_schema` queries don't read key constraints yet).
+- **Deviations / notes:**
+  - The phase was respecified before it was built (decision log 2026-10-16). Fetching `snowflake-sdk` / `@databricks/sql` tarballs ourselves can't produce a working driver (~120 MB dependency trees with native binaries), so AutoDE moderates installs that the user's npm performs. Those two SDKs are not planned. The old phase was split: DRV1 here, DRV2 (onboarding UI) next.
+  - The drivers folder is user-level (`~/.autode/drivers`), not VS Code's global storage as the old text said, so an MCP server started by another client finds the same drivers.
+  - "The install starts only from the onboarding UI" became "only from a command's button", since the UI is DRV2.
+  - Oracle is a source only. Generating Oracle SQL (primitives, Pipeline Spec dialects) is out of scope, and an Oracle *target* connection is refused.
+  - Thin mode only: Oracle 11g and older, and the wallet-based password store, need Thick mode.
+  - The settings panel has no Oracle card yet (DRV2). Oracle is configured in VS Code settings and with the password command.
+  - A q-quoted string that contains an apostrophe is refused by the guard, because the readings disagree. Use `''`.
+- **Measured:** `npm run eval` unchanged from v0.37.0 (traps 4/5, contract violations 4/4 with none false, vocabulary 17/21 and 19/21 with captured vocabulary, large estate 8/8, longest synchronous task 57 ms). 308 tests (8 new). Minified bundles: extension 776 KB, MCP server 554 KB.
+
 ## 0.37.0
 
 - **MCP server — phase 4: data platforms** (`docs/mcp-engine-requirements.md` §5.3, §6; requirements MCP-1, SEC-5; technical-design §6.12, §10.6; setup: `docs/mcp-setup.md`, *Data platforms*). Seven new tools: `autode_list_connections`, `autode_test_connection`, `autode_list_databases`, `autode_list_schemas`, `autode_extract_metadata`, `autode_explain_sql`, `autode_execute_query`. No vendor-named tools; the platform comes from the connection.

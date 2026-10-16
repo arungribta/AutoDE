@@ -54,6 +54,11 @@ export async function executeSourceAssessmentAgent(
       if (token) {
         credentials['token'] = token;
       }
+    } else if (platform === 'oracle') {
+      const password = await context.configManager.getSecret('autoDataEngineeringHub.oraclePassword');
+      if (password) credentials['password'] = password;
+      const walletPassword = await context.configManager.getSecret('autoDataEngineeringHub.oracleWalletPassword');
+      if (walletPassword) credentials['walletPassword'] = walletPassword;
     }
   } catch (err) {
     context.log(`Warning: Could not retrieve secrets: ${err instanceof Error ? err.message : String(err)}`);
@@ -61,7 +66,8 @@ export async function executeSourceAssessmentAgent(
 
   const connectionManager = new ConnectionManager((msg: string) => context.log(msg), {
     cliConsent: () => context.configManager.getSettings().dataPlatformCliConsent === true,
-    sampleDataConsent: sampleDataConsentFromWorkspace(context.host?.workspaceRoot)
+    sampleDataConsent: sampleDataConsentFromWorkspace(context.host?.workspaceRoot),
+    driversRoot: () => context.configManager.getSettings().driversDirectory
   });
 
   try {
@@ -193,6 +199,10 @@ function validateCredentials(platform: string, credentials: Record<string, strin
     case 'databricks':
       if (!credentials['workspaceUrl']) missing.push('Workspace URL');
       if (!credentials['catalog']) missing.push('Catalog');
+      break;
+    case 'oracle':
+      if (!credentials['connectString']) missing.push('Connect string');
+      if (!credentials['username']) missing.push('Username');
       break;
     default:
       break;

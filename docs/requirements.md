@@ -42,7 +42,7 @@ This document states what AutoDE does and why; requirements marked *Planned* or 
 | Business problem and specification (BPS), Conversation (CHT) | [context-layer-requirements.md](context-layer-requirements.md) §5.2 extraction, §5.4 Context Inbox, §7.2 cited Q&A | C4b |
 | Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §5 enrichment, §6 semantic model, §8 freshness and health | C4b, C5, C6; migration track M1–M3 (not yet written) |
 | Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §7 packs, §10 grounding checks and metrics | C4b, C5, C6 |
-| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phases DRV1, DRV2 | DRV1, DRV2 |
+| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase DRV2 | DRV2 |
 | Planning and orchestration (ORC), Generation (GEN) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer-requirements.md](context-layer-requirements.md) §6 semantic model | 5, 6, GOV, C5 |
 | Tool skills (SKL) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase S3, §9 Phase 6 | S3, 6 |
 | Interoperability with other agents (MCP) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as client; [context-layer-requirements.md](context-layer-requirements.md) §9 context-layer tools | 5, C4b, C5 |
@@ -124,15 +124,15 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 
 ### 3.4 Data platforms and credentials (PLT)
 
-- **PLT-1 — Snowflake and Databricks can be connected, queried and introspected** (tables, columns, keys, views; optional profiling — sampled and within a per-run query budget since v0.32.0, so profiling a large schema cannot run unbounded against the customer's warehouse). Other platforms are listed but not yet connectable. *Status:* Shipped v0.17.0.
+- **PLT-1 — Snowflake and Databricks can be connected, queried and introspected** (tables, columns, keys, views; optional profiling — sampled and within a per-run query budget since v0.32.0, so profiling a large schema cannot run unbounded against the customer's warehouse). Since v0.38.0 also **Oracle Database 12.1+ as a source** (through a tnsnames alias or Easy Connect; tables, views, columns, comments, primary and foreign keys, sampled profiling), once its driver is installed (PLT-7). Other platforms are listed but not yet connectable. *Status:* Shipped v0.17.0; Oracle v0.38.0.
 - **PLT-2 — Connectivity works on restricted networks without heavy SDKs** (P6, P7): a native-protocol path through the platform CLI where present and consented, and a CLI-free path always. *Status:* Shipped v0.17.0.
 - **PLT-3 — Both interactive users and service accounts can authenticate,** through credential references resolved at use (environment, CLI configuration, the OS secret store, or a pluggable enterprise secrets manager). Secrets are never written to settings or the repository (P5). *Status:* Shipped v0.15.0 / v0.16.0.
 - **PLT-4 — Every auth mode offered in the UI works end to end,** and a missing consent is fixed in place rather than by editing settings by hand. *Status:* Shipped v0.17.0.
 - **PLT-5 — The assistant knows what is connected,** and the UI shows it. *Status:* Shipped v0.18.0.
 - **PLT-6 — Legacy sources without a live connector can still be described:** dictionary exports (Teradata, Oracle, INFORMATION_SCHEMA) and DDL. *Status:* Shipped v0.31.0.
-- **PLT-7 — A user can add a driver for a platform the CLI-free path doesn't cover,** guided by AutoDE: what is missing, why, the exact install step (run only on request), and a verification before first use. *Status:* Planned (DRV1 — Oracle first; DRV2 — onboarding UI).
+- **PLT-7 — A user can add a driver for a platform the CLI-free path doesn't cover,** guided by AutoDE: what is missing, why, the exact install step (run only on request), and a verification before first use. *Why:* legacy sources need drivers AutoDE must not ship (P6), and engineers on client machines need to know exactly what to install and why. *Status:* Partial v0.38.0. AutoDE lists each platform's prerequisites with their state. For the Oracle driver it explains the install (what, where, size, licence, why) and runs it with the user's own npm and registry settings, but only on request, in a visible terminal. It then verifies the result and refuses to load a driver that is unverified or has changed since. Nothing is installed or loaded at activation or by connecting. Still planned: the onboarding UI that brings this together per platform (DRV2).
 
-*Planned work:* data-platform MCP tools and credentials across the process boundary — [mcp-engine-requirements.md](mcp-engine-requirements.md) §5.3, §6 (phase 4); moderated driver installation and Oracle — §9.1 Phase DRV1; platform onboarding — Phase DRV2.
+*Planned work:* data-platform MCP tools and credentials across the process boundary — [mcp-engine-requirements.md](mcp-engine-requirements.md) §5.3, §6 (phase 4); platform onboarding — §9.1 Phase DRV2.
 
 ### 3.5 Context layer (CTX)
 

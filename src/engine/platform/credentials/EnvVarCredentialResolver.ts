@@ -28,6 +28,14 @@ const FIELD_SUFFIXES: Partial<Record<DataPlatformProvider, Record<string, string
     schema: 'SCHEMA',
     clientId: 'CLIENT_ID',
     clientSecret: 'CLIENT_SECRET'
+  },
+  oracle: {
+    connectString: 'CONNECT_STRING',
+    username: 'USERNAME',
+    password: 'PASSWORD',
+    configDir: 'CONFIG_DIR',
+    walletLocation: 'WALLET_LOCATION',
+    walletPassword: 'WALLET_PASSWORD'
   }
 };
 

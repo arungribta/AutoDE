@@ -1966,6 +1966,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       } else if (platform === 'databricks') {
         const token = await this.configManager.getDatabricksToken();
         if (token) credentials['token'] = token;
+      } else if (platform === 'oracle') {
+        const password = await this.configManager.getOraclePassword();
+        if (password) credentials['password'] = password;
+        const walletPassword = await this.configManager.getOracleWalletPassword();
+        if (walletPassword) credentials['walletPassword'] = walletPassword;
       }
     } catch { /* best-effort — connect() will surface a clear error if a required secret is missing */ }
 
@@ -1980,6 +1985,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       if (!credentials['workspaceUrl']) missing.push('Workspace URL');
       if (!credentials['httpPath']) missing.push('SQL Warehouse HTTP Path');
       if (!credentials['token']) missing.push('Token');
+    } else if (platform === 'oracle') {
+      if (!credentials['connectString']) missing.push('Connect string');
+      if (!credentials['username']) missing.push('Username');
     }
     if (missing.length > 0) {
       this.postMessage('error', { message: `Missing connection settings for ${platform}: ${missing.join(', ')}. Configure them in Settings → Connections, or choose "Describe source" instead.` });
@@ -1988,7 +1996,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
     const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), {
       cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true,
-      sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
+      sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
+      driversRoot: () => this.configManager.getSettings().driversDirectory
     });
     connectionManager.setEstateResolver((id) => this.resolveConnectionIdentity(id));
     try {

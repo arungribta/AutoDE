@@ -7130,7 +7130,7 @@ async function main() {
       '    workspaceUrl: adb-1.azuredatabricks.net',
       '    httpPath: /sql/1.0/warehouses/abc',
       '    token: do-not-commit',
-      '  - platform: oracle',
+      '  - platform: teradata',
       '  - platform: snowflake',
       '    credentials: { resolver: cli, ref: prod }',
       '  - platform: snowflake',
@@ -7146,7 +7146,7 @@ async function main() {
       ['databricks:adb-9.azuredatabricks.net', 'source', 'env', false, 'environment']
     ]);
     assert.ok(cfg.errors.some((e) => /connections\[2\].*token must not be in this file/.test(e)), 'a secret in the committed file invalidates the entry');
-    assert.ok(cfg.errors.some((e) => /oracle.*not supported/.test(e)) && cfg.errors.some((e) => /duplicate connection id "snowflake:prod"/.test(e)) && cfg.errors.some((e) => /resolver must be env or cli/.test(e)));
+    assert.ok(cfg.errors.some((e) => /teradata.*not supported/.test(e)) && cfg.errors.some((e) => /duplicate connection id "snowflake:prod"/.test(e)) && cfg.errors.some((e) => /resolver must be env or cli/.test(e)));
     assert.ok(!JSON.stringify(cfg).includes('never-listed') && !JSON.stringify(cfg).includes('do-not-commit'));
     // The id is the one the adapter reports once connected, so estate bindings and consent line up.
     const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
@@ -7346,6 +7346,306 @@ async function main() {
     // CSV ingestion infers types from the rows but keeps no values.
     const csv = parseCsv('customer_id,email,tier\n1,zz-csv@corp.example,ZZCSVGOLD\n2,b@corp.example,SILVER\n', 'customers.csv', { system: 'shop', environment: 'prod' });
     assert.ok(!/zz-csv@corp\.example|ZZCSVGOLD/.test(JSON.stringify(csv)), 'CSV ingestion keeps no row values');
+  });
+
+  // ── v0.38.0: DRV1 — platform prerequisites, moderated driver installation, Oracle as a source ──
+  // A fake node-oracledb on disk: answers the dictionary queries the adapter sends, through a hook the test sets.
+  const FAKE_ORACLEDB = `
+    'use strict';
+    exports.OUT_FORMAT_OBJECT = 4002; exports.CLOB = 2017; exports.NCLOB = 2019; exports.thin = true;
+    exports.getConnection = async (config) => {
+      const h = globalThis.__autodeFakeOracle;
+      if (!h) throw new Error('no fake handler');
+      if (h.connectError) throw new Error(h.connectError);
+      h.configs.push(config);
+      return {
+        oracleServerVersionString: '19.22.0.0.0',
+        async execute(sql, binds, opts) { h.sql.push(sql); return h.answer(sql, opts); },
+        async close() { h.closed++; }
+      };
+    };`;
+  const oracleDictionary = () => {
+    const h = { configs: [], sql: [], closed: 0 };
+    h.answer = (sql, opts) => {
+      const rows = (r) => ({ rows: opts && opts.maxRows ? r.slice(0, opts.maxRows) : r, metaData: r[0] ? Object.keys(r[0]).map((name) => ({ name })) : [] });
+      if (/SYS_CONTEXT\('USERENV', 'CON_NAME'\) AS "db"/.test(sql)) return rows([{ db: 'ORCLPDB1', schema: 'HR' }]);
+      if (/FROM all_users/.test(sql)) return rows([{ name: 'HR' }, { name: 'SALES' }]);
+      if (/FROM all_tables t/.test(sql)) return rows([
+        { table_schema: 'HR', table_name: 'DEPARTMENTS', table_type: 'TABLE', row_count: 27, last_altered: new Date('2026-01-02T03:04:05Z'), comment: null },
+        { table_schema: 'HR', table_name: 'EMPLOYEES', table_type: 'TABLE', row_count: 107, last_altered: new Date('2026-01-02T03:04:05Z'), comment: 'Staff' },
+        { table_schema: 'HR', table_name: 'EMP_V', table_type: 'VIEW', row_count: null, last_altered: new Date('2026-01-02T03:04:05Z'), comment: null }]);
+      if (/FROM all_tab_columns c/.test(sql)) return rows([
+        { table_schema: 'HR', table_name: 'DEPARTMENTS', column_name: 'DEPARTMENT_ID', data_type: 'NUMBER(4,0)', is_nullable: 'NO', ordinal_position: 1, comment: null },
+        { table_schema: 'HR', table_name: 'EMPLOYEES', column_name: 'EMPLOYEE_ID', data_type: 'NUMBER(6,0)', is_nullable: 'NO', ordinal_position: 1, comment: null },
+        { table_schema: 'HR', table_name: 'EMPLOYEES', column_name: 'EMAIL', data_type: 'VARCHAR2(25)', is_nullable: 'NO', ordinal_position: 2, comment: 'Work e-mail' },
+        { table_schema: 'HR', table_name: 'EMPLOYEES', column_name: 'DEPARTMENT_ID', data_type: 'NUMBER(4,0)', is_nullable: 'YES', ordinal_position: 3, comment: null },
+        { table_schema: 'HR', table_name: 'EMPLOYEES', column_name: 'RESUME', data_type: 'CLOB', is_nullable: 'YES', ordinal_position: 4, comment: null }]);
+      if (/constraint_type = 'P'/.test(sql)) return rows([{ table_schema: 'HR', table_name: 'EMPLOYEES', column_name: 'EMPLOYEE_ID' }, { table_schema: 'HR', table_name: 'DEPARTMENTS', column_name: 'DEPARTMENT_ID' }]);
+      if (/constraint_type = 'R'/.test(sql)) return rows([{ source_schema: 'HR', source_table: 'EMPLOYEES', source_column: 'DEPARTMENT_ID', target_schema: 'HR', target_table: 'DEPARTMENTS', target_column: 'DEPARTMENT_ID', constraint_name: 'EMP_DEPT_FK' }]);
+      if (/FROM all_views/.test(sql)) return rows([{ table_schema: 'HR', table_name: 'EMP_V', view_definition: 'select employee_id from employees' }]);
+      if (/COUNT\(\*\) AS row_count/.test(sql)) return rows([{ ROW_COUNT: 107, D_0: 107, N_0: 0, D_1: 107, N_1: 0, D_2: 11, N_2: 1 }]);
+      if (/^EXPLAIN PLAN FOR/.test(sql)) return { rows: undefined, metaData: undefined };
+      if (/DBMS_XPLAN/.test(sql)) return rows([{ plan: 'Plan hash value: 1445457117' }]);
+      if (/product_component_version/.test(sql)) return rows([{ database: 'ORCLPDB1', schema: 'HR', version: '19.0.0.0.0' }]);
+      if (/^SELECT employee_id/i.test(sql)) return rows([{ EMPLOYEE_ID: 100, EMAIL: 'SKING' }]);
+      return rows([]);
+    };
+    globalThis.__autodeFakeOracle = h;
+    return h;
+  };
+  /** A drivers root with the fake package "installed" by npm (package.json, package-lock.json, node_modules/oracledb). */
+  const oracleDriversRoot = ({ version = '6.5.1', body = FAKE_ORACLEDB } = {}) => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-drivers-'));
+    const dir = nodePath.join(root, 'oracle');
+    nodeFs.mkdirSync(nodePath.join(dir, 'node_modules', 'oracledb'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(dir, 'package.json'), JSON.stringify({ dependencies: { oracledb: `^${version}` } }));
+    nodeFs.writeFileSync(nodePath.join(dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/oracledb': { version, integrity: 'sha512-fake' } } }));
+    nodeFs.writeFileSync(nodePath.join(dir, 'node_modules', 'oracledb', 'package.json'), JSON.stringify({ name: 'oracledb', version, main: 'index.js' }));
+    nodeFs.writeFileSync(nodePath.join(dir, 'node_modules', 'oracledb', 'index.js'), body);
+    return { root, dir, done: () => nodeFs.rmSync(root, { recursive: true, force: true }) };
+  };
+  const tnsFolder = (text) => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-tns-'));
+    nodeFs.writeFileSync(nodePath.join(dir, 'tnsnames.ora'), text);
+    return { dir, done: () => nodeFs.rmSync(dir, { recursive: true, force: true }) };
+  };
+  const TNS = [
+    '# test tnsnames',
+    'PRODDB =',
+    '  (DESCRIPTION =',
+    '    (ADDRESS = (PROTOCOL = TCP)(HOST = db1.corp)(PORT = 1521))',
+    '    (CONNECT_DATA = (SERVICE_NAME = prod.corp))',
+    '  )',
+    'REPORTING, REPORTING_RO = (DESCRIPTION = (ADDRESS = (PROTOCOL = TCP)(HOST = db2)(PORT = 1521))(CONNECT_DATA = (SERVICE_NAME = rpt)))',
+    'IFILE = /etc/oracle/more_tnsnames.ora'
+  ].join('\n');
+
+  await test('v0.38.0: driver store — install command, verification record, and a changed folder is not loaded', () => {
+    const D = fresh('../dist/engine/platform/driverStore.js');
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    assert.strictEqual(D.driversRoot('', {}), nodePath.join(os.homedir(), '.autode', 'drivers'));
+    assert.strictEqual(D.driversRoot('', { AUTODE_DRIVERS_DIR: '/opt/autode-drivers' }), nodePath.resolve('/opt/autode-drivers'));
+    assert.strictEqual(D.driversRoot('/srv/drv', { AUTODE_DRIVERS_DIR: '/opt/x' }), nodePath.resolve('/srv/drv'), 'the setting wins');
+    const cmd = D.installCommand(nodePath.resolve('/srv/drv'), 'oracle');
+    assert.strictEqual(cmd.command, `npm install --prefix "${nodePath.join(nodePath.resolve('/srv/drv'), 'oracle')}" --ignore-scripts --no-audit --no-fund "oracledb@^6.0.0"`);
+    assert.throws(() => D.installCommand('/srv/"evil', 'oracle'), /can't be quoted safely/);
+    const empty = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-drv-empty-'));
+    try { assert.strictEqual(D.driverStatus(empty, 'oracle').state, 'missing'); } finally { nodeFs.rmSync(empty, { recursive: true, force: true }); }
+    const f = oracleDriversRoot();
+    try {
+      assert.strictEqual(D.driverStatus(f.root, 'oracle').state, 'unverified');
+      assert.throws(() => D.loadDriver(f.root, 'oracle'), (e) => e.name === 'DriverNotReadyError' && /Verify Oracle Driver/.test(e.message), 'an unverified driver is not loaded');
+      const v = D.verifyDriver(f.root, 'oracle', new Date('2026-10-16T10:00:00Z'));
+      assert.deepStrictEqual([v.state, v.version], ['ready', '6.5.1'], v.detail);
+      const record = JSON.parse(nodeFs.readFileSync(nodePath.join(f.dir, '.autode-driver.json'), 'utf8'));
+      assert.deepStrictEqual([record.package, record.version, record.verifiedAt, record.lockfileSha256.length], ['oracledb', '6.5.1', '2026-10-16T10:00:00.000Z', 64]);
+      assert.strictEqual(typeof D.loadDriver(f.root, 'oracle').getConnection, 'function');
+      nodeFs.appendFileSync(nodePath.join(f.dir, 'package-lock.json'), ' ');
+      assert.strictEqual(D.driverStatus(f.root, 'oracle').state, 'changed');
+      assert.throws(() => D.loadDriver(f.root, 'oracle'), /changed after it was verified/);
+    } finally { f.done(); }
+    const old = oracleDriversRoot({ version: '5.5.0' });
+    try { assert.strictEqual(D.verifyDriver(old.root, 'oracle').state, 'unsupported'); } finally { old.done(); }
+    const wrong = oracleDriversRoot({ version: '6.0.0', body: 'exports.thin = true;' });
+    try { const r = D.verifyDriver(wrong.root, 'oracle'); assert.ok(r.state === 'unverified' && /getConnection/.test(r.detail), r.detail); } finally { wrong.done(); }
+    const thick = oracleDriversRoot({ version: '6.0.0', body: 'exports.thin = false; exports.getConnection = async () => ({});' });
+    try { assert.ok(/Thick mode/.test(D.verifyDriver(thick.root, 'oracle').detail)); } finally { thick.done(); }
+  });
+
+  await test('v0.38.0: prerequisites — states per platform, and the install step is blocked with guidance when npm is missing', async () => {
+    const P = fresh('../dist/engine/platform/prerequisites.js');
+    const f = oracleDriversRoot();
+    try {
+      const noNpm = { found: false, detail: 'npm was not found on PATH. Install Node.js' };
+      let list = await P.checkPrerequisites({ driversRoot: f.root, platforms: ['oracle'], npm: noNpm });
+      assert.deepStrictEqual(list.map((p) => [p.id, p.kind, p.required, p.state]), [['oracle-driver', 'driver', true, 'unverified']]);
+      fresh('../dist/engine/platform/driverStore.js').verifyDriver(f.root, 'oracle');
+      list = await P.checkPrerequisites({ driversRoot: f.root, platforms: ['oracle'], npm: noNpm });
+      assert.strictEqual(list[0].state, 'ready');
+      const os = require('node:os'); const nodePath = require('node:path');
+      const missing = await P.checkPrerequisites({ driversRoot: nodePath.join(os.tmpdir(), 'autode-no-such-drivers'), platforms: ['oracle'], npm: noNpm });
+      assert.ok(missing[0].state === 'missing' && /--ignore-scripts/.test(missing[0].install.command) && /Node\.js/.test(missing[0].install.blocked), JSON.stringify(missing[0].install));
+      assert.ok(missing[0].install.notes.some((n) => /12\.1/.test(n)) && /Apache-2\.0/.test(missing[0].install.licence));
+      assert.deepStrictEqual(P.detectNpm(() => ({ status: 0, stdout: '10.8.2\n' })), { found: true, version: '10.8.2', detail: 'npm 10.8.2' });
+      assert.strictEqual(P.detectNpm(() => { throw new Error('ENOENT'); }).found, false);
+      assert.strictEqual(P.detectNpm(() => ({ status: 1, stdout: '' })).found, false);
+    } finally { f.done(); }
+  });
+
+  await test('v0.38.0: tnsnames.ora — aliases (multi-alias entries, nested and multi-line), Oracle\'s lookup order, and clear errors', () => {
+    const T = fresh('../dist/engine/platform/credentials/tnsnames.js');
+    assert.deepStrictEqual(T.parseTnsAliases(TNS), { aliases: ['PRODDB', 'REPORTING', 'REPORTING_RO'], includes: ['/etc/oracle/more_tnsnames.ora'] });
+    assert.deepStrictEqual(T.tnsLocations('/cfg', { TNS_ADMIN: '/tns', ORACLE_HOME: '/oh' }).map((l) => l.source), ['configDir', 'TNS_ADMIN', 'ORACLE_HOME']);
+    const t = tnsFolder(TNS);
+    try {
+      assert.deepStrictEqual(T.resolveConnectString('proddb', undefined, { TNS_ADMIN: t.dir }), { configDir: t.dir }, 'aliases match case-insensitively; TNS_ADMIN is used');
+      assert.deepStrictEqual(T.resolveConnectString('db1.corp:1521/prod.corp', undefined, {}), { configDir: undefined }, 'Easy Connect needs no tnsnames.ora');
+      const unknown = T.resolveConnectString('NOPE', t.dir, {});
+      assert.ok(/may come from an included file/.test(unknown.warning) && unknown.configDir === t.dir, 'with IFILE present the driver decides');
+      const noTns = T.resolveConnectString('PRODDB', undefined, {});
+      assert.ok(/TNS_ADMIN/.test(noTns.problem) && /Easy Connect/.test(noTns.problem));
+    } finally { t.done(); }
+    const plain = tnsFolder('PRODDB = (DESCRIPTION = (ADDRESS = (HOST = h)))\n');
+    try {
+      const r = T.resolveConnectString('OTHER', plain.dir, {});
+      assert.ok(/not in .*tnsnames\.ora.*found: PRODDB/.test(r.problem), r.problem);
+    } finally { plain.done(); }
+  });
+
+  await test('v0.38.0: the read-only guard reads Oracle q-quotes too, so a write hidden behind one is refused', () => {
+    const { checkReadOnlySql } = fresh('../dist/engine/platform/sqlGuard.js');
+    for (const sql of ["SELECT q'[a']' ; DROP TABLE t --'", "SELECT nq'{x'}' ; DELETE FROM t --'", "SELECT Q'!a'!' ; TRUNCATE TABLE t --'", 'BEGIN DELETE FROM t; END;', 'SELECT * FROM emp FOR UPDATE'])
+      assert.ok(!checkReadOnlySql(sql).ok, `accepted: ${sql}`);
+    assert.ok(checkReadOnlySql("SELECT q'[abc]' AS s FROM dual").ok, 'a plain q-quote passes');
+    assert.ok(!checkReadOnlySql("SELECT q'[it's]' AS s FROM dual").ok, 'a q-quote holding an apostrophe reads differently elsewhere and is refused (documented)');
+  });
+
+  await test('v0.38.0: Oracle adapter — connects through a tnsnames alias with the verified driver from the drivers folder; extracts tables, views, columns, comments, primary and foreign keys', async () => {
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const D = fresh('../dist/engine/platform/driverStore.js');
+    const f = oracleDriversRoot();
+    const t = tnsFolder(TNS);
+    const h = oracleDictionary();
+    try {
+      const m = new ConnectionManager(() => {}, { driversRoot: () => f.root });
+      await assert.rejects(() => m.connect('oracle', { connectString: 'PRODDB', username: 'hr', password: 'pw', configDir: t.dir }), /not verified|Verify Oracle Driver/, 'no load before verification');
+      D.verifyDriver(f.root, 'oracle');
+      await assert.rejects(() => m.connect('oracle', { connectString: 'MISSING', username: 'hr', password: 'pw', configDir: tnsFolder('A = (DESCRIPTION = (ADDRESS = (HOST = h)))').dir }), /not in .*tnsnames\.ora/);
+      const info = await m.connect('oracle', { connectString: 'PRODDB', username: 'hr', password: 'pw', configDir: t.dir });
+      assert.deepStrictEqual([info.platform, info.databaseName, info.schemaName, info.version], ['oracle', 'ORCLPDB1', 'HR', '19.22.0.0.0']);
+      assert.deepStrictEqual(h.configs[0], { user: 'hr', password: 'pw', connectString: 'PRODDB', configDir: t.dir });
+      assert.deepStrictEqual([m.getActivePlatform(), m.activeConnectionId()], ['oracle', 'oracle:PRODDB']);
+      assert.deepStrictEqual(await m.listSchemas('ORCLPDB1'), ['HR', 'SALES']);
+      const snap = await m.extractMetadata({ schemaFilter: ['ORCLPDB1.hr'], includeProfiling: true });
+      assert.deepStrictEqual(snap.tables.map((x) => [x.fqn, x.type, x.rowCount]), [['HR.DEPARTMENTS', 'TABLE', 27], ['HR.EMPLOYEES', 'TABLE', 107], ['HR.EMP_V', 'VIEW', undefined]]);
+      const emp = snap.tables[1];
+      assert.deepStrictEqual(emp.columns.map((c) => [c.name, c.dataType, c.isNullable, c.isPrimaryKey, c.isForeignKey]), [
+        ['EMPLOYEE_ID', 'NUMBER(6,0)', false, true, false], ['EMAIL', 'VARCHAR2(25)', false, false, false], ['DEPARTMENT_ID', 'NUMBER(4,0)', true, false, true], ['RESUME', 'CLOB', true, false, false]]);
+      assert.deepStrictEqual([emp.comment, emp.columns[1].comment, emp.lastAltered], ['Staff', 'Work e-mail', '2026-01-02T03:04:05.000Z']);
+      assert.deepStrictEqual(snap.views.map((v) => [v.fqn, v.definition]), [['HR.EMP_V', 'select employee_id from employees']]);
+      assert.deepStrictEqual(snap.foreignKeys.map((k) => `${k.sourceTable}.${k.sourceColumn}->${k.targetTable}.${k.targetColumn}`), ['EMPLOYEES.DEPARTMENT_ID->DEPARTMENTS.DEPARTMENT_ID']);
+      assert.ok(h.sql.some((s) => /WHERE t\.owner = 'HR'/.test(s)), 'the owner comes from the scope, upper-cased');
+      const prof = h.sql.find((s) => /COUNT\(\*\) AS row_count/.test(s) && /EMPLOYEES/.test(s));
+      assert.ok(/FROM \(SELECT \* FROM "HR"\."EMPLOYEES" FETCH FIRST 10000 ROWS ONLY\) s0/.test(prof) && /COUNT\(DISTINCT "EMAIL"\)/.test(prof) && !/RESUME/.test(prof), prof);
+      assert.deepStrictEqual([emp.columns[0].profile.distinctCount, emp.columns[2].profile.nullCount], [107, 1]);
+      // Probes speak Oracle: no LIMIT, no COUNT(DISTINCT a, b).
+      const probes = m.probeExecutor({ sampleRows: 500 });
+      await probes.run({ check: 'unique', table: { fqn: 'HR.EMPLOYEES' }, columns: ['EMPLOYEE_ID', 'EMAIL'] });
+      const probeSql = h.sql.at(-1);
+      assert.ok(/FETCH FIRST 500 ROWS ONLY/.test(probeSql) && /SELECT DISTINCT EMPLOYEE_ID, EMAIL/.test(probeSql) && !/LIMIT/.test(probeSql), probeSql);
+      await m.disconnect();
+      assert.strictEqual(h.closed, 1);
+    } finally { f.done(); t.done(); delete globalThis.__autodeFakeOracle; }
+  });
+
+  await test('v0.38.0: Oracle 11g gets a plain "needs Thick mode" message; Oracle in connections.yaml and over MCP (explain via EXPLAIN PLAN, keys, consent)', async () => {
+    const { OracleAdapter } = fresh('../dist/engine/platform/adapters/OracleAdapter.js');
+    const h = oracleDictionary();
+    h.connectError = 'NJS-138: connections to this database server version are not supported by node-oracledb in Thin mode';
+    const fakeDriver = () => { const mod = { exports: {} }; new Function('exports', 'module', FAKE_ORACLEDB)(mod.exports, mod); return mod.exports; };
+    await assert.rejects(() => new OracleAdapter({ connectString: 'h:1521/x', username: 'u' }, () => {}, { loadDriver: fakeDriver }).connect(), /older than Oracle 12\.1.*Thick mode/);
+    delete h.connectError;
+    const C = fresh('../dist/engine/platform/connectionsConfig.js');
+    const cfg = C.parseConnectionsConfig('connections:\n  - platform: oracle\n    connectString: PRODDB\n    username: hr\n    walletPassword: x\n  - platform: oracle\n    connectString: PRODDB\n    username: hr\n    configDir: /tns\n', { AUTODE_ORACLE_CONNECT_STRING: 'db9:1521/svc' });
+    assert.deepStrictEqual(cfg.connections.map((c) => [c.id, c.origin]), [['oracle:PRODDB', 'file'], ['oracle:db9:1521/svc', 'environment']]);
+    assert.ok(cfg.errors.some((e) => /walletPassword must not be in this file/.test(e)));
+    // Over MCP, with the fake driver injected.
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+    const { createAutodeServer } = fresh('../dist/mcp/server.js');
+    const { PlatformSession } = fresh('../dist/mcp/platform.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-ora-mcp-'));
+    nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: oracle\n    connectString: db1:1521/prod\n    username: hr\n');
+    const session = new PlatformSession({ workspaceRoot: ws, allowWrite: false, allowCli: false, log: () => {},
+      createManager: (log, options) => { const m = new ConnectionManager(log, options); m.registerAdapterFactory('oracle', (c, l) => new OracleAdapter(c, l, { loadDriver: fakeDriver })); return m; } });
+    const server = createAutodeServer({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..'), version: 't', platform: session, log: () => {} });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(a);
+    const client = new Client({ name: 't', version: '1' });
+    await client.connect(b);
+    const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+    try {
+      const listed = await call('autode_list_connections', {});
+      assert.deepStrictEqual(listed.connections.map((c) => [c.id, c.platform, c.authMode]), [['oracle:db1:1521/prod', 'oracle', 'password']]);
+      const id = 'oracle:db1:1521/prod';
+      assert.deepStrictEqual(await call('autode_test_connection', { connectionId: id }), { connectionId: id, connected: true, platform: 'oracle', role: 'source', database: 'ORCLPDB1', schema: 'HR', version: '19.0.0.0.0' });
+      const plan = await call('autode_explain_sql', { connectionId: id, sql: 'SELECT employee_id FROM hr.employees;' });
+      assert.deepStrictEqual(plan.plan, [{ plan: 'Plan hash value: 1445457117' }]);
+      assert.ok(h.sql.includes('EXPLAIN PLAN FOR SELECT employee_id FROM hr.employees'));
+      const meta = await call('autode_extract_metadata', { connectionId: id, database: 'ORCLPDB1', schema: 'HR' });
+      assert.strictEqual(meta.tables.find((x) => x.name === 'EMPLOYEES').columns[0].isPrimaryKey, true);
+      const q = await call('autode_execute_query', { connectionId: id, sql: 'SELECT employee_id, email FROM hr.employees' });
+      assert.ok(q.rows === undefined && q.rowCount === 1 && /withheld/.test(q.withheld), 'sample-data consent applies to Oracle too');
+      assert.strictEqual((await call('autode_execute_query', { connectionId: id, sql: "SELECT q'[a']' ; DROP TABLE t --'" })).code, 'VALIDATION_FAILED');
+    } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); delete globalThis.__autodeFakeOracle; }
+  });
+
+  await test('v0.38.0: nothing is spawned or fetched at activation or on connect; the install command reaches a terminal only from the install action\'s button', async () => {
+    const cp = require('node:child_process');
+    const calls = [];
+    const saved = { spawn: cp.spawn, spawnSync: cp.spawnSync, exec: cp.exec, execSync: cp.execSync, execFile: cp.execFile, fetch: globalThis.fetch };
+    for (const k of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile']) cp[k] = (...args) => { calls.push(`${k} ${String(args[0])}`); return saved[k](...args); };
+    globalThis.fetch = (...args) => { calls.push(`fetch ${String(args[0])}`); return saved.fetch(...args); };
+    const f = oracleDriversRoot();
+    const h = oracleDictionary();
+    try {
+      const mock = createMock();
+      withMock(mock, () => { const ext = fresh('../dist/extension.js'); ext.activate(mockContext()); });
+      await new Promise((r) => setTimeout(r, 200));
+      fresh('../dist/engine/platform/driverStore.js').verifyDriver(f.root, 'oracle');
+      const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+      const m = new ConnectionManager(() => {}, { driversRoot: () => f.root });
+      await m.connect('oracle', { connectString: 'db1:1521/prod', username: 'hr', password: 'pw' });
+      await m.extractMetadata({});
+      assert.deepStrictEqual(calls, [], `unexpected: ${calls.join('; ')}`);
+    } finally {
+      for (const k of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile']) cp[k] = saved[k];
+      globalThis.fetch = saved.fetch;
+      f.done(); delete globalThis.__autodeFakeOracle;
+    }
+    // The install action: cancelled → no terminal; "Run in AutoDE terminal" → the exact command, once.
+    const { installDriverCommand } = fresh('../dist/core/platformPrerequisites.js');
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-drv-install-'));
+    const sent = [];
+    const fakeVs = (answer) => ({
+      window: {
+        terminals: [],
+        createTerminal: (opts) => ({ name: opts.name, show() {}, sendText: (text) => sent.push({ text, cwd: opts.cwd }) }),
+        showInformationMessage: async (msg) => (/^Install the/.test(msg) ? answer : undefined),
+        showWarningMessage: async () => undefined, showErrorMessage: async () => undefined
+      },
+      env: { clipboard: { writeText: async (t) => sent.push({ copied: t }) }, openExternal: async () => true },
+      Uri: { parse: (s) => s }, commands: { executeCommand: async () => {} }
+    });
+    const host = { driversDirectory: () => root, snowflakeCliPath: () => '', databricksCliPath: () => '', log: () => {} };
+    try {
+      await installDriverCommand(fakeVs(undefined), host, 'oracle');
+      assert.deepStrictEqual(sent, [], 'dismissing the dialog runs nothing');
+      await installDriverCommand(fakeVs('Run in AutoDE terminal'), host, 'oracle');
+      const npmFound = sent.length > 0;
+      if (npmFound) {
+        assert.deepStrictEqual(sent, [{ text: `npm install --prefix "${nodePath.join(root, 'oracle')}" --ignore-scripts --no-audit --no-fund "oracledb@^6.0.0"`, cwd: nodePath.join(root, 'oracle') }]);
+        assert.ok(!nodeFs.existsSync(nodePath.join(root, 'oracle', 'node_modules')), 'AutoDE itself installed nothing');
+      }
+    } finally { nodeFs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  await test('v0.38.0: no driver ships — neither the package manifest nor the bundles contain oracledb', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const pkg = require('../package.json');
+    for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) assert.ok(!pkg[section] || !pkg[section].oracledb, `oracledb in ${section}`);
+    const notices = nodePath.join(__dirname, '..', 'dist', 'THIRD-PARTY-NOTICES.md');
+    if (nodeFs.existsSync(notices)) assert.ok(!/oracledb/.test(nodeFs.readFileSync(notices, 'utf8')), 'oracledb was bundled');
+    for (const b of ['extension.js', 'mcp-server.js']) {
+      const text = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', b), 'utf8');
+      assert.ok(!/node_modules[\\/]+oracledb/.test(text), `${b} contains oracledb sources`);
+    }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

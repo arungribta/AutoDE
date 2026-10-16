@@ -27,6 +27,8 @@ export interface PlatformOptions {
   allowWrite: boolean;
   /** `--allow-cli`: consent to run the platform's CLI (Snowflake named connections, username/password). */
   allowCli: boolean;
+  /** `--drivers <folder>`: where user-installed drivers live (default: `AUTODE_DRIVERS_DIR`, else `~/.autode/drivers`). */
+  driversRoot?: string;
   log: (line: string) => void;
   env?: NodeJS.ProcessEnv;
   /** Tests: a manager with fake adapters registered. It must be built with the options it is given (consent). */
@@ -37,6 +39,7 @@ export const DEFAULT_MAX_ROWS = 100;
 export const MAX_ROWS_CAP = 10_000;
 const DEFAULT_TIMEOUT_S = 60;
 const MAX_PLAN_ROWS = 500;
+const TEST_QUERY_ORACLE = `SELECT SYS_CONTEXT('USERENV', 'CON_NAME') AS "database", SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS "schema", (SELECT version FROM product_component_version WHERE ROWNUM = 1) AS "version" FROM dual`;
 
 /** Maps a platform failure to the §5.6 envelope. Raw text goes into `details` (redacted and truncated by `toEnvelope`). */
 export function classifyPlatformError(err: unknown, connectionId: string, phase: 'connect' | 'query'): EngineToolError {
@@ -110,7 +113,7 @@ export class PlatformSession {
     if (!pending) {
       pending = (async () => {
         const log = (msg: string) => this.options.log(`[${entry.id}] ${msg}`);
-        const managerOptions: ConnectionManagerOptions = { cliConsent: () => this.options.allowCli, sampleDataConsent: () => this.consent(entry.id) };
+        const managerOptions: ConnectionManagerOptions = { cliConsent: () => this.options.allowCli, sampleDataConsent: () => this.consent(entry.id), driversRoot: () => this.options.driversRoot };
         const manager = this.options.createManager?.(log, managerOptions) ?? new ConnectionManager(log, managerOptions);
         try {
           const credentials = await resolveConnectionCredentials(entry);
@@ -150,6 +153,7 @@ const connectionIdSchema = { type: 'string', minLength: 1, description: 'A conne
 function authModeOf(entry: ConnectionEntry): string {
   if (entry.fields.authMode) return entry.fields.authMode;
   if (entry.credentials.resolver === 'cli') return entry.platform === 'snowflake' ? 'connections-toml' : 'databrickscfg';
+  if (entry.platform === 'oracle') return entry.fields.walletLocation ? 'password+wallet' : 'password';
   return entry.platform === 'databricks' ? 'pat' : 'key-pair';
 }
 
@@ -196,7 +200,7 @@ export function platformTools(session: PlatformSession): EngineTool[] {
       handler: async (args) => {
         const entry = session.entry(String(args.connectionId));
         const manager = await session.connect(entry, true);
-        const probe = await run(entry.id, async (m) => m.executeQuery(entry.platform === 'databricks' ? 'SELECT current_catalog() AS database, current_schema() AS schema, current_version() AS version' : 'SELECT CURRENT_DATABASE() AS DATABASE, CURRENT_SCHEMA() AS SCHEMA, CURRENT_VERSION() AS VERSION', { maxRows: 1 })).catch(() => undefined);
+        const probe = await run(entry.id, async (m) => m.executeQuery(entry.platform === 'oracle' ? TEST_QUERY_ORACLE : entry.platform === 'databricks' ? 'SELECT current_catalog() AS database, current_schema() AS schema, current_version() AS version' : 'SELECT CURRENT_DATABASE() AS DATABASE, CURRENT_SCHEMA() AS SCHEMA, CURRENT_VERSION() AS VERSION', { maxRows: 1 })).catch(() => undefined);
         const row = (probe?.rows[0] ?? {}) as Record<string, unknown>;
         const pick = (k: string) => row[k] ?? row[k.toUpperCase()] ?? null;
         return { connectionId: entry.id, connected: manager.isConnected(), platform: entry.platform, role: entry.role, database: pick('database'), schema: pick('schema'), version: pick('version') };
@@ -253,8 +257,13 @@ export function platformTools(session: PlatformSession): EngineTool[] {
         if (!check.ok) throw new EngineToolError('VALIDATION_FAILED', check.reason ?? 'Not a single statement.');
         if (check.firstKeyword === 'EXPLAIN') throw new EngineToolError('VALIDATION_FAILED', 'Pass the statement without EXPLAIN; the tool adds it.');
         const entry = session.entry(String(args.connectionId));
-        const prefix = entry.platform === 'snowflake' ? 'EXPLAIN USING TEXT' : 'EXPLAIN';
-        const result = await run(entry.id, (m) => m.executeQuery(`${prefix} ${stripTrailingSemicolon(String(args.sql))}`, { maxRows: MAX_PLAN_ROWS }));
+        const body = stripTrailingSemicolon(String(args.sql));
+        // Oracle writes the plan to the session's PLAN_TABLE and reads it back; the others return it directly.
+        const result = await run(entry.id, async (m) => {
+          if (entry.platform !== 'oracle') return m.executeQuery(`${entry.platform === 'snowflake' ? 'EXPLAIN USING TEXT' : 'EXPLAIN'} ${body}`, { maxRows: MAX_PLAN_ROWS });
+          await m.executeQuery(`EXPLAIN PLAN FOR ${body}`);
+          return m.executeQuery('SELECT plan_table_output AS "plan" FROM TABLE(DBMS_XPLAN.DISPLAY())', { maxRows: MAX_PLAN_ROWS });
+        });
         return { connectionId: entry.id, statement: check.firstKeyword, columns: result.columns, plan: result.rows };
       }
     },
