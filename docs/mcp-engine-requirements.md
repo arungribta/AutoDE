@@ -35,7 +35,7 @@ Business problem (interview, skills/*.json)
 
 Non-negotiable principles (every phase MUST preserve them):
 
-Defined in [requirements.md §2.1](requirements.md) (P1–P7), which is canonical: P1 the LLM selects and parameterises, never freehands where a primitive exists; P2 the catalog is governed at design time; P3 approval gates enforced by the orchestrator; P4 LLM-agnostic; P5 credentials are pointers; P6 small footprint, offline, no automatic downloads (DRV is the one opt-in exception), new dependencies need a recorded decision; P7 platform CLIs are optional accelerators.
+Defined in [requirements.md §2.1](requirements.md) (P1–P7), which is canonical: P1 the LLM selects and parameterises, never freehands where a primitive exists; P2 the catalog is governed at design time; P3 approval gates enforced by the orchestrator; P4 LLM-agnostic; P5 credentials are pointers; P6 small footprint, offline, no automatic downloads (AutoDE moderates installs the user starts; DRV1), new dependencies need a recorded decision; P7 platform CLIs are optional accelerators.
 
 ---
 
@@ -243,9 +243,9 @@ Until this phase ships, the MCP server MUST NOT be given write access to `.autod
 
 ### 9.0 Combined roadmap
 
-The order, version and status of every phase — this spec's, the context-layer spec's, and the carried-forward ones — live in one place: [roadmap.md](roadmap.md). Implement in that order; each phase is one minor version. Phase identifiers: `1`–`6` (this spec), `C1`–`C6`, `C4a`/`C4b` and `K1`/`K2` (context-layer spec §11), `S1`–`S3`, `DRV` and `GOV` (§9.1 below). `DRV` and `GOV` were called D and G until 2026-10-15; they were renamed because those letters also name older, unrelated work (the v0.9.0 tool-skills "Phase D", and an unbuilt "Phase G" context-memory item).
+The order, version and status of every phase — this spec's, the context-layer spec's, and the carried-forward ones — live in one place: [roadmap.md](roadmap.md). Implement in that order; each phase is one minor version. Phase identifiers: `1`–`6` (this spec), `C1`–`C6`, `C4a`/`C4b` and `K1`/`K2` (context-layer spec §11), `S1`–`S3`, `DRV1`/`DRV2` and `GOV` (§9.1 below). `DRV` and `GOV` were called D and G until 2026-10-15; they were renamed because those letters also name older, unrelated work (the v0.9.0 tool-skills "Phase D", and an unbuilt "Phase G" context-memory item).
 
-### 9.1 Carried-forward phases (S1, S2, DRV, GOV, S3)
+### 9.1 Carried-forward phases (S1, S2, DRV1/DRV2, GOV, S3)
 
 These come from the earlier AutoDE plans:
 - Phase 4, "Skill Onboarding, Versioning & Governance" (becomes S1–S3).
@@ -276,28 +276,50 @@ Acceptance:
 
 In short: AutoDE keeps a sidecar per imported skill (status, version, provenance with a content checksum, trust tier) and never touches `SKILL.md`. A skill runs only after an engineer has reviewed it — *reviewed* caps it at read-only tools and keeps it off the Claude Code path, *trusted* allows writes, commands and Claude Code — and trust is tied to the content that was reviewed. With lifecycle management on, skills are published as numbered versions, deprecated or retired; a pinned version still runs after deprecation. Only published, reviewed or trusted skills are eligible for MCP `prompts/list` (§5.4).
 
-#### Phase DRV: Opt-in native driver acquisition + platform-onboarding UI
-Scope (the earlier Phase 3b-iv design, moved into the engine):
-- **Backend cascade per connection.** Native-protocol CLI (Snowflake `snow sql`) → **opt-in native driver** (`snowflake-sdk` / `@databricks/sql`) → REST. All three return the existing `QueryResult` shape.
-- **Driver acquisition** in `src/engine/platform/driverAcquisition.ts`:
-  - Resolves the package from a **configurable registry URL**. The default is `https://registry.npmjs.org`; it can point at Artifactory or Nexus on client networks.
-  - Reads the version, tarball URL and `integrity` hash from the registry's metadata. Never hardcoded, never chosen by an LLM.
-  - Verifies the hash, then extracts to the extension's global storage under `drivers/<pkg>/<version>/`.
-  - Loads the driver in the **engine server process** only, and caches it by version.
-- **Only ever started by the user**, from the onboarding UI, with the trade-offs stated: download size, disk space, and why it helps. Never at activation, never automatic. A failed fetch (offline, proxy, air-gapped) is reported plainly and the connection falls back to CLI or REST.
-- **Platform-onboarding UI** ("Data Platforms"):
-  1. Pick platforms.
-  2. Per platform, Configure: the existing detect / pick-connection flow.
-  3. Choose a backend tier, with honest caveats for each.
-  4. Guided authentication.
-  5. End-to-end connectivity check before the platform is marked ready.
+#### Phases DRV1 and DRV2: moderated driver installation, Oracle, platform onboarding
 
-Acceptance (using a mocked registry and a local tarball fixture):
-- A tampered payload is rejected by the integrity check.
-- A configured internal registry URL is used.
-- With the registry unreachable, the connection falls back to REST with a clear message.
-- The VSIX contains neither driver.
-- Nothing downloads unless the user clicks the install action; a test asserts there is no fetch on activation or on connection.
+*Rewritten 2026-10-16 (roadmap decision log). The earlier text had AutoDE fetch `snowflake-sdk` / `@databricks/sql` tarballs from a registry and verify their hashes itself. That doesn't hold: each is a dependency tree, not a tarball (together ~120 MB, including the full AWS/Azure/Google SDKs and native per-OS binaries; technical-design §6.9). Making it work would mean writing an npm installer and shipping native code. Those two platforms also gain little over CLI + REST. The roadmap's reason for the phase is legacy sources, which the old text didn't cover.*
+
+**Principle: AutoDE moderates, it does not distribute.** AutoDE bundles, hosts and downloads no driver. For each platform it knows the **prerequisites** (a platform CLI, a driver package, a client library). For each one it can detect it, say why it is needed, give the exact install step, and verify the result. The install runs only when the user clicks, as a visible command in an AutoDE terminal, using the user's own tools. For npm packages this is `npm` with the user's own `.npmrc`, so internal registries (Artifactory, Nexus), proxies, registry authentication and lockfile integrity work exactly as they do for the user's other projects. P6 holds by construction: nothing heavy or native enters AutoDE's package, and nothing downloads unless the user starts it.
+
+##### Phase DRV1 (v0.38.0): prerequisites, moderated install, Oracle as a source
+
+Scope:
+1. **Prerequisite model** (`src/engine/platform/prerequisites.ts`). Per platform: id, kind (`cli` | `driver` | `client-library`), what it is, why it's needed, `detect()` (status `ready` | `missing` | `unverified` | `changed`, with version and detail), the install step (command, working folder, notes, size and licence where known), and `verify()`. The existing Snowflake/Databricks CLI detection appears in the model unchanged.
+2. **Driver store.** Drivers live in one folder per driver under a drivers root. The root is the setting `driversDirectory`, else `AUTODE_DRIVERS_DIR`, else `~/.autode/drivers`. It is a user-level folder rather than VS Code's global storage, so that an MCP server started by another client finds the same drivers. Install command: `npm install --prefix "<root>/<driver>" --ignore-scripts --no-audit --no-fund "<package>@<range>"`; the version range is fixed in code and reviewed like code (never chosen by an LLM). `--ignore-scripts` because no supported driver needs an install script.
+3. **Verification and trust.** `verify()` loads the package from the driver folder, checks its version against the supported range and that it works without native code (Oracle: Thin mode). It then records `{ package, version, lockfileSha256, verifiedAt }` in `<driver folder>/.autode-driver.json`. A driver is loaded only while that record matches the folder's `package-lock.json`. If the folder changes, the status becomes `changed` and the driver must be verified again (the same "trust belongs to content" rule as S2 skills). A driver is never loaded at activation and is loaded on first connect only.
+4. **Moderated install in the extension.** Commands **AutoDE: Check Platform Prerequisites** (status of every prerequisite, with actions) and **AutoDE: Install Oracle Driver**. The install command shows what will run, where, roughly how large it is and why. On **Run in terminal** it opens a visible terminal named "AutoDE" in the driver folder and runs the command. Then **Verify** checks and records the result. Without `npm` on `PATH`, AutoDE says so and offers the alternatives: install Node.js, or point `driversDirectory` at a folder where the package is already installed.
+5. **Oracle as a source** (`oracledb` ≥ 6, Thin mode only — **Oracle Database 12.1 or later**; older databases need Thick mode and Oracle Instant Client, which is out of scope and documented as such):
+   - Connection: `connectString` is either a **tnsnames alias** or an Easy Connect string. `configDir` is optional. The location of `tnsnames.ora` follows Oracle's own order: `configDir`, then `TNS_ADMIN`, then `$ORACLE_HOME/network/admin`. AutoDE reads alias names from it only (to list and validate them); the driver resolves the alias. `walletLocation` covers TLS wallets (e.g. Autonomous Database). The username is a setting or a `connections.yaml` field. The password and wallet password come from `AUTODE_ORACLE[_<REF>]_PASSWORD` / `_WALLET_PASSWORD` or VS Code SecretStorage. tnsnames carries no credentials, and Oracle's wallet-based password store needs Thick mode.
+   - Adapter (`src/engine/platform/adapters/OracleAdapter.ts`): metadata from `ALL_TABLES`, `ALL_VIEWS`, `ALL_TAB_COLUMNS`, `ALL_TAB_COMMENTS` / `ALL_COL_COMMENTS`, `ALL_CONSTRAINTS` / `ALL_CONS_COLUMNS` (foreign **and primary** keys), `ALL_OBJECTS` (last DDL time); a schema is an owner; listing "databases" returns the connected database; sampled profiling with `FETCH FIRST n ROWS ONLY`.
+   - Probes gain an `oracle` dialect. The read-only guard gains a third reading convention for Oracle's `q'[…]'` quoting, so Oracle SQL can't hide a write past it.
+   - `connections.yaml`, the MCP data-platform tools (§5.3) and the extension's connection flow (settings and a SecretStorage password) all accept `oracle`. `autode_explain_sql` uses `EXPLAIN PLAN FOR` + `DBMS_XPLAN.DISPLAY`.
+   - Oracle is a **source**: generating Oracle SQL (primitives, Pipeline Spec dialects) is out of scope.
+
+Acceptance:
+- Nothing runs or downloads unless the user clicks: a test asserts no process is spawned and no network request is made at activation or on connection, and that the install command is only sent to a terminal from the install action.
+- The install command uses the configured drivers folder, the fixed version range and `--ignore-scripts`. It quotes paths and the version range so that it works in PowerShell, cmd and bash.
+- A driver folder whose lockfile changed after verification is reported `changed` and is not loaded. An unverified driver is not loaded. Connecting without the driver says what is missing and how to install it.
+- Against a fake `oracledb` package (fixture): connect via a tnsnames alias with `configDir`; extract metadata (tables, views, columns, comments, primary and foreign keys); probes; the MCP tools.
+- tnsnames: aliases are listed (including multi-alias entries and `IFILE` reported but not followed); an unknown alias is reported with the file that was searched.
+- The guard rejects `q'[…]'`-smuggled statements.
+- The VSIX contains no driver.
+- Manual, live: an Oracle 19c (or later) database via a tnsnames alias and via Easy Connect; a machine without npm gets the guidance.
+
+##### Phase DRV2 (v0.39.0): platform-onboarding UI ("Data Platforms")
+
+Scope: a panel section that renders the prerequisite model for each platform:
+1. Pick platforms.
+2. Per platform, the prerequisites with their status and actions (install, verify), and the existing detect / pick-connection flow (CLI connections, tnsnames aliases).
+3. Choose a backend tier, with honest caveats for each.
+4. Guided authentication, storing secrets in SecretStorage.
+5. An end-to-end connectivity check before the platform is marked ready.
+
+It also writes the chosen connection to `.autode/config/connections.yaml` (pointers only), so the MCP server sees it. It also folds in the backlog item "the old `testConnection` path assembles credentials from settings rather than the credential resolvers".
+
+Acceptance: a platform is marked ready only after a passing connectivity check; every action that installs or runs something is a click with the command shown; the settings panel's existing Snowflake/Databricks flows keep working.
+
+**Not planned:** `snowflake-sdk` and `@databricks/sql` as a backend tier. Reconsider them as moderated installs if an engagement is blocked because the Snowflake SQL API is restricted and no CLI is allowed.
 
 #### Phase GOV: Governance-as-code
 Scope (from the earlier Phase 6 plan):
@@ -379,7 +401,7 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 |----------|--------------|
 | Moving the engine to a separate repository | Shared types (e.g. `SqlDialect` duplicated between `dqm/types.ts` and `transforms/types.ts`) would drift; one repo with a lint-enforced boundary gives the same isolation (D1). |
 | Native per-OS binaries (`pkg`, PyInstaller, Go) | `pkg` is archived; binaries are 40–80 MB each, need code signing, and are often blocked on client networks. A bundled JS file on VS Code's Node is a few hundred KB (D2). |
-| Downloading the server or CLIs at activation (JIT installer) | Breaks offline / air-gapped clients, slows activation, and introduces an unsigned download-and-execute path. The only sanctioned download is Phase DRV's user-initiated, integrity-checked driver acquisition, which has an offline fallback. |
+| Downloading the server or CLIs at activation (JIT installer) | Breaks offline / air-gapped clients, slows activation, and introduces an unsigned download-and-execute path. Drivers are installed only by the user, through a command AutoDE shows and runs on request (Phase DRV1), with the user's own package manager and registry. |
 | Blocking activation or the panel on `snow` / `databricks` being installed | REST backends need no CLI (P7); detection already exists in `cliDetection.ts` and runs lazily at connection time. |
 | Rewriting `skillRegistry.ts` as an MCP client or deleting it | It loads the interview prompt packs; they are exposed as MCP **prompts** (§5.4), and the client lives in `src/core/mcp/`. |
 | Making the extension a proxy between Claude Code / Copilot and the server | Both connect to MCP servers directly; the extension is one client among several (§7.5). |

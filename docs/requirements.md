@@ -42,7 +42,7 @@ This document states what AutoDE does and why; requirements marked *Planned* or 
 | Business problem and specification (BPS), Conversation (CHT) | [context-layer-requirements.md](context-layer-requirements.md) §5.2 extraction, §5.4 Context Inbox, §7.2 cited Q&A | C4b |
 | Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §5 enrichment, §6 semantic model, §8 freshness and health | C4b, C5, C6; migration track M1–M3 (not yet written) |
 | Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §7 packs, §10 grounding checks and metrics | C4b, C5, C6 |
-| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase DRV | DRV |
+| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phases DRV1, DRV2 | DRV1, DRV2 |
 | Planning and orchestration (ORC), Generation (GEN) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer-requirements.md](context-layer-requirements.md) §6 semantic model | 5, 6, GOV, C5 |
 | Tool skills (SKL) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase S3, §9 Phase 6 | S3, 6 |
 | Interoperability with other agents (MCP) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as client; [context-layer-requirements.md](context-layer-requirements.md) §9 context-layer tools | 5, C4b, C5 |
@@ -64,7 +64,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 | **P3** | Human approval gates are enforced by the orchestrator, not only by the UI. | No entry point can skip a gate. |
 | **P4** | LLM-agnostic: Copilot, Claude Code and the API providers all keep working; no capability depends on one provider. | Customers choose (or are restricted to) their provider. |
 | **P5** | Credentials are pointers, never secrets in LLM context, logs or tool output. | Customer credentials never leave their control. |
-| **P6** | Small footprint, works offline and on locked-down client networks: no automatic downloads, no native modules or heavy SDKs in the package. The one sanctioned download is the user-initiated, integrity-checked driver acquisition (phase DRV). Any new dependency needs a recorded decision covering licence and size. | Client networks and security reviews. |
+| **P6** | Small footprint, works offline and on locked-down client networks: no automatic downloads, no native modules or heavy SDKs in the package. Drivers and client tools are installed by the user, with the user's own package manager, through a step AutoDE shows and runs only on request (phase DRV1); AutoDE itself never downloads or bundles them. Any new dependency needs a recorded decision covering licence and size. | Client networks and security reviews. |
 | **P7** | Platform CLIs are optional accelerators, never prerequisites; a CLI-free path always exists. | Not every machine has, or may install, a CLI. |
 
 ### 2.2 Context and grounding
@@ -130,9 +130,9 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **PLT-4 — Every auth mode offered in the UI works end to end,** and a missing consent is fixed in place rather than by editing settings by hand. *Status:* Shipped v0.17.0.
 - **PLT-5 — The assistant knows what is connected,** and the UI shows it. *Status:* Shipped v0.18.0.
 - **PLT-6 — Legacy sources without a live connector can still be described:** dictionary exports (Teradata, Oracle, INFORMATION_SCHEMA) and DDL. *Status:* Shipped v0.31.0.
-- **PLT-7 — A user can opt in to a native driver** for platforms or performance the CLI-free path doesn't cover, fetched only on request and integrity-checked. *Status:* Planned (DRV).
+- **PLT-7 — A user can add a driver for a platform the CLI-free path doesn't cover,** guided by AutoDE: what is missing, why, the exact install step (run only on request), and a verification before first use. *Status:* Planned (DRV1 — Oracle first; DRV2 — onboarding UI).
 
-*Planned work:* data-platform MCP tools and credentials across the process boundary — [mcp-engine-requirements.md](mcp-engine-requirements.md) §5.3, §6 (phase 4); opt-in native drivers and platform onboarding — §9.1 Phase DRV.
+*Planned work:* data-platform MCP tools and credentials across the process boundary — [mcp-engine-requirements.md](mcp-engine-requirements.md) §5.3, §6 (phase 4); moderated driver installation and Oracle — §9.1 Phase DRV1; platform onboarding — Phase DRV2.
 
 ### 3.5 Context layer (CTX)
 
