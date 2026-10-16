@@ -106,7 +106,9 @@ Start at [docs/README.md](docs/README.md), which says which document answers wha
 
 ## License
 
-This project is licensed under the MIT License (see LICENSE file).
+AutoDE is free to use for any purpose, including commercial use, under the MIT License (see [LICENSE](LICENSE)): you may use, copy, modify, merge, publish, distribute, sublicense and sell it, provided the copyright and licence notice stay with substantial copies. It comes without warranty.
+
+The packaged extension bundles open-source libraries under their own permissive licences; their notices are generated at build time into `dist/THIRD-PARTY-NOTICES.md` and ship inside the package.
 
 ---
 

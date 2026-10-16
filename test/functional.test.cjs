@@ -6699,7 +6699,9 @@ async function main() {
     const client = await mcpSession(f.ws);
     try {
       const pkg = require('../package.json');
-      assert.deepStrictEqual(client.getServerVersion(), { name: 'autode', version: pkg.version });
+      const info = client.getServerVersion();
+      assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
+      assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
       assert.deepStrictEqual(tools.map((t) => t.name), ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding']);
       for (const t of tools) assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], [true, false], t.name);

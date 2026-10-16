@@ -1,22 +1,24 @@
-**/.vscode/**
-**/.git/**
-**/.github/**
-**/*.map
-node_modules/**
-.gitignore
-.vscodeignore
-src/**
-scripts/**
-test/**
-tsconfig.json
-.eslintrc.cjs
-mock_*.js
-tmp_*.js
-.ai-context/**
-*.vsix
-# Only the two esbuild bundles ship (phase 3): tsc's per-module output stays local for tests.
-dist/**
+# Allowlist: the package ships only what is named below. Everything else in the
+# folder — sources, tests, local tool folders (.claude/, .venv/, .ai-context/),
+# tsc's per-module dist/ output — stays out, including anything added later.
+**
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+# The two esbuild bundles and the licences of what they contain (phase 3).
 !dist/extension.js
 !dist/mcp-server.js
-docs/*.md
-media/architecture.drawio
+!dist/THIRD-PARTY-NOTICES.md
+# Icons: marketplace PNG, the MCP server's PNG, the activity-bar glyph.
+!media/autode-icon-256.png
+!media/autode-icon-64.png
+!media/autode-activitybar.svg
+# Webviews and custom editors.
+!media/sidebar.html
+!media/panel.html
+!media/editors/*.html
+# Bundled interview skills and Tier-2 primitives; JSON Schemas for yamlValidation.
+!skills/*.json
+!primitive-definitions/**
+!docs/schemas/*.json

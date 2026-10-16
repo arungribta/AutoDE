@@ -54,6 +54,16 @@ export interface ServerOptions {
   log?: (line: string) => void;
 }
 
+/** AutoDE's icon for clients that show one next to the server name — embedded as a data URI, so nothing is fetched (P6). */
+export function serverIcons(resourcesRoot: string): Array<{ src: string; mimeType: string; sizes: string[] }> {
+  try {
+    const png = fs.readFileSync(path.join(resourcesRoot, 'media', 'autode-icon-64.png'));
+    return [{ src: `data:image/png;base64,${png.toString('base64')}`, mimeType: 'image/png', sizes: ['64x64'] }];
+  } catch {
+    return [];
+  }
+}
+
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validators = new Map<string, ValidateFunction>(TOOLS.map((t) => [t.name, ajv.compile(t.inputSchema)]));
 
@@ -77,7 +87,7 @@ export function createAutodeServer(options: ServerOptions): Server {
   const ws = new EngineWorkspace({ workspaceRoot: options.workspaceRoot, resourcesRoot: options.resourcesRoot });
   const log = (line: string) => (options.log ?? ((l: string) => process.stderr.write(l + '\n')))(redact(line));
   const server = new Server(
-    { name: 'autode', version: options.version },
+    { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {
       capabilities: { tools: {}, prompts: {}, resources: {} },
       instructions: 'AutoDE data-engineering engine. Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. All tools are read-only.'
