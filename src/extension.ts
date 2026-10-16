@@ -21,6 +21,10 @@ import { registerDefaultCredentialResolvers, resolveCredential } from './core/cr
 import { DataPlatformProvider, DataAgentHubSettings } from './engine/types';
 import { parseFile, detectFileFormat } from './engine/context/fileIngestion';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as lifecycle from './engine/skills/lifecycle';
+import { resolveAllowedToolNames } from './engine/skills/toolAllowList';
 
 /**
  * Resources that outlive a single command (e.g. `connectionManager` below,
@@ -49,6 +53,9 @@ async function copyDirectoryRecursive(source: vscode.Uri, target: vscode.Uri): P
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
   const hub = new DataAgentHubHub(configManager);
+  // Tool-skill imports, reviews and lifecycle transitions (Phase S2); the durable record is each skill's sidecar.
+  const skillLog = vscode.window.createOutputChannel('AutoDE: Tool Skills');
+  const skillActor = (): string => { try { return os.userInfo().username || 'user'; } catch { return 'user'; } };
   registerDefaultCredentialResolvers(context.secrets);
 
   // Which VS Code Language Model provider the user has selected (Copilot or
@@ -857,13 +864,26 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.workspace.fs.stat(skillMdUri); // throws if missing
       const id = sourceUri.fsPath.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^a-zA-Z0-9_-]+/g, '_') || `skill-${Date.now().toString(36)}`;
       const targetDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills', id);
+      if (fs.existsSync(targetDir.fsPath)) {
+        const replace = await vscode.window.showWarningMessage(`A skill "${id}" is already imported. Replace it? Its review and version history are reset.`, { modal: true }, 'Replace');
+        if (replace !== 'Replace') { return; }
+        fs.rmSync(targetDir.fsPath, { recursive: true, force: true });
+      }
       await copyDirectoryRecursive(sourceUri, targetDir);
       const { loadToolSkill } = require('./engine/skills/toolSkills') as typeof import('./engine/skills/toolSkills');
+      // AutoDE's own files never come from the source: a skill cannot ship its own trust (Phase S2).
+      fs.rmSync(path.join(targetDir.fsPath, lifecycle.SIDECAR_FILENAME), { force: true });
+      fs.rmSync(path.join(targetDir.fsPath, lifecycle.HISTORY_DIRNAME), { recursive: true, force: true });
+      const management = !!configManager.getSettings().toolSkillManagementEnabled;
+      lifecycle.recordImport(targetDir.fsPath, { source: 'local' }, skillActor(), { managementEnabled: management });
+      skillLog.appendLine(`${new Date().toISOString()} ${id}: imported (${management ? 'draft' : 'published'} v1, unreviewed).`);
       const skill = loadToolSkill(targetDir.fsPath, id);
       const toolsNote = skill.declaredTools?.length ? ` Declares tools: ${skill.declaredTools.join(', ')}.` : '';
-      vscode.window.showInformationMessage(
-        `Imported skill "${skill.name}" (id: ${id}, ${skill.resourceFiles.length} resource file(s)).${toolsNote} Run it with the "▶ Run Skill" action or /skill ${id} <instruction> in chat.`
+      const next = await vscode.window.showInformationMessage(
+        `Imported skill "${skill.name}" (id: ${id}, ${skill.resourceFiles.length} resource file(s)).${toolsNote} It is unreviewed${management ? ' and a draft' : ''}: review it before it can run.`,
+        'Review Now'
       );
+      if (next === 'Review Now') { await vscode.commands.executeCommand(`${EXTENSION_ID}.reviewToolSkill`, id); }
     } catch (err) {
       vscode.window.showErrorMessage(`Import failed: ${err instanceof Error ? err.message : String(err)}. Make sure the folder contains a SKILL.md file.`);
     }
@@ -874,22 +894,86 @@ export function activate(context: vscode.ExtensionContext): void {
   const runToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.runToolSkill`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
-    const { loadToolSkillsFromDirectory } = require('./engine/skills/toolSkills') as typeof import('./engine/skills/toolSkills');
     const toolSkillsDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills').fsPath;
-    const skills = loadToolSkillsFromDirectory(toolSkillsDir);
-    if (skills.length === 0) { vscode.window.showInformationMessage('No tool skills imported yet. Run "AutoDE: Import Tool Skill" first.'); return; }
+    const all = lifecycle.loadToolSkillStates(toolSkillsDir, skillActor());
+    if (all.length === 0) { vscode.window.showInformationMessage('No tool skills imported yet. Run "AutoDE: Import Tool Skill" first.'); return; }
+    // The run gate (Phase S2): only published skills reviewed or trusted for their current content.
+    const runnable = all.filter((s) => lifecycle.isSkillRunnable(s));
+    const hidden = all.length - runnable.length;
+    if (runnable.length === 0) { vscode.window.showInformationMessage(`None of the ${all.length} imported skill(s) can run yet. Run "AutoDE: Review Tool Skill" first.`); return; }
     const picked = await vscode.window.showQuickPick(
-      skills.map((s) => ({ label: s.name, description: s.id, detail: s.description })),
-      { title: 'Run a tool-executing skill', placeHolder: 'Choose a skill' }
+      runnable.map((s) => ({ label: s.skill.name, description: `${s.skill.id} · ${s.effectiveTier}`, detail: s.skill.description, id: s.skill.id })),
+      { title: `Run a tool-executing skill${hidden ? ` (${hidden} unreviewed, draft, deprecated or retired — hidden)` : ''}`, placeHolder: 'Choose a skill' }
     );
     if (!picked) { return; }
     const instruction = await vscode.window.showInputBox({ title: `Instruction for "${picked.label}"`, placeHolder: 'What should this run do?' });
     if (!instruction || !instruction.trim()) { return; }
     vscode.window.showInformationMessage(`Running skill "${picked.label}"…`);
-    const result = await hub.runToolSkill(picked.description!, instruction.trim());
+    const result = await hub.runToolSkill(picked.id, instruction.trim());
     if (result.success) { vscode.window.showInformationMessage(`Skill "${picked.label}" completed: ${result.message.slice(0, 200)}`); }
-    else { vscode.window.showErrorMessage(`Skill "${picked.label}" failed: ${result.error || result.message}`); }
+    else { vscode.window.showErrorMessage(`Skill "${picked.label}" failed: ${result.message}`); }
   });
+
+  // ── Tool-skill review and lifecycle (Phase S2) ──
+
+  const pickToolSkill = async (title: string, filter: (s: lifecycle.ToolSkillState) => boolean, preselected?: unknown) => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return undefined; }
+    const dir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills').fsPath;
+    const states = lifecycle.loadToolSkillStates(dir, skillActor()).filter(filter);
+    if (typeof preselected === 'string') { return states.find((s) => s.skill.id === preselected); }
+    if (states.length === 0) { vscode.window.showInformationMessage('No matching tool skills.'); return undefined; }
+    const picked = await vscode.window.showQuickPick(
+      states.map((s) => ({ label: s.skill.name, description: `${s.skill.id} · ${s.sidecar.status} v${s.sidecar.version} · ${s.effectiveTier}${s.changedSinceReview ? ' (changed since review)' : ''}`, detail: s.skill.description, state: s })),
+      { title }
+    );
+    return picked?.state;
+  };
+
+  const reviewToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.reviewToolSkill`, async (skillId?: unknown) => {
+    const state = await pickToolSkill('Review a tool skill', (s) => s.sidecar.status !== 'retired', skillId);
+    if (!state) { return; }
+    const doc = await vscode.workspace.openTextDocument({ content: lifecycle.buildSkillReviewDocument(state, resolveAllowedToolNames(state.skill.declaredTools)), language: 'markdown' });
+    await vscode.window.showTextDocument(doc, { preview: true });
+    const choice = await vscode.window.showWarningMessage(
+      `Review "${state.skill.name}" (now ${state.effectiveTier}). Read the opened page in full: the skill's instructions and resource files will act in this workspace.`,
+      { modal: true, detail: 'Reviewed: read-only tools at most, not through Claude Code. Trusted: may write files and run commands (each approved), and may run through Claude Code. Unreviewed: does not run.' },
+      'Reviewed (read-only)', 'Trusted (full access)', 'Unreviewed'
+    );
+    const tier = choice === 'Reviewed (read-only)' ? 'reviewed' : choice === 'Trusted (full access)' ? 'trusted' : choice === 'Unreviewed' ? 'unreviewed' : undefined;
+    if (!tier) { return; }
+    lifecycle.setTrustTier(state.skill.sourceDir, tier, skillActor());
+    skillLog.appendLine(`${new Date().toISOString()} ${state.skill.id}: ${state.effectiveTier} → ${tier} (content ${state.checksum.slice(0, 12)}).`);
+    vscode.window.showInformationMessage(`Skill "${state.skill.name}" is now ${tier}.${state.sidecar.status === 'draft' ? ' It is still a draft: publish it to run it.' : ''}`);
+  });
+
+  const lifecycleCommand = (action: 'publish' | 'deprecate' | 'retire') => async (skillId?: unknown) => {
+    if (!configManager.getSettings().toolSkillManagementEnabled) {
+      vscode.window.showErrorMessage('Tool-skill lifecycle management is off. Enable "autoDataEngineeringHub.toolSkillManagementEnabled".');
+      return;
+    }
+    const from: Record<typeof action, string[]> = { publish: ['draft', 'published', 'deprecated'], deprecate: ['published'], retire: ['draft', 'published', 'deprecated'] };
+    const state = await pickToolSkill(`${action[0].toUpperCase()}${action.slice(1)} a tool skill`, (s) => from[action].includes(s.sidecar.status), skillId);
+    if (!state) { return; }
+    if (action === 'retire') {
+      const ok = await vscode.window.showWarningMessage(`Retire "${state.skill.name}"? It will never run again, including plan steps pinned to its versions.`, { modal: true }, 'Retire');
+      if (ok !== 'Retire') { return; }
+    }
+    try {
+      const by = skillActor();
+      const sidecar = action === 'publish' ? lifecycle.publishToolSkill(state.skill.sourceDir, by).sidecar
+        : action === 'deprecate' ? lifecycle.deprecateToolSkill(state.skill.sourceDir, by)
+          : lifecycle.retireToolSkill(state.skill.sourceDir, by);
+      skillLog.appendLine(`${new Date().toISOString()} ${state.skill.id}: ${action} → ${sidecar.status} v${sidecar.version}.`);
+      const tierNote = action === 'publish' && sidecar.trustTier === 'unreviewed' ? ' This content is unreviewed: review it before it can run.' : '';
+      vscode.window.showInformationMessage(`Skill "${state.skill.name}" is now ${sidecar.status} (v${sidecar.version}).${tierNote}`);
+    } catch (err) {
+      vscode.window.showErrorMessage(`${action} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const publishToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.publishToolSkill`, lifecycleCommand('publish'));
+  const deprecateToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.deprecateToolSkill`, lifecycleCommand('deprecate'));
+  const retireToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.retireToolSkill`, lifecycleCommand('retire'));
 
   // ── Chat sessions (Phase D5... Phase F, v0.9.0) ──
 
@@ -950,7 +1034,7 @@ export function activate(context: vscode.ExtensionContext): void {
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
     testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
-    importToolSkill, runToolSkill,
+    importToolSkill, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential
   );

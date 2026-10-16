@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { AgentExecutionContext, AgentExecutionResult, PlanStep, ToolExecutionMode, ToolSkillDefinition } from '../../engine/types';
-import { loadToolSkillsFromDirectory } from '../../engine/skills/toolSkills';
 import { resolveAllowedToolNames, toolModeCeiling } from '../../engine/skills/toolAllowList';
+import { TrustTier, isClaudeCliEligible, minMode, notRunnableReason, resolveSkillVersion, tierModeCeiling } from '../../engine/skills/lifecycle';
 
 /**
  * Runs an imported Claude Agent Skill (`SKILL.md` + resources) with real tool
@@ -20,7 +20,10 @@ import { resolveAllowedToolNames, toolModeCeiling } from '../../engine/skills/to
  *
  * What the skill may use is capped twice: its declared `allowed-tools` narrow the
  * tool catalog (`resolveAllowedToolNames`), and `resolveToolExecutionMode` never
- * grants `'full'` to a skill that declared only read tools. Phase S2 adds trust tiers.
+ * grants `'full'` to a skill that declared only read tools. Phase S2 (v0.34.0) caps
+ * it by trust tier too — reviewed skills run read-only at most and never through
+ * Claude Code; unreviewed, draft and retired skills don't run — and resolves a
+ * pinned `skillVersion` from the skill's version history.
  */
 
 export async function executeToolSkillAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
@@ -34,10 +37,19 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
   }
 
   const toolSkillsDir = path.join(workspaceRoot, '.ai-context', 'skills', 'tool-skills');
-  const skill = loadToolSkillsFromDirectory(toolSkillsDir).find((s) => s.id === skillId);
-  if (!skill) {
-    return { success: false, message: `Skill "${skillId}" was not found under .ai-context/skills/tool-skills/.`, error: 'skill not found' };
+  const pinned = step.skillVersion ?? context.skillVersion;
+  const state = resolveSkillVersion(toolSkillsDir, skillId, pinned);
+  if (!state) {
+    return pinned === undefined
+      ? { success: false, message: `Skill "${skillId}" was not found under .ai-context/skills/tool-skills/.`, error: 'skill not found' }
+      : { success: false, message: `Version ${pinned} of skill "${skillId}" was not found (it was never published, or its history was removed).`, error: 'skill version not found' };
   }
+  const notRunnable = notRunnableReason(state, { pinned: pinned !== undefined });
+  if (notRunnable) {
+    return { success: false, message: notRunnable, error: 'skill not runnable' };
+  }
+  const skill = state.skill;
+  const tier = state.effectiveTier;
 
   const instruction = (step.taskDescription || context.skillInstruction || context.objective || '').trim();
   if (!instruction) {
@@ -49,8 +61,15 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
   }
 
   const allowed = resolveAllowedToolNames(skill.declaredTools);
-  const mode = resolveToolExecutionMode(skill, allowed);
+  const mode = resolveToolExecutionMode(skill, allowed, tier);
   const provider = context.settings.activeLlmProvider;
+  if (provider === 'claude' && !isClaudeCliEligible(tier)) {
+    return {
+      success: false,
+      message: `Skill "${skill.name}" is ${tier}, not trusted: it cannot run through Claude Code, whose tool calls AutoDE cannot audit one by one. Choose another provider, or trust the skill ("AutoDE: Review Tool Skill").`,
+      error: 'skill not eligible for the Claude CLI path'
+    };
+  }
   const toolsLabel = allowed === undefined ? 'all workspace tools' : allowed.length === 0 ? 'no tools' : allowed.join(', ');
 
   try {
@@ -64,11 +83,11 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
           'Claude Code runs its own tool loop: you approve this whole run once, and AutoDE cannot audit or block individual tool calls — it can only limit which tools are available.'
         : undefined
     });
-    context.log(`Skill "${skill.name}" completed via ${provider} (mode ${mode}, tools: ${toolsLabel}) after ${audit.length} audited tool call(s).`);
+    context.log(`Skill "${skill.name}" v${state.sidecar.version} (${tier}) completed via ${provider} (mode ${mode}, tools: ${toolsLabel}) after ${audit.length} audited tool call(s).`);
     return {
       success: true,
       message: text || `Skill "${skill.name}" completed (${audit.length} tool call(s), no final text).`,
-      details: { provider, skillId: skill.id, mode, allowedTools: allowed ?? 'unrestricted', audit: audit as unknown as Record<string, unknown> }
+      details: { provider, skillId: skill.id, skillVersion: state.sidecar.version, trustTier: tier, contentChecksum: state.checksum, mode, allowedTools: allowed ?? 'unrestricted', audit: audit as unknown as Record<string, unknown> }
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -77,9 +96,9 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
   }
 }
 
-/** The mode a skill runs in: its declared-tools ceiling (S1). Phase S2 caps this further by trust tier. */
-export function resolveToolExecutionMode(_skill: ToolSkillDefinition, allowed: readonly string[] | undefined): ToolExecutionMode {
-  return toolModeCeiling(allowed);
+/** The mode a skill runs in: the lower of its declared-tools ceiling (S1) and its trust tier's ceiling (S2). */
+export function resolveToolExecutionMode(_skill: ToolSkillDefinition, allowed: readonly string[] | undefined, tier: TrustTier = 'trusted'): ToolExecutionMode {
+  return minMode(toolModeCeiling(allowed), tierModeCeiling(tier));
 }
 
 function buildSkillSystemPrompt(skill: ToolSkillDefinition, context: AgentExecutionContext): string {

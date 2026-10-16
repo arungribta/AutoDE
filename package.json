@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "publisher": "Arun Gribta",
   "license": "MIT",
   "icon": "media/logo.svg",
@@ -189,6 +189,22 @@
         "title": "AutoDE: Run Tool Skill"
       },
       {
+        "command": "autoDataEngineeringHub.reviewToolSkill",
+        "title": "AutoDE: Review Tool Skill"
+      },
+      {
+        "command": "autoDataEngineeringHub.publishToolSkill",
+        "title": "AutoDE: Publish Tool Skill"
+      },
+      {
+        "command": "autoDataEngineeringHub.deprecateToolSkill",
+        "title": "AutoDE: Deprecate Tool Skill"
+      },
+      {
+        "command": "autoDataEngineeringHub.retireToolSkill",
+        "title": "AutoDE: Retire Tool Skill"
+      },
+      {
         "command": "autoDataEngineeringHub.newChat",
         "title": "AutoDE: New Chat"
       },
@@ -209,6 +225,22 @@
         "title": "AutoDE: Test Service Account Credential"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "autoDataEngineeringHub.publishToolSkill",
+          "when": "config.autoDataEngineeringHub.toolSkillManagementEnabled"
+        },
+        {
+          "command": "autoDataEngineeringHub.deprecateToolSkill",
+          "when": "config.autoDataEngineeringHub.toolSkillManagementEnabled"
+        },
+        {
+          "command": "autoDataEngineeringHub.retireToolSkill",
+          "when": "config.autoDataEngineeringHub.toolSkillManagementEnabled"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -611,6 +643,11 @@
           "type": "boolean",
           "default": false,
           "description": "Allow publishing/deprecating declarative (Tier 2) transform primitives from the Primitives palette (opt-in). Off by default — a workspace's platform admin turns this on deliberately."
+        },
+        "autoDataEngineeringHub.toolSkillManagementEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Manage imported tool skills' lifecycle: imports start as drafts, and Publish/Deprecate/Retire Tool Skill keep numbered versions that plan steps can pin (opt-in). Reviewing and trusting a skill works either way."
         },
         "autoDataEngineeringHub.dataPlatformCliConsent": {
           "type": "boolean",

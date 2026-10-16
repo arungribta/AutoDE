@@ -58,7 +58,7 @@ export function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
   return { name, description, allowedTools, body };
 }
 
-/** Lists every file under `dir` (recursively), relative to `dir`, excluding SKILL.md itself. */
+/** Lists every file under `dir` (recursively), relative to `dir`, excluding SKILL.md itself and AutoDE's own sidecar and version history (Phase S2). */
 function listResourceFiles(dir: string): string[] {
   const results: string[] = [];
   const walk = (current: string, relPrefix: string) => {
@@ -70,6 +70,7 @@ function listResourceFiles(dir: string): string[] {
     }
     for (const entry of entries) {
       const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+      if (!relPrefix && (entry.name === '.autode-skill.json' || entry.name === '.autode-history')) continue;
       if (entry.isDirectory()) {
         walk(path.join(current, entry.name), rel);
       } else if (entry.isFile() && entry.name !== SKILL_FILENAME) {

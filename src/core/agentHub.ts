@@ -520,13 +520,14 @@ export class DataAgentHubHub {
    * from the auto-planner (see the note on `VALID_AGENT_TYPES`). Bypasses the
    * DAG: this is a single, immediate step, not a queued plan step.
    */
-  public async runToolSkill(skillId: string, instruction: string, liveContext?: string): Promise<{ success: boolean; message: string; error?: string }> {
+  public async runToolSkill(skillId: string, instruction: string, liveContext?: string, skillVersion?: number): Promise<{ success: boolean; message: string; error?: string }> {
     const step: PlanStep = {
       id: `skill-${Date.now().toString(36)}`,
       assignedAgent: 'toolSkillAgent',
       taskDescription: instruction,
       status: 'running',
-      skillId
+      skillId,
+      skillVersion
     };
     const context: AgentExecutionContext = {
       objective: this.state.objective,

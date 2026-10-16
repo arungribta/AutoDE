@@ -590,6 +590,8 @@ export interface DataAgentHubSettings {
   copilotProgrammaticConsent?: boolean;
   /** Opt-in gate (Phase 2B-iv, default false) — publishing/deprecating a Tier-2 declarative primitive is disabled until a workspace's platform admin turns this on. */
   primitiveManagementEnabled?: boolean;
+  /** Opt-in (Phase S2, default false): tool-skill lifecycle — imports start as drafts; publish/deprecate/retire keep versions. Review and trust work regardless. */
+  toolSkillManagementEnabled?: boolean;
   /** Consent to shell out to an external data-platform CLI (`snow`/`databricks`) — to enumerate connections/profiles (Phase 3a-ii), and to actually execute queries via a CLI-derived connection (Phase 3b's `SnowflakeCliBackend`). CLI *detection* (a version check) is exempt — only these actually invoke the vendor CLI. */
   dataPlatformCliConsent?: boolean;
   /** Optional explicit path to the Snowflake CLI (`snow` / `snow.exe`). Empty = auto-detect via PATH. */
@@ -658,6 +660,8 @@ export interface PlanStep {
   phase?: WorkflowPhase;
   /** Which imported tool skill to run — required when `assignedAgent === 'toolSkillAgent'`. */
   skillId?: string;
+  /** Pins a published version of that skill (Phase S2); resolves after deprecation, from its version history. */
+  skillVersion?: number;
 }
 
 // ── Tool-executing Skills (Phase D) ──
@@ -864,6 +868,8 @@ export interface AgentExecutionContext {
   workspaceRoot?: string;
   /** Which skill to run + the user's instruction — populated by the caller (plan step or chat). */
   skillId?: string;
+  /** Pins a published version of the skill (Phase S2). */
+  skillVersion?: number;
   skillInstruction?: string;
   /**
    * Lets a caller (a future spec/UI authoring flow) supply a transform

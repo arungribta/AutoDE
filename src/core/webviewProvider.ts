@@ -663,13 +663,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'syncMetadata': { this.postLog('Syncing database metadata...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.syncMetadata`); } catch { this.postLog('Sync metadata command not yet registered.'); } break; }
         case 'runToolSkill': {
-          const skillId = typeof message.skillId === 'string' ? message.skillId.trim() : '';
+          // `/skill <id>[@<version>] <instruction>` — a version pins a published revision (Phase S2).
+          const [, skillId = '', pinned] = /^([^@\s]*)(?:@(\d+))?$/.exec(typeof message.skillId === 'string' ? message.skillId.trim() : '') ?? [];
           const instruction = typeof message.instruction === 'string' ? message.instruction.trim() : '';
-          if (!skillId || !instruction) { this.postLog('Usage: /skill <skillId> <instruction>'); break; }
-          this.postLog(`Running skill "${skillId}"…`);
+          if (!skillId || !instruction) { this.postLog('Usage: /skill <skillId>[@<version>] <instruction>'); break; }
+          this.postLog(`Running skill "${skillId}"${pinned ? ` v${pinned}` : ''}…`);
           try {
-            const result = await this.hub.runToolSkill(skillId, instruction, this.contextPackText('step', instruction, `Skill ${skillId}: ${instruction.slice(0, 50)}`));
-            this.postMessage('chatResponse', { message: result.success ? result.message : `Skill failed: ${result.error || result.message}`, error: !result.success });
+            const result = await this.hub.runToolSkill(skillId, instruction, this.contextPackText('step', instruction, `Skill ${skillId}: ${instruction.slice(0, 50)}`), pinned ? Number(pinned) : undefined);
+            this.postMessage('chatResponse', { message: result.success ? result.message : `Skill failed: ${result.message}`, error: !result.success });
           } catch (err) {
             const message2 = err instanceof Error ? err.message : String(err);
             this.postMessage('chatResponse', { message: `Skill failed: ${message2}`, error: true });

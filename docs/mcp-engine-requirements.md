@@ -272,27 +272,9 @@ Acceptance:
 - An interview turn's prompt contains the skill's `systemPrompt`.
 
 #### Phase S2: Tool-skill lifecycle, provenance, review and trust tiers
-Scope:
-- **Sidecar file.** AutoDE owns `.ai-context/skills/tool-skills/<id>/.autode-skill.json` and never modifies the foreign `SKILL.md`. Fields:
-  - `status`: `draft | published | deprecated | retired`
-  - `version`
-  - `provenance { source: local|git, repoUrl?, ref?, resolvedCommit?, subpath?, contentChecksum, importedAt }`
-  - `trustTier`: `unreviewed | reviewed | trusted`
+**Status:** ✅ shipped in v0.34.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md SKL-5; HOW: technical-design.md §7.6. The full specification text is in git (this file at v0.33.0).
 
-  A skill with no sidecar defaults to `{ status: published, version: 1, trustTier: trusted }` if it was imported before this phase (back-compat), and `unreviewed` if imported after.
-- **Lifecycle.** `src/core/toolSkillLifecycle.ts` mirrors `transforms/declarative/lifecycle.ts`: publish, deprecate, archive to `history/v<N>/`. It is gated by a new `toolSkillManagementEnabled` setting (default false, hidden when off).
-- **Review screen.** Shows the full `SKILL.md`, declared tools and resource files, with an explicit "Trust and enable". Tier semantics:
-  - `unreviewed`: not runnable, not exposed over MCP.
-  - `reviewed`: runnable with a `read-only` mode ceiling; not eligible for the Claude CLI path.
-  - `trusted`: an explicit elevation to `full` and Claude CLI eligibility.
-
-  Every transition is logged.
-- **Run gate.** `isSkillRunnable()` gates the run picker the way `isSelectable()` gates primitives. A pinned `skillVersion` still resolves after deprecation.
-
-Acceptance:
-- A freshly imported skill is neither runnable nor listed in MCP `prompts/list` until reviewed.
-- Review unlocks read-only only; elevation unlocks full.
-- Publish/deprecate/archive round-trip tests mirror the primitive lifecycle tests.
+In short: AutoDE keeps a sidecar per imported skill (status, version, provenance with a content checksum, trust tier) and never touches `SKILL.md`. A skill runs only after an engineer has reviewed it — *reviewed* caps it at read-only tools and keeps it off the Claude Code path, *trusted* allows writes, commands and Claude Code — and trust is tied to the content that was reviewed. With lifecycle management on, skills are published as numbered versions, deprecated or retired; a pinned version still runs after deprecation. Only published, reviewed or trusted skills are eligible for MCP `prompts/list` (§5.4).
 
 #### Phase DRV: Opt-in native driver acquisition + platform-onboarding UI
 Scope (the earlier Phase 3b-iv design, moved into the engine):
