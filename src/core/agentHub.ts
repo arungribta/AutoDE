@@ -177,7 +177,7 @@ export class DataAgentHubHub {
     this.state.stagesConfirmedAt = persisted.stagesConfirmedAt;
     this.state.phaseOverrides = persisted.phaseOverrides ? { ...persisted.phaseOverrides } : undefined;
     this.state.currentPhase = PHASE_ORDER.find((phase) => persisted.steps.some((step) => step.phase === phase));
-    this.log(`Restored plan v${persisted.version} (${persisted.status}, ${persisted.steps.length} steps) from .ai-context/plan/.`);
+    this.log(`Restored plan v${persisted.version} (${persisted.status}, ${persisted.steps.length} steps) from the problem's plan/ folder.`);
     this.emitState();
   }
 

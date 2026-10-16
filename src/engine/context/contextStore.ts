@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 
 /**
- * Compare-and-swap persistence for `.ai-context` files (v0.25.0, moved into
+ * Compare-and-swap persistence for `.autode` files (v0.25.0, moved into
  * the engine layer in v0.26.0 — docs/mcp-engine-requirements.md §4.3/§8).
  *
  * A *revision* is the SHA-256 of a file's bytes; `undefined` means the file

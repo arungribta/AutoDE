@@ -10,13 +10,13 @@ Everything the server offers is **read-only**. It never writes to your workspace
 - The server file `dist/mcp-server.js`. It has no dependencies, and you can find it in either of two places:
   - **Installed extension:** `~/.vscode/extensions/<publisher>.auto-data-engineering-hub-<version>/dist/mcp-server.js` (Windows: `%USERPROFILE%\.vscode\extensions\…`). The folder name changes with every extension update, so update the path after updating. A command that writes a stable path for you comes in a later release.
   - **Source checkout:** run `npm install` and then `npm run compile`. The server is `<checkout>/dist/mcp-server.js`.
-- A workspace that AutoDE has worked in, meaning it has an `.ai-context/` folder. Without one, the primitive and Pipeline Spec tools still work, but the context tools find nothing.
+- A workspace that AutoDE has worked in, meaning it has an `.autode/` folder. Without one, the primitive and Pipeline Spec tools still work, but the context tools find nothing.
 
 The server takes two arguments:
 
 | Argument | Meaning |
 |---|---|
-| `--workspace <folder>` | The project whose `.ai-context/` the server reads. Defaults to the current directory. |
+| `--workspace <folder>` | The project whose `.autode/` the server reads. Defaults to the current directory. |
 | `--resources <folder>` | The extension's root folder, which holds the bundled interview prompts and primitives. Found automatically next to the server file, so pass it only if you copied `mcp-server.js` somewhere else. |
 
 ## Claude Code
@@ -129,5 +129,5 @@ The following arrive in later releases:
 ## Troubleshooting
 
 - **No tools show up.** Run the configured command yourself. The server prints `autode MCP server <version> — workspace <folder>` to stderr and then waits for input; press Ctrl+C to stop it.
-- **The context tools return nothing.** Check that `--workspace` points at the folder that contains `.ai-context/`.
+- **The context tools return nothing.** Check that `--workspace` points at the folder that contains `.autode/`.
 - **A skill prompt is missing.** It has not been reviewed for its current content. Review it in AutoDE: any change to a skill's files requires a new review.

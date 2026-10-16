@@ -47,7 +47,7 @@ The product principles are in requirements.md §2. These are the implementation 
 | **Conversation-first UI.** The chat is the spine; context, settings and workflow state are surfaced beside it, not in separate tabs. | Requirements UI-1. |
 | **Platform-agnostic agents.** Agents ask *what* (extract metadata, run a query); adapters know *how* (system tables, dialects, execution backends). | One agent works on every platform. |
 | **One shared context object per call.** Every LLM call gets its context from `ContextFileManager.buildContextPack()` (or the hub's provider for plan steps), never from ad-hoc string assembly at the call site. | C5; a single place to scope, budget and record context. |
-| **Revision-checked, atomic writes.** Every `.ai-context` document is written through a temp file and rename, and refused if it changed on disk since it was read (§2.3). | NFR-2, WS-4. |
+| **Revision-checked, atomic writes.** Every `.autode` document is written through a temp file and rename, and refused if it changed on disk since it was read (§2.4). | NFR-2, WS-4. |
 | **Orchestrator-enforced gates.** `AgentHub` re-checks every lifecycle precondition itself; the UI only reflects it. | P3, ORC-3. |
 | **No silent fallbacks that change meaning.** A missing CLI, consent or credential produces an actionable error, not a quiet switch to another path. | LLM-3, PLT-4. |
 
@@ -93,14 +93,14 @@ The product principles are in requirements.md §2. These are the implementation 
 
 ## 2. Repository Layout & Persistence
 
-### 2.1 `.ai-context/` layout
+### 2.1 Workspace layout: `.autode/` and `autode-output/` (v0.36.0)
 
-Everything AutoDE keeps lives under `.ai-context/` in the open workspace. Problem-scoped documents live under the active business problem's folder (`contextRoot`); shared knowledge lives at the workspace level.
+AutoDE keeps its working state in `.autode/`, grouped by lifecycle, and writes generated deliverables to a visible folder. Every path is defined once in `src/engine/workspaceLayout.ts` (`LAYOUT`, `layoutPath()`, `layoutRel()`); extension, engine and MCP server all use it. Problem-scoped documents live under the active business problem's folder (`contextRoot`); shared knowledge lives at the workspace level.
 
 ```
-.ai-context/
-├── active-problem.json              # pointer: which problem is active (absent = clean slate)
-├── problems/<problem-id>/           # one folder per business problem (slug + 4-char suffix)
+.autode/
+├── .gitignore                       # written by AutoDE (ensureLayout): ignores local/
+├── problems/<problem-id>/           # one folder per business problem (slug + 4-char suffix) — committed
 │   ├── spec/business-problem.yaml   #   Business Problem Specification (+ spec/history/)
 │   ├── spec/pipeline.yaml           #   Pipeline Specification (+ history)
 │   ├── plan/plan.yaml               #   persisted plan (+ plan/history/)
@@ -108,42 +108,59 @@ Everything AutoDE keeps lives under `.ai-context/` in the open workspace. Proble
 │   │                                #   mapping-context.yaml, semantic-layer.yaml
 │   │                                #   (+ .snapshot.json), history/
 │   ├── attachments/<id>.yaml        #   attachment content + structured extract
-│   ├── pack/pack.yaml               #   business-problem pack: documents by path, role, authority, version (§5.13)
-│   └── artifacts/<phase>/<specId>.v<n>/…   # generated deliverables, each with
-│                                    #   <file>.grounding.json, and history/ archives
+│   └── pack/pack.yaml               #   business-problem pack: documents by path, role, authority, version (§5.13)
 ├── problems/_unscoped/              # root for commands run with no active problem
-├── context/                         # shared, human-owned (committed)
-│   ├── business-context.yaml        #   glossary terms + business rules
-│   ├── vocabulary.yaml              #   the customer's abbreviations and synonyms (§5.12)
+├── knowledge/                       # shared project knowledge — committed
+│   ├── ledger/                      #   assertion ledger, the system of record
+│   │   ├── <yyyy-mm-dd>.<sessionUlid>.jsonl
+│   │   └── snapshot.json            #     optional, written by compaction
+│   ├── estate.yaml                  #   systems, environments, roles; which connections/files feed them (§5.11)
+│   ├── sources.yaml                 #   registered business-context source files
+│   ├── profiles/<id>.yaml           #   interpretation profiles for house-format documents (§5.13)
+│   ├── business-context.yaml        #   glossary terms + business rules (human-owned)
 │   ├── verified-queries.yaml
+│   ├── vocabulary.yaml              #   the customer's abbreviations and synonyms (§5.12)
 │   └── snapshots/<specId>.v<n>.md   #   readable record of context at plan time
-├── ledger/                          # assertion ledger — system of record (committed)
-│   ├── <yyyy-mm-dd>.<sessionUlid>.jsonl
-│   └── snapshot.json                #   optional, written by compaction
-├── derived/graph.json               # projection cache (git-ignored, rebuildable)
-├── catalog/<system>/<environment>/catalog.json   # estate catalog, tiers 0–2 (§5.12; git-ignored by its own .gitignore, rebuildable)
-├── schema-graph.json                # last live extraction (input to the next reindex)
-├── estate.yaml                      # systems, environments, roles; which connections/files feed them (§5.11)
-├── sources.yaml                     # registered business-context source files
-├── profiles/<id>.yaml               # interpretation profiles for house-format documents (§5.13; committed)
-├── skills/                          # interview-skill overrides; tool-skills/<id>/ imports (+ .autode-skill.json, .autode-history/v<N>/; §7.6)
-├── primitives/                      # Tier-2 primitive overrides (+ history/)
-├── chats/                           # chat sessions (git-ignored) + carryover/
-└── target-environment.yaml          # tool-preference profiles (TargetConfigManager)
+├── config/                          # team customisations — committed
+│   ├── skills/                      #   interview-skill overrides (*.json); tool-skills/<id>/ imports
+│   │                                #   (+ .autode-skill.json, .autode-history/v<N>/; §7.6)
+│   ├── primitives/                  #   Tier-2 primitive overrides (+ history/)
+│   └── target-environment.yaml      #   tool-preference profiles (TargetConfigManager)
+└── local/                           # per engineer, rebuildable — never committed
+    ├── active-problem.json          #   pointer: which problem is active (absent = clean slate)
+    ├── chats/                       #   chat sessions + carryover/
+    ├── derived/graph.json           #   projection cache
+    ├── catalog/<system>/<environment>/catalog.json   # estate catalog, tiers 0–2 (§5.12)
+    └── schema-graph.json            #   last live extraction (input to the next reindex)
+
+autode-output/                       # setting `artifactDirectory` (workspace-relative) — committed
+└── <problem-id>/<phase>/<specId>.v<n>/…   # generated deliverables, each with <file>.grounding.json,
+                                     #   and history/ archives
 ```
 
-**Committed vs ignored.** Specifications, context documents, the ledger and artifacts are deliverables and are committed; `derived/`, `catalog/`, `chats/` and temp files are git-ignored (`.gitignore`; `catalog/` writes its own).
+**Committed vs ignored.** Everything in `.autode/` except `local/` is committed, and so is the output folder. `local/` holds what is per engineer (the active problem, chat transcripts) or rebuildable (derived graph, catalog, last extraction); AutoDE writes `.autode/.gitignore` itself, so this holds in any repository, not only this one. (Before v0.36.0 the "git-ignored" folders relied on the repository's own `.gitignore`, so in a customer repository transcripts and `active-problem.json` were committed unless someone added rules by hand.)
 
-### 2.2 Atomic writes and archives
+**Output folder.** `ArtifactWriter.resolveArtifactDirectory(problemRoot)` = `<workspace>/<artifactDirectory>/<problem-id>` via `outputDirSegments()`; the setting defaults to `autode-output`, and absolute paths or `..` fall back to the default so artifacts never leave the workspace. Deliverables are visible on purpose: they are what the customer receives, and hidden folders are skipped by file browsers and some tools.
+
+### 2.2 Migration from `.ai-context/` (v0.36.0)
+
+`src/engine/workspaceMigration.ts#migrateWorkspace(root, { artifactDirectory })` runs in `activate()` before any manager reads a path, for a local workspace that still has `.ai-context/`:
+- **Moves only** (`fs.renameSync`), so ledger events, manifests and history stay byte-identical and git records renames. `problems/<id>/artifacts/**` → `<output>/<id>/**`; `problems/**` → `.autode/problems/**`; `ledger/`, `profiles/`, `estate.yaml`, `sources.yaml`, `context/**` (and legacy root `business-context.yaml`, `verified-queries.yaml`, `vocabulary.yaml`) → `knowledge/`; `skills/`, `primitives/`, `target-environment.yaml` → `config/`; `active-problem.json`, `chats/`, `derived/`, `catalog/`, `schema-graph.json`, `state.json` → `local/` (`mapLegacyPath()`).
+- **Never overwrites:** a file already at its new place stays in `.ai-context/` and is reported as a conflict (a teammate migrated first; the committed copy wins). **Never guesses:** an entry no rule covers stays in `.ai-context/` and is reported. `.ai-context/` is removed only when it ends up empty.
+- **Idempotent:** runs on every activation; a teammate who pulls a migrated repository gets their remaining local files (chats, caches) moved on next start.
+- The result is summarised in a notification (`describeMigration()`), asking the engineer to commit the move.
+- Evidence in the ledger that names the old business-context path (`context/business-context.yaml`) needs no rewrite: business-context facts are keyed by subject and re-read from the file on every load, so the first load after migration keeps every fact live, with none retracted or sent to review (tested).
+
+### 2.3 Atomic writes and archives
 
 Every manager writes through a dot-prefixed temp file beside the target and renames it over (`writeFileAtomic`, `src/engine/context/contextStore.ts`). Managers that version a document (`SpecManager`, `PipelineSpecManager`, `PlanManager`, `Source/Target/MappingContextManager`, `SemanticLayerManager`) archive the previous revision to a `history/` folder before replacing an approved one; the version number bumps only when an *approved* predecessor is revised. `ArtifactWriter` archives an artifact (and its manifest) before a rerun overwrites it.
 
-### 2.3 Revision-checked persistence and external edits (WS-4)
+### 2.4 Revision-checked persistence and external edits (WS-4)
 
 - **`ContextStore` / `RevisionedFile`** (`src/engine/context/contextStore.ts`): a *revision* is the SHA-256 of a file's bytes. A write states the revision it expects to replace and is refused with `RevisionConflictError` when the file changed on disk since it was last read or written; the refused change is not adopted in memory (managers write *before* updating their cached copy). An unparseable external edit keeps the loaded copy and leaves the expected revision stale, so the next save asks rather than clobbering a hand edit in progress.
 - **`FileIo`** abstracts file access: `nodeFileIo` (engine default, MCP server, tests) and `createVscodeFileIo(vscode)` (`src/context/vscodeFileIo.ts`, extension), so remote and virtual workspaces keep working. The ledger additionally uses the optional `listDir` / `deleteFile`.
-- **`ContextFileWatcher`** (`src/context/ContextFileWatcher.ts`): one recursive watcher over `.ai-context/**/*.{yaml,yml,json}`, debounced per path, ignoring temp files and `history/`. `webviewProvider.onContextFileChanged` routes each path to its owner's `reload()`; AutoDE's own writes are filtered out because the revision still matches. A spec or Pipeline Spec change during execution calls `AgentHub.pauseForExternalChange()` (ORC-6). A refused save raises a Reload from Disk / Overwrite prompt through a module-level conflict handler.
-- **Known gap:** `ContextFileManager`'s own business-context reload is driven by a separate, non-recursive watcher on top-level `.ai-context/*.{yaml,json}`, so edits under `.ai-context/context/` need a reload (CTX-5; roadmap §2).
+- **`ContextFileWatcher`** (`src/context/ContextFileWatcher.ts`): one recursive watcher over `.autode/**/*.{yaml,yml,json}`, debounced per path, ignoring temp files and `history/`. `webviewProvider.onContextFileChanged` routes each path to its owner's `reload()`; AutoDE's own writes are filtered out because the revision still matches. A spec or Pipeline Spec change during execution calls `AgentHub.pauseForExternalChange()` (ORC-6). A refused save raises a Reload from Disk / Overwrite prompt through a module-level conflict handler.
+- **Known gap:** `ContextFileManager`'s own business-context reload is driven by a separate, non-recursive watcher on top-level `.autode/*.{yaml,json}`, so edits under `.autode/knowledge/` need a reload (CTX-5; roadmap §2).
 
 ---
 
@@ -170,7 +187,7 @@ AutoDE is **conversation-driven and specification-driven**. The user describes a
 | `targetEnvironment` | platform + modeling + transformation tooling |
 | `createdAt/updatedAt/approvedAt/approvedBy` | audit |
 
-Persisted and versioned in `.ai-context/spec/business-problem.yaml` (git is the version history).
+Persisted and versioned in `.autode/problems/<id>/spec/business-problem.yaml` (git is the version history).
 
 ### 3.3 Spec-driven flow
 
@@ -221,7 +238,7 @@ The palette shows (top → bottom): BPS summary (read-only + status + approve/re
 
 The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspired by the Superpowers SDLC (skills + explicit phases + review gates), rather than a single-shot prompt.
 
-**Skills.** `skills/*.json` define composable DE skills — Requirements Discovery, Source Catalog, Data Flow, Transformations, Quality & Acceptance, Constraints & Assumptions, and Synthesis. Each carries a system prompt, question guidance, and the spec fields it owns. `SkillRegistry` (`src/engine/skills/skillRegistry.ts`) loads bundled skills plus optional user overrides in `.ai-context/skills/` (later entries win).
+**Skills.** `skills/*.json` define composable DE skills — Requirements Discovery, Source Catalog, Data Flow, Transformations, Quality & Acceptance, Constraints & Assumptions, and Synthesis. Each carries a system prompt, question guidance, and the spec fields it owns. `SkillRegistry` (`src/engine/skills/skillRegistry.ts`) loads bundled skills plus optional user overrides in `.autode/config/skills/` (later entries win).
 
 **Engine.** `SpecOpsEngine` (`src/core/specOps.ts`) is a deterministic state machine (`discovery → synthesizing → draft → refining → approved`) that tracks per-field coverage and a turn budget, and validates the prompt-schema **actions** the LLM returns each turn (`ask` / `ask_many` / `synthesize` / `done`). No native tool-calling is used — actions are JSON, validated deterministically, so the loop works on Copilot's `vscode.lm` and the Claude Code CLI as well as OpenAI/Anthropic/Ollama.
 
@@ -250,10 +267,10 @@ The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspi
 
 ### 3.10 Versioning & governance (Phase B, v0.9.0)
 
-**Design choice:** lean on git as the version/audit log rather than build a parallel in-app version store — `.ai-context/spec/` is already meant to be committed, so a second source of version truth would only drift from it.
+**Design choice:** lean on git as the version/audit log rather than build a parallel in-app version store — `.autode/problems/<id>/spec/` is already meant to be committed, so a second source of version truth would only drift from it.
 
 - **`src/context/ArtifactWriter.ts`** now writes every spec-stamped artifact under a `<specId>.v<version>` folder (`ArtifactWriter.specTag(artifact)`), inserted **above** the artifact's own relative path — so a multi-file artifact (e.g. the dbt scaffold) keeps every filename a tool like dbt expects (`dbt_project.yml` stays `dbt_project.yml`); only a folder is added, never a filename prefix. Artifacts with no `specId` (legacy pre-Phase-B writes, or generated with no spec set) land directly under the phase directory as before.
-- **`src/context/ArtifactStalenessScanner.ts`** (`scanArtifactStaleness(workspaceRoot, currentSpec?)`) walks `.ai-context/artifacts/<phase>/*`, recognizes `<specId>.v<version>` folder names via regex, and classifies each as `current` (matches the approved spec's id+version), `stale` (same id, older version), or `unknown-spec` (different id, or no spec currently approved). Files sitting directly under a phase dir (no version folder) are counted separately as `untaggedFileCount` — this is *why* the folder scheme exists: `PlanState.artifacts` (which also carries `specId`/`specVersion`) is in-memory only and gone after a reload, so the filesystem path is the only durable record.
+- **`src/context/ArtifactStalenessScanner.ts`** (`scanArtifactStaleness(problemRoot, currentSpec?)`) walks the problem's output folder (`autode-output/<problem-id>/<phase>/*`, §2.1; before v0.36.0 it was given the workspace root and looked where nothing was written), recognizes `<specId>.v<version>` folder names via regex, and classifies each as `current` (matches the approved spec's id+version), `stale` (same id, older version), or `unknown-spec` (different id, or no spec currently approved). Files sitting directly under a phase dir (no version folder) are counted separately as `untaggedFileCount` — this is *why* the folder scheme exists: `PlanState.artifacts` (which also carries `specId`/`specVersion`) is in-memory only and gone after a reload, so the filesystem path is the only durable record.
 - **UI:** opening the Workflow Palette posts `checkArtifactStaleness`; the response renders a small "Generated Artifacts" section above the phase rows — a warning banner + list for `stale` groups, a quiet green line per `current` group, and a note for untagged/unknown files. Nothing is deleted or regenerated automatically.
 - **"🕓 History"** on the spec card posts `viewSpecHistory` → `git log --follow -p -- <spec path>` (via `child_process.execFile`, `cwd` = workspace root) rendered as a chat message. Not a git repo, or no history yet → a clear message, not a crash.
 
@@ -262,17 +279,17 @@ The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspi
 **Design choice:** chat session identity is deliberately independent of BPS identity (confirmed via clarifying question) — a session can span several specs, and a spec can be discussed across several sessions, so `ChatSessionMeta.specId`/`specVersion` are a breadcrumb recorded at creation time, not a live foreign key kept in sync.
 
 **`ChatSessionManager` (`src/context/ChatSessionManager.ts`).** One class, mirrors the rest of `src/context/`'s pattern (atomic metadata writes, one class per concern):
-- `.ai-context/chats/<id>.meta.json` — `{ id, createdAt, updatedAt, status: 'active'|'archived'|'discarded', specId?, specVersion?, llmProvider?, title? }`, written via the same temp-file→`rename` pattern as `SpecManager`/`SourceRegistry`.
-- `.ai-context/chats/<id>.jsonl` — one `ChatMessage` (`{ role: 'user'|'ai'|'log', content, at }`) per line. `vscode.workspace.fs` has no append primitive, so `appendMessage` is read-modify-write (whole file re-read, message appended, whole file rewritten) — an accepted cost at realistic chat lengths rather than an engineered-around one.
+- `.autode/local/chats/<id>.meta.json` — `{ id, createdAt, updatedAt, status: 'active'|'archived'|'discarded', specId?, specVersion?, llmProvider?, title? }`, written via the same temp-file→`rename` pattern as `SpecManager`/`SourceRegistry`.
+- `.autode/local/chats/<id>.jsonl` — one `ChatMessage` (`{ role: 'user'|'ai'|'log', content, at }`) per line. `vscode.workspace.fs` has no append primitive, so `appendMessage` is read-modify-write (whole file re-read, message appended, whole file rewritten) — an accepted cost at realistic chat lengths rather than an engineered-around one.
 - Exactly one session is `status: 'active'` at a time; `getActiveSession()` is `listSessions().find(s => s.status === 'active')`.
-- Gitignored (`.ai-context/chats/`) — unlike the committed BPS, transcripts are local/exploratory by explicit decision.
+- Gitignored (`.autode/local/chats/`) — unlike the committed BPS, transcripts are local/exploratory by explicit decision.
 
 **`webviewProvider.ts` wiring.**
 - On `resolveWebviewView()`, after the spec manager initializes: construct `ChatSessionManager`, `initialize()`, `getActiveSession()` or `createSession()` if none exists, load its transcript. **Changed in v0.13.0:** if that transcript is non-empty, the session is folded (`startNewChat()` — archived, never discarded, and a fresh empty one takes its place) rather than posted as-is; only an empty session is posted directly via `chatSessionLoaded` (`{ meta, transcript }`). A reload/restart therefore never silently resumes a prior conversation into view — see CHT-2.
 - `postMessage()` now also calls `recordAssistantMessage(type, payload)`, which maps the handful of assistant-facing message types (`chatResponse`, `specDrafted`, `specApproved`, `specQuestion`, `specQuestions`) to a `ChatMessage` and appends it to the active session — chat persistence is a side effect of the existing post path, not a parallel code path callers have to remember to invoke. User messages are appended directly at the `case 'chat'` / `case 'submitSpecAnswers'` handlers.
 - New message cases: `newChat` → `startNewChat()`; `listChatSessions` → posts `chatSessionsList`; `openChatSession` → **(v0.13.0, changed from a read-only viewer)** archives whatever's currently active, reactivates the chosen session (`ChatSessionManager.updateMeta(chatId, {status:'active'})`), and posts `chatSessionLoaded` with its transcript — a real resume, not a preview; `discardChat` → `ChatSessionManager.discardSession` after the caller's own confirmation.
 - `startNewChat()`: if a `SpecOpsEngine` interview is in flight, calls `carryOverPartialInterview()` first, then tears down the engine; archives the current session (`archiveSession`, never a delete); creates a new one seeded with the current spec's id/version and the active LLM provider; posts `chatSessionLoaded` with an empty transcript. Now also called from the startup-fold path above, not just the "🗨 New Chat" action.
-- `carryOverPartialInterview(session, workspaceRoot)`: implements the exact behavior specified by the user in response to a clarifying question that rejected three alternative designs (resume as live Q&A / block New Chat / silently discard). Renders the session's collected `answers`/`insights` as Markdown, writes it to `.ai-context/chats/carryover/<sessionId>.md`, registers it via `SourceRegistry.addSource(..., 'business_context', 'autode')`, and runs `SynthesisPipeline.synthesize()` so the partial answers become graph nodes *before* the interview state is discarded. A no-op if the session collected nothing.
+- `carryOverPartialInterview(session, workspaceRoot)`: implements the exact behavior specified by the user in response to a clarifying question that rejected three alternative designs (resume as live Q&A / block New Chat / silently discard). Renders the session's collected `answers`/`insights` as Markdown, writes it to `.autode/local/chats/carryover/<sessionId>.md`, registers it via `SourceRegistry.addSource(..., 'business_context', 'autode')`, and runs `SynthesisPipeline.synthesize()` so the partial answers become graph nodes *before* the interview state is discarded. A no-op if the session collected nothing.
 
 **Sidebar (`media/sidebar.html`).**
 - "🗨 New Chat" topbar icon → `post('newChat')` (after `endPending()`, so an in-flight pending bubble doesn't leak into the new session's rendering).
@@ -288,18 +305,18 @@ The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspi
 
 **Design choice:** reuse existing machinery rather than build parallel systems — spec→context sync reuses `SynthesisPipeline`/`GraphManager` (already built for registered-source ingestion), implementation-type classification reuses the deterministic keyword-evidence pattern `phaseInference.ts` already established, and plan persistence reuses `SpecManager`'s exact atomic-write-plus-history shape.
 
-- **Context sync (closes the gap where nothing fed the approved spec's own content into the Context Layer).** `SynthesisPipeline.synthesizeFromSpec(spec)` maps `objectives`/`businessRequirements`/`dependencies` to `business_term` nodes and `constraints`/`assumptions` to `business_rule` nodes (STRICT / RECOMMENDED respectively), each stamped with `Origin.specId`/`specVersion`. It first calls `GraphManager.removeNodesBySourceRef('spec:' + spec.id)` so re-synthesizing on a later revision **replaces** the prior version's derived nodes rather than accumulating stale ones alongside them. Runs automatically inside the `approveSpec` handler — before `generatePlanFromSpec` is ever reachable — so the Context Layer is always current for the spec version a plan is about to be generated from. A durable, human-readable record is also written to `.ai-context/context/snapshots/<specId>.v<version>.md` (committed, unlike the transient `.ai-context/derived/graph.json`), capturing exactly what fed plan generation for that spec version.
+- **Context sync (closes the gap where nothing fed the approved spec's own content into the Context Layer).** `SynthesisPipeline.synthesizeFromSpec(spec)` maps `objectives`/`businessRequirements`/`dependencies` to `business_term` nodes and `constraints`/`assumptions` to `business_rule` nodes (STRICT / RECOMMENDED respectively), each stamped with `Origin.specId`/`specVersion`. It first calls `GraphManager.removeNodesBySourceRef('spec:' + spec.id)` so re-synthesizing on a later revision **replaces** the prior version's derived nodes rather than accumulating stale ones alongside them. Runs automatically inside the `approveSpec` handler — before `generatePlanFromSpec` is ever reachable — so the Context Layer is always current for the spec version a plan is about to be generated from. A durable, human-readable record is also written to `.autode/knowledge/snapshots/<specId>.v<version>.md` (committed, unlike the transient `.autode/local/derived/graph.json`), capturing exactly what fed plan generation for that spec version.
 - **`generatePlan`'s prompt now actually reads the Context Layer.** Previously only `chat`, `discoverNextAction`, and `synthesizeComprehensiveSpec` merged in `contextFileManager.buildContextPrompt()`; the `generatePlan` webview case passed the caller's raw (usually empty) `schemaContext` straight through. It now merges `buildContextPrompt()` the same way `chat` does, and `generatePlanFromSpec` does the same before delegating to `generatePlan`.
 - **Implementation type (`src/core/implementationType.ts`).** `classifyImplementationType(spec)` scans the same spec-text corpus `phaseInference.ts` uses for keyword evidence of existing-system language (`existing`, `legacy`, `migrate`, `as-is`, …) vs. new-build language (`greenfield`, `from scratch`, `net new`, …); mixed evidence defaults to `brownfield` (the higher-risk assumption), no evidence defaults to `greenfield`. Computed at every spec draft/revision/synthesis point (`webviewProvider.applyImplementationType`), unless the user has explicitly overridden it (`setImplementationType` message → `implementationTypeOverridden: true`, preserved across later revisions rather than silently reclassified). Surfaced as a badge with a one-click flip in both the chat spec card and the Workflow Palette.
 - **Phase applicability now considers implementation type and context.** `inferPhases(spec, implementationType?, contextSummary?)` — both new parameters are optional so existing callers are unaffected. A `brownfield` classification forces `discover` required by default (existing systems need assessment even absent explicit spec language) unless `scope.out` explicitly excludes it, which still wins. Note the **`unrequired` `PhaseStatus`** (§3.5) already *is* the Non-Applicable state the palette renders (dimmed, "⊘ Non-Applicable", with its `reason` string) — this section only widens what feeds the classification, it does not introduce a new status.
-- **Plan persistence (`src/context/PlanManager.ts`).** Mirrors `SpecManager` exactly: atomic writes to `.ai-context/plan/plan.yaml`, every version-on-change archived to `plan/history/plan.v<n>.<status>.yaml`, restored into `AgentHub`'s in-memory `PlanState` on extension activation (`hub.loadPersistedPlan`) so the generated steps, inferred phases, status, and implementation type survive a VS Code reload — previously `PlanState` had no on-disk representation at all. `PlanState.artifacts` (execution-produced `GeneratedArtifact[]`) is **not** part of the persisted shape and remains in-memory-only, per §3.10's existing rationale for the artifact-folder spec-tagging scheme.
+- **Plan persistence (`src/context/PlanManager.ts`).** Mirrors `SpecManager` exactly: atomic writes to `.autode/problems/<id>/plan/plan.yaml`, every version-on-change archived to `plan/history/plan.v<n>.<status>.yaml`, restored into `AgentHub`'s in-memory `PlanState` on extension activation (`hub.loadPersistedPlan`) so the generated steps, inferred phases, status, and implementation type survive a VS Code reload — previously `PlanState` had no on-disk representation at all. `PlanState.artifacts` (execution-produced `GeneratedArtifact[]`) is **not** part of the persisted shape and remains in-memory-only, per §3.10's existing rationale for the artifact-folder spec-tagging scheme.
 - **Artifact-level version history.** `ArtifactWriter.write()` now archives whatever previously sat at a given path to a `history/` subfolder before overwriting it, so re-running a step within the *same* `<specId>.v<version>` folder no longer silently discards the prior output — only cross-version staleness was tracked before (§3.10).
 
 ### 3.13 Multi-business-problem workspace (WS-2)
 
 - **Identity.** A problem's folder is an auto-generated slug (`src/core/problemSlug.ts#generateProblemSlug`): the first five non-stop-words of the problem statement, kebab-cased, at most 48 characters, plus a 4-character random suffix, collision-checked against existing slugs. Creation is lazy: the folder is created on the first spec draft, because it can't be named before a problem statement exists.
 - **`ActiveProblemManager`** (`src/context/ActiveProblemManager.ts`) owns `active-problem.json` (`{ problemId, activatedAt }`, atomic write) and `listProblems()`, a scan of every `problems/<id>/spec/business-problem.yaml` (id, statement, status, version, updated, active), newest first, skipping unreadable folders.
-- **Context roots.** `SpecManager`, `PlanManager`, `TargetContextManager`, `SourceContextManager`, `MappingContextManager`, `SemanticLayerManager`, `PipelineSpecManager`, `AttachmentStore` and `ArtifactWriter` take an already-resolved `contextRoot`; the caller passes the active problem's folder (or `_unscoped`). `ContextFileManager`, `SourceRegistry`, `ChatSessionManager` and the ledger stay workspace-level.
+- **Context roots.** `SpecManager`, `PlanManager`, `TargetContextManager`, `SourceContextManager`, `MappingContextManager`, `SemanticLayerManager`, `PipelineSpecManager`, `AttachmentStore` and `ArtifactWriter` take an already-resolved `contextRoot`; the caller passes the active problem's folder (or `_unscoped`). `ArtifactWriter` derives the problem id and workspace from it and writes to the output folder, not inside it (§2.1). `ContextFileManager`, `SourceRegistry`, `ChatSessionManager` and the ledger stay workspace-level.
 - **Activation** (`webviewProvider.activateProblem`, at startup and on start/switch): `hub.resetForNewProblem()` (clears spec identity, inferred phases, implementation type — fuller than `resetPlan()`), removes the previous problem's spec-derived graph nodes, sets the context manager's active spec id (spec-scoped assertions of other problems stay in the ledger but are not projected, §5.5), re-points the hub's `PlanManager`/`ArtifactWriter` via `extension.ts#applyProblemRoot`, then initialises the problem's managers and re-synthesises an approved spec into the graph.
 - **Webview actions:** `startNewBusinessProblem` (clears the pointer, full reset, archives the current chat, starts a new one), `switchBusinessProblem`, `listBusinessProblems` → `businessProblemsList` (palette's Business Problem section).
 
@@ -401,7 +418,7 @@ A persistent, collapsible panel between the chat stream and input area:
 - **Expanded state**: Up to 260px showing entity chips organized by category
 - **Categories**: Database Metadata, Business Context, Verified Queries
 - **Chips**: Clickable pill-shaped elements that insert `@entityname` into the chat input
-- **Actions**: Re-index button, Open .ai-context folder button
+- **Actions**: Re-index button, Open .autode folder button
 
 ### 4.5 Slide-Out Settings Panel
 
@@ -574,7 +591,7 @@ Every parser takes an `IngestIdentity { system?, environment?, role? }` (default
 
 ### 5.11 Estate identity (v0.31.0; STC-10, PLT-6)
 
-- **Model** (`src/engine/context/estate.ts`): `Estate { systems: EstateSystem[]; bindings: EstateBinding[] }`; `EstateSystem { id (slug), name, role: source | target | both, schemaRoles? }` (a schema can override its system's role — in-place modernisation); `EstateBinding { connection? | file?, system, environment?, schemas? }`. `parseEstate()`/`serializeEstate()` over `.ai-context/estate.yaml`.
+- **Model** (`src/engine/context/estate.ts`): `Estate { systems: EstateSystem[]; bindings: EstateBinding[] }`; `EstateSystem { id (slug), name, role: source | target | both, schemaRoles? }` (a schema can override its system's role — in-place modernisation); `EstateBinding { connection? | file?, system, environment?, schemas? }`. `parseEstate()`/`serializeEstate()` over `.autode/knowledge/estate.yaml`.
 - **Resolution:** `resolveIdentity(estate, { connection | file })` returns `{ system, environment, role }` from the binding (files match by name, case-insensitively); an unbound source gets a system named after it (connection id or file name), added to the estate. `ContextFileManager` owns the estate (`getEstate`, `bindToSystem`, `resolveConnection`, `resolveFile`) and writes it when it changes.
 - **Live extraction:** `ConnectionManager.setEstateResolver(fn)` (set by the extension and by the webview's own connection checks) supplies the identity for `snapshotToGraph(snapshot, identity)` and the binding's `schemas` as `schemaFilter` when the caller names none. `Origin.environment` (source/target) follows the system's role.
 - **Re-keying legacy ids:** `rekeyLegacyGraph(graph, identityOf)` is pure and idempotent: tables and columns get `obj:` ids from their origin's system (origin.system, else the connection's or file's binding, else `unassigned`), business kinds their namespaced ids, edges ids from their re-keyed endpoints; it returns the alias map. `ContextFileManager` applies it to the base graph on load and before every persist; the aliases go to the ledger (§5.3).
@@ -595,7 +612,7 @@ Every parser takes an `IngestIdentity { system?, environment?, role? }` (default
 ### 5.13 Business-problem pack, conformance and probes (v0.33.0; BPS-1, BPS-3, BPS-10, CTX-3, CTX-9, SEC-5)
 
 - **Pack** (`src/engine/context/pack.ts`): `PackDocument { id (slug of the file name), path (workspace-relative), role: contract | brd | kpi_definitions | mapping | data_dictionary | sample | other, authority: signed | draft, version, sha?, profileId?, table? (samples), bindings? (contract entity → table ids) }`, in `<problem>/pack/pack.yaml`. Documents are referenced, never copied. `clauseRef(path, clausePath, sha)` = `<file>#<path>@<sha12>`; `trustFor(signed) = confirmed`, `draft = documented`.
-- **Interpretation profiles** (`profiles.ts`): `InterpretationProfile { id, status: proposed | confirmed, signature (top-level keys), entities: { each, name, description?, tables?, fields: { each, name, type?, required?/nullable?/unique? (FlagPath { path, yes[] }), columns? (object system/schema → column) }, rules?: { each, field, check, checkMap (document rule name → not_null | unique | accepted_values), values? } } }`, Ajv-validated, `.ai-context/profiles/<id>.yaml`. `applyProfile(doc, profile)` is pure and reports unreadable entries as warnings. `buildProfileProposalPrompt()` sends only the document's skeleton (keys, first list element, values cut at 40 characters); `parseProfileProposal()` forces `status: proposed`. Only confirmed profiles are applied.
+- **Interpretation profiles** (`profiles.ts`): `InterpretationProfile { id, status: proposed | confirmed, signature (top-level keys), entities: { each, name, description?, tables?, fields: { each, name, type?, required?/nullable?/unique? (FlagPath { path, yes[] }), columns? (object system/schema → column) }, rules?: { each, field, check, checkMap (document rule name → not_null | unique | accepted_values), values? } } }`, Ajv-validated, `.autode/knowledge/profiles/<id>.yaml`. `applyProfile(doc, profile)` is pure and reports unreadable entries as warnings. `buildProfileProposalPrompt()` sends only the document's skeleton (keys, first list element, values cut at 40 characters); `parseProfileProposal()` forces `status: proposed`. Only confirmed profiles are applied.
 - **Contracts** (`contracts.ts`): clauses become `quality_expectation` assertions on `contract:<doc>/<entity>.<field>` — predicate `contract_schema` (value `{ check: 'schema', dataType?, isNullable?, columns? }`), `unique`, and one per rule — with `createdBy: pack:<doc>` and the clause ref as evidence. `reconcileContract()` keys clauses by subject|predicate: new → asserted, changed value or trust → superseded, missing → rejected ("no longer in <file> v<n>"), equal → untouched.
 - **Conformance** (`conformance.ts`): `bindEntity()` — the pack's bindings, else the contract's table references matched by fqn or `schema.table` in every system/environment of the catalog; `physicalColumn()` — the field's `columns[system]`, `columns[schema]`, else its name. Per bound table: present, type family (`typeFamily()`: string, integer, number, timestamp, date, boolean; number accepts integer; unknown types are not verified), nullability (from the catalog), then unique and rule checks through probes. Status `pass | fail | not_verified`; `renderConformanceReport()` → discover-phase artifact `conformance-report.md` (`validation_report`).
 - **Probes** (`probes.ts`): `ProbeSpec { check: unique | not_null | accepted_values | orphans | freshness, table { fqn, id }, columns, values?, to? }`. `renderProbeSql(spec, dialect, { sampleRows })` — fixed templates returning one row of aggregates (`row_count`, `distinct_count`, `null_count`, `violation_count`, `orphan_count`, `max_value`); identifiers must be plain (`[A-Za-z_][A-Za-z0-9_$]*` dotted) or the probe is refused; values are literals with quotes doubled; sampling `SAMPLE (n ROWS)` (Snowflake), `TABLESAMPLE (n ROWS)` (Spark SQL), `LIMIT` subquery (ANSI). `interpretProbe()` turns the aggregates into a verdict for both executors: `createSqlProbeExecutor()` (`ConnectionManager.probeExecutor()`, `maxRows: 1`, 60 s, 50 000-row sample, covers only its own system/environment) and `createSampleProbeExecutor()` (same aggregates over sample CSV rows; rows never leave it). `combineProbeExecutors()` tries live where it covers the table, then samples. `probesFor(assertion)` maps key/grain → unique, quality_expectation on a column → its check, relationship → orphans; contract subjects get none. `verifyAssertions()` records `verified` (trust → verified; status unchanged — confirming stays the engineer's) or `verification_failed` (→ needs_review, detail as reason).
@@ -737,7 +754,7 @@ interface TargetEnvironment {
 Target environments support multiple profiles (dev/staging/prod) with inheritance:
 
 ```yaml
-# .ai-context/target-environment.yaml
+# .autode/config/target-environment.yaml
 profiles:
   base:
     platform: snowflake
@@ -759,7 +776,7 @@ profiles:
 
 #### 6.7.4 Target Extraction
 
-The orchestrator uses a dedicated LLM call to extract target stack details from user messages. If critical fields are missing, it prompts the user for clarification. Once extracted, the target config is persisted to `.ai-context/target-environment.yaml` and injected into all sub-agent execution contexts.
+The orchestrator uses a dedicated LLM call to extract target stack details from user messages. If critical fields are missing, it prompts the user for clarification. Once extracted, the target config is persisted to `.autode/config/target-environment.yaml` and injected into all sub-agent execution contexts.
 
 #### 6.7.5 Target-Aware Prompt Assembly
 
@@ -876,7 +893,7 @@ Each adapter's `connect()` picks the backend once (CLI-derived credential → ti
 
 **On Polaris/Iceberg-federated catalogs specifically:** not independently live-verified (no such catalog was available to test against), but by design, any catalog that Unity Catalog or Snowflake itself manages — including an external Iceberg REST catalog (Apache Polaris, Snowflake Open Catalog) attached via Lakehouse Federation or a Snowflake Catalog Integration — is unified into that platform's own normal catalog/database model from a SQL client's perspective, so the existing Unity Catalog / Snowflake `INFORMATION_SCHEMA` queries should apply unchanged. `defaultDatabricksCatalogType`'s `'hive_metastore'` setting is available as an override if a specific federated catalog turns out not to behave that way in practice.
 
-**Chat had zero awareness of a live connection, and the top status pill never updated after a successful connect — both real, both fixed.** Two separate "Connect" actions exist: the settings-panel "Connect" (`testConnection`) only proves connectivity; a full schema extraction only happens via the separate "Source Assessment" button, or via the Palette's "Connect to Data Platform"/`runSourceConnectionCheck` flow (which does both in one step). A user who only clicks the first "Connect" — the natural first thing to try — gets a real connection but a chat that still has nothing to say, since (a) `sidebar.html`'s `sendMessage()`/`generatePlan` slash command both hardcoded `schemaContext: ''` unconditionally, always, regardless of anything the user did (dead parameter — real schema context, once extracted, actually reaches chat through `ContextFileManager.buildContextPrompt()`'s `repositoryContext` instead, fed by `.ai-context/schema-graph.json` via a `FileSystemWatcher`-triggered reindex), and (b) nothing at all told the LLM a live connection even existed short of a full extraction, so it answered as if AutoDE had no database capability whatsoever. Fixed with a new `DataAgentHubWebviewProvider.connectionStatus` field, set via a public `notifyConnectionStatus()` called from `extension.ts`'s `testConnection`/`sourceAssessment` commands and from `runSourceConnectionCheck()` — driving both the top-of-panel status pill (`connDot`/`connLabel`, previously grabbed via `$()` but never once updated after being declared — confirmed dead UI) and a new always-included one-line chat context fact ("Connected to X, no schema extracted yet — suggest Source Assessment" when `ContextFileManager.getContextStats().tables === 0`, or the real detail once it's non-zero). This doesn't merge the two "Connect" actions or replace `repositoryContext` as the real schema-carrying channel — it just makes the gap between "connected" and "schema known" visible and self-explanatory instead of silent.
+**Chat had zero awareness of a live connection, and the top status pill never updated after a successful connect — both real, both fixed.** Two separate "Connect" actions exist: the settings-panel "Connect" (`testConnection`) only proves connectivity; a full schema extraction only happens via the separate "Source Assessment" button, or via the Palette's "Connect to Data Platform"/`runSourceConnectionCheck` flow (which does both in one step). A user who only clicks the first "Connect" — the natural first thing to try — gets a real connection but a chat that still has nothing to say, since (a) `sidebar.html`'s `sendMessage()`/`generatePlan` slash command both hardcoded `schemaContext: ''` unconditionally, always, regardless of anything the user did (dead parameter — real schema context, once extracted, actually reaches chat through `ContextFileManager.buildContextPrompt()`'s `repositoryContext` instead, fed by `.autode/local/schema-graph.json` via a `FileSystemWatcher`-triggered reindex), and (b) nothing at all told the LLM a live connection even existed short of a full extraction, so it answered as if AutoDE had no database capability whatsoever. Fixed with a new `DataAgentHubWebviewProvider.connectionStatus` field, set via a public `notifyConnectionStatus()` called from `extension.ts`'s `testConnection`/`sourceAssessment` commands and from `runSourceConnectionCheck()` — driving both the top-of-panel status pill (`connDot`/`connLabel`, previously grabbed via `$()` but never once updated after being declared — confirmed dead UI) and a new always-included one-line chat context fact ("Connected to X, no schema extracted yet — suggest Source Assessment" when `ContextFileManager.getContextStats().tables === 0`, or the real detail once it's non-zero). This doesn't merge the two "Connect" actions or replace `repositoryContext` as the real schema-carrying channel — it just makes the gap between "connected" and "schema known" visible and self-explanatory instead of silent.
 
 **A pasted folder path was silently accepted as if it were the binary, then failed with a confusing `ENOENT`.** Once the field above existed, live testing immediately hit it: `fs.existsSync()` can't tell a directory from a file, so an explicit `snowflakeCliPath` pointing at the CLI's *folder* (a completely natural thing to paste — e.g. from Explorer's address bar) was accepted as "found," and `spawnSync` then tried to execute the directory itself. `detectCliBinary()`'s explicit-setting branch now uses `fs.statSync()` first: a file is used as-is (unchanged behavior); a directory is auto-completed to `<folder>/<binName>` and re-checked as a file before being accepted.
 
@@ -902,7 +919,7 @@ Live UI testing of the Phase 3b connectivity work above surfaced a structural bu
 
 ```typescript
 export interface RuntimeFact { label: string; text: string; }
-// ContextFileManager.setRuntimeFact(key, fact | null) — never persisted to .ai-context/,
+// ContextFileManager.setRuntimeFact(key, fact | null) — never persisted to .autode/,
 // cleared on reload by construction; buildContextPrompt() renders these under a new
 // "## Live Session Facts" heading, ahead of the existing Enterprise Context Layer section.
 ```
@@ -1006,7 +1023,7 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
 
 ### 7.6 Tool-executing skills (SKL-1 – SKL-5)
 
-- **Import:** `AutoDE: Import Tool Skill` copies a folder containing `SKILL.md` into `.ai-context/skills/tool-skills/<id>/`; `src/engine/skills/toolSkills.ts` parses it leniently (optional YAML frontmatter: `name`, `description`, `allowed-tools`; the body becomes the instructions) into a `ToolSkillDefinition`.
+- **Import:** `AutoDE: Import Tool Skill` copies a folder containing `SKILL.md` into `.autode/config/skills/tool-skills/<id>/`; `src/engine/skills/toolSkills.ts` parses it leniently (optional YAML frontmatter: `name`, `description`, `allowed-tools`; the body becomes the instructions) into a `ToolSkillDefinition`.
 - **One execution path for every provider (v0.28.0):** `ToolSkillAgent` builds the prompt (skill instructions, resources list, step context) and calls `context.runWithTools()`, which `AgentHub.runConfiguredLlmWithTools()` implements as one `getLlmAdapter(provider).complete(...)` with a tool mode. Each adapter runs its own loop (§8): OpenAI-compatible (OpenAI, Azure OpenAI, Ollama), Anthropic, Gemini and Copilot loops execute AutoDE's tools; Claude Code runs its CLI loop.
 - **Allow-list:** `src/engine/skills/toolAllowList.ts#resolveAllowedToolNames()` maps declared `allowed-tools` (e.g. `Read`, `Grep`, `Bash(git:*)`) onto AutoDE tools (`autode_read_file`, `autode_search_files`, `autode_list_dir`, `autode_write_file`, `autode_run_command`). Nothing declared → no extra restriction; declared but unrecognised → no tools. `toolModeCeiling()` never grants `full` to a skill with no write/exec tool. `toolSpecsForMode(mode, allowed)` (`src/core/agenticTools.ts`) builds the offered tools; `executeAgenticTool` refuses (and audits as `denied`) any call to a tool the run wasn't offered.
 - **Sandbox and approval:** paths resolve against the workspace root and are rejected if they escape it; commands run with the workspace as cwd; each write or command on an AutoDE-owned loop asks for confirmation. Every call is appended to `LlmCompleteOptions.auditSink` and returned as `details.audit`.
@@ -1175,7 +1192,7 @@ interface TransformPrimitive<TParams = Record<string, unknown>> {
 
 **Two tiers, one interface, one registry (`registry.ts`):**
 - **Tier 1** (code, reviewed): `rename_cast` (staging casts/renames, plus a `dbt_model` output mode), `dedup` (`ROW_NUMBER()`, dialect-aware `EXCLUDE`/`EXCEPT`), `incremental_load` (keyed `MERGE`). Registered at module load into `TRANSFORM_PRIMITIVES: Record<string, TransformPrimitive<any>>`.
-- **Tier 2** (declarative, `declarative/`): a `PrimitiveDefinition` YAML (`kind`/`version`/`status`/`paramSchema`/`platformTemplates`/`previewParams`/`outputChecks`) whose `compile()` is a rendered template, not code — `templateEngine.ts` is a hand-rolled, deliberately constrained engine (`{{param}}`, `{{join arr ", "}}`, `{{#each}}...{{/each}}`, no `eval`/`Function()`) so a definition author cannot smuggle code execution into the compile path. `loadPrimitiveDefinitionsFromDirectory()` + `mergePrimitiveDefinitions()` mirror `skillRegistry.ts#loadSkillsFromDirectory` exactly — bundled `primitive-definitions/` + `.ai-context/primitives/` override, later wins. `registerPrimitives()` merges Tier 2 into the same `TRANSFORM_PRIMITIVES` map; Tier 1 always wins a `kind` collision.
+- **Tier 2** (declarative, `declarative/`): a `PrimitiveDefinition` YAML (`kind`/`version`/`status`/`paramSchema`/`platformTemplates`/`previewParams`/`outputChecks`) whose `compile()` is a rendered template, not code — `templateEngine.ts` is a hand-rolled, deliberately constrained engine (`{{param}}`, `{{join arr ", "}}`, `{{#each}}...{{/each}}`, no `eval`/`Function()`) so a definition author cannot smuggle code execution into the compile path. `loadPrimitiveDefinitionsFromDirectory()` + `mergePrimitiveDefinitions()` mirror `skillRegistry.ts#loadSkillsFromDirectory` exactly — bundled `primitive-definitions/` + `.autode/config/primitives/` override, later wins. `registerPrimitives()` merges Tier 2 into the same `TRANSFORM_PRIMITIVES` map; Tier 1 always wins a `kind` collision.
 
 **Selection (`src/agents/llmParamSelector.ts`):** `selectTransformSpec(context, step, candidateKinds, fixedParams?)` asks the LLM for *only* `{kind, params}` JSON against the candidate primitives' schemas, Ajv-validates, and returns `undefined` (never throws) on any failure — `fixedParams` (object names the caller already computed deterministically) are merged in *after* the LLM's response so they can't be overridden. `generateViaPrimitiveOrFallback()` wraps this as tier 0 ahead of the *unmodified* existing tier 1 (freehand LLM) / tier 2 (hardcoded template) fallback chain in `IngestionPipelineAgent`, `SttmMapperAgent`, and `TransformationScaffolderAgent`'s staging model — the 3 of 5 codegen agents where a single-source primitive is a genuine fit (not `DataModelerAgent`'s multi-table schema design, nor the marts model's multi-source joins).
 
@@ -1202,7 +1219,7 @@ entities:
 
 - **`compiler.ts#compilePipelineSpec(spec, dialect)`** — the AutoDE analogue of the sibling framework's `interpreter.py`: runs each entity's `transforms[]` through the existing `compileTransformSpec()` (§9.2) in order, zero LLM calls. Deliberately **no freehand fallback** here (unlike §9.2's tiered chain) — a compile failure is a bug in an already-approved, already-Ajv-validated spec, not a coverage gap.
 - **`designDocGenerator.ts#generateDesignDoc(spec)`** — a pure function producing Markdown (with a Mermaid `flowchart LR` lineage diagram) from a validated spec; same input always produces the same output, so the YAML and its Markdown projection cannot drift apart.
-- **`context/PipelineSpecManager.ts`** — persistence modeled function-for-function on `SpecManager.ts` (§3): `.ai-context/problems/<id>/spec/pipeline.yaml` + `spec/history/pipeline.v<version>.<status>.yaml`, atomic temp-then-rename writes, `approve()` doesn't bump version (a draft v1 becomes approved v1), a new revision from an approved predecessor does. A document whose `specVersion` doesn't match `CURRENT_PIPELINE_SPEC_VERSION` loads leniently (a logged warning, not a thrown error) — schema evolution must never brick an already-approved pipeline.
+- **`context/PipelineSpecManager.ts`** — persistence modeled function-for-function on `SpecManager.ts` (§3): `.autode/problems/<id>/spec/pipeline.yaml` + `spec/history/pipeline.v<version>.<status>.yaml`, atomic temp-then-rename writes, `approve()` doesn't bump version (a draft v1 becomes approved v1), a new revision from an approved predecessor does. A document whose `specVersion` doesn't match `CURRENT_PIPELINE_SPEC_VERSION` loads leniently (a logged warning, not a thrown error) — schema evolution must never brick an already-approved pipeline.
 - **Synthesis (`src/agents/pipelineSpecSynthesis.ts` + `AgentHub.synthesizePipelineSpec()`)** — grounded in the approved BPS, the approved Target Context (platform/naming/tooling feed `targetPlatform` directly — confirmed via test that swapping Target Context's platform changes the generated spec with no BPS change at all), the approved Source Context, the Context Layer graph, and attachment extracts (§9.4). Retries up to 3 times, feeding the previous attempt's Ajv errors back into the next prompt (`buildPipelineSpecSynthesisPrompt(inputs, validationErrors?)`) — the same discipline `selectTransformSpec` (§9.2) already uses for one primitive, now applied to the whole document. Also the first real consumer of `BusinessProblemSpec.provenance` (§3.2): a field tagged `source: 'assumption'` is called out in the prompt for conservative treatment.
 - **New command, "AutoDE: Generate Pipeline Spec"** — additive, not a replacement for §3.3's existing plan flow; gated on the same `computeContextGateStatus()` (§3.12) Generate Plan already requires.
 
@@ -1211,7 +1228,7 @@ entities:
 Closes a real gap in the pre-existing `attachSpecFile` flow (§3.9): raw attachment text was appended verbatim to a prompt, never persisted past the discovery session, never tagged with provenance.
 
 - **`core/attachmentExtraction.ts`** — `buildAttachmentExtractionPrompt()`/`parseAttachmentExtract()`, pure (mirrors the `specOpsPrompts.ts`/`specSynthesis.ts` split for the BPS itself) — `AgentHub.extractAttachmentFacts()` owns the actual LLM call and never throws, falling back to `fallbackAttachmentExtract()` (a plain text summary, `confidence: 'low'`) on any failure. Deliberately not a rigid, format-specific parser — an attachment could be a schema dump, a memo, anything.
-- **`context/AttachmentStore.ts`** — persists `{raw content, extract}` to `.ai-context/problems/<id>/attachments/<id>.yaml`, atomic write, surviving past the ephemeral `IntakeSession` that created it.
+- **`context/AttachmentStore.ts`** — persists `{raw content, extract}` to `.autode/problems/<id>/attachments/<id>.yaml`, atomic write, surviving past the ephemeral `IntakeSession` that created it.
 - **`SpecProvenance.source`** gains `'attachment'` (+ `attachmentId`) — `specSynthesis.ts#buildProvenance` tags `sourceCatalog`/`dataFlows` this way when an entity-extracting attachment exists and no direct question already covers the field (a narrow, honest heuristic — there's no per-field attribution signal from the LLM's synthesis output for anything broader).
 
 ### 9.5 Primitive lifecycle & governance
@@ -1222,7 +1239,7 @@ type PrimitiveLifecycleStatus = 'draft' | 'published' | 'deprecated' | 'retired'
 
 - **UI:** sidebar Workflow Palette gains a "Primitives" section (`palettePrimitives`/`renderPalettePrimitives`) — chosen over a new panel or a 6th custom editor because the Dashboard panel has zero manager wiring and none of the 5 existing custom editors support write-back, whereas the palette's `paletteProblems`/`paletteSpec`/`paletteArtifacts` pattern (§4.6) already does exactly this shape of work. **Preview** is a plain `compileTransformSpec()` call — confirmed to need neither an LLM call nor `agenticTools.ts`'s agentic loop (§7.6), since rendering a template against sample params isn't LLM-directed at all.
 - **Selectability:** `isSelectable(primitive)` = `!primitive.status || primitive.status === 'published'` — `selectTransformSpec()` (§9.2) filters `candidateKinds` through this before building the LLM's catalog and again before accepting its response. `compileTransformSpec()` is **not** filtered — a deprecated/retired primitive still compiles for anything that already references it; selectability only gates the LLM's future choice.
-- **Version pinning:** `TransformSpec.primitiveVersion?: number`; `registry.ts` keeps a second map, `VERSIONED_PRIMITIVES: Map<kind, Map<version, TransformPrimitive>>`, independent of the live `TRANSFORM_PRIMITIVES` catalog. `resolvePrimitive(spec)` prefers an exact-version match when pinned, falling back to the live entry otherwise. `webviewProvider.ts#ensurePrimitivesLoaded()` also loads `.ai-context/primitives/history/` into this map (never into the live catalog) so an approved Pipeline Spec's pinned reference keeps resolving after a newer version is published.
+- **Version pinning:** `TransformSpec.primitiveVersion?: number`; `registry.ts` keeps a second map, `VERSIONED_PRIMITIVES: Map<kind, Map<version, TransformPrimitive>>`, independent of the live `TRANSFORM_PRIMITIVES` catalog. `resolvePrimitive(spec)` prefers an exact-version match when pinned, falling back to the live entry otherwise. `webviewProvider.ts#ensurePrimitivesLoaded()` also loads `.autode/config/primitives/history/` into this map (never into the live catalog) so an approved Pipeline Spec's pinned reference keeps resolving after a newer version is published.
 - **Publish/deprecate (`declarative/lifecycle.ts`):** `publishPrimitiveDefinition()` — a first publish keeps `version` as-is (mirrors `SpecManager.approve()`'s "draft v1 becomes approved v1"); republishing an already-published definition bumps `version` and archives the prior revision to `history/`, same convention as `SpecManager`/`PipelineSpecManager`. Gated by `autoDataEngineeringHub.primitiveManagementEnabled` (default `false`, same opt-in pattern as `languageModelProgrammaticConsent`, §8.1) — the sidebar hides Publish/Deprecate entirely, not just disables them, when off.
 
 ### 9.6 Files
@@ -1259,7 +1276,7 @@ The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileMa
 ### 10.2 Engine boundary (v0.26.0)
 
 - **Rule:** nothing under `src/engine/**` or `src/mcp/**` imports `vscode` — not even types (`.eslintrc.cjs`); a functional test loads every `dist/engine/**` module in plain Node, and the MCP tests run the bundled server in a plain Node child process (§10.6).
-- **Host concerns pass in as parameters or interfaces:** `FileIo` for files (§2.3); `AgentHost { workspaceRoot, confirm(message, actionLabel), fileIo }` for agents; `AbortSignal` instead of VS Code cancellation tokens in platform `QueryOptions`/`ExtractOptions`; Snowflake CLI consent as a constructor option; the VS Code SecretStorage credential resolver lives in `src/core/credentials/`, the engine registers only `env` and `cli`.
+- **Host concerns pass in as parameters or interfaces:** `FileIo` for files (§2.4); `AgentHost { workspaceRoot, confirm(message, actionLabel), fileIo }` for agents; `AbortSignal` instead of VS Code cancellation tokens in platform `QueryOptions`/`ExtractOptions`; Snowflake CLI consent as a constructor option; the VS Code SecretStorage credential resolver lives in `src/core/credentials/`, the engine registers only `env` and `cli`.
 - **Persistence of live schema** moved from the adapter into `ConnectionManager.persistSchemaContext(snapshot, workspaceRoot, io)` (writes `schema-graph.json`; `snapshotToGraph()` is public).
 - **Mocks in tests:** modules that import `vscode` capture the mock at load time; shared helpers that need the VS Code API take it as a parameter (e.g. `createVscodeFileIo(vscode)`) so per-module mocks don't leak.
 
@@ -1280,7 +1297,7 @@ The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileMa
 | `listLanguageModels` | Command proxy | Enumerate all `vscode.lm` models + report where the Claude Code CLI resolves from |
 | `openCopilotHandoff` | Command proxy | Open handoff editor |
 | `reindex` | Command proxy | Rebuild context index |
-| `openContextFolder` | File system | Open .ai-context in OS |
+| `openContextFolder` | File system | Open .autode in OS |
 | `testConnection` | `ConnectionManager.connect()` | Connect to data platform |
 | `sourceAssessment` | `ConnectionManager.extractMetadata()` | Extract + persist metadata |
 | `runAgent` | Agent routing | Run a specific sub-agent |
@@ -1374,7 +1391,7 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 | `context.schemaTtlDays` | number | `7` | Schema facts older than this are re-checked against a connected source when a task uses them and before a plan runs. |
 | `discovery.profileQueryBudget` | number | `50` | Most profiling queries one Source Assessment may run (one sampled query per table). |
 | `discovery.profileConcurrency` | number | `4` | Profiling queries run in parallel during Source Assessment. |
-| `artifactDirectory` | string | `"artifacts"` | Folder (relative to the active business problem's own folder, .ai-context/problems/<id>/) where AutoDE writes generated artifacts — alongside that problem's specification, context, and plan, so its knowledge base stays in one place. |
+| `artifactDirectory` | string | `"autode-output"` | Workspace-relative folder where AutoDE writes generated deliverables, one subfolder per business problem (autode-output/<problem-id>/<phase>/...). |
 | `extensionDisplayName` | string | `"AutoDE — Data Engineering Workspace"` | Extension display name. |
 | `extensionDescription` | string | `"AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation."` | Extension description. |
 | `languageModelProgrammaticConsent` | boolean | `false` | Allow AutoDE to programmatically use a locally-installed language model for its LLM calls (opt-in): GitHub Copilot via the VS Code Language Model API, or the Claude Code CLI. |
@@ -1411,15 +1428,15 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 ### 10.6 MCP server (v0.35.0; MCP-1)
 
 - **Entry:** `src/mcp/server.ts` → bundled `dist/mcp-server.js`; `node dist/mcp-server.js --workspace <root> [--resources <extension root>]`. `findResourcesRoot()` walks up from the bundle to AutoDE's `package.json` (bundled `skills/`, `primitive-definitions/`, version). Uses the SDK's low-level `Server` with plain JSON Schemas (no zod in our code) over `StdioServerTransport`; stdout carries the protocol, logs go to stderr through `redact()`. `createAutodeServer(options)` is exported for in-process hosts (phase 5).
-- **Read-only by construction** (`src/mcp/workspace.ts`, `EngineWorkspace`): reads `.ai-context/**` and the extension's resources, never writes. Tool skills load with `loadToolSkillStates(..., { migrate: false })` (an unmigrated pre-S2 skill is unreviewed here). Context: `contextSources()` loads the ledger, projects the graph for the active spec (`active-problem.json` → `spec/business-problem.yaml` `id`), detects conflicts, loads the catalog with vocabulary and `glossaryAliases()` and builds its index in memory — the same `ContextPackSources` the extension builds, minus runtime facts; packs do not promote into the working set. Each source is cached by a fingerprint of path + size + mtime of its files. Primitives are re-registered (bundled + `.ai-context/primitives` + `history/`) when those folders change.
-- **Tools** (`src/mcp/tools.ts`, `TOOLS`): `autode_search_primitives`, `autode_describe_primitive`, `autode_validate_transform`, `autode_compile_transform` (registry, `getPrimitiveVersion()`); `autode_validate_pipeline_spec`, `autode_compile_pipeline_spec` (adds `suggestedPath` = `artifacts/build/<spec>.v<n>/<entity>/<nn>_<kind>.sql`), `autode_generate_design_doc`; `autode_resolve` (`resolveText` over the working set + `Catalog.search`), `autode_get_context_pack` (`buildContextPack`), `autode_list_assertions` (mirrors excluded unless `includeMirrors`), `autode_check_grounding` (`checkSqlGrounding` over `buildSchemaIndex(graph)`). All annotated `readOnlyHint: true, destructiveHint: false, idempotentHint: true`. Arguments are Ajv-validated against `inputSchema` before a handler runs. Workspace paths are refused if they leave the workspace.
-- **Prompts and resources** (`src/mcp/catalogs.ts`): `autode_interview_<id>` (bundled skills overridden by `.ai-context/skills/*.json`; body = systemPrompt + questionGuidance + spec fields + examples + optional `answers_so_far`); `autode_skill_<id>` only when `isSkillExposable()` (S2) — the body states the declared tools and the tier's limits. Resources: `autode://spec/business-problem`, `spec/pipeline`, `context/{source,target,mapping,semantic-layer}` (listed only if the file exists) and `autode://primitives/{kind}` (also a resource template); contents carry `_meta.revision` (SHA-256 of the bytes) and are redacted.
+- **Read-only by construction** (`src/mcp/workspace.ts`, `EngineWorkspace`): reads `.autode/**` and the extension's resources, never writes. Tool skills load with `loadToolSkillStates(..., { migrate: false })` (an unmigrated pre-S2 skill is unreviewed here). Context: `contextSources()` loads the ledger, projects the graph for the active spec (`active-problem.json` → `spec/business-problem.yaml` `id`), detects conflicts, loads the catalog with vocabulary and `glossaryAliases()` and builds its index in memory — the same `ContextPackSources` the extension builds, minus runtime facts; packs do not promote into the working set. Each source is cached by a fingerprint of path + size + mtime of its files. Primitives are re-registered (bundled + `.autode/config/primitives` + `history/`) when those folders change.
+- **Tools** (`src/mcp/tools.ts`, `TOOLS`): `autode_search_primitives`, `autode_describe_primitive`, `autode_validate_transform`, `autode_compile_transform` (registry, `getPrimitiveVersion()`); `autode_validate_pipeline_spec`, `autode_compile_pipeline_spec` (adds `suggestedPath` = `autode-output/<active problem>/03-build/<specId>.v<n>/<entity>/<nn>_<kind>.sql`, where `ArtifactWriter` puts build artifacts; the server assumes the default output folder), `autode_generate_design_doc`; `autode_resolve` (`resolveText` over the working set + `Catalog.search`), `autode_get_context_pack` (`buildContextPack`), `autode_list_assertions` (mirrors excluded unless `includeMirrors`), `autode_check_grounding` (`checkSqlGrounding` over `buildSchemaIndex(graph)`). All annotated `readOnlyHint: true, destructiveHint: false, idempotentHint: true`. Arguments are Ajv-validated against `inputSchema` before a handler runs. Workspace paths are refused if they leave the workspace.
+- **Prompts and resources** (`src/mcp/catalogs.ts`): `autode_interview_<id>` (bundled skills overridden by `.autode/config/skills/*.json`; body = systemPrompt + questionGuidance + spec fields + examples + optional `answers_so_far`); `autode_skill_<id>` only when `isSkillExposable()` (S2) — the body states the declared tools and the tier's limits. Resources: `autode://spec/business-problem`, `spec/pipeline`, `context/{source,target,mapping,semantic-layer}` (listed only if the file exists) and `autode://primitives/{kind}` (also a resource template); contents carry `_meta.revision` (SHA-256 of the bytes) and are redacted.
 - **Errors** (`src/mcp/errors.ts`): tool failures return `isError: true` with `{ code, message, retryable, details }` as `structuredContent` and text; codes are the §5.6 set plus `NOT_FOUND` and `INTERNAL_ERROR`; string details are truncated at 2 000 characters. Prompt and resource failures are JSON-RPC errors (`InvalidParams` / `InternalError`) carrying the envelope as `data`. `redact()` removes PEM private keys, bearer/basic tokens, JWTs, `key=value` secrets, URL credentials, Databricks PATs, GitHub/OpenAI/Anthropic/AWS-style keys and `AUTODE_*` credential variables; `redactValue()` also blanks values of secret-named keys.
 
 ### 10.7 Build and packaging (v0.35.0; NFR-5)
 
 - `npm run compile` = `tsc -p ./` (every module to `dist/**`, used by tests and the eval) then `scripts/bundle.cjs` (esbuild, CJS, `node18`): `dist/extension.js` (external `vscode`; replaces tsc's file) and `dist/mcp-server.js` (no externals). Development bundles are readable with linked maps; `vscode:prepublish` builds `--production` (minified, no maps): 740 KB and 470 KB. `--analyze` prints what each bundle contains.
-- `.vscodeignore` is an **allowlist** (`**`, then `!` per shipped file): the two bundles and `dist/THIRD-PARTY-NOTICES.md`, the icons (`media/autode-icon-256.png` marketplace, `media/autode-icon-64.png` MCP, `media/autode-activitybar.svg` single-colour glyph for the activity bar and panel), webviews, `skills/*.json`, `primitive-definitions/**`, `docs/schemas/*.json`, README, CHANGELOG and LICENSE — so local folders (`.claude/`, `.venv/`, `.ai-context/`) can never ship; no `node_modules/` (before v0.35.0 the package excluded `node_modules/` while `ajv` and `yaml` were runtime dependencies, so a packaged extension could not load). Package with `vsce package --no-dependencies`.
+- `.vscodeignore` is an **allowlist** (`**`, then `!` per shipped file): the two bundles and `dist/THIRD-PARTY-NOTICES.md`, the icons (`media/autode-icon-256.png` marketplace, `media/autode-icon-64.png` MCP, `media/autode-activitybar.svg` single-colour glyph for the activity bar and panel), webviews, `skills/*.json`, `primitive-definitions/**`, `docs/schemas/*.json`, README, CHANGELOG and LICENSE — so local folders (`.claude/`, `.venv/`, `.autode/`) can never ship; no `node_modules/` (before v0.35.0 the package excluded `node_modules/` while `ajv` and `yaml` were runtime dependencies, so a packaged extension could not load). Package with `vsce package --no-dependencies`.
 - **Licences of bundled code:** the bundles strip comments, so `scripts/bundle.cjs` writes `dist/THIRD-PARTY-NOTICES.md` from esbuild's metafile — every package actually bundled (innermost `node_modules/<pkg>` of each input), with its version, declared licence and full licence file.
 - **Identity:** publisher `arun-gribta` (extension id `arun-gribta.auto-data-engineering-hub`); the MCP server reports `title: 'AutoDE'` and the 64 px icon as a data URI (`serverIcons()`).
 - The `activate()` functional test loads the bundled `dist/extension.js`, so the bundle itself is smoke-tested on every `npm test`.
@@ -1451,7 +1468,7 @@ src/core/credentials/    # VS Code SecretStorage credential resolver
 src/editors/    # custom editors
   DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SttmEditorProvider.ts
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
-  types.ts
+  types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
   assertions.ts, assertionSchemas.ts, catalog.ts, conflicts.ts, conformance.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, fileIngestion.ts, ledger.ts, pack.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
@@ -1518,7 +1535,7 @@ Outside `src/`: `scripts/bundle.cjs` (esbuild, §10.7), `media/` (webviews: `sid
 - Phase organization matches how engineers think about their workflow
 - The orchestrating agent understands which phase the user is in and suggests the next logical action
 
-### 13.4 Why Atomic Writes for .ai-context/?
+### 13.4 Why Atomic Writes for .autode/?
 
 **Decision:** All writes use temporary staging + atomic rename.
 
@@ -1541,7 +1558,7 @@ Outside `src/`: `scripts/bundle.cjs` (esbuild, §10.7), `media/` (webviews: `sid
 
 ### 13.6 YAML Parsing Strategy
 
-**Original decision:** Lightweight custom parser for `.ai-context/` YAML files.
+**Original decision:** Lightweight custom parser for `.autode/` YAML files.
 
 **Original rationale:**
 - Avoids adding a native dependency that complicates VSIX packaging

@@ -2,7 +2,7 @@
 
 **The single place for order and status.** Specifications say *what* each phase delivers and *why*; this document says *when*, and whether it's done. If another document's plan disagrees with this one, this one wins. Document map: [README.md](README.md).
 
-Last updated: 2026-10-15 · Current version: **0.35.0** · Branch: `feature/engine-boundary`
+Last updated: 2026-10-16 · Current version: **0.36.0** · Branch: `feature/engine-boundary`
 
 ---
 
@@ -12,7 +12,7 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 
 | Version | Phase | Specified in | Why here |
 |---|---|---|---|
-| v0.25.0 | ✅ **1** Spec state synchronization | [mcp-engine §8](mcp-engine-requirements.md) | Live bug; prerequisite for any second writer of `.ai-context/`. |
+| v0.25.0 | ✅ **1** Spec state synchronization | [mcp-engine §8](mcp-engine-requirements.md) | Live bug; prerequisite for any second writer of `.autode/`. |
 | v0.26.0 | ✅ **2** Engine boundary and context store | [mcp-engine §4](mcp-engine-requirements.md) | Everything after this builds in `src/engine/`. |
 | v0.27.0 | ✅ **C1** Reference problem, eval harness, baseline | [context-layer §10, §11](context-layer-requirements.md) | Measures the baseline *before* the context layer changes. |
 | v0.28.0 | ✅ **S1** Tool skills on every provider + `allowed-tools` | [mcp-engine §9.1](mcp-engine-requirements.md) | Security prerequisite for exposing skills. |
@@ -23,18 +23,19 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.33.0 | ✅ **C4a** Business-problem pack, interpretation profiles, discover → validate → ask, probes, conformance report, vocabulary capture | [context-layer §11 Phase C4a](context-layer-requirements.md) | Builds the spec from the customer's own documents; probes no longer wait for the MCP track. |
 | v0.34.0 | ✅ **S2** Tool-skill lifecycle, provenance, review, trust tiers | [mcp-engine §9.1](mcp-engine-requirements.md) | Must exist before any skill is exposed to external agents over MCP. |
 | v0.35.0 | ✅ **3** MCP server: registry, spec, prompts, resources | [mcp-engine §5, §9](mcp-engine-requirements.md) | Also exposes `autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`. |
-| v0.36.0 | **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
-| v0.37.0 | **DRV** Opt-in native driver acquisition + platform-onboarding UI | [mcp-engine §9.1](mcp-engine-requirements.md) | How legacy sources (Oracle, SQL Server …) get a live connection without breaking P6. |
-| v0.38.0 | **C4b** Chat extraction, Context Inbox, tool-action memory | [context-layer §11 Phase C4b](context-layer-requirements.md) | Remaining context MCP tools; context gaps start pausing steps. |
-| v0.39.0 | **GOV** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | [mcp-engine §9.1](mcp-engine-requirements.md) | Required by C5/C6 grounding checks and PII expectations. |
-| v0.40.0 | **C5** Semantic model | [context-layer §6, §11](context-layer-requirements.md) | Built on confirmed/verified assertions; also carries the merge semantics (correspondence, survivorship, conformed dimensions). |
-| v0.41.0 | **5** Extension as MCP client; exposure to other agents | [mcp-engine §7, §9](mcp-engine-requirements.md) | Done once the surface is complete. Also moves heavy work out of the extension host process. |
-| v0.42.0 | **6** + **S3** Skill and primitive governance hardening; Git-URL skill import; docs and starter library | [mcp-engine §9](mcp-engine-requirements.md) | Third-party skills open last, once every safety rail exists. |
-| v0.43.0 | **C6** Freshness, context health, release evaluation | [context-layer §8, §11](context-layer-requirements.md) | Final metric targets; eval report becomes a release gate. |
+| v0.36.0 | ✅ **LAY** Workspace layout: `.ai-context/` → `.autode/` grouped by lifecycle (problems, knowledge, config, git-ignored local), deliverables in a visible `autode-output/`, migration of existing workspaces | [technical-design §2.1–2.2](technical-design.md) | Decided 2026-10-16 before the MCP data-platform work: the name confused users, per-engineer state leaked into commits, and deliverables were hidden. |
+| v0.37.0 | **4** MCP server: data platform, sample-data consent and redaction | [mcp-engine §5.3, §6, §9](mcp-engine-requirements.md) | Moves C4a's probes behind `autode_execute_query`; prerequisite for driver acquisition. |
+| v0.38.0 | **DRV** Opt-in native driver acquisition + platform-onboarding UI | [mcp-engine §9.1](mcp-engine-requirements.md) | How legacy sources (Oracle, SQL Server …) get a live connection without breaking P6. |
+| v0.39.0 | **C4b** Chat extraction, Context Inbox, tool-action memory | [context-layer §11 Phase C4b](context-layer-requirements.md) | Remaining context MCP tools; context gaps start pausing steps. |
+| v0.40.0 | **GOV** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | [mcp-engine §9.1](mcp-engine-requirements.md) | Required by C5/C6 grounding checks and PII expectations. |
+| v0.41.0 | **C5** Semantic model | [context-layer §6, §11](context-layer-requirements.md) | Built on confirmed/verified assertions; also carries the merge semantics (correspondence, survivorship, conformed dimensions). |
+| v0.42.0 | **5** Extension as MCP client; exposure to other agents | [mcp-engine §7, §9](mcp-engine-requirements.md) | Done once the surface is complete. Also moves heavy work out of the extension host process. |
+| v0.43.0 | **6** + **S3** Skill and primitive governance hardening; Git-URL skill import; docs and starter library | [mcp-engine §9](mcp-engine-requirements.md) | Third-party skills open last, once every safety rail exists. |
+| v0.44.0 | **C6** Freshness, context health, release evaluation | [context-layer §8, §11](context-layer-requirements.md) | Final metric targets; eval report becomes a release gate. |
 | tbd | **M1–M3** Migration track: assessment; bulk mapping and generation (importing external code-converter output); reconciliation and cutover | not yet written | Agreed in outline 2026-10-15; specified and positioned after K and C4a. |
 | tbd | **RET** Embeddings as an optional, opt-in ranking signal | not yet written | Not scheduled (K2 measured 17/21 and 8/8; the misses are free paraphrases — decision log 2026-10-15). Reconsidered if real engagements show paraphrase misses that C4a's vocabulary capture does not fix. |
 
-**Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `C1`–`C6`, `C4a`/`C4b`, `K1`/`K2` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in the plan sections of earlier versions of requirements.md (§11) and technical-design.md (§10), both at `fc16b0d`.
+**Phase identifiers.** `1`–`6` and `S1`–`S3`, `DRV`, `GOV` are specified in mcp-engine-requirements.md; `LAY` (v0.36.0, workspace layout) was decided in the decision log and is documented in technical-design.md §2.1–2.2 without a separate spec; `C1`–`C6`, `C4a`/`C4b`, `K1`/`K2` in context-layer-requirements.md. Shipped work is referred to by version (e.g. "the v0.9.0 tool-skills work"), not by older phase letters: the letters D, F, G and the numbers 0–9 were reused across earlier plans and mean different things in the plan sections of earlier versions of requirements.md (§11) and technical-design.md (§10), both at `fc16b0d`.
 
 **Workflow per phase:** spec section verified against the code → implementation with tests → `npm test`, `npm run lint`, `npm run eval` → CHANGELOG entry (with deviations) → requirements.md: the affected requirements' status and wording (WHAT/WHY only) → technical-design.md for the HOW → spec section shrinks to a pointer → ✅ here → version bump → commit and push.
 
@@ -59,7 +60,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Orchestrator ideas: action suggestions, intent-based agent invocation, plan diff, first-run onboarding, SQL result preview, Markdown/YAML export | §16.3 | Product backlog; unprioritised. |
 | Old `testConnection` path still assembles credentials from settings rather than the credential resolvers | §16.8 | Verify, then fold into DRV. |
 | Rename and delete business problems from the UI (WS-3) | §8.11 | Folders can only be removed by hand. |
-| Edits to `.ai-context/context/business-context.yaml` take effect without a window reload (CTX-5) | found 2026-10-14 | That folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message. |
+| Edits to `.autode/knowledge/business-context.yaml` take effect without a window reload (CTX-5) | found 2026-10-14 | That folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message. |
 | Style guide; keyboard and screen-reader verification (UI-4, UI-5) | §2 | |
 | Make command-only features discoverable from the panel: a Skills section in the Workflow Palette (import, run, list) and chat slash commands for import, "What the Agent Saw" and "Explain This Artifact" (UI-1) | manual testing 2026-10-15 | Today they exist only in the Command Palette. |
 | Remove unused `src/spokes/{architectureAgent,ingestionAgent,sttmAgent}.ts` | found 2026-10-15 | Not imported anywhere; superseded by `src/agents/`. |
@@ -82,7 +83,7 @@ Every item from the retired backlog and checklist of the previous requirements.m
 | Item | From | Done in |
 |---|---|---|
 | Real Snowflake/Databricks execution | §16.1 | v0.17.0 |
-| Persist platform metadata under `derived/system/` | §16.1 | v0.32.0 (per-system catalogs under `.ai-context/catalog/`) |
+| Persist platform metadata under `derived/system/` | §16.1 | v0.32.0 (per-system catalogs under `.autode/local/catalog/`) |
 | `deactivate()` cleanup | §16.4 | v0.14.0 |
 | Token-aware prompt assembly, STRICT rules survive pruning | §16.2 | v0.30.0 (context packs) |
 | Per-kind content validation | §16.6 | v0.29.0 |
@@ -130,6 +131,7 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 | 2026-10-15 | K2: **RET not scheduled.** Deterministic signals found 17 of 21 vocabulary-mismatch questions (3 of 21 from names alone) and 8 of 8 on the large estate; all 4 misses are free paraphrases. Counter-measure first: C4a's vocabulary capture (LLM-proposed, engineer-reviewed `vocabulary.yaml` entries) keeps run-time retrieval deterministic and provider-independent. RET is reconsidered if real engagements' questions show paraphrase misses that this does not fix. |
 | 2026-10-15 | C4a: probes also run over **sample files the customer supplies** (same templates, same aggregates), because merge and migration sources often have no live connector yet; only counts leave the probe either way. |
 | 2026-10-15 | C4a: probes stay **fixed templates in code** (`probes.ts`), reviewed like code, until phase 6 brings Tier-2 governance for them; a passed probe raises trust to verified but does **not** confirm the claim — confirming stays the engineer's (Inbox, C4b). |
+| 2026-10-16 | **`.ai-context/` becomes `.autode/`, grouped by lifecycle; deliverables move to a visible `autode-output/`.** The folder had grown from a deliverables folder into four things with different lifecycles (per-problem work, shared knowledge, team customisations, per-engineer caches). AutoDE never wrote ignore rules into customer repositories, so chat transcripts, caches and `active-problem.json` were committed there. Rejected: nesting `.ai-context/` inside `.autode/` (keeps the confusing name, adds a level, fixes nothing). Existing workspaces migrate on open by moves only. Inserted as v0.36.0; phase 4 and everything after shift by one version. |
 | 2026-10-16 | **Documentation kept current by construction where possible.** The onboarding guide was rewritten as an orientation that links into the other documents instead of duplicating them (the duplicated v0.13.0 guide had drifted for twenty versions). technical-design.md's settings table and source tree are generated from `package.json` and `src/` and checked by `npm test`. requirements.md maps each capability area to the spec sections that extend it. Every phase updates the guide and the manual-verification checklist. |
 | 2026-10-16 | **Licence and identity.** AutoDE is the owner's personal open-source work, free for any use including commercial: it stays **MIT** (copyright Arun Gribta), which already permits that and is accepted by enterprise intake reviews; publisher id `arun-gribta`. A Tiger Analytics fork will need its own publisher and, to install alongside, its own extension name and command/setting prefix. Bundled libraries' licences ship as `dist/THIRD-PARTY-NOTICES.md`, generated from what the bundler included. |
 | 2026-10-16 | Phase 3: new runtime dependency **`@modelcontextprotocol/sdk` 1.31.0** (MIT; with zod, ajv and its other dependencies, all MIT) — bundled into `dist/mcp-server.js`, 470 KB minified against a 1.5 MB budget; dev-only `esbuild` 0.28.2 and `@vscode/vsce` 4.0.0 (MIT). Versions pinned exactly and chosen at least two weeks old. The package shrank from 871 KB / 220 files (and broken: no `ajv`/`yaml`) to 453 KB / 25 files. |

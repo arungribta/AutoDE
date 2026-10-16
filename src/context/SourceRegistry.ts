@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ContextLayer } from '../engine/context/types';
 import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { LAYOUT } from '../engine/workspaceLayout';
 
 export type SourceKind = 'business_context' | 'verified_queries' | 'data_definitions';
 
@@ -20,7 +21,7 @@ const KIND_TO_LAYER: Record<SourceKind, ContextLayer> = {
 
 /**
  * Registry of user-identified context source files.
- * Persists to `.ai-context/sources.yaml` (path → {kind, layer, owner}).
+ * Persists to `.autode/knowledge/sources.yaml` (path → {kind, layer, owner}).
  */
 export class SourceRegistry implements vscode.Disposable {
   private sources: RegisteredSource[] = [];
@@ -31,8 +32,8 @@ export class SourceRegistry implements vscode.Disposable {
     private readonly workspaceUri: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
-    this.contextDir = vscode.Uri.joinPath(workspaceUri, '.ai-context');
-    this.registryUri = vscode.Uri.joinPath(this.contextDir, 'sources.yaml');
+    this.contextDir = vscode.Uri.joinPath(workspaceUri, ...LAYOUT.knowledge);
+    this.registryUri = vscode.Uri.joinPath(workspaceUri, ...LAYOUT.sources);
   }
 
   public dispose(): void {

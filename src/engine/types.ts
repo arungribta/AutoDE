@@ -64,10 +64,10 @@ export type SpecStatus = 'draft' | 'approved' | 'superseded';
 // ── Multi-Problem Workspace (v0.12.0) ──
 //
 // A single workspace can hold several business problems, each with its own
-// spec/plan/context/artifacts subtree under `.ai-context/problems/<id>/`.
+// spec/plan/context/artifacts subtree under `.autode/problems/<id>/`.
 // See requirements.md §8.11.
 
-/** Identifies which business problem is currently active — `.ai-context/active-problem.json`. */
+/** Identifies which business problem is currently active — `.autode/local/active-problem.json`. */
 export interface ActiveProblemPointer {
   problemId: string;
   activatedAt: string;
@@ -722,7 +722,7 @@ export interface ChatSessionMeta {
   summary?: string;
 }
 
-/** One persisted line of a chat session's transcript (`.ai-context/chats/<id>.jsonl`). */
+/** One persisted line of a chat session's transcript (`.autode/local/chats/<id>.jsonl`). */
 export interface ChatMessage {
   role: 'user' | 'ai' | 'log';
   content: string;
@@ -782,7 +782,7 @@ export interface PlanState {
 
 /**
  * The durable, on-disk record of a generated plan — persisted by `PlanManager` to
- * `.ai-context/plan/plan.yaml`, with every prior version archived to `plan/history/`
+ * `.autode/plan/plan.yaml`, with every prior version archived to `plan/history/`
  * (mirrors `SpecManager`'s pattern exactly). Unlike `PlanState`, which is the live,
  * in-memory working copy `AgentHub` mutates step-by-step during execution, this is
  * the governed artifact: one row written per generation or re-plan.

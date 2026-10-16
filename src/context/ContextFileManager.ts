@@ -1,3 +1,4 @@
+import { LAYOUT, ensureLayout, layoutPath } from '../engine/workspaceLayout';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -85,13 +86,13 @@ export class ContextFileManager implements vscode.Disposable {
   private activeSpecId: string | undefined;
   /** The most recent packs, newest first — what "AutoDE: What the Agent Saw" lists (C3). */
   private readonly recentPacks: Array<{ title: string; at: string; pack: ContextPack }> = [];
-  /** `.ai-context/estate.yaml` (Phase K1): systems, environments, bindings. */
+  /** `.autode/knowledge/estate.yaml` (Phase K1): systems, environments, bindings. */
   private estate: Estate = emptyEstate();
   private estateDirty = false;
   /** Re-keyings found while loading, recorded in the ledger at the next persist. */
   private pendingAliases = new Map<string, string>();
   /**
-   * Phase K2: the estate catalog (tiers 0–2, `.ai-context/catalog/`, git-ignored).
+   * Phase K2: the estate catalog (tiers 0–2, `.autode/local/catalog/`, git-ignored).
    * The graph and ledger hold only the working set; see `admitObjects()`.
    */
   private readonly catalog: Catalog;
@@ -107,8 +108,8 @@ export class ContextFileManager implements vscode.Disposable {
     private readonly log: (msg: string) => void,
     private readonly validator?: ContextValidator
   ) {
-    this.ledger = new AssertionLedger(path.join(vscode.Uri.joinPath(workspaceRoot, '.ai-context').fsPath, 'ledger'));
-    this.catalog = new Catalog(path.join(vscode.Uri.joinPath(workspaceRoot, '.ai-context').fsPath, 'catalog'));
+    this.ledger = new AssertionLedger(layoutPath(workspaceRoot.fsPath, 'ledger'));
+    this.catalog = new Catalog(layoutPath(workspaceRoot.fsPath, 'catalog'));
   }
 
   // ── Working set and catalog (Phase K2) ──────────────────────────────────────
@@ -305,15 +306,15 @@ export class ContextFileManager implements vscode.Disposable {
     await this.catalog.save();
   }
 
-  /** `.ai-context/context/vocabulary.yaml` (or the legacy root): the customer's abbreviations and synonyms. */
   /** Re-reads `vocabulary.yaml` and rebuilds the retrieval index (after "Propose Vocabulary" wrote to it). */
   public async reloadVocabulary(): Promise<void> {
-    this.loadVocabulary(vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath);
+    this.loadVocabulary();
     await this.catalog.buildIndex();
   }
 
-  private loadVocabulary(contextPath: string): void {
-    const file = this.firstExisting([path.join(contextPath, 'context', 'vocabulary.yaml'), path.join(contextPath, 'vocabulary.yaml')]);
+  /** `.autode/knowledge/vocabulary.yaml`: the customer's abbreviations and synonyms. */
+  private loadVocabulary(): void {
+    const file = this.firstExisting([layoutPath(this.workspaceRoot.fsPath, 'vocabulary')]);
     try {
       this.catalog.setVocabulary(buildVocabulary(file ? parseVocabularyFile(fs.readFileSync(file, 'utf8')) : undefined));
     } catch (err) {
@@ -331,7 +332,7 @@ export class ContextFileManager implements vscode.Disposable {
   }
 
   private estatePath(): string {
-    return path.join(vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath, 'estate.yaml');
+    return layoutPath(this.workspaceRoot.fsPath, 'estate');
   }
 
   private loadEstate(): void {
@@ -436,7 +437,7 @@ export class ContextFileManager implements vscode.Disposable {
 
   /**
    * Records or clears an in-memory, session-scoped fact under `key` (pass
-   * `null` to clear). Never written to `.ai-context/` — this is for live facts
+   * `null` to clear). Never written to `.autode/` — this is for live facts
    * that must not survive a reload, not durable schema/glossary content.
    */
   public setRuntimeFact(key: string, fact: RuntimeFact | null): void {
@@ -459,19 +460,16 @@ export class ContextFileManager implements vscode.Disposable {
   }
 
   public async initialize(): Promise<void> {
-    const contextDir = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context');
-    const contextPath = contextDir.fsPath;
-
-    // Ensure .ai-context directory exists
+    // Ensure .autode/ (with its .gitignore for local/) exists
     try {
-      await vscode.workspace.fs.createDirectory(contextDir);
+      ensureLayout(this.workspaceRoot.fsPath);
     } catch {
-      // Directory may already exist
+      // Not a local file system, or already there
     }
 
-    // Set up file watcher
+    // Shared knowledge files (estate, sources, business context, vocabulary …) re-index on change
     this.watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(this.workspaceRoot, '.ai-context/*.{yaml,yml,json}')
+      new vscode.RelativePattern(vscode.Uri.joinPath(this.workspaceRoot, ...LAYOUT.knowledge), '*.{yaml,yml,json}')
     );
 
     this.watcher.onDidChange(() => this.debouncedReindex());
@@ -492,9 +490,7 @@ export class ContextFileManager implements vscode.Disposable {
   }
 
   private async loadAllFiles(): Promise<void> {
-    const contextDir = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context');
-    const contextPath = contextDir.fsPath;
-    const authoritativeDir = path.join(contextPath, 'context');
+    const contextPath = layoutPath(this.workspaceRoot.fsPath, 'root');
 
     // ── Base graph (C2, v0.29.0): the projection of the assertion ledger, the
     // system of record. A workspace with no ledger yet starts from the compiled
@@ -510,9 +506,9 @@ export class ContextFileManager implements vscode.Disposable {
       }
       this.catalogLoaded = true;
     }
-    this.loadVocabulary(contextPath);
-    const graphPath = path.join(contextPath, 'derived', 'graph.json');
-    const legacySchemaPath = path.join(contextPath, 'schema-graph.json');
+    this.loadVocabulary();
+    const graphPath = layoutPath(this.workspaceRoot.fsPath, 'graph');
+    const legacySchemaPath = layoutPath(this.workspaceRoot.fsPath, 'schemaGraph');
     try {
       await this.ledger.load();
     } catch (err) {
@@ -589,17 +585,14 @@ export class ContextFileManager implements vscode.Disposable {
       }
     }
 
-    // ── Authoritative layer (`context/**` first, then legacy `.ai-context/` root),
+    // ── Authoritative layer (`.autode/knowledge/business-context.yaml`, `verified-queries.yaml`),
     // re-read every time: what came from these files before is dropped first, so an
     // edited or removed entry is superseded or retracted in the ledger, not kept. ──
     await this.graphManager.removeNodesWhere((n) =>
       (n.type === 'business_term' || n.type === 'business_rule' || n.type === 'verified_query') &&
       (!n.origin || n.origin.extractor === 'business-context' || n.origin.extractor === 'verified-queries'));
 
-    const bizCtxPath = this.firstExisting([
-      path.join(authoritativeDir, 'business-context.yaml'),
-      path.join(contextPath, 'business-context.yaml')
-    ]);
+    const bizCtxPath = this.firstExisting([layoutPath(this.workspaceRoot.fsPath, 'businessContext')]);
     if (bizCtxPath) {
       try {
         const content = fs.readFileSync(bizCtxPath, 'utf8');
@@ -613,10 +606,7 @@ export class ContextFileManager implements vscode.Disposable {
     }
 
     // Load verified-queries.yaml
-    const queriesPath = this.firstExisting([
-      path.join(authoritativeDir, 'verified-queries.yaml'),
-      path.join(contextPath, 'verified-queries.yaml')
-    ]);
+    const queriesPath = this.firstExisting([layoutPath(this.workspaceRoot.fsPath, 'verifiedQueries')]);
     if (queriesPath) {
       try {
         const content = fs.readFileSync(queriesPath, 'utf8');
@@ -702,11 +692,10 @@ export class ContextFileManager implements vscode.Disposable {
       this.log(`Catalog update failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
-      const contextPath = vscode.Uri.joinPath(this.workspaceRoot, '.ai-context').fsPath;
-      const derivedDir = path.join(contextPath, 'derived');
+      const derivedDir = layoutPath(this.workspaceRoot.fsPath, 'derived');
       fs.mkdirSync(derivedDir, { recursive: true });
       const snapshot = this.graphManager.serializeSnapshot();
-      writeGraphSnapshot(path.join(derivedDir, 'graph.json'), {
+      writeGraphSnapshot(layoutPath(this.workspaceRoot.fsPath, 'graph'), {
         nodes: snapshot.nodes,
         edges: snapshot.edges,
         compiledAt: snapshot.generatedAt

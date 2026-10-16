@@ -1,6 +1,6 @@
 /**
  * Deterministic slug generation for a business problem's folder name
- * (`.ai-context/problems/<slug>/`) — see requirements.md §8.11. Derived from
+ * (`.autode/problems/<slug>/`) — see requirements.md §8.11. Derived from
  * the problem statement the moment the first spec draft exists; no LLM call,
  * no user prompt.
  */

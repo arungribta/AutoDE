@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -278,7 +278,7 @@
     },
     "yamlValidation": [
       {
-        "fileMatch": "**/.ai-context/primitives/*.yaml",
+        "fileMatch": "**/.autode/config/primitives/*.yaml",
         "url": "./docs/schemas/primitive-definition.schema.json"
       }
     ],
@@ -619,8 +619,8 @@
         },
         "autoDataEngineeringHub.artifactDirectory": {
           "type": "string",
-          "default": "artifacts",
-          "description": "Folder (relative to the active business problem's own folder, .ai-context/problems/<id>/) where AutoDE writes generated artifacts — alongside that problem's specification, context, and plan, so its knowledge base stays in one place."
+          "default": "autode-output",
+          "description": "Workspace-relative folder where AutoDE writes generated deliverables, one subfolder per business problem (autode-output/<problem-id>/<phase>/...). Visible on purpose: these are what the customer receives. AutoDE's own working state lives in .autode/."
         },
         "autoDataEngineeringHub.extensionDisplayName": {
           "type": "string",

@@ -92,8 +92,8 @@ function createBaselineSut({ provider, chatContext, configureHub, viaCatalog }) 
     ingestion,
 
     async setup({ workspaceDir, referenceDir, sourceOrder, identities }) {
-      // Documents go where AutoDE reads them: .ai-context/context/business-context.yaml
-      const ctxDir = path.join(workspaceDir, '.ai-context', 'context');
+      // Documents go where AutoDE reads them: .autode/knowledge/business-context.yaml
+      const ctxDir = path.join(workspaceDir, '.autode', 'knowledge');
       fs.mkdirSync(ctxDir, { recursive: true });
       fs.copyFileSync(path.join(referenceDir, 'documents', 'business-context.yaml'), path.join(ctxDir, 'business-context.yaml'));
       cfm = new ContextFileManager({ fsPath: workspaceDir }, graph, (m) => logs.push(m));

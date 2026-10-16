@@ -51,6 +51,7 @@ import { applyCspNonce } from './webviewSecurity';
 import { classifyImplementationType } from './implementationType';
 import { buildTargetContextQuestions } from './targetContextQuestions';
 import { buildSourceContextQuestions } from './sourceContextQuestions';
+import { LAYOUT, UNSCOPED_PROBLEM, layoutRel } from '../engine/workspaceLayout';
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoDataEngineeringHubSidebar';
@@ -624,7 +625,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'openCopilotHandoff': { try { const prompt = typeof (message.prompt) === 'string' ? message.prompt : undefined; await vscode.commands.executeCommand(`${EXTENSION_ID}.copilotHandoff`, prompt); } catch { this.postLog('Failed to open Copilot handoff editor.'); } break; }
         case 'reindex': { this.postLog('Re-index requested from webview.'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.reindex`); } catch { this.postLog('Re-index command not yet registered.'); } break; }
         case 'openContextFolder': {
-          const contextUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri, '.ai-context');
+          const contextUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri, ...LAYOUT.root);
           try { await vscode.commands.executeCommand('revealFileInOS', contextUri); } catch { await vscode.commands.executeCommand('workbench.files.action.showActiveFileInExplorer'); }
           break;
         }
@@ -1164,16 +1165,15 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'openArtifactFolder': {
-          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
-          const artifactUri = ArtifactWriter.resolveArtifactDirectory(workspaceRoot);
+          const artifactUri = this.artifactRootForProblem() ?? vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri, ...LAYOUT.root);
           try { await vscode.commands.executeCommand('revealFileInOS', artifactUri); } catch { await vscode.commands.executeCommand('workbench.files.action.showActiveFileInExplorer'); }
           break;
         }
         case 'checkArtifactStaleness': {
-          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-          if (!workspaceRoot) { break; }
+          const problemRoot = this.currentProblemRoot();
+          if (!problemRoot) { break; }
           const spec = this.specManager?.getSpec();
-          const report = await scanArtifactStaleness(workspaceRoot, spec ? { id: spec.id, version: spec.version } : undefined);
+          const report = await scanArtifactStaleness(problemRoot, spec ? { id: spec.id, version: spec.version } : undefined);
           this.postMessage('artifactStaleness', { report });
           await this.reportFactStaleness();
           break;
@@ -1198,7 +1198,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * A `.ai-context` file changed on disk (debounced by `ContextFileWatcher`).
+   * A `.autode` file changed on disk (debounced by `ContextFileWatcher`).
    * Our own writes are filtered out by each manager's `reload()` — the file's
    * revision still matches what that manager last wrote, so it reports
    * "unchanged" and nothing below runs.
@@ -1247,8 +1247,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.hub.pauseForExternalChange('The Business Problem Specification changed on disk during execution');
     this.postSpec();
     this.postContextGateStatus();
-    if (this.workspaceRoot) {
-      const report = await scanArtifactStaleness(this.workspaceRoot, spec ? { id: spec.id, version: spec.version } : undefined);
+    const problemRoot = this.currentProblemRoot();
+    if (problemRoot) {
+      const report = await scanArtifactStaleness(problemRoot, spec ? { id: spec.id, version: spec.version } : undefined);
       this.postMessage('artifactStaleness', { report });
       await this.reportFactStaleness();
     }
@@ -1278,8 +1279,15 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   /** The active problem's artifact directory (where manifests live). */
   private artifactRootForProblem(): vscode.Uri | undefined {
-    const contextRoot = this.activeProblemId && this.activeProblemManager ? this.activeProblemManager.problemRoot(this.activeProblemId) : this.workspaceRoot;
-    return contextRoot ? ArtifactWriter.resolveArtifactDirectory(contextRoot) : undefined;
+    const problemRoot = this.currentProblemRoot();
+    return problemRoot ? ArtifactWriter.resolveArtifactDirectory(problemRoot) : undefined;
+  }
+
+  /** The active business problem's folder, or the unscoped one when none is active. */
+  private currentProblemRoot(): vscode.Uri | undefined {
+    const ws = this.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!ws) return undefined;
+    return this.activeProblemId && this.activeProblemManager ? this.activeProblemManager.problemRoot(this.activeProblemId) : vscode.Uri.joinPath(ws, ...LAYOUT.problems, UNSCOPED_PROBLEM);
   }
 
   /** Estate bridges for `extension.ts` (Phase K1). */
@@ -1502,7 +1510,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!proposals.length) { this.postLog('No vocabulary to propose.'); return; }
     const picked = await vscode.window.showQuickPick(
       proposals.map((p) => ({ label: p.kind === 'abbreviation' ? `${p.from.toUpperCase()} = ${p.to}` : `${p.from} means ${p.to}`, description: p.source === 'comments' ? `from ${p.support} comment(s)` : 'proposed from documents', detail: p.example, picked: p.source === 'comments' && p.support > 1, proposal: p })),
-      { canPickMany: true, title: 'Add to the vocabulary (.ai-context/context/vocabulary.yaml)', placeHolder: 'Select the entries that are right for this customer' });
+      { canPickMany: true, title: `Add to the vocabulary (${layoutRel('vocabulary')})`, placeHolder: 'Select the entries that are right for this customer' });
     if (!picked?.length) return;
     await pm.acceptVocabulary(picked.map((x) => x.proposal));
     this.postLog(`Vocabulary: ${picked.length} entr${picked.length === 1 ? 'y' : 'ies'} added; retrieval re-indexed.`);
@@ -1597,7 +1605,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   /**
    * `AutoDE: Compact Context Ledger` (C2, v0.29.0): writes the ledger's folded
-   * state to `.ai-context/ledger/snapshot.json`. With `prune`, the event files
+   * state to `.autode/knowledge/ledger/snapshot.json`. With `prune`, the event files
    * folded into it are deleted — the only operation that removes history.
    */
   public async compactContextLedger(prune: boolean): Promise<{ assertions: number; prunedFiles: number } | undefined> {
@@ -1719,9 +1727,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     for (const answer of session.answers) { lines.push(`- ${answer.field}: ${answer.value}`); }
     for (const insight of session.insights) { lines.push(`- note: ${insight}`); }
 
-    const relativePath = `.ai-context/chats/carryover/${session.id}.md`;
+    const relativePath = layoutRel('carryover', `${session.id}.md`);
     try {
-      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'chats', 'carryover'));
+      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.carryover));
       await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(workspaceRoot, relativePath), Buffer.from(lines.join('\n') + '\n', 'utf8'));
       await this.sourceRegistry.addSource(relativePath, 'business_context', 'autode');
       const result = await this.synthesisPipeline.synthesize(this.sourceRegistry.getSources());
@@ -1734,7 +1742,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   /**
    * Renders the spec file's git history as readable text — AutoDE leans on git
-   * as the version/audit log (`.ai-context/spec/` is meant to be committed)
+   * as the version/audit log (`.autode/spec/` is meant to be committed)
    * rather than maintaining a parallel in-app version store.
    */
   private getSpecGitHistory(): Promise<string> {
@@ -2170,13 +2178,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /**
    * Writes a durable, human-readable record of the Context Layer content that
    * fed (or will feed) plan generation for this spec version, to
-   * `.ai-context/context/snapshots/<specId>.v<version>.md` — committed
+   * `.autode/knowledge/snapshots/<specId>.v<version>.md` — committed
    * alongside the spec, unlike the transient compiled graph
-   * (`.ai-context/derived/graph.json`, gitignored).
+   * (`.autode/local/derived/graph.json`, gitignored).
    */
   private async writeContextSnapshot(spec: BusinessProblemSpec): Promise<void> {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
-    const snapshotDir = vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'context', 'snapshots');
+    const snapshotDir = vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.snapshots);
     const fileName = `${spec.id}.v${spec.version}.md`;
     const target = vscode.Uri.joinPath(snapshotDir, fileName);
     const contextBody = this.contextFileManager?.buildContextPrompt() || '_No context nodes were derived._';
@@ -2194,7 +2202,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const tempUri = vscode.Uri.joinPath(snapshotDir, `.${fileName}.tmp.${Date.now()}`);
     await vscode.workspace.fs.writeFile(tempUri, Buffer.from(lines.join('\n') + '\n', 'utf8'));
     await vscode.workspace.fs.rename(tempUri, target, { overwrite: true });
-    this.postLog(`Context snapshot written: .ai-context/context/snapshots/${fileName}`);
+    this.postLog(`Context snapshot written: ${layoutRel('snapshots', fileName)}`);
   }
 
   /**
@@ -2244,18 +2252,18 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
     const bundledDir = vscode.Uri.joinPath(this.context.extensionUri, 'skills').fsPath;
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
-    const overrideDir = vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'skills').fsPath;
+    const overrideDir = vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.skills).fsPath;
     const bundled = loadSkillsFromDirectory(bundledDir);
     const overrides = loadSkillsFromDirectory(overrideDir);
     this.skillRegistry = new SkillRegistry([...bundled, ...overrides]);
     return this.skillRegistry.list();
   }
 
-  /** `.ai-context/primitives/` — the workspace override directory for Tier-2 primitive definitions (Phase 2B-ii/iii). */
+  /** `.autode/config/primitives/` — the workspace override directory for Tier-2 primitive definitions (Phase 2B-ii/iii). */
   private primitivesOverrideDir(): string | undefined {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!workspaceRoot) return undefined;
-    return vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'primitives').fsPath;
+    return vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.primitives).fsPath;
   }
 
   /**

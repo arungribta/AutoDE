@@ -39,7 +39,7 @@ export function parseSkillDefinition(raw: unknown, idFallback?: string): SkillDe
 
 /**
  * Loads and parses every `*.json` file in a skills directory (bundled defaults
- * or user overrides under `.ai-context/skills/`). Later entries with the same
+ * or user overrides under `.autode/config/skills/`). Later entries with the same
  * id override earlier ones, so user skills can replace bundled skills.
  */
 export function loadSkillsFromDirectory(dirPath: string): SkillDefinition[] {

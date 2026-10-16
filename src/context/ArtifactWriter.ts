@@ -1,3 +1,4 @@
+import { DEFAULT_OUTPUT_DIR, UNSCOPED_PROBLEM, outputDirSegments } from '../engine/workspaceLayout';
 import * as vscode from 'vscode';
 import { GeneratedArtifact, WorkflowPhase } from '../engine/types';
 
@@ -119,11 +120,14 @@ export class ArtifactWriter {
    * configuration logic.
    */
   public static resolveArtifactDirectory(contextRoot: vscode.Uri): vscode.Uri {
+    // v0.36.0: deliverables live in a visible, workspace-relative folder per problem
+    // (`autode-output/<problem-id>/` by default), not inside the hidden .autode/ state.
     const configured = vscode.workspace
       .getConfiguration('autoDataEngineeringHub')
-      .get<string>('artifactDirectory', 'artifacts');
-    const safe = (configured || 'artifacts').replace(/^[\\/]+|[\\/]+$/g, '') || 'artifacts';
-    return vscode.Uri.joinPath(contextRoot, safe);
+      .get<string>('artifactDirectory', DEFAULT_OUTPUT_DIR);
+    const problemId = String(contextRoot.path ?? contextRoot.fsPath).split(/[\\/]/).filter(Boolean).pop() || UNSCOPED_PROBLEM;
+    const workspaceRoot = vscode.Uri.joinPath(contextRoot, '..', '..', '..');
+    return vscode.Uri.joinPath(workspaceRoot, ...outputDirSegments(problemId, configured));
   }
 
   private resolveRelativePath(artifact: GeneratedArtifact): string {

@@ -3,6 +3,7 @@ import { computeRevision } from '../engine/context/contextStore';
 import { getPrimitiveVersion, listPrimitives } from '../engine/transforms/registry';
 import { EngineToolError } from './errors';
 import { EngineWorkspace, PROBLEM_DOCUMENTS } from './workspace';
+import { layoutRel } from '../engine/workspaceLayout';
 
 /**
  * MCP prompts (§5.4) and resources (§5.5) — read-only views of the
@@ -57,7 +58,7 @@ export function getPrompt(ws: EngineWorkspace, name: string, args: Record<string
       ? 'It was reviewed for read-only use: do not write files or run commands while following it.'
       : 'It is trusted: writes and commands are allowed where its instructions need them, with the user\'s approval.';
     const parts = [`# Skill: ${s.skill.name} (v${s.sidecar.version})`, toolsLine, tierLine, '## Instructions', s.skill.instructions.trim()];
-    if (s.skill.resourceFiles.length) parts.push(`Resource files alongside the skill (in .ai-context/skills/tool-skills/${s.skill.id}/): ${s.skill.resourceFiles.join(', ')}.`);
+    if (s.skill.resourceFiles.length) parts.push(`Resource files alongside the skill (in ${layoutRel('toolSkills', s.skill.id)}/): ${s.skill.resourceFiles.join(', ')}.`);
     if (args.instruction?.trim()) parts.push('## Task', args.instruction.trim());
     return { description: s.skill.description, text: parts.join('\n\n') };
   }

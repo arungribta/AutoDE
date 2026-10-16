@@ -10,7 +10,7 @@ import { parseYaml, stringifyYaml } from './Yaml';
  * tables in two systems — or in dev and prod — never collide. Business
  * kinds get namespaced ids too (`term:`, `rule:`, `query:`).
  *
- * `.ai-context/estate.yaml` records the systems and which connection or
+ * `.autode/knowledge/estate.yaml` records the systems and which connection or
  * imported file feeds which system. Anything not bound gets a system named
  * after its connection or file, added automatically.
  */

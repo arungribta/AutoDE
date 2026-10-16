@@ -25,7 +25,7 @@ The end-to-end flow stays exactly as it is today:
 
 ```
 Business problem (interview, skills/*.json)
-  → Business Problem Specification (.ai-context/spec/business-problem.yaml, approval gate)
+  → Business Problem Specification (.autode/problems/<id>/spec/business-problem.yaml, approval gate)
   → Source / Target / Mapping context (approval gates)
   → Pipeline Spec (validated, compiled)
   → Plan (DAG of agent steps) → Plan approval + stage confirmation (enforced in agentHub.executePlan)
@@ -42,7 +42,7 @@ Defined in [requirements.md §2.1](requirements.md) (P1–P7), which is canonica
 ## 2. Problem statement
 
 1. **The skill registry is locked inside the extension.** The real registry — transform primitives (Tier 1 code + Tier 2 YAML `PrimitiveDefinition`s), the Pipeline Spec compiler, interview skills (`skills/*.json`) and imported tool skills (`SKILL.md`) — is reachable only from AutoDE's own panel. Claude Code, Copilot agent mode, Cursor, etc. cannot discover or call it, so when a developer uses those agents directly they fall back to freehand SQL, bypassing P1.
-2. **In-memory spec caches go stale.** `SpecManager`, `PipelineSpecManager`, `SourceContextManager`, `TargetContextManager` (and the other context managers) load YAML once in `initialize()` and serve from memory. The only `.ai-context` watcher (`ContextFileManager.ts:110`) uses the non-recursive glob `.ai-context/*.{yaml,yml,json}`, so `spec/` and `context/` subfolders are unwatched. If any other process (Claude Code, Copilot, `git pull`, an MCP tool) edits a spec, the extension keeps the old copy and can overwrite the newer file on its next save.
+2. **In-memory spec caches go stale.** `SpecManager`, `PipelineSpecManager`, `SourceContextManager`, `TargetContextManager` (and the other context managers) load YAML once in `initialize()` and serve from memory. The only `.autode` watcher (`ContextFileManager.ts:110`) uses the non-recursive glob `.autode/*.{yaml,yml,json}`, so `spec/` and `context/` subfolders are unwatched. If any other process (Claude Code, Copilot, `git pull`, an MCP tool) edits a spec, the extension keeps the old copy and can overwrite the newer file on its next save.
 3. **Platform access is coupled to VS Code.** `src/dqm/ConnectionManager.ts`, `dqm/types.ts`, `BaseAdapter.ts`, `adapters/SnowflakeAdapter.ts`, `credentials/index.ts`, `credentials/VsCodeSecretStorageResolver.ts` import `vscode`, so the adapters cannot run outside the extension host.
 4. **Packaging (verify):** the build is plain `tsc` and `.vscodeignore` excludes `node_modules/**`, so a packaged VSIX likely ships without `ajv` and `yaml`. Confirm with `npx vsce ls`. Phase 3's bundling fixes this regardless.
 5. **Version drift:** `package.json` says `0.13.0` while `docs/technical-design.md` is at v0.24.0. Phase 1 MUST align `package.json` to the documented version before bumping.
@@ -66,7 +66,7 @@ Defined in [requirements.md §2.1](requirements.md) (P1–P7), which is canonica
 │   • Registry: transform primitives (Tier 1 + Tier 2), interview skills, tool skills              │
 │   • Pipeline Spec: validator, compiler, design-doc generator                                     │
 │   • Platform: adapters, REST/CLI execution backends, credential resolvers (env, CLI config)      │
-│   • Context store: .ai-context YAML read/write with revision checks                              │
+│   • Context store: .autode YAML read/write with revision checks                              │
 │  src/mcp/server.ts — exposes the engine as MCP tools, prompts and resources                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
         ▲                                   ▲                                   ▲
@@ -111,10 +111,10 @@ Move via `git mv` so history is preserved. Leave a one-line re-export at each ol
 
 ### 4.3 Context store
 
-Add `src/engine/context/ContextStore.ts`: node-`fs` based read/write for `.ai-context/**` with:
+Add `src/engine/context/ContextStore.ts`: node-`fs` based read/write for `.autode/**` with:
 - `read(relPath) → { data, revision }`, where `revision` is a SHA-256 of the file bytes.
 - `write(relPath, data, expectedRevision)` — writes atomically (temp file + rename, as `ArtifactWriter` already does) **only if** the on-disk revision still equals `expectedRevision`; otherwise throws `RevisionConflictError` with both revisions.
-- The existing extension managers (`SpecManager`, `PipelineSpecManager`, `SourceContextManager`, `TargetContextManager`, `MappingContextManager`, `SemanticLayerManager`) keep their public APIs and UI behavior, but their parsing/versioning/archive logic SHOULD move behind this store so the server and the extension write `.ai-context` the same way.
+- The existing extension managers (`SpecManager`, `PipelineSpecManager`, `SourceContextManager`, `TargetContextManager`, `MappingContextManager`, `SemanticLayerManager`) keep their public APIs and UI behavior, but their parsing/versioning/archive logic SHOULD move behind this store so the server and the extension write `.autode` the same way.
 
 ### 4.4 Enforcement
 
@@ -141,7 +141,7 @@ Server name `autode`, version = extension version. Transport: **stdio** only (§
 | Tool | Input | Output |
 |------|-------|--------|
 | `autode_validate_pipeline_spec` | `path?` (default active spec) or inline `spec` | `PipelineSpecValidationResult` |
-| `autode_compile_pipeline_spec` | `path?`, `dialect` | `CompiledEntity[]` (content + suggested relative paths under `artifacts/`) |
+| `autode_compile_pipeline_spec` | `path?`, `dialect` | `CompiledEntity[]` (content + suggested relative paths in the output folder, `autode-output/<problem>/03-build/…`) |
 | `autode_generate_design_doc` | `path?` | Markdown |
 
 Compile tools return content; they do not write. Writing stays with the caller (`ArtifactWriter` in the extension; the coding agent's own file tools elsewhere), so the server never touches `artifacts/` behind the user's back.
@@ -228,14 +228,14 @@ A thin typed wrapper (`searchPrimitives()`, `compileTransform()`, `compilePipeli
 
 ## 8. Spec state synchronization (Phase 1 — a live bug today)
 
-1. Replace the watcher in `ContextFileManager.ts:110` with a recursive one: `new RelativePattern(workspaceRoot, '.ai-context/**/*.{yaml,yml,json}')`. Keep the existing debounce.
+1. Replace the watcher in `ContextFileManager.ts:110` with a recursive one: `new RelativePattern(workspaceRoot, '.autode/**/*.{yaml,yml,json}')`. Keep the existing debounce.
 2. Route change events by path to a new `reload()` on each affected manager: `SpecManager`, `PipelineSpecManager`, `SourceContextManager`, `TargetContextManager`, `MappingContextManager`, `SemanticLayerManager`. `TargetConfigManager` already has its own watcher — leave it. `ActiveProblemManager` reads from disk on every call and needs no cache invalidation, but a change to its pointer file MUST trigger the existing active-problem switch flow.
 3. Each manager records the revision (§4.3) of what it loaded. Every save goes through compare-and-swap. On `RevisionConflictError`, show: *"<file> changed on disk since AutoDE loaded it."* with **Reload** (discard in-memory edits) and **Overwrite** (explicit, logged) actions. Never overwrite silently.
 4. Ignore watcher events caused by AutoDE's own writes (compare the event file's revision with the last revision written by this process).
 5. After a reload, push refreshed state to the webview (the same path `refreshSettingsInWebview()` uses for settings).
 6. `executePlan()` records the spec revisions at start. If an approved spec changes mid-run, finish the running step, pause, and tell the user that later steps would run against a changed spec. Reuse `ArtifactStalenessScanner` to flag artifacts generated from the older revision.
 
-Until this phase ships, the MCP server MUST NOT be given write access to `.ai-context/`.
+Until this phase ships, the MCP server MUST NOT be given write access to `.autode/`.
 
 ---
 
@@ -332,7 +332,7 @@ Acceptance:
 ### Phase 1: Spec state synchronization
 Scope: §8, plus the `package.json` version alignment (§2.5).
 Acceptance:
-- Test: edit `.ai-context/spec/business-problem.yaml` externally → `SpecManager.getSpec()` returns the new content within the debounce window.
+- Test: edit `.autode/problems/<id>/spec/business-problem.yaml` externally → `SpecManager.getSpec()` returns the new content within the debounce window.
 - Test: external edit, then an AutoDE save of a stale copy → `RevisionConflictError`; the file on disk is unchanged.
 - Test: AutoDE's own save does not trigger a reload loop.
 - Manual: the panel reflects an external spec edit without a reload of the window.

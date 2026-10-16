@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
+import { AUTODE_DIR } from '../engine/workspaceLayout';
 
 /**
- * Recursive watcher over every `.ai-context/**` YAML/JSON file (v0.25.0,
+ * Recursive watcher over every `.autode/**` YAML/JSON file (v0.25.0,
  * docs/mcp-engine-requirements.md §8). `ContextFileManager`'s own watcher
- * only ever covered the top-level `.ai-context/*` business-context files, so
+ * only ever covered the top-level `.autode/*` business-context files, so
  * a change to a business problem's `spec/` or `context/` files — made by any
  * other process — went unnoticed and the cached copy went stale. This one
  * reports each changed path (debounced per path) so the owner can route it
@@ -20,7 +21,7 @@ export class ContextFileWatcher implements vscode.Disposable {
     private readonly debounceMs = 300
   ) {
     this.watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(workspaceRoot, '.ai-context/**/*.{yaml,yml,json}')
+      new vscode.RelativePattern(workspaceRoot, `${AUTODE_DIR}/**/*.{yaml,yml,json}`)
     );
     const handle = (uri: vscode.Uri): void => this.schedule(uri);
     this.watcher.onDidChange(handle);

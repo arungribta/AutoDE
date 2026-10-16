@@ -96,15 +96,15 @@ Each `kind` has an Ajv schema for `value` in `src/engine/context/assertionSchema
 
 ### 4.2 Ledger (system of record)
 
-- Append-only JSON Lines under `.ai-context/ledger/` with one file per writer session: `<yyyy-mm-dd>.<sessionUlid>.jsonl`. Appending to separate files keeps git merges conflict-free when a team shares a workspace.
+- Append-only JSON Lines under `.autode/knowledge/ledger/` with one file per writer session: `<yyyy-mm-dd>.<sessionUlid>.jsonl`. Appending to separate files keeps git merges conflict-free when a team shares a workspace.
 - Event types: `asserted`, `confirmed`, `rejected`, `superseded`, `verified`, `verification_failed`, `flagged_needs_review`. Every event carries `id`, `assertionId`, `at`, `actor`, and `causedBy` (the event or evidence id that triggered it). `causedBy` is what makes causality traceable (§8).
-- Folding all events gives the current assertion set. Compaction: an `AutoDE: Compact Context Ledger` command writes `.ai-context/ledger/snapshot.json` plus the events after it. It never deletes history unless the user explicitly runs it with `--prune`.
+- Folding all events gives the current assertion set. Compaction: an `AutoDE: Compact Context Ledger` command writes `.autode/knowledge/ledger/snapshot.json` plus the events after it. It never deletes history unless the user explicitly runs it with `--prune`.
 - All writes go through `ContextStore` (mcp-engine-requirements §4.3).
 
 ### 4.3 Projections (derived, rebuildable, never hand-edited)
 
 1. **Context graph.** `GraphManager` is rebuilt from active assertions. Existing node and edge types stay. Nodes gain `supportedBy: string[]` (assertion ids), and edges gain the same. The existing `Origin` remains for compatibility and is filled from the strongest supporting assertion.
-2. **Semantic model** (§6), `.ai-context/semantic/model.yaml`.
+2. **Semantic model** (§6), `.autode/semantic/model.yaml`.
 3. **Governed containers.** The Business Problem Spec, Source/Target/Mapping context and Pipeline Spec stay the human-approval units and keep their files and versioning. Approving a container sets every `proposed` assertion it contains to `active` with trust ≥ `confirmed`. Editing an approved container emits `superseded` events rather than rewriting.
 
 Migration: on first load, existing graph content (`GraphPersistence` snapshot, `business-context.yaml`, verified queries, data definitions, file ingestion, live discovery) is converted into assertions. Trust is `verified` for `reliability: 'live-verified'` origins, `documented` for file-derived ones, `inferred` for `OriginSource 'llm'`, and `confirmed` for content inside already-approved containers. The migration MUST be idempotent and MUST produce the same graph as before (test: node and edge sets equal pre/post).
@@ -162,7 +162,7 @@ A new panel section listing `proposed`, `needs_review` and conflicting assertion
 
 ## 6. Semantic model
 
-`SemanticLayerManager` changes from a graph snapshot to a **semantic model** projected from active assertions and stored at `.ai-context/semantic/model.yaml`. It keeps the existing approve / version / archive pattern (`context/history/...`) and spec pinning.
+`SemanticLayerManager` changes from a graph snapshot to a **semantic model** projected from active assertions and stored at `.autode/semantic/model.yaml`. It keeps the existing approve / version / archive pattern (`context/history/...`) and spec pinning.
 
 ```yaml
 version: 3
@@ -353,7 +353,7 @@ Acceptance: every artifact written has a manifest; "What the agent saw" and "Exp
 ### Phase K: Estate identity, per-system catalogs and the working-set cache
 **Status:** ✅ shipped in two parts — **K1** (identity and catalogs, items 1–3, 6, 7, 9, 10) in v0.31.0 and **K2** (working-set cache and scale, items 4, 5, 8, 11, 12, with the large-estate and vocabulary-mismatch fixtures) in v0.32.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md STC-6, STC-7, STC-10, PLT-6, GRD-8, NFR-1, NFR-6, NFR-7, NFR-8; HOW: technical-design.md §5.11, §5.12, §6.3; measurements: `test/reference/retail-orders/baselines/v0.32.0-offline.md`. The embedded-store and RET decisions are in the roadmap's decision log. The full specification text is in git (this file at v0.31.0).
 
-Added 2026-10-15 (after C3), because estate merge and legacy migration/modernisation need several systems side by side and estates larger than the §1 design target. In short: physical objects have estate-qualified ids (`obj:<system>/<environment>/<fqn>`); `.ai-context/estate.yaml` records systems, environments, roles and which connections and files feed them; each system has a catalog in tiers (names, structure, profile) of which only the working set — what a problem uses — is mirrored into the graph and ledger; objects are loaded from the live source when a task needs them and re-checked when stale; packs report what is not loaded or not visible; retrieval matches abbreviations, synonyms, the customer's vocabulary, comments and glossary terms; and no synchronous task exceeds 100 ms at about 2 000 tables and 50 000 columns.
+Added 2026-10-15 (after C3), because estate merge and legacy migration/modernisation need several systems side by side and estates larger than the §1 design target. In short: physical objects have estate-qualified ids (`obj:<system>/<environment>/<fqn>`); `.autode/knowledge/estate.yaml` records systems, environments, roles and which connections and files feed them; each system has a catalog in tiers (names, structure, profile) of which only the working set — what a problem uses — is mirrored into the graph and ledger; objects are loaded from the live source when a task needs them and re-checked when stale; packs report what is not loaded or not visible; retrieval matches abbreviations, synonyms, the customer's vocabulary, comments and glossary terms; and no synchronous task exceeds 100 ms at about 2 000 tables and 50 000 columns.
 
 ### Phase C4a: Business-problem pack, discovery-first gap closing, conformance
 **Status:** ✅ shipped in v0.33.0 (items 1–11). What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md BPS-1, BPS-3, BPS-10, CTX-3, CTX-9, GRD-8, SEC-5; HOW: technical-design.md §5.13; measurements: `test/reference/retail-orders/baselines/v0.33.0-offline.md` (pack scenario and trap 3). The full specification text is in git (this file at v0.32.0).

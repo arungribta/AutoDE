@@ -7,7 +7,11 @@ npm-debug.log*
 tmp_*.js
 mock_*.js
 
-# Enterprise Context Layer — ignore derived/transient only
+# AutoDE working state (v0.36.0): .autode/local/ is per engineer and rebuildable.
+# AutoDE also writes .autode/.gitignore itself; this line covers this repo's own use.
+.autode/local/
+
+# Enterprise Context Layer (pre-v0.36.0 .ai-context/) — ignore derived/transient only
 # (context/, spec/, sources.yaml, target-environment.yaml are committed)
 .ai-context/derived/
 .ai-context/state.json

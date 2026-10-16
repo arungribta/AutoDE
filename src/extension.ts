@@ -24,6 +24,8 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as lifecycle from './engine/skills/lifecycle';
+import { LAYOUT, UNSCOPED_PROBLEM, layoutRel } from './engine/workspaceLayout';
+import { describeMigration, migrateWorkspace } from './engine/workspaceMigration';
 import { resolveAllowedToolNames } from './engine/skills/toolAllowList';
 
 /**
@@ -66,8 +68,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? context.extensionUri;
 
+  // v0.36.0: a workspace from an earlier version keeps its state in .ai-context/.
+  // Move it to the .autode/ layout (and its artifacts to the output folder) before
+  // any manager reads a path. Only moves, never overwrites; reported to the user.
+  if (vscode.workspace.workspaceFolders?.[0] && workspaceRoot.scheme === 'file') {
+    try {
+      const report = migrateWorkspace(workspaceRoot.fsPath, { artifactDirectory: configManager.getSettings().artifactDirectory });
+      if (report.needed) {
+        const summary = describeMigration(report);
+        console.log(`[AutoDE] Workspace layout migrated: ${summary}`);
+        void vscode.window.showInformationMessage(`AutoDE now keeps its working state in .autode/ and generated deliverables in a visible output folder. ${summary} Commit the move so teammates get it too.`);
+      }
+    } catch (err) {
+      void vscode.window.showErrorMessage(`AutoDE could not move .ai-context/ to .autode/: ${err instanceof Error ? err.message : String(err)}. Nothing was deleted; move it by hand or retry after closing programs that hold its files.`);
+    }
+  }
+
   // PlanManager and ArtifactWriter are scoped to a business problem's own
-  // folder (v0.12.0, `.ai-context/problems/<id>/`) — but they're also the two
+  // folder (v0.12.0, `.autode/problems/<id>/` since v0.36.0) — but they're also the two
   // managers the command-palette entry points (`autoDE.generatePlan`,
   // `autoDE.executePlan`) can reach *without* the sidebar ever resolving, so
   // ownership stays here rather than moving into `webviewProvider`. `applyProblemRoot`
@@ -98,7 +116,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // drafted) that never resolves to a real business problem — kept separate
   // from any real problem folder so it can't be mistaken for one in the
   // business-problem picker.
-  const unscopedRoot = vscode.Uri.joinPath(workspaceRoot, '.ai-context', 'problems', '_unscoped');
+  const unscopedRoot = vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.problems, UNSCOPED_PROBLEM);
   void applyProblemRoot(unscopedRoot);
 
   const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub, applyProblemRoot);
@@ -112,7 +130,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let targetConnectionManager: ConnectionManager | undefined;
   disposableRegistry.register({ dispose: () => targetConnectionManager?.dispose() });
 
-  // Initialize TargetConfigManager (.ai-context/target-environment.yaml, profile
+  // Initialize TargetConfigManager (.autode/config/target-environment.yaml, profile
   // inheritance) — kept instantiated for future dev/staging/prod profile
   // switching, but (v0.11.0) its generic default profile is deliberately NOT
   // seeded into the hub anymore. Doing that previously meant every workspace
@@ -641,7 +659,7 @@ export function activate(context: vscode.ExtensionContext): void {
         ...(suggested ? [{ label: suggested.system ?? '', description: `environment ${suggested.environment ?? 'default'} (suggested)`, system: suggested.system ?? '', environment: suggested.environment }] : []),
         ...(estate?.systems ?? []).filter((s) => s.id !== suggested?.system).map((s) => ({ label: s.id, description: `${s.name} · ${s.role}`, system: s.id, environment: undefined as string | undefined }))
       ],
-      { title: `Which system does ${fileName} describe?`, placeHolder: 'Pick a system (edit .ai-context/estate.yaml to add systems, environments or roles)' }
+      { title: `Which system does ${fileName} describe?`, placeHolder: `Pick a system (edit ${layoutRel('estate')} to add systems, environments or roles)` }
     );
     if (!systemPick) return;
     sidebarProvider.bindToSystem({ file: fileName, system: systemPick.system, ...(systemPick.environment ? { environment: systemPick.environment } : {}) });
@@ -769,11 +787,11 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Phase K1 (v0.31.0): the estate — systems, environments, roles and which
-  // connections/files feed them — lives in .ai-context/estate.yaml.
+  // connections/files feed them — lives in .autode/knowledge/estate.yaml.
   const openEstate = vscode.commands.registerCommand(`${EXTENSION_ID}.openEstate`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
-    const uri = vscode.Uri.joinPath(wsRoot, '.ai-context', 'estate.yaml');
+    const uri = vscode.Uri.joinPath(wsRoot, ...LAYOUT.estate);
     try { await vscode.workspace.fs.stat(uri); } catch {
       await vscode.workspace.fs.writeFile(uri, Buffer.from(serializeEstate(sidebarProvider.getEstate() ?? emptyEstate()), 'utf8'));
     }
@@ -849,7 +867,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Imports a Claude Agent Skill (a folder containing SKILL.md + optional
-  // resources) into .ai-context/skills/tool-skills/<id>/ — Phase D.
+  // resources) into .autode/config/skills/tool-skills/<id>/ — Phase D.
   const importToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.importToolSkill`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
@@ -863,7 +881,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const skillMdUri = vscode.Uri.joinPath(sourceUri, 'SKILL.md');
       await vscode.workspace.fs.stat(skillMdUri); // throws if missing
       const id = sourceUri.fsPath.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^a-zA-Z0-9_-]+/g, '_') || `skill-${Date.now().toString(36)}`;
-      const targetDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills', id);
+      const targetDir = vscode.Uri.joinPath(wsRoot, ...LAYOUT.toolSkills, id);
       if (fs.existsSync(targetDir.fsPath)) {
         const replace = await vscode.window.showWarningMessage(`A skill "${id}" is already imported. Replace it? Its review and version history are reset.`, { modal: true }, 'Replace');
         if (replace !== 'Replace') { return; }
@@ -894,7 +912,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const runToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.runToolSkill`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
-    const toolSkillsDir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills').fsPath;
+    const toolSkillsDir = vscode.Uri.joinPath(wsRoot, ...LAYOUT.toolSkills).fsPath;
     const all = lifecycle.loadToolSkillStates(toolSkillsDir, skillActor());
     if (all.length === 0) { vscode.window.showInformationMessage('No tool skills imported yet. Run "AutoDE: Import Tool Skill" first.'); return; }
     // The run gate (Phase S2): only published skills reviewed or trusted for their current content.
@@ -919,7 +937,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const pickToolSkill = async (title: string, filter: (s: lifecycle.ToolSkillState) => boolean, preselected?: unknown) => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return undefined; }
-    const dir = vscode.Uri.joinPath(wsRoot, '.ai-context', 'skills', 'tool-skills').fsPath;
+    const dir = vscode.Uri.joinPath(wsRoot, ...LAYOUT.toolSkills).fsPath;
     const states = lifecycle.loadToolSkillStates(dir, skillActor()).filter(filter);
     if (typeof preselected === 'string') { return states.find((s) => s.skill.id === preselected); }
     if (states.length === 0) { vscode.window.showInformationMessage('No matching tool skills.'); return undefined; }

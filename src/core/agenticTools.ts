@@ -37,7 +37,7 @@ export interface JsonSchemaToolSpec {
 export const MAX_TOOL_OUTPUT_CHARS = 20_000;
 const MAX_SEARCH_FILES_SCANNED = 500;
 const MAX_SEARCH_MATCHES = 100;
-const SEARCH_SKIP_DIRS = new Set(['.git', 'node_modules', 'out', 'dist', '.ai-context']);
+const SEARCH_SKIP_DIRS = new Set(['.git', 'node_modules', 'out', 'dist', '.autode', '.ai-context']);
 
 export const READ_ONLY_TOOL_SPECS: JsonSchemaToolSpec[] = [
   {

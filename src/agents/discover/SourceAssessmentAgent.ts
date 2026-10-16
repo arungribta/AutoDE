@@ -1,12 +1,13 @@
 import { AgentExecutionContext, AgentExecutionResult, GeneratedArtifact, PlanStep } from '../../engine/types';
 import { ConnectionManager } from '../../engine/platform/ConnectionManager';
 import { SchemaSnapshot } from '../../engine/platform/types';
+import { layoutRel } from '../../engine/workspaceLayout';
 
 /**
  * Source Assessment Agent
  *
  * Extracts schema metadata from the connected data platform and persists it
- * to the .ai-context/ knowledge graph. This agent is the entry point for
+ * to the .autode/ knowledge graph. This agent is the entry point for
  * the Discover phase of the data engineering workflow.
  *
  * A missing/unreachable connection does NOT fail the step outright — the
@@ -79,11 +80,11 @@ export async function executeSourceAssessmentAgent(
       (snapshot.lineage ? `, ${snapshot.lineage.length} lineage edges` : '')
     );
 
-    // Persist to .ai-context/
+    // Persist to .autode/
     const workspaceRoot = context.host?.workspaceRoot;
     if (workspaceRoot && context.host) {
       await connectionManager.persistSchemaContext(snapshot, workspaceRoot, context.host.fileIo);
-      context.log('Schema context persisted to .ai-context/schema-graph.json');
+      context.log(`Schema context persisted to ${layoutRel('schemaGraph')}`);
     } else {
       context.log('Warning: No workspace folder found. Schema context was not persisted to disk.');
     }

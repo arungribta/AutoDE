@@ -14,7 +14,7 @@ import { parseYaml } from './Yaml';
  * share concepts match even when they share no spelling.
  */
 
-/** Generic data-engineering abbreviations. Extended per customer in `.ai-context/context/vocabulary.yaml`. */
+/** Generic data-engineering abbreviations. Extended per customer in `.autode/knowledge/vocabulary.yaml`. */
 export const DEFAULT_ABBREVIATIONS: Readonly<Record<string, string>> = {
   acct: 'account', addr: 'address', adj: 'adjustment', agg: 'aggregate', amt: 'amount', appr: 'approval', arch: 'archive',
   ast: 'asset', attr: 'attribute', aud: 'audit', avg: 'average', bal: 'balance', bdgt: 'budget', bk: 'book', bu: 'business unit',
@@ -111,7 +111,7 @@ export function buildVocabulary(extra?: VocabularyFile): Vocabulary {
   return { abbreviations, synonyms };
 }
 
-/** Parses `.ai-context/context/vocabulary.yaml`; malformed content yields an empty file. */
+/** Parses `.autode/knowledge/vocabulary.yaml`; malformed content yields an empty file. */
 export function parseVocabularyFile(text: string | undefined): VocabularyFile {
   if (!text || !text.trim()) return {};
   let raw: VocabularyFile | null;

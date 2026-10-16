@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.35.0 (2026-10-16). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.36.0 (2026-10-16). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -32,7 +32,7 @@ AutoDE is a **VS Code extension** that takes a data-engineering business problem
 
 Things that surprise newcomers:
 
-- **There is no backend.** Everything runs on the engineer's machine: the VS Code extension host, a webview, and (since v0.35.0) an optional MCP server process. Everything AutoDE knows is a file under `.ai-context/` in the open repository.
+- **There is no backend.** Everything runs on the engineer's machine: the VS Code extension host, a webview, and (since v0.35.0) an optional MCP server process. Everything AutoDE knows is a file under `.autode/` in the open repository, and everything it generates for the customer goes to `autode-output/` (§4.11).
 - **The LLM proposes; deterministic code decides.** Transform SQL comes from reviewed *primitives* the LLM only selects and parameterises; facts the LLM extracts land as *proposed* and need a person or a probe to become trusted; grounding checks are pure code.
 - **The chat box is a router.** What a message does depends on the state of the active business problem (§5.2).
 - **Most product decisions are recorded.** Before changing direction, read the roadmap's decision log and the "Rejected approaches" in the specs — the question has often been answered.
@@ -96,7 +96,7 @@ Bundling: `tsc` compiles every module to `dist/**` (used by tests); esbuild then
 ## 4. Concepts you need
 
 ### 4.1 Business problem and its specification
-A workspace holds several **business problems** under `.ai-context/problems/<id>/`; `active-problem.json` says which is current. Each has a **Business Problem Specification** (`spec/business-problem.yaml`), versioned and approved by the engineer. Everything downstream keys off the spec's id and version. *Design: technical-design §3.*
+A workspace holds several **business problems** under `.autode/problems/<id>/`; `.autode/local/active-problem.json` says which is current for this engineer. Each has a **Business Problem Specification** (`spec/business-problem.yaml`), versioned and approved by the engineer. Everything downstream keys off the spec's id and version. *Design: technical-design §3.*
 
 ### 4.2 Lifecycle gates
 Business problem confirmed → spec approved → source/target context approved → plan approved → stage confirmed → execute. The gates are enforced in `AgentHub` itself, not only in the UI — a command that skips a gate throws. *Requirements: ORC-3; design §3.14.*
@@ -105,10 +105,10 @@ Business problem confirmed → spec approved → source/target context approved 
 Phases (discover, model, build, validate) are inferred **deterministically** from the spec (`src/core/phaseInference.ts`, no LLM). The plan is a DAG of steps, each assigned to an agent (`AGENT_EXECUTORS` in `agentHub.ts`). The planner may only assign known agents; tool skills are never auto-planned. *Design §7.*
 
 ### 4.4 Assertions, ledger, trust
-An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `business_term`, `metric`, `quality_expectation`, `decision`, …) about subjects (object ids), with a **status** (`proposed`, `active`, `needs_review`, `superseded`, `rejected`), a **trust** tier (`verified` > `confirmed` > `documented` > `inferred`) and evidence. The **ledger** (`.ai-context/ledger/*.jsonl`) appends events; folding them gives the current assertions. Graph nodes are **mirrors** of schema assertions. Nothing an LLM proposes becomes trusted without a person (or, for `verified`, a probe). *Requirements CTX-*; design §5.3–5.4.*
+An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `business_term`, `metric`, `quality_expectation`, `decision`, …) about subjects (object ids), with a **status** (`proposed`, `active`, `needs_review`, `superseded`, `rejected`), a **trust** tier (`verified` > `confirmed` > `documented` > `inferred`) and evidence. The **ledger** (`.autode/knowledge/ledger/*.jsonl`) appends events; folding them gives the current assertions. Graph nodes are **mirrors** of schema assertions. Nothing an LLM proposes becomes trusted without a person (or, for `verified`, a probe). *Requirements CTX-*; design §5.3–5.4.*
 
 ### 4.5 Estate, catalog, working set
-Objects have estate-qualified ids: `obj:<system>/<environment>/<fqn>` (e.g. `obj:shop/prod/shop.orders`); `.ai-context/estate.yaml` records systems, environments and which connection or file feeds them. Each system has a **catalog** (`.ai-context/catalog/…`, git-ignored, rebuildable) holding the whole estate in tiers (names → structure → profile). Only the **working set** — what problems use, 200 tables by default — is mirrored into the ledger and graph; a task that needs a catalogued table promotes it. *Design §5.11–5.12.*
+Objects have estate-qualified ids: `obj:<system>/<environment>/<fqn>` (e.g. `obj:shop/prod/shop.orders`); `.autode/knowledge/estate.yaml` records systems, environments and which connection or file feeds them. Each system has a **catalog** (`.autode/local/catalog/…`, git-ignored, rebuildable) holding the whole estate in tiers (names → structure → profile). Only the **working set** — what problems use, 200 tables by default — is mirrored into the ledger and graph; a task that needs a catalogued table promotes it. *Design §5.11–5.12.*
 
 ### 4.6 Context packs, gaps, grounding
 `buildContextPack({ purpose, query | seeds, maxTokens })` resolves seeds (deterministic retrieval with abbreviations, synonyms, the customer's vocabulary, comments, glossary), expands the graph neighbourhood, renders within a budget and reports **gaps** (missing keys, grains, joins). After generation, **grounding checks** resolve every identifier in the SQL against the estate and write a manifest next to the artifact. "What the Agent Saw" and "Explain This Artifact" show both. *Design §5.5–5.7.*
@@ -125,6 +125,9 @@ Imported Claude Agent Skills (`SKILL.md` folders) that run with real tools on an
 ### 4.10 The MCP server
 `dist/mcp-server.js` exposes the engine to other agents: primitives, Pipeline Spec, context tools (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), interview and reviewed-skill prompts, and resources. Read-only, no LLM calls, secrets redacted. *Design §10.6; setup: [mcp-setup.md](mcp-setup.md).*
 
+### 4.11 Where AutoDE keeps things
+`.autode/` holds AutoDE's working state, grouped by lifecycle: `problems/<id>/` (spec, plan, context documents, pack — committed), `knowledge/` (ledger, estate, sources, profiles, business context, vocabulary — committed), `config/` (skills, primitives, target environment — committed) and `local/` (active problem, chats, derived graph, catalog — never committed; AutoDE writes `.autode/.gitignore` for it). Generated deliverables go to the visible `autode-output/<problem-id>/` (setting `artifactDirectory`). Every path comes from `src/engine/workspaceLayout.ts`; never build one by hand. A workspace from before v0.36.0 (`.ai-context/`) is moved over on activation (`workspaceMigration.ts`). *Design §2.1–2.2.*
+
 ## 5. The main flows
 
 Each flow names its entry point; follow it in the code with the design section beside you.
@@ -136,10 +139,10 @@ Each flow names its entry point; follow it in the code with the design section b
 `webviewProvider.handleMessage('chat')` routes by state: no active business problem → the **interview**; a draft spec → **revision** of the draft; an approved spec → **grounded chat** with a `chat` pack. Slash commands (`/spec`, `/plan`, `/skill <id>[@<version>]`, `/settings` …) bypass the router. *Design §4.3, §4.8.*
 
 ### 5.3 Interview → specification
-`AgentHub.discoverNextAction()` runs the SpecOps interview over the bundled skills (`skills/*.json`, overridable in `.ai-context/skills/`), with an `interview` pack and what discovery already established (questions discovery answers are dropped). Synthesis drafts the spec (`specSynthesis.ts`); `SpecManager` persists and versions it. *Design §3.8–3.9.*
+`AgentHub.discoverNextAction()` runs the SpecOps interview over the bundled skills (`skills/*.json`, overridable in `.autode/config/skills/`), with an `interview` pack and what discovery already established (questions discovery answers are dropped). Synthesis drafts the spec (`specSynthesis.ts`); `SpecManager` persists and versions it. *Design §3.8–3.9.*
 
 ### 5.4 Spec → plan → execution
-Approve the spec and contexts → `generatePlanFromSpec()` (phase inference, planner LLM call, validation of the plan) → approve the plan → `executePlan()`: per step, refresh the working set, build a `step` pack, run the agent, write artifacts through `ArtifactWriter` under `artifacts/<phase>/<specId>.v<n>/`, run grounding checks, write the manifest. A changed approved spec mid-run pauses the plan. *Design §7.4, §5.7.*
+Approve the spec and contexts → `generatePlanFromSpec()` (phase inference, planner LLM call, validation of the plan) → approve the plan → `executePlan()`: per step, refresh the working set, build a `step` pack, run the agent, write artifacts through `ArtifactWriter` under `autode-output/<problem-id>/<phase>/<specId>.v<n>/`, run grounding checks, write the manifest. A changed approved spec mid-run pauses the plan. *Design §7.4, §5.7.*
 
 ### 5.5 Getting the estate in
 Two routes, same destination: a live connection (`ConnectionManager` → adapter → REST or CLI backend → `extractMetadata`) or a file (`Ingest File as Source Context`: DDL, CSV/JSON, legacy column dictionaries). Both go through `ContextFileManager`: into the catalog whole, into the working set as far as it fits, mirrored into the ledger, projected into the graph. *Design §5.9, §5.11–5.12, §6.*
@@ -221,6 +224,7 @@ The checklist the project follows for every phase:
 
 - **No `vscode` in `src/engine/**` or `src/mcp/**`.** Take what you need as a parameter. (Lint error.)
 - **No LLM calls in the engine's decisions or in the MCP server.** The LLM proposes; deterministic code validates, compiles and checks (P1, D5).
+- **Never build an `.autode/` path by hand.** Use `LAYOUT` / `layoutPath()` from `src/engine/workspaceLayout.ts`, so the extension, the engine and the MCP server agree.
 - **Never edit the graph or the ledger in place.** Append events (assert, supersede, retract, verify); the graph is rebuilt from them.
 - **Nothing an LLM produces becomes trusted on its own.** Proposed facts need a person; `verified` needs a probe; tool skills need a review.
 - **Probes and MCP responses never return row values** without explicit consent, and every outward string goes through `redact()`.
@@ -232,7 +236,7 @@ The checklist the project follows for every phase:
 
 Each recipe lists the touch points; the design section has the detail.
 
-**A Tier-2 primitive (no TypeScript).** Add `.ai-context/primitives/<kind>.yaml` (or `primitive-definitions/<kind>.yaml` to ship it) with `kind`, `version`, `status: draft`, `description`, `paramSchema`, `platformTemplates`, `previewParams` (template syntax: `src/engine/transforms/declarative/templateEngine.ts`). Preview it in the panel's Primitives section; publish it with `primitiveManagementEnabled` on. To have an agent offer it, add the kind to that agent's `candidateKinds`. It appears in the MCP server automatically. *Design §9.2, §9.5.*
+**A Tier-2 primitive (no TypeScript).** Add `.autode/config/primitives/<kind>.yaml` (or `primitive-definitions/<kind>.yaml` to ship it) with `kind`, `version`, `status: draft`, `description`, `paramSchema`, `platformTemplates`, `previewParams` (template syntax: `src/engine/transforms/declarative/templateEngine.ts`). Preview it in the panel's Primitives section; publish it with `primitiveManagementEnabled` on. To have an agent offer it, add the kind to that agent's `candidateKinds`. It appears in the MCP server automatically. *Design §9.2, §9.5.*
 
 **An agent.** Add the type to `AgentType` (`src/engine/types.ts`); write `execute<Name>(step, context)` under `src/agents/<phase>/`; register it in `AGENT_EXECUTORS`, `VALID_AGENT_TYPES` and `AGENT_PHASE` (`agentHub.ts`) and the planner's allowed list; return artifacts in `result.artifacts`; add a test. Prefer a primitive path with LLM fallback (`llmParamSelector.ts`). *Design §7.2.*
 
@@ -266,14 +270,13 @@ Open items worth knowing before you change things. The roadmap's backlog is the 
 | R8 | The AutoDE Dashboard panel is stale and parked. | `panel.html`, `panelProvider.ts` | Retire or rewire later (product decision). |
 | R9 | Context gaps don't pause steps yet; extracted chat facts don't reach the ledger. | context layer | C4b (Context Inbox). |
 | R10 | The extension still calls the engine in-process; only external agents use the MCP server. | `src/core`, `src/mcp` | Phase 5. |
-| R11 | Edits to `.ai-context/context/business-context.yaml` aren't picked up live. | watchers | Reload the window; open item. |
 
 ## 11. Your first week
 
 | Day | Do | You'll understand |
 |---|---|---|
 | 1 | Read §1–§4 of this guide and requirements.md §1–§2. Build, run `npm test`, F5 into a scratch workspace. | What AutoDE is and the rules it lives by. |
-| 2 | Run [manual-verification.md](manual-verification.md) Parts 1, 5 and 6 with Copilot or an API provider; watch `.ai-context/` fill. | The interview, the ledger, packs. |
+| 2 | Run [manual-verification.md](manual-verification.md) Parts 1, 5 and 6 with Copilot or an API provider; watch `.autode/` fill. | The interview, the ledger, packs. |
 | 3 | Read `types.ts`, `extension.ts`, then `agentHub.ts` (`generatePlanFromSpec`, `executePlan`). Run Part 7. | Orchestration and gates. |
 | 4 | Read the context-layer core (§6 items 5–8) beside technical-design §5. Run `npm run eval` and read the report. | Grounding, and how AutoDE is measured. |
 | 5 | Read the roadmap and the next phase's spec. Pick a small backlog item or a test gap and ship it through §7.4. | The way the project works. |
@@ -288,7 +291,9 @@ Open items worth knowing before you change things. The roadmap's backlog is the 
 
 **Why won't my imported skill run?** It hasn't been reviewed, it changed since it was reviewed, it's a draft/deprecated/retired, or it's reviewed (not trusted) and you're on the `claude` provider. The error says which.
 
-**Where do artifacts go?** `.ai-context/problems/<id>/artifacts/<phase>/<specId>.v<n>/`, each with a `.grounding.json` manifest.
+**Where do artifacts go?** `autode-output/<problem-id>/<phase>/<specId>.v<n>/`, each with a `.grounding.json` manifest. AutoDE's own state is in `.autode/` (§4.11).
+
+**I opened an old workspace and `.ai-context/` disappeared.** v0.36.0 moved it to `.autode/` (and its artifacts to `autode-output/`) on activation and said so in a notification; commit the move. Anything it didn't recognise stays in `.ai-context/`.
 
 **Can I add a dependency?** Only with a recorded decision (licence, size, why no alternative) — P6. Everything ships bundled.
 

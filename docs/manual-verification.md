@@ -1,10 +1,10 @@
-# Manual verification — v0.25.0 to v0.35.0
+# Manual verification — v0.25.0 to v0.36.0
 
-Hands-on checks for the features shipped in v0.25.0–v0.35.0, run in the VS Code Extension Development Host. Each check gives **Do** and **Expect**; tick the box when it holds, and note anything that doesn't in the results table at the end.
+Hands-on checks for the features shipped in v0.25.0–v0.36.0, run in the VS Code Extension Development Host. Each check gives **Do** and **Expect**; tick the box when it holds, and note anything that doesn't in the results table at the end.
 
 Automated coverage already exists (`npm test`, `npm run eval`); these checks cover what only a real VS Code session shows: the panel, prompts, commands, file watching and real LLM providers.
 
-Time: about 90 minutes for Parts 1–8, of which Part 7 (a full plan run) takes the longest, plus about 60 minutes for Parts 9–12. Parts can be done in any order after Part 0; Part 12.2–12.4 reuse the workspace of Part 10.
+Time: about 90 minutes for Parts 1–8, of which Part 7 (a full plan run) takes the longest, plus about 60 minutes for Parts 9–12 and 20 minutes for Part 13. Parts can be done in any order after Part 0; Part 12.2–12.4 reuse the workspace of Part 10.
 
 ---
 
@@ -13,14 +13,14 @@ Time: about 90 minutes for Parts 1–8, of which Part 7 (a full plan run) takes 
 1. **Build.** In the AutoDE repo: `rm -rf dist && npm run compile`.
 2. **Make a scratch workspace** outside the repo, e.g. `D:\autode-manual-test\`, and copy into it:
    - `test/reference/retail-orders/sources/shop.ddl`, `crm.ddl`, `hr_legacy.ddl` → `D:\autode-manual-test\sources\`
-   - `test/reference/retail-orders/documents/business-context.yaml` → `D:\autode-manual-test\.ai-context\context\business-context.yaml`
+   - `test/reference/retail-orders/documents/business-context.yaml` → `D:\autode-manual-test\.autode\knowledge\business-context.yaml`
 3. **Launch.** Press F5 in the repo ("Run Extension (Development Host)"). In the new window, **File → Open Folder…** the scratch workspace.
 4. **Open the AutoDE panel** (AutoDE icon in the activity bar). Log lines appear as small grey messages in the chat stream; most "Expect" items below refer to those.
 5. **Choose an LLM provider** with `/settings` in the chat box. Parts 4 and 7 need a working provider; use Copilot if it is available, plus one API provider (OpenAI, Anthropic, Gemini or Ollama) for Part 4.
-6. Keep the Explorer open on `.ai-context/`; several checks look at files there.
+6. Keep the Explorer open on `.autode/`; several checks look at files there.
 7. **Where commands are:** every step written as "`AutoDE: …`" is a VS Code command, run from the **Command Palette** (Ctrl+Shift+P, type part of the name) **in the Development Host window**. Most have no button in the AutoDE panel. Steps written as `/something` are typed into the AutoDE chat box.
 
-> **Known gap found while writing this:** edits to `.ai-context/context/business-context.yaml` are not picked up live (that folder isn't watched for business context, and `AutoDE: Re-index Context` only shows a message). Where a step edits that file, it says to run **Developer: Reload Window** afterwards.
+> **Fixed in v0.36.0:** edits to `.autode/knowledge/business-context.yaml` now take effect without a reload (before, that file wasn't watched). Steps below that say to reload after editing it still work; the reload is no longer needed.
 
 ---
 
@@ -29,7 +29,7 @@ Time: about 90 minutes for Parts 1–8, of which Part 7 (a full plan run) takes 
 Needs a business problem with a spec. Create one quickly: in chat, `/spec Daily net revenue reporting in Snowflake from the shop orders system`, then wait for the draft.
 
 - [ ] **1.1 External edit is picked up.**
-  Do: open `.ai-context/problems/<problem>/spec/business-problem.yaml` in the editor, change the `problemStatement` text, save.
+  Do: open `.autode/problems/<problem>/spec/business-problem.yaml` in the editor, change the `problemStatement` text, save.
   Expect: within a second the panel's specification view shows the new text. No AutoDE save overwrites it.
 - [ ] **1.2 A stale save asks instead of overwriting.**
   Do: in the same file, break the YAML on purpose (e.g. delete a closing quote) and save. Then make AutoDE save the spec (e.g. `/spec add a requirement for hourly freshness`, or click Approve).
@@ -78,7 +78,7 @@ CREATE TABLE names per file. Do not create or modify any file.
 ```
 
 - [ ] **4.1 Import.** Do: Command Palette → `AutoDE: Import Tool Skill`; in the folder picker select the `table-lister` **folder** (not `SKILL.md` itself) and click "Import as a tool skill".
-  Expect: it lands under `.ai-context/skills/tool-skills/table-lister/`.
+  Expect: it lands under `.autode/config/skills/tool-skills/table-lister/`.
 - [ ] **4.2 Runs on Copilot.** Do: with Copilot active, chat `/skill table-lister list the tables`.
   Expect: a reply listing the `shop`, `crm` and `hr_legacy` tables. No write tool was offered (nothing created in the workspace).
 - [ ] **4.3 Runs on an API provider.** Do: switch provider (`/settings`) to OpenAI/Anthropic/Gemini/Ollama, repeat 4.2.
@@ -91,16 +91,16 @@ CREATE TABLE names per file. Do not create or modify any file.
 ## Part 5 — v0.29.0 Assertion ledger
 
 - [ ] **5.1 First load migrates into the ledger.**
-  Do: open `.ai-context/ledger/`.
+  Do: open `.autode/knowledge/ledger/`.
   Expect: a file named `<date>.<26-char id>.jsonl`; each line is an event (`"type":"asserted"`). The four glossary terms and two rules from `business-context.yaml` are there.
 - [ ] **5.2 DDL import keeps schemas apart.**
   Do: `AutoDE: Ingest File as Source Context (CSV/JSON/DDL)` three times: `sources/shop.ddl`, `crm.ddl`, `hr_legacy.ddl`.
-  Expect: "Ingested shop.ddl: 10 table(s), 72 column(s)", "crm.ddl: 8 table(s), 50 column(s)". Open `.ai-context/derived/graph.json` and search `"fqn": "shop.customers"` and `"fqn": "crm.customers"`: both exist as separate nodes. `shop.orders` has a `channel` column (it was lost before v0.30.0).
+  Expect: "Ingested shop.ddl: 10 table(s), 72 column(s)", "crm.ddl: 8 table(s), 50 column(s)". Open `.autode/local/derived/graph.json` and search `"fqn": "shop.customers"` and `"fqn": "crm.customers"`: both exist as separate nodes. `shop.orders` has a `channel` column (it was lost before v0.30.0).
 - [ ] **5.3 Nodes carry their support.**
   Do: in `derived/graph.json`, look at any table node.
   Expect: `"supportedBy": ["01…"]` and `"origin": { …, "confidence": 0.8 }` (file-derived = documented). The id matches an `asserted` event in the ledger.
 - [ ] **5.4 An edit supersedes, history is kept.**
-  Do: in `.ai-context/context/business-context.yaml`, change the Revenue `formula` (e.g. add `- SUM(refunds.amount)`), save, run **Developer: Reload Window**.
+  Do: in `.autode/knowledge/business-context.yaml`, change the Revenue `formula` (e.g. add `- SUM(refunds.amount)`), save, run **Developer: Reload Window**.
   Expect: log "Context ledger: … 1 superseded …" (some "asserted" too on the first reload after 5.2 — the glossary links to the now-ingested tables are new). A new ledger file has an `asserted` event with `"supersedes"` and a `superseded` event; the original `asserted` line is still in the older file.
 - [ ] **5.5 A contradiction is detected.**
   Do: add a second entry to `business-terms` in the same file — `term: Revenue`, `formula: SUM(order_items.unit_price)` — save, reload the window.
@@ -143,10 +143,10 @@ Uses real LLM calls (one per step plus spec and plan). Continue with the problem
   Do: `AutoDE: What the Agent Saw`; open two different "Plan step sN (…)" entries.
   Expect: different seeds and tables per step, matching each step's task text; no `hr_legacy` tables in any step.
 - [ ] **7.2 Every artifact has a manifest.**
-  Do: open `.ai-context/problems/<problem>/artifacts/`.
+  Do: open `autode-output/<problem>/`.
   Expect: beside each generated file a `<file>.grounding.json` with `planStepId`, `packId`, `agent`, `model`, `specRevision`, `assertions` and `grounding`. Each artifact appears only once in the panel's artifact list.
 - [ ] **7.3 Grounding Report.**
-  Do: open `artifacts/04-validate/…/grounding-report.md`.
+  Do: open `autode-output/<problem>/04-validate/…/grounding-report.md`.
   Expect: the metrics table (identifier grounding, decision backing, unbacked decisions, STRICT rule violations, context gaps), one row per artifact, and the STRICT rules needing manual review.
 - [ ] **7.4 Explain This Artifact.**
   Do: open a generated `.sql` file, run `AutoDE: Explain This Artifact`.
@@ -176,7 +176,7 @@ Uses real LLM calls (one per step plus spec and plan). Continue with the problem
   Save, then import `sources/shop.ddl`, `sources/crm.ddl` and `sources/shop_dev.ddl` (Command Palette → `AutoDE: Ingest File as Source Context`), accepting the suggested system each time.
   Expect: the suggestion for each file shows its bound system and environment.
 - [ ] **8.2 Same names stay apart.**
-  Do: open `.ai-context/derived/graph.json`.
+  Do: open `.autode/local/derived/graph.json`.
   Expect: `obj:shop/prod/ref.currency_codes` and `obj:crm/prod/ref.currency_codes` with different columns; `obj:shop/prod/shop.orders` and `obj:shop/dev/shop.orders`, the dev one with `gift_wrap`.
 - [ ] **8.3 Legacy dictionary.**
   Do: import `sources/legacy/edw_dbc_columns.csv` as a new system `edw-dbc-columns` (suggested).
@@ -194,12 +194,12 @@ Use a fresh scratch workspace with `sources/shop.ddl` and `sources/crm.ddl` copi
 
 - [ ] **9.1 Imports beyond the working set are catalogued, not mirrored.**
   Do: in the Development Host's settings set `autoDataEngineeringHub.context.workingSetMaxTables` to `5`. Import `sources/shop.ddl` (`AutoDE: Ingest File as Source Context`).
-  Expect: log "Catalogued 11 table(s); 5 in the working set (limit 5)…". `.ai-context/catalog/shop/<environment>/catalog.json` exists, and `.ai-context/catalog/` holds its own `.gitignore`.
+  Expect: log "Catalogued 11 table(s); 5 in the working set (limit 5)…". `.autode/local/catalog/shop/<environment>/catalog.json` exists, and `.autode/local/catalog/` holds its own `.gitignore`.
 - [ ] **9.2 A task pulls a catalogued table in.**
   Do: ask in chat "Which table records refunds?", then run `AutoDE: What the Agent Saw`.
   Expect: the answer names `shop.refunds`. The pack lists it, and the log shows "Working set: … table(s) promoted from the catalog."
 - [ ] **9.3 The customer's vocabulary.**
-  Do: copy `test/reference/retail-orders/documents/vocabulary.yaml` to `.ai-context/context/vocabulary.yaml`, import `sources/crm.ddl`, run **Developer: Reload Window**, then ask "Which patrons are in which engagement?"
+  Do: copy `test/reference/retail-orders/documents/vocabulary.yaml` to `.autode/knowledge/vocabulary.yaml`, import `sources/crm.ddl`, run **Developer: Reload Window**, then ask "Which patrons are in which engagement?"
   Expect: What the Agent Saw shows the CRM customer and campaign tables among the seeds.
 - [ ] **9.4 Reset.** Set `workingSetMaxTables` back to its default (200).
 
@@ -212,7 +212,7 @@ Needs an active business problem: in chat, `/spec Customer 360 merge of the shop
   Expect: one "Added … to the business-problem pack (…)" line per document; the problem folder has `pack/pack.yaml` listing all four.
 - [ ] **10.2 A house-format contract gets a reading profile proposed, not applied.**
   Do: `AutoDE: Apply Business-Problem Pack`.
-  Expect: for the contract, "AutoDE proposed a reading profile. Check it, set "status: confirmed"…"; a new file under `.ai-context/profiles/`. The BRD reports "N fact(s) proposed for review" with a working LLM, or says it needs one. The samples report "registered as a sample — probes will use it."
+  Expect: for the contract, "AutoDE proposed a reading profile. Check it, set "status: confirmed"…"; a new file under `.autode/knowledge/profiles/`. The BRD reports "N fact(s) proposed for review" with a working LLM, or says it needs one. The samples report "registered as a sample — probes will use it."
 - [ ] **10.3 Confirm the profile; clauses become expectations.**
   Do: compare the proposed profile with `test/reference/retail-orders/documents/pack/profile.house-contract.yaml`, correct it if needed, set `status: confirmed`, save, and apply the pack again.
   Expect: "read with profile … — 7 new clause(s), 0 changed, 0 removed".
@@ -227,7 +227,7 @@ Needs an active business problem: in chat, `/spec Customer 360 merge of the shop
   Expect: one ✓/✗ line per claim AutoDE could check, ending "Probes: N verified, M failed (now under review), K not verified". Claims about tables with neither a live connection nor a sample in the pack stay "not verified". Every detail is a count or rate, never a row value. (Chat statements such as "member_id is the key" become claims only with C4b.)
 - [ ] **10.7 Vocabulary capture.**
   Do: add `docs/glossary.md` to the pack (role `data_dictionary`, `draft`), then run `AutoDE: Propose Vocabulary`.
-  Expect: with a working LLM, single-word entries such as "complaint means ticket" and "parcel means shipment"; never a multi-word phrase. Accepting them writes `.ai-context/context/vocabulary.yaml` and logs "retrieval re-indexed".
+  Expect: with a working LLM, single-word entries such as "complaint means ticket" and "parcel means shipment"; never a multi-word phrase. Accepting them writes `.autode/knowledge/vocabulary.yaml` and logs "retrieval re-indexed".
 - [ ] **10.8 The interview skips what discovery knows.**
   Do: `/spec` a new problem about `shop.customers` and answer the interview until it asks about keys.
   Expect: no question about the key of a table whose DDL declares one; the log says which question was dropped and why.
@@ -253,7 +253,7 @@ Read README.md and summarise it in three bullet points.
   Do: choose **Reviewed (read-only)**, then run the skill on an API provider or Copilot, and again with provider `claude`.
   Expect: the first run works without any write prompt. The `claude` run is refused: "…is reviewed, not trusted: it cannot run through Claude Code…".
 - [ ] **11.4 Changed content loses its trust.**
-  Do: edit the imported `.ai-context/skills/tool-skills/reader/SKILL.md` (add a line) and run it.
+  Do: edit the imported `.autode/config/skills/tool-skills/reader/SKILL.md` (add a line) and run it.
   Expect: "changed since it was reviewed". Reviewing it again restores it. `.autode-skill.json` lists every transition.
 - [ ] **11.5 Lifecycle (optional).**
   Do: set `autoDataEngineeringHub.toolSkillManagementEnabled` to true. Import a second skill, review it, `AutoDE: Publish Tool Skill`, edit it, publish again, `AutoDE: Deprecate Tool Skill`. Then `/skill <id>@1 do something`.
@@ -276,6 +276,24 @@ Read README.md and summarise it in three bullet points.
 - [ ] **12.5 The package builds and installs.**
   Do: in the repo, `npx vsce package --no-dependencies`. In a normal VS Code window (not the Development Host), run **Extensions: Install from VSIX…** with the result, and reload.
   Expect: a VSIX of about 480 KB. The extension shows the new icon in the Extensions view and the single-colour glyph in the activity bar; the panel opens; `AutoDE: Run Tool Skill` works (it needs `ajv` and `yaml`, which earlier packages lacked). Uninstall it afterwards if you keep using the Development Host.
+
+## Part 13 — v0.36.0 `.autode/` layout, visible deliverables, migration
+
+- [ ] **13.1 An old workspace is moved over.**
+  Do: take a workspace used with v0.35.0 or earlier (it has `.ai-context/`; Part 10's is ideal) and commit it if it is a repository. Open it with this build.
+  Expect: a notification "AutoDE now keeps its working state in .autode/ … Moved N file(s) …". `.ai-context/` is gone (or holds only what was listed as not recognised). `.autode/` has `problems/`, `knowledge/` (ledger, estate.yaml, profiles, business-context.yaml …), `config/` (skills, target-environment.yaml), `local/` and a `.gitignore` containing `local/`. Generated artifacts are under `autode-output/<problem-id>/`.
+- [ ] **13.2 Nothing is lost.**
+  Do: run `git status` and `git diff -M --stat`; then ask a chat question about a table and run `AutoDE: What the Agent Saw`; open an artifact and run `AutoDE: Explain This Artifact`.
+  Expect: git shows renames, no content changes (`local/` contents are no longer listed — they are ignored now). The pack and the explanation show the same facts as before; nothing new is "needs review".
+- [ ] **13.3 A fresh workspace starts in the new layout.**
+  Do: open an empty folder, `/spec` a problem, run a plan step that writes an artifact.
+  Expect: only `.autode/` and `autode-output/` appear; the artifact is under `autode-output/<problem-id>/<phase>/<specId>.v1/`; `📂 Open .autode` in the context drawer opens `.autode/`; "open artifacts folder" opens the problem's output folder.
+- [ ] **13.4 Business context edits apply live.**
+  Do: edit `.autode/knowledge/business-context.yaml` (add a term), save, wait a second, ask about the term.
+  Expect: the term is known without reloading the window.
+- [ ] **13.5 The output folder setting.**
+  Do: set `autoDataEngineeringHub.artifactDirectory` to `deliverables`, run a step; then set it to `../outside`.
+  Expect: the first run writes to `deliverables/<problem-id>/…`; the second falls back to `autode-output/` (paths that leave the workspace are refused).
 
 ## Results
 
@@ -338,5 +356,10 @@ Read README.md and summarise it in three bullet points.
 | 12.3 |  |  |
 | 12.4 |  |  |
 | 12.5 |  |  |
+| 13.1 |  |  |
+| 13.2 |  |  |
+| 13.3 |  |  |
+| 13.4 |  |  |
+| 13.5 |  |  |
 
-For a failure, the most useful notes are: the log lines around it, the relevant `.ai-context` file, and for packs the What the Agent Saw document.
+For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

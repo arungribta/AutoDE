@@ -18,7 +18,7 @@ import { DEFAULT_ENVIRONMENT, catalogWatermarks, edgeId, parseObjectId, slugifyI
  * a problem uses. Measured on the 2 000-table fixture, mirroring every column
  * into the ledger costs ~390 MB of extension-host memory; the catalog holds
  * the same estate in a fraction of that and is rebuildable (git-ignored JSON
- * under `.ai-context/catalog/<system>/<environment>/`).
+ * under `.autode/local/catalog/<system>/<environment>/`).
  *
  * Retrieval over the catalog is a ranked full-text index of concepts (see
  * `vocabulary.ts`) over names, comments, glossary aliases and column names.

@@ -12,6 +12,7 @@ import { createSubjectResolver, isMirror } from '../engine/context/projection';
 import { isLive } from '../engine/context/assertions';
 import { TableNode } from '../engine/context/types';
 import { writeFileAtomic, nodeFileIo } from '../engine/context/contextStore';
+import { layoutPath } from '../engine/workspaceLayout';
 
 /** One structured LLM call: system + user prompt in, parsed JSON out. */
 export type CompleteJson = (system: string, user: string, purpose: string) => Promise<unknown>;
@@ -30,7 +31,7 @@ const STRUCTURED = /\.(ya?ml|json)$/i;
 /**
  * The business-problem pack of the active problem (Phase C4a): its documents
  * (`<problem>/pack/pack.yaml`), the interpretation profiles that read them
- * (`.ai-context/profiles/`), and what they contribute — contract clauses,
+ * (`.autode/knowledge/profiles/`), and what they contribute — contract clauses,
  * extracted proposals, samples for probes, conformance reports and
  * vocabulary proposals. The context layer's ledger is the record.
  */
@@ -49,7 +50,7 @@ export class BusinessPackManager {
 
   private get cfm(): ContextFileManager { return this.cfmOf(); }
   private get packFile(): string { return path.join(this.packDir, 'pack.yaml'); }
-  private get profilesDir(): string { return path.join(this.workspaceRoot, '.ai-context', 'profiles'); }
+  private get profilesDir(): string { return layoutPath(this.workspaceRoot, 'profiles'); }
 
   public async load(): Promise<void> {
     this.pack = fs.existsSync(this.packFile) ? parsePack(fs.readFileSync(this.packFile, 'utf8')) : emptyPack();
@@ -202,7 +203,7 @@ export class BusinessPackManager {
 
   /** Vocabulary proposals: mined from catalog names and comments, plus the LLM's reading of the pack's documents when available. */
   public async proposeVocabulary(): Promise<VocabularyProposal[]> {
-    const file = path.join(this.workspaceRoot, '.ai-context', 'context', 'vocabulary.yaml');
+    const file = layoutPath(this.workspaceRoot, 'vocabulary');
     const vocab = buildVocabulary(parseVocabularyFile(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined));
     const items = this.cfm.getCatalog().all().flatMap((e) => [{ name: e.table.label, comment: e.table.description }, ...(e.columns ?? []).map((c) => ({ name: c.label, comment: c.description }))]);
     const proposals = mineAbbreviations(items, vocab);
@@ -221,11 +222,11 @@ export class BusinessPackManager {
     return proposals;
   }
 
-  /** Writes accepted proposals to `.ai-context/context/vocabulary.yaml` and re-indexes. */
+  /** Writes accepted proposals to `.autode/knowledge/vocabulary.yaml` and re-indexes. */
   public async acceptVocabulary(accepted: readonly VocabularyProposal[]): Promise<void> {
     if (!accepted.length) return;
-    const dir = path.join(this.workspaceRoot, '.ai-context', 'context');
-    const file = path.join(dir, 'vocabulary.yaml');
+    const file = layoutPath(this.workspaceRoot, 'vocabulary');
+    const dir = path.dirname(file);
     fs.mkdirSync(dir, { recursive: true });
     await writeFileAtomic(nodeFileIo, file, mergeVocabularyFile(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined, accepted));
     await this.cfm.reloadVocabulary();

@@ -147,9 +147,9 @@ async function main() {
 
     // ── Scenario E: estate identity (Phase K1) — the same table names in two systems,
     // and in dev and prod of one system, plus a legacy dictionary export ──
-    fs.mkdirSync(path.join(scratch, 'estate', '.ai-context', 'context'), { recursive: true });
+    fs.mkdirSync(path.join(scratch, 'estate', '.autode', 'knowledge'), { recursive: true });
     // Phase K2: the acquired CRM team's vocabulary, where an engineer would record it.
-    fs.copyFileSync(path.join(REF, 'documents', 'vocabulary.yaml'), path.join(scratch, 'estate', '.ai-context', 'context', 'vocabulary.yaml'));
+    fs.copyFileSync(path.join(REF, 'documents', 'vocabulary.yaml'), path.join(scratch, 'estate', '.autode', 'knowledge', 'vocabulary.yaml'));
     const sutE = createSut({ provider: args.provider });
     const estateFiles = ['shop.ddl', 'crm.ddl', 'shop_dev.ddl', 'legacy/edw_dbc_columns.csv'];
     await sutE.setup({ workspaceDir: path.join(scratch, 'estate'), referenceDir: REF, sourceOrder: estateFiles,
@@ -195,7 +195,7 @@ async function main() {
       fs.copyFileSync(path.join(REF, 'documents', 'pack', 'glossary.md'), path.join(wsE, 'docs', 'glossary.md'));
       const standIn = JSON.parse(fs.readFileSync(path.join(REF, 'documents', 'pack', 'vocabulary-proposal.offline.json'), 'utf8'));
       const complete = llmComplete(args, dist) || (async () => standIn);
-      const pm = new BusinessPackManager(path.join(wsE, '.ai-context', 'problems', 'eval', 'pack'), wsE, () => cfmE, () => {}, complete);
+      const pm = new BusinessPackManager(path.join(wsE, '.autode', 'problems', 'eval', 'pack'), wsE, () => cfmE, () => {}, complete);
       await pm.load();
       await pm.addDocument({ path: 'docs/glossary.md', role: 'data_dictionary', authority: 'draft', version: '1' });
       const proposals = (await pm.proposeVocabulary()).filter((p) => p.source === 'llm');
@@ -343,7 +343,7 @@ async function measureLargeEstate(dist, scratch) {
   const { ContextFileManager } = dist('context/ContextFileManager.js');
   const { parseFile } = dist('engine/context/fileIngestion.js');
   const dir = path.join(scratch, 'large');
-  fs.mkdirSync(path.join(dir, '.ai-context'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.autode', 'knowledge'), { recursive: true });
   const estate = generateLargeEstate();
   gc();
   const heap0 = process.memoryUsage().heapUsed;
@@ -406,8 +406,8 @@ async function measureLargeEstate(dist, scratch) {
     parseMaxMs: Math.round(parseMaxMs),
     packMaxMs,
     longestSyncMs: Math.max(parseMaxMs, packMaxMs, ...Object.values(stages).map((s) => s.maxBlockMs)),
-    catalogKB: Math.round(bytes(path.join(dir, '.ai-context', 'catalog')) / 1024),
-    ledgerKB: Math.round(bytes(path.join(dir, '.ai-context', 'ledger')) / 1024),
+    catalogKB: Math.round(bytes(path.join(dir, '.autode', 'local', 'catalog')) / 1024),
+    ledgerKB: Math.round(bytes(path.join(dir, '.autode', 'knowledge', 'ledger')) / 1024),
     packs
   };
 }
@@ -428,7 +428,7 @@ function llmComplete(args, dist) {
  */
 async function measurePack({ createSut, args, scratch, dist, load, router }) {
   const ws = path.join(scratch, 'pack');
-  fs.mkdirSync(path.join(ws, '.ai-context', 'profiles'), { recursive: true });
+  fs.mkdirSync(path.join(ws, '.autode', 'knowledge', 'profiles'), { recursive: true });
   fs.mkdirSync(path.join(ws, 'docs'), { recursive: true });
   const sut = createSut({ provider: args.provider });
   await sut.setup({ workspaceDir: ws, referenceDir: REF, sourceOrder: ['shop.ddl', 'crm.ddl'], identities: { 'shop.ddl': { system: 'shop', environment: 'prod' }, 'crm.ddl': { system: 'crm', environment: 'prod' } } });
@@ -438,14 +438,14 @@ async function measurePack({ createSut, args, scratch, dist, load, router }) {
   const { filterInterviewQuestions } = dist('engine/context/discoveryGaps.js');
   const expected = load('documents/pack/expected.yaml');
   const copy = (from, to) => fs.copyFileSync(path.join(REF, from), path.join(ws, to));
-  copy('documents/pack/profile.house-contract.yaml', '.ai-context/profiles/house-contract.yaml');
+  copy('documents/pack/profile.house-contract.yaml', '.autode/knowledge/profiles/house-contract.yaml');
   copy('documents/pack/customer-contract.v1.yaml', 'docs/customer-contract.yaml');
   copy('documents/pack/brd.md', 'docs/brd.md');
   copy('sources/samples/shop_customers.csv', 'docs/shop_customers.csv');
   copy('sources/samples/crm_customers.csv', 'docs/crm_customers.csv');
   const complete = llmComplete(args, dist);
   void router;
-  const pm = new BusinessPackManager(path.join(ws, '.ai-context', 'problems', 'eval', 'pack'), ws, () => cfm, () => {}, complete);
+  const pm = new BusinessPackManager(path.join(ws, '.autode', 'problems', 'eval', 'pack'), ws, () => cfm, () => {}, complete);
   await pm.load();
   await pm.addDocument({ path: 'docs/customer-contract.yaml', role: 'contract', authority: 'signed', version: '1' });
   await pm.addDocument({ path: 'docs/brd.md', role: 'brd', authority: 'draft', version: '1' });

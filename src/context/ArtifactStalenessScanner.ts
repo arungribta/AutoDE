@@ -39,7 +39,7 @@ export interface ArtifactStalenessReport {
 const MAX_SAMPLE_FILES = 5;
 
 export async function scanArtifactStaleness(
-  workspaceRoot: vscode.Uri,
+  problemRoot: vscode.Uri,
   currentSpec?: { id: string; version: number }
 ): Promise<ArtifactStalenessReport> {
   const report: ArtifactStalenessReport = {
@@ -49,7 +49,7 @@ export async function scanArtifactStaleness(
     untaggedFileCount: 0
   };
 
-  const artifactRoot = ArtifactWriter.resolveArtifactDirectory(workspaceRoot);
+  const artifactRoot = ArtifactWriter.resolveArtifactDirectory(problemRoot);
   let phaseDirs: [string, vscode.FileType][];
   try {
     phaseDirs = await vscode.workspace.fs.readDirectory(artifactRoot);

@@ -10,7 +10,7 @@ import { parseYaml, stringifyYaml } from './Yaml';
  * later versions of the document — so a new version yields a precise diff.
  *
  * Paths are dot-separated keys relative to the current object; `each` paths
- * name an array. Stored as `.ai-context/profiles/<id>.yaml`.
+ * name an array. Stored as `.autode/knowledge/profiles/<id>.yaml`.
  */
 
 /** A yes/no value in the document: true when the value (lower-cased) is one of `yes`. */

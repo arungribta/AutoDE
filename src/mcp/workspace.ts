@@ -16,12 +16,13 @@ import { registerPrimitiveVersion, registerPrimitives, resetDeclarativePrimitive
 import { loadSkillsFromDirectory } from '../engine/skills/skillRegistry';
 import { ToolSkillState, loadToolSkillStates } from '../engine/skills/lifecycle';
 import { SkillDefinition } from '../engine/types';
+import { LayoutKey, layoutPath } from '../engine/workspaceLayout';
 import { EngineToolError } from './errors';
 
 /**
- * What the MCP server reads from a workspace — `.ai-context/**` and the
+ * What the MCP server reads from a workspace — `.autode/**` and the
  * extension's bundled resources — strictly read-only (docs/mcp-engine-
- * requirements.md §5, §8: the server gets no write access to `.ai-context/`).
+ * requirements.md §5, §8: the server gets no write access to `.autode/`).
  *
  * Each source is re-read only when its files change (path + size + mtime),
  * so a long-running server follows edits made by the extension or by hand.
@@ -70,10 +71,14 @@ export class EngineWorkspace {
   private cachedSources: ContextPackSources | undefined;
 
   public constructor(public readonly options: WorkspaceOptions) {
-    this.contextDir = path.join(options.workspaceRoot, '.ai-context');
+    this.contextDir = layoutPath(options.workspaceRoot, 'root');
   }
 
   // ── Paths ────────────────────────────────────────────────────────────────
+
+  private at(key: LayoutKey, ...more: string[]): string {
+    return layoutPath(this.options.workspaceRoot, key, ...more);
+  }
 
   /** A workspace-relative path, refused if it escapes the workspace. */
   public resolveInWorkspace(rel: string): string {
@@ -87,7 +92,7 @@ export class EngineWorkspace {
 
   public activeProblemId(): string | undefined {
     try {
-      const raw = JSON.parse(fs.readFileSync(path.join(this.contextDir, 'active-problem.json'), 'utf8')) as { problemId?: string };
+      const raw = JSON.parse(fs.readFileSync(this.at('activeProblem'), 'utf8')) as { problemId?: string };
       return typeof raw.problemId === 'string' && /^[A-Za-z0-9_.-]+$/.test(raw.problemId) ? raw.problemId : undefined;
     } catch {
       return undefined;
@@ -96,7 +101,7 @@ export class EngineWorkspace {
 
   public problemRoot(): string | undefined {
     const id = this.activeProblemId();
-    return id ? path.join(this.contextDir, 'problems', id) : undefined;
+    return id ? this.at('problems', id) : undefined;
   }
 
   /** The active problem's document for a resource key, if it exists on disk. */
@@ -128,7 +133,7 @@ export class EngineWorkspace {
   /** Registers bundled + workspace Tier-2 definitions (and archived revisions for pins) into the engine registry, when they changed. */
   public ensurePrimitives(): void {
     const bundledDir = path.join(this.options.resourcesRoot, 'primitive-definitions');
-    const overrideDir = path.join(this.contextDir, 'primitives');
+    const overrideDir = this.at('primitives');
     const key = fingerprint([bundledDir, overrideDir]);
     if (key === this.primitivesKey) return;
     resetDeclarativePrimitives();
@@ -156,18 +161,18 @@ export class EngineWorkspace {
 
   // ── Skills ───────────────────────────────────────────────────────────────
 
-  /** Interview skills: bundled, overridden by the workspace's `.ai-context/skills/*.json` by id. */
+  /** Interview skills: bundled, overridden by the workspace's `.autode/config/skills/*.json` by id. */
   public interviewSkills(): SkillDefinition[] {
     const byId = new Map<string, SkillDefinition>();
     for (const s of loadSkillsFromDirectory(path.join(this.options.resourcesRoot, 'skills'))) byId.set(s.id, s);
-    const overrideDir = path.join(this.contextDir, 'skills');
+    const overrideDir = this.at('skills');
     if (fs.existsSync(overrideDir)) for (const s of loadSkillsFromDirectory(overrideDir)) byId.set(s.id, s);
     return [...byId.values()].sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1));
   }
 
   /** Imported tool skills with their S2 state — never migrated here (the server does not write). */
   public toolSkills(): ToolSkillState[] {
-    return loadToolSkillStates(path.join(this.contextDir, 'skills', 'tool-skills'), 'mcp', { migrate: false });
+    return loadToolSkillStates(this.at('toolSkills'), 'mcp', { migrate: false });
   }
 
   // ── Context layer ────────────────────────────────────────────────────────
@@ -189,10 +194,10 @@ export class EngineWorkspace {
    * only: nothing is promoted into the working set and nothing is saved.
    */
   public async contextSources(): Promise<ContextPackSources> {
-    const ledgerDir = path.join(this.contextDir, 'ledger');
-    const catalogDir = path.join(this.contextDir, 'catalog');
-    const vocabFiles = [path.join(this.contextDir, 'context', 'vocabulary.yaml'), path.join(this.contextDir, 'vocabulary.yaml')];
-    const key = fingerprint([ledgerDir, catalogDir, ...vocabFiles, path.join(this.contextDir, 'active-problem.json'), this.problemDocument('spec/business-problem') ?? '']);
+    const ledgerDir = this.at('ledger');
+    const catalogDir = this.at('catalog');
+    const vocabFiles = [this.at('vocabulary')];
+    const key = fingerprint([ledgerDir, catalogDir, ...vocabFiles, this.at('activeProblem'), this.problemDocument('spec/business-problem') ?? '']);
     if (this.cachedSources && key === this.contextKey) return this.cachedSources;
 
     const ledger = new AssertionLedger(ledgerDir);

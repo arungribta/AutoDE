@@ -13,10 +13,10 @@ import { createVscodeFileIo } from './vscodeFileIo';
  * exactly), tied to `specId`/`specVersion` for staleness detection.
  *
  * `contextRoot` is a business problem's own folder (v0.12.0) — deliberately
- * distinct from the *shared* `.ai-context/context/business-context.yaml` /
+ * distinct from the *shared* `.autode/knowledge/business-context.yaml` /
  * `verified-queries.yaml` (registered-source-derived, global across business
  * problems). Also distinct from `TargetConfigManager`
- * (`.ai-context/target-environment.yaml`), which remains a generic,
+ * (`.autode/config/target-environment.yaml`), which remains a generic,
  * user-editable dev/staging/prod tool-preference profile. This is the
  * spec-tied, gating record built through the Target Context Q&A and required
  * before a plan can be generated (requirements.md §8.10).

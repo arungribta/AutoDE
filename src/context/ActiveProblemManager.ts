@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import { ActiveProblemPointer, BusinessProblemSummary, SpecStatus } from '../engine/types';
 import { parseYaml } from '../engine/context/Yaml';
+import { LAYOUT } from '../engine/workspaceLayout';
 
 /**
- * Tracks which business problem is active (`.ai-context/active-problem.json`)
+ * Tracks which business problem is active (`.autode/local/active-problem.json`)
  * and lists every business problem folder in the workspace for the picker
- * UI. Each business problem lives at `.ai-context/problems/<id>/` with its
+ * UI. Each business problem lives at `.autode/problems/<id>/` with its
  * own spec/plan/context/artifacts subtree — see requirements.md §8.11.
  *
  * Deliberately lightweight: `listProblems()` reads just enough of each
@@ -20,8 +21,8 @@ export class ActiveProblemManager implements vscode.Disposable {
     private readonly workspaceUri: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
-    this.problemsDir = vscode.Uri.joinPath(workspaceUri, '.ai-context', 'problems');
-    this.pointerUri = vscode.Uri.joinPath(workspaceUri, '.ai-context', 'active-problem.json');
+    this.problemsDir = vscode.Uri.joinPath(workspaceUri, ...LAYOUT.problems);
+    this.pointerUri = vscode.Uri.joinPath(workspaceUri, ...LAYOUT.activeProblem);
   }
 
   public dispose(): void {}
@@ -48,7 +49,7 @@ export class ActiveProblemManager implements vscode.Disposable {
 
   public async setActiveProblemId(problemId: string): Promise<void> {
     const pointer: ActiveProblemPointer = { problemId, activatedAt: new Date().toISOString() };
-    const dir = vscode.Uri.joinPath(this.workspaceUri, '.ai-context');
+    const dir = vscode.Uri.joinPath(this.workspaceUri, ...LAYOUT.local);
     await vscode.workspace.fs.createDirectory(dir);
     const tempUri = vscode.Uri.joinPath(dir, `.active-problem.tmp.${Date.now()}.json`);
     await vscode.workspace.fs.writeFile(tempUri, Buffer.from(JSON.stringify(pointer, null, 2), 'utf8'));

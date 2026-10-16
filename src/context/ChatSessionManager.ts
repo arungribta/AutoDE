@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { ChatMessage, ChatSessionMeta } from '../engine/types';
+import { LAYOUT } from '../engine/workspaceLayout';
 
 /**
  * Persists chat sessions — independent of Business Problem Specification
  * identity (Phase F, v0.9.0). One `.meta.json` + one `.jsonl` transcript per
- * chat under `.ai-context/chats/` (gitignored: transcripts are local/exploratory,
+ * chat under `.autode/local/chats/` (gitignored: transcripts are local/exploratory,
  * unlike the curated, committed BPS). Mirrors the rest of `src/context/`'s
  * one-class-per-concern, atomic-metadata-write pattern (`SpecManager`,
  * `SourceRegistry`).
@@ -21,7 +22,7 @@ export class ChatSessionManager implements vscode.Disposable {
     private readonly workspaceUri: vscode.Uri,
     private readonly log: (msg: string) => void
   ) {
-    this.chatsDir = vscode.Uri.joinPath(workspaceUri, '.ai-context', 'chats');
+    this.chatsDir = vscode.Uri.joinPath(workspaceUri, ...LAYOUT.chats);
   }
 
   public dispose(): void {

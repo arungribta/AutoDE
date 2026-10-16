@@ -10,6 +10,7 @@ import { DEFAULT_ENVIRONMENT, parseObjectId, slugifyId } from '../context/estate
 import { ProbeExecutor, createSqlProbeExecutor } from '../context/probes';
 import { BaseDataSourceAdapter } from './BaseAdapter';
 import type { BaseNode, GraphEdge } from '../context/types';
+import { LAYOUT, layoutRel } from '../workspaceLayout';
 
 type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
 
@@ -26,7 +27,7 @@ export interface ConnectionManagerOptions {
 
 /**
  * Where a connection's objects belong in the estate, and which schemas to
- * extract (Phase K1). Supplied by the host from `.ai-context/estate.yaml`.
+ * extract (Phase K1). Supplied by the host from `.autode/knowledge/estate.yaml`.
  */
 export type EstateResolver = (connectionId: string) => { identity: ObjectIdentity; schemas?: string[] } | undefined;
 
@@ -265,7 +266,7 @@ export class ConnectionManager implements Disposable {
   }
 
   /**
-   * Persists the snapshot's graph form to `<workspaceRoot>/.ai-context/schema-graph.json`
+   * Persists the snapshot's graph form to `<workspaceRoot>/.autode/local/schema-graph.json`
    * (atomic write). `io` defaults to Node's `fs`; the extension passes its
    * `vscode.workspace.fs`-backed `FileIo` so remote workspaces keep working.
    */
@@ -275,9 +276,9 @@ export class ConnectionManager implements Disposable {
     }
     const graphData = this.activeAdapter.snapshotToGraph(snapshot, this.activeIdentity());
     const sep = workspaceRoot.includes('\\') && !workspaceRoot.includes('/') ? '\\' : '/';
-    const target = [workspaceRoot.replace(/[\\/]+$/, ''), '.ai-context', 'schema-graph.json'].join(sep);
+    const target = [workspaceRoot.replace(/[\\/]+$/, ''), ...LAYOUT.schemaGraph].join(sep);
     await writeFileAtomic(io, target, JSON.stringify(graphData, null, 2));
-    this.log(`Schema context persisted to .ai-context/schema-graph.json`);
+    this.log(`Schema context persisted to ${layoutRel('schemaGraph')}`);
   }
 
   /**

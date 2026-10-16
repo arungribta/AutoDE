@@ -9,7 +9,7 @@ import { createVscodeFileIo } from './vscodeFileIo';
  * Persists to `<contextRoot>/spec/business-problem.yaml` with atomic writes.
  *
  * `contextRoot` is a business problem's own folder
- * (`.ai-context/problems/<id>/`, v0.12.0) — the caller resolves which one;
+ * (`.autode/problems/<id>/`, v0.12.0) — the caller resolves which one;
  * this class has no opinion about multi-problem routing.
  */
 export class SpecManager implements vscode.Disposable {
@@ -65,7 +65,7 @@ export class SpecManager implements vscode.Disposable {
 
   public async saveSpec(spec: BusinessProblemSpec): Promise<void> {
     // Archive whatever is currently persisted before it is replaced, so that every
-    // prior draft/approved revision stays traceable in .ai-context/spec/history/.
+    // prior draft/approved revision stays traceable in .autode/problems/<id>/spec/history/.
     await this.archive(this.spec, spec);
     await this.file.write(this.serialize(spec));
     this.spec = spec;

@@ -839,7 +839,7 @@ async function main() {
         'approvedAt: 2026-01-02T00:00:00.000Z',
         'approvedBy: user'
       ].join('\n') + '\n';
-      store.set('/ws/.ai-context/spec/business-problem.yaml', legacy);
+      store.set('/ws/.autode/problems/p1/spec/business-problem.yaml', legacy);
       return {
         Uri: {
           file: (p) => ({ fsPath: p }),
@@ -859,7 +859,7 @@ async function main() {
     const mock = specManagerMock();
     delete require.cache[require.resolve('../dist/context/SpecManager.js')];
     const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
-    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    const mgr = new SpecManager({ fsPath: '/ws/.autode/problems/p1' }, () => {});
     await withMock(mock, () => mgr.initialize());
     const spec = mgr.getSpec();
     assert.strictEqual(spec.id, 'bps-legacy');
@@ -898,7 +898,7 @@ async function main() {
         'createdAt: 2026-01-01T00:00:00.000Z',
         'updatedAt: 2026-01-01T00:00:00.000Z'
       ].join('\n') + '\n';
-      store.set('/ws/.ai-context/spec/business-problem.yaml', legacy);
+      store.set('/ws/.autode/problems/p1/spec/business-problem.yaml', legacy);
       return {
         Uri: {
           file: (p) => ({ fsPath: p }),
@@ -918,7 +918,7 @@ async function main() {
     const mock = specManagerMock();
     delete require.cache[require.resolve('../dist/context/SpecManager.js')];
     const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
-    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    const mgr = new SpecManager({ fsPath: '/ws/.autode/problems/p1' }, () => {});
     await withMock(mock, () => mgr.initialize());
     const spec = mgr.getSpec();
     assert.deepStrictEqual(spec.businessRequirements, ['br1']);
@@ -948,7 +948,7 @@ async function main() {
     const mock = specManagerMock();
     delete require.cache[require.resolve('../dist/context/SpecManager.js')];
     const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
-    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    const mgr = new SpecManager({ fsPath: '/ws/.autode/problems/p1' }, () => {});
     await withMock(mock, () => mgr.initialize());
     const spec = {
       id: 'bps-native', version: 1, status: 'draft', problemStatement: 'Native YAML spec.',
@@ -961,11 +961,11 @@ async function main() {
     };
     await withMock(mock, () => mgr.saveSpec(spec));
     let raw = null;
-    await mock.workspace.fs.readFile({ fsPath: '/ws/.ai-context/spec/business-problem.yaml' }).then((b) => { raw = b.toString('utf8'); });
+    await mock.workspace.fs.readFile({ fsPath: '/ws/.autode/problems/p1/spec/business-problem.yaml' }).then((b) => { raw = b.toString('utf8'); });
     assert.ok(!raw.includes('comprehensive:'), 'should not emit the JSON comprehensive block');
     assert.ok(raw.includes('scope:'), 'should emit nested scope');
     assert.ok(raw.includes('businessRequirements:'), 'v2 field emitted natively');
-    const mgr2 = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    const mgr2 = new SpecManager({ fsPath: '/ws/.autode/problems/p1' }, () => {});
     await withMock(mock, () => mgr2.initialize());
     const loaded = mgr2.getSpec();
     assert.deepStrictEqual(loaded.scope.in, ['in1']);
@@ -1064,8 +1064,8 @@ async function main() {
     const path = require('node:path');
     const fs = require('node:fs');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-cfm-'));
-    const ctxDir = path.join(dir, '.ai-context');
-    const authDir = path.join(ctxDir, 'context');
+    const ctxDir = path.join(dir, '.autode');
+    const authDir = path.join(ctxDir, 'knowledge');
     fs.mkdirSync(authDir, { recursive: true });
     const bizCtx = [
       'business_terms:',
@@ -1108,7 +1108,7 @@ async function main() {
     const terms = graph.getNodesByType('business_term');
     assert.strictEqual(terms.length, 1, 'loaded business_term from authoritative context/');
     assert.strictEqual(terms[0].label, 'revenue');
-    const graphPath = path.join(ctxDir, 'derived', 'graph.json');
+    const graphPath = path.join(ctxDir, 'local', 'derived', 'graph.json');
     assert.ok(fs.existsSync(graphPath), 'derived/graph.json written atomically');
     const persisted = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
     assert.strictEqual(persisted.nodes.length, 1);
@@ -1121,8 +1121,8 @@ async function main() {
     const path = require('node:path');
     const fs = require('node:fs');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-cfm-schema-'));
-    const ctxDir = path.join(dir, '.ai-context');
-    fs.mkdirSync(ctxDir, { recursive: true });
+    const ctxDir = path.join(dir, '.autode');
+    fs.mkdirSync(path.join(ctxDir, 'local'), { recursive: true });
 
     function cfmMock() {
       return {
@@ -1151,14 +1151,14 @@ async function main() {
     const graph1 = new GraphManager();
     const cfm1 = new ContextFileManager({ fsPath: dir }, graph1, () => {});
     await withMock(mock, () => cfm1.initialize());
-    const graphPath = path.join(ctxDir, 'derived', 'graph.json');
+    const graphPath = path.join(ctxDir, 'local', 'derived', 'graph.json');
     assert.ok(fs.existsSync(graphPath), 'derived/graph.json exists after the very first activation, even with nothing extracted yet');
     assert.strictEqual(graph1.getNodesByType('table').length, 0);
 
     // Step 2: "Source Assessment" writes schema-graph.json with real tables —
     // give it a guaranteed-later mtime (real filesystem timestamp resolution can
     // otherwise be too coarse to distinguish two writes microseconds apart).
-    const schemaGraphPath = path.join(ctxDir, 'schema-graph.json');
+    const schemaGraphPath = path.join(ctxDir, 'local', 'schema-graph.json');
     fs.writeFileSync(schemaGraphPath, JSON.stringify({
       nodes: [{ id: 't1', type: 'table', label: 'orders', fqn: 'db.public.orders', metadata: {}, version: 1 }],
       edges: []
@@ -1183,7 +1183,8 @@ async function main() {
     const path = require('node:path');
     const fs = require('node:fs');
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-artifacts-'));
-    const workspaceRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
+    const problemDir = path.join(tmpRoot, '.autode', 'problems', 'p1');
+    const workspaceRoot = { fsPath: problemDir, toString: () => problemDir };
     const mock = createMock();
     // createMock()'s default fs.* are no-ops (fine for adapter tests); this test
     // needs real writes so scanArtifactStaleness can walk an actual tree.
@@ -1210,9 +1211,11 @@ async function main() {
       await writer.write({ ...makeArtifact('legacy', undefined, undefined) }); // pre-Phase-B / no spec
     });
 
-    assert.ok(fs.existsSync(path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v1', 'a1.sql')), 'v1 artifact under its spec-tagged folder');
-    assert.ok(fs.existsSync(path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v2', 'a2.sql')), 'v2 artifact under its spec-tagged folder');
-    assert.ok(fs.existsSync(path.join(tmpRoot, 'artifacts', '03-build', 'legacy.sql')), 'unstamped artifact has no version folder');
+    // v0.36.0: deliverables live in the visible output folder, one subfolder per problem.
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'autode-output', 'p1', '03-build', 'bps-1.v1', 'a1.sql')), 'v1 artifact under its spec-tagged folder');
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'autode-output', 'p1', '03-build', 'bps-1.v2', 'a2.sql')), 'v2 artifact under its spec-tagged folder');
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'autode-output', 'p1', '03-build', 'legacy.sql')), 'unstamped artifact has no version folder');
+    assert.ok(!fs.existsSync(path.join(problemDir, 'artifacts')), 'nothing is written inside .autode/');
 
     const report = await withMock(mock, () => scanArtifactStaleness(workspaceRoot, { id: 'bps-1', version: 2 }));
     const stale = report.groups.find((g) => g.specVersion === 1);
@@ -1310,7 +1313,7 @@ async function main() {
     const manager = withMock(mock, () => new ChatSessionManager(workspaceRoot, (m) => logs.push(m)));
 
     await withMock(mock, () => manager.initialize());
-    assert.ok(fs.existsSync(path.join(tmpRoot, '.ai-context', 'chats')), 'chats directory created');
+    assert.ok(fs.existsSync(path.join(tmpRoot, '.autode', 'local', 'chats')), 'chats directory created');
 
     const session = await withMock(mock, () => manager.createSession({ specId: 'bps-1', specVersion: 2, llmProvider: 'claude' }));
     assert.strictEqual(session.status, 'active');
@@ -1338,8 +1341,8 @@ async function main() {
     assert.strictEqual(sessions[0].status, 'archived');
 
     await withMock(mock, () => manager.discardSession(session.id));
-    assert.ok(!fs.existsSync(path.join(tmpRoot, '.ai-context', 'chats', `${session.id}.meta.json`)), 'meta file removed');
-    assert.ok(!fs.existsSync(path.join(tmpRoot, '.ai-context', 'chats', `${session.id}.jsonl`)), 'transcript file removed');
+    assert.ok(!fs.existsSync(path.join(tmpRoot, '.autode', 'local', 'chats', `${session.id}.meta.json`)), 'meta file removed');
+    assert.ok(!fs.existsSync(path.join(tmpRoot, '.autode', 'local', 'chats', `${session.id}.jsonl`)), 'transcript file removed');
     const sessionsAfterDiscard = await withMock(mock, () => manager.listSessions());
     assert.strictEqual(sessionsAfterDiscard.length, 0);
 
@@ -1993,7 +1996,8 @@ async function main() {
     const path = require('node:path');
     const fs = require('node:fs');
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-artifact-history-'));
-    const workspaceRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
+    const problemDir = path.join(tmpRoot, '.autode', 'problems', 'p1');
+    const workspaceRoot = { fsPath: problemDir, toString: () => problemDir };
     const mock = createMock();
     mock.workspace.fs.createDirectory = async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); };
     mock.workspace.fs.writeFile = async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); };
@@ -2013,10 +2017,10 @@ async function main() {
     await withMock(mock, () => writer.write(artifact('select 1')));
     await withMock(mock, () => writer.write(artifact('select 2 -- rerun')));
 
-    const targetPath = path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v1', 'ddl-1.sql');
+    const targetPath = path.join(tmpRoot, 'autode-output', 'p1', '03-build', 'bps-1.v1', 'ddl-1.sql');
     assert.strictEqual(fs.readFileSync(targetPath, 'utf8'), 'select 2 -- rerun', 'the file itself reflects the latest rerun');
 
-    const historyDir = path.join(tmpRoot, 'artifacts', '03-build', 'bps-1.v1', 'history');
+    const historyDir = path.join(tmpRoot, 'autode-output', 'p1', '03-build', 'bps-1.v1', 'history');
     const historyFiles = fs.readdirSync(historyDir);
     assert.strictEqual(historyFiles.length, 1, 'exactly one prior revision archived');
     assert.ok(historyFiles[0].endsWith('.ddl-1.sql'), historyFiles[0]);
@@ -2083,7 +2087,7 @@ async function main() {
 
     // Seed two problem folders directly on disk.
     const seedSpec = (id, statement, status, updatedAt) => {
-      const specDir = path.join(tmpRoot, '.ai-context', 'problems', id, 'spec');
+      const specDir = path.join(tmpRoot, '.autode', 'problems', id, 'spec');
       fs.mkdirSync(specDir, { recursive: true });
       const yaml = [
         `id: ${id}`, 'version: 1', `status: ${status}`, `problemStatement: ${statement}`,
@@ -2094,7 +2098,7 @@ async function main() {
     seedSpec('problem-a', 'Older problem', 'approved', '2026-01-01T00:00:00.000Z');
     seedSpec('problem-b', 'Newer problem', 'draft', '2026-02-01T00:00:00.000Z');
     // A folder with no readable spec yet must be skipped, not throw.
-    fs.mkdirSync(path.join(tmpRoot, '.ai-context', 'problems', 'problem-c', 'spec'), { recursive: true });
+    fs.mkdirSync(path.join(tmpRoot, '.autode', 'problems', 'problem-c', 'spec'), { recursive: true });
 
     const problems = await withMock(mock, () => mgr.listProblems());
     assert.strictEqual(problems.length, 2, 'the unreadable folder is skipped');
@@ -2305,7 +2309,7 @@ async function main() {
     const mock = mockFs();
     delete require.cache[require.resolve('../dist/context/SpecManager.js')];
     const { SpecManager } = withMock(mock, () => require('../dist/context/SpecManager.js'));
-    const mgr = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    const mgr = new SpecManager({ fsPath: '/ws/.autode/problems/p1' }, () => {});
     await withMock(mock, () => mgr.initialize());
     const spec = {
       id: 'bps-1', version: 1, status: 'draft', problemStatement: 'p', objectives: ['o'], successCriteria: [],
@@ -2315,7 +2319,7 @@ async function main() {
       problemStatementApproved: true
     };
     await withMock(mock, () => mgr.saveSpec(spec));
-    const mgr2 = new SpecManager({ fsPath: '/ws/.ai-context' }, () => {});
+    const mgr2 = new SpecManager({ fsPath: '/ws/.autode/problems/p1' }, () => {});
     await withMock(mock, () => mgr2.initialize());
     const loaded = mgr2.getSpec();
     assert.strictEqual(loaded.implementationType, 'brownfield', 'implementationType now round-trips (previously silently dropped)');
@@ -4502,14 +4506,14 @@ async function main() {
     const { ContextFileWatcher } = withMock(mock, () => require('../dist/context/ContextFileWatcher.js'));
     const seen = [];
     const watcher = withMock(mock, () => new ContextFileWatcher({ fsPath: '/ws' }, (uri) => seen.push(uri.fsPath), 10));
-    handlers.change({ fsPath: '/ws/.ai-context/problems/p1/spec/.business-problem.tmp.123.yaml' });
-    handlers.create({ fsPath: '/ws/.ai-context/problems/p1/spec/history/business-problem.v1.draft.yaml' });
-    handlers.change({ fsPath: '/ws/.ai-context/problems/p1/spec/business-problem.yaml' });
-    handlers.change({ fsPath: '/ws/.ai-context/problems/p1/spec/business-problem.yaml' });
-    handlers.delete({ fsPath: '/ws/.ai-context/problems/p1/context/source-context.yaml' });
+    handlers.change({ fsPath: '/ws/.autode/problems/p1/spec/.business-problem.tmp.123.yaml' });
+    handlers.create({ fsPath: '/ws/.autode/problems/p1/spec/history/business-problem.v1.draft.yaml' });
+    handlers.change({ fsPath: '/ws/.autode/problems/p1/spec/business-problem.yaml' });
+    handlers.change({ fsPath: '/ws/.autode/problems/p1/spec/business-problem.yaml' });
+    handlers.delete({ fsPath: '/ws/.autode/problems/p1/context/source-context.yaml' });
     await new Promise((r) => setTimeout(r, 40));
     watcher.dispose();
-    assert.deepStrictEqual(seen.sort(), ['/ws/.ai-context/problems/p1/context/source-context.yaml', '/ws/.ai-context/problems/p1/spec/business-problem.yaml']);
+    assert.deepStrictEqual(seen.sort(), ['/ws/.autode/problems/p1/context/source-context.yaml', '/ws/.autode/problems/p1/spec/business-problem.yaml']);
   });
 
   await test('v0.25.0: AgentHub.pauseForExternalChange() only arms a pause while a run is in progress', async () => {
@@ -4814,7 +4818,7 @@ async function main() {
     const nodePath = require('node:path');
     const nodeFs = require('node:fs');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-skill-'));
-    const skillDir = nodePath.join(ws, '.ai-context', 'skills', 'tool-skills', 'reader');
+    const skillDir = nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', 'reader');
     nodeFs.mkdirSync(skillDir, { recursive: true });
     nodeFs.writeFileSync(nodePath.join(skillDir, 'SKILL.md'), '---\nname: reader\ndescription: reads things\nallowed-tools: [Read]\n---\nRead a.txt and summarise it.\n');
     const mock = createMock();
@@ -4857,7 +4861,7 @@ async function main() {
     const nodePath = require('node:path');
     const nodeFs = require('node:fs');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-skill-'));
-    const skillDir = nodePath.join(ws, '.ai-context', 'skills', 'tool-skills', 'writer');
+    const skillDir = nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', 'writer');
     nodeFs.mkdirSync(skillDir, { recursive: true });
     nodeFs.writeFileSync(nodePath.join(skillDir, 'SKILL.md'), '---\nname: writer\n---\nWrite a file.\n');
     try {
@@ -5260,7 +5264,7 @@ async function main() {
     const nodeFs = require('node:fs');
     const p = require('node:path');
     const dir = c2.tmp();
-    const authDir = p.join(dir, '.ai-context', 'context');
+    const authDir = p.join(dir, '.autode', 'knowledge');
     nodeFs.mkdirSync(authDir, { recursive: true });
     const write = (formula) => nodeFs.writeFileSync(p.join(authDir, 'business-context.yaml'), ['business_terms:', '  - term: Revenue', `    formula: ${formula}`, '  - term: Margin', '    formula: revenue - cost', ''].join('\n'));
     write('SUM(amount)');
@@ -5282,7 +5286,7 @@ async function main() {
       assert.strictEqual(term().origin.confidence, 0.8);
       assert.strictEqual(term().supportedBy.length, 1);
       const firstId = term().supportedBy[0];
-      assert.ok(nodeFs.readdirSync(p.join(dir, '.ai-context', 'ledger')).some((f) => f.endsWith('.jsonl')));
+      assert.ok(nodeFs.readdirSync(p.join(dir, '.autode', 'knowledge', 'ledger')).some((f) => f.endsWith('.jsonl')));
 
       write('SUM(amount) - SUM(refunds)');
       const graph2 = new GraphManager();
@@ -5310,8 +5314,8 @@ async function main() {
     const nodeFs = require('node:fs');
     const p = require('node:path');
     const dir = c2.tmp();
-    const ctxDir = p.join(dir, '.ai-context');
-    nodeFs.mkdirSync(ctxDir, { recursive: true });
+    const ctxDir = p.join(dir, '.autode');
+    nodeFs.mkdirSync(p.join(ctxDir, 'local'), { recursive: true });
     const mock = {
       Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
       workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
@@ -5327,7 +5331,7 @@ async function main() {
       await cfm.initialize();
       await graph.addNode({ id: 'table-csv_events', type: 'table', label: 'events', fqn: 'csv.events', database: 'ingested_files', schema: 'csv', isView: false, metadata: {}, version: 1, origin: { source: 'derived', sourceRef: '/d/events.csv' } });
       await cfm.persistCompiledGraph();
-      const schemaGraphPath = p.join(ctxDir, 'schema-graph.json');
+      const schemaGraphPath = p.join(ctxDir, 'local', 'schema-graph.json');
       const live = { source: 'system', sourceRef: 'snowflake', connectionId: 'sf', reliability: 'live-verified', lastVerifiedAt: '2026-10-14T00:00:00.000Z' };
       nodeFs.writeFileSync(schemaGraphPath, JSON.stringify({ nodes: [{ id: 't1', type: 'table', label: 'orders', fqn: 'DB.PUBLIC.orders', metadata: {}, version: 1, origin: live }], edges: [] }));
       const future = new Date(Date.now() + 60000);
@@ -5715,13 +5719,13 @@ async function main() {
   await test('v0.31.0: ContextFileManager migrates a pre-K1 workspace in place — no assertion lost, old ids still resolve, estate.yaml written, second load appends nothing', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
     const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k1-cfm-'));
-    const ctx = p.join(dir, '.ai-context');
+    const ctx = p.join(dir, '.autode');
     try {
       // A v0.30.0 workspace: a ledger holding legacy-id mirrors and a key assertion about one of them.
       const { AssertionLedger } = require('../dist/engine/context/ledger.js');
       const { syncGraphToLedger } = require('../dist/engine/context/projection.js');
       const fileO = { source: 'derived', sourceRef: '/data/shop.ddl', extractor: 'file-ingestion', reliability: 'best-effort-inferred' };
-      const old = new AssertionLedger(p.join(ctx, 'ledger'));
+      const old = new AssertionLedger(p.join(ctx, 'knowledge', 'ledger'));
       await syncGraphToLedger(old, { nodes: [{ id: 'table-shop_orders', type: 'table', label: 'orders', fqn: 'shop.orders', database: 'ingested_files', schema: 'shop', isView: false, metadata: {}, version: 1, origin: fileO }], edges: [] });
       const key = await old.assert({ kind: 'key', subject: ['table-shop_orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key', evidence: [{ type: 'chat_message', ref: 't3' }], status: 'active', trust: 'confirmed' });
       const mock = {
@@ -5741,7 +5745,7 @@ async function main() {
       const ledger = cfm.getLedger();
       assert.deepStrictEqual([ledger.get(key.id).status, ledger.get(key.id).subject], ['active', ['obj:shop/default/shop.orders']]);
       assert.ok(!ledger.assertions().some((a) => a.status === 'rejected'), 'nothing retracted by the migration');
-      assert.ok(/system: shop/.test(nodeFs.readFileSync(p.join(ctx, 'estate.yaml'), 'utf8')), 'the file-derived system is recorded in estate.yaml');
+      assert.ok(/system: shop/.test(nodeFs.readFileSync(p.join(ctx, 'knowledge', 'estate.yaml'), 'utf8')), 'the file-derived system is recorded in estate.yaml');
       const events = ledger.allEvents().length;
       const graph2 = new GraphManager();
       const cfm2 = new ContextFileManager({ fsPath: dir }, graph2, () => {});
@@ -5755,8 +5759,8 @@ async function main() {
   await test('v0.31.0: extracting a second schema of the same connection does not retract the first; re-extracting a schema replaces only it', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
     const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k1-merge-'));
-    const ctx = p.join(dir, '.ai-context');
-    nodeFs.mkdirSync(ctx, { recursive: true });
+    const ctx = p.join(dir, '.autode');
+    nodeFs.mkdirSync(p.join(ctx, 'local'), { recursive: true });
     const mock = {
       Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
       workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
@@ -5771,7 +5775,7 @@ async function main() {
     const extraction = (schema, tables) => adapter.snapshotToGraph({ platform: 'snowflake', connectionId: 'snowflake:acme', extractedAt: '2026-10-15T00:00:00Z', views: [], foreignKeys: [],
       tables: tables.map((t) => ({ catalog: 'SALES', schema, name: t, fqn: `SALES.${schema}.${t}`, type: 'BASE TABLE', columns: [{ name: 'ID', dataType: 'NUMBER', isNullable: false, isPrimaryKey: true, isForeignKey: false, ordinalPosition: 1 }] })) }, { system: 'shop', environment: 'prod', role: 'source' });
     const write = async (g) => {
-      const f = p.join(ctx, 'schema-graph.json');
+      const f = p.join(ctx, 'local', 'schema-graph.json');
       nodeFs.writeFileSync(f, JSON.stringify(g));
       const future = new Date(Date.now() + 60000 + Math.random() * 1000);
       nodeFs.utimesSync(f, future, future);
@@ -5856,11 +5860,11 @@ async function main() {
       const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
       const cfm = new ContextFileManager({ fsPath: dir }, new GraphManager(), () => {});
       await cfm.initialize();
-      nodeFs.writeFileSync(p.join(dir, '.ai-context', 'estate.yaml'), 'systems:\n  - { id: shop, name: Shop, role: source }\nbindings:\n  - { file: shop_dev.ddl, system: shop, environment: dev }\n');
+      nodeFs.writeFileSync(p.join(dir, '.autode', 'knowledge', 'estate.yaml'), 'systems:\n  - { id: shop, name: Shop, role: source }\nbindings:\n  - { file: shop_dev.ddl, system: shop, environment: dev }\n');
       assert.deepStrictEqual(cfm.resolveFile('C:\\src\\shop_dev.ddl'), { system: 'shop', environment: 'dev', role: 'source' });
       assert.strictEqual(cfm.resolveFile('/src/other.ddl').system, 'other');
-      assert.ok(/other\.ddl/.test(nodeFs.readFileSync(p.join(dir, '.ai-context', 'estate.yaml'), 'utf8')), 'the new binding is saved, the edited ones kept');
-      assert.ok(/environment: dev/.test(nodeFs.readFileSync(p.join(dir, '.ai-context', 'estate.yaml'), 'utf8')));
+      assert.ok(/other\.ddl/.test(nodeFs.readFileSync(p.join(dir, '.autode', 'knowledge', 'estate.yaml'), 'utf8')), 'the new binding is saved, the edited ones kept');
+      assert.ok(/environment: dev/.test(nodeFs.readFileSync(p.join(dir, '.autode', 'knowledge', 'estate.yaml'), 'utf8')));
     } finally {
       nodeFs.rmSync(dir, { recursive: true, force: true });
     }
@@ -5872,7 +5876,7 @@ async function main() {
     async cfm(options = {}) {
       const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
       const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-k2-'));
-      nodeFs.mkdirSync(p.join(dir, '.ai-context'), { recursive: true });
+      nodeFs.mkdirSync(p.join(dir, '.autode', 'knowledge'), { recursive: true });
       const mock = {
         Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
         workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
@@ -5967,8 +5971,8 @@ async function main() {
       assert.deepStrictEqual(await env.cfm.ingestParsed(small.nodes, small.edges), { catalogued: 2, promoted: 2 });
       // Catalog files: per system/environment, and ignored by git.
       const nodeFs = require('node:fs');
-      assert.ok(nodeFs.existsSync(`${env.dir}/.ai-context/catalog/edw/prod/catalog.json`));
-      assert.ok(/\*/.test(nodeFs.readFileSync(`${env.dir}/.ai-context/catalog/.gitignore`, 'utf8')));
+      assert.ok(nodeFs.existsSync(`${env.dir}/.autode/local/catalog/edw/prod/catalog.json`));
+      assert.ok(/\*/.test(nodeFs.readFileSync(`${env.dir}/.autode/local/catalog/.gitignore`, 'utf8')));
       const again = await env.reload();
       assert.strictEqual(again.cfm.getCatalog().size, 9, 'the catalog survives a reload');
     } finally { env.cleanup(); }
@@ -5978,8 +5982,8 @@ async function main() {
     const nodeFs = require('node:fs');
     const env = await k2.cfm({ policy: { maxTables: 1 } });
     try {
-      nodeFs.mkdirSync(`${env.dir}/.ai-context/context`, { recursive: true });
-      nodeFs.writeFileSync(`${env.dir}/.ai-context/context/business-context.yaml`, 'business_terms:\n  - term: Loyalty Tier\n    description: GOLD, SILVER or BRONZE from the points balance.\n    mapped_tables: [crm.members]\n  - term: Gross Merchandise Value\n    mapped_tables: [crm.orders_hist]\n');
+      nodeFs.mkdirSync(`${env.dir}/.autode/knowledge`, { recursive: true });
+      nodeFs.writeFileSync(`${env.dir}/.autode/knowledge/business-context.yaml`, 'business_terms:\n  - term: Loyalty Tier\n    description: GOLD, SILVER or BRONZE from the points balance.\n    mapped_tables: [crm.members]\n  - term: Gross Merchandise Value\n    mapped_tables: [crm.orders_hist]\n');
       const reloaded = await env.reload();
       const g = k2.parsed('crm', 'crm', ['members']);
       await reloaded.cfm.ingestParsed(g.nodes, g.edges);
@@ -6414,7 +6418,7 @@ async function main() {
       const asked = [];
       const complete = async (system, user, purpose) => { asked.push(purpose); return { ...c4a.profile(), id: 'house-contract' }; };
       const { BusinessPackManager } = require('../dist/context/BusinessPackManager.js');
-      const pm = new BusinessPackManager(p.join(env.dir, '.ai-context', 'problems', 'x', 'pack'), env.dir, () => env.cfm, () => {}, complete);
+      const pm = new BusinessPackManager(p.join(env.dir, '.autode', 'problems', 'x', 'pack'), env.dir, () => env.cfm, () => {}, complete);
       await pm.load();
       const doc = await pm.addDocument({ path: p.join(env.dir, 'docs', 'contract.yaml'), role: 'contract', authority: 'signed', version: '1' });
       assert.strictEqual(doc.path, 'docs/contract.yaml', 'stored workspace-relative');
@@ -6471,7 +6475,7 @@ async function main() {
     const nodePath = require('node:path');
     const nodeFs = require('node:fs');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-s2-'));
-    const dir = nodePath.join(ws, '.ai-context', 'skills', 'tool-skills');
+    const dir = nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills');
     const make = (id, md, files = {}) => {
       const d = nodePath.join(dir, id);
       nodeFs.mkdirSync(d, { recursive: true });
@@ -6646,11 +6650,12 @@ async function main() {
     const nodePath = require('node:path');
     const nodeFs = require('node:fs');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-mcp-'));
-    const ctx = nodePath.join(ws, '.ai-context');
+    const ctx = nodePath.join(ws, '.autode');
     const prob = nodePath.join(ctx, 'problems', 'retail-ab12');
     nodeFs.mkdirSync(nodePath.join(prob, 'spec'), { recursive: true });
     nodeFs.mkdirSync(nodePath.join(prob, 'context'), { recursive: true });
-    nodeFs.writeFileSync(nodePath.join(ctx, 'active-problem.json'), JSON.stringify({ problemId: 'retail-ab12' }));
+    nodeFs.mkdirSync(nodePath.join(ctx, 'local'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ctx, 'local', 'active-problem.json'), JSON.stringify({ problemId: 'retail-ab12' }));
     nodeFs.writeFileSync(nodePath.join(prob, 'spec', 'business-problem.yaml'), 'id: bps-1\nversion: 1\nstatus: draft\nproblemStatement: Retail analytics\n');
     nodeFs.writeFileSync(nodePath.join(prob, 'spec', 'pipeline.yaml'), JSON.stringify(samplePipelineSpec()));
     nodeFs.writeFileSync(nodePath.join(prob, 'context', 'semantic-layer.yaml'), `notes: connect with password=hunter2 and token: ${['gh', 'p_', 'q'.repeat(36)].join('')}\n`);
@@ -6659,12 +6664,12 @@ async function main() {
     const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
     const { syncGraphToLedger } = fresh('../dist/engine/context/projection.js');
     const g = parseDdl('CREATE TABLE shop.customers (customer_id INTEGER PRIMARY KEY, email VARCHAR(200));\nCREATE TABLE shop.orders (order_id INTEGER PRIMARY KEY, customer_id INTEGER, amount NUMBER(12,2));', nodePath.join(ws, 'shop.ddl'), { system: 'shop', environment: 'prod' });
-    const ledger = new AssertionLedger(nodePath.join(ctx, 'ledger'));
+    const ledger = new AssertionLedger(nodePath.join(ctx, 'knowledge', 'ledger'));
     await ledger.load();
     await syncGraphToLedger(ledger, { nodes: g.nodes, edges: g.edges });
     // Tool skills: one reviewed, one unreviewed, one pre-S2 folder without a sidecar (and no migration marker).
     const L = fresh('../dist/engine/skills/lifecycle.js');
-    const tsDir = nodePath.join(ctx, 'skills', 'tool-skills');
+    const tsDir = nodePath.join(ctx, 'config', 'skills', 'tool-skills');
     const mk = (id, md) => { const d = nodePath.join(tsDir, id); nodeFs.mkdirSync(d, { recursive: true }); nodeFs.writeFileSync(nodePath.join(d, 'SKILL.md'), md); return d; };
     L.recordImport(mk('reviewed-one', '---\nname: reviewed-one\nallowed-tools: [Read]\n---\nSummarise the data.\n'), { source: 'local' }, 't');
     L.setTrustTier(nodePath.join(tsDir, 'reviewed-one'), 'reviewed', 't');
@@ -6792,7 +6797,7 @@ async function main() {
       r = await client.callTool({ name: 'autode_compile_pipeline_spec', arguments: { dialect: 'snowflake' } });
       assert.ok(!r.isError, JSON.stringify(r.structuredContent));
       assert.deepStrictEqual(r.structuredContent.entities.map((e) => e.name), ['customers', 'orders', 'products']);
-      assert.strictEqual(r.structuredContent.entities[0].artifacts[0].suggestedPath, 'artifacts/build/pipeline_test.v1/customers/01_rename_cast.sql');
+      assert.strictEqual(r.structuredContent.entities[0].artifacts[0].suggestedPath, 'autode-output/retail-ab12/03-build/pipeline-test.v1/customers/01_rename_cast.sql');
       r = await client.callTool({ name: 'autode_generate_design_doc', arguments: {} });
       assert.ok(/customers/.test(r.structuredContent.markdown));
       r = await client.callTool({ name: 'autode_validate_pipeline_spec', arguments: { spec: { id: 'x' } } });
@@ -6847,6 +6852,206 @@ async function main() {
     const bundle = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'mcp-server.js'), 'utf8');
     assert.ok(!/require\(["']vscode["']\)/.test(bundle), 'the MCP bundle requires vscode');
     assert.ok(bundle.length < 1.5 * 1024 * 1024, `mcp-server.js is ${Math.round(bundle.length / 1024)} KB (budget 1.5 MB)`);
+  });
+
+  // ── v0.36.0: .autode/ workspace layout, visible deliverables, migration from .ai-context/ ──
+  const cfmOver = (dir) => {
+    const mock = {
+      Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+      workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: () => ({ onDidChange: () => {}, onDidCreate: () => {}, onDidDelete: () => {}, dispose: () => {} }) },
+      RelativePattern: class {}
+    };
+    delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+    delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+    const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+    return new ContextFileManager({ fsPath: dir }, new GraphManager(), () => {});
+  };
+
+  await test('v0.36.0: one layout module defines every path; the output folder stays inside the workspace; .autode/.gitignore keeps local/ out of git', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const L = fresh('../dist/engine/workspaceLayout.js');
+    assert.strictEqual(L.layoutRel('ledger'), '.autode/knowledge/ledger');
+    assert.strictEqual(L.layoutRel('activeProblem'), '.autode/local/active-problem.json');
+    assert.strictEqual(L.layoutRel('toolSkills', 'x'), '.autode/config/skills/tool-skills/x');
+    assert.deepStrictEqual(L.outputDirSegments('p1'), ['autode-output', 'p1']);
+    assert.deepStrictEqual(L.outputDirSegments('p1', 'deliverables/sql/'), ['deliverables', 'sql', 'p1']);
+    for (const bad of ['../outside', 'C:\\temp', '/abs/path', 'a/../../b']) assert.deepStrictEqual(L.outputDirSegments('p1', bad), ['autode-output', 'p1'], bad);
+    assert.deepStrictEqual(L.problemFromRoot(p.join('/ws', '.autode', 'problems', 'retail-ab12')), { workspaceRoot: p.resolve('/ws'), problemId: 'retail-ab12' });
+    const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-layout-'));
+    try {
+      L.ensureLayout(dir);
+      assert.ok(/^local\/$/m.test(nodeFs.readFileSync(p.join(dir, '.autode', '.gitignore'), 'utf8')));
+      for (const d of ['knowledge', 'config', 'local']) assert.ok(nodeFs.statSync(p.join(dir, '.autode', d)).isDirectory(), d);
+      nodeFs.writeFileSync(p.join(dir, '.autode', '.gitignore'), 'local/\nmine/\n');
+      L.ensureLayout(dir);
+      assert.strictEqual(nodeFs.readFileSync(p.join(dir, '.autode', '.gitignore'), 'utf8'), 'local/\nmine/\n', 'an edited .gitignore is kept');
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('v0.36.0: migration moves every kind of .ai-context/ file to its new home byte for byte, artifacts to autode-output/, and leaves what it does not recognise', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const { migrateWorkspace, describeMigration } = fresh('../dist/engine/workspaceMigration.js');
+    const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-migrate-'));
+    const legacy = {
+      'problems/p1/spec/business-problem.yaml': 'id: bps-1\n',
+      'problems/p1/plan/plan.yaml': 'steps: []\n',
+      'problems/p1/pack/pack.yaml': 'documents: []\n',
+      'problems/p1/artifacts/03-build/bps-1.v1/stg.sql': 'select 1\r\n',
+      'problems/p1/artifacts/03-build/bps-1.v1/stg.sql.grounding.json': '{"artifact":"stg.sql"}',
+      'ledger/2026-10-01.01H.jsonl': '{"type":"asserted"}\n',
+      'estate.yaml': 'systems: []\n',
+      'sources.yaml': 'sources: []\n',
+      'profiles/house.yaml': 'id: house\n',
+      'context/business-context.yaml': 'business_terms: []\n',
+      'context/vocabulary.yaml': 'synonyms: []\n',
+      'context/snapshots/bps-1.v1.md': '# snapshot\n',
+      'skills/data-flow.json': '{}',
+      'skills/tool-skills/reader/SKILL.md': 'Read.\n',
+      'skills/tool-skills/reader/.autode-skill.json': '{}',
+      'primitives/k.yaml': 'kind: k\n',
+      'target-environment.yaml': 'profiles: {}\n',
+      'active-problem.json': '{"problemId":"p1"}',
+      'chats/c1.jsonl': '{}\n',
+      'derived/graph.json': '{}',
+      'catalog/shop/prod/catalog.json': '{}',
+      'schema-graph.json': '{}',
+      'weird/notes.txt': 'keep me\n'
+    };
+    const expected = {
+      'problems/p1/spec/business-problem.yaml': '.autode/problems/p1/spec/business-problem.yaml',
+      'problems/p1/plan/plan.yaml': '.autode/problems/p1/plan/plan.yaml',
+      'problems/p1/pack/pack.yaml': '.autode/problems/p1/pack/pack.yaml',
+      'problems/p1/artifacts/03-build/bps-1.v1/stg.sql': 'autode-output/p1/03-build/bps-1.v1/stg.sql',
+      'problems/p1/artifacts/03-build/bps-1.v1/stg.sql.grounding.json': 'autode-output/p1/03-build/bps-1.v1/stg.sql.grounding.json',
+      'ledger/2026-10-01.01H.jsonl': '.autode/knowledge/ledger/2026-10-01.01H.jsonl',
+      'estate.yaml': '.autode/knowledge/estate.yaml',
+      'sources.yaml': '.autode/knowledge/sources.yaml',
+      'profiles/house.yaml': '.autode/knowledge/profiles/house.yaml',
+      'context/business-context.yaml': '.autode/knowledge/business-context.yaml',
+      'context/vocabulary.yaml': '.autode/knowledge/vocabulary.yaml',
+      'context/snapshots/bps-1.v1.md': '.autode/knowledge/snapshots/bps-1.v1.md',
+      'skills/data-flow.json': '.autode/config/skills/data-flow.json',
+      'skills/tool-skills/reader/SKILL.md': '.autode/config/skills/tool-skills/reader/SKILL.md',
+      'skills/tool-skills/reader/.autode-skill.json': '.autode/config/skills/tool-skills/reader/.autode-skill.json',
+      'primitives/k.yaml': '.autode/config/primitives/k.yaml',
+      'target-environment.yaml': '.autode/config/target-environment.yaml',
+      'active-problem.json': '.autode/local/active-problem.json',
+      'chats/c1.jsonl': '.autode/local/chats/c1.jsonl',
+      'derived/graph.json': '.autode/local/derived/graph.json',
+      'catalog/shop/prod/catalog.json': '.autode/local/catalog/shop/prod/catalog.json',
+      'schema-graph.json': '.autode/local/schema-graph.json'
+    };
+    try {
+      for (const [rel, body] of Object.entries(legacy)) { const f = p.join(dir, '.ai-context', ...rel.split('/')); nodeFs.mkdirSync(p.dirname(f), { recursive: true }); nodeFs.writeFileSync(f, body); }
+      const r = migrateWorkspace(dir);
+      assert.strictEqual(r.needed, true);
+      for (const [from, to] of Object.entries(expected)) {
+        assert.strictEqual(nodeFs.readFileSync(p.join(dir, ...to.split('/')), 'utf8'), legacy[from], `${from} → ${to}`);
+        assert.ok(!nodeFs.existsSync(p.join(dir, '.ai-context', ...from.split('/'))), `${from} moved, not copied`);
+      }
+      assert.strictEqual(r.moved.length, Object.keys(expected).length);
+      assert.deepStrictEqual(r.unrecognised, ['.ai-context/weird']);
+      assert.strictEqual(nodeFs.readFileSync(p.join(dir, '.ai-context', 'weird', 'notes.txt'), 'utf8'), 'keep me\n');
+      assert.strictEqual(r.legacyRemoved, false, '.ai-context/ stays while it holds something unrecognised');
+      assert.ok(nodeFs.existsSync(p.join(dir, '.autode', '.gitignore')));
+      assert.ok(/22 file\(s\).*2 generated artifact\(s\).*\.ai-context\/weird/.test(describeMigration(r)), describeMigration(r));
+
+      // Idempotent; a teammate who pulled the migration still has local files in .ai-context/.
+      assert.strictEqual(migrateWorkspace(dir).moved.length, 0);
+      nodeFs.mkdirSync(p.join(dir, '.ai-context', 'chats'), { recursive: true });
+      nodeFs.writeFileSync(p.join(dir, '.ai-context', 'chats', 'c2.jsonl'), 'mine\n');
+      nodeFs.writeFileSync(p.join(dir, '.ai-context', 'estate.yaml'), 'stale copy\n');
+      const r2 = migrateWorkspace(dir);
+      assert.deepStrictEqual(r2.moved.map((m) => m.to), ['.autode/local/chats/c2.jsonl']);
+      assert.deepStrictEqual(r2.conflicts.map((c) => c.to), ['.autode/knowledge/estate.yaml']);
+      assert.strictEqual(nodeFs.readFileSync(p.join(dir, '.autode', 'knowledge', 'estate.yaml'), 'utf8'), 'systems: []\n', 'the copy already in .autode/ wins; nothing is overwritten');
+
+      // A custom output folder is honoured; a fully recognised .ai-context/ is removed.
+      const dir2 = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-migrate2-'));
+      try {
+        const f = p.join(dir2, '.ai-context', 'problems', 'p9', 'artifacts', 'x.sql');
+        nodeFs.mkdirSync(p.dirname(f), { recursive: true });
+        nodeFs.writeFileSync(f, 'x');
+        const r3 = migrateWorkspace(dir2, { artifactDirectory: 'deliverables' });
+        assert.deepStrictEqual(r3.moved.map((m) => m.to), ['deliverables/p9/x.sql']);
+        assert.strictEqual(r3.legacyRemoved, true);
+        assert.ok(!nodeFs.existsSync(p.join(dir2, '.ai-context')));
+      } finally { nodeFs.rmSync(dir2, { recursive: true, force: true }); }
+      assert.strictEqual(migrateWorkspace(p.join(dir, 'nowhere')).needed, false);
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('v0.36.0: a migrated workspace reloads its ledger with no fact lost, retracted or sent to review, and writes only under .autode/local/', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const { migrateWorkspace } = fresh('../dist/engine/workspaceMigration.js');
+    const { LAYOUT } = fresh('../dist/engine/workspaceLayout.js');
+    const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-migrate-cfm-'));
+    try {
+      // Build a workspace with today's code, then put it back into the pre-v0.36.0 shape —
+      // including evidence that names the old business-context path — as an older AutoDE left it.
+      nodeFs.mkdirSync(p.join(dir, '.autode', 'knowledge'), { recursive: true });
+      nodeFs.writeFileSync(p.join(dir, '.autode', 'knowledge', 'business-context.yaml'), 'business_terms:\n  - term: Revenue\n    description: net sales\n    mapped_tables: [orders]\n');
+      nodeFs.writeFileSync(p.join(dir, 'shop.ddl'), 'CREATE TABLE shop.orders (order_id INTEGER PRIMARY KEY, amount NUMBER);');
+      let cfm = cfmOver(dir);
+      await cfm.initialize();
+      const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+      const g = parseDdl(nodeFs.readFileSync(p.join(dir, 'shop.ddl'), 'utf8'), p.join(dir, 'shop.ddl'), { system: 'shop', environment: 'prod' });
+      await cfm.ingestParsed(g.nodes, g.edges);
+      const before = cfm.getLedger().assertions().filter((a) => ['active', 'needs_review', 'proposed'].includes(a.status));
+      assert.ok(before.length > 3 && before.some((a) => a.kind === 'business_term'));
+      const legacy = p.join(dir, '.ai-context');
+      const back = [['knowledge/ledger', 'ledger'], ['knowledge/business-context.yaml', 'context/business-context.yaml'], ['knowledge/estate.yaml', 'estate.yaml'], ['local/derived', 'derived'], ['local/catalog', 'catalog']];
+      for (const [from, to] of back) {
+        const src = p.join(dir, '.autode', ...from.split('/'));
+        if (!nodeFs.existsSync(src)) continue;
+        nodeFs.mkdirSync(p.dirname(p.join(legacy, ...to.split('/'))), { recursive: true });
+        nodeFs.renameSync(src, p.join(legacy, ...to.split('/')));
+      }
+      for (const f of nodeFs.readdirSync(p.join(legacy, 'ledger'))) {
+        const file = p.join(legacy, 'ledger', f);
+        nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').split('knowledge/business-context.yaml').join('context/business-context.yaml'));
+      }
+      nodeFs.rmSync(p.join(dir, '.autode'), { recursive: true, force: true });
+
+      const report = migrateWorkspace(dir);
+      assert.ok(report.moved.length > 0 && report.legacyRemoved, JSON.stringify(report));
+      cfm = cfmOver(dir);
+      await cfm.initialize();
+      const after = cfm.getLedger().assertions();
+      const live = after.filter((a) => ['active', 'needs_review', 'proposed'].includes(a.status));
+      assert.strictEqual(after.filter((a) => a.status === 'needs_review').length, 0, 'nothing sent to review');
+      assert.strictEqual(after.filter((a) => a.status === 'rejected').length, 0, 'nothing retracted');
+      assert.deepStrictEqual([...new Set(live.map((a) => `${a.kind}|${a.subject.join(',')}|${a.predicate}`))].sort(), [...new Set(before.map((a) => `${a.kind}|${a.subject.join(',')}|${a.predicate}`))].sort(), 'the same facts are live');
+      assert.ok(nodeFs.existsSync(p.join(dir, ...LAYOUT.graph)) && !nodeFs.existsSync(p.join(dir, '.autode', 'derived')), 'caches go to local/');
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('v0.36.0: editing .autode/knowledge/business-context.yaml takes effect without a reload (the old watcher only saw top-level .ai-context files)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const p = require('node:path');
+    const dir = nodeFs.mkdtempSync(p.join(os.tmpdir(), 'autode-watch-'));
+    const watchers = [];
+    try {
+      const mock = {
+        Uri: { file: (x) => ({ fsPath: x }), joinPath: (...parts) => ({ fsPath: parts.map((x) => (x && x.fsPath) ? x.fsPath : String(x)).join('/') }) },
+        workspace: { fs: { createDirectory: async () => {} }, createFileSystemWatcher: (pattern) => { const w = { pattern, handlers: {}, onDidChange: (h) => { w.handlers.change = h; }, onDidCreate: (h) => { w.handlers.create = h; }, onDidDelete: (h) => { w.handlers.delete = h; }, dispose: () => {} }; watchers.push(w); return w; } },
+        RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } }
+      };
+      delete require.cache[require.resolve('../dist/context/ContextFileManager.js')];
+      delete require.cache[require.resolve('../dist/context/GraphManager.js')];
+      const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
+      const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
+      const graph = new GraphManager();
+      const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+      await cfm.initialize();
+      const w = watchers.find((x) => /[\\/]\.autode[\\/]knowledge$/.test(x.pattern.base.fsPath));
+      assert.ok(w && w.pattern.pattern === '*.{yaml,yml,json}', 'the knowledge folder is watched');
+      nodeFs.writeFileSync(p.join(dir, '.autode', 'knowledge', 'business-context.yaml'), 'business_terms:\n  - term: Churn\n    description: customers lost in a month\n');
+      w.handlers.change({ fsPath: p.join(dir, '.autode', 'knowledge', 'business-context.yaml') });
+      await new Promise((r) => setTimeout(r, 700));
+      assert.ok(graph.serializeSnapshot().nodes.some((n) => n.type === 'business_term' && /churn/i.test(n.label)), 'the edited term is loaded');
+      cfm.dispose();
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

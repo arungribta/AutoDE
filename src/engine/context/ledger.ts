@@ -6,7 +6,7 @@ import { validateAssertion } from './assertionSchemas';
  * The assertion ledger — context-layer system of record (C2, v0.29.0;
  * docs/context-layer-requirements.md §4.2).
  *
- * Append-only JSON Lines under `.ai-context/ledger/`, one file per writer
+ * Append-only JSON Lines under `.autode/knowledge/ledger/`, one file per writer
  * session (`<yyyy-mm-dd>.<sessionUlid>.jsonl`), so a team sharing a
  * workspace merges without conflicts. Folding every event in id order gives
  * the current assertion set; the same events always fold to the same set.

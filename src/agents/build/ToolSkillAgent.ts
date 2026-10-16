@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { AgentExecutionContext, AgentExecutionResult, PlanStep, ToolExecutionMode, ToolSkillDefinition } from '../../engine/types';
 import { resolveAllowedToolNames, toolModeCeiling } from '../../engine/skills/toolAllowList';
 import { TrustTier, isClaudeCliEligible, minMode, notRunnableReason, resolveSkillVersion, tierModeCeiling } from '../../engine/skills/lifecycle';
+import { layoutPath, layoutRel } from '../../engine/workspaceLayout';
 
 /**
  * Runs an imported Claude Agent Skill (`SKILL.md` + resources) with real tool
@@ -36,12 +37,12 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
     return { success: false, message: 'No workspace is open.', error: 'workspaceRoot is required to run a tool-executing skill.' };
   }
 
-  const toolSkillsDir = path.join(workspaceRoot, '.ai-context', 'skills', 'tool-skills');
+  const toolSkillsDir = layoutPath(workspaceRoot, 'toolSkills');
   const pinned = step.skillVersion ?? context.skillVersion;
   const state = resolveSkillVersion(toolSkillsDir, skillId, pinned);
   if (!state) {
     return pinned === undefined
-      ? { success: false, message: `Skill "${skillId}" was not found under .ai-context/skills/tool-skills/.`, error: 'skill not found' }
+      ? { success: false, message: `Skill "${skillId}" was not found under ${layoutRel('toolSkills')}/.`, error: 'skill not found' }
       : { success: false, message: `Version ${pinned} of skill "${skillId}" was not found (it was never published, or its history was removed).`, error: 'skill version not found' };
   }
   const notRunnable = notRunnableReason(state, { pinned: pinned !== undefined });

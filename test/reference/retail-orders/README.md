@@ -32,7 +32,7 @@ Record mode works with the `fetch()`-based providers (`openai`, `azure-openai`, 
 | `documents/pack/glossary.md`, `vocabulary-proposal.offline.json` | The customer's glossary, and the vocabulary an LLM proposes from it (the offline stand-in; replay/record runs ask the LLM). Accepted, it re-measures the vocabulary-mismatch questions (v0.33.0) |
 | `documents/pack/expected.yaml` | What the pack scenario must find |
 | `sources/samples/shop_customers.csv`, `crm_customers.csv` | Customer samples for probes; crm's has a duplicate `cust_no` |
-| `documents/vocabulary.yaml` | The acquired CRM team's vocabulary (cross-organisation synonyms), as an engineer records it in `.ai-context/context/vocabulary.yaml` |
+| `documents/vocabulary.yaml` | The acquired CRM team's vocabulary (cross-organisation synonyms), as an engineer records it in `.autode/knowledge/vocabulary.yaml` |
 | `../../eval/lib/largeEstate.cjs` | Generator for the large estate (4 systems, ~2 000 tables, ~50 000 columns, planted questions) used to measure scale and responsiveness (v0.32.0) |
 | `sources/samples/loyalty_members.csv` | Sample rows; contains a duplicate `member_id` |
 | `documents/business-context.yaml` | The client's finance glossary and rules (defines revenue as gross) |

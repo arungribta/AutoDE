@@ -16,7 +16,7 @@ export interface PrimitiveDefinitionLoadResult {
 
 /**
  * Loads and validates every `*.yaml`/`*.yml` file in a primitive-definitions
- * directory (bundled defaults, or a workspace's `.ai-context/primitives/`
+ * directory (bundled defaults, or a workspace's `.autode/config/primitives/`
  * overrides). Modeled on `loadSkillsFromDirectory()` (src/engine/skills/skillRegistry.ts)
  * — same plain-Node-fs, no-vscode-dependency approach — but unlike that
  * loader, a malformed definition is reported in `errors`, not silently

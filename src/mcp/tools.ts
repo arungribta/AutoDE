@@ -9,6 +9,7 @@ import { PackPurpose, buildContextPack } from '../engine/context/contextPack';
 import { ASSERTION_KINDS, AssertionStatus, TrustTier } from '../engine/context/assertions';
 import { isMirror } from '../engine/context/projection';
 import { buildSchemaIndex, checkSqlGrounding } from '../engine/grounding/sqlGrounding';
+import { UNSCOPED_PROBLEM, outputDirSegments } from '../engine/workspaceLayout';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
 
@@ -183,14 +184,16 @@ export const TOOLS: readonly EngineTool[] = [
   },
   {
     name: 'autode_compile_pipeline_spec',
-    description: 'Compile a valid Pipeline Spec to code, entity by entity, with suggested paths under artifacts/. Returns content; never writes files.',
+    description: 'Compile a valid Pipeline Spec to code, entity by entity, with suggested paths in the output folder (autode-output/<problem>/03-build/…, where the extension writes build artifacts). Returns content; never writes files.',
     inputSchema: { type: 'object', required: ['dialect'], additionalProperties: false, properties: { ...specInput, dialect: dialectSchema } },
     annotations: readOnly('Compile a Pipeline Spec'),
     handler: async (args, ws) => {
       const { spec, source } = validSpec(ws, args);
+      // Same place ArtifactWriter writes build artifacts (default output folder; the extension's setting is not visible here).
+      const base = [...outputDirSegments(ws.activeProblemId() ?? UNSCOPED_PROBLEM), '03-build', `${spec.id}.v${spec.version}`].join('/');
       const entities = compilePipelineSpec(spec, args.dialect as SqlDialect).map((e) => ({
         name: e.name,
-        artifacts: e.artifacts.map((a, i) => ({ ...a, suggestedPath: `artifacts/build/${slug(spec.id)}.v${spec.version}/${slug(e.name)}/${String(i + 1).padStart(2, '0')}_${slug(a.kind)}.sql` }))
+        artifacts: e.artifacts.map((a, i) => ({ ...a, suggestedPath: `${base}/${slug(e.name)}/${String(i + 1).padStart(2, '0')}_${slug(a.kind)}.sql` }))
       }));
       return { source, specId: spec.id, specVersion: spec.version, dialect: args.dialect, entities };
     }

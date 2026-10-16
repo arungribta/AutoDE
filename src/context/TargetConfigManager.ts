@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { TargetEnvironment, TargetConfigFile, TargetProfile } from '../engine/types';
 import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { LAYOUT } from '../engine/workspaceLayout';
 
 /**
- * Manages the .ai-context/target-environment.yaml file.
+ * Manages the .autode/config/target-environment.yaml file.
  * Provides CRUD operations for target environment profiles with inheritance support.
  */
 export class TargetConfigManager implements vscode.Disposable {
@@ -25,10 +26,10 @@ export class TargetConfigManager implements vscode.Disposable {
   }
 
   async initialize(): Promise<void> {
-    this.targetFileUri = vscode.Uri.joinPath(this.workspaceUri, '.ai-context', 'target-environment.yaml');
+    this.targetFileUri = vscode.Uri.joinPath(this.workspaceUri, ...LAYOUT.targetEnvironment);
 
-    // Ensure .ai-context directory exists
-    const contextDir = vscode.Uri.joinPath(this.workspaceUri, '.ai-context');
+    // Ensure .autode/config exists
+    const contextDir = vscode.Uri.joinPath(this.workspaceUri, ...LAYOUT.config);
     try {
       await vscode.workspace.fs.createDirectory(contextDir);
     } catch {
@@ -50,7 +51,7 @@ export class TargetConfigManager implements vscode.Disposable {
 
     // Watch for external changes
     this.fileWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.joinPath(this.workspaceUri, '.ai-context'), 'target-environment.yaml')
+      new vscode.RelativePattern(vscode.Uri.joinPath(this.workspaceUri, ...LAYOUT.config), 'target-environment.yaml')
     );
     this.fileWatcher.onDidChange(async () => {
       try {
@@ -260,7 +261,7 @@ export class TargetConfigManager implements vscode.Disposable {
 
     const yaml = this.serializeYaml();
     const tempFile = vscode.Uri.joinPath(
-      vscode.Uri.joinPath(this.workspaceUri, '.ai-context'),
+      vscode.Uri.joinPath(this.workspaceUri, ...LAYOUT.config),
       `target-environment.tmp.${Date.now()}.yaml`
     );
 

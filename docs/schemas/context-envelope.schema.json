@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://autode.dev/schemas/context-envelope.schema.json",
   "title": "AutoDE Context Object Envelope",
-  "description": "Unified metadata envelope for every node and edge in the AutoDE Enterprise Context Layer (.ai-context). Per-kind 'content' schemas extend this envelope.",
+  "description": "Unified metadata envelope for every node and edge in the AutoDE Enterprise Context Layer (.autode). Per-kind 'content' schemas extend this envelope.",
   "type": "object",
   "required": ["id", "kind", "layer", "label", "origin", "version"],
   "properties": {
