@@ -33,6 +33,24 @@ AutoDE is a VS Code extension that takes a data-engineering business problem fro
 
 ---
 
+### 1.1 Where planned work is specified
+
+This document states what AutoDE does and why; requirements marked *Planned* or *Partial* are completed by phases specified in two companion documents. They hold the detail — design contracts, acceptance criteria, rejected alternatives — and are not repeated here. Each capability section below ends with a *Planned work* line pointing to them. When a phase ships, its WHAT/WHY moves into this document and its specification shrinks to a pointer ([README.md](README.md)).
+
+| Capability area (this document) | Specified in | Phases (order: [roadmap.md](roadmap.md)) |
+|---|---|---|
+| Business problem and specification (BPS), Conversation (CHT) | [context-layer-requirements.md](context-layer-requirements.md) §5.2 extraction, §5.4 Context Inbox, §7.2 cited Q&A | C4b |
+| Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §5 enrichment, §6 semantic model, §8 freshness and health | C4b, C5, C6; migration track M1–M3 (not yet written) |
+| Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §7 packs, §10 grounding checks and metrics | C4b, C5, C6 |
+| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §5.3 data-platform tools, §6 credentials, §9.1 Phase DRV | 4, DRV |
+| Planning and orchestration (ORC), Generation (GEN) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer-requirements.md](context-layer-requirements.md) §6 semantic model | 5, 6, GOV, C5 |
+| Tool skills (SKL) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase S3, §9 Phase 6 | S3, 6 |
+| Interoperability with other agents (MCP) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §5–§7; [context-layer-requirements.md](context-layer-requirements.md) §9 context-layer tools | 4, 5, C4b, C5 |
+| Governance and security (SEC) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9 Phase 4 (sample-data consent), §9.1 Phase GOV | 4, GOV |
+| Non-functional (NFR) | [context-layer-requirements.md](context-layer-requirements.md) §10.2 metrics, §11 Phase C6 release evaluation | C6 |
+
+Workspace (WS), LLM providers (LLM) and user experience (UI) have no open specification; their open items are in the roadmap's backlog.
+
 ## 2. Principles
 
 Product-wide; every capability and phase preserves them. The forward specs refer to these by ID.
@@ -87,6 +105,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **BPS-9 — Greenfield or brownfield is classified automatically and can be overridden;** the override survives revisions. It decides whether source context is required and whether discovery is in scope. *Status:* Shipped v0.10.0.
 - **BPS-10 — The specification states intent and scope; detailed clauses stay with their source documents** and are referenced, not copied. *Why:* a specification that copies a contract drifts from it. *Status:* Partial v0.33.0 — a specification drafted while the problem has a pack records the ids of the contract clauses it rests on and is drafted with them in view; the specification's own fields are not yet restructured around references.
 
+*Planned work:* interview and chat answers extracted into the ledger, the Context Inbox, an interview that survives a reload — [context-layer-requirements.md](context-layer-requirements.md) §5.2, §5.4 (C4b).
+
 ### 3.3 Source and target context (STC)
 
 - **STC-1 — Target context is required and approved before planning:** platform, modelling approach, transformation and orchestration tools, naming, environment, location. Each answer is confirmed by the user; defaults are suggestions. It is the only source of the plan's target environment. *Status:* Shipped v0.11.0.
@@ -100,6 +120,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **STC-9 — Live-verified and file-derived facts are never blended silently;** the difference is shown to the user and to the model. An explicit re-verify reports what appeared and disappeared without deleting anything on its own. *Status:* Shipped v0.24.0.
 - **STC-10 — An estate is modelled as systems, environments and locations.** Several source systems and a target coexist; identically named tables in different systems stay distinct; roles (source, target, both) belong to a system or schema, so in-place modernisation and dev/test/prod are expressible. The estate is recorded in the repository and editable; a connection or imported file not yet assigned gets a system named after it. *Why:* estate merge and migration. *Status:* Shipped v0.31.0.
 
+*Planned work:* semantic model — [context-layer-requirements.md](context-layer-requirements.md) §6 (C5); legacy migration assessment and mapping — migration track M1–M3 (to be specified).
+
 ### 3.4 Data platforms and credentials (PLT)
 
 - **PLT-1 — Snowflake and Databricks can be connected, queried and introspected** (tables, columns, keys, views; optional profiling — sampled and within a per-run query budget since v0.32.0, so profiling a large schema cannot run unbounded against the customer's warehouse). Other platforms are listed but not yet connectable. *Status:* Shipped v0.17.0.
@@ -109,6 +131,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **PLT-5 — The assistant knows what is connected,** and the UI shows it. *Status:* Shipped v0.18.0.
 - **PLT-6 — Legacy sources without a live connector can still be described:** dictionary exports (Teradata, Oracle, INFORMATION_SCHEMA) and DDL. *Status:* Shipped v0.31.0.
 - **PLT-7 — A user can opt in to a native driver** for platforms or performance the CLI-free path doesn't cover, fetched only on request and integrity-checked. *Status:* Planned (DRV).
+
+*Planned work:* data-platform MCP tools and credentials across the process boundary — [mcp-engine-requirements.md](mcp-engine-requirements.md) §5.3, §6 (phase 4); opt-in native drivers and platform onboarding — §9.1 Phase DRV.
 
 ### 3.5 Context layer (CTX)
 
@@ -125,6 +149,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **CTX-11 — A semantic model** (entities, keys, grain, relationships, measures, metrics) is derived from confirmed facts and exportable to the target's semantic formats. *Status:* Planned (C5).
 - **CTX-12 — Freshness and health are tracked;** stale facts are labelled, and a health view summarises the layer. *Status:* Planned (C6).
 
+*Planned work:* chat and interview extraction, Context Inbox — [context-layer-requirements.md](context-layer-requirements.md) §5.2, §5.4 (C4b); semantic model — §6 (C5); freshness policy and context health — §8.2, §8.4 (C6).
+
 ### 3.6 Context delivery and grounding (GRD)
 
 - **GRD-1 — Each LLM call receives context selected for its task** (C5): what the task names, related objects, STRICT rules, conflicts and items under review that touch them; unrelated schemas are left out. With nothing to scope by, it receives the project overview. *Status:* Shipped v0.30.0.
@@ -137,6 +163,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **GRD-8 — Retrieval finds the right objects when the request's vocabulary differs from physical names** — synonyms, abbreviations, another organisation's terms. Deterministic signals first; embeddings only as an optional signal if measurement shows they're needed. *Why:* merges and legacy estates. *Status:* Shipped v0.32.0 — abbreviations, synonyms, the customer's own vocabulary, table and column comments and glossary terms; on the reference question set 17 of 21 found, against 3 of 21 from names alone. Free paraphrases ("money customers got back") are not covered; embeddings (RET) are not scheduled, see the roadmap's decision log. Since v0.33.0 the customer's vocabulary can be captured from their documents: abbreviations are mined from names and the comments that spell them out, the LLM proposes further entries from the pack, and the engineer accepts each one. With vocabulary captured from the reference customer's glossary, 19 of 21 are found and 2 of the 4 paraphrases; the two still missed share no word with the table they mean, or rank a sibling table first.
 - **GRD-9 — Grounding and accuracy are measured on a reference problem for every release** (C7), with frozen baselines so every change shows its effect; the results become a release gate. *Status:* Shipped v0.27.0 (release gate Planned C6).
 
+*Planned work:* cited Q&A — [context-layer-requirements.md](context-layer-requirements.md) §7.2 (C4b); decision backing against the semantic model — §10.1 (C5); release metrics and ablation — §10.2, §11 Phase C6.
+
 ### 3.7 Planning and orchestration (ORC)
 
 - **ORC-1 — The required workflow phases (discover, model, build, validate) are inferred from the approved specification,** explained, shown live, and can be overridden; an override survives re-planning. *Status:* Shipped v0.6.0 (overrides v0.10.0).
@@ -146,6 +174,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **ORC-5 — A failed step doesn't stop independent steps;** only steps that depend on it are blocked. *Status:* Shipped v0.10.0.
 - **ORC-6 — A specification change during execution pauses the run after the current step.** *Status:* Shipped v0.25.0.
 - **ORC-7 — Long-running actions show progress, and completion is confirmed** with the next actions offered. *Status:* Shipped v0.9.0 / v0.10.0.
+
+*Planned work:* context gaps pause a step once the Context Inbox exists — [context-layer-requirements.md](context-layer-requirements.md) §11 Phase C4b; the extension reaches the engine through MCP — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5).
 
 ### 3.8 Generation (GEN)
 
@@ -157,6 +187,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **GEN-6 — Migration programmes are supported at scale:** assessment and wave planning, rule-based mapping and generation across many objects, importing external code-converter output, and reconciliation proving the target matches the source. *Status:* Planned (M1–M3).
 - **GEN-7 — Further generators:** DDL, orchestration (Airflow, Dagster, Prefect) and tests as dedicated agents. *Status:* Not met (DDL likely covered by M2).
 
+*Planned work:* per-dialect primitives, conformance suite, dry-run before execute, idempotent DDL — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9 Phase 6; governance-as-code (masking, classifications) — §9.1 Phase GOV; semantic-model exports — [context-layer-requirements.md](context-layer-requirements.md) §6 (C5).
+
 ### 3.9 Conversation (CHT)
 
 - **CHT-1 — Chat follows the specification's state:** with no specification, the first message starts the discovery interview; with a draft, messages refine it; with an approved specification, questions are answered grounded in it and the context; a requested change starts a revision interview. *Status:* Shipped v0.9.0.
@@ -165,6 +197,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **CHT-4 — The assistant is read-only by default;** write and command access is granted per chat, explicitly. *Status:* Shipped.
 - **CHT-5 — Facts stated in chat are captured as proposed facts, and answers cite the facts they rest on.** *Status:* Planned (C4b).
 - **CHT-6 — Chat history can be searched, tagged and exported.** *Status:* Not met.
+
+*Planned work:* chat extraction into the ledger and tool-action memory — [context-layer-requirements.md](context-layer-requirements.md) §11 Phase C4b.
 
 ### 3.10 LLM providers (LLM)
 
@@ -181,9 +215,13 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **SKL-4 — Skills are confined to the workspace,** and writes or commands are approved per call where AutoDE runs the loop. *Status:* Shipped v0.9.0.
 - **SKL-5 — Skills are reviewed and trusted before they gain capabilities,** with provenance; imports from Git with updates shown as diffs; a starter library and authoring guidance. *Why:* a skill's instructions and scripts act in the customer's workspace; what runs must have been read by a person (P2). *Status:* Partial v0.34.0 — every imported skill records where it came from and a checksum of its content, and does not run until an engineer has read it on a review page and chosen a tier: *reviewed* (read-only tools at most, never through Claude Code) or *trusted* (writes and commands, each approved, and Claude Code). Trust belongs to the content that was read: a skill whose files change afterwards (a pull, an edit) is unreviewed again. Skills present before v0.34.0 stay trusted. With lifecycle management switched on, skills are published as numbered versions, deprecated or retired, and a plan step can pin a version that keeps running after deprecation. Every transition is recorded with who and when. Git imports with diffs, the starter library and authoring guidance are S3.
 
+*Planned work:* Git-URL import with update diffs, starter library, authoring guidance — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase S3.
+
 ### 3.12 Interoperability with other agents (MCP)
 
 - **MCP-1 — AutoDE's deterministic core — primitives, specifications, context, grounding checks, platform access — is usable by other coding agents** (Claude Code, Copilot agent mode, Cursor) through the Model Context Protocol, and the extension uses the same interface. *Why:* engineers also work in those agents; they should get AutoDE's grounding instead of freehand SQL. *Status:* Partial v0.35.0 — the server ships inside the extension and runs on plain Node: transform primitives (search, describe, validate, compile), Pipeline Spec validation, compilation and design document, AutoDE's interview prompts and reviewed tool skills as prompts, the active problem's specifications and context documents as resources, and the read-only context tools (resolve text to estate objects, context packs, the assertion ledger, SQL grounding checks). Everything it offers is read-only and deterministic, and every response is scrubbed of secrets. Setup for Claude Code, VS Code and Cursor is documented. Still planned: data-platform tools and sample-data consent (4), the extension using the server itself and registering it with other agents (5).
+
+*Planned work:* data-platform tools — [mcp-engine-requirements.md](mcp-engine-requirements.md) §5.3 (phase 4); the extension as a client and registration with other agents — §7 (phase 5); proposing and verifying assertions, semantic-model resources — [context-layer-requirements.md](context-layer-requirements.md) §9 (C4b, C5).
 
 ### 3.13 Governance and security (SEC)
 
@@ -192,6 +230,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **SEC-3 — Telemetry, if any, is opt-in and free of personal data.** *Status:* Not met (the setting exists; nothing reports).
 - **SEC-4 — Data sensitivity and masking are governed as code:** classifications in specifications, a masking primitive, a governance interview. *Status:* Planned (GOV).
 - **SEC-5 — Probes and samples never expose row values without consent;** verification uses aggregates. *Status:* Partial v0.33.0 — probes return counts and rates only (tested), also over sample files; the consent setting for row-level samples arrives with phase 4.
+
+*Planned work:* sample-data consent and PII masking — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9 Phase 4; governance-as-code — §9.1 Phase GOV.
 
 ### 3.14 User experience (UI)
 
@@ -215,6 +255,8 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **NFR-7 — Reproducible:** the same inputs give the same context, projections and checks; artifacts pin the revisions they used. *Status:* Shipped v0.29.0 / v0.30.0 (catalog revisions pinned in manifests v0.31.0).
 - **NFR-8 — Scale:** a business problem's working set (about 200 tables, 5 000 columns, 1 000 facts) stays responsive in memory; larger estates are handled by K's catalogs and cache, with any storage change decided from measurements. *Status:* Shipped v0.32.0 — the working set is held in memory; the estate around it lives in per-system catalogs, and objects enter the working set when a task uses them and leave it when unused. Measured at about 2 000 tables and 50 000 columns; no database is needed at that size (decision in the roadmap).
 - **NFR-9 — Every behaviour change is covered by automated tests,** and every release is evaluated on the reference problem. *Status:* Shipped (241 tests and eval at v0.30.0).
+
+*Planned work:* release evaluation across providers — [context-layer-requirements.md](context-layer-requirements.md) §10.2, §11 Phase C6.
 
 ---
 

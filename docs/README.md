@@ -9,9 +9,9 @@ Each document answers one kind of question. When two disagree, the precedence ru
 | **When**, and is it done? | [roadmap.md](roadmap.md) | The only place for phase order and status, the unscheduled backlog, and the decision log. |
 | **How** is it built? | [technical-design.md](technical-design.md) | Architecture, modules, data formats, algorithms, trade-offs. |
 | What **changed** in each version? | [CHANGELOG.md](../CHANGELOG.md) | Newest first, including deliberate deviations from the specs. |
-| How do I get oriented as a new engineer? | [engineering-onboarding-guide.md](engineering-onboarding-guide.md) | Describes v0.13.0; refresh scheduled. |
+| How do I get oriented as a new engineer? | [engineering-onboarding-guide.md](engineering-onboarding-guide.md) | Orientation for new engineers: concepts, flows, code tour, daily loop, how to extend, known risks (v0.35.0). Links into the documents above for detail. |
 | How do I use AutoDE from Claude Code, VS Code agent mode or Cursor? | [mcp-setup.md](mcp-setup.md) | MCP server configuration and what it offers (v0.35.0). |
-| How do I verify a release by hand? | [manual-verification.md](manual-verification.md) | Checklist for v0.25.0–v0.31.0. |
+| How do I verify a release by hand? | [manual-verification.md](manual-verification.md) | F5 checklist for v0.25.0–v0.35.0, one part per version. |
 | Data formats | [schemas/](schemas/) | JSON Schemas for context envelopes and primitive definitions. |
 | How is AutoDE measured? | [../test/reference/retail-orders/README.md](../test/reference/retail-orders/README.md) | Reference problem and `npm run eval`; frozen reports in `baselines/`. |
 
@@ -24,7 +24,8 @@ Each document answers one kind of question. When two disagree, the precedence ru
 ## Rules for keeping these documents straight
 
 - **WHAT/WHY and HOW stay apart.** Requirements don't name files, classes or CLI flags; technical design doesn't restate requirements.
-- **When a phase ships:** its WHAT/WHY moves into requirements.md, its HOW into technical-design.md, its spec section shrinks to a pointer, it gets a CHANGELOG entry and a ✅ in the roadmap.
+- **When a phase ships:** its WHAT/WHY moves into requirements.md, its HOW into technical-design.md, its spec section shrinks to a pointer, it gets a CHANGELOG entry and a ✅ in the roadmap; the onboarding guide and the manual-verification checklist are updated for anything a newcomer or a tester needs. `npm run docs:generate` refreshes the generated parts of technical-design.md, and `npm test` fails when they are stale.
+- **requirements.md points to the specs, never repeats them:** its §1.1 map and the *Planned work* line under each capability say where planned work is specified.
 - **New plans go in the roadmap,** never in a new section of another document. New phase specifications go in the relevant spec (or a new spec listed here).
 - **Phase identifiers are unique:** `1`–`6`, `S1`–`S3`, `DRV`, `GOV` (mcp-engine spec); `C1`–`C6`, `C4a`/`C4b`, `K1`/`K2` (context-layer spec); `M1`–`M3`, `RET` (to be specified). Shipped work is referred to by version.
 - **New documents are added to this map,** or they don't exist.

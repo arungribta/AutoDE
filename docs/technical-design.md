@@ -64,13 +64,14 @@ The product principles are in requirements.md §2. These are the implementation 
 │  │ Agents (discover/model/build/validate, tool skills)                │ │
 │  └──────────────────────────────┬─────────────────────────────────────┘ │
 │  ┌───────────── engine: src/engine/** (no vscode imports) ────────────┐ │
-│  │ context/  assertions, ledger, projection, conflicts, retrieval,   │ │
-│  │           contextPack, contextGaps, contextStore, fileIngestion   │ │
+│  │ context/  assertions, ledger, projection, conflicts, estate ids,  │ │
+│  │           catalog, vocabulary, retrieval, contextPack, gaps,      │ │
+│  │           pack, profiles, contracts, conformance, probes          │ │
 │  │ grounding/ sqlGrounding, manifest                                  │ │
 │  │ transforms/ primitives (Tier 1 code, Tier 2 declarative)           │ │
 │  │ pipelineSpec/ validator, compiler, design doc                      │ │
 │  │ platform/ ConnectionManager, adapters, execution backends, creds   │ │
-│  │ skills/   interview skills, tool skills, allow-lists               │ │
+│  │ skills/   interview skills, tool skills, allow-lists, trust tiers  │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────┬───────────────────────────────────────┘
                                    │ postMessage
@@ -78,9 +79,14 @@ The product principles are in requirements.md §2. These are the implementation 
                      │ media/sidebar.html        │  chat · context drawer ·
                      │ (single-file webview)     │  workflow palette · settings
                      └───────────────────────────┘
-Planned (phases 3–5): src/mcp/server.ts exposes the engine over MCP stdio;
-the extension and external agents (Claude Code, Copilot agent mode, Cursor)
-become clients of the same server — see mcp-engine-requirements.md §3.
+
+┌──── dist/mcp-server.js — src/mcp/** over src/engine/** (v0.35.0) ────┐
+│  stdio MCP server, plain Node, read-only, no LLM calls: primitives,   │
+│  Pipeline Spec, context tools, interview and skill prompts, resources │
+└───────────────────────────────────────────────────────────────────────┘
+        ▲ Claude Code · VS Code agent mode · Cursor (configured by hand,
+          docs/mcp-setup.md). Planned: the extension becomes a client of
+          the same server and registers it (phase 5).
 ```
 
 ---
@@ -1316,35 +1322,70 @@ The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileMa
 | `setSnowflakePassword(value)` | Store Snowflake password |
 | `getSnowflakePassword()` | Retrieve Snowflake password |
 
-### 10.5 Registered Configuration Properties
+### 10.5 Settings
 
-All properties are under the `autoDataEngineeringHub` section:
+All settings are under `autoDataEngineeringHub.`; the table is generated from `package.json` (`npm run docs:generate`; `npm test` fails when it is stale).
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `defaultProvider` | enum | `snowflake` | Default data platform |
-| `defaultSnowflakeAccount` | string | `""` | Snowflake account |
-| `defaultSnowflakeUsername` | string | `""` | Snowflake username |
-| `defaultSnowflakeWarehouse` | string | `""` | Snowflake warehouse |
-| `defaultSnowflakeDatabase` | string | `""` | Snowflake database |
-| `defaultSnowflakeSchema` | string | `PUBLIC` | Snowflake schema |
-| `defaultSnowflakeRole` | string | `SYSADMIN` | Snowflake role |
-| `defaultSnowflakeAuthMode` | enum | `key-pair` | Auth mode |
-| `snowflakePrivateKeyPath` | string | `""` | Key path |
-| `metadataCachingDurationMinutes` | number | `15` | Cache duration |
-| `queryTimeoutSeconds` | number | `120` | Query timeout |
-| `readOnlyMode` | boolean | `true` | Read-only mode |
-| `enableSessionReuse` | boolean | `true` | Session reuse |
-| `autoDocumentationEnabled` | boolean | `true` | Auto-documentation |
-| `telemetryEnabled` | boolean | `false` | Telemetry opt-in |
-| `activeLlmProvider` | enum | `copilot` | Active LLM provider (`copilot`, `claude`, `openai`, `anthropic`, `azure-openai`, `gemini`, `ollama`) |
-| `activeLlmModel` | string | `gpt-4o-mini` | LLM model name |
-| `llmEndpoint` | string | `""` | Custom LLM endpoint |
-| `languageModelProgrammaticConsent` | boolean | `false` | Consent to use a local LLM (Copilot via `vscode.lm`, or the Claude Code CLI) programmatically |
-| `claudeCodePath` | string | `""` | Explicit path to the `claude` CLI for provider `claude`; empty = auto-detect |
-| `copilotProgrammaticConsent` | boolean | `false` | _Deprecated_ — legacy consent flag, still honored as a fallback |
-| `extensionDisplayName` | string | `Auto Data Engineering Hub` | Display name |
-| `extensionDescription` | string | `...` | Description |
+<!-- generated:settings -->
+| Setting | Type | Default | What it does |
+|---|---|---|---|
+| `defaultProvider` | enum: `snowflake`, `databricks`, `bigquery`, `redshift`, `synapse`, `other` | `"snowflake"` | Default data platform provider. |
+| `defaultDatabricksWorkspaceUrl` | string | `""` | Default Databricks workspace host (e.g. adb-1234567890123456.7.azuredatabricks.net). |
+| `defaultDatabricksHttpPath` | string | `""` | The target SQL warehouse's HTTP Path (e.g. /sql/1.0/warehouses/0123456789abcdef), copied from its Connection Details page. |
+| `defaultDatabricksCatalog` | string | `"main"` | Default Databricks (Unity Catalog) catalog. |
+| `defaultDatabricksCatalogType` | enum: `auto`, `unity`, `hive_metastore` | `"auto"` | Which metadata-introspection shape to use for the configured catalog. 'auto' infers it from the catalog name (the reserved 'hivemetastore' name vs. everything else); set explicitly when a workspace has more than one catalog type, or as a manual override for another catalog that shares the legacy metastore's limitations (no bulk informationschema). |
+| `defaultDatabricksSchema` | string | `"default"` | Default Databricks schema. |
+| `defaultSnowflakeAccount` | string | `""` | Default Snowflake account identifier. |
+| `defaultSnowflakeUsername` | string | `""` | Default Snowflake username. |
+| `defaultSnowflakeWarehouse` | string | `""` | Default Snowflake warehouse. |
+| `defaultSnowflakeDatabase` | string | `""` | Default Snowflake database. |
+| `defaultSnowflakeSchema` | string | `"PUBLIC"` | Default Snowflake schema. |
+| `defaultSnowflakeRole` | string | `"SYSADMIN"` | Default Snowflake role. |
+| `defaultSnowflakeAuthMode` | enum: `key-pair`, `username-password`, `oauth`, `external-browser`, `mcp` | `"key-pair"` | Snowflake authentication mode. |
+| `snowflakePrivateKeyPath` | string | `""` | Path to Snowflake private key. |
+| `defaultTargetProvider` | enum: `snowflake`, `databricks`, `bigquery`, `redshift`, `synapse`, `other` | `"snowflake"` | Target data platform provider — independent of, and can be connected simultaneously with, the source platform above. |
+| `defaultTargetDatabricksWorkspaceUrl` | string | `""` | Target Databricks workspace host (e.g. adb-1234567890123456.7.azuredatabricks.net). |
+| `defaultTargetDatabricksHttpPath` | string | `""` | The target platform's SQL warehouse HTTP Path (e.g. /sql/1.0/warehouses/0123456789abcdef), copied from its Connection Details page. |
+| `defaultTargetDatabricksCatalog` | string | `"main"` | Target Databricks (Unity Catalog) catalog. |
+| `defaultTargetDatabricksCatalogType` | enum: `auto`, `unity`, `hive_metastore` | `"auto"` | Which metadata-introspection shape to use for the target's configured catalog. |
+| `defaultTargetDatabricksSchema` | string | `"default"` | Target Databricks schema. |
+| `defaultTargetSnowflakeAccount` | string | `""` | Target Snowflake account identifier — independent of, and can be connected simultaneously with, the source Snowflake account above. |
+| `defaultTargetSnowflakeUsername` | string | `""` | Target Snowflake username. |
+| `defaultTargetSnowflakeWarehouse` | string | `""` | Target Snowflake warehouse. |
+| `defaultTargetSnowflakeDatabase` | string | `""` | Target Snowflake database. |
+| `defaultTargetSnowflakeSchema` | string | `"PUBLIC"` | Target Snowflake schema. |
+| `defaultTargetSnowflakeRole` | string | `"SYSADMIN"` | Target Snowflake role. |
+| `defaultTargetSnowflakeAuthMode` | enum: `key-pair`, `username-password`, `oauth`, `external-browser`, `mcp` | `"key-pair"` | Target Snowflake authentication mode. |
+| `targetSnowflakePrivateKeyPath` | string | `""` | Path to the target connection's Snowflake private key. |
+| `targetSnowflakeCliPath` | string | `""` | Explicit path to the Snowflake CLI for the target connection (only if not found automatically). |
+| `targetDatabricksCliPath` | string | `""` | Explicit path to the Databricks CLI for the target connection (only if not found automatically). |
+| `metadataCachingDurationMinutes` | number | `15` | Metadata caching duration in minutes. |
+| `queryTimeoutSeconds` | number | `120` | Default query timeout in seconds. |
+| `readOnlyMode` | boolean | `true` | Restrict to read-only mode. |
+| `enableSessionReuse` | boolean | `true` | Enable session reuse. |
+| `autoDocumentationEnabled` | boolean | `true` | Auto-generate documentation. |
+| `telemetryEnabled` | boolean | `false` | Allow telemetry (opt-in). |
+| `activeLlmProvider` | enum: `azure-openai`, `openai`, `anthropic`, `gemini`, `ollama`, `copilot`, `claude` | `"copilot"` | Active LLM provider. |
+| `activeLlmModel` | string | `"gpt-4o-mini"` | LLM model name. |
+| `claudeCodePath` | string | `""` | Path to the Claude Code CLI ('claude' / 'claude.exe'). |
+| `llmEndpoint` | string | `""` | Custom LLM endpoint. |
+| `context.workingSetMaxTables` | number | `200` | Tables AutoDE keeps in its working set (the context graph and ledger). |
+| `context.evictAfterDays` | number | `30` | While the working set is over its size, tables no task has used for this many days (and no confirmed fact is about) go back to the catalog. |
+| `context.schemaTtlDays` | number | `7` | Schema facts older than this are re-checked against a connected source when a task uses them and before a plan runs. |
+| `discovery.profileQueryBudget` | number | `50` | Most profiling queries one Source Assessment may run (one sampled query per table). |
+| `discovery.profileConcurrency` | number | `4` | Profiling queries run in parallel during Source Assessment. |
+| `artifactDirectory` | string | `"artifacts"` | Folder (relative to the active business problem's own folder, .ai-context/problems/<id>/) where AutoDE writes generated artifacts — alongside that problem's specification, context, and plan, so its knowledge base stays in one place. |
+| `extensionDisplayName` | string | `"AutoDE — Data Engineering Workspace"` | Extension display name. |
+| `extensionDescription` | string | `"AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation."` | Extension description. |
+| `languageModelProgrammaticConsent` | boolean | `false` | Allow AutoDE to programmatically use a locally-installed language model for its LLM calls (opt-in): GitHub Copilot via the VS Code Language Model API, or the Claude Code CLI. |
+| `copilotProgrammaticConsent` | boolean | `false` | Deprecated — use `languageModelProgrammaticConsent`. |
+| `primitiveManagementEnabled` | boolean | `false` | Allow publishing/deprecating declarative (Tier 2) transform primitives from the Primitives palette (opt-in). |
+| `toolSkillManagementEnabled` | boolean | `false` | Manage imported tool skills' lifecycle: imports start as drafts, and Publish/Deprecate/Retire Tool Skill keep numbered versions that plan steps can pin (opt-in). |
+| `dataPlatformCliConsent` | boolean | `false` | Allow AutoDE to shell out to a data-platform CLI (currently: 'snow connection list') to enumerate configured connections for 'AutoDE: Connect to Data Platform' (opt-in). |
+| `snowflakeCliPath` | string | `""` | Path to the Snowflake CLI ('snow' / 'snow.exe'). |
+| `databricksCliPath` | string | `""` | Path to the Databricks CLI ('databricks' / 'databricks.exe'). |
+| `serviceAccountCredentialRef` | string | `""` | A service-account credential pointer, set once by a platform team — deliberately a plain settings value, no interactive UI. |
+<!-- /generated:settings -->
 
 ---
 
@@ -1352,7 +1393,7 @@ All properties are under the `autoDataEngineeringHub` section:
 
 ### 11.1 Functional tests (NFR-9)
 
-`npm test` compiles and runs `test/functional.test.cjs`: one runner (241 tests at v0.30.0) that loads the compiled `dist/` modules with a per-test `vscode` mock (`createMock()`, `withMock()`; modules are re-required with `fresh()` because they capture the mock at load time). Engine modules are tested in plain Node with no mock, which doubles as the engine-boundary check (§10.2). Coverage spans the context store and watchers, ledger/projection/conflicts, packs/gaps/manifests, file ingestion, the Snowflake/Databricks adapters and execution backends (mocked processes and `fetch`), credential resolvers and CLI detection, LLM adapters and tool loops (mocked models), the spec engine and synthesis, phase inference, plan validation and execution, managers' versioning/archiving, and the primitive registry and Pipeline Spec compiler. `npm run lint` must report no errors.
+`npm test` compiles (tsc + bundles) and runs `test/functional.test.cjs`: one runner (288 tests at v0.35.0) that loads the compiled `dist/` modules with a per-test `vscode` mock (`createMock()`, `withMock()`; modules are re-required with `fresh()` because they capture the mock at load time). Engine modules are tested in plain Node with no mock, which doubles as the engine-boundary check (§10.2). Coverage spans the context store and watchers, ledger/projection/conflicts, packs/gaps/manifests, file ingestion, the Snowflake/Databricks adapters and execution backends (mocked processes and `fetch`), credential resolvers and CLI detection, LLM adapters and tool loops (mocked models), the spec engine and synthesis, phase inference, plan validation and execution, managers' versioning/archiving, the primitive registry and Pipeline Spec compiler, the business-problem pack (profiles, contracts, conformance, probes), tool-skill lifecycle and trust, and the MCP server — the bundle is spawned in a plain Node child process and driven over stdio with the SDK client (contract tests, golden compile snapshots in `test/golden/mcp-compile/`, a no-writes check). A docs test fails when the generated sections of this document (§10.5, §12) are stale. `npm run lint` must report no errors.
 
 ### 11.2 Evaluation harness (GRD-9; C7)
 
@@ -1385,47 +1426,48 @@ All properties are under the `autoDataEngineeringHub` section:
 
 ## 12. Source Tree
 
-Generated from `git ls-files src` (2026-10-15). `src/engine/**` never imports `vscode` (§10.2).
+Generated from `src/` (`npm run docs:generate`; `npm test` fails when it is stale). `src/engine/**` and `src/mcp/**` never import `vscode` (§10.2).
 
+<!-- generated:source-tree -->
 ```
 src/    # activation and command registration
   extension.ts
 src/agents/    # shared codegen paths (primitive selection, freehand, Pipeline Spec synthesis)
   llmCodegen.ts, llmParamSelector.ts, pipelineSpecSynthesis.ts
-src/agents/build/
+src/agents/build/    # build-phase agents, including the tool-skill runner
   IngestionPipelineAgent.ts, ToolSkillAgent.ts, TransformationScaffolderAgent.ts
-src/agents/discover/
+src/agents/discover/    # Source Assessment
   SourceAssessmentAgent.ts
-src/agents/model/
+src/agents/model/    # data model and source-to-target mapping
   DataModelerAgent.ts, SttmMapperAgent.ts
-src/agents/validate/
+src/agents/validate/    # documentation and Grounding Report
   DocumentationAgent.ts
-src/context/    # host-side managers: specs, plans, context documents, artifacts, chats, graph, watchers
-  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
+src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
+  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
   agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, panelProvider.ts, phaseInference.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
-  VsCodeSecretStorageResolver.ts, index.ts
+  index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
   DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SttmEditorProvider.ts
-src/engine/    # shared types
+src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts
-src/engine/context/    # assertions, ledger, projection, conflicts, retrieval, packs, gaps, persistence, ingestion, validation
-  ContextValidator.ts, Yaml.ts, assertionSchemas.ts, assertions.ts, conflicts.ts, contextGaps.ts, contextPack.ts, contextStore.ts, fileIngestion.ts, ledger.ts, projection.ts, retrieval.ts, types.ts
+src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
+  assertions.ts, assertionSchemas.ts, catalog.ts, conflicts.ts, conformance.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, fileIngestion.ts, ledger.ts, pack.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
   manifest.ts, sqlGrounding.ts
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters
   BaseAdapter.ts, ConnectionManager.ts, providerRegistry.ts, types.ts
-src/engine/platform/adapters/
+src/engine/platform/adapters/    # Snowflake and Databricks adapters
   DatabricksAdapter.ts, SnowflakeAdapter.ts, snowflakeJwt.ts
 src/engine/platform/credentials/    # credential resolvers and CLI detection
-  CliConfigResolver.ts, DatabricksCli.ts, EnvVarCredentialResolver.ts, PlatformCliDescriptor.ts, SnowflakeCli.ts, cliDetection.ts, cliRegistry.ts, databricksCfg.ts, index.ts, registry.ts, types.ts
+  CliConfigResolver.ts, cliDetection.ts, cliRegistry.ts, databricksCfg.ts, DatabricksCli.ts, EnvVarCredentialResolver.ts, index.ts, PlatformCliDescriptor.ts, registry.ts, SnowflakeCli.ts, types.ts
 src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
-src/engine/skills/    # interview skills, tool skills, allow-lists
-  skillRegistry.ts, toolAllowList.ts, toolSkills.ts
+src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
+  lifecycle.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
 src/engine/transforms/    # primitive registry
   platformDialect.ts, registry.ts, types.ts
 src/engine/transforms/declarative/    # Tier 2 declarative primitives
@@ -1437,8 +1479,9 @@ src/mcp/    # MCP server (no vscode; §10.6)
 src/spokes/    # Snowflake executor (other files unused)
   architectureAgent.ts, ingestionAgent.ts, snowflakeExecutor.ts, sttmAgent.ts
 ```
+<!-- /generated:source-tree -->
 
-Outside `src/`: `scripts/bundle.cjs` (esbuild, §10.7), `media/` (webviews: `sidebar.html`, `panel.html`, `editors/`), `skills/` (bundled interview skills), `primitive-definitions/` (bundled Tier-2 primitives), `docs/schemas/` (JSON Schemas), `test/` (`functional.test.cjs`, `eval/`, `reference/`, `golden/mcp-compile/` — compile snapshots, rewritten with `AUTODE_UPDATE_GOLDEN=1`).
+Outside `src/`: `scripts/bundle.cjs` (esbuild, §10.7), `media/` (webviews: `sidebar.html`, `panel.html`, `editors/`), `skills/` (bundled interview skills), `primitive-definitions/` (bundled Tier-2 primitives — the loader reads it, none ship yet), `docs/schemas/` (JSON Schemas), `test/` (`functional.test.cjs`, `eval/`, `reference/`, `golden/mcp-compile/` — compile snapshots, rewritten with `AUTODE_UPDATE_GOLDEN=1`).
 
 ---
 

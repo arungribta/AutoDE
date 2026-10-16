@@ -1,10 +1,10 @@
-# Manual verification — v0.25.0 to v0.31.0
+# Manual verification — v0.25.0 to v0.35.0
 
-Hands-on checks for the features shipped in v0.25.0–v0.31.0, run in the VS Code Extension Development Host. Each check gives **Do** and **Expect**; tick the box when it holds, and note anything that doesn't in the results table at the end.
+Hands-on checks for the features shipped in v0.25.0–v0.35.0, run in the VS Code Extension Development Host. Each check gives **Do** and **Expect**; tick the box when it holds, and note anything that doesn't in the results table at the end.
 
 Automated coverage already exists (`npm test`, `npm run eval`); these checks cover what only a real VS Code session shows: the panel, prompts, commands, file watching and real LLM providers.
 
-Time: about 90 minutes, of which Part 7 (a full plan run) takes the longest. Parts 1–6 can be done in any order after Part 0.
+Time: about 90 minutes for Parts 1–8, of which Part 7 (a full plan run) takes the longest, plus about 60 minutes for Parts 9–12. Parts can be done in any order after Part 0; Part 12.2–12.4 reuse the workspace of Part 10.
 
 ---
 
@@ -188,6 +188,95 @@ Uses real LLM calls (one per step plus spec and plan). Continue with the problem
   Do: Browse… on the source card, pick two schemas, then Source Assessment.
   Expect: tables from both schemas; `estate.yaml` lists both under the connection's binding; running Source Assessment again doesn't retract either schema.
 
+## Part 9 — v0.32.0 Working set and catalog
+
+Use a fresh scratch workspace with `sources/shop.ddl` and `sources/crm.ddl` copied in as in Part 0.
+
+- [ ] **9.1 Imports beyond the working set are catalogued, not mirrored.**
+  Do: in the Development Host's settings set `autoDataEngineeringHub.context.workingSetMaxTables` to `5`. Import `sources/shop.ddl` (`AutoDE: Ingest File as Source Context`).
+  Expect: log "Catalogued 11 table(s); 5 in the working set (limit 5)…". `.ai-context/catalog/shop/<environment>/catalog.json` exists, and `.ai-context/catalog/` holds its own `.gitignore`.
+- [ ] **9.2 A task pulls a catalogued table in.**
+  Do: ask in chat "Which table records refunds?", then run `AutoDE: What the Agent Saw`.
+  Expect: the answer names `shop.refunds`. The pack lists it, and the log shows "Working set: … table(s) promoted from the catalog."
+- [ ] **9.3 The customer's vocabulary.**
+  Do: copy `test/reference/retail-orders/documents/vocabulary.yaml` to `.ai-context/context/vocabulary.yaml`, import `sources/crm.ddl`, run **Developer: Reload Window**, then ask "Which patrons are in which engagement?"
+  Expect: What the Agent Saw shows the CRM customer and campaign tables among the seeds.
+- [ ] **9.4 Reset.** Set `workingSetMaxTables` back to its default (200).
+
+## Part 10 — v0.33.0 Business-problem pack, conformance, probes, vocabulary capture
+
+Needs an active business problem: in chat, `/spec Customer 360 merge of the shop and CRM customer tables`, and wait for the draft. Import `sources/shop.ddl` and `sources/crm.ddl`, accepting systems `shop` and `crm`. Copy these files from `test/reference/retail-orders/` into the scratch workspace's `docs/` folder: `documents/pack/customer-contract.v1.yaml`, `documents/pack/brd.md`, `documents/pack/glossary.md`, `sources/samples/shop_customers.csv`, `sources/samples/crm_customers.csv`.
+
+- [ ] **10.1 Add documents with role and authority.**
+  Do: `AutoDE: Add Document to Business-Problem Pack` → `docs/customer-contract.v1.yaml`, role `contract`, authority `signed`, version `1`. Repeat for `docs/brd.md` (`brd`, `draft`), and for each CSV (role `sample`, choosing `customers` in the matching system).
+  Expect: one "Added … to the business-problem pack (…)" line per document; the problem folder has `pack/pack.yaml` listing all four.
+- [ ] **10.2 A house-format contract gets a reading profile proposed, not applied.**
+  Do: `AutoDE: Apply Business-Problem Pack`.
+  Expect: for the contract, "AutoDE proposed a reading profile. Check it, set "status: confirmed"…"; a new file under `.ai-context/profiles/`. The BRD reports "N fact(s) proposed for review" with a working LLM, or says it needs one. The samples report "registered as a sample — probes will use it."
+- [ ] **10.3 Confirm the profile; clauses become expectations.**
+  Do: compare the proposed profile with `test/reference/retail-orders/documents/pack/profile.house-contract.yaml`, correct it if needed, set `status: confirmed`, save, and apply the pack again.
+  Expect: "read with profile … — 7 new clause(s), 0 changed, 0 removed".
+- [ ] **10.4 Conformance report.**
+  Do: `AutoDE: Run Conformance Check`.
+  Expect: "Conformance report written: 4 failing clause(s) …"; the report artifact shows four failures for `crm.customers` (`customer_ref` unique, `email` nullability, `country` missing, `created` type) and none for `shop.customers`.
+- [ ] **10.5 A new contract version supersedes only what changed.**
+  Do: overwrite `docs/customer-contract.v1.yaml` with the content of `documents/pack/customer-contract.v2.yaml`, add it again with version `2`, and apply the pack.
+  Expect: "0 new clause(s), 3 changed, 0 removed, 4 unchanged".
+- [ ] **10.6 Probes verify claims, with counts only.**
+  Do: after the BRD was read in 10.2 (needs a working LLM), run `AutoDE: Verify Claims with Probes`.
+  Expect: one ✓/✗ line per claim AutoDE could check, ending "Probes: N verified, M failed (now under review), K not verified". Claims about tables with neither a live connection nor a sample in the pack stay "not verified". Every detail is a count or rate, never a row value. (Chat statements such as "member_id is the key" become claims only with C4b.)
+- [ ] **10.7 Vocabulary capture.**
+  Do: add `docs/glossary.md` to the pack (role `data_dictionary`, `draft`), then run `AutoDE: Propose Vocabulary`.
+  Expect: with a working LLM, single-word entries such as "complaint means ticket" and "parcel means shipment"; never a multi-word phrase. Accepting them writes `.ai-context/context/vocabulary.yaml` and logs "retrieval re-indexed".
+- [ ] **10.8 The interview skips what discovery knows.**
+  Do: `/spec` a new problem about `shop.customers` and answer the interview until it asks about keys.
+  Expect: no question about the key of a table whose DDL declares one; the log says which question was dropped and why.
+
+## Part 11 — v0.34.0 Tool-skill review and trust
+
+Make a skill folder outside the workspace, e.g. `D:\skills\reader\SKILL.md`:
+```markdown
+---
+name: reader
+allowed-tools: [Read]
+---
+Read README.md and summarise it in three bullet points.
+```
+
+- [ ] **11.1 Imported skills are not runnable until reviewed.**
+  Do: `AutoDE: Import Tool Skill` → `D:\skills\reader`. Close the message without choosing **Review Now**. Then run `AutoDE: Run Tool Skill`.
+  Expect: the import message says it is unreviewed. The run picker says none can run yet. `/skill reader summarise` in chat fails with "has not been reviewed".
+- [ ] **11.2 The review page.**
+  Do: `AutoDE: Review Tool Skill` → reader.
+  Expect: a read-only page with `SKILL.md` verbatim, declared tools `Read`, granted tool `autode_read_file`, provenance and checksum; then a modal with Reviewed / Trusted / Unreviewed.
+- [ ] **11.3 Reviewed means read-only, and not through Claude Code.**
+  Do: choose **Reviewed (read-only)**, then run the skill on an API provider or Copilot, and again with provider `claude`.
+  Expect: the first run works without any write prompt. The `claude` run is refused: "…is reviewed, not trusted: it cannot run through Claude Code…".
+- [ ] **11.4 Changed content loses its trust.**
+  Do: edit the imported `.ai-context/skills/tool-skills/reader/SKILL.md` (add a line) and run it.
+  Expect: "changed since it was reviewed". Reviewing it again restores it. `.autode-skill.json` lists every transition.
+- [ ] **11.5 Lifecycle (optional).**
+  Do: set `autoDataEngineeringHub.toolSkillManagementEnabled` to true. Import a second skill, review it, `AutoDE: Publish Tool Skill`, edit it, publish again, `AutoDE: Deprecate Tool Skill`. Then `/skill <id>@1 do something`.
+  Expect: the Publish/Deprecate/Retire commands appear only with the setting on. Versions go v1 → v2. `.autode-history/v1/` exists. After deprecation, an unpinned run is refused but `@1` runs version 1's instructions.
+
+## Part 12 — v0.35.0 MCP server and packaging
+
+- [ ] **12.1 The server runs on its own.**
+  Do: in the repo, `node dist/mcp-server.js --workspace <scratch workspace>`.
+  Expect: stderr "autode MCP server 0.35.0 — workspace …", then it waits. Ctrl+C stops it.
+- [ ] **12.2 Claude Code can use it.**
+  Do: configure it as in [mcp-setup.md](mcp-setup.md) for the scratch workspace from Part 10, start Claude Code there, and run `/mcp`.
+  Expect: `autode` connected, 11 tools. Asking "Use AutoDE to find a deduplication primitive and compile it for Snowflake for RAW.ORDERS by ORDER_ID, latest UPDATED_AT" calls search → describe → compile and returns the SQL.
+- [ ] **12.3 Context and grounding over MCP.**
+  Do: ask Claude Code "Use autode_check_grounding on: SELECT discount FROM shop.orders".
+  Expect: `discount` reported as unresolved. `autode_resolve` for "refunds" returns `obj:shop/prod/shop.refunds`. The workspace's files are unchanged afterwards (`git status`, if it is a repository).
+- [ ] **12.4 Only reviewed skills are prompts.**
+  Do: list prompts in the client (Claude Code: type `/` and look for `autode` entries).
+  Expect: the interview prompts, plus `autode_skill_reader` only while reader is reviewed or trusted for its current content.
+- [ ] **12.5 The package builds and installs.**
+  Do: in the repo, `npx vsce package --no-dependencies`. In a normal VS Code window (not the Development Host), run **Extensions: Install from VSIX…** with the result, and reload.
+  Expect: a VSIX of about 480 KB. The extension shows the new icon in the Extensions view and the single-colour glyph in the activity bar; the panel opens; `AutoDE: Run Tool Skill` works (it needs `ajv` and `yaml`, which earlier packages lacked). Uninstall it afterwards if you keep using the Development Host.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -227,5 +316,27 @@ Uses real LLM calls (one per step plus spec and plan). Continue with the problem
 | 8.3 |  |  |
 | 8.4 |  |  |
 | 8.5 |  |  |
+| 9.1 |  |  |
+| 9.2 |  |  |
+| 9.3 |  |  |
+| 9.4 |  |  |
+| 10.1 |  |  |
+| 10.2 |  |  |
+| 10.3 |  |  |
+| 10.4 |  |  |
+| 10.5 |  |  |
+| 10.6 |  |  |
+| 10.7 |  |  |
+| 10.8 |  |  |
+| 11.1 |  |  |
+| 11.2 |  |  |
+| 11.3 |  |  |
+| 11.4 |  |  |
+| 11.5 |  |  |
+| 12.1 |  |  |
+| 12.2 |  |  |
+| 12.3 |  |  |
+| 12.4 |  |  |
+| 12.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.ai-context` file, and for packs the What the Agent Saw document.

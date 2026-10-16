@@ -6849,6 +6849,13 @@ async function main() {
     assert.ok(bundle.length < 1.5 * 1024 * 1024, `mcp-server.js is ${Math.round(bundle.length / 1024)} KB (budget 1.5 MB)`);
   });
 
+  await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {
+    const { spawnSync } = require('node:child_process');
+    const nodePath = require('node:path');
+    const r = spawnSync(process.execPath, [nodePath.join(__dirname, '..', 'scripts', 'docs-generate.cjs'), '--check'], { encoding: 'utf8' });
+    assert.strictEqual(r.status, 0, (r.stderr || r.stdout).trim());
+  });
+
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length ? 1 : 0);
