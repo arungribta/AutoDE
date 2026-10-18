@@ -8,6 +8,9 @@ import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './engine/platform/ConnectionManager';
 import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
 import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, PrerequisiteHost } from './core/platformPrerequisites';
+import { PlatformOnboarding } from './core/platformOnboarding';
+import { secretStorageKey } from './core/credentials/VsCodeSecretStorageResolver';
+import { SECRET_KEYS } from './core/extensionIdentity';
 import { ArtifactWriter } from './context/ArtifactWriter';
 import { PlanManager } from './context/PlanManager';
 import { TargetConfigManager } from './context/TargetConfigManager';
@@ -123,6 +126,30 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub, applyProblemRoot);
   const panelProvider = new DataAgentHubPanelProvider(context, hub);
+
+  // Phase DRV2: named connections, onboarded from the settings cards.
+  const managerOptions = () => ({
+    cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true,
+    // Phase 4: row values reach prompts only if .autode/config/connections.yaml allows it for this connection.
+    sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
+    driversRoot: () => configManager.getSettings().driversDirectory
+  });
+  const cardSecrets: Record<string, string> = {
+    'source.snowflake.password': SECRET_KEYS.snowflakePassword, 'source.snowflake.privateKeyPassphrase': SECRET_KEYS.snowflakePrivateKeyPassphrase,
+    'target.snowflake.password': SECRET_KEYS.targetSnowflakePassword, 'target.snowflake.privateKeyPassphrase': SECRET_KEYS.targetSnowflakePrivateKeyPassphrase,
+    'source.databricks.token': SECRET_KEYS.databricksToken, 'target.databricks.token': SECRET_KEYS.targetDatabricksToken,
+    'source.oracle.password': SECRET_KEYS.oraclePassword, 'source.oracle.walletPassword': SECRET_KEYS.oracleWalletPassword
+  };
+  const onboarding = new PlatformOnboarding({
+    workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    settings: () => configManager.getSettings(),
+    secrets: context.secrets,
+    secretKey: (platform, ref, field) => secretStorageKey(platform, 'interactive-user', ref, field),
+    cardSecretKey: (role, platform, field) => cardSecrets[`${role}.${platform}.${field}`],
+    createManager: (log) => new ConnectionManager(log, managerOptions()),
+    log: (line) => sidebarProvider.logToChat(line)
+  });
+  sidebarProvider.setPlatformOnboarding(onboarding);
 
   let connectionManager: ConnectionManager | undefined;
   disposableRegistry.register({ dispose: () => connectionManager?.dispose() });
@@ -385,57 +412,63 @@ export function activate(context: vscode.ExtensionContext): void {
    */
   async function runConnectionTest(role: 'source' | 'target'): Promise<void> {
     const commandId = role === 'target' ? `${EXTENSION_ID}.testTargetConnection` : `${EXTENSION_ID}.testConnection`;
+    let named: Awaited<ReturnType<PlatformOnboarding['credentialsFor']>> | undefined;
     try {
       const settings = configManager.getSettings();
-      const platform = (role === 'target' ? settings.defaultTargetProvider : settings.defaultProvider) ?? 'snowflake';
-      const credentials = ConnectionManager.getCredentialsFromSettings(platform, settings as unknown as Record<string, unknown>, role);
-      if (platform === 'snowflake') {
-        const password = role === 'target' ? await configManager.getTargetSnowflakePassword() : await configManager.getSnowflakePassword();
-        if (password) credentials['password'] = password;
-        const passphrase = role === 'target' ? await configManager.getTargetSnowflakePrivateKeyPassphrase() : await configManager.getSnowflakePrivateKeyPassphrase();
-        if (passphrase) credentials['privateKeyPassphrase'] = passphrase;
-      } else if (platform === 'databricks') {
-        const token = role === 'target' ? await configManager.getTargetDatabricksToken() : await configManager.getDatabricksToken();
-        if (token) credentials['token'] = token;
-      } else if (platform === 'oracle' && role === 'source') {
-        const password = await configManager.getOraclePassword();
-        if (password) credentials['password'] = password;
-        const walletPassword = await configManager.getOracleWalletPassword();
-        if (walletPassword) credentials['walletPassword'] = walletPassword;
+      // Phase DRV2: a named connection, when one is in use for this role, resolves
+      // through the credential resolvers exactly as the MCP server does.
+      const activeId = (role === 'target' ? settings.activeTargetConnection : settings.activeSourceConnection) ?? '';
+      if (activeId) {
+        named = await onboarding.credentialsFor(activeId);
+        if (named.entry.role !== role) throw new Error(`Connection "${activeId}" is a ${named.entry.role} connection.`);
       }
-      // Only what every Snowflake execution path genuinely requires up front —
-      // Warehouse/Database used to be hardcoded here too, but that drifted out of
-      // sync with SnowflakeAdapter's real requirements (Database is REST-tier-only;
-      // Warehouse isn't required by any path, since Snowflake falls back to the
-      // account's default warehouse). Anything else missing is surfaced by
-      // SnowflakeAdapter.connect() itself with a path-specific, accurate message.
-      const missing: string[] = [];
-      if (platform === 'snowflake') { if (!credentials['account']) missing.push('Account'); if (!credentials['username']) missing.push('Username'); }
-      else if (platform === 'databricks') { if (!credentials['workspaceUrl']) missing.push('Workspace URL'); if (!credentials['httpPath']) missing.push('SQL Warehouse HTTP Path'); if (!credentials['token']) missing.push('Token'); }
-      else if (platform === 'oracle') {
-        if (role === 'target') { const msg = 'Oracle is supported as a source only.'; vscode.window.showErrorMessage(msg); sidebarProvider.logToChat(msg); return; }
-        if (!credentials['connectString']) missing.push('Connect string (defaultOracleConnectString)'); if (!credentials['username']) missing.push('Username (defaultOracleUsername)'); if (!credentials['password']) missing.push('Password (AutoDE: Set Oracle Password)');
-      }
-      if (missing.length > 0) {
-        const msg = `Missing ${role} credentials for ${platform}: ${missing.join(', ')}`;
-        vscode.window.showErrorMessage(msg);
-        sidebarProvider.logToChat(msg);
-        return;
+      const platform = named ? named.entry.platform : (role === 'target' ? settings.defaultTargetProvider : settings.defaultProvider) ?? 'snowflake';
+      const credentials = named ? named.credentials : ConnectionManager.getCredentialsFromSettings(platform, settings as unknown as Record<string, unknown>, role);
+      if (!named) {
+        if (platform === 'snowflake') {
+          const password = role === 'target' ? await configManager.getTargetSnowflakePassword() : await configManager.getSnowflakePassword();
+          if (password) credentials['password'] = password;
+          const passphrase = role === 'target' ? await configManager.getTargetSnowflakePrivateKeyPassphrase() : await configManager.getSnowflakePrivateKeyPassphrase();
+          if (passphrase) credentials['privateKeyPassphrase'] = passphrase;
+        } else if (platform === 'databricks') {
+          const token = role === 'target' ? await configManager.getTargetDatabricksToken() : await configManager.getDatabricksToken();
+          if (token) credentials['token'] = token;
+        } else if (platform === 'oracle' && role === 'source') {
+          const password = await configManager.getOraclePassword();
+          if (password) credentials['password'] = password;
+          const walletPassword = await configManager.getOracleWalletPassword();
+          if (walletPassword) credentials['walletPassword'] = walletPassword;
+        }
+        // Only what every Snowflake execution path genuinely requires up front —
+        // Warehouse/Database used to be hardcoded here too, but that drifted out of
+        // sync with SnowflakeAdapter's real requirements (Database is REST-tier-only;
+        // Warehouse isn't required by any path, since Snowflake falls back to the
+        // account's default warehouse). Anything else missing is surfaced by
+        // SnowflakeAdapter.connect() itself with a path-specific, accurate message.
+        const missing: string[] = [];
+        if (platform === 'snowflake') { if (!credentials['account']) missing.push('Account'); if (!credentials['username']) missing.push('Username'); }
+        else if (platform === 'databricks') { if (!credentials['workspaceUrl']) missing.push('Workspace URL'); if (!credentials['httpPath']) missing.push('SQL Warehouse HTTP Path'); if (!credentials['token']) missing.push('Token'); }
+        else if (platform === 'oracle') {
+          if (role === 'target') { const msg = 'Oracle is supported as a source only.'; vscode.window.showErrorMessage(msg); sidebarProvider.logToChat(msg); return; }
+          if (!credentials['connectString']) missing.push('Connect string (defaultOracleConnectString)'); if (!credentials['username']) missing.push('Username (defaultOracleUsername)'); if (!credentials['password']) missing.push('Password (AutoDE: Set Oracle Password)');
+        }
+        if (missing.length > 0) {
+          const msg = `Missing ${role} credentials for ${platform}: ${missing.join(', ')}`;
+          vscode.window.showErrorMessage(msg);
+          sidebarProvider.logToChat(msg);
+          return;
+        }
       }
       const newManager = new ConnectionManager(
         (msg: string) => { console.log(`[AutoDE ${role} Connection] ${msg}`); sidebarProvider.logToChat(msg); },
-        {
-          cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true,
-          // Phase 4: row values reach prompts only if .autode/config/connections.yaml allows it for this connection.
-          sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
-          driversRoot: () => configManager.getSettings().driversDirectory
-        }
+        managerOptions()
       );
       // Phase K1: extractions are tagged with the estate system this connection feeds.
       newManager.setEstateResolver((id) => sidebarProvider.resolveConnectionIdentity(id, role));
       if (role === 'target') { targetConnectionManager?.dispose(); targetConnectionManager = newManager; } else { connectionManager?.dispose(); connectionManager = newManager; }
       const info = await newManager.connect(platform, credentials);
-      const successMsg = `Connected to ${role} ${platform}: ${info.databaseName}.${info.schemaName} (v${info.version})`;
+      if (named) onboarding.markChecked(named.entry, true, `${info.databaseName}.${info.schemaName} (${info.version})`);
+      const successMsg = `Connected to ${role} ${named ? named.entry.id : platform}: ${info.databaseName}.${info.schemaName} (v${info.version})`;
       vscode.window.showInformationMessage(successMsg);
       sidebarProvider.logToChat(successMsg);
       // This only proves connectivity — it does NOT extract schema (that's
@@ -449,6 +482,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (role === 'source') sidebarProvider.setLiveProbes(newManager.probeExecutor());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (named) onboarding.markChecked(named.entry, false, message);
       // CLI-execution consent is an easy first-connection trip-up now that
       // username/password auth also routes through the CLI (it needs the same
       // consent a CLI-derived connection already required) — offer to flip the

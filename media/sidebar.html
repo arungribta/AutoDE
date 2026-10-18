@@ -215,6 +215,26 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .toggle-row { display: flex; align-items: center; gap: 8px; font-size: var(--font-size); }
 .toggle-row input[type="checkbox"] { width: auto; flex: none; }
 .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+/* ── Platform onboarding (DRV2) ── */
+.onb { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; border-bottom: 1px dashed var(--border-soft); }
+.onb-note { font-size: var(--font-size-sm); color: var(--text-muted); }
+.onb-note b { color: var(--text); font-weight: 600; }
+.onb-prereq { display: flex; flex-direction: column; gap: 4px; }
+.onb-prereq-item { display: flex; align-items: flex-start; gap: 6px; font-size: var(--font-size-sm); }
+.onb-prereq-item .onb-state { flex: none; width: 16px; text-align: center; }
+.onb-prereq-item .onb-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.onb-prereq-item button { flex: none; }
+.onb-active { font-size: var(--font-size-sm); padding: 4px 6px; border-radius: var(--radius); background: var(--accent-subtle); }
+.onb-save-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--font-size-sm); }
+.onb-save-row input[type="checkbox"] { width: auto; flex: none; }
+.saved-conns { margin-bottom: var(--spacing-md); }
+.saved-conn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--font-size-sm); }
+.saved-conn .sc-id { font-weight: 600; overflow-wrap: anywhere; }
+.saved-conn .sc-badges { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+.sc-badge { padding: 0 6px; border-radius: 8px; border: 1px solid var(--border-soft); white-space: nowrap; }
+.sc-badge.ok { border-color: var(--success, #3fb950); }
+.sc-badge.warn { border-color: var(--warning, #d29922); }
+.sc-badge.err { border-color: var(--error, #f85149); }
 
 /* ── Palette ── */
 .palette-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); padding: var(--spacing-md); margin-bottom: var(--spacing-sm); transition: border-color var(--transition-fast), background var(--transition-fast); }
@@ -455,14 +475,17 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         <div class="card" data-llm="ollama"><div class="card-header"><span class="radio"></span><span class="card-title">Ollama (Local)</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model</label><input id="ollamaModel" placeholder="llama3" /></div><div><label>Endpoint</label><input id="ollamaEndpoint" placeholder="http://localhost:11434" /></div></div></div></div>
       </div>
       <div class="section slide-section" id="slideSectionConnect" style="display:none;">
+        <div class="saved-conns" id="savedConnsSource" data-role="source"></div>
         <div class="section-title">Source Platform</div><div class="card-body" style="padding:6px 0 10px;"><div style="font-size:12px;opacity:0.8;margin-bottom:6px;">No live connectivity? Ingest a CSV, JSON, or DDL (.sql) file's real structure instead.</div><button id="ingestFileBtn">Import File...</button></div>
         <div class="card selected" data-provider="snowflake"><div class="card-header"><span class="radio"></span><span class="card-title">Snowflake</span><span class="card-status" id="snowflakeStatus">Not connected</span></div><div class="card-body"><div class="form-row"><div><label>Account</label><input id="sfAccount" placeholder="XYZ12345" /></div><div><label>Username</label><input id="sfUsername" placeholder="data_agent" /></div></div><div class="form-row"><div><label>Warehouse</label><input id="sfWarehouse" placeholder="WH_XS" /></div><div><label>Database</label><input id="sfDatabase" placeholder="RAW_DB" /></div></div><div class="form-row"><div><label>Schema</label><input id="sfSchema" placeholder="PUBLIC" /></div><div><label>Role</label><input id="sfRole" placeholder="SYSADMIN" /></div></div><div class="form-row"><div><label>Auth Mode</label><select id="sfAuthMode"><option value="key-pair">Key-Pair</option><option value="username-password">Username + Password</option><option value="oauth">OAuth</option><option value="external-browser">External Browser</option><option value="mcp">MCP</option></select></div><div><label>Key Path</label><input id="sfKeyPath" placeholder="/path/to/key.pem" /></div></div><div class="form-row"><div><label>Password (for Username + Password auth)</label><input id="sfPassword" type="password" placeholder="Stored in VS Code SecretStorage — never shown again" autocomplete="new-password" /></div></div><div class="form-row"><div><label>Snowflake CLI path (only if not found automatically)</label><input id="sfCliPath" placeholder="e.g. D:\Program Files\Snowflake CLI\snow.exe — leave blank if `snow` is on PATH" /></div></div><div class="btn-row"><button id="testConnBtn" class="primary">Connect</button><button id="browseSourceBtn">Browse...</button><button id="sourceAssessmentBtn">Source Assessment</button><button id="disconnectBtn">Disconnect</button></div></div></div>
         <div class="card" data-provider="databricks"><div class="card-header"><span class="radio"></span><span class="card-title">Databricks</span><span class="card-status" id="databricksStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Workspace URL</label><input id="dbxWorkspaceUrl" placeholder="adb-1234.5.azuredatabricks.net" /></div><div><label>SQL Warehouse HTTP Path</label><input id="dbxHttpPath" placeholder="/sql/1.0/warehouses/abc123" /></div></div><div class="form-row"><div><label>Catalog</label><input id="dbxCatalog" placeholder="main" /></div><div><label>Schema</label><input id="dbxSchema" placeholder="default" /></div></div><div class="form-row"><div><label>Catalog Type</label><select id="dbxCatalogType"><option value="auto">Auto</option><option value="unity">Unity Catalog</option><option value="hive_metastore">Hive Metastore</option></select></div><div><label>CLI path (only if not found automatically)</label><input id="dbxCliPath" placeholder="leave blank if databricks is on PATH" /></div></div><div class="form-row"><div><label>Token</label><input id="dbxToken" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testConnBtnDbx" class="primary">Connect</button><button id="browseSourceBtnDbx">Browse...</button><button id="sourceAssessmentBtnDbx">Source Assessment</button><button id="disconnectBtnDbx">Disconnect</button></div></div></div>
+        <div class="card" data-provider="oracle"><div class="card-header"><span class="radio"></span><span class="card-title">Oracle</span><span class="card-status" id="oracleStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Connect string (tnsnames alias or host:port/service)</label><input id="oraConnectString" placeholder="PRODDB or db1.example.com:1521/ORCLPDB1" /></div></div><div class="form-row"><div><label>Username</label><input id="oraUsername" placeholder="hr" /></div><div><label>tnsnames.ora folder (only if not TNS_ADMIN)</label><input id="oraConfigDir" placeholder="leave blank to use TNS_ADMIN / ORACLE_HOME" /></div></div><div class="form-row"><div><label>Password</label><input id="oraPassword" type="password" placeholder="Stored in VS Code SecretStorage — never shown again" autocomplete="new-password" /></div></div><div class="form-row"><div><label>TLS wallet folder (optional)</label><input id="oraWalletLocation" placeholder="e.g. Autonomous Database wallet folder" /></div><div><label>Wallet password (optional)</label><input id="oraWalletPassword" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testConnBtnOra" class="primary">Connect</button><button id="browseSourceBtnOra">Browse...</button><button id="sourceAssessmentBtnOra">Source Assessment</button><button id="disconnectBtnOra">Disconnect</button></div></div></div>
         <div class="card" data-provider="bigquery"><div class="card-header"><span class="radio"></span><span class="card-title">BigQuery</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Project ID</label><input placeholder="my-project" /></div><div><label>Dataset</label><input placeholder="analytics" /></div></div></div></div>
         <div class="card" data-provider="redshift"><div class="card-header"><span class="radio"></span><span class="card-title">Redshift</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Cluster</label><input placeholder="my-cluster" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
         <div class="card" data-provider="synapse"><div class="card-header"><span class="radio"></span><span class="card-title">Azure Synapse</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Server</label><input placeholder="my-server" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
       </div>
       <div class="section slide-section" id="slideSectionTarget" style="display:none;">
+        <div class="saved-conns" id="savedConnsTarget" data-role="target"></div>
         <div class="section-title">Target Platform</div>
         <div class="card selected" data-target-provider="snowflake"><div class="card-header"><span class="radio"></span><span class="card-title">Snowflake</span><span class="card-status" id="tgtSnowflakeStatus">Not connected</span></div><div class="card-body"><div class="form-row"><div><label>Account</label><input id="tgtSfAccount" placeholder="XYZ12345" /></div><div><label>Username</label><input id="tgtSfUsername" placeholder="data_agent" /></div></div><div class="form-row"><div><label>Warehouse</label><input id="tgtSfWarehouse" placeholder="WH_XS" /></div><div><label>Database</label><input id="tgtSfDatabase" placeholder="TARGET_DB" /></div></div><div class="form-row"><div><label>Schema</label><input id="tgtSfSchema" placeholder="PUBLIC" /></div><div><label>Role</label><input id="tgtSfRole" placeholder="SYSADMIN" /></div></div><div class="form-row"><div><label>Auth Mode</label><select id="tgtSfAuthMode"><option value="key-pair">Key-Pair</option><option value="username-password">Username + Password</option><option value="oauth">OAuth</option><option value="external-browser">External Browser</option><option value="mcp">MCP</option></select></div><div><label>Key Path</label><input id="tgtSfKeyPath" placeholder="/path/to/key.pem" /></div></div><div class="form-row"><div><label>Password (for Username + Password auth)</label><input id="tgtSfPassword" type="password" placeholder="Stored in VS Code SecretStorage — never shown again" autocomplete="new-password" /></div></div><div class="form-row"><div><label>Snowflake CLI path (only if not found automatically)</label><input id="tgtSfCliPath" placeholder="e.g. D:\Program Files\Snowflake CLI\snow.exe — leave blank if `snow` is on PATH" /></div></div><div class="btn-row"><button id="testTargetConnBtn" class="primary">Connect</button><button id="browseTargetBtn">Browse...</button><button id="targetDisconnectBtn">Disconnect</button></div></div></div>
         <div class="card" data-target-provider="databricks"><div class="card-header"><span class="radio"></span><span class="card-title">Databricks</span><span class="card-status" id="tgtDatabricksStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Workspace URL</label><input id="tgtDbxWorkspaceUrl" placeholder="adb-1234.5.azuredatabricks.net" /></div><div><label>SQL Warehouse HTTP Path</label><input id="tgtDbxHttpPath" placeholder="/sql/1.0/warehouses/abc123" /></div></div><div class="form-row"><div><label>Catalog</label><input id="tgtDbxCatalog" placeholder="main" /></div><div><label>Schema</label><input id="tgtDbxSchema" placeholder="default" /></div></div><div class="form-row"><div><label>Catalog Type</label><select id="tgtDbxCatalogType"><option value="auto">Auto</option><option value="unity">Unity Catalog</option><option value="hive_metastore">Hive Metastore</option></select></div><div><label>CLI path (only if not found automatically)</label><input id="tgtDbxCliPath" placeholder="leave blank if databricks is on PATH" /></div></div><div class="form-row"><div><label>Token</label><input id="tgtDbxToken" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testTargetConnBtnDbx" class="primary">Connect</button><button id="browseTargetBtnDbx">Browse...</button><button id="targetDisconnectBtnDbx">Disconnect</button></div></div></div>
@@ -1543,7 +1566,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   }
 
   // ── Slide Panels ──
-  function openSlidePanel(tab) { slideOverlay.classList.add('visible'); slidePanel.classList.add('visible'); if (tab) switchSlideTab(tab); }
+  function openSlidePanel(tab) { slideOverlay.classList.add('visible'); slidePanel.classList.add('visible'); if (tab) switchSlideTab(tab); post('platformsState'); }
   function closeSlidePanel() { slideOverlay.classList.remove('visible'); slidePanel.classList.remove('visible'); }
   slideOverlay.onclick = closeSlidePanel; slideCloseBtn.onclick = closeSlidePanel;
   $('#settingsBtn').onclick = function () { openSlidePanel('llm'); };
@@ -1695,6 +1718,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   $('#sourceAssessmentBtnDbx').onclick = function () { post('sourceAssessment'); showToast('Running source assessment...', ''); };
   $('#disconnectBtn').onclick = function () { post('disconnectDataPlatform'); showToast('Disconnecting...', ''); };
   $('#disconnectBtnDbx').onclick = function () { post('disconnectDataPlatform'); showToast('Disconnecting...', ''); };
+  $('#testConnBtnOra').onclick = function () { connectAfterSave($('#testConnBtnOra').closest('.card'), providerCards, 'testConnection'); };
+  $('#browseSourceBtnOra').onclick = function () { connectAfterSave($('#browseSourceBtnOra').closest('.card'), providerCards, 'browseSourceDatabase'); };
+  $('#sourceAssessmentBtnOra').onclick = function () { post('sourceAssessment'); showToast('Running source assessment...', ''); };
+  $('#disconnectBtnOra').onclick = function () { post('disconnectDataPlatform'); showToast('Disconnecting...', ''); };
   $('#targetDisconnectBtn').onclick = function () { post('disconnectTargetDataPlatform'); showToast('Disconnecting...', ''); };
   $('#targetDisconnectBtnDbx').onclick = function () { post('disconnectTargetDataPlatform'); showToast('Disconnecting...', ''); };
   // "Browse..." (Step 4) — same save-before-act need as Connect, so it reuses
@@ -1711,12 +1738,13 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   $('#saveSettingsBtn').onclick = function () { saveSettings(); };
   $('#copilotConsent').onchange = function () { post('updateSettings', { settings: { languageModelProgrammaticConsent: $('#copilotConsent').checked } }); };
 
-  function saveSettings() {
+  function saveSettings(keepOpen) {
     var settings = {
       activeLlmProvider: getSelectedLlm(),
       defaultProvider: getSelectedProvider(),
       defaultSnowflakeAccount: $('#sfAccount').value, defaultSnowflakeUsername: $('#sfUsername').value, defaultSnowflakeWarehouse: $('#sfWarehouse').value, defaultSnowflakeDatabase: $('#sfDatabase').value, defaultSnowflakeSchema: $('#sfSchema').value, defaultSnowflakeRole: $('#sfRole').value, defaultSnowflakeAuthMode: $('#sfAuthMode').value, snowflakePrivateKeyPath: $('#sfKeyPath').value, snowflakeCliPath: $('#sfCliPath').value.trim(),
       defaultDatabricksWorkspaceUrl: $('#dbxWorkspaceUrl').value, defaultDatabricksHttpPath: $('#dbxHttpPath').value, defaultDatabricksCatalog: $('#dbxCatalog').value, defaultDatabricksSchema: $('#dbxSchema').value, defaultDatabricksCatalogType: $('#dbxCatalogType').value, databricksCliPath: $('#dbxCliPath').value.trim(),
+      defaultOracleConnectString: $('#oraConnectString').value.trim(), defaultOracleUsername: $('#oraUsername').value.trim(), oracleConfigDir: $('#oraConfigDir').value.trim(), oracleWalletLocation: $('#oraWalletLocation').value.trim(),
       // ── Target connection (v0.19.0) ──
       defaultTargetProvider: getSelectedTargetProvider(),
       defaultTargetSnowflakeAccount: $('#tgtSfAccount').value, defaultTargetSnowflakeUsername: $('#tgtSfUsername').value, defaultTargetSnowflakeWarehouse: $('#tgtSfWarehouse').value, defaultTargetSnowflakeDatabase: $('#tgtSfDatabase').value, defaultTargetSnowflakeSchema: $('#tgtSfSchema').value, defaultTargetSnowflakeRole: $('#tgtSfRole').value, defaultTargetSnowflakeAuthMode: $('#tgtSfAuthMode').value, targetSnowflakePrivateKeyPath: $('#tgtSfKeyPath').value, targetSnowflakeCliPath: $('#tgtSfCliPath').value.trim(),
@@ -1735,7 +1763,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     // secret with an empty string.
     var secretFields = [
       ['sfPassword', 'snowflakePassword'], ['tgtSfPassword', 'targetSnowflakePassword'],
-      ['dbxToken', 'databricksToken'], ['tgtDbxToken', 'targetDatabricksToken']
+      ['dbxToken', 'databricksToken'], ['tgtDbxToken', 'targetDatabricksToken'],
+      ['oraPassword', 'oraclePassword'], ['oraWalletPassword', 'oracleWalletPassword']
     ];
     secretFields.forEach(function (pair) {
       var el = $('#' + pair[0]);
@@ -1743,12 +1772,157 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       if (el) { el.value = ''; }
     });
     post('updateSettings', payload);
-    closeSlidePanel();
-    showToast('Settings saved', 'success');
+    if (!keepOpen) { closeSlidePanel(); showToast('Settings saved', 'success'); }
   }
   function getSelectedLlm() { var card = document.querySelector('#slideSectionLlm .card.selected'); return card ? card.getAttribute('data-llm') : 'copilot'; }
   function getSelectedProvider() { var card = document.querySelector('#slideSectionConnect .card.selected'); return card ? card.getAttribute('data-provider') : 'snowflake'; }
   function getSelectedTargetProvider() { var card = document.querySelector('#slideSectionTarget .card.selected'); return card ? card.getAttribute('data-target-provider') : 'snowflake'; }
+
+  // ── Platform onboarding in the cards (Phase DRV2) ──
+  // Each platform card gets: what it needs (prerequisites, checked on click),
+  // the backend it will use, existing CLI connections / tnsnames aliases, and
+  // "Save as named connection" — checked first, written only if the check passes.
+  var platformsState = null;
+  var pendingNamedSave = null;
+  var PRETTY = { snowflake: 'Snowflake', databricks: 'Databricks', oracle: 'Oracle' };
+  var STATE_ICON = { ready: '✔', missing: '✖', unverified: '?', changed: '⚠', unsupported: '⚠' };
+  function onbCards() {
+    var out = [];
+    providerCards.forEach(function (c) { out.push({ card: c, platform: c.getAttribute('data-provider'), role: 'source', list: providerCards }); });
+    targetProviderCards.forEach(function (c) { out.push({ card: c, platform: c.getAttribute('data-target-provider'), role: 'target', list: targetProviderCards }); });
+    return out;
+  }
+  function authModeFor(platform, role) {
+    if (platform !== 'snowflake') return '';
+    var el = $(role === 'target' ? '#tgtSfAuthMode' : '#sfAuthMode');
+    return el ? el.value : '';
+  }
+  function backendText(platform, role, viaCli) {
+    if (!platformsState || !platformsState.backends) return '';
+    var b = platform === 'snowflake' ? (viaCli ? platformsState.backends['snowflake:cli'] : authModeFor(platform, role) === 'username-password' ? platformsState.backends['snowflake:username-password'] : platformsState.backends.snowflake) : platformsState.backends[platform];
+    return b ? '<b>Backend:</b> ' + escapeHtml(b.backend) + ' — ' + escapeHtml(b.caveat) : '';
+  }
+  function setupOnboarding() {
+    onbCards().forEach(function (o) {
+      var body = o.card.querySelector('.card-body');
+      if (!body || body.querySelector('.onb')) return;
+      var existingLabel = o.platform === 'oracle' ? 'tnsnames.ora alias' : o.platform === 'databricks' ? '.databrickscfg profile' : 'Snowflake CLI connection (connections.toml)';
+      var onb = document.createElement('div');
+      onb.className = 'onb';
+      onb.innerHTML =
+        '<div class="onb-active" style="display:none;"></div>' +
+        '<div class="onb-prereq"><div class="btn-row" style="margin-top:0;"><button class="onb-check">Check prerequisites</button></div><div class="onb-prereq-list"></div></div>' +
+        '<div class="onb-note onb-backend"></div>' +
+        '<div class="form-row"><div><label>Use an existing ' + escapeHtml(existingLabel) + '</label><select class="onb-existing"><option value="">— use the fields below —</option></select></div></div>' +
+        '<div class="btn-row" style="margin-top:0;"><button class="onb-find">Find existing</button></div>' +
+        '<div class="onb-note onb-existing-note"></div>';
+      body.insertBefore(onb, body.firstChild);
+      var save = document.createElement('div');
+      save.className = 'onb-save-row';
+      save.innerHTML = '<button class="onb-save">Save as named connection</button>' +
+        '<label class="toggle-row" style="font-size:inherit;"><input type="checkbox" class="onb-share" checked /> Share with the team</label>' +
+        '<span class="onb-note">Checks the connection first; saved only if it connects. Shared: .autode/config/connections.yaml (commit it); your username and paths stay in .autode/local/.</span>';
+      body.appendChild(save);
+      onb.querySelector('.onb-check').onclick = function () { onb.querySelector('.onb-prereq-list').innerHTML = '<div class="onb-note">Checking…</div>'; post('checkPrerequisites', { platform: o.platform, authMode: authModeFor(o.platform, o.role) }); };
+      onb.querySelector('.onb-find').onclick = function () { onb.querySelector('.onb-existing-note').textContent = 'Reading…'; post('findExistingConnections', { platform: o.platform, role: o.role }); };
+      onb.querySelector('.onb-existing').onchange = function () {
+        var v = this.value;
+        if (o.platform === 'oracle' && v) { $('#oraConnectString').value = v; }
+        onb.querySelector('.onb-backend').innerHTML = backendText(o.platform, o.role, o.platform !== 'oracle' && !!v);
+      };
+      save.querySelector('.onb-save').onclick = function () {
+        var sel = onb.querySelector('.onb-existing');
+        var cliRef = o.platform !== 'oracle' && sel ? sel.value : '';
+        selectProviderCard(o.card, o.list);
+        this.disabled = true;
+        pendingNamedSave = { platform: o.platform, role: o.role, cliRef: cliRef, scope: save.querySelector('.onb-share').checked ? 'team' : 'personal' };
+        showToast('Checking the connection…', '');
+        saveSettings(true);
+      };
+    });
+    ['#sfAuthMode', '#tgtSfAuthMode'].forEach(function (sel) { var el = $(sel); if (el) el.addEventListener('change', renderPlatformsState); });
+  }
+  function onbFor(platform, role) {
+    var found = onbCards().filter(function (o) { return o.platform === platform && (!role || o.role === role); });
+    return found.map(function (o) { return { o: o, el: o.card.querySelector('.onb') }; }).filter(function (x) { return !!x.el; });
+  }
+  function renderPrerequisites(platform, list) {
+    onbFor(platform).forEach(function (x) {
+      var html = list.length ? '' : '<div class="onb-note">Nothing to install for ' + escapeHtml(PRETTY[platform] || platform) + '.</div>';
+      list.forEach(function (p) {
+        var btn = '';
+        if (p.kind === 'driver' && (p.state === 'missing' || p.state === 'unsupported')) btn = '<button data-act="install">Install…</button>';
+        else if (p.kind === 'driver' && p.state !== 'ready') btn = '<button data-act="verify">Verify</button>';
+        else if (p.state !== 'ready' && p.install && p.install.docs) btn = '<button data-act="guide" data-url="' + escapeHtml(p.install.docs) + '">Install guide</button>';
+        var cmd = p.install && p.install.command ? '<div class="onb-note">Runs only when you click Install, in a terminal named “AutoDE”: <code>' + escapeHtml(p.install.command) + '</code></div>' : '';
+        var blocked = p.install && p.install.blocked ? '<div class="onb-note">' + escapeHtml(p.install.blocked) + '</div>' : '';
+        html += '<div class="onb-prereq-item"><span class="onb-state">' + (STATE_ICON[p.state] || '•') + '</span><div class="onb-text"><b>' + escapeHtml(p.title) + '</b> — ' + escapeHtml(p.state) + (p.version ? ' · ' + escapeHtml(p.version) : '') + (p.required ? '' : ' · optional') +
+          '<div class="onb-note">' + escapeHtml(p.state === 'ready' ? p.detail : (p.detail + ' ' + p.why)) + '</div>' + cmd + blocked + '</div>' + btn + '</div>';
+      });
+      var target = x.el.querySelector('.onb-prereq-list');
+      target.innerHTML = html;
+      target.querySelectorAll('button[data-act]').forEach(function (b) { b.onclick = function () { post('prerequisiteAction', { platform: platform, action: b.getAttribute('data-act'), url: b.getAttribute('data-url') || '' }); }; });
+    });
+  }
+  function renderExisting(platform, role, result) {
+    onbFor(platform, role).forEach(function (x) {
+      var sel = x.el.querySelector('.onb-existing');
+      var html = '<option value="">— use the fields below —</option>';
+      (result && result.items || []).forEach(function (i) { html += '<option value="' + escapeHtml(i.name) + '"' + (i.usable ? '' : ' disabled') + '>' + escapeHtml(i.name) + (i.detail ? ' — ' + escapeHtml(i.detail) : '') + '</option>'; });
+      sel.innerHTML = html;
+      var count = result && result.items ? result.items.length : 0;
+      x.el.querySelector('.onb-existing-note').textContent = result && result.problem ? result.problem : (count + ' found in ' + (result && result.where || '') + (platform === 'oracle' ? '. Picking one fills the connect string.' : '. Pick one, then Save as named connection.'));
+    });
+  }
+  function badge(text, cls, title) { return '<span class="sc-badge ' + cls + '"' + (title ? ' title="' + escapeHtml(title) + '"' : '') + '>' + escapeHtml(text) + '</span>'; }
+  function renderPlatformsState() {
+    var st = platformsState;
+    if (!st) return;
+    [['source', '#savedConnsSource'], ['target', '#savedConnsTarget']].forEach(function (pair) {
+      var role = pair[0], box = $(pair[1]);
+      if (!box) return;
+      var rows = st.connections.filter(function (c) { return c.role === role; });
+      var active = st.active[role];
+      var html = '<div class="section-title">Saved connections</div>';
+      if (st.noWorkspace) html += '<div class="onb-note">Open a workspace folder to save named connections.</div>';
+      else if (!rows.length) html += '<div class="onb-note">None yet. Fill in a card below and use “Save as named connection”; it is checked before it is saved, and the MCP server sees it too.</div>';
+      rows.forEach(function (c) {
+        var s = c.status;
+        var autode = s.autode === 'ready' ? badge('AutoDE: ready', 'ok', s.detail) : s.autode === 'failed' ? badge('AutoDE: failed', 'err', s.detail) : s.autode === 'stale' ? badge('AutoDE: re-check', 'warn', 'Changed since its last check') : badge('AutoDE: not checked', 'warn');
+        var mcp = badge(s.mcp.ready ? 'MCP: ready' : 'MCP: not ready', s.mcp.ready ? 'ok' : 'warn', s.mcp.note);
+        var where = c.origin === 'local' ? badge('personal', '', 'Only in .autode/local/connections.yaml') : c.origin === 'environment' ? badge('env vars', '', 'Defined by AUTODE_* environment variables') : '';
+        var inUse = active && active.toLowerCase() === c.id.toLowerCase();
+        html += '<div class="saved-conn"><span class="sc-id">' + (inUse ? '● ' : '') + escapeHtml(c.id) + '</span><span class="sc-badges">' + autode + mcp + where + badge(c.resolver, '', 'Credentials resolver') + '</span>' +
+          '<span class="btn-row" style="margin-top:0;">' + (inUse ? '<button data-sc="stop" data-role="' + role + '">Use card fields</button>' : '<button data-sc="use" data-id="' + escapeHtml(c.id) + '" data-role="' + role + '">Use</button>') +
+          '<button data-sc="recheck" data-id="' + escapeHtml(c.id) + '">Re-check</button>' + (c.origin === 'environment' ? '' : '<button data-sc="remove" data-id="' + escapeHtml(c.id) + '">Remove</button>') + '</span>' +
+          (s.mcp.note ? '<div class="onb-note" style="flex-basis:100%;">' + escapeHtml(s.mcp.note) + '</div>' : '') + '</div>';
+      });
+      (st.errors || []).forEach(function (e) { html += '<div class="onb-note">⚠ ' + escapeHtml(e) + '</div>'; });
+      box.innerHTML = html;
+      box.querySelectorAll('button[data-sc]').forEach(function (b) {
+        b.onclick = function () {
+          var act = b.getAttribute('data-sc'), id = b.getAttribute('data-id') || '';
+          if (act === 'use') post('useConnection', { id: id, role: b.getAttribute('data-role') });
+          else if (act === 'stop') post('stopUsingConnection', { role: b.getAttribute('data-role') });
+          else if (act === 'recheck') post('recheckConnection', { id: id });
+          else if (act === 'remove') post('removeConnection', { id: id });
+        };
+      });
+    });
+    onbCards().forEach(function (o) {
+      var el = o.card.querySelector('.onb');
+      if (!el) return;
+      var sel = el.querySelector('.onb-existing');
+      el.querySelector('.onb-backend').innerHTML = backendText(o.platform, o.role, o.platform !== 'oracle' && sel && !!sel.value);
+      var activeId = st.active[o.role];
+      var entry = activeId ? st.connections.filter(function (c) { return c.id.toLowerCase() === activeId.toLowerCase(); })[0] : null;
+      var banner = el.querySelector('.onb-active');
+      if (entry && entry.platform === o.platform) { banner.style.display = ''; banner.textContent = 'Connect uses the saved connection ' + entry.id + ' (Saved connections, above). Use card fields there to switch back.'; }
+      else if (activeId && !entry && o.card.classList.contains('selected')) { banner.style.display = ''; banner.textContent = 'Connect is set to the saved connection ' + activeId + ', which no longer exists in the connections files.'; }
+      else { banner.style.display = 'none'; }
+    });
+  }
+  setupOnboarding();
 
   // ── Message Handler ──
   window.addEventListener('message', function (event) {
@@ -1784,6 +1958,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         }
         renderCardStatus(snowflakeStatus, msg.source, 'snowflake');
         renderCardStatus($('#databricksStatus'), msg.source, 'databricks');
+        renderCardStatus($('#oracleStatus'), msg.source, 'oracle');
         renderCardStatus($('#tgtSnowflakeStatus'), msg.target, 'snowflake');
         renderCardStatus($('#tgtDatabricksStatus'), msg.target, 'databricks');
         break;
@@ -1793,7 +1968,12 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'settingsSaved':
         showToast('Settings saved', 'success');
         if (pendingConnectionCommand) { var cmd = pendingConnectionCommand; pendingConnectionCommand = null; post(cmd); }
+        if (pendingNamedSave) { var ns = pendingNamedSave; pendingNamedSave = null; post('saveNamedConnection', ns); }
         break;
+      case 'platformsState': platformsState = msg.state; renderPlatformsState(); break;
+      case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
+      case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
+      case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': endPending(); if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
@@ -1912,6 +2092,13 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     if (data.defaultDatabricksCatalogType) $('#dbxCatalogType').value = data.defaultDatabricksCatalogType;
     if (data.databricksCliPath) $('#dbxCliPath').value = data.databricksCliPath;
     if ($('#dbxToken')) { $('#dbxToken').placeholder = data.databricksHasToken ? 'Token already saved — leave blank to keep it, or type a new one to replace it' : 'Stored in VS Code SecretStorage — never shown again'; }
+    // Source — Oracle
+    if (data.defaultOracleConnectString) $('#oraConnectString').value = data.defaultOracleConnectString;
+    if (data.defaultOracleUsername) $('#oraUsername').value = data.defaultOracleUsername;
+    if (data.oracleConfigDir) $('#oraConfigDir').value = data.oracleConfigDir;
+    if (data.oracleWalletLocation) $('#oraWalletLocation').value = data.oracleWalletLocation;
+    if ($('#oraPassword')) { $('#oraPassword').placeholder = data.oracleHasPassword ? 'Password already saved — leave blank to keep it, or type a new one to replace it' : 'Stored in VS Code SecretStorage — never shown again'; }
+    if ($('#oraWalletPassword')) { $('#oraWalletPassword').placeholder = data.oracleHasWalletPassword ? 'Already saved — leave blank to keep it' : 'Stored in VS Code SecretStorage'; }
     // Target — Snowflake
     if (data.defaultTargetSnowflakeAccount) $('#tgtSfAccount').value = data.defaultTargetSnowflakeAccount;
     if (data.defaultTargetSnowflakeUsername) $('#tgtSfUsername').value = data.defaultTargetSnowflakeUsername;
@@ -1953,6 +2140,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   if (prevState.chatHtml) { chatStream.innerHTML = prevState.chatHtml; if (welcomeBlock) welcomeBlock.style.display = 'none'; }
   setInterval(function () { vscode.setState({ chatHtml: chatStream.innerHTML }); }, 3000);
   post('settingsLoaded', {});
+  post('platformsState');
 })();
 </script>
 </body>

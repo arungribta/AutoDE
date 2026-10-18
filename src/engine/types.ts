@@ -632,6 +632,9 @@ export interface DataAgentHubSettings {
   oracleWalletLocation?: string;
   /** Where user-installed drivers live (phase DRV1); empty = AUTODE_DRIVERS_DIR, else ~/.autode/drivers. */
   driversDirectory?: string;
+  /** Phase DRV2: the named connection (connections.yaml id) Connect uses per role; empty = the card's fields. */
+  activeSourceConnection?: string;
+  activeTargetConnection?: string;
 
   // ── Target connection (v0.19.0 Source/Target Panel split) ──
   // Doubled flat settings, deliberately additive rather than a symmetric

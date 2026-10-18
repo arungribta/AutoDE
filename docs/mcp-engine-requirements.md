@@ -287,18 +287,10 @@ In short: AutoDE keeps a sidecar per imported skill (status, version, provenance
 
 In short: a prerequisite model per platform (CLI, driver, client library: detect, why, install step, verify), the driver store (`~/.autode/drivers` or the `driversDirectory` setting, shared with the MCP server), an `npm install --ignore-scripts` command run in a visible AutoDE terminal only on the user's click, a verification record bound to the lockfile, and Oracle 12.1+ in Thin mode as a source: tnsnames aliases or Easy Connect, ALL_* metadata with primary and foreign keys, Oracle probes and q-quote-aware read-only guard, in `connections.yaml`, the MCP tools and the extension's connection flow.
 
-##### Phase DRV2 (v0.39.0): platform-onboarding UI ("Data Platforms")
+##### Phase DRV2 (v0.39.0): platform onboarding in the settings cards
+**Status:** ✅ shipped in v0.39.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md PLT-7, PLT-8; HOW: technical-design.md §6.14; setup: [mcp-setup.md](mcp-setup.md) (Data platforms). The full specification text is in git (this file at v0.38.0).
 
-Scope: a panel section that renders the prerequisite model for each platform:
-1. Pick platforms.
-2. Per platform, the prerequisites with their status and actions (install, verify), and the existing detect / pick-connection flow (CLI connections, tnsnames aliases).
-3. Choose a backend tier, with honest caveats for each.
-4. Guided authentication, storing secrets in SecretStorage.
-5. An end-to-end connectivity check before the platform is marked ready.
-
-It also writes the chosen connection to `.autode/config/connections.yaml` (pointers only), so the MCP server sees it. It also folds in the backlog item "the old `testConnection` path assembles credentials from settings rather than the credential resolvers".
-
-Acceptance: a platform is marked ready only after a passing connectivity check; every action that installs or runs something is a click with the command shown; the settings panel's existing Snowflake/Databricks flows keep working.
+In short: no separate "Data Platforms" tab (decided with the owner, 2026-10-18). Each platform card in the Source and Target tabs shows its prerequisites with Install / Verify, the backend it will use with that backend's caveat, and the existing CLI connections, Databricks profiles or tnsnames aliases. **Save as named connection** connects first and writes only if the check passes: shared fields to `.autode/config/connections.yaml`, personal ones to the gitignored `.autode/local/connections.yaml`, and secrets to VS Code's secret storage under the new `resolver: vscode`, which an MCP server reads from same-named env variables. A **Saved connections** list per tab shows readiness for AutoDE and for MCP clients separately (per machine, bound to the entry), with Use, Re-check and Remove. Connect resolves a named connection through the credential resolvers, as the MCP server does. There is an Oracle source card; Oracle as a target is not offered. The existing Snowflake and Databricks flows are unchanged.
 
 **Not planned:** `snowflake-sdk` and `@databricks/sql` as a backend tier. Reconsider them as moderated installs if an engagement is blocked because the Snowflake SQL API is restricted and no CLI is allowed.
 

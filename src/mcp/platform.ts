@@ -1,5 +1,5 @@
 import { ConnectionManager, ConnectionManagerOptions } from '../engine/platform/ConnectionManager';
-import { ConnectionEntry, ConnectionsConfig, loadConnectionsConfig, resolveConnectionCredentials } from '../engine/platform/connectionsConfig';
+import { ConnectionEntry, ConnectionsConfig, envStandInVariables, loadConnectionsConfig, resolveConnectionCredentials } from '../engine/platform/connectionsConfig';
 import { registerBuiltInCredentialResolvers } from '../engine/platform/credentials';
 import { gateQueryResult, sanitizeSnapshot } from '../engine/platform/sampleData';
 import { checkReadOnlySql, checkSingleStatement, stripTrailingSemicolon } from '../engine/platform/sqlGuard';
@@ -9,10 +9,12 @@ import { EngineTool, ToolAnnotations } from './tools';
 /**
  * The data-platform tools (docs/mcp-engine-requirements.md §5.3, §6; phase 4).
  *
- * Connections come from `.autode/config/connections.yaml` and the `AUTODE_*`
- * environment (connectionsConfig.ts); credentials only through the engine's
- * own resolvers (env vars, the platform CLI's configuration) — never VS Code's
- * secret store, which a server started by another client cannot read. When the
+ * Connections come from `.autode/config/connections.yaml`, the personal
+ * `.autode/local/connections.yaml` and the `AUTODE_*` environment
+ * (connectionsConfig.ts); credentials only through the engine's own resolvers
+ * (env vars, the platform CLI's configuration) — never VS Code's secret store,
+ * which a server started by another client cannot read: a `resolver: vscode`
+ * entry takes its secret from the same-named env variables here. When the
  * extension starts the server (phase 5) it passes SecretStorage values as the
  * same environment variables.
  *
@@ -116,7 +118,7 @@ export class PlatformSession {
         const managerOptions: ConnectionManagerOptions = { cliConsent: () => this.options.allowCli, sampleDataConsent: () => this.consent(entry.id), driversRoot: () => this.options.driversRoot };
         const manager = this.options.createManager?.(log, managerOptions) ?? new ConnectionManager(log, managerOptions);
         try {
-          const credentials = await resolveConnectionCredentials(entry);
+          const credentials = await resolveConnectionCredentials(entry, this.options.env ?? process.env);
           await withTimeout(DEFAULT_TIMEOUT_S, entry.id, () => manager.connect(entry.platform, credentials));
           return manager;
         } catch (err) {
@@ -182,7 +184,9 @@ export function platformTools(session: PlatformSession): EngineTool[] {
           connections: config.connections.map((c) => ({
             id: c.id, platform: c.platform, role: c.role, authMode: authModeOf(c),
             credentials: { resolver: c.credentials.resolver, ref: c.credentials.ref || 'default' },
-            allowSampleDataInPrompts: c.allowSampleDataInPrompts, origin: c.origin
+            allowSampleDataInPrompts: c.allowSampleDataInPrompts, origin: c.origin,
+            // Phase DRV2: a secret kept in VS Code's secret storage reaches this server only through these variables.
+            ...(c.credentials.resolver === 'vscode' ? { secretFromEnv: envStandInVariables(c) } : {})
           })),
           configFile: config.file,
           configFileExists: config.fileExists,

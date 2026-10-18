@@ -6,6 +6,33 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.39.0
+
+- **Phase DRV2: platform onboarding in the settings cards, and named connections** (`docs/mcp-engine-requirements.md` §9.1; requirements PLT-7, PLT-8 (new); technical-design §6.14; setup: `docs/mcp-setup.md`, *Data platforms*).
+- **Each platform card** (Source: Snowflake, Databricks, Oracle; Target: Snowflake, Databricks) now shows:
+  - **Prerequisites**, checked when you click *Check prerequisites* (DRV1's model): state, version, why, and *Install…* / *Verify* for the Oracle driver or *Install guide* for a CLI. The install command is shown before it runs, and runs only on the click.
+  - **The backend it will use**, with that backend's limits: Snowflake SQL API or Snowflake CLI (by auth mode), Databricks Statement Execution API (the only backend), Oracle Thin mode (12.1+, a source only).
+  - **Existing connections** under *Find existing*: Snowflake `connections.toml` names, `.databrickscfg` profiles (those without a token are listed but not selectable, with the reason), tnsnames aliases (picking one fills the connect string). They are read from the files; no CLI is run.
+  - **Save as named connection.** AutoDE connects first and writes nothing if that fails. On success the shared fields go to `.autode/config/connections.yaml` (comments in the file are kept), and your `username`, key, wallet and CLI paths go to the new gitignored `.autode/local/connections.yaml`. A password or token you typed moves to VS Code's secret storage under the connection's reference, and the connection becomes the one Connect uses for that role. *Share with the team* off keeps the whole entry personal.
+- **Saved connections** at the top of the Source and Target tabs: every connection from both files and the environment, with **AutoDE: ready / failed / not checked / re-check** and **MCP: ready / not ready** plus what an MCP client still needs (env variables, `--allow-cli`, the drivers folder). Buttons: *Use* (connect with it), *Use card fields*, *Re-check*, *Remove* (confirmed; removes it from both files and deletes its stored secrets).
+- **Readiness is per machine** (`.autode/local/connection-readiness.json`) and tied to the entry: editing it turns the status to *re-check*.
+- **Connect through a named connection** (settings `activeSourceConnection`, `activeTargetConnection`). When one is in use, Test Connection resolves its credentials through the same resolvers the MCP server uses, which closes the backlog item "the old testConnection path assembles credentials from settings". With none in use, the card's fields work exactly as before.
+- **`connections.yaml`**:
+  - The new **`resolver: vscode`** means VS Code's secret storage. Outside VS Code the secret comes from `AUTODE_<PLATFORM>_<REF>_<FIELD>`; `autode_list_connections` names those variables in `secretFromEnv`, and a missing one is an error naming it.
+  - The **personal file** `.autode/local/connections.yaml` adds fields, or the engineer's own credentials, to a team entry by `id`, or holds connections of its own. It can't change sample-data consent.
+- **Oracle source card**, with connect string, username, tnsnames folder, password, and an optional wallet folder and wallet password (stored in secret storage). There is no Oracle target card.
+- **Fixed:**
+  - In `connections.yaml`, `role` is source/target, so a Snowflake role given as `role` made the entry invalid. Snowflake's role is now **`snowflakeRole`** (mapped to the adapter's `role`).
+  - **Databricks `.databrickscfg` profiles** could not connect at all (v0.37.0 notes). `DatabricksAdapter` now reads the profile's host and personal access token at connect time; `httpPath` still comes from the entry. A profile without a token (OAuth, Azure CLI) is explained.
+  - The settings panel's save dropped the Oracle settings and `oracle` as the source provider.
+- **Deviations / notes:**
+  - No "Data Platforms" tab or wizard. On review with the owner the steps moved into the existing platform cards, and a Saved connections list was added because a card holds one connection while an estate merge needs several (decision log 2026-10-18). The spec's step 1, picking platforms, is the card choice. Step 3, the backend tier, is shown as information, because only Snowflake has a real choice and it follows the auth mode.
+  - Secrets are stored in VS Code's secret storage as the spec says. Because MCP clients can't read it, readiness is reported per consumer, and a `vscode` connection that needs a secret is *MCP: not ready* until its env variables are set in the client (or phase 5 starts the server).
+  - Writing the connections files keeps comments and order (yaml Document API), but a hand-edited entry is matched by its id. Editing a team entry from a card replaces its shared fields and leaves its consent alone.
+  - The card path still stores its secrets under the old fixed keys; a named connection copies them to its own reference. Two places for the same password until the card-only path is retired (roadmap backlog).
+  - Oracle as a target goes to the backlog: it means Oracle SQL generation, not a card.
+- **Measured:** `npm run eval` unchanged from v0.38.0 (traps 4/5, contract violations 4/4 with none false, vocabulary 17/21 and 19/21 with captured vocabulary, large estate 8/8, longest synchronous task 47 ms). 316 tests (8 new, one rewritten for the Databricks profile change).
+
 ## 0.38.0
 
 - **Phase DRV1: AutoDE moderates driver installs, and reads Oracle as a source** (`docs/mcp-engine-requirements.md` §9.1, rewritten before implementation, commit 77d02c3; requirements PLT-1, PLT-7; technical-design §6.13; setup: `docs/mcp-setup.md`, *Oracle*).

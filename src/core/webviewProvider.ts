@@ -46,6 +46,8 @@ import { createDeclarativePrimitive } from '../engine/transforms/declarative/ada
 import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from '../engine/transforms/declarative/lifecycle';
 import { PrimitiveDefinition } from '../engine/transforms/declarative/types';
 import { ConnectionManager } from '../engine/platform/ConnectionManager';
+import type { PlatformOnboarding } from './platformOnboarding';
+import { backendFor } from './platformOnboarding';
 import { sampleDataConsentFromWorkspace } from '../engine/platform/connectionsConfig';
 import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
 import { applyCspNonce } from './webviewSecurity';
@@ -100,6 +102,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private problemRoot?: vscode.Uri;
   /** Phase C4a: probes on the source connection (set by extension.ts when it connects). */
   private liveProbes?: ProbeExecutor;
+  private platformOnboarding?: PlatformOnboarding;
   private activeProblemManager?: ActiveProblemManager;
   /** `undefined` = no active business problem yet (fresh workspace, or "Start New" before the first draft). */
   private activeProblemId?: string;
@@ -306,6 +309,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     } catch { /* best-effort */ }
     try {
       merged.targetDatabricksHasToken = !!(await this.configManager.getTargetDatabricksToken());
+    } catch { /* best-effort */ }
+    try {
+      merged.oracleHasPassword = !!(await this.configManager.getOraclePassword());
+      merged.oracleHasWalletPassword = !!(await this.configManager.getOracleWalletPassword());
     } catch { /* best-effort */ }
     return merged;
   }
@@ -543,7 +550,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const typedSettings: Partial<DataAgentHubSettings> = {
             extensionDisplayName: typeof settings.extensionDisplayName === 'string' ? settings.extensionDisplayName : undefined,
             extensionDescription: typeof settings.extensionDescription === 'string' ? settings.extensionDescription : undefined,
-            defaultProvider: settings.defaultProvider === 'snowflake' || settings.defaultProvider === 'databricks' || settings.defaultProvider === 'bigquery' || settings.defaultProvider === 'redshift' || settings.defaultProvider === 'synapse' || settings.defaultProvider === 'other' ? settings.defaultProvider : undefined,
+            defaultProvider: settings.defaultProvider === 'snowflake' || settings.defaultProvider === 'databricks' || settings.defaultProvider === 'oracle' || settings.defaultProvider === 'bigquery' || settings.defaultProvider === 'redshift' || settings.defaultProvider === 'synapse' || settings.defaultProvider === 'other' ? settings.defaultProvider : undefined,
             defaultSnowflakeAccount: typeof settings.defaultSnowflakeAccount === 'string' ? settings.defaultSnowflakeAccount : undefined,
             defaultSnowflakeUsername: typeof settings.defaultSnowflakeUsername === 'string' ? settings.defaultSnowflakeUsername : undefined,
             defaultSnowflakeWarehouse: typeof settings.defaultSnowflakeWarehouse === 'string' ? settings.defaultSnowflakeWarehouse : undefined,
@@ -563,6 +570,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             defaultDatabricksSchema: typeof settings.defaultDatabricksSchema === 'string' ? settings.defaultDatabricksSchema : undefined,
             defaultDatabricksCatalogType: settings.defaultDatabricksCatalogType === 'auto' || settings.defaultDatabricksCatalogType === 'unity' || settings.defaultDatabricksCatalogType === 'hive_metastore' ? settings.defaultDatabricksCatalogType : undefined,
             databricksCliPath: typeof settings.databricksCliPath === 'string' ? settings.databricksCliPath : undefined,
+            // Phase DRV2: the Oracle source card.
+            defaultOracleConnectString: typeof settings.defaultOracleConnectString === 'string' ? settings.defaultOracleConnectString : undefined,
+            defaultOracleUsername: typeof settings.defaultOracleUsername === 'string' ? settings.defaultOracleUsername : undefined,
+            oracleConfigDir: typeof settings.oracleConfigDir === 'string' ? settings.oracleConfigDir : undefined,
+            oracleWalletLocation: typeof settings.oracleWalletLocation === 'string' ? settings.oracleWalletLocation : undefined,
             // ── Target connection (v0.19.0) — mirrors the source fields above exactly ──
             defaultTargetProvider: settings.defaultTargetProvider === 'snowflake' || settings.defaultTargetProvider === 'databricks' || settings.defaultTargetProvider === 'bigquery' || settings.defaultTargetProvider === 'redshift' || settings.defaultTargetProvider === 'synapse' || settings.defaultTargetProvider === 'other' ? settings.defaultTargetProvider : undefined,
             defaultTargetSnowflakeAccount: typeof settings.defaultTargetSnowflakeAccount === 'string' ? settings.defaultTargetSnowflakeAccount : undefined,
@@ -603,6 +615,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           // called it, since the Databricks card had no real token field.
           if (typeof message.databricksToken === 'string') { await this.configManager.setDatabricksToken(message.databricksToken); }
           if (typeof message.targetDatabricksToken === 'string') { await this.configManager.setTargetDatabricksToken(message.targetDatabricksToken); }
+          if (typeof message.oraclePassword === 'string') { await this.configManager.setOraclePassword(message.oraclePassword); }
+          if (typeof message.oracleWalletPassword === 'string') { await this.configManager.setOracleWalletPassword(message.oracleWalletPassword); }
           this.postMessage('settingsSaved', { success: true });
           this.postLog('Settings saved securely to VS Code secrets.');
           // Refresh the active-provider status pill (e.g. after switching LLM card).
@@ -631,6 +645,15 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'testConnection': { this.postLog('Connecting to source database...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testConnection`); } catch { this.postLog('Connect command not yet registered.'); } break; }
+        case 'platformsState':
+        case 'checkPrerequisites':
+        case 'prerequisiteAction':
+        case 'findExistingConnections':
+        case 'saveNamedConnection':
+        case 'useConnection':
+        case 'stopUsingConnection':
+        case 'recheckConnection':
+        case 'removeConnection': { await this.handlePlatformMessage(message); break; }
         case 'disconnectDataPlatform': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.disconnectDataPlatform`); } catch { this.postLog('Disconnect command not yet registered.'); } break; }
         case 'testTargetConnection': { this.postLog('Connecting to target database...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testTargetConnection`); } catch { this.postLog('Test target connection command not yet registered.'); } break; }
         case 'disconnectTargetDataPlatform': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.disconnectTargetDataPlatform`); } catch { this.postLog('Disconnect target command not yet registered.'); } break; }
@@ -1367,6 +1390,96 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Lets `extension.ts`'s command handlers (e.g. `testConnection`) surface progress/results into the chat log, not just a native VS Code notification the webview never sees. */
+  /** Phase DRV2: named-connection onboarding in the settings cards (built in extension.ts). */
+  public setPlatformOnboarding(onboarding: PlatformOnboarding): void {
+    this.platformOnboarding = onboarding;
+  }
+
+  private postPlatformsState(): void {
+    if (this.platformOnboarding) this.postMessage('platformsState', { state: this.platformOnboarding.state() });
+  }
+
+  private async setActiveConnection(role: 'source' | 'target', id: string): Promise<void> {
+    await this.configManager.updateSettings(role === 'target' ? { activeTargetConnection: id } : { activeSourceConnection: id });
+  }
+
+  /** The platform-card messages: prerequisites, existing CLI connections/aliases, saved connections. */
+  private async handlePlatformMessage(message: WebviewMessage): Promise<void> {
+    const onboarding = this.platformOnboarding;
+    if (!onboarding) return;
+    const m = message as unknown as Record<string, unknown>;
+    const platform = String(m.platform ?? '') as DataPlatformProvider;
+    const role = m.role === 'target' ? 'target' : 'source';
+    const id = typeof m.id === 'string' ? m.id : '';
+    switch (message.type) {
+      case 'platformsState': this.postPlatformsState(); break;
+      case 'checkPrerequisites': {
+        const list = await onboarding.prerequisites(platform);
+        this.postMessage('prerequisites', { platform, list, backend: backendFor(platform, typeof m.authMode === 'string' ? m.authMode : undefined) });
+        break;
+      }
+      case 'prerequisiteAction': {
+        const action = String(m.action ?? '');
+        if (action === 'install' && platform === 'oracle') await vscode.commands.executeCommand(`${EXTENSION_ID}.installOracleDriver`);
+        else if (action === 'verify' && platform === 'oracle') await vscode.commands.executeCommand(`${EXTENSION_ID}.verifyOracleDriver`);
+        else if (action === 'guide' && typeof m.url === 'string' && /^https:\/\//.test(m.url)) await vscode.env.openExternal(vscode.Uri.parse(m.url));
+        const list = await onboarding.prerequisites(platform);
+        this.postMessage('prerequisites', { platform, list, backend: backendFor(platform) });
+        break;
+      }
+      case 'findExistingConnections': this.postMessage('existingConnections', { platform, role, result: await onboarding.existing(platform) }); break;
+      case 'saveNamedConnection': {
+        const cliRef = typeof m.cliRef === 'string' && m.cliRef ? m.cliRef : undefined;
+        const scope = m.scope === 'personal' ? 'personal' : 'team';
+        let result = await onboarding.saveFromCard(platform, role, { cliRef, scope });
+        // Same in-place fix as the Connect button: the CLI path needs the consent setting.
+        if (!result.ok && result.message.includes('dataPlatformCliConsent')) {
+          const pick = await vscode.window.showErrorMessage(result.message, 'Enable CLI Consent & Retry');
+          if (pick === 'Enable CLI Consent & Retry') {
+            await this.configManager.updateSettings({ dataPlatformCliConsent: true });
+            result = await onboarding.saveFromCard(platform, role, { cliRef, scope });
+          }
+        }
+        if (result.ok && result.id) await this.setActiveConnection(role, result.id);
+        this.postLog(result.ok ? `${result.message} Connect now uses it for the ${role}.` : result.message);
+        this.postMessage('namedConnectionResult', { ...result, platform, role });
+        this.postPlatformsState();
+        break;
+      }
+      case 'useConnection': {
+        await this.setActiveConnection(role, id);
+        this.postPlatformsState();
+        await vscode.commands.executeCommand(role === 'target' ? `${EXTENSION_ID}.testTargetConnection` : `${EXTENSION_ID}.testConnection`);
+        this.postPlatformsState();
+        break;
+      }
+      case 'stopUsingConnection': {
+        await this.setActiveConnection(role, '');
+        this.postLog(`Connect now uses the ${role} card's fields.`);
+        this.postPlatformsState();
+        break;
+      }
+      case 'recheckConnection': {
+        const result = await onboarding.recheck(id);
+        this.postLog(result.message);
+        this.postPlatformsState();
+        break;
+      }
+      case 'removeConnection': {
+        const pick = await vscode.window.showWarningMessage(`Remove the connection "${id}"?`, { modal: true, detail: 'It is removed from .autode/config/connections.yaml (the team file: commit the change) and .autode/local/connections.yaml, together with its secrets in VS Code\'s secret storage.' }, 'Remove');
+        if (pick !== 'Remove') break;
+        const result = await onboarding.remove(id);
+        const settings = this.configManager.getSettings();
+        if (settings.activeSourceConnection === id) await this.setActiveConnection('source', '');
+        if (settings.activeTargetConnection === id) await this.setActiveConnection('target', '');
+        this.postLog(result.message);
+        this.postPlatformsState();
+        break;
+      }
+      default: break;
+    }
+  }
+
   public logToChat(message: string): void {
     this.postLog(message);
   }

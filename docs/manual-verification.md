@@ -350,6 +350,38 @@ Needs an Oracle Database 19c (or any 12.1+) you can reach, a read-only user, and
   Do: on a machine (or a shell with `PATH` trimmed) without npm, run **AutoDE: Install Oracle Driver**.
   Expect: a dialog saying npm is missing, offering Node.js and the `driversDirectory` setting; nothing runs.
 
+## Part 16 — v0.39.0 Platform onboarding in the cards, named connections
+
+Use a scratch workspace with a git repository (to see what would be committed). Keep the AutoDE chat log visible.
+
+- [ ] **16.1 Existing flows unchanged.**
+  Do: with no saved connections, fill in the Snowflake source card as before and click **Connect**; repeat for a Databricks target.
+  Expect: both connect as in v0.38.0; the Saved connections lists say "None yet"; no `.autode/config/connections.yaml` is created.
+- [ ] **16.2 Prerequisites and backend in a card.**
+  Do: open the Oracle source card, click **Check prerequisites**; switch the Snowflake card's auth mode between Key-Pair and Username + Password.
+  Expect: the Oracle driver with its state and the exact `npm install …` command (nothing runs); **Install…** opens DRV1's install dialog. The Snowflake backend line changes between "SQL API (REST)" and "Snowflake CLI (native protocol)" with its caveat.
+- [ ] **16.3 A failed check saves nothing.**
+  Do: in the Snowflake source card, enter a wrong password and click **Save as named connection**.
+  Expect: "Not saved — the connectivity check failed: …"; no connections file changes (`git status` clean).
+- [ ] **16.4 Saving splits team, personal and secret.**
+  Do: fix the password, **Save as named connection** with *Share with the team* on.
+  Expect: `.autode/config/connections.yaml` has the entry (`id`, account, warehouse, `snowflakeRole`, `credentials: { resolver: vscode, ref: … }`) and no username, key path or password; `.autode/local/connections.yaml` (ignored by git) has the username/key path; Saved connections shows **AutoDE: ready**, **MCP: not ready** with `AUTODE_SNOWFLAKE_<REF>_PASSWORD`, and "● " as in use.
+- [ ] **16.5 Connect uses the named connection.**
+  Do: change the card's account field to something wrong, save settings, click **Connect**.
+  Expect: it still connects (to the named connection) and the card shows the "Connect uses the saved connection …" banner. **Use card fields** switches back, and Connect then fails with the wrong account.
+- [ ] **16.6 Existing CLI connection and Databricks profile.**
+  Do: **Find existing** in the Snowflake card, pick a `connections.toml` connection, **Save as named connection** (consent prompt if asked). In the Databricks card, enter the HTTP path, **Find existing**, pick a profile with a token, save.
+  Expect: both saved with `resolver: cli` and shown **MCP: ready** (Snowflake noting `--allow-cli`). A profile without a token is greyed out with the reason.
+- [ ] **16.7 Oracle alias.**
+  Do: in the Oracle card set the tnsnames folder, **Find existing**, pick an alias, enter the username and password, save.
+  Expect: the alias fills the connect string; the entry saves after a passing check; MCP shows the `AUTODE_ORACLE_<ALIAS>_PASSWORD` variable.
+- [ ] **16.8 Readiness lapses on edit; Re-check; Remove.**
+  Do: edit the saved Snowflake entry's warehouse in the committed file; reopen settings. Then **Re-check**. Then **Remove** and confirm.
+  Expect: "AutoDE: re-check" after the edit; ready again after Re-check; Remove deletes it from both files, its secret is gone (Connect with it would fail), and Connect falls back to the card.
+- [ ] **16.9 Over MCP.**
+  Do: with the 16.4 entry, start the MCP server (mcp-setup.md) without and then with `AUTODE_SNOWFLAKE_<REF>_PASSWORD` in the client's `env`; call `autode_list_connections` and `autode_test_connection`.
+  Expect: the listing shows `secretFromEnv`; without the variable the test fails naming it; with it, it connects.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -416,5 +448,29 @@ Needs an Oracle Database 19c (or any 12.1+) you can reach, a read-only user, and
 | 13.3 |  |  |
 | 13.4 |  |  |
 | 13.5 |  |  |
+| 14.1 |  |  |
+| 14.2 |  |  |
+| 14.3 |  |  |
+| 14.4 |  |  |
+| 14.5 |  |  |
+| 14.6 |  |  |
+| 14.7 |  |  |
+| 15.1 |  |  |
+| 15.2 |  |  |
+| 15.3 |  |  |
+| 15.4 |  |  |
+| 15.5 |  |  |
+| 15.6 |  |  |
+| 15.7 |  |  |
+| 15.8 |  |  |
+| 16.1 |  |  |
+| 16.2 |  |  |
+| 16.3 |  |  |
+| 16.4 |  |  |
+| 16.5 |  |  |
+| 16.6 |  |  |
+| 16.7 |  |  |
+| 16.8 |  |  |
+| 16.9 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

@@ -94,7 +94,9 @@ On macOS the executable is `/Applications/Visual Studio Code.app/Contents/MacOS/
 
 ## Data platforms
 
-The server reads connections from `.autode/config/connections.yaml` in the workspace. The file is committed with the rest of `.autode/config/`, so it holds **no secrets**: an entry with a `password`, `token` or private key in it is refused. Secrets come from environment variables or from the platform CLI's own configuration.
+The server reads connections from `.autode/config/connections.yaml` in the workspace, plus your personal `.autode/local/connections.yaml`. The first file is committed with the rest of `.autode/config/`; the second is gitignored. Neither holds **secrets**: an entry with a `password`, `token` or private key in it is refused. Secrets come from environment variables, from the platform CLI's own configuration, or (inside VS Code) from VS Code's secret storage.
+
+In VS Code you rarely edit these files by hand. Fill in a platform card in AutoDE's settings (Source or Target) and click **Save as named connection**. AutoDE checks the connection first and saves it only if the check passes. The shared settings go to the committed file and your username and file paths to the personal one; a password or token you typed goes to VS Code's secret storage. The **Saved connections** list at the top of the tab shows, for each connection, whether it is ready in AutoDE and what an MCP client still needs.
 
 ```yaml
 connections:
@@ -112,6 +114,7 @@ connections:
     username: AUTODE_SVC
     warehouse: ANALYTICS_WH
     database: ANALYTICS
+    snowflakeRole: LOADER            # Snowflake's role; `role` above is source/target
     authMode: key-pair
     credentials: { resolver: env, ref: target }
 
@@ -127,11 +130,23 @@ connections:
 |---|---|
 | `platform` | `snowflake`, `databricks` or `oracle` (a source; see [Oracle](#oracle)). |
 | `role` | `source` (default) or `target`. |
-| `credentials.resolver` | `env`: environment variables `AUTODE_<PLATFORM>_<FIELD>`, or `AUTODE_<PLATFORM>_<REF>_<FIELD>` when `ref` is set. `cli`: a named connection in the Snowflake CLI's `connections.toml`. |
-| `credentials.ref` | The CLI connection name, or the infix of the environment variables. |
+| `credentials.resolver` | `env`: environment variables `AUTODE_<PLATFORM>_<FIELD>`, or `AUTODE_<PLATFORM>_<REF>_<FIELD>` when `ref` is set. `cli`: a named connection in the Snowflake CLI's `connections.toml`, or a profile in `.databrickscfg` (host and personal access token; `httpPath` still comes from the entry). `vscode`: VS Code's secret storage, which only the AutoDE extension can read; an MCP server takes the secret from the same `AUTODE_<PLATFORM>_<REF>_<FIELD>` variables instead (`autode_list_connections` names them in `secretFromEnv`). |
+| `credentials.ref` | The CLI connection or profile name, the infix of the environment variables, or the secret-storage reference. |
 | `id` | Optional. By default `<platform>:<CLI connection name, account or workspace URL>`, the id AutoDE uses for this connection everywhere else (estate bindings, extracted schema). |
 | `allowSampleDataInPrompts` | Whether row values from this connection may reach a language model. Default `false`. See [Sample data](#sample-data). |
-| other keys | Settings that aren't secret: Snowflake `account`, `username`, `warehouse`, `database`, `schema`, `role`, `authMode`, `keyPath`; Databricks `workspaceUrl`, `httpPath`, `catalog`, `schema`. |
+| other keys | Settings that aren't secret: Snowflake `account`, `username`, `warehouse`, `database`, `schema`, `snowflakeRole`, `authMode`, `keyPath`; Databricks `workspaceUrl`, `httpPath`, `catalog`, `schema`; Oracle `connectString`, `username`, `configDir`, `walletLocation`. |
+
+**Personal fields** (`.autode/local/connections.yaml`). What differs per engineer (`username`, `keyPath`, `snowflakeCliPath`, `configDir`, `walletLocation`) is added to the team entry with the same `id`:
+
+```yaml
+connections:
+  - id: snowflake:ACME-XY12345
+    username: JDOE
+    keyPath: ~/.ssh/snowflake_key.p8
+    credentials: { resolver: vscode, ref: ACME-XY12345 }   # optional: your own credentials for this entry
+```
+
+An entry here may also use its own credentials, or be a whole connection of your own (with `platform`). `allowSampleDataInPrompts` can't be set here for a team entry: consent is the team's decision.
 
 Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATABASE`, `SCHEMA`, `ROLE`, `AUTH_MODE`, `PASSWORD`, `PRIVATE_KEY_PATH`, `PRIVATE_KEY`, `PRIVATE_KEY_PASSPHRASE`; Databricks `WORKSPACE_URL`, `HTTP_PATH`, `TOKEN`, `CATALOG`, `SCHEMA`; Oracle `CONNECT_STRING`, `USERNAME`, `PASSWORD`, `CONFIG_DIR`, `WALLET_LOCATION`, `WALLET_PASSWORD`. Pass them in the client's `env` block or set them in the shell that starts the client:
 
@@ -149,7 +164,9 @@ Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATA
 
 **Without the file.** If `AUTODE_SNOWFLAKE_ACCOUNT` or `AUTODE_DATABRICKS_WORKSPACE_URL` is set, the server offers that connection as a source, with sample data off. This is the simplest set-up for CI.
 
-**VS Code's secret store.** A server started by Claude Code or Cursor can't read the passwords and tokens you saved in AutoDE's settings panel. Use environment variables or the CLI's configuration. (When the AutoDE extension starts the server itself, in a later release, it passes those secrets as environment variables.)
+**VS Code's secret store.** A server started by Claude Code or Cursor can't read the passwords and tokens you saved in AutoDE's settings panel. For a `resolver: vscode` entry, set the variables `autode_list_connections` lists in `secretFromEnv` (e.g. `AUTODE_SNOWFLAKE_ACME_PASSWORD`) in the client's `env` block, or use a CLI connection. (When the AutoDE extension starts the server itself, in a later release, it passes those secrets as environment variables.)
+
+**Renamed in 0.39.0:** Snowflake's role is `snowflakeRole` in these files. `role` always meant source or target, so a Snowflake role given as `role` made the entry invalid.
 
 **Without the platform CLIs.** Snowflake key-pair and Databricks token connections go over HTTPS and need no CLI.
 

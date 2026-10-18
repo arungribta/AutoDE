@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -708,6 +708,16 @@
           "type": "string",
           "default": "",
           "description": "Where drivers you install with AutoDE's guidance live. Empty: the AUTODE_DRIVERS_DIR environment variable, else ~/.autode/drivers (shared with the MCP server)."
+        },
+        "autoDataEngineeringHub.activeSourceConnection": {
+          "type": "string",
+          "default": "",
+          "description": "Id of the named connection (from .autode/config/connections.yaml or .autode/local/connections.yaml) that Connect uses for the source, e.g. snowflake:prod. Empty: the source card's fields."
+        },
+        "autoDataEngineeringHub.activeTargetConnection": {
+          "type": "string",
+          "default": "",
+          "description": "Id of the named connection that Connect uses for the target. Empty: the target card's fields."
         },
         "autoDataEngineeringHub.serviceAccountCredentialRef": {
           "type": "string",

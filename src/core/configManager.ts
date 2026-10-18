@@ -53,6 +53,8 @@ export class ConfigurationManager {
       oracleConfigDir: config.get<string>('oracleConfigDir', ''),
       oracleWalletLocation: config.get<string>('oracleWalletLocation', ''),
       driversDirectory: config.get<string>('driversDirectory', ''),
+      activeSourceConnection: config.get<string>('activeSourceConnection', ''),
+      activeTargetConnection: config.get<string>('activeTargetConnection', ''),
 
       // ── Target connection (v0.19.0) — see DataAgentHubSettings' own doc comment ──
       defaultTargetProvider: config.get<DataPlatformProvider>('defaultTargetProvider', 'snowflake'),
@@ -113,6 +115,12 @@ export class ConfigurationManager {
      ['defaultDatabricksCatalog', settings.defaultDatabricksCatalog],
      ['defaultDatabricksSchema', settings.defaultDatabricksSchema],
      ['defaultDatabricksCatalogType', settings.defaultDatabricksCatalogType],
+     ['defaultOracleConnectString', settings.defaultOracleConnectString],
+     ['defaultOracleUsername', settings.defaultOracleUsername],
+     ['oracleConfigDir', settings.oracleConfigDir],
+     ['oracleWalletLocation', settings.oracleWalletLocation],
+     ['activeSourceConnection', settings.activeSourceConnection],
+     ['activeTargetConnection', settings.activeTargetConnection],
      ['defaultTargetProvider', settings.defaultTargetProvider],
      ['defaultTargetSnowflakeAccount', settings.defaultTargetSnowflakeAccount],
      ['defaultTargetSnowflakeUsername', settings.defaultTargetSnowflakeUsername],

@@ -9,6 +9,7 @@ import {
 } from '../types';
 import { ExecutionBackend } from '../executionBackends/types';
 import { DatabricksRestBackend } from '../executionBackends/DatabricksRestBackend';
+import { databricksConfigPath, readDatabricksCfgProfiles } from '../credentials/databricksCfg';
 
 /**
  * Databricks data platform adapter.
@@ -17,8 +18,10 @@ import { DatabricksRestBackend } from '../executionBackends/DatabricksRestBacken
  * unlike Snowflake, Databricks' CLI has no native-protocol execution path of its
  * own (`databricks api post ...` is a thin wrapper over this exact same REST
  * endpoint), so there is no CLI-shell-out tier to fall back to here. A
- * CLI-derived (`profile`) credential is rejected with an explanation rather than
- * silently failing on a missing workspace URL.
+ * CLI-derived (`profile`) credential (Phase DRV2) supplies the workspace host
+ * and personal access token from that `.databrickscfg` profile, read here at
+ * connect time — the way the Snowflake path lets its CLI read connections.toml;
+ * the SQL warehouse HTTP path still comes from the connection's fields.
  *
  * Metadata extraction uses system.information_schema (Unity Catalog).
  * Profiling uses Spark SQL aggregate functions.
@@ -34,17 +37,30 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
     super('databricks', credentials, log);
   }
 
+  /** Host and personal access token of a `.databrickscfg` profile; other auth types (OAuth, Azure CLI) are explained, not attempted. */
+  private async readProfile(name: string): Promise<{ host: string; token: string }> {
+    const profiles = await readDatabricksCfgProfiles();
+    const found = profiles?.find((p) => p.name === name);
+    if (!found) throw new Error(`No profile "${name}" in ${databricksConfigPath()}.`);
+    const host = found.fields['host'] || '';
+    const token = found.fields['token'] || '';
+    if (!token) {
+      const authType = found.fields['auth_type'] ? ` (auth_type ${found.fields['auth_type']})` : '';
+      throw new Error(`Databricks profile "${name}"${authType} has no personal access token. AutoDE's REST connection needs a token: add one to the profile, or enter the workspace URL and token in the Databricks card.`);
+    }
+    return { host, token };
+  }
+
   async connect(): Promise<ConnectionInfo> {
     const profile = this.credentials['profile'] || '';
+    let workspaceUrl = this.credentials['workspaceUrl'] || this.credentials['workspace_url'] || '';
+    let token = this.credentials['token'] || '';
     if (profile) {
-      throw new Error(
-        'Databricks has no CLI-based native execution path the way Snowflake does — the Databricks CLI only wraps the same Statement Execution REST API. Configure a workspace host, SQL warehouse HTTP path, and token directly (Settings → Connections) to connect.'
-      );
+      const fromProfile = await this.readProfile(profile);
+      workspaceUrl = workspaceUrl || fromProfile.host;
+      token = token || fromProfile.token;
     }
-
-    const workspaceUrl = this.credentials['workspaceUrl'] || this.credentials['workspace_url'] || '';
     const httpPath = this.credentials['httpPath'] || '';
-    const token = this.credentials['token'] || '';
     const catalog = this.credentials['catalog'] || 'main';
     const schema = this.credentials['schema'] || 'default';
     const catalogType = this.credentials['catalogType'];
@@ -53,7 +69,9 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
     }
 
     if (!workspaceUrl || !httpPath || !token) {
-      throw new Error('Databricks connection requires a workspace host, SQL warehouse HTTP path, and token.');
+      throw new Error(profile && !httpPath
+        ? `Databricks profile "${profile}" gives the workspace and token; the connection also needs the SQL warehouse HTTP path (httpPath).`
+        : 'Databricks connection requires a workspace host, SQL warehouse HTTP path, and token.');
     }
 
     const host = workspaceUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');

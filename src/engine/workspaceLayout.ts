@@ -14,7 +14,8 @@ import * as path from 'node:path';
  *                       business context, vocabulary, verified queries, snapshots
  *     config/           team customisations: skills, primitives, target environment,
  *                       connections (pointers and sample-data consent, never secrets)
- *     local/            per engineer and rebuildable: never committed
+ *     local/            per engineer and rebuildable: never committed (including
+ *                       personal connection fields and connection readiness)
  *   autode-output/<id>/ generated deliverables (setting `artifactDirectory`)
  *
  * Before v0.36.0 everything lived in `.ai-context/` (see workspaceMigration.ts).
@@ -46,6 +47,8 @@ export const LAYOUT = {
   targetEnvironment: [AUTODE_DIR, 'config', 'target-environment.yaml'],
   connections: [AUTODE_DIR, 'config', 'connections.yaml'],
   local: [AUTODE_DIR, 'local'],
+  localConnections: [AUTODE_DIR, 'local', 'connections.yaml'],
+  connectionReadiness: [AUTODE_DIR, 'local', 'connection-readiness.json'],
   activeProblem: [AUTODE_DIR, 'local', 'active-problem.json'],
   chats: [AUTODE_DIR, 'local', 'chats'],
   carryover: [AUTODE_DIR, 'local', 'chats', 'carryover'],

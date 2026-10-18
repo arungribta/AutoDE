@@ -24,6 +24,16 @@ async function readConnectionNames(filePath: string): Promise<string[] | undefin
   return names;
 }
 
+/** Path of the Snowflake CLI's `connections.toml` (`SNOWFLAKE_HOME`, else `~/.snowflake`). */
+export function snowflakeConnectionsTomlPath(): string {
+  return path.join(process.env.SNOWFLAKE_HOME || path.join(os.homedir(), '.snowflake'), 'connections.toml');
+}
+
+/** Connection names in `connections.toml`, read from the file (no CLI run); `undefined` when there is no file. */
+export async function listSnowflakeConnectionNames(): Promise<string[] | undefined> {
+  return readConnectionNames(snowflakeConnectionsTomlPath());
+}
+
 /**
  * Resolves credentials via a vendor CLI's own configuration file — primarily an
  * interactive-user path (a developer who's already run `snow connection add`), but
@@ -59,9 +69,7 @@ export class CliConfigResolver implements CredentialResolver {
   }
 
   private async resolveSnowflake(reference: CredentialReference): Promise<Record<string, string> | undefined> {
-    const configDir = process.env.SNOWFLAKE_HOME || path.join(os.homedir(), '.snowflake');
-    const configPath = path.join(configDir, 'connections.toml');
-    const names = await readConnectionNames(configPath);
+    const names = await readConnectionNames(snowflakeConnectionsTomlPath());
     if (!names) {
       return undefined;
     }

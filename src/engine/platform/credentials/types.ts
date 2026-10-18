@@ -27,3 +27,10 @@ export interface CredentialResolver {
   readonly supportedPrincipalTypes: PrincipalType[];
   resolve(reference: CredentialReference): Promise<Record<string, string> | undefined>;
 }
+
+/**
+ * The id the extension registers its SecretStorage resolver under. A
+ * `connections.yaml` entry names it as `resolver: vscode` (Phase DRV2); outside
+ * VS Code (the MCP server) it isn't registered.
+ */
+export const VSCODE_SECRET_RESOLVER_ID = 'vscode-secret-storage';

@@ -3610,11 +3610,14 @@ async function main() {
     await assert.rejects(() => withMock(consented, () => noPassword.connect()), /requires a password/);
   });
 
-  await test('DatabricksAdapter.connect() (Phase 3b) rejects a CLI-derived profile credential with an explanation, since Databricks has no native-protocol CLI path unlike Snowflake', async () => {
+  await test('DatabricksAdapter.connect() explains a CLI-derived profile it cannot find (DRV2: profiles are read from .databrickscfg, not rejected)', async () => {
     const mock = createMock();
     const { DatabricksAdapter } = freshAdapterModule(mock, '../dist/engine/platform/adapters/DatabricksAdapter.js');
     const adapter = new DatabricksAdapter({ profile: 'FinanceIQ', authMode: 'databrickscfg' }, () => {});
-    await assert.rejects(() => withMock(mock, () => adapter.connect()), /no CLI-based native execution path/);
+    const savedCfg = process.env.DATABRICKS_CONFIG_FILE;
+    process.env.DATABRICKS_CONFIG_FILE = require('node:path').join(require('node:os').tmpdir(), 'autode-no-such-databrickscfg');
+    try { await assert.rejects(() => withMock(mock, () => adapter.connect()), /No profile "FinanceIQ"/); }
+    finally { if (savedCfg === undefined) delete process.env.DATABRICKS_CONFIG_FILE; else process.env.DATABRICKS_CONFIG_FILE = savedCfg; }
 
     const bare = new DatabricksAdapter({}, () => {});
     await assert.rejects(() => withMock(mock, () => bare.connect()), /requires a workspace host, SQL warehouse HTTP path, and token/);
@@ -7146,7 +7149,7 @@ async function main() {
       ['databricks:adb-9.azuredatabricks.net', 'source', 'env', false, 'environment']
     ]);
     assert.ok(cfg.errors.some((e) => /connections\[2\].*token must not be in this file/.test(e)), 'a secret in the committed file invalidates the entry');
-    assert.ok(cfg.errors.some((e) => /teradata.*not supported/.test(e)) && cfg.errors.some((e) => /duplicate connection id "snowflake:prod"/.test(e)) && cfg.errors.some((e) => /resolver must be env or cli/.test(e)));
+    assert.ok(cfg.errors.some((e) => /teradata.*not supported/.test(e)) && cfg.errors.some((e) => /duplicate connection id "snowflake:prod"/.test(e)) && cfg.errors.some((e) => /resolver must be env, cli or vscode/.test(e)));
     assert.ok(!JSON.stringify(cfg).includes('never-listed') && !JSON.stringify(cfg).includes('do-not-commit'));
     // The id is the one the adapter reports once connected, so estate bindings and consent line up.
     const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
@@ -7646,6 +7649,263 @@ async function main() {
       const text = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', b), 'utf8');
       assert.ok(!/node_modules[\\/]+oracledb/.test(text), `${b} contains oracledb sources`);
     }
+  });
+
+  // ── v0.39.0: DRV2 — platform onboarding in the cards, named connections, readiness ──
+
+  function drv2Workspace(prefix) {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), prefix));
+    return { ws, file: (...p) => nodePath.join(ws, ...p), read: (...p) => nodeFs.readFileSync(nodePath.join(ws, ...p), 'utf8'), exists: (...p) => nodeFs.existsSync(nodePath.join(ws, ...p)), done: () => nodeFs.rmSync(ws, { recursive: true, force: true }) };
+  }
+
+  await test('v0.39.0: the personal file adds per-engineer fields to a team entry by id; consent and secrets stay out of it; it may hold connections of its own', () => {
+    const C = fresh('../dist/engine/platform/connectionsConfig.js');
+    const team = [
+      'connections:',
+      '  - id: snowflake:ACME',
+      '    platform: snowflake',
+      '    account: ACME',
+      '    warehouse: WH',
+      '    credentials: { resolver: cli, ref: prod }',
+      '    allowSampleDataInPrompts: false'
+    ].join('\n');
+    const local = [
+      'connections:',
+      '  - id: snowflake:ACME',
+      '    username: arun',
+      '    keyPath: /home/arun/key.p8',
+      '    authMode: key-pair',
+      '    credentials: { resolver: vscode, ref: ACME }',
+      '    allowSampleDataInPrompts: true',
+      '  - id: snowflake:ACME',
+      '    password: hunter2',
+      '  - platform: oracle',
+      '    connectString: LEGACYDB',
+      '    username: scott',
+      '    credentials: { resolver: vscode, ref: LEGACYDB }'
+    ].join('\n');
+    const cfg = C.parseConnectionsConfig(team, {}, local);
+    const sf = cfg.connections.find((c) => c.id === 'snowflake:ACME');
+    assert.deepStrictEqual(sf.fields, { account: 'ACME', warehouse: 'WH', username: 'arun', keyPath: '/home/arun/key.p8', authMode: 'key-pair' });
+    assert.deepStrictEqual(sf.credentials, { resolver: 'vscode', ref: 'ACME' }, 'an engineer may point the team entry at their own credentials');
+    assert.strictEqual(sf.allowSampleDataInPrompts, false, 'consent is the team\'s decision');
+    assert.deepStrictEqual(sf.personal, ['username', 'keyPath', 'authMode', 'credentials']);
+    assert.ok(cfg.errors.some((e) => /local connections\[0\].*allowSampleDataInPrompts is the team's decision/.test(e)));
+    assert.ok(cfg.errors.some((e) => /local connections\[1\].*password must not be in this file either/.test(e)));
+    assert.ok(!JSON.stringify(cfg.connections).includes('hunter2'));
+    const ora = cfg.connections.find((c) => c.platform === 'oracle');
+    assert.deepStrictEqual([ora.id, ora.origin, ora.credentials.resolver], ['oracle:LEGACYDB', 'local', 'vscode']);
+    assert.ok(C.parseConnectionsConfig('connections:\n  - platform: oracle\n    role: target\n    connectString: X\n', {}).errors.some((e) => /Oracle is supported as a source only/.test(e)));
+    // Snowflake's own role is snowflakeRole in the file (role is source/target); the adapter still gets role.
+    const roled = C.parseConnectionsConfig('connections:\n  - platform: snowflake\n    role: target\n    account: T\n    snowflakeRole: LOADER\n', {});
+    assert.deepStrictEqual([roled.errors, roled.connections[0].role, C.adapterFields(roled.connections[0].fields)], [[], 'target', { account: 'T', role: 'LOADER' }]);
+    assert.ok(C.parseConnectionsConfig('', {}, 'connections:\n  - id: snowflake:nope\n    username: x\n').errors.some((e) => /no team connection "snowflake:nope"/.test(e)));
+  });
+
+  await test('v0.39.0: a resolver: vscode entry outside VS Code takes its secret from the same-named env variables, or fails saying exactly which ones', async () => {
+    const C = fresh('../dist/engine/platform/connectionsConfig.js');
+    const entry = C.parseConnectionsConfig('connections:\n  - platform: databricks\n    workspaceUrl: adb-1.azuredatabricks.net\n    httpPath: /sql/1.0/warehouses/abc\n    credentials: { resolver: vscode, ref: finance }\n', {}).connections[0];
+    assert.deepStrictEqual(C.envStandInVariables(entry), ['AUTODE_DATABRICKS_FINANCE_TOKEN']);
+    await assert.rejects(() => C.resolveConnectionCredentials(entry, {}), /keeps its secret in VS Code's secret storage.*AUTODE_DATABRICKS_FINANCE_TOKEN/);
+    const creds = await C.resolveConnectionCredentials(entry, { AUTODE_DATABRICKS_FINANCE_TOKEN: 'dapi-x' });
+    assert.deepStrictEqual(creds, { workspaceUrl: 'adb-1.azuredatabricks.net', httpPath: '/sql/1.0/warehouses/abc', token: 'dapi-x' });
+    // Key-pair without a passphrase needs no secret at all.
+    const kp = C.parseConnectionsConfig('connections:\n  - platform: snowflake\n    account: A\n    authMode: key-pair\n    keyPath: /k.p8\n    credentials: { resolver: vscode, ref: A }\n', {}).connections[0];
+    assert.deepStrictEqual(await C.resolveConnectionCredentials(kp, {}), { account: 'A', authMode: 'key-pair', keyPath: '/k.p8' });
+    // Inside VS Code the registered SecretStorage resolver answers instead.
+    const R = require('../dist/engine/platform/credentials/registry.js');
+    R.registerCredentialResolver({ id: 'vscode-secret-storage', supportedPrincipalTypes: ['interactive-user'], resolve: async (ref) => (ref.ref === 'finance' ? { token: 'from-secret-storage' } : undefined) });
+    try {
+      const C2 = fresh('../dist/engine/platform/connectionsConfig.js');
+      assert.strictEqual((await C2.resolveConnectionCredentials(entry, {})).token, 'from-secret-storage');
+    } finally { R.unregisterCredentialResolver('vscode-secret-storage'); }
+  });
+
+  await test('v0.39.0: saving a connection splits it — shared fields to the committed file (its comments kept), personal fields to .autode/local — and refuses secrets', () => {
+    const C = fresh('../dist/engine/platform/connectionsConfig.js');
+    const w = drv2Workspace('autode-drv2-save-');
+    const nodeFs = require('node:fs');
+    try {
+      nodeFs.mkdirSync(w.file('.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(w.file('.autode', 'config', 'connections.yaml'), '# Team connections — reviewed by the platform team\nconnections:\n  - platform: snowflake\n    credentials: { resolver: cli, ref: prod }   # the shared prod account\n');
+      const saved = C.saveConnection(w.ws, { platform: 'snowflake', role: 'source', fields: { account: 'ACME', username: 'arun', keyPath: '/k.p8', warehouse: 'WH', authMode: 'key-pair' }, credentials: { resolver: 'vscode', ref: 'ACME' } });
+      assert.deepStrictEqual(saved, { id: 'snowflake:ACME', written: ['.autode/config/connections.yaml', '.autode/local/connections.yaml'], credentialsLocal: undefined });
+      const teamText = w.read('.autode', 'config', 'connections.yaml');
+      assert.ok(teamText.includes('# Team connections — reviewed by the platform team') && teamText.includes('# the shared prod account'), 'comments survive');
+      assert.ok(!/arun|k\.p8/.test(teamText), 'personal fields are not committed');
+      assert.ok(/username: arun/.test(w.read('.autode', 'local', 'connections.yaml')));
+      assert.ok(/local\//.test(w.read('.autode', '.gitignore')), 'the personal file is gitignored');
+      const cfg = C.loadConnectionsConfig(w.ws, {});
+      assert.deepStrictEqual(cfg.errors, []);
+      assert.deepStrictEqual(cfg.connections.map((c) => c.id), ['snowflake:prod', 'snowflake:ACME']);
+      assert.deepStrictEqual(cfg.connections[1].fields, { account: 'ACME', warehouse: 'WH', authMode: 'key-pair', username: 'arun', keyPath: '/k.p8' });
+      // A second engineer choosing other credentials for the same team entry: theirs go to the local file.
+      const again = C.saveConnection(w.ws, { platform: 'snowflake', role: 'source', fields: { account: 'ACME', warehouse: 'WH', authMode: 'key-pair' }, credentials: { resolver: 'env', ref: 'ACME' } });
+      assert.strictEqual(again.credentialsLocal, true);
+      assert.ok(/resolver: vscode/.test(w.read('.autode', 'config', 'connections.yaml')), 'the team entry keeps its credentials');
+      assert.throws(() => C.saveConnection(w.ws, { platform: 'snowflake', role: 'source', fields: { account: 'X', password: 'p' }, credentials: { resolver: 'vscode', ref: 'X' } }), /password can't be written/);
+      assert.throws(() => C.saveConnection(w.ws, { platform: 'oracle', role: 'target', fields: { connectString: 'X' }, credentials: { resolver: 'vscode', ref: 'X' } }), /source only/);
+      // A personal connection stays in the local file only.
+      const mine = C.saveConnection(w.ws, { platform: 'oracle', role: 'source', fields: { connectString: 'LEGACY', username: 'scott' }, credentials: { resolver: 'vscode', ref: 'LEGACY' }, scope: 'personal' });
+      assert.deepStrictEqual(mine.written, ['.autode/local/connections.yaml']);
+      assert.ok(!/LEGACY/.test(w.read('.autode', 'config', 'connections.yaml')));
+      assert.deepStrictEqual(C.removeConnection(w.ws, 'snowflake:ACME', {}), ['.autode/config/connections.yaml', '.autode/local/connections.yaml']);
+      assert.deepStrictEqual(C.loadConnectionsConfig(w.ws, {}).connections.map((c) => [c.id, c.origin]), [['snowflake:prod', 'file'], ['oracle:LEGACY', 'local']]);
+    } finally { w.done(); }
+  });
+
+  await test('v0.39.0: readiness is per machine and bound to the entry — an edit makes it stale; AutoDE and MCP clients are reported separately', () => {
+    const C = fresh('../dist/engine/platform/connectionsConfig.js');
+    const Rd = fresh('../dist/engine/platform/connectionReadiness.js');
+    const w = drv2Workspace('autode-drv2-ready-');
+    try {
+      const [dbx, sf] = C.parseConnectionsConfig('connections:\n  - platform: databricks\n    workspaceUrl: adb-1\n    httpPath: /p\n    credentials: { resolver: vscode, ref: fin }\n  - platform: snowflake\n    credentials: { resolver: cli, ref: prod }\n', {}).connections;
+      assert.strictEqual(Rd.connectionStatus(dbx, undefined).autode, 'unchecked');
+      Rd.recordReadiness(w.ws, dbx, true, 'main.default (x)');
+      Rd.recordReadiness(w.ws, sf, true, 'DB.PUBLIC (9)');
+      assert.ok(w.exists('.autode', 'local', 'connection-readiness.json'));
+      const rec = Rd.readReadiness(w.ws);
+      const d = Rd.connectionStatus(dbx, rec[dbx.id]);
+      assert.deepStrictEqual([d.autode, d.mcp.ready], ['ready', false]);
+      assert.ok(/AUTODE_DATABRICKS_FIN_TOKEN/.test(d.mcp.note));
+      const s2 = Rd.connectionStatus(sf, rec[sf.id]);
+      assert.deepStrictEqual([s2.autode, s2.mcp.ready], ['ready', true]);
+      assert.ok(/--allow-cli/.test(s2.mcp.note));
+      const edited = { ...dbx, fields: { ...dbx.fields, httpPath: '/other' } };
+      assert.strictEqual(Rd.connectionStatus(edited, rec[dbx.id]).autode, 'stale');
+      assert.strictEqual(Rd.entryHash({ ...dbx, fields: { httpPath: '/p', workspaceUrl: 'adb-1' } }), Rd.entryHash(dbx), 'field order does not matter');
+      Rd.forgetReadiness(w.ws, dbx.id);
+      assert.ok(!(dbx.id in Rd.readReadiness(w.ws)));
+    } finally { w.done(); }
+  });
+
+  function drv2Onboarding(ws, settings, connect) {
+    const { PlatformOnboarding } = fresh('../dist/core/platformOnboarding.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const store = new Map([['card.source.snowflake.password', 'pw-1'], ['card.source.databricks.token', 'dapi-1']]);
+    const connected = [];
+    const onboarding = new PlatformOnboarding({
+      workspaceRoot: () => ws,
+      settings: () => ({ defaultSnowflakeSchema: 'PUBLIC', defaultSnowflakeRole: 'SYSADMIN', ...settings }),
+      secrets: { get: async (k) => store.get(k), store: async (k, v) => { store.set(k, v); }, delete: async (k) => { store.delete(k); } },
+      secretKey: (platform, ref, field) => `named.${platform}.${ref}.${field}`,
+      cardSecretKey: (role, platform, field) => `card.${role}.${platform}.${field}`,
+      createManager: (log) => {
+        const m = new ConnectionManager(log);
+        for (const p of ['snowflake', 'databricks', 'oracle']) m.registerAdapterFactory(p, (creds) => ({ connect: async () => { connected.push({ p, creds }); return connect(p, creds); }, disconnect: async () => {}, dispose() {} }));
+        return m;
+      },
+      log: () => {}
+    });
+    return { onboarding, store, connected };
+  }
+
+  await test('v0.39.0: Save as named connection checks first — a failed check writes nothing; a passing one saves, moves the secret to the connection\'s reference and marks it ready', async () => {
+    const w = drv2Workspace('autode-drv2-onb-');
+    try {
+      let fail = true;
+      const settings = { defaultSnowflakeAccount: 'ACME', defaultSnowflakeUsername: 'arun', defaultSnowflakeAuthMode: 'username-password', defaultSnowflakeWarehouse: 'WH' };
+      const { onboarding, store, connected } = drv2Onboarding(w.ws, settings, () => { if (fail) throw new Error('390100 incorrect username or password'); return { databaseName: 'DB', schemaName: 'PUBLIC', version: '9.1' }; });
+      const bad = await onboarding.saveFromCard('snowflake', 'source', {});
+      assert.deepStrictEqual([bad.ok, /Not saved.*incorrect username/.test(bad.message)], [false, true]);
+      assert.ok(!w.exists('.autode', 'config', 'connections.yaml'), 'nothing written on a failed check');
+      assert.strictEqual(connected[0].creds.password, 'pw-1', 'the check used the card\'s stored password');
+      fail = false;
+      const ok = await onboarding.saveFromCard('snowflake', 'source', {});
+      assert.ok(ok.ok, ok.message);
+      assert.strictEqual(ok.id, 'snowflake:ACME');
+      assert.strictEqual(store.get('named.snowflake.ACME.password'), 'pw-1');
+      assert.ok(!/pw-1/.test(w.read('.autode', 'config', 'connections.yaml') + w.read('.autode', 'local', 'connections.yaml')), 'no secret on disk');
+      const st = onboarding.state();
+      assert.deepStrictEqual(st.connections.map((c) => [c.id, c.resolver, c.status.autode, c.status.mcp.ready]), [['snowflake:ACME', 'vscode', 'ready', false]]);
+      assert.ok(/AUTODE_SNOWFLAKE_ACME_PASSWORD/.test(st.connections[0].status.mcp.note));
+      assert.ok(/Snowflake CLI/.test(st.backends['snowflake:username-password'].backend) && /SQL API/.test(st.backends.snowflake.backend));
+      // The Connect path: credentials through the resolvers (VS Code's secret storage registered in the host).
+      const R = require('../dist/engine/platform/credentials/registry.js');
+      R.registerCredentialResolver({ id: 'vscode-secret-storage', supportedPrincipalTypes: ['interactive-user'], resolve: async (ref) => { const v = store.get(`named.${ref.platform}.${ref.ref}.password`); return v ? { password: v } : undefined; } });
+      try {
+        const named = await onboarding.credentialsFor('snowflake:acme');
+        assert.deepStrictEqual(named.credentials, { account: 'ACME', username: 'arun', warehouse: 'WH', schema: 'PUBLIC', role: 'SYSADMIN', authMode: 'username-password', password: 'pw-1' });
+        fail = true;
+        const re = await onboarding.recheck('snowflake:ACME');
+        assert.strictEqual(re.ok, false);
+        assert.strictEqual(onboarding.state().connections[0].status.autode, 'failed');
+      } finally { R.unregisterCredentialResolver('vscode-secret-storage'); }
+      await assert.rejects(() => onboarding.credentialsFor('snowflake:gone'), /No connection "snowflake:gone"/);
+      const removed = await onboarding.remove('snowflake:ACME');
+      assert.ok(removed.ok && !store.has('named.snowflake.ACME.password'), 'removing deletes its secret');
+      assert.deepStrictEqual((await onboarding.saveFromCard('oracle', 'target', {})).ok, false);
+    } finally { w.done(); }
+  });
+
+  await test('v0.39.0: a .databrickscfg profile onboards as a CLI connection (host and token from the profile, HTTP path from the card); a profile without a token is explained', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const w = drv2Workspace('autode-drv2-dbx-');
+    const cfgFile = nodePath.join(w.ws, '.databrickscfg');
+    nodeFs.writeFileSync(cfgFile, '[DEFAULT]\nhost = https://adb-7.azuredatabricks.net\ntoken = dapi-profile\n\n[sso]\nhost = https://adb-8.azuredatabricks.net\nauth_type = databricks-cli\n');
+    const savedCfg = process.env.DATABRICKS_CONFIG_FILE;
+    process.env.DATABRICKS_CONFIG_FILE = cfgFile;
+    const origFetch = global.fetch;
+    const hosts = [];
+    global.fetch = async (url, init) => { hosts.push([String(url).split('/api/')[0], init.headers.Authorization]); return { status: 200, json: async () => ({ status: { state: 'SUCCEEDED' }, manifest: { schema: { columns: [{ name: 'CURRENT_CATALOG' }, { name: 'CURRENT_SCHEMA' }] } }, result: { data_array: [['main', 'default']] } }) }; };
+    try {
+      const { DatabricksAdapter } = fresh('../dist/engine/platform/adapters/DatabricksAdapter.js');
+      const info = await new DatabricksAdapter({ profile: 'DEFAULT', httpPath: '/sql/1.0/warehouses/abc' }, () => {}).connect();
+      assert.strictEqual(info.databaseName, 'main');
+      assert.deepStrictEqual(hosts[0], ['https://adb-7.azuredatabricks.net', 'Bearer dapi-profile']);
+      await assert.rejects(() => new DatabricksAdapter({ profile: 'DEFAULT' }, () => {}).connect(), /also needs the SQL warehouse HTTP path/);
+      await assert.rejects(() => new DatabricksAdapter({ profile: 'sso', httpPath: '/p' }, () => {}).connect(), /auth_type databricks-cli\) has no personal access token/);
+      const { onboarding } = drv2Onboarding(w.ws, { defaultDatabricksHttpPath: '/sql/1.0/warehouses/abc', defaultDatabricksCatalog: 'main' }, (p, creds) => new DatabricksAdapter(creds, () => {}).connect());
+      const existing = await onboarding.existing('databricks');
+      assert.deepStrictEqual(existing.items.map((i) => [i.name, i.usable]), [['DEFAULT', true], ['sso', false]]);
+      const saved = await onboarding.saveFromCard('databricks', 'source', { cliRef: 'DEFAULT' });
+      assert.ok(saved.ok, saved.message);
+      assert.strictEqual(saved.id, 'databricks:DEFAULT');
+      const team = w.read('.autode', 'config', 'connections.yaml');
+      assert.ok(/resolver: cli/.test(team) && /httpPath: \/sql\/1.0\/warehouses\/abc/.test(team) && !/dapi/.test(team));
+      assert.deepStrictEqual(onboarding.state().connections.map((c) => [c.status.autode, c.status.mcp.ready]), [['ready', true]]);
+    } finally {
+      global.fetch = origFetch;
+      if (savedCfg === undefined) delete process.env.DATABRICKS_CONFIG_FILE; else process.env.DATABRICKS_CONFIG_FILE = savedCfg;
+      w.done();
+    }
+  });
+
+  await test('v0.39.0: tnsnames aliases are offered for the Oracle card; the MCP listing names the env variables that stand in for a vscode secret', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const w = drv2Workspace('autode-drv2-ora-');
+    try {
+      nodeFs.writeFileSync(nodePath.join(w.ws, 'tnsnames.ora'), 'PRODDB = (DESCRIPTION = (ADDRESS = (PROTOCOL = TCP)(HOST = db1)(PORT = 1521)) (CONNECT_DATA = (SERVICE_NAME = prod)))\nREPORTING = (DESCRIPTION = (ADDRESS = (PROTOCOL = TCP)(HOST = db2)(PORT = 1521)) (CONNECT_DATA = (SERVICE_NAME = rpt)))\n');
+      const { onboarding } = drv2Onboarding(w.ws, { oracleConfigDir: w.ws }, () => ({ databaseName: 'ORCL', schemaName: 'HR', version: '19' }));
+      const existing = await onboarding.existing('oracle');
+      assert.deepStrictEqual([existing.kind, existing.items.map((i) => i.name)], ['tns', ['PRODDB', 'REPORTING']]);
+      nodeFs.mkdirSync(w.file('.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(w.file('.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: oracle\n    connectString: PRODDB\n    credentials: { resolver: vscode, ref: PRODDB }\n');
+      const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+      const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+      const { createAutodeServer } = fresh('../dist/mcp/server.js');
+      const { PlatformSession } = fresh('../dist/mcp/platform.js');
+      const session = new PlatformSession({ workspaceRoot: w.ws, allowWrite: false, allowCli: false, log: () => {}, env: {} });
+      const server = createAutodeServer({ workspaceRoot: w.ws, resourcesRoot: nodePath.join(__dirname, '..'), version: 't', platform: session, log: () => {} });
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      await server.connect(a);
+      const client = new Client({ name: 't', version: '1' });
+      await client.connect(b);
+      try {
+        const listed = (await client.callTool({ name: 'autode_list_connections', arguments: {} })).structuredContent;
+        assert.deepStrictEqual(listed.connections.map((c) => [c.id, c.secretFromEnv]), [['oracle:PRODDB', ['AUTODE_ORACLE_PRODDB_PASSWORD']]]);
+        const failed = (await client.callTool({ name: 'autode_test_connection', arguments: { connectionId: 'oracle:PRODDB' } })).structuredContent;
+        assert.ok(/AUTODE_ORACLE_PRODDB_PASSWORD/.test(JSON.stringify(failed)), JSON.stringify(failed));
+      } finally { await client.close(); }
+    } finally { w.done(); }
+  });
+
+  await test('v0.39.0: the source and target cards keep their Snowflake/Databricks controls, add the Oracle source card and the onboarding hooks; no Oracle target card', () => {
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    for (const id of ['testConnBtn', 'testConnBtnDbx', 'testTargetConnBtn', 'testTargetConnBtnDbx', 'sfPassword', 'dbxToken', 'tgtSfPassword', 'tgtDbxToken', 'testConnBtnOra', 'oraConnectString', 'oraPassword', 'savedConnsSource', 'savedConnsTarget']) assert.ok(html.includes(`id="${id}"`), id);
+    assert.ok(html.includes('data-provider="oracle"') && !html.includes('data-target-provider="oracle"'));
+    for (const msg of ['checkPrerequisites', 'findExistingConnections', 'saveNamedConnection', 'useConnection', 'recheckConnection', 'removeConnection']) assert.ok(html.includes(`'${msg}'`), msg);
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

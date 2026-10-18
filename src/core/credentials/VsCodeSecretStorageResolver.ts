@@ -1,15 +1,16 @@
 import * as vscode from 'vscode';
 import { CONFIG_SECTION } from '../extensionIdentity';
 import { DataPlatformProvider, PrincipalType } from '../../engine/types';
-import { CredentialReference, CredentialResolver } from '../../engine/platform/credentials/types';
+import { CredentialReference, CredentialResolver, VSCODE_SECRET_RESOLVER_ID } from '../../engine/platform/credentials/types';
 
 /**
  * Which credential fields for a platform are actual secrets (vs. plain settings like
  * account/warehouse, which stay in VS Code configuration). Only these are looked up here.
  */
 const SECRET_FIELDS: Partial<Record<DataPlatformProvider, string[]>> = {
-  snowflake: ['password', 'privateKey', 'privateKeyPassphrase'],
-  databricks: ['token', 'clientSecret']
+  snowflake: ['password', 'privateKey', 'privateKeyPassphrase', 'token'],
+  databricks: ['token', 'clientSecret'],
+  oracle: ['password', 'walletPassword']
 };
 
 /**
@@ -30,7 +31,7 @@ export function secretStorageKey(platform: DataPlatformProvider, principalType: 
  * developer's own picks, or a service account's config surface set once via command).
  */
 export class VsCodeSecretStorageResolver implements CredentialResolver {
-  readonly id = 'vscode-secret-storage';
+  readonly id = VSCODE_SECRET_RESOLVER_ID;
   readonly supportedPrincipalTypes: PrincipalType[] = ['interactive-user', 'service-account'];
 
   constructor(private readonly secrets: vscode.SecretStorage) {}
