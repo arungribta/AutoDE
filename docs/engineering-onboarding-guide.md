@@ -41,7 +41,7 @@ Things that surprise newcomers:
 
 | You want to know… | Read | Notes |
 |---|---|---|
-| What AutoDE must do, and why | [requirements.md](requirements.md) | Requirement IDs (`GRD-4`, `SKL-5` …) with status. Principles P1–P7 and C1–C9 are binding. §1.1 maps each capability area to where its planned work is specified. |
+| What AutoDE must do, and why | [requirements.md](requirements.md) | Requirement IDs (`GRD-4`, `SKL-5` …) with status. Principles P1–P9 and C1–C9 are binding. §1.1 maps each capability area to where its planned work is specified. |
 | What planned phases will build | [mcp-engine-requirements.md](mcp-engine-requirements.md), [context-layer-requirements.md](context-layer-requirements.md) | Phase specifications with acceptance criteria. A shipped phase shrinks to a pointer. |
 | What is next, and what was decided | [roadmap.md](roadmap.md) | Phase order and status, backlog, decision log. Wins over any plan text elsewhere. |
 | How it is built | [technical-design.md](technical-design.md) | Modules, formats, algorithms. §10.5 (settings) and §12 (source tree) are generated from the code. |
@@ -90,6 +90,14 @@ Three ideas carry most of the design:
 1. **The engine boundary.** `src/engine/**` and `src/mcp/**` never touch the VS Code API, so the same code runs in the extension, the MCP server and plain-Node tests. Host concerns come in as parameters (`FileIo`, `AgentHost`, `CompleteJson`). See technical-design §10.2.
 2. **The ledger is the system of record for context.** Facts are append-only *assertions* with status and trust; the graph the agents read is a projection of them, rebuilt, never edited in place. See §4.4 and technical-design §5.3.
 3. **Packs, not dumps.** Each LLM call gets a task-scoped *context pack* within a token budget, and every generated artifact gets a *manifest* of what it rested on. See technical-design §5.5–5.7.
+
+**Where the architecture is going (from v0.40.0).** AutoDE is moving to a portable architecture ([mcp-engine-requirements.md §3.1](mcp-engine-requirements.md), phases PA1–PA4 and phase 5 in the [roadmap](roadmap.md)):
+- every AI capability becomes a standard agent skill (`SKILL.md`);
+- the engine offers deterministic tools;
+- a change to AutoDE's state becomes a validated **proposal** that a person approves as a **decision**;
+- the host (VS Code, Claude Code, Cursor, Codex …) supplies the model.
+
+VS Code stays the first-class host; other hosts use the same engine through MCP, the skills pack and a CLI. Today's agents and `AgentHub` flows are migrated phase by phase, and a migrated path is deleted in the same release.
 
 Bundling: `tsc` compiles every module to `dist/**` (used by tests); esbuild then bundles `dist/extension.js` and `dist/mcp-server.js`, which are all the package ships (technical-design §10.7).
 
@@ -230,7 +238,8 @@ The checklist the project follows for every phase:
 - **Probes and MCP responses never return row values** without explicit consent, and every outward string goes through `redact()`.
 - **Writes are atomic and revision-checked** (`writeFileAtomic`, `RevisionedFile`); an external edit wins a conflict unless the user overwrites explicitly.
 - **New dependencies need a recorded decision** (licence, size) in the roadmap's decision log (P6); pin exact versions.
-- **Gates live in `AgentHub`,** not only in the UI.
+- **Gates live in `AgentHub`,** not only in the UI. From PA1 on they live in the engine's decision store: a change proposed by an AI path is a decision, and high-stakes decisions are resolved only through a human channel.
+- **New AI capability is written the new way** once PA1 ships: a skill plus deterministic tools ending in a proposal tool. Don't add new flow logic or LLM calls to `src/core` or `src/agents` (PA3 adds a lint rule).
 
 ## 9. How to extend AutoDE
 
@@ -238,7 +247,7 @@ Each recipe lists the touch points; the design section has the detail.
 
 **A Tier-2 primitive (no TypeScript).** Add `.autode/config/primitives/<kind>.yaml` (or `primitive-definitions/<kind>.yaml` to ship it) with `kind`, `version`, `status: draft`, `description`, `paramSchema`, `platformTemplates`, `previewParams` (template syntax: `src/engine/transforms/declarative/templateEngine.ts`). Preview it in the panel's Primitives section; publish it with `primitiveManagementEnabled` on. To have an agent offer it, add the kind to that agent's `candidateKinds`. It appears in the MCP server automatically. *Design §9.2, §9.5.*
 
-**An agent.** Add the type to `AgentType` (`src/engine/types.ts`); write `execute<Name>(step, context)` under `src/agents/<phase>/`; register it in `AGENT_EXECUTORS`, `VALID_AGENT_TYPES` and `AGENT_PHASE` (`agentHub.ts`) and the planner's allowed list; return artifacts in `result.artifacts`; add a test. Prefer a primitive path with LLM fallback (`llmParamSelector.ts`). *Design §7.2.*
+**An agent.** *Being replaced:* from PA3, a capability is an AutoDE skill (`SKILL.md`) plus deterministic tools, not an agent class. Until then: add the type to `AgentType` (`src/engine/types.ts`); write `execute<Name>(step, context)` under `src/agents/<phase>/`; register it in `AGENT_EXECUTORS`, `VALID_AGENT_TYPES` and `AGENT_PHASE` (`agentHub.ts`) and the planner's allowed list; return artifacts in `result.artifacts`; add a test. Prefer a primitive path with LLM fallback (`llmParamSelector.ts`). *Design §7.2.*
 
 **An LLM provider.** One `LlmAdapter` class plus an entry in `LLM_ADAPTERS` (`src/core/llmProviders.ts`); add the enum value to `activeLlmProvider` in `package.json` and to the guard in `webviewProvider.updateSettings`; a provider card in `sidebar.html`. Tool loops: see the existing adapters and `agenticTools.ts`. *Design §8.*
 
@@ -260,7 +269,7 @@ Open items worth knowing before you change things. The roadmap's backlog is the 
 
 | # | Risk | Where | Status / direction |
 |---|---|---|---|
-| R1 | `agentHub.ts` and `webviewProvider.ts` are large (~1 700 and ~2 500 lines) and mix concerns. | `src/core/` | Extract services (spec, target environment, gates) when touching them; phase 5 moves engine calls behind an MCP client. |
+| R1 | `agentHub.ts` and `webviewProvider.ts` are large (~1 700 and ~2 600 lines) and mix UI, flow logic and LLM calls. | `src/core/` | Resolved by the portable architecture: PA1 moves gates to the engine's decisions, PA3 moves flows into skills over deterministic tools and deletes the old paths. Risk during migration: two implementations of one flow; the rule is one release at most. |
 | R2 | Several declared settings do nothing: `readOnlyMode`, `metadataCachingDurationMinutes`, `queryTimeoutSeconds`, `enableSessionReuse`, `autoDocumentationEnabled`, `telemetryEnabled`. `readOnlyMode` implies a guarantee that only phase 4's query guard will provide. | `package.json`, settings UI | Implement or remove; `readOnlyMode` gets real meaning in phase 4. |
 | R3 | The interview session is in memory only; a window reload loses it. | `IntakeSession` | BPS-7, planned with C4b. |
 | R4 | Tier-1 primitives emit Snowflake-flavoured SQL (`SELECT * EXCEPT`, `CREATE OR REPLACE VIEW`) for every dialect. | `src/engine/transforms/primitives/` | Pinned by golden snapshots; fixed in phase 6 with per-dialect coverage. |

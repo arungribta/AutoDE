@@ -4,8 +4,8 @@ Each document answers one kind of question. When two disagree, the precedence ru
 
 | Question | Document | Notes |
 |---|---|---|
-| **What** must AutoDE do, and **why**? (shipped behaviour) | [requirements.md](requirements.md) | Authoritative for shipped behaviour and for the product-wide principles (P1–P7, C1–C9). Requirements have IDs (`WS-1`, `GRD-4` …) and a status. |
-| What and why, for **planned** work | [mcp-engine-requirements.md](mcp-engine-requirements.md) — MCP server, engine boundary, skills, platform access, governance · [context-layer-requirements.md](context-layer-requirements.md) — ledger, context packs, grounding, estate catalogs, business-problem documents, semantic model | Phase specifications: WHAT/WHY plus the implementation contract for phases not yet built. A migration-track spec (M1–M3) will join them. |
+| **What** must AutoDE do, and **why**? (shipped behaviour) | [requirements.md](requirements.md) | Authoritative for shipped behaviour and for the product-wide principles (P1–P9, C1–C9). Requirements have IDs (`WS-1`, `GRD-4` …) and a status. |
+| What and why, for **planned** work | [mcp-engine-requirements.md](mcp-engine-requirements.md) — MCP server, engine boundary, the portable architecture (§3.1: skills, tools, decisions, standalone package), platform access, governance · [context-layer-requirements.md](context-layer-requirements.md) — ledger, context packs, grounding, estate catalogs, business-problem documents, semantic model | Phase specifications: WHAT/WHY plus the implementation contract for phases not yet built. A migration-track spec (M1–M3) will join them. |
 | **When**, and is it done? | [roadmap.md](roadmap.md) | The only place for phase order and status, the unscheduled backlog, and the decision log. |
 | **How** is it built? | [technical-design.md](technical-design.md) | Architecture, modules, data formats, algorithms, trade-offs. |
 | What **changed** in each version? | [CHANGELOG.md](../CHANGELOG.md) | Newest first, including deliberate deviations from the specs. |
@@ -27,5 +27,5 @@ Each document answers one kind of question. When two disagree, the precedence ru
 - **When a phase ships:** its WHAT/WHY moves into requirements.md, its HOW into technical-design.md, its spec section shrinks to a pointer, it gets a CHANGELOG entry and a ✅ in the roadmap; the onboarding guide and the manual-verification checklist are updated for anything a newcomer or a tester needs. `npm run docs:generate` refreshes the generated parts of technical-design.md, and `npm test` fails when they are stale.
 - **requirements.md points to the specs, never repeats them:** its §1.1 map and the *Planned work* line under each capability say where planned work is specified.
 - **New plans go in the roadmap,** never in a new section of another document. New phase specifications go in the relevant spec (or a new spec listed here).
-- **Phase identifiers are unique:** `1`–`6`, `S1`–`S3`, `DRV1`/`DRV2`, `GOV` (mcp-engine spec); `C1`–`C6`, `C4a`/`C4b`, `K1`/`K2` (context-layer spec); `LAY` (roadmap decision, technical-design §2.1–2.2); `M1`–`M3`, `RET` (to be specified). Shipped work is referred to by version.
+- **Phase identifiers are unique:** `1`–`6`, `S1`–`S3`, `DRV1`/`DRV2`, `GOV`, `PA1`–`PA4` (mcp-engine spec); `C1`–`C6`, `C4a`/`C4b`, `K1`/`K2` (context-layer spec); `LAY` (roadmap decision, technical-design §2.1–2.2); `M1`–`M3`, `RET` (to be specified). Shipped work is referred to by version.
 - **New documents are added to this map,** or they don't exist.

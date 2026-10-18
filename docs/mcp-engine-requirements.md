@@ -35,7 +35,7 @@ Business problem (interview, skills/*.json)
 
 Non-negotiable principles (every phase MUST preserve them):
 
-Defined in [requirements.md §2.1](requirements.md) (P1–P7), which is canonical: P1 the LLM selects and parameterises, never freehands where a primitive exists; P2 the catalog is governed at design time; P3 approval gates enforced by the orchestrator; P4 LLM-agnostic; P5 credentials are pointers; P6 small footprint, offline, no automatic downloads (AutoDE moderates installs the user starts; DRV1), new dependencies need a recorded decision; P7 platform CLIs are optional accelerators.
+Defined in [requirements.md §2.1](requirements.md) (P1–P9), which is canonical: P1 the LLM selects and parameterises, never freehands where a primitive exists; P2 the catalog is governed at design time; P3 approval gates enforced by the orchestrator; P4 LLM-agnostic; P5 credentials are pointers; P6 small footprint, offline, no automatic downloads (AutoDE moderates installs the user starts; DRV1), new dependencies need a recorded decision; P7 platform CLIs are optional accelerators; P8 portable by standards (skills over deterministic tools via MCP; the host supplies the model); P9 people decide, machines are deterministic (§3.1).
 
 ---
 
@@ -82,6 +82,50 @@ Key decisions (each was weighed; change only with reviewer sign-off):
 - **D3 — The extension uses the engine through MCP too.** One code path means what Claude Code sees is exactly what the panel uses, and contract tests cover both. stdio IPC cost (milliseconds) is negligible next to LLM calls.
 - **D4 — Registry tools are generic, not one tool per primitive.** The registry is meant to grow large; one MCP tool per primitive would flood every client's context. Clients use search → describe → compile (§5.1). (Optional later setting: expose per-primitive tools when the catalog is small.)
 - **D5 — Reasoning stays with the client.** The MCP server performs no LLM calls. Spec synthesis, planning and interviewing remain in the extension (via its LLM adapters) or in whichever coding agent is connected. The server is deterministic.
+
+
+### 3.1 Target architecture from v0.40.0: standard skills, deterministic tools, human decisions
+
+*Decided 2026-10-18 (roadmap decision log, "portable architecture"). It keeps D1, D4 and D5, amends D2 and D3, and replaces the part of §3 that keeps orchestration and LLM calls inside the extension for good. Phases PA1–PA4 (§9.2) and phase 5 implement it.*
+
+AutoDE stays a first-class VS Code product, and becomes usable from any coding agent that speaks MCP and, where the host supports it, Agent Skills: Claude Code, Codex, Cursor, Cline, JetBrains hosts. It works through files, MCP and a CLI until a native UI for another host is built on the same engine. Principles (requirements P8, P9):
+
+1. **Skills are standard.** Every AI capability, built-in or imported, is an Agent Skill: a `SKILL.md` with instructions and optional scripts and resources. There is no AutoDE-specific skill format, and a ported skill is never split by hand into deterministic and AI parts.
+2. **Tools are deterministic** (D5). The engine's MCP tools read, compute, check and compile; no model runs inside them.
+3. **A change to AutoDE's state is a proposal.** A tool that would change a specification, mapping, model, plan, artifact, the ledger or a data platform validates its input deterministically and creates a **pending decision**. Engine code applies it only after the decision is approved.
+4. **The host supplies the model.** The engine holds no model credentials. A skill's reasoning runs in an *executor*:
+   - **VS Code in-process:** the extension's LLM adapters, with the skill's `allowed-tools` enforced by AutoDE.
+   - **Host agent:** any MCP client whose agent loads the skill and calls AutoDE's tools; works in every host.
+   - **MCP sampling:** used only when the client declares it, and only for the engine's own judgement steps (e.g. analysing a skill to port, PA4).
+5. **The workspace is the source of truth.** Specifications, ledger, connections and decisions are files under `.autode/`. The extension, any MCP client, the CLI and git all see the same state.
+
+```
+ Hosts (each brings its own model and agent loop)
+   VS Code (rich panel, own chat, in-process executor) · Claude Code / Codex (skills + MCP)
+   Cursor / Cline / JetBrains … (MCP; skills where supported) · CI and terminals (autode CLI)
+          │ MCP (the extension too, from phase 5)                     │ CLI
+          ▼                                                           ▼
+ AutoDE engine (one package, host-neutral, no model credentials)
+   AutoDE skills pack (built-in SKILL.md) · imported skills (reviewed, trusted)
+   deterministic tools · proposal tools → decision store → apply on approval
+   context layer · primitives and compile · platform adapters, guard, consent
+          │
+   .autode/ files (specs, ledger, connections, decisions)
+```
+
+Further decisions:
+
+- **D6 — Decisions have stakes, and stakes decide who may resolve them.** A *low-stakes* decision (accept a vocabulary synonym, a documented fact) may be resolved through an MCP tool; the tool is annotated destructive, so the host asks its user. A *high-stakes* decision may be resolved only through a channel that needs a person:
+  - the VS Code panel;
+  - the CLI with an interactive terminal;
+  - a committed decision file, reviewable in a pull request.
+
+  High-stakes decisions are a specification or Pipeline Spec, a mapping set, a data model, a plan, generated artifacts, and anything that would write to a data platform. A non-interactive run (CI, no terminal) never resolves a decision; it is strictly deterministic.
+- **D7 — The engine ships on its own as well** (amends D2). An `autode` package holds the engine, the MCP server (`autode mcp`, at a path that doesn't change with extension updates), the CLI and the skills pack. The VSIX bundles the same build. Publishing it to a registry is the owner's decision when PA2 ships.
+- **D8 — AutoDE's own capabilities are AutoDE skills over deterministic tools** (amends D3 and §7.3). The built-in agents (`src/agents/**`) are re-expressed once, by us: their prompts become skill instructions and their deterministic code becomes tools. The extension runs these skills in-process. A host agent runs the same skills against the same tools, so behaviour can't drift between hosts.
+- **D9 — No per-host plugins.** MCP and Agent Skills are the portability layer. A host needs, at most, configuration and a copy of the skills pack in its skills folder. A native UI for another host is built fresh on the engine when one is needed.
+
+**Known limit.** A skill's `allowed-tools` is enforced only where AutoDE runs the loop (VS Code, the CLI). In another host, the host's own tools run, and only AutoDE's decision gate protects AutoDE's state. PA4's capability report says so for every skill that writes or executes.
 
 ---
 
@@ -295,6 +339,8 @@ In short: no separate "Data Platforms" tab (decided with the owner, 2026-10-18).
 **Not planned:** `snowflake-sdk` and `@databricks/sql` as a backend tier. Reconsider them as moderated installs if an engagement is blocked because the Snowflake SQL API is restricted and no CLI is allowed.
 
 #### Phase GOV: Governance-as-code
+Built in the §3.1 style (scheduled after PA4): the governance interview is an AutoDE skill, and sensitivity flags reach specs and Pipeline Specs through proposal tools and decisions.
+
 Scope (from the earlier Phase 6 plan):
 - `src/engine/governance/types.ts` (`PiiClassification`, `ColumnGovernance`). Fill in the `governance` block already reserved on each Pipeline Spec entity.
 - A `mask` primitive as a Tier-2 `PrimitiveDefinition`, with **non-reversible strategies only** (`hash`, `redact`). `tokenize` is out of scope because it needs an external vault.
@@ -308,21 +354,8 @@ Acceptance:
 - A spec without governance still validates.
 - The interview raises a governance question when governance guidance is active.
 
-#### Phase S3 (ships with Phase 6): Git-URL skill import, docs and starter library
-Scope:
-- **Import sources.** `SkillImportSource` covers a local folder and a Git URL. For Git:
-  - Shallow clone only.
-  - File-count and byte caps are checked **before** anything is copied.
-  - Path-traversal check, like `resolveSandboxedPath`.
-  - `resolvedCommit` is recorded.
-- **Format importers.** `SkillFormatImporter`, with today's `SKILL.md` parser as the default implementation.
-- **"Update Skill" command.** Re-fetches, shows a diff, and resets `trustTier` to `unreviewed`. Never silent.
-- **Docs and starter library.** Skills authoring docs for both skill systems, and an optional bundled `skills-library/` of first-party `trusted` starter skills.
-
-Acceptance:
-- A Git import from a local bare-repo fixture lands in the same shape, with provenance recorded and `unreviewed`.
-- An oversized or path-escaping repo is rejected before anything is copied.
-- Update Skill against a changed ref shows a diff and requires re-approval.
+#### Phase S3: Git-URL skill import, docs and starter library
+**Absorbed into Phase PA4** (2026-10-18): Git and vendor import, format importers, Update Skill with diffs, the starter library and authoring docs are part of the Port-a-skill step (§9.2). The previous text is in git (this file at v0.39.0).
 
 ### Phase 1: Spec state synchronization
 Scope: §8, plus the `package.json` version alignment (§2.5).
@@ -350,7 +383,10 @@ In short: `dist/mcp-server.js`, bundled with esbuild and runnable in plain Node,
 In short: the §5.3 tools over connections defined in `.autode/config/connections.yaml` (pointers and non-secret settings; secrets from env vars or the platform CLI's configuration, §6). `autode_execute_query` runs one statement, read-only unless the server is started with `--allow-write`, behind a lexical guard that reads the SQL under two quoting conventions. Row values — query results, profile minimums and maximums, query-history text — reach a prompt only when the connection's `allowSampleDataInPrompts` is on; personal-data columns are masked when it is. The live acceptance checks (Snowflake CLI and key-pair, Databricks PAT, a machine without CLIs) are in manual-verification.md Part 14.
 
 ### Phase 5: Extension as an MCP client; exposure to other agents
-Scope: §7.1–7.3, §7.5.
+Scope: §7.1–7.3, §7.5, widened by §3.1 (2026-10-18):
+- The panel's Decisions view and approvals go through the engine (PA1's decision tools and channels), not directly to files.
+- When the extension starts the server, it passes `resolver: vscode` secrets as the matching `AUTODE_*` variables, so those connections become ready for the server it started.
+- The in-process executor calls tools through the client like any host agent. This makes PA3 a change of who calls the tools, not of what they do.
 Acceptance:
 - The extension no longer imports `src/engine/**` directly except for types (lint rule: value imports from `src/engine` banned outside `src/mcp`).
 - Activation does not spawn the server; first engine use does. Killing the server process mid-session recovers on the next call.
@@ -359,12 +395,104 @@ Acceptance:
 - `AutoDE: Configure MCP for Claude Code` writes a working `.mcp.json` entry that survives an extension update.
 
 ### Phase 6: Skill governance hardening
-Scope:
+Scope (S3's import work moved to PA4; publishing a primitive or skill goes through PA1's decisions):
 - Add optional `platforms: SqlDialect[]` to `PrimitiveDefinition` (+ `docs/schemas/primitive-definition.schema.json`); `autode_search_primitives` filters by it. Make it visible when a compile falls back to the `default` template for a platform.
 - **Conformance suite:** a test that loads every bundled and workspace primitive and, for each declared platform, validates `previewParams` against `paramSchema`, compiles, runs `outputChecks`, and compares with a golden snapshot. Publishing a primitive (`publishPrimitiveDefinition`) MUST run the same checks and refuse to publish on failure.
 - **Dry-run before execute:** any plan step that executes SQL against a platform calls `autode_explain_sql` first and fails the step on an explain error.
 - **Idempotency:** generated DDL/DML from primitives uses idempotent forms (`CREATE OR REPLACE` / `CREATE ... IF NOT EXISTS` / `MERGE`) where the dialect supports them; add a conformance check (`mustNotContain` on bare `CREATE TABLE` where applicable).
 Acceptance: the conformance suite runs in `npm test`; a deliberately broken primitive fixture is rejected by both the suite and the publish path.
+
+### 9.2 Portable architecture (PA1–PA4)
+
+*Added 2026-10-18 for §3.1. Order and versions: roadmap.md. Phase 5 (below) belongs to the same direction.*
+
+#### Phase PA1: Decision store and proposal tools
+Scope:
+- **Decision store** in the engine. A decision records:
+  - `{ id, kind, stakes, proposal (by reference), evidence, validation report }`;
+  - `proposedBy { host, client, skill?, model? }` (model only when the host reports it);
+  - `allowedChannels`, `status`, `resolvedBy`, `channel`, `appliedAt`.
+
+  Events are append-only (proposed, resolved, applied, superseded, withdrawn), like the ledger (C2), under `.autode/`, committed with the project. A decision whose subject changed before resolution is marked superseded, never applied to stale state.
+- **Stakes per kind** (D6), defined once in the engine, not by callers. A caller, skill or host can't lower a kind's stakes.
+- **Proposal tools** on the MCP server:
+  - `autode_propose_assertion` (moved here from C4b; context-layer §9), `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`;
+  - `autode_propose_platform_change`, which replaces direct writes: with `--allow-write`, a write statement becomes a proposal, and only an approved one runs.
+
+  Each tool validates (schema, grounding of every cited object and column, conformance where it applies, the read-only guard for platform changes). A failure returns `VALIDATION_FAILED` with item-level details the agent can act on. Proposals for plans and artifacts come with PA3.
+- **Decision tools:** `autode_list_decisions`, `autode_get_decision`, `autode_resolve_decision`. The last works for low-stakes decisions only; for a high-stakes one it returns `PERMISSION_DENIED`, naming the channels that may resolve it.
+- **Human channels:**
+  - a **Decisions** view in the panel (proposal, evidence, validation, proposer; Approve / Reject with a note);
+  - **decision files**: `.autode/decisions/<id>.yaml` with `resolution: approved | rejected`, `by` and `note`, picked up when they change. The file channel's identity is self-declared; the pull request is its audit.
+- **Existing approvals become decisions.** Approving the specification and the Pipeline Spec in the panel works as today and is recorded as a decision, so a proposal made from Claude Code appears in the same place.
+- **Apply:** deterministic engine code applies an approved decision, recording proposer, approver, channel and revision in the ledger or in the specification's history.
+
+Acceptance:
+- From an MCP client, `autode_propose_mapping` citing a column that doesn't exist returns `VALIDATION_FAILED` naming it, and nothing is written.
+- A valid proposal creates a pending decision. `autode_resolve_decision` on it (high stakes) is refused. Approving it in the panel, or through a decision file, applies it, and the record shows who proposed (host, client, skill), who approved, and through which channel.
+- A contract test shows that no MCP tool writes AutoDE state or runs a platform write except by applying an approved decision.
+- A decision whose subject changed in the meantime is superseded, not applied.
+- Panel approvals behave as before; `npm run eval` doesn't regress.
+
+#### Phase PA2: The engine on its own — `autode` package and CLI
+Scope:
+- **Package** (D7): the engine, `autode mcp`, the CLI, the skills pack (from PA3), and a `package.json` that packs to a tarball. No `vscode`, and no new runtime dependency (arguments through `node:util` `parseArgs`). The VSIX bundles the same build.
+- **Commands.** Deterministic: `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor` (prerequisites, connection readiness), and `check`, the CI gate: validations pass and no pending high-stakes decision affects the artifacts. Human: `decisions list | show | approve | reject`; approve and reject require an interactive terminal and refuse when `CI` is set. Exit codes are documented and stable.
+- **Stable server path.** `autode mcp` passes the same contract tests as `dist/mcp-server.js`. `AutoDE: Configure MCP for Claude Code` and `docs/mcp-setup.md` prefer it when it is installed.
+- **Docs:** a CLI reference and per-host set-up (Claude Code, Codex, Cursor, Cline).
+
+Acceptance:
+- The MCP contract suite passes against `autode mcp`.
+- `autode check` returns the documented exit codes on fixtures: clean, a validation failure, a pending high-stakes decision.
+- `autode decisions approve` refuses without a terminal and with `CI` set.
+- The packed tarball contains no `vscode` reference and stays within a size budget. The VSIX still works offline.
+- Publishing to a registry stays a separate, owner-approved step.
+
+#### Phase PA3: AutoDE skills — built-in capabilities as standard skills over deterministic tools
+Scope:
+- **Skills pack** in Agent Skills format: business-problem interview, specification authoring, source assessment, STTM mapping, data modelling, pipeline scaffolding, documentation. Each `SKILL.md` names the AutoDE tools it uses and ends in proposal tools. The interview prompt packs (`skills/*.json`) become resources of the interview skill.
+- **New deterministic tools** for what the agents do without a model:
+  - candidate column matches (names, types, vocabulary, past approved mappings);
+  - a draft model from grain and keys;
+  - primitive candidates and parameter checks;
+  - plan structure from the inferred phases.
+
+  Also new: `autode_propose_plan` and `autode_propose_artifacts`.
+- **In-process executor.** AutoDE's chat and plan steps run these skills through S1's single dispatch, with `allowed-tools` enforced and every tool call audited. `AgentHub` keeps only running skills, gates and progress.
+- **Migration rule.** When an agent's skill ships, its old path (`src/agents/**`, its prompts in `src/core`) is deleted in the same release. A lint rule keeps new flow logic and LLM calls out of `src/core` outside the executor.
+- **Distribution:** in the package and the VSIX; `autode skills install --target <dir>` copies the pack into a host's skills folder; the skills are also offered as MCP prompts.
+
+Acceptance:
+- The reference problem, run in VS Code, produces the same artifacts and `npm run eval` metrics as before the migration.
+- A scripted MCP client (a fake host agent following each `SKILL.md`) drives every built-in skill to valid proposals.
+- Each skill passes an Agent Skills format check.
+- No migrated agent's old code path remains.
+
+#### Phase PA4: Port a skill — a guided step in the panel, no code
+Scope (absorbs S3):
+- **Sources:**
+  - a local folder;
+  - a Git URL (shallow clone; file-count and byte caps checked before anything is copied; path-traversal check; `resolvedCommit` recorded);
+  - skills shipped in dbt packages.
+
+  `SkillFormatImporter`, with the Agent Skills parser as the default.
+- **Analysis.** Deterministic: frontmatter, declared tools, scripts, resources, size, overlaps with installed skills. Model-assisted, presented as a proposal for review, never applied:
+  - classification (*knowledge*, usable as context in AutoDE's packs; *procedure*, run by an agent);
+  - mapping of the tools the skill mentions to AutoDE tools;
+  - external prerequisites (CLIs, MCP servers), reusing DRV1's prerequisite model.
+- **Capability report:** what the skill does, which of its actions become approval-gated decisions, what it reads, whether it runs scripts, and the limit of §3.1 for skills that write or execute.
+- **Review and trust** (S2, bound to the content checksum), an optional dry run on a sample workspace, then publish. A skill that runs scripts or commands is never published without review.
+- **Update Skill** re-fetches, shows a diff and resets trust to unreviewed. Never silent.
+- **Optional hardening:** AutoDE may suggest turning a repeated deterministic procedure in a skill into a primitive or tool. The skill works without it.
+- **Starter library and authoring guide:** the PA3 pack plus curated examples; authoring docs covering skills, tools and proposals.
+- **CLI:** `autode skills import` runs the deterministic analysis and writes the report. Publishing needs a human channel.
+
+Acceptance:
+- Importing a fixture skill from a local bare repository produces a report listing mapped tools and prerequisites; the skill stays unpublished until reviewed.
+- An oversized or path-escaping repository is rejected before anything is copied.
+- A knowledge skill appears as context in a relevant context pack. A procedure skill's state changes reach AutoDE only as proposals.
+- Update shows a diff and requires re-approval.
+- The whole flow runs from the panel with no code or file editing (a test drives the webview messages).
 
 ---
 
@@ -382,9 +510,13 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 | SSE / HTTP transport, Docker image | stdio covers all local clients. A Docker image is a later option and can reuse the same bundle with `docker run -i` over stdio; Streamable HTTP only if a remote/shared deployment is required. |
 | Adopting an external agent harness (CUGA, AutoGen, LangGraph, …) | AutoDE's orchestration, approval gates and deterministic core already cover the harness role; adding a Python runtime contradicts P6. With the engine behind MCP, a harness can be adopted later without a rewrite. |
 | LLM calls inside the MCP server | Keeps the server deterministic and provider-free (D5). |
+| An engine-owned task protocol, with agents redefined as AutoDE workflows of deterministic steps and LLM "tasks" (considered 2026-10-18) | Non-standard: a ported skill would have to be split by hand into tasks, and the result would no longer run in other hosts. Standard skills over deterministic, gated tools give the same guarantee where it matters, at the change of state (§3.1). |
+| Plugins or adapters per host (Cursor, Codex, Cline, …) | MCP and Agent Skills are the portability layer (D9); per-host work is configuration, plus a native UI only when one is needed. |
+| A CLI or server that calls LLM providers with its own keys | Client networks allow the models their IDE provides; the host supplies the model (§3.1, D5). |
+| MCP tools that write AutoDE state or run platform writes directly, even behind a flag | Every change is a proposal a person approves (D6); `--allow-write` turns platform writes into proposals (PA1). |
 
 ---
 
 ## 11. Documentation deliverables
 
-Per phase: a `CHANGELOG.md` entry, the affected requirements in `docs/requirements.md` updated by ID (WHAT/WHY only), the HOW in `docs/technical-design.md`, and onboarding-guide updates for the new `src/engine/` / `src/mcp/` layout. Phase 3 adds `docs/mcp-setup.md`. Phase 6 adds a "How to onboard a new primitive" section covering the conformance requirements.
+PA2 adds a CLI reference and per-host set-up; PA3 and PA4 add a skills authoring guide (skills, tools, proposals). Per phase: a `CHANGELOG.md` entry, the affected requirements in `docs/requirements.md` updated by ID (WHAT/WHY only), the HOW in `docs/technical-design.md`, and onboarding-guide updates for the new `src/engine/` / `src/mcp/` layout. Phase 3 adds `docs/mcp-setup.md`. Phase 6 adds a "How to onboard a new primitive" section covering the conformance requirements.

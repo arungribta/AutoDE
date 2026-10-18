@@ -1,6 +1,6 @@
 # AutoDE — Context Layer, Semantic Model & Grounding: Requirements Specification
 
-**Status:** In progress — order and status: [roadmap.md](roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion to:** [mcp-engine-requirements.md](mcp-engine-requirements.md) · **Document map:** [README.md](README.md) (read §0 and §1 there first; its implementation rules and principles P1–P7 apply here unchanged)
+**Status:** In progress — order and status: [roadmap.md](roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion to:** [mcp-engine-requirements.md](mcp-engine-requirements.md) · **Document map:** [README.md](README.md) (read §0 and §1 there first; its implementation rules and principles P1–P9 apply here unchanged)
 **Audience:** the coding agent implementing this, and the reviewers approving each phase.
 
 ---
@@ -34,7 +34,7 @@ Industry direction this follows (adopt the principles, not the products):
 
 ---
 
-## 3. Context principles (in addition to P1–P7)
+## 3. Context principles (in addition to P1–P9)
 
 Defined in [requirements.md §2.2](requirements.md) (C1–C9), which is canonical: C1 assertions, not blobs; C2 nothing silently overwritten; C3 agents don't infer what the context layer defines; C4 explicit, ordered trust; C5 deliver less but the right context; C6 every artifact explainable; C7 grounding measured; C8 deterministic core, LLM at the edges; C9 sources referenced, never copied.
 
@@ -275,7 +275,7 @@ Settings (defaults in brackets): `schema_fact` re-verify after [7 days] and alwa
 | `autode_get_context_pack` `{ purpose, seeds?, query?, maxTokens }` | Same `ContextPackBuilder` the extension uses; returns text + `PackManifest`. |
 | `autode_get_semantic_model` | The approved (or draft) semantic model. |
 | `autode_list_assertions` `{ subject?, kind?, status?, trust? }` | Ledger query. |
-| `autode_propose_assertion` `{ kind, subject, predicate, value, statement, evidence }` | External agents can enrich context. Always lands as `proposed` / `inferred`; never `active`. |
+| `autode_propose_assertion` `{ kind, subject, predicate, value, statement, evidence }` | External agents can enrich context. Always lands as `proposed` / `inferred`; never `active`. Ships in PA1 (mcp-engine §9.2) as one of the proposal tools; the proposal is a decision whose resolution confirms or rejects the assertion. |
 | `autode_verify_assertion` `{ id }` | Runs the matching probe (read-only). |
 | `autode_check_grounding` `{ content, dialect }` | Grounding check of any SQL/YAML (§10.1); lets external coding agents self-check. |
 | Prompt `autode_extract_assertions` | The extraction prompt (§5.2). |
@@ -361,6 +361,8 @@ Added 2026-10-15 (after C3), because estate merge and legacy migration/modernisa
 In short: a business problem is whatever the customer has — a paragraph, a document or a set of them. AutoDE registers them in a pack with a role, an authority and a version; reads house-format structured documents through an interpretation profile the LLM proposes once and the engineer confirms (then applied deterministically, so a new version supersedes exactly the changed clauses); reads free text into proposed facts with section-level provenance; records contract clauses as expectations, never as observed facts; checks each source system against a contract clause by clause; verifies claims with fixed, aggregate-only probes on a live connection or on customer-supplied samples; asks the interviewer only what discovery and probes did not settle; and captures the customer's vocabulary for retrieval.
 
 ### Phase C4b: Chat extraction, Context Inbox, tool-action memory
+*Since 2026-10-18 C4b follows PA1 (mcp-engine §9.2): the Context Inbox is the panel's view of PA1's fact decisions, and `autode_propose_assertion` ships in PA1. Chat and interview extraction produce proposals through the same path.*
+
 The remainder of the original C4.
 Scope: what C4a doesn't cover of §5 (chat and interview extraction §5.2, Context Inbox §5.4); §7.2 cited Q&A; MCP additions in §9 (`autode_propose_assertion`, `autode_verify_assertion` — probes move behind `autode_execute_query` here). Context gaps (C3) pause the step from this phase on, since the inbox lets the engineer answer them. Also absorbs the open phase 5 of the earlier chat-memory plan, **tool-action memory**:
 - `AgentHub.chat()` returns the tool audit it already collects (`ToolCallAuditEntry[]`).

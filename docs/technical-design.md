@@ -35,7 +35,7 @@
 
 ### 1.1 What this document covers
 
-How AutoDE is built: its processes and layers, where state lives, and how each capability in [requirements.md](requirements.md) is implemented. Requirement IDs (`GRD-4`, `ORC-3` …) and principles (P1–P7, C1–C9) are defined there and only referenced here.
+How AutoDE is built: its processes and layers, where state lives, and how each capability in [requirements.md](requirements.md) is implemented. Requirement IDs (`GRD-4`, `ORC-3` …) and principles (P1–P9, C1–C9) are defined there and only referenced here.
 
 ### 1.2 Design principles (implementation level)
 
@@ -88,6 +88,15 @@ The product principles are in requirements.md §2. These are the implementation 
           docs/mcp-setup.md). Planned: the extension becomes a client of
           the same server and registers it (phase 5).
 ```
+
+**Direction from v0.40.0 (planned, not yet built).** The portable architecture of [mcp-engine-requirements.md §3.1](mcp-engine-requirements.md) changes this picture phase by phase:
+- PA1 adds a decision store and proposal tools to the engine and the MCP server;
+- PA2 ships the engine on its own with a CLI;
+- phase 5 makes the extension a client of it;
+- PA3 replaces `src/agents/**` and the flow logic in `agentHub.ts` / `webviewProvider.ts` with standard skills run by an in-process executor over deterministic tools;
+- PA4 adds the Port-a-skill step.
+
+Each phase's HOW is added to this document when it ships. Until then, the sections below describe the code as it is.
 
 ---
 
