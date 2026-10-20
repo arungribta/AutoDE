@@ -751,6 +751,8 @@ export interface PlanState {
   status: SessionStatus;
   runningStepId?: string;
   lastError?: string;
+  /** C4b: the step paused on context gaps, and what it needs (answered in the Context Inbox). */
+  waitingForContext?: { stepId: string; gaps: Array<{ needed: string; subject: string[]; text: string; reason: string; minTrust: string; foundTrust?: string; stepId?: string }> };
   artifacts?: GeneratedArtifact[];
   currentPhase?: WorkflowPhase;
   specId?: string;

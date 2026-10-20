@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.40.0 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.41.0 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -234,11 +234,13 @@ The checklist the project follows for every phase:
 - **No LLM calls in the engine's decisions or in the MCP server.** The LLM proposes; deterministic code validates, compiles and checks (P1, D5).
 - **Never build an `.autode/` path by hand.** Use `LAYOUT` / `layoutPath()` from `src/engine/workspaceLayout.ts`, so the extension, the engine and the MCP server agree.
 - **Never edit the graph or the ledger in place.** Append events (assert, supersede, retract, verify); the graph is rebuilt from them.
-- **Nothing an LLM produces becomes trusted on its own.** Proposed facts need a person; `verified` needs a probe; tool skills need a review.
+- **Nothing an LLM produces becomes trusted on its own.** Proposed facts need a person (the Context Inbox; a correction retires the old fact only on confirmation); `verified` needs a probe; tool skills need a review.
 - **Probes and MCP responses never return row values** without explicit consent, and every outward string goes through `redact()`.
 - **Writes are atomic and revision-checked** (`writeFileAtomic`, `RevisionedFile`); an external edit wins a conflict unless the user overwrites explicitly.
 - **New dependencies need a recorded decision** (licence, size) in the roadmap's decision log (P6); pin exact versions.
 - **Gates live in `AgentHub`,** not only in the UI, and since v0.40.0 in the engine's decision store (`src/engine/decisions/`): a change proposed through MCP is a decision, high-stakes decisions are resolved only through a human channel, and only engine code applies them. Never write a specification, Pipeline Spec, mapping or ledger fact from an MCP tool directly; propose it.
+- **Facts use the ledger's gate, changes use decisions.** A fact is recorded `proposed` (`recordChatProposals()` dedups and links corrections) and confirmed by a person; documents, mappings and platform changes are decisions (§7.7). Never confirm a fact from code on a model's behalf.
+- **Chat extraction runs after the turn and never fails it** (`extractFromTurn()` never throws); keep it that way.
 - **Spec, Pipeline Spec and Mapping Context formats live in `src/engine/documents/problemDocuments.ts`.** The managers and the decision appliers both use it; change serialisation there only.
 - **New AI capability is written the new way** (PA1 has shipped): a skill plus deterministic tools ending in a proposal tool. Don't add new flow logic or LLM calls to `src/core` or `src/agents` (PA3 adds a lint rule).
 

@@ -5,12 +5,11 @@ import { BusinessPack, DocumentAuthority, DocumentRole, PackDocument, contentSha
 import { InterpretationProfile, applyProfile, buildProfileProposalPrompt, parseProfile, parseProfileProposal, parseStructured, profileMatches, serializeProfile } from '../engine/context/profiles';
 import { ReconcileResult, documentClauses, reconcileContract } from '../engine/context/contracts';
 import { ConformanceReport, checkConformance, renderConformanceReport } from '../engine/context/conformance';
-import { ProbeExecutor, ProbeResolver, VerifyOutcome, combineProbeExecutors, createSampleProbeExecutor, parseSampleCsv, verifyAssertions } from '../engine/context/probes';
+import { ProbeExecutor, ProbeResolver, VerifyOutcome, combineProbeExecutors, createProbeResolver, createSampleProbeExecutor, parseSampleCsv, verifyAssertions } from '../engine/context/probes';
 import { buildDocumentExtractionPrompt, parseDocumentExtraction, recordExtraction, splitSections } from '../engine/context/documentExtraction';
 import { VocabularyProposal, buildVocabulary, buildVocabularyProposalPrompt, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, parseVocabularyProposal } from '../engine/context/vocabulary';
 import { createSubjectResolver, isMirror } from '../engine/context/projection';
 import { isLive } from '../engine/context/assertions';
-import { TableNode } from '../engine/context/types';
 import { writeFileAtomic, nodeFileIo } from '../engine/context/contextStore';
 import { layoutPath } from '../engine/workspaceLayout';
 
@@ -172,19 +171,7 @@ export class BusinessPackManager {
 
   /** Resolves graph table/column ids to probe targets. */
   public probeResolver(): ProbeResolver {
-    const g = this.cfm.getPackSources().graph;
-    const byId = new Map(g.nodes.map((n) => [n.id, n] as const));
-    const tableOf = new Map<string, string>();
-    for (const e of g.edges) if (e.type === 'contains') tableOf.set(e.target, e.source);
-    const resolveRef = createSubjectResolver(g);
-    return (ref) => {
-      const id = byId.has(ref) ? ref : resolveRef(ref);
-      const n = id ? byId.get(id) : undefined;
-      if (!n) return undefined;
-      if (n.type === 'table' || n.type === 'semantic_view') return { table: { fqn: (n as TableNode).fqn || n.label, id: n.id } };
-      const t = n.type === 'column' ? byId.get(tableOf.get(n.id) ?? '') : undefined;
-      return t ? { table: { fqn: (t as TableNode).fqn || t.label, id: t.id }, column: n.label } : undefined;
-    };
+    return createProbeResolver(this.cfm.getPackSources().graph);
   }
 
   /**

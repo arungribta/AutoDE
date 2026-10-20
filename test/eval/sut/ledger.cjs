@@ -15,8 +15,14 @@
  * records as an *outcome* (status, trust, `supersedes`, `conflictsWith`, verification) is
  * withheld, so whatever the ledger concludes — conflicts in particular — is its own work.
  *
- * Capabilities: conflicts() only. Supersession from chat (trap 2) needs the extractor to
- * recognise a correction, so it stays unsupported until C4b.
+ * Since v0.41.0 (C4b) the stand-in plays only the model's part: it returns each turn's facts as
+ * the extractor's JSON (`{ facts: [...] }`, outcomes withheld — including `supersedes`), and the
+ * engine does the rest exactly as after a real chat turn: `parseChatExtraction()` validates and
+ * resolves, `recordChatProposals()` dedups and links corrections. The engineer then confirms the
+ * turn's proposals in the Context Inbox (the golden end state is confirmed facts), which is when
+ * a correction retires the fact it replaces.
+ *
+ * Capabilities: conflicts(), superseded().
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -34,6 +40,7 @@ function createLedgerSut(opts) {
   const { parseYaml } = dist('engine/context/Yaml.js');
   const { createSubjectResolver, resolveSubjects } = dist('engine/context/projection.js');
   const { detectConflicts } = dist('engine/context/conflicts.js');
+  const { parseChatExtraction, recordChatProposals } = dist('engine/context/chatExtraction.js');
   let turnsByText = new Map();
   let golden = new Map();
   const proposals = [];
@@ -44,10 +51,11 @@ function createLedgerSut(opts) {
     ...base,
     name: 'assertion ledger (v0.29.0, C2)',
     notes: [
-      'Chat extraction arrives in C4b. This run proposes each turn\'s scripted facts to the ledger as an extractor would (outcomes such as status, trust, supersession and conflicts withheld), so trap 1 measures the conflict detector, not extraction.'
+      'Chat extraction (C4b) needs the LLM. Offline, a stand-in returns each turn\'s scripted facts as the extractor\'s JSON (outcomes such as status, trust, supersession and conflicts withheld); validation, subject resolution, dedup and correction linking are the engine\'s own work, and the engineer\'s Inbox confirmation is simulated per turn. Extraction quality itself is measured by hand (manual-verification Part 18).'
     ],
     proposals,
-    trapNotes: { 2: 'not yet: the ledger supersedes, but telling that a chat turn corrects an earlier one is chat extraction (C4b) — here t5 and t6 surface as a key conflict instead' },
+    corrections: [],
+    trapNotes: { 2: 'supersession: the engine linked the correction and retired the earlier fact when it was confirmed' },
 
     async setup(opts) {
       await base.setup(opts);
@@ -63,25 +71,14 @@ function createLedgerSut(opts) {
       const turn = turnsByText.get(text);
       if (turn && turn.facts) {
         const resolve = createSubjectResolver(base.internals().graph.serializeSnapshot());
-        for (const factId of turn.facts) {
-          const g = golden.get(factId);
-          if (!g) continue;
-          const fact = Object.fromEntries(Object.entries(g).filter(([k]) => !WITHHELD.includes(k)));
-          const { subject, unresolved } = resolveSubjects(fact.subject, resolve);
-          const a = await ledger().assert({
-            kind: fact.kind,
-            subject,
-            predicate: fact.predicate,
-            value: fact.value,
-            statement: text,
-            evidence: [{ type: 'chat_message', ref: `chat-script#${turn.id}`, excerpt: text }],
-            trust: 'inferred',
-            status: 'proposed',
-            createdBy: 'agent:extraction-standin',
-            flags: unresolved.length ? ['unresolved_subject'] : undefined
-          });
-          proposals.push({ fact: factId, id: a.id, subject, unresolved });
-        }
+        // What the model would return for this turn: the scripted facts, outcomes withheld.
+        const raw = { facts: turn.facts.map((id) => golden.get(id)).filter(Boolean).map((g) => ({ kind: g.kind, subject: g.subject, predicate: g.predicate, value: g.value, statement: text })) };
+        const outcome = parseChatExtraction(raw, { ref: `chat-script#${turn.id}`, text, source: 'chat' }, resolve);
+        const { recorded, corrections } = await recordChatProposals(ledger(), outcome);
+        this.corrections.push(...corrections);
+        recorded.forEach((a, i) => proposals.push({ fact: turn.facts[i], id: a.id, subject: a.subject, unresolved: (a.flags || []).includes('unresolved_subject') ? a.subject : [] }));
+        // The engineer confirms the turn's proposals in the Context Inbox.
+        for (const a of recorded) await ledger().confirm(a.id, 'user:engineer');
         await base.internals().cfm.persistCompiledGraph();
       }
       return res;
@@ -104,6 +101,10 @@ function createLedgerSut(opts) {
     capabilities: {
       async conflicts() {
         return detectConflicts(ledger().assertions()).map((c) => ({ rule: c.rule, key: c.key, subject: c.subject, ids: c.ids, sides: c.sides }));
+      },
+      /** C4b: facts a confirmed correction replaced. */
+      async superseded() {
+        return ledger().assertions().filter((a) => a.status === 'superseded' && a.supersededBy && !String(a.createdBy).startsWith('system') && a.predicate !== 'node' && a.predicate !== 'edge').map((a) => ({ id: a.id, by: a.supersededBy, statement: a.statement }));
       }
     }
   };

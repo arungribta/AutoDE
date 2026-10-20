@@ -275,7 +275,7 @@ Settings (defaults in brackets): `schema_fact` re-verify after [7 days] and alwa
 | `autode_get_context_pack` `{ purpose, seeds?, query?, maxTokens }` | Same `ContextPackBuilder` the extension uses; returns text + `PackManifest`. |
 | `autode_get_semantic_model` | The approved (or draft) semantic model. |
 | `autode_list_assertions` `{ subject?, kind?, status?, trust? }` | Ledger query. |
-| `autode_propose_assertion` `{ kind, subject, predicate, value, statement, evidence }` | External agents can enrich context. Always lands as `proposed` / `inferred`; never `active`. Ships in PA1 (mcp-engine §9.2) as one of the proposal tools; the proposal is a decision whose resolution confirms or rejects the assertion. |
+| `autode_propose_assertion` `{ kind, subject, predicate, value, statement, evidence }` | External agents can enrich context. Always lands as `proposed` / `inferred`; never `active`. Since v0.41.0 (C4b) it records a `proposed` assertion in the ledger (attributed `mcp:<client>`); a person confirms it in the Context Inbox, or the agent confirms a low-stakes one with `autode_review_assertion`. |
 | `autode_verify_assertion` `{ id }` | Runs the matching probe (read-only). |
 | `autode_check_grounding` `{ content, dialect }` | Grounding check of any SQL/YAML (§10.1); lets external coding agents self-check. |
 | Prompt `autode_extract_assertions` | The extraction prompt (§5.2). |
@@ -361,15 +361,16 @@ Added 2026-10-15 (after C3), because estate merge and legacy migration/modernisa
 In short: a business problem is whatever the customer has — a paragraph, a document or a set of them. AutoDE registers them in a pack with a role, an authority and a version; reads house-format structured documents through an interpretation profile the LLM proposes once and the engineer confirms (then applied deterministically, so a new version supersedes exactly the changed clauses); reads free text into proposed facts with section-level provenance; records contract clauses as expectations, never as observed facts; checks each source system against a contract clause by clause; verifies claims with fixed, aggregate-only probes on a live connection or on customer-supplied samples; asks the interviewer only what discovery and probes did not settle; and captures the customer's vocabulary for retrieval.
 
 ### Phase C4b: Chat extraction, Context Inbox, tool-action memory
-*Since 2026-10-18 C4b follows PA1 (mcp-engine §9.2): the Context Inbox is the panel's view of PA1's fact decisions, and `autode_propose_assertion` ships in PA1. Chat and interview extraction produce proposals through the same path.*
+**Status:** ✅ shipped in v0.41.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CHT-5, CTX-10, GRD-3, CTX-1; HOW: technical-design.md §5.14; usage: [mcp-setup.md](mcp-setup.md). The full specification text is in git (this file at v0.40.0).
 
-The remainder of the original C4.
-Scope: what C4a doesn't cover of §5 (chat and interview extraction §5.2, Context Inbox §5.4); §7.2 cited Q&A; MCP additions in §9 (`autode_propose_assertion`, `autode_verify_assertion` — probes move behind `autode_execute_query` here). Context gaps (C3) pause the step from this phase on, since the inbox lets the engineer answer them. Also absorbs the open phase 5 of the earlier chat-memory plan, **tool-action memory**:
-- `AgentHub.chat()` returns the tool audit it already collects (`ToolCallAuditEntry[]`).
-- The chat handler appends one compact `log` message per meaningful action (file written, command run) to the transcript.
-- Structured history includes those entries. For Anthropic and Gemini they are folded into the adjacent assistant turn, because those APIs require strict user/assistant alternation.
-- Actions that change context (e.g. a written spec file) are also recorded as ledger evidence.
-Acceptance: the scripted chat produces the golden assertions (≥ 90% match, the rest surfaced in the inbox); trap 2 passes; extraction never blocks or fails a chat turn (fault-injection test); chat answers cite assertion ids.
+In short:
+- After each chat and interview turn, the configured model proposes the facts the turn states, in the background. Validation, subject resolution, dedup and **correction linking** are deterministic: a later, different value for the same single-valued fact supersedes the earlier one once confirmed.
+- `/define`, `/rule`, `/decide` and `/assume` capture facts without the model.
+- The **Context Inbox** shows facts to review (grouped by subject), conflicts, a plan step paused on a context gap, and PA1's changes to approve, with Confirm / Edit & confirm / Reject / Verify now and bulk confirmation of documented facts.
+- Facts proposed over MCP use the ledger's gate, not decision files (`autode_review_assertion` for low-stakes facts only); `autode_verify_assertion` runs probes; the `autode_extract_assertions` prompt gives other hosts the same extraction.
+- Chat answers cite `[fact:<id>]`.
+- A step needing a missing join, key or grain pauses.
+- Tool actions are kept in the transcript.
 
 ### Phase C5: Semantic model
 Scope: §6, including dbt and Snowflake semantic-view export primitives (Databricks metric views where supported) and C3 consumption by the modeling/STTM/transform agents. Depends on mcp-engine Phase GOV (governance-as-code): the model's `rules` and PII classifications come from GOV's governance assertions, and the reference problem's masking expectations need GOV's `mask` primitive.

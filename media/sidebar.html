@@ -234,6 +234,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .decision .d-title { font-weight: 600; overflow-wrap: anywhere; }
 .decision .d-meta, .decision .d-note { color: var(--text-muted); overflow-wrap: anywhere; }
 .decision textarea { width: 100%; min-height: 32px; margin-top: 4px; }
+.inbox-group { margin: 6px 0 2px; font-size: var(--font-size-sm); font-weight: 600; color: var(--text-muted); overflow-wrap: anywhere; }
+.fact-chip { display: inline-block; padding: 0 5px; margin: 0 2px; border-radius: 8px; border: 1px solid var(--border-soft); font-size: 10px; cursor: help; color: var(--text-muted); }
 .saved-conn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--font-size-sm); }
 .saved-conn .sc-id { font-weight: 600; overflow-wrap: anywhere; }
 .saved-conn .sc-badges { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
@@ -602,7 +604,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function escapeHtml(str) { return String(str).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"'); }
 
   // ── Chat ──
-  function addMessage(role, content, label) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + formatContent(content) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
+  function addMessage(role, content, label, citations) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + withCitations(formatContent(content), citations) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
+  // C4b: [fact:<id>] in an answer becomes a chip; hovering shows the fact it rests on.
+  function withCitations(html, citations) { var n = 0; return html.replace(/\[fact:([0-9A-Z]{26})\]/g, function (_, id) { n++; var t = citations && citations[id] ? citations[id] : 'fact ' + id + ' (not found)'; return '<span class="fact-chip" title="' + escapeHtml(t) + '">fact ' + n + '</span>'; }); }
   function formatContent(text) { var escaped = escapeHtml(String(text)); escaped = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) { return '<pre><code>' + escapeHtml(code.trim()) + '</code></pre>'; }); escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>'); return escaped; }
   function showSpecHistory(text, error) {
     if (error) { showToast(error, 'error'); return; }
@@ -1637,7 +1641,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       }
     };
   }
-  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } beginPending(currentSpec ? 'Revising the specification…' : 'Drafting the specification…'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': if (currentSpec && currentSpec.status === 'approved') { beginPlanGeneration('Building implementation plan…'); post('generatePlanFromSpec'); break; } var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; beginPlanGeneration('Building implementation plan…'); post('generatePlan', { objective: objective }); break; case '/execute': post('executePlan'); break; case '/skill': var skillArgs = text.replace('/skill', '').trim(); var skillMatch = skillArgs.match(/^(\S+)\s+([\s\S]+)$/); if (!skillMatch) { addMessage('ai', 'Usage: /skill <skillId> <instruction> — import a skill first via "AutoDE: Import Tool Skill".', 'AutoDE'); break; } beginPending('Running skill "' + skillMatch[1] + '"… this may write files or run commands, and will ask for your approval.'); post('runToolSkill', { skillId: skillMatch[1], instruction: skillMatch[2] }); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/target': openSlidePanel('target'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
+  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } beginPending(currentSpec ? 'Revising the specification…' : 'Drafting the specification…'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': if (currentSpec && currentSpec.status === 'approved') { beginPlanGeneration('Building implementation plan…'); post('generatePlanFromSpec'); break; } var objective = text.replace('/plan', '').trim() || 'Generate a data engineering plan'; beginPlanGeneration('Building implementation plan…'); post('generatePlan', { objective: objective }); break; case '/execute': post('executePlan'); break; case '/skill': var skillArgs = text.replace('/skill', '').trim(); var skillMatch = skillArgs.match(/^(\S+)\s+([\s\S]+)$/); if (!skillMatch) { addMessage('ai', 'Usage: /skill <skillId> <instruction> — import a skill first via "AutoDE: Import Tool Skill".', 'AutoDE'); break; } beginPending('Running skill "' + skillMatch[1] + '"… this may write files or run commands, and will ask for your approval.'); post('runToolSkill', { skillId: skillMatch[1], instruction: skillMatch[2] }); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/target': openSlidePanel('target'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/define': case '/rule': case '/decide': case '/assume': post('chat', { message: text, toolMode: chatToolMode }); break; case '/reindex': post('reindex'); break; case '/clear': post('resetPlan'); chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
 
   // ── @-mention ──
   function handleMentionInput(e) { var val = chatInput.value; var cursorPos = chatInput.selectionStart; var textBeforeCursor = val.substring(0, cursorPos); var mentionMatch = textBeforeCursor.match(/@(\w*)$/); if (mentionMatch) { var query = mentionMatch[1].toLowerCase(); var items = buildMentionItems(query); if (items.length > 0) { renderMentionDropdown(items); mentionDropdown.classList.add('visible'); } else { mentionDropdown.classList.remove('visible'); } } else { mentionDropdown.classList.remove('visible'); } }
@@ -1791,12 +1795,43 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   // Pipeline Spec it also runs the usual approval.
   var decisionsState = { pending: [], recent: [] };
   var KIND_LABEL = { assertion: 'Fact', spec_revision: 'Specification', pipeline_spec: 'Pipeline Spec', mapping: 'Mapping', platform_change: 'Platform change', spec_approval: 'Specification approval', pipeline_spec_approval: 'Pipeline Spec approval' };
+  var inboxState = { facts: [], conflicts: [] };
+  function factHtml(f) {
+    var meta = escapeHtml(f.kind.replace('_', ' ')) + ' · ' + escapeHtml(f.trust) + ' · ' + escapeHtml(f.status) + ' · ' + escapeHtml(f.stakes) + ' stakes · from ' + escapeHtml(f.createdBy);
+    var notes = '';
+    if (f.supersedes) notes += '<div class="d-note">↻ corrects: ' + escapeHtml(f.supersedes.statement || f.supersedes.id) + ' (retired when you confirm)</div>';
+    if (f.verification) notes += '<div class="d-note">' + (f.verification.result === 'pass' ? '✔ ' : '✖ ') + escapeHtml(f.verification.detail || '') + '</div>';
+    if (f.reviewReason && !f.verification) notes += '<div class="d-note">⚠ ' + escapeHtml(f.reviewReason) + '</div>';
+    if ((f.flags || []).indexOf('unresolved_subject') >= 0) notes += '<div class="d-note">⚠ subject not found in the estate: ' + escapeHtml(f.subject.join(', ')) + '</div>';
+    (f.evidence || []).forEach(function (e) { notes += '<div class="d-note">↳ ' + escapeHtml(e.ref) + (e.excerpt ? ' — “' + escapeHtml(e.excerpt.slice(0, 140)) + '”' : '') + '</div>'; });
+    var probeable = ['key', 'grain', 'relationship', 'quality_expectation'].indexOf(f.kind) >= 0;
+    return '<div class="decision ' + escapeHtml(f.stakes) + '"><div class="d-title">' + escapeHtml(f.statement) + '</div><div class="d-meta">' + meta + '</div>' + notes +
+      '<div class="btn-row"><button class="primary" data-fact="confirm" data-id="' + f.id + '">Confirm</button><button data-fact="edit" data-id="' + f.id + '">Edit…</button><button data-fact="reject" data-id="' + f.id + '">Reject</button>' + (probeable ? '<button data-fact="verify" data-id="' + f.id + '">Verify now</button>' : '') + '</div>' +
+      '<div data-edit="' + f.id + '" style="display:none;"><label>Statement</label><textarea data-edit-statement="' + f.id + '">' + escapeHtml(f.statement) + '</textarea><label>Value (JSON)</label><textarea data-edit-value="' + f.id + '">' + escapeHtml(JSON.stringify(f.value)) + '</textarea><div class="btn-row"><button class="primary" data-fact="save" data-id="' + f.id + '">Save and confirm</button></div></div></div>';
+  }
   function renderDecisions() {
     var box = $('#paletteDecisions');
     if (!box) return;
     var pending = decisionsState.pending || [];
-    var html = '<div class="section-title">Decisions' + (pending.length ? ' (' + pending.length + ' waiting)' : '') + '</div>';
-    if (!pending.length) html += '<div class="onb-note">Nothing waiting. Changes proposed by AutoDE or by other agents through its MCP server appear here for your approval.</div>';
+    var facts = inboxState.facts || [];
+    var html = '<div class="section-title">Context Inbox' + ((pending.length + facts.length) ? ' (' + (pending.length + facts.length) + ' waiting)' : '') + '</div>';
+    var w = inboxState.waitingForContext;
+    if (w) {
+      html += '<div class="decision high"><div class="d-title">Step ' + escapeHtml(w.stepId) + ' is paused for missing context</div>' + w.gaps.map(function (g) { return '<div class="d-note">needs ' + escapeHtml(g.needed) + ': ' + escapeHtml(g.text) + ' (' + (g.reason === 'absent' ? 'not known' : 'only ' + escapeHtml(g.foundTrust || '')) + ')</div>'; }).join('') +
+        '<div class="d-note">Tell AutoDE in chat (e.g. “tickets join orders on order_id”), confirm the fact here, and run the plan again.</div><div class="btn-row"><button data-continue="' + escapeHtml(w.stepId) + '">Continue without it</button></div></div>';
+    }
+    (inboxState.conflicts || []).forEach(function (c) { html += '<div class="decision high"><div class="d-title">Conflict (' + escapeHtml(c.rule) + ')</div>' + c.sides.map(function (x) { return '<div class="d-note">• ' + escapeHtml(x) + '</div>'; }).join('') + '<div class="d-note">Confirm one side and reject the other, or edit one.</div></div>'; });
+    if (facts.length) {
+      html += '<div class="inbox-group">Facts to review</div>';
+      var groups = {};
+      facts.forEach(function (f) { var k = (f.subject || []).join(', ') || '(no subject)'; (groups[k] = groups[k] || []).push(f); });
+      Object.keys(groups).sort().forEach(function (k) { html += '<div class="inbox-group">' + escapeHtml(k) + '</div>' + groups[k].map(factHtml).join(''); });
+      var documented = {};
+      facts.forEach(function (f) { if (f.trust === 'documented' && f.status === 'proposed') documented[f.createdBy] = (documented[f.createdBy] || 0) + 1; });
+      Object.keys(documented).forEach(function (src) { if (documented[src] > 1) html += '<div class="btn-row"><button data-bulk="' + escapeHtml(src) + '">Confirm all ' + documented[src] + ' documented facts from ' + escapeHtml(src) + '</button></div>'; });
+    }
+    if (pending.length) html += '<div class="inbox-group">Changes to approve</div>';
+    if (!pending.length && !facts.length && !w && !(inboxState.conflicts || []).length) html += '<div class="onb-note">Nothing waiting. Facts from your conversations and documents, and changes proposed by AutoDE or other agents, appear here for you to confirm.</div>';
     pending.forEach(function (d) {
       var who = [d.proposedBy && d.proposedBy.host, d.proposedBy && d.proposedBy.client, d.proposedBy && d.proposedBy.skill ? 'skill ' + d.proposedBy.skill : ''].filter(Boolean).join(' · ');
       var warn = (d.validation && d.validation.warnings || []).map(function (w) { return '<div class="d-note">⚠ ' + escapeHtml(w) + '</div>'; }).join('');
@@ -1816,6 +1851,18 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       html += '</details>';
     }
     box.innerHTML = html;
+    box.querySelectorAll('button[data-fact]').forEach(function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-id'), act = b.getAttribute('data-fact');
+        if (act === 'edit') { var ed = box.querySelector('[data-edit="' + id + '"]'); if (ed) ed.style.display = ed.style.display === 'none' ? '' : 'none'; return; }
+        if (act === 'verify') { post('verifyFact', { id: id }); return; }
+        if (act === 'save') { post('reviewFact', { id: id, action: 'edit', statement: box.querySelector('[data-edit-statement="' + id + '"]').value, value: box.querySelector('[data-edit-value="' + id + '"]').value }); return; }
+        b.disabled = true;
+        post('reviewFact', { id: id, action: act });
+      };
+    });
+    box.querySelectorAll('button[data-bulk]').forEach(function (b) { b.onclick = function () { b.disabled = true; post('bulkConfirmFacts', { createdBy: b.getAttribute('data-bulk') }); }; });
+    box.querySelectorAll('button[data-continue]').forEach(function (b) { b.onclick = function () { b.disabled = true; post('continueDespiteGaps', { stepId: b.getAttribute('data-continue') }); }; });
     box.querySelectorAll('button[data-resolve]').forEach(function (b) {
       b.onclick = function () {
         var id = b.getAttribute('data-id');
@@ -1982,6 +2029,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
           sessionStatus = msg.state.status || 'idle';
           if (pendingBubble && (msg.state.status === 'ready' || msg.state.status === 'failed')) { endPending(); }
           if (msg.state.inferredPhases) { inferredPhases = msg.state.inferredPhases; renderPalettePhases(); }
+          if ((msg.state.waitingForContext || null) !== (inboxState.waitingForContext || null)) { inboxState.waitingForContext = msg.state.waitingForContext; renderDecisions(); if (msg.state.waitingForContext) showToast('A plan step is waiting for context — see the Context Inbox', ''); }
           if (msg.state.steps && msg.state.steps.length > 0) { addPlanCard(msg.state); }
           if (msg.state.artifacts && msg.state.artifacts.length > 0) { for (var i = 0; i < msg.state.artifacts.length; i++) { addArtifactCard(msg.state.artifacts[i]); } }
           if (wasGeneratingPlan && msg.state.status === 'ready') { showPlanReadySuccess(msg.state); }
@@ -2020,12 +2068,13 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         break;
       case 'platformsState': platformsState = msg.state; renderPlatformsState(); break;
       case 'decisionsList': decisionsState = { pending: msg.pending || [], recent: msg.recent || [] }; renderDecisions(); break;
+      case 'inboxState': inboxState = msg; renderDecisions(); break;
       case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
       case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
-      case 'chatResponse': endPending(); if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE'); } break;
+      case 'chatResponse': endPending(); if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE', msg.citations); } if (msg.actions && msg.actions.length) { addLogEntry('Actions: ' + msg.actions.join('; ')); } break;
       case 'sourcesList': renderSourcesList(msg.sources); break;
       case 'specQuestion': endPending(); discoveryActive = true; discoveryProgress = msg.progress || discoveryProgress; if (msg.question) { addSpecQuestion(msg.question); } renderPaletteSpec(); break;
       case 'specQuestions': endPending(); discoveryActive = true; discoveryProgress = msg.progress || discoveryProgress; if (msg.questions && msg.questions.length) { addSpecQuestionsForm(msg.questions); } renderPaletteSpec(); break;

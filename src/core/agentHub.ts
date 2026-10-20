@@ -20,6 +20,31 @@ import { parseComprehensiveSpec } from './specSynthesis';
 import { buildAttachmentExtractionPrompt, fallbackAttachmentExtract, parseAttachmentExtract } from './attachmentExtraction';
 import { buildPipelineSpecSynthesisPrompt, parsePipelineSpecResponse, PipelineSpecSynthesisInputs } from '../agents/pipelineSpecSynthesis';
 import { PipelineSpec } from '../engine/pipelineSpec/types';
+import { CITATION_INSTRUCTION } from '../engine/context/chatExtraction';
+import { GapClass } from '../engine/context/contextGaps';
+
+/** Gaps that pause a plan step (C3: agents don't infer joins, keys or grain; C4b). */
+const BLOCKING_GAPS: readonly GapClass[] = ['relationship', 'key', 'grain'];
+
+/**
+ * Tool-action memory (C4b): transcript `log` entries (files written, commands
+ * run) are folded into the assistant turn before them, so every provider gets
+ * strict user/assistant alternation and still sees what was done.
+ */
+export function foldActionEntries(history: readonly ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of history) {
+    if (m.role === 'log') {
+      const last = out[out.length - 1];
+      if (last && last.role === 'ai') out[out.length - 1] = { ...last, content: `${last.content}
+
+[Actions taken] ${m.content}` };
+      continue;
+    }
+    if (m.role === 'user' || m.role === 'ai') out.push(m);
+  }
+  return out;
+}
 import { LlmAdapterContext, LlmHistoryTurn, extractJsonText } from './llmAdapter';
 import { getLlmAdapter } from './llmProviders';
 import { contextWindowForModel, windowHistoryToBudget, RESERVED_PROMPT_TOKENS, RESERVED_RESPONSE_TOKENS } from './tokenBudget';
@@ -92,6 +117,7 @@ export class DataAgentHubHub {
   };
 
   private executionPaused = false;
+  private readonly gapOverrides = new Set<string>();
   private stateListener?: (state: PlanState) => void;
   private logListener?: (message: string) => void;
   private artifactWriter?: ArtifactWriter;
@@ -297,7 +323,7 @@ export class DataAgentHubHub {
         : mode === 'read-only'
         ? 'You have read-only tools for this workspace: file read, directory listing, and text search. You cannot write files or run commands from this chat \u2014 say so plainly if asked, and suggest the user enable "Allow edits" if they want you to make changes.'
         : 'You have no file access in this chat \u2014 you can only see what\u2019s pasted into the conversation or the context block above. If asked whether you can read or edit files, say no.';
-    return `${DataAgentHubHub.CHAT_SYSTEM_PROMPT_BASE}\n${capability}`;
+    return `${DataAgentHubHub.CHAT_SYSTEM_PROMPT_BASE}\n${capability}\n${CITATION_INSTRUCTION}`;
   }
 
   /**
@@ -754,7 +780,7 @@ Message: ${message}`;
     schemaContext?: string,
     toolExecutionMode: ToolExecutionMode = 'read-only',
     opts?: { history?: ChatMessage[]; priorSummary?: string; claudeSessionId?: string }
-  ): Promise<{ message: string; updatedSummary?: string; newClaudeSessionId?: string }> {
+  ): Promise<{ message: string; updatedSummary?: string; newClaudeSessionId?: string; actions: ToolCallAuditEntry[] }> {
     const trimmed = message.trim();
     if (!trimmed) {
       throw new Error('A message is required.');
@@ -788,7 +814,8 @@ Message: ${message}`;
     let updatedSummary: string | undefined;
 
     if (!resumingClaude) {
-      const rawHistory = (opts?.history ?? []).filter((m) => m.role === 'user' || m.role === 'ai');
+      // C4b: action entries ('log') are folded into the assistant turn before them — every provider's history is strict user/assistant turns.
+      const rawHistory = foldActionEntries(opts?.history ?? []);
       const budget = Math.max(contextWindowForModel(settings.activeLlmModel) - RESERVED_PROMPT_TOKENS - RESERVED_RESPONSE_TOKENS, 0);
       const { kept, dropped } = windowHistoryToBudget(rawHistory, budget);
       historyTurns = kept.map((m): LlmHistoryTurn => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
@@ -804,6 +831,7 @@ Message: ${message}`;
     const sections = [contextBlock.trim(), summaryBlock].filter((s) => s.length > 0);
     const prompt = `${sections.length > 0 ? sections.join('\n\n') + '\n\n' : ''}## User message\n${trimmed}\n\nRespond now.`;
 
+    const actions: ToolCallAuditEntry[] = [];
     try {
       const rawResponse = await this.callConfiguredLlm(
         prompt,
@@ -815,13 +843,15 @@ Message: ${message}`;
           toolExecutionMode,
           history: resumingClaude ? undefined : historyTurns,
           claudeSessionId,
-          isNewClaudeSession: startingClaudeSession
+          isNewClaudeSession: startingClaudeSession,
+          auditSink: actions
         }
       );
       return {
         message: rawResponse,
         updatedSummary,
-        newClaudeSessionId: startingClaudeSession ? claudeSessionId : undefined
+        newClaudeSessionId: startingClaudeSession ? claudeSessionId : undefined,
+        actions
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error during chat.';
@@ -1029,8 +1059,15 @@ Message: ${message}`;
 
   // ── Plan Execution ──
 
+  /** C4b: run a step paused on a context gap anyway — an explicit choice by the engineer, logged. */
+  public continueDespiteGaps(stepId: string): void {
+    this.gapOverrides.add(stepId);
+    this.log(`Step ${stepId} will run without the missing context (chosen by the engineer).`);
+  }
+
   public async executePlan(): Promise<void> {
     this.executionPaused = false;
+    this.state.waitingForContext = undefined;
 
     if (this.state.steps.length === 0) {
       const message = 'Generate a plan before attempting execution.';
@@ -1139,6 +1176,17 @@ Message: ${message}`;
           this.stepPacks.set(readyStep.id, pack);
           this.packListener?.(`Plan step ${readyStep.id} (${readyStep.assignedAgent})`, pack);
           for (const gap of pack.manifest.gaps) this.log(`Context gap in step ${readyStep.id}: ${gap.needed} ${gap.text} — ${gap.reason === 'absent' ? 'not known' : `only ${gap.foundTrust}`}.`);
+          // C4b: a step with a context gap pauses until the engineer answers it in the Context Inbox (or chooses to continue).
+          const blocking = pack.manifest.gaps.filter((g) => BLOCKING_GAPS.includes(g.needed));
+          if (blocking.length && !this.gapOverrides.has(readyStep.id)) {
+            readyStep.status = 'pending';
+            this.state.status = 'paused';
+            this.state.runningStepId = undefined;
+            this.state.waitingForContext = { stepId: readyStep.id, gaps: blocking };
+            this.log(`Step ${readyStep.id} paused: it needs ${blocking.map((g) => `${g.needed} (${g.text})`).join('; ')}. Answer it in the Context Inbox, then run the plan again — or continue without it.`);
+            this.emitState();
+            return;
+          }
         }
         const stepContext = pack
           ? [pack.text, this.contextProvider?.supplementary?.()].filter((p): p is string => !!p && p.trim().length > 0).join('\n\n')
@@ -1464,6 +1512,8 @@ Message: ${message}`;
       history?: LlmHistoryTurn[];
       claudeSessionId?: string;
       isNewClaudeSession?: boolean;
+      /** C4b: the tool calls the turn made, for the transcript (tool-action memory). */
+      auditSink?: ToolCallAuditEntry[];
     }
   ): Promise<string> {
     const settings = this.configManager.getSettings();
@@ -1480,7 +1530,8 @@ Message: ${message}`;
           toolExecutionMode: opts?.toolExecutionMode,
           history: opts?.history,
           claudeSessionId: opts?.claudeSessionId,
-          isNewClaudeSession: opts?.isNewClaudeSession
+          isNewClaudeSession: opts?.isNewClaudeSession,
+          auditSink: opts?.auditSink
         },
         this.buildLlmContext()
       );

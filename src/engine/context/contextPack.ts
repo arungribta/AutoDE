@@ -448,6 +448,16 @@ function renderSeeded(seeds: string[], purpose: PackPurpose, budget: number, sou
     if (fits(block)) { push(block); nodeIds.push(...queries.slice(0, 5).map((q) => q.id)); } else truncated.queries = queries.length;
   }
 
+  // ── Chat only (C4b): the facts an answer may cite, with their ids ──
+  if (purpose === 'chat') {
+    const citable = [...new Set([...extra, ...nodeIds.flatMap((id) => idx.nodes.get(id)?.supportedBy ?? [])])]
+      .map((id) => idx.assertions.get(id))
+      .filter((a): a is Assertion => !!a && !isMirror(a) && (isLive(a.status) || a.status === 'proposed'))
+      .slice(0, 15);
+    const block = ['### Facts (cite as [fact:<id>])', ...citable.map((a) => `- [${a.id}] ${a.statement} (${a.status === 'proposed' ? 'proposed, not confirmed' : a.trust})`)];
+    if (citable.length && fits(block)) { push(block); extra.push(...citable.map((a) => a.id)); }
+  }
+
   const dropped = Object.entries(truncated).filter(([, n]) => n > 0);
   if (dropped.length > 0) lines.push(`_Not shown (token budget): ${dropped.map(([k, n]) => `${n} ${k}`).join(', ')}._`);
   return { lines, nodeIds: [...new Set(nodeIds)], extraAssertions: [...new Set(extra)], truncated, warnings };

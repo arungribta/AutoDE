@@ -2,6 +2,7 @@ import { isSkillExposable } from '../engine/skills/lifecycle';
 import { computeRevision } from '../engine/context/contextStore';
 import { getPrimitiveVersion, listPrimitives } from '../engine/transforms/registry';
 import { EngineToolError } from './errors';
+import { buildChatExtractionPrompt } from '../engine/context/chatExtraction';
 import { EngineWorkspace, PROBLEM_DOCUMENTS } from './workspace';
 import { layoutRel } from '../engine/workspaceLayout';
 
@@ -32,10 +33,20 @@ export function listPrompts(ws: EngineWorkspace): PromptInfo[] {
     description: s.skill.description || `Imported skill "${s.skill.name}".`,
     arguments: [{ name: 'instruction', description: 'What this run of the skill should do.', required: false }]
   }));
-  return [...interview, ...tools];
+  // C4b: the same fact extraction AutoDE runs after each chat turn, for a client's own model (§5.2, D5).
+  const extraction = { name: 'autode_extract_assertions', title: 'AutoDE: extract facts from a message', description: 'Turn what the engineer just said into proposed facts (keys, grain, relationships, terms, metrics, rules, decisions); submit each with autode_propose_assertion.', arguments: [{ name: 'message', description: "The engineer's message.", required: true }, { name: 'previous_reply', description: 'Your previous reply, for context.', required: false }] };
+  return [...interview, ...tools, extraction];
 }
 
 export function getPrompt(ws: EngineWorkspace, name: string, args: Record<string, string> = {}): { description: string; text: string } {
+  if (name === 'autode_extract_assertions') {
+    if (!args.message?.trim()) throw new EngineToolError('VALIDATION_FAILED', 'autode_extract_assertions needs the message to extract from.');
+    const { system, user } = buildChatExtractionPrompt({ text: args.message, previousReply: args.previous_reply, source: 'chat' }, []);
+    return {
+      description: 'Extract the facts the engineer stated.',
+      text: [system, user, 'Facts already recorded: call autode_list_assertions for the subjects involved. Then submit each fact you found with autode_propose_assertion (evidence: the message). AutoDE validates, links corrections and asks a person to confirm.'].join('\n\n')
+    };
+  }
   const interviewId = /^autode_interview_(.+)$/.exec(name)?.[1];
   if (interviewId) {
     const s = ws.interviewSkills().find((x) => x.id === interviewId);

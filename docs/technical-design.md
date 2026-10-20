@@ -89,7 +89,7 @@ The product principles are in requirements.md §2. These are the implementation 
           the same server and registers it (phase 5).
 ```
 
-**Direction from v0.40.0 (PA1 shipped in v0.40.0: §7.7; the rest planned).** The portable architecture of [mcp-engine-requirements.md §3.1](mcp-engine-requirements.md) changes this picture phase by phase:
+**Direction from v0.40.0 (PA1 shipped in v0.40.0: §7.7; the rest planned).** C4b (v0.41.0, §5.14) is built on it. The portable architecture of [mcp-engine-requirements.md §3.1](mcp-engine-requirements.md) changes this picture phase by phase:
 - PA1 adds a decision store and proposal tools to the engine and the MCP server;
 - PA2 ships the engine on its own with a CLI;
 - phase 5 makes the extension a client of it;
@@ -633,6 +633,54 @@ Every parser takes an `IngestIdentity { system?, environment?, role? }` (default
 
 ---
 
+### 5.14 Facts from conversation and the Context Inbox (v0.41.0; CHT-5, CTX-10, GRD-3)
+
+**Extraction** (`src/engine/context/chatExtraction.ts`).
+- `buildChatExtractionPrompt(turn, existing)`: kinds and value shapes, plus the facts already recorded about the subjects (up to 40, compact, with ids), the previous reply as context only, and the engineer's message.
+- `parseChatExtraction(raw, turn, resolve)`: `CHAT_EXTRACTABLE` kinds, `validateAssertion()`, subjects resolved with `createSubjectResolver()` (unresolved ones kept and flagged `unresolved_subject`). Evidence is `chat_message` / `interview_answer` with the turn ref, plus `user_edit` entries for the turn's actions. Results are `proposed` / `inferred`, `createdBy: extractor:<source>`.
+- `recordChatProposals()`: dedups on kind, subject (case-insensitive), predicate and value, where key and grain columns are compared case-insensitively and in any order. It then runs `linkCorrections()`: for `SINGLE_VALUED` predicates (key/primary, grain/grain, metric/defined_as, business_term/defined_as, constraint/platform), a proposal whose kind, subject and predicate match a live or proposed fact with a different value gets `supersedes` = the most recent one. Proposals are appended with `buildAsserted()`, so nothing is retired yet.
+- `extractFromTurn()` wraps all of it and **never throws**: a model error, a garbled answer, a timeout (`timeoutMs`, default 120 s) or a ledger failure comes back in `error`. Slash commands are skipped.
+
+**Capture without the model.** `parseCaptureCommand()` handles:
+- `/define T = D` → `business_term` on `term:<slug>`, or the resolved node;
+- `/rule` → `business_rule`, `STRICT` when it says must, never, always or shall;
+- `/decide` → `decision`;
+- `/assume` → `assumption`.
+
+Each one is `proposed`, `createdBy: user:capture`, subject `project` where there is no entity.
+
+**Ledger.**
+- `AssertionLedger.confirm()` now also writes a `superseded` event for the confirmed fact's `supersedes` target when that target is still live or proposed. This is how a correction takes effect, and only once a person confirmed it.
+- `detectConflicts()` leaves out a fact that a considered proposal supersedes, so a pending correction isn't reported as a value conflict.
+- `createProbeResolver(graph)` moved from `BusinessPackManager` into `probes.ts`, shared by the extension and the MCP server.
+
+**Citations.**
+- `buildContextPack()` adds `### Facts (cite as [fact:<id>])`, listing up to 15 non-mirror live or proposed assertions from the pack, **for `purpose: 'chat'` only**, so step, QA and spec packs are unchanged.
+- `CITATION_INSTRUCTION` is appended to the chat system prompt.
+- `citedFactIds()` reads the ids back; the webview turns `[fact:<id>]` into hover chips with the fact's statement.
+
+**AgentHub.**
+- `chat()` returns `actions`, the turn's `ToolCallAuditEntry[]` through `auditSink`.
+- `foldActionEntries()` folds transcript `log` entries into the preceding assistant turn for every provider, because history turns are strictly user/assistant.
+- `executePlan()` pauses a step whose pack has a `BLOCKING_GAPS` gap (relationship, key, grain): the step goes back to `pending`, the plan to `paused`, and `PlanState.waitingForContext = { stepId, gaps }`. `continueDespiteGaps(stepId)` records the engineer's explicit override.
+
+**Extension** (`webviewProvider.ts`).
+- The `chat` case first tries `captureFact()`. After every route (discovery, revision, answer) it schedules `extractFactsFromTurn()` without awaiting it. That uses `hub.completeJson()`, logs dropped items to the console, auto-verifies probeable proposals when `liveProbes` is set and `readOnlyMode` is on (§5.3), re-projects the graph and refreshes the Inbox.
+- `describeActions()` turns the audit into `wrote <path>` and `ran <command>` lines, which are appended to the transcript as a `log` message and shown under the reply.
+- **Inbox** (`inboxState()`): proposed and needs-review non-mirror facts (with stakes, the superseded fact's statement, verification and evidence), `detectConflicts()`, `waitingForContext` and `live`. Actions:
+  - `reviewFact`: confirm, reject, or edit = `ledger.supersede()` with the edited statement and value (JSON), confirmed. An edited correction also retires its target.
+  - `verifyFact`: `verifyAssertions()` with `liveProbes`.
+  - `bulkConfirmFacts`: only `documented` proposals with one `createdBy`.
+  - `continueDespiteGaps`.
+
+  The PA1 Decisions section became the Context Inbox (`renderDecisions()` with `inboxState`).
+
+**MCP** (`src/mcp/decisions.ts`, `catalogs.ts`).
+- `autode_propose_assertion` now validates, resolves subjects against the workspace graph, and records through `recordChatProposals()` (dedup and correction linking). It is `createdBy: mcp:<client>[:skill:<s>][:model:<m>]` and returns the assertion, its stakes, and `corrects`. No decision file is written.
+- `autode_review_assertion` confirms or rejects a **proposed, low-stakes** fact (`stakesFor('assertion', a)`); anything else is `PERMISSION_DENIED`.
+- `autode_verify_assertion` builds a `createSqlProbeExecutor()` on the named connection (its dialect from the platform) with `createProbeResolver()`, and records the outcome.
+- `autode_extract_assertions` (prompt) is the extraction prompt plus instructions to read existing facts with `autode_list_assertions` and submit with `autode_propose_assertion`.
+
 ## 6. Data Platforms
 
 ### 6.1 Design Rationale
@@ -1123,6 +1171,8 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
 
 ### 7.7 Decisions and proposals (v0.40.0; ORC-8, MCP-2)
 
+*Since v0.41.0 facts no longer become decisions: they use the ledger's gate (§5.14); the `assertion` kind remains for decisions recorded before.*
+
 **Store** (`src/engine/decisions/decisionStore.ts`). `LAYOUT.decisions` = `.autode/decisions/` (committed).
 - Each decision is `<id>.yaml` (`dec-<ULID>`), with its proposal in `<id>.proposal.json`.
 - The YAML holds `{ kind, title, summary, stakes, status, problemId, subject { document, revision | connectionId }, proposedBy { host, client, skill, model }, evidence, validation { ok, errors, warnings, checks }, allowedChannels, resolution { decision, by, note }, events[] }` under a header comment that explains the file channel.
@@ -1604,7 +1654,7 @@ src/editors/    # custom editors
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
-  assertions.ts, assertionSchemas.ts, catalog.ts, conflicts.ts, conformance.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, fileIngestion.ts, ledger.ts, pack.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
+  assertions.ts, assertionSchemas.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, fileIngestion.ts, ledger.ts, pack.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/decisions/
   decisionStore.ts, proposals.ts
 src/engine/documents/

@@ -1,5 +1,7 @@
 import { Assertion, Verification } from './assertions';
 import { AssertionLedger } from './ledger';
+import { BaseNode, GraphEdge, TableNode } from './types';
+import { createSubjectResolver } from './projection';
 
 /**
  * Verification probes (Phase C4a, item 8; docs/context-layer-requirements.md
@@ -256,6 +258,22 @@ export function parseSampleCsv(content: string): Array<Record<string, string>> {
 
 /** Resolves a graph id (table or column) to the table it belongs to, as a probe target. */
 export type ProbeResolver = (id: string) => { table: ProbeTable; column?: string } | undefined;
+
+/** Resolves graph table and column ids (or names) to probe targets — shared by the extension and the MCP server. */
+export function createProbeResolver(g: { nodes: readonly BaseNode[]; edges: readonly GraphEdge[] }): ProbeResolver {
+  const byId = new Map(g.nodes.map((n) => [n.id, n] as const));
+  const tableOf = new Map<string, string>();
+  for (const e of g.edges) if (e.type === 'contains') tableOf.set(e.target, e.source);
+  const resolveRef = createSubjectResolver(g as Parameters<typeof createSubjectResolver>[0]);
+  return (ref) => {
+    const id = byId.has(ref) ? ref : resolveRef(ref);
+    const n = id ? byId.get(id) : undefined;
+    if (!n) return undefined;
+    if (n.type === 'table' || n.type === 'semantic_view') return { table: { fqn: (n as TableNode).fqn || n.label, id: n.id } };
+    const t = n.type === 'column' ? byId.get(tableOf.get(n.id) ?? '') : undefined;
+    return t ? { table: { fqn: (t as TableNode).fqn || t.label, id: t.id }, column: n.label } : undefined;
+  };
+}
 
 /** The probes that test an assertion (§5.3 table). Assertions about non-physical subjects get none. */
 export function probesFor(a: Assertion, resolve: ProbeResolver): ProbeSpec[] {

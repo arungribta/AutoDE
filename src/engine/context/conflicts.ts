@@ -70,7 +70,9 @@ function valueKey(a: Assertion): string {
 }
 
 export function detectConflicts(assertions: readonly Assertion[]): Conflict[] {
-  const considered = assertions.filter((a) => CONSIDERED.has(a.status));
+  // A pending correction and the fact it would replace are a correction, not a conflict (C4b).
+  const replaced = new Set(assertions.filter((a) => CONSIDERED.has(a.status) && a.supersedes).map((a) => a.supersedes as string));
+  const considered = assertions.filter((a) => CONSIDERED.has(a.status) && !replaced.has(a.id));
   const conflicts: Conflict[] = [];
 
   // 1. definitions by business name

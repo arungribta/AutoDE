@@ -215,7 +215,13 @@ When you allow sample data, values in columns that look like personal data (`ema
 
 ## Proposing changes
 
-Nothing an agent does through the server changes AutoDE's state or a data platform directly. Instead:
+**Facts** (since 0.41.0). `autode_propose_assertion` records a fact as *proposed* in AutoDE's knowledge, with its evidence. A proposed fact is visible to conflict detection and context gaps, but nothing relies on it until it is confirmed. If it corrects an earlier fact (same kind, subject and predicate, different value), it replaces that fact once confirmed.
+- Glossary terms, naming conventions and assumptions are low stakes: the agent may confirm or reject them with `autode_review_assertion` after asking you.
+- Every other fact is confirmed by a person in the AutoDE **Context Inbox**.
+
+`autode_verify_assertion` checks a key, grain, relationship or data expectation against a connection with a read-only, aggregate-only probe, and records the result. The `autode_extract_assertions` prompt turns a message into proposed facts with your client's own model.
+
+**Other changes.** Nothing an agent does through the server changes AutoDE's state or a data platform directly. Instead:
 
 1. The agent calls an `autode_propose_*` tool.
 2. The server validates the proposal and records a **decision** in `.autode/decisions/<id>.yaml` (committed with the project).
@@ -226,7 +232,6 @@ Validation errors come back item by item, so the agent can fix the proposal and 
 
 | Proposal tool | What it proposes | Stakes |
 |---|---|---|
-| `autode_propose_assertion` | A fact for AutoDE's context, with evidence | Low for glossary terms, naming conventions and assumptions; high for keys, grain, relationships, rules, metrics and the rest |
 | `autode_propose_spec_change` | A revised Business Problem Specification; approved, it becomes the new draft | High |
 | `autode_propose_pipeline_spec` | A Pipeline Spec; approved, it becomes the new draft | High |
 | `autode_propose_mapping` | One source-to-target mapping; source columns are checked against the estate | High |
@@ -235,7 +240,7 @@ Validation errors come back item by item, so the agent can fix the proposal and 
 **Who may resolve a decision:**
 - **Low stakes:** the agent, with `autode_resolve_decision`, after asking you. The tool is marked destructive, so your client confirms first.
 - **High stakes:** only a person:
-  - in the AutoDE panel (**Workflow Palette → Decisions**), or
+  - in the AutoDE panel (**Workflow Palette → Context Inbox**), or
   - in the decision file: set `resolution.decision` to `approved` or `rejected`, fill in `resolution.by`, and commit. AutoDE picks it up when the file changes, or the next time an MCP client lists decisions.
 
   The `autode` CLI joins these channels in a later release.
@@ -267,13 +272,16 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_extract_metadata` | Read a schema's tables, columns, keys and views, and optionally sampled column profiles. |
 | `autode_explain_sql` | Dry-run a statement: the platform compiles it and returns the plan without running it. |
 | `autode_execute_query` | Run one read-only statement, with at most 10 000 rows (100 by default). |
-| `autode_propose_assertion`, `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`, `autode_propose_platform_change` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
+| `autode_propose_assertion` | Propose a fact; a person confirms it in the Context Inbox, or you confirm a low-stakes one with `autode_review_assertion` after asking ([Proposing changes](#proposing-changes)). |
+| `autode_review_assertion` / `autode_verify_assertion` | Confirm or reject a low-stakes fact; verify a fact against data. |
+| `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`, `autode_propose_platform_change` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
 | `autode_list_decisions` / `autode_get_decision` | See decisions, their proposals, validation and history. |
 | `autode_resolve_decision` | Approve or reject a low-stakes decision after asking the user. |
 | `autode_apply_decision` | Run an approved platform change (server started with `--allow-write`). |
 
 **Prompts**
 - `autode_interview_<part>`: AutoDE's requirements interview, one prompt per part.
+- `autode_extract_assertions`: extract the facts in a message (submit them with `autode_propose_assertion`).
 - `autode_skill_<id>`: an imported tool skill, listed only if it has been reviewed or trusted in AutoDE (**AutoDE: Review Tool Skill**).
 
 **Resources**

@@ -6713,14 +6713,14 @@ async function main() {
       const tools = (await client.listTools()).tools;
       const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_resolve_decision', 'autode_apply_decision'].sort());
-      // PA1: reads are read-only; proposals only create a pending decision; resolving and applying are destructive (the host asks first).
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : proposalTools.includes(t.name) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || t.name === 'autode_verify_assertion') ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
-      assert.ok(prompts.includes('autode_interview_data-flow') && prompts.includes('autode_interview_requirements-discovery'), prompts.join());
+      assert.ok(prompts.includes('autode_interview_data-flow') && prompts.includes('autode_interview_requirements-discovery') && prompts.includes('autode_extract_assertions'), prompts.join());
       assert.deepStrictEqual(prompts.filter((p) => p.startsWith('autode_skill_')), ['autode_skill_reviewed-one'], 'unreviewed and unmigrated pre-S2 skills are not exposed');
       const uris = (await client.listResources()).resources.map((r) => r.uri);
       for (const u of ['autode://spec/business-problem', 'autode://spec/pipeline', 'autode://context/semantic-layer', 'autode://primitives/dedup']) assert.ok(uris.includes(u), u);
@@ -6761,7 +6761,9 @@ async function main() {
       autode_list_decisions: [{ status: 'pending' }, { status: 'maybe' }],
       autode_get_decision: [{ id: 'dec-x' }, {}],
       autode_resolve_decision: [{ id: 'dec-x', decision: 'approved', by: 'me' }, { id: 'dec-x', decision: 'perhaps', by: 'me' }],
-      autode_apply_decision: [{ id: 'dec-x' }, { id: '' }]
+      autode_apply_decision: [{ id: 'dec-x' }, { id: '' }],
+      autode_review_assertion: [{ id: 'x', action: 'confirm', by: 'me' }, { id: 'x', action: 'approve', by: 'me' }],
+      autode_verify_assertion: [{ id: 'x', connectionId: 'snowflake:prod' }, { id: 'x' }]
     };
     const f = await mcpWorkspace();
     const client = await mcpSession(f.ws);
@@ -8018,27 +8020,157 @@ async function main() {
     } finally { f.done(); }
   });
 
-  await test('v0.40.0: a low-stakes fact may be accepted through the agent; it enters the ledger as confirmed, attributed to its decision', async () => {
+  await test('v0.41.0: facts from agents go through the ledger gate — proposed (seen by conflicts), confirmed by a person, or by the agent for low stakes only', async () => {
     const f = await mcpWorkspace();
     const client = await mcpSession(f.ws);
     const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
     try {
       const fact = { kind: 'business_term', subject: ['obj:shop/prod/shop.orders'], predicate: 'defined_as', value: { term: 'Order', definition: 'A customer purchase' }, statement: 'An order is a customer purchase.', evidence: [{ type: 'file', ref: 'docs/glossary.md#order' }] };
-      const p = await call('autode_propose_assertion', { assertion: fact });
-      assert.deepStrictEqual([p.decision.stakes, p.decision.allowedChannels.includes('tool')], ['low', true], JSON.stringify(p));
-      const key = await call('autode_propose_assertion', { assertion: { ...fact, kind: 'key', predicate: 'unique', value: ['order_id'], statement: 'order_id is unique.' } });
-      assert.strictEqual(key.decision.stakes, 'high', 'a key changes joins: a person decides');
-      const r = await call('autode_resolve_decision', { id: p.decision.id, decision: 'approved', by: 'priya', note: 'checked the glossary' });
-      assert.ok(r.applied === true, JSON.stringify(r));
-      const listed = await call('autode_list_assertions', { kind: 'business_term' });
-      const a = listed.assertions.find((x) => x.statement === 'An order is a customer purchase.');
-      assert.ok(a && a.trust === 'confirmed' && a.status === 'active' && !a.specId, JSON.stringify(listed));
+      const p = await call('autode_propose_assertion', { assertion: fact, skill: 'glossary' });
+      assert.deepStrictEqual([p.stakes, p.assertion.status, p.assertion.trust], ['low', 'proposed', 'inferred'], JSON.stringify(p));
+      assert.strictEqual((await call('autode_propose_assertion', { assertion: fact })).duplicate, true, 'the same fact twice adds nothing');
+      const key = await call('autode_propose_assertion', { assertion: { ...fact, kind: 'key', predicate: 'primary', value: ['order_id'], statement: 'order_id is the key of orders.' } });
+      assert.strictEqual(key.stakes, 'high');
+      assert.strictEqual((await call('autode_review_assertion', { id: key.assertion.id, action: 'confirm', by: 'agent' })).code, 'PERMISSION_DENIED', 'a key changes joins: a person decides');
+      const r = await call('autode_review_assertion', { id: p.assertion.id, action: 'confirm', by: 'priya' });
+      assert.deepStrictEqual([r.assertion.status, r.assertion.trust], ['active', 'confirmed']);
       const nodeFs = require('node:fs'); const nodePath = require('node:path');
       const ledgerDir = nodePath.join(f.ws, '.autode', 'knowledge', 'ledger');
       const events = nodeFs.readdirSync(ledgerDir).filter((n) => n.endsWith('.jsonl')).flatMap((n) => nodeFs.readFileSync(nodePath.join(ledgerDir, n), 'utf8').split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l)));
-      const asserted = events.find((e) => e.type === 'asserted' && e.assertion.statement === 'An order is a customer purchase.');
-      assert.deepStrictEqual([asserted.assertion.createdBy, asserted.causedBy], [`decision:${p.decision.id}`, p.decision.id], 'attributed to its decision');
+      assert.strictEqual(events.find((e) => e.type === 'asserted' && e.assertion.statement === fact.statement).assertion.createdBy, 'mcp:autode-tests:skill:glossary');
+      assert.strictEqual(events.find((e) => e.type === 'confirmed' && e.assertionId === p.assertion.id).actor, 'user:priya');
+      assert.ok(!nodeFs.existsSync(nodePath.join(f.ws, '.autode', 'decisions')), 'no decision files for facts');
+      const prompt = await client.getPrompt({ name: 'autode_extract_assertions', arguments: { message: 'orders are keyed by order_id' } });
+      assert.ok(/orders are keyed by order_id/.test(prompt.messages[0].content.text) && /autode_propose_assertion/.test(prompt.messages[0].content.text));
     } finally { await client.close(); f.done(); }
+  });
+
+  // ── v0.41.0: C4b — facts from conversation, Context Inbox, tool-action memory ──
+
+  async function c4bLedger() {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-c4b-'));
+    const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+    const ledger = new AssertionLedger(dir);
+    await ledger.load();
+    return { ledger, done: () => nodeFs.rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  await test('v0.41.0: extraction output is validated and resolved; a later value for the same key is linked as a correction and retires the old fact only when confirmed', async () => {
+    const X = fresh('../dist/engine/context/chatExtraction.js');
+    const { detectConflicts } = fresh('../dist/engine/context/conflicts.js');
+    const env = await c4bLedger();
+    try {
+      const resolve = (r) => ({ 'crm.customers': 'obj:crm/prod/crm.customers' }[r.toLowerCase()]);
+      const turn = (ref, text) => ({ ref, text, source: 'chat' });
+      const t5 = X.parseChatExtraction({ facts: [
+        { kind: 'key', subject: ['crm.customers'], predicate: 'primary', value: ['customer_id'], statement: 'The customer key is customer_id.' },
+        { kind: 'key', subject: ['crm.customers'], predicate: 'primary', value: 'customer_id', statement: 'bad value' },
+        { kind: 'schema_fact', subject: ['x'], predicate: 'p', value: {}, statement: 'not extractable from chat' },
+        { kind: 'business_term', subject: ['Churn'], predicate: 'defined_as', value: { term: 'Churn', definition: 'No order in 90 days' }, statement: 'Churn means no order in 90 days.' }
+      ] }, turn('chat:c#5', 'The customer key across both systems is customer_id.'), resolve);
+      assert.deepStrictEqual(t5.proposed.map((a) => [a.subject[0], a.status, a.trust, a.flags || []]), [['obj:crm/prod/crm.customers', 'proposed', 'inferred', []], ['Churn', 'proposed', 'inferred', ['unresolved_subject']]]);
+      assert.strictEqual(t5.dropped.length, 2);
+      const first = await X.recordChatProposals(env.ledger, t5);
+      assert.strictEqual(first.recorded.length, 2);
+      const old = first.recorded[0];
+      const t6 = X.parseChatExtraction({ facts: [{ kind: 'key', subject: ['crm.customers'], predicate: 'primary', value: ['cust_no'], statement: 'In the CRM the customer key is cust_no.' }] }, turn('chat:c#6', 'Correction — in the CRM the customer key is cust_no, not customer_id.'), resolve);
+      const second = await X.recordChatProposals(env.ledger, t6);
+      assert.deepStrictEqual(second.corrections.map((c) => c.supersedes), [old.id]);
+      const corr = second.recorded[0];
+      assert.strictEqual(env.ledger.get(old.id).status, 'proposed', 'nothing retired while the correction is only proposed');
+      assert.deepStrictEqual(detectConflicts(env.ledger.assertions()).filter((c) => c.rule === 'value'), [], 'a pending correction is not a conflict');
+      await env.ledger.confirm(corr.id, 'user:priya');
+      assert.deepStrictEqual([env.ledger.get(corr.id).status, env.ledger.get(old.id).status, env.ledger.get(old.id).supersededBy], ['active', 'superseded', corr.id]);
+      const again = await X.recordChatProposals(env.ledger, X.parseChatExtraction({ facts: [{ kind: 'key', subject: ['crm.customers'], predicate: 'primary', value: ['CUST_NO'], statement: 'same' }] }, turn('chat:c#7', 'x'), resolve));
+      assert.deepStrictEqual([again.recorded.length], [0], 'equal fact (case-insensitive key columns) is a duplicate');
+    } finally { env.done(); }
+  });
+
+  await test('v0.41.0: extraction never blocks or fails a chat turn — a failing, garbled or silent model is reported, not thrown', async () => {
+    const X = fresh('../dist/engine/context/chatExtraction.js');
+    const env = await c4bLedger();
+    try {
+      const turn = { ref: 'chat:c#1', text: 'orders are keyed by order_id', source: 'chat' };
+      const resolve = () => undefined;
+      const failing = await X.extractFromTurn({ turn, ledger: env.ledger, resolve, complete: async () => { throw new Error('LLM request failed: no consent'); } });
+      assert.ok(/no consent/.test(failing.error) && failing.recorded.length === 0);
+      const garbled = await X.extractFromTurn({ turn, ledger: env.ledger, resolve, complete: async () => 'not json at all' });
+      assert.ok(!garbled.error && garbled.recorded.length === 0 && garbled.dropped.length === 1);
+      const silent = await X.extractFromTurn({ turn, ledger: env.ledger, resolve, complete: () => new Promise(() => {}), timeoutMs: 30 });
+      assert.ok(/no answer within/.test(silent.error));
+      const brokenLedger = { assertions: () => { throw new Error('disk full'); } };
+      assert.ok(/disk full/.test((await X.extractFromTurn({ turn, ledger: brokenLedger, resolve, complete: async () => ({ facts: [] }) })).error));
+      const skipped = await X.extractFromTurn({ turn: { ...turn, text: '/plan go' }, ledger: env.ledger, resolve, complete: async () => { throw new Error('must not be called'); } });
+      assert.ok(!skipped.error, 'slash commands are not extracted');
+    } finally { env.done(); }
+  });
+
+  await test('v0.41.0: /define, /rule, /decide and /assume capture facts without the model', () => {
+    const X = fresh('../dist/engine/context/chatExtraction.js');
+    const d = X.parseCaptureCommand('/define Active customer = ordered in the last 90 days', 'chat:c#2');
+    assert.deepStrictEqual([d.kind, d.subject[0], d.value, d.status, d.createdBy], ['business_term', 'term:active_customer', { term: 'Active customer', definition: 'ordered in the last 90 days' }, 'proposed', 'user:capture']);
+    assert.deepStrictEqual([X.parseCaptureCommand('/rule PII must never reach the marts', 'r').kind, X.parseCaptureCommand('/rule PII must never reach the marts', 'r').value.level], ['business_rule', 'STRICT']);
+    assert.strictEqual(X.parseCaptureCommand('/decide Use SCD2 for customers', 'r').kind, 'decision');
+    assert.strictEqual(X.parseCaptureCommand('/assume Refunds arrive within 30 days', 'r').kind, 'assumption');
+    assert.ok(/Usage/.test(X.parseCaptureCommand('/define nothing here', 'r').error));
+    assert.strictEqual(X.parseCaptureCommand('/plan something', 'r'), undefined);
+    const { validateAssertion } = fresh('../dist/engine/context/assertionSchemas.js');
+    for (const c of ['/define A = b', '/rule x', '/decide y', '/assume z']) assert.deepStrictEqual(validateAssertion(X.parseCaptureCommand(c, 'r')), [], c);
+  });
+
+  await test('v0.41.0: chat answers cite the facts they rest on — chat packs list fact ids; citations are read back; action entries fold into history', async () => {
+    const X = fresh('../dist/engine/context/chatExtraction.js');
+    const { buildContextPack } = fresh('../dist/engine/context/contextPack.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      const T = (n) => c3.graph().nodes.find((x) => x.fqn === n || x.label === n)?.id ?? n;
+      const key = await env.ledger.assert({ kind: 'key', subject: [T('shop.orders')], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key of shop.orders', evidence: [{ type: 'chat_message', ref: 'chat#t3' }], status: 'active', trust: 'confirmed' });
+      const chat = buildContextPack({ purpose: 'chat', query: 'what is the key of shop.orders' }, c3.sources(env.ledger, env.project()));
+      assert.ok(chat.text.includes('### Facts (cite as [fact:<id>])') && chat.text.includes(`[${key.id}] order_id is the key of shop.orders`), chat.text);
+      const step = buildContextPack({ purpose: 'step', query: 'what is the key of shop.orders' }, c3.sources(env.ledger, env.project()));
+      assert.ok(!step.text.includes('cite as'), 'only chat packs carry the citation list');
+    } finally { env.cleanup(); }
+    assert.deepStrictEqual(X.citedFactIds('Yes [fact:01ARZ3NDEKTSV4RRFFQ69G5FAV] and again [fact:01ARZ3NDEKTSV4RRFFQ69G5FAV], [fact:bogus].'), ['01ARZ3NDEKTSV4RRFFQ69G5FAV']);
+    assert.ok(/\[fact:<id>\]/.test(X.CITATION_INSTRUCTION));
+    const mock = createMock();
+    const { foldActionEntries } = withMock(mock, () => fresh('../dist/core/agentHub.js'));
+    assert.deepStrictEqual(foldActionEntries([{ role: 'user', content: 'write it', at: 't' }, { role: 'ai', content: 'Done.', at: 't' }, { role: 'log', content: 'wrote spec.md', at: 't' }, { role: 'user', content: 'next', at: 't' }]).map((m) => [m.role, m.content]),
+      [['user', 'write it'], ['ai', 'Done.\n\n[Actions taken] wrote spec.md'], ['user', 'next']]);
+    const { describeActions } = withMock(mock, () => fresh('../dist/core/webviewProvider.js'));
+    assert.deepStrictEqual(describeActions([{ tool: 'autode_write_file', input: { path: 'a.sql' }, outcome: 'approved' }, { tool: 'autode_read_file', input: { path: 'b' }, outcome: 'ok' }, { tool: 'autode_run_command', input: { command: 'dbt run' }, outcome: 'denied' }]), ['wrote a.sql']);
+  });
+
+  await test('v0.41.0: a plan step with a context gap pauses until the gap is answered or the engineer continues without it', async () => {
+    const { hub } = hubForPlanResponse('# Architecture\n\nTickets per order.');
+    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      hub.setContextProvider({
+        buildPack: (req) => {
+          const p = buildContextPack(req, c3.sources(env.ledger, env.project()));
+          if (req.stepId === 's2') p.manifest.gaps = [{ needed: 'relationship', subject: ['crm.support_tickets', 'shop.orders'], text: 'support tickets ↔ orders', reason: 'absent', minTrust: 'confirmed', stepId: 's2' }];
+          return p;
+        },
+        sources: () => c3.sources(env.ledger, env.project()), supplementary: () => '', specRevision: () => 'sha256:spec'
+      });
+      hub.loadPersistedPlan({ id: 'p', version: 1, objective: 'tickets', schemaContext: '', steps: [
+        { id: 's1', assignedAgent: 'architectureAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
+        { id: 's2', assignedAgent: 'architectureAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
+      ], status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1 });
+      await hub.executePlan();
+      let st = hub.getPlan();
+      assert.deepStrictEqual([st.status, st.steps.map((x) => x.status), st.waitingForContext.stepId, st.waitingForContext.gaps[0].needed], ['paused', ['completed', 'pending'], 's2', 'relationship']);
+      hub.continueDespiteGaps('s2');
+      await hub.executePlan();
+      st = hub.getPlan();
+      assert.deepStrictEqual([st.steps.map((x) => x.status), st.waitingForContext], [['completed', 'completed'], undefined]);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.41.0: the panel has the Context Inbox (facts, conflicts, paused steps, changes) and citation chips', () => {
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    for (const t of ["case 'inboxState'", "post('reviewFact'", "post('verifyFact'", "post('bulkConfirmFacts'", "post('continueDespiteGaps'", 'Context Inbox', 'fact-chip', "case '/define'"]) assert.ok(html.includes(t), t);
   });
 
   await test('v0.40.0: the managers and the engine share one serialisation — a document written by either reads back the same', () => {

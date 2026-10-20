@@ -6,6 +6,39 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.41.0
+
+- **Phase C4b: facts from conversation, the Context Inbox, and tool-action memory** (`docs/context-layer-requirements.md` §5.2–5.4, §7.2, §11; requirements CHT-5, CTX-10, GRD-3, CTX-1; technical-design §5.14; usage: `docs/mcp-setup.md`).
+- **Facts from what the engineer says.** After each chat and interview turn, the configured assistant proposes the facts the turn states: keys, grain, relationships, terms, metrics, rules, decisions, assumptions and platform constraints.
+  - This runs **in the background and never slows down or fails the turn**. A model error, a garbled answer, a timeout or a ledger problem is logged and nothing else happens; a test injects each fault.
+  - Proposals are validated, their subjects resolved against the estate (unresolved ones flagged, never dropped), and duplicates skipped.
+  - **A correction is linked deterministically:** a later, different value for the same key, grain, metric, term definition or platform supersedes the earlier fact. The earlier fact is retired only when the correction is confirmed, and a pending correction is not reported as a conflict.
+  - **Explicit capture without the model:** `/define <term> = <definition>`, `/rule`, `/decide`, `/assume`.
+- **Context Inbox** (the Workflow Palette section that PA1 called Decisions):
+  - facts to review, grouped by subject, with stakes, evidence, the fact a correction replaces, and verification results;
+  - conflicts;
+  - a plan step paused for missing context;
+  - PA1's changes to approve.
+
+  Actions: **Confirm**, **Edit & confirm** (statement and value; supersedes), **Reject**, **Verify now** (probes on the live source connection), and **Confirm all** for documented facts from one source. With a live connection and read-only mode on, proposed keys, grain and relationships are probed automatically.
+- **Plan steps pause on missing context.** A step whose context lacks a confirmed join, key or grain pauses until the engineer states it (and confirms it) or chooses "Continue without it". The choice is logged.
+- **Answers cite their facts.** Chat context lists the facts it holds with ids, the assistant is asked to cite them as `[fact:<id>]`, and the panel shows them as chips whose hover text is the fact.
+- **Tool-action memory.** What the assistant did in a turn (files written, commands run) is shown under the reply, kept in the transcript, and part of later turns' history (folded into the assistant turn). It is also recorded as evidence on facts extracted from that turn.
+- **MCP:**
+  - `autode_propose_assertion` now records a *proposed* fact in the ledger instead of a decision file, attributed to the client (and skill and model when given). It dedups, links corrections and returns the stakes.
+  - New `autode_review_assertion` lets an agent confirm or reject a low-stakes fact only (glossary terms, naming conventions, assumptions); other facts are refused and go to the Inbox.
+  - New `autode_verify_assertion` runs the probe for a fact on a named connection.
+  - New prompt `autode_extract_assertions` gives other hosts the same extraction with their own model.
+- **Eval:** offline, the stand-in now plays only the model's part (each turn's scripted facts as the extractor's JSON, outcomes withheld). Validation, resolution, dedup and correction linking are the engine's own work, and the engineer's Inbox confirmation is simulated per turn. **Trap 2 (customer key corrected mid-chat) is now detected: traps 5/5** (4/5 before). Answerability from the context layer rose to 18/26 (16/26), partly because simulated confirmation makes chat facts confirmed. New baseline `baselines/v0.41.0-offline.md`.
+- **Deviations / notes:**
+  - **Facts use the ledger's gate, not PA1's decision files** (decision log 2026-10-20). This changes what PA1 shipped two days earlier for `autode_propose_assertion`. Decisions remain the gate for documents, mappings and platform changes.
+  - **The ≥ 90% extraction criterion was not measured automatically.** The eval runs outside VS Code and can't use Copilot, and recording with a billed API key was declined. It is checked by hand with the user's own assistant (manual-verification Part 18.1). A recorder that uses the host's model is in the roadmap backlog.
+  - **The extractor prompt is engine code, not a `skills/` prompt pack:** governed by review now, and it becomes part of an AutoDE skill in PA3. Over MCP it's the `autode_extract_assertions` prompt.
+  - **Duplicates add nothing**, because the ledger has no "evidence added" event; the spec said they add evidence to the existing fact.
+  - **Not done here:** an interview that survives a window reload (BPS-7) stays in the backlog.
+  - Steps pause only on join, key and grain gaps (principle C3), not on structure or decision gaps.
+- **Measured:** `npm run eval`: traps 5/5, contract violations 4/4 with none false, answerability 18/26, vocabulary 17/21 and 19/21 with captured vocabulary, large estate 8/8, longest synchronous task 48 ms, plan-step context 529 tokens median (unchanged; only chat packs gained the fact list). 327 tests (6 new; the PA1 fact test was rewritten for the ledger gate; MCP tool-list and input-schema tests updated).
+
 ## 0.40.0
 
 - **Phase PA1: decisions and proposal tools**, the first phase of the portable architecture (`docs/mcp-engine-requirements.md` §3.1, §9.2; requirements ORC-8, MCP-2, P9; technical-design §7.7; usage: `docs/mcp-setup.md`, *Proposing changes*).

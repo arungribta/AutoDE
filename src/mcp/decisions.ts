@@ -2,6 +2,13 @@ import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
 import { Decision, DecisionError, DecisionStore } from '../engine/decisions/decisionStore';
 import { ProposalContext, ProposalKind, ProposalValidationError, applyDecision, processResolved, propose } from '../engine/decisions/proposals';
 import { EngineTool } from './tools';
+import { AssertionLedger, NewAssertion } from '../engine/context/ledger';
+import { createSubjectResolver, isMirror } from '../engine/context/projection';
+import { recordChatProposals } from '../engine/context/chatExtraction';
+import { createProbeResolver, createSqlProbeExecutor, verifyAssertions, ProbeDialect } from '../engine/context/probes';
+import { stakesFor } from '../engine/decisions/decisionStore';
+import { validateAssertionProposal } from '../engine/decisions/proposals';
+import { layoutPath } from '../engine/workspaceLayout';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
 import { PlatformSession } from './platform';
@@ -85,9 +92,39 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
   });
 
   return [
-    proposalTool('autode_propose_assertion', 'assertion', 'Propose a fact',
-      'Propose a fact for AutoDE\'s context (a business term, key, grain, relationship, rule, metric …), with evidence. Glossary terms, naming conventions and assumptions are low stakes; anything that changes joins, keys, grain, rules or metrics needs a person.',
-      'assertion', { type: 'object', required: ['kind', 'subject', 'predicate', 'statement', 'evidence'], properties: { kind: { type: 'string' }, subject: { type: 'array', items: { type: 'string' }, minItems: 1 }, predicate: { type: 'string' }, value: {}, statement: { type: 'string' }, evidence: { type: 'array', minItems: 1, items: { type: 'object', required: ['type', 'ref'], properties: { type: { type: 'string' }, ref: { type: 'string' }, quote: { type: 'string' } } } }, specId: { type: 'string' } } }),
+    {
+      // C4b: facts go through the ledger's own gate (proposed → confirmed by a person), not a decision file.
+      name: 'autode_propose_assertion',
+      description: 'Propose a fact for AutoDE\'s context (a business term, key, grain, relationship, rule, metric …), with evidence. It is recorded as proposed — seen by conflict detection and context gaps, used by nothing until confirmed. Glossary terms, naming conventions and assumptions are low stakes (autode_review_assertion after asking the user); anything that changes joins, keys, grain, rules or metrics is confirmed by a person in the AutoDE Context Inbox. A fact that corrects an earlier one (same kind, subject and predicate) replaces it once confirmed.',
+      inputSchema: { type: 'object', required: ['assertion'], additionalProperties: false, properties: {
+        assertion: { type: 'object', required: ['kind', 'subject', 'predicate', 'statement', 'evidence'], properties: { kind: { type: 'string' }, subject: { type: 'array', items: { type: 'string' }, minItems: 1 }, predicate: { type: 'string' }, value: {}, statement: { type: 'string' }, evidence: { type: 'array', minItems: 1, items: { type: 'object', required: ['type', 'ref'], properties: { type: { type: 'string' }, ref: { type: 'string' }, excerpt: { type: 'string' } } } }, specId: { type: 'string' } } },
+        skill: { type: 'string', description: 'The skill that produced the proposal, if any.' },
+        model: { type: 'string', description: 'The model that produced it, if you know it.' }
+      } },
+      annotations: { title: 'Propose a fact', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (args, ws) => {
+        const p = args.assertion as NewAssertion;
+        const report = validateAssertionProposal(p);
+        if (!report.ok) throw new EngineToolError('VALIDATION_FAILED', `The fact did not pass validation: ${report.errors.join('; ')}`, { errors: report.errors, checked: report.checks });
+        const src = await ws.contextSources();
+        const resolve = createSubjectResolver(src.graph as Parameters<typeof createSubjectResolver>[0]);
+        const refs = p.subject.map((x) => String(x));
+        const unresolved = refs.filter((r) => !resolve(r));
+        const by = [options.clientName(), args.skill ? `skill:${String(args.skill)}` : '', args.model ? `model:${String(args.model)}` : ''].filter(Boolean).join(':');
+        const ledger = new AssertionLedger(layoutPath(ws.options.workspaceRoot, 'ledger'));
+        await ledger.load();
+        const outcome = { proposed: [{ kind: p.kind, subject: refs.map((r) => resolve(r) ?? r), predicate: p.predicate, value: p.value ?? {}, statement: p.statement, evidence: p.evidence, specId: p.specId, trust: 'inferred' as const, status: 'proposed' as const, createdBy: `mcp:${by || 'client'}`, ...(unresolved.length ? { flags: ['unresolved_subject'] } : {}) }], dropped: [], duplicates: [] as string[] };
+        const { recorded, corrections } = await recordChatProposals(ledger, outcome);
+        if (!recorded.length) return { duplicate: true, message: 'AutoDE already holds this fact (same kind, subject, predicate and value); nothing was added.' };
+        const a = recorded[0];
+        const stakes = stakesFor('assertion', a);
+        return {
+          assertion: { id: a.id, kind: a.kind, subject: a.subject, predicate: a.predicate, statement: a.statement, status: a.status, trust: a.trust, flags: a.flags, supersedes: a.supersedes },
+          stakes, corrects: corrections[0]?.supersedes,
+          next: stakes === 'low' ? 'Ask the user, then confirm or reject it with autode_review_assertion — or leave it for the AutoDE Context Inbox.' : 'A person confirms it in the AutoDE Context Inbox. Tell the user.'
+        };
+      }
+    },
     proposalTool('autode_propose_spec_change', 'spec_revision', 'Propose a specification revision',
       'Propose a revised Business Problem Specification for the active problem (the full document, as the autode://spec/business-problem resource reads). Approved, it becomes the new draft; the specification is then approved in AutoDE as usual.',
       'spec', { type: 'object', required: ['problemStatement', 'objectives', 'scope'] }),
@@ -100,6 +137,45 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
     proposalTool('autode_propose_platform_change', 'platform_change', 'Propose a platform change',
       'Propose one statement that changes data or objects on a connection (DDL, DML, GRANT …), with the reason. autode_execute_query never runs writes; an approved change runs through autode_apply_decision on a server started with --allow-write.',
       'change', { type: 'object', required: ['connectionId', 'sql', 'reason'], additionalProperties: false, properties: { connectionId: { type: 'string', minLength: 1 }, sql: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 1 } } }),
+    {
+      name: 'autode_review_assertion',
+      description: 'Confirm or reject a proposed LOW-stakes fact (glossary term, naming convention, assumption) after asking the user. Other facts are refused here: a person confirms them in the AutoDE Context Inbox.',
+      inputSchema: { type: 'object', required: ['id', 'action', 'by'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1 }, action: { type: 'string', enum: ['confirm', 'reject'] }, by: { type: 'string', minLength: 1, description: 'The user who decided.' }, note: { type: 'string' } } },
+      annotations: { title: 'Review a low-stakes fact', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws) => {
+        const ledger = new AssertionLedger(layoutPath(ws.options.workspaceRoot, 'ledger'));
+        await ledger.load();
+        const a = ledger.get(String(args.id));
+        if (!a || isMirror(a)) throw new EngineToolError('NOT_FOUND', `No fact "${String(args.id)}".`);
+        if (a.status !== 'proposed') throw new EngineToolError('VALIDATION_FAILED', `Fact ${a.id} is ${a.status}, not proposed.`, { status: a.status });
+        if (stakesFor('assertion', a) !== 'low') throw new EngineToolError('PERMISSION_DENIED', `A ${a.kind} fact is high stakes: a person confirms it in the AutoDE Context Inbox.`, { stakes: 'high', allowedChannels: ['panel', 'cli', 'file'] });
+        const actor = `user:${String(args.by)}`;
+        if (args.action === 'confirm') await ledger.confirm(a.id, actor);
+        else await ledger.reject(a.id, actor, args.note as string | undefined);
+        const after = ledger.get(a.id)!;
+        return { assertion: { id: after.id, status: after.status, trust: after.trust, statement: after.statement } };
+      }
+    },
+    {
+      name: 'autode_verify_assertion',
+      description: 'Check a key, grain, relationship or data expectation against live data with a fixed, read-only, aggregate-only probe, and record the result (verified, or needs review with the observed numbers). Never returns row values.',
+      inputSchema: { type: 'object', required: ['id', 'connectionId'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1 }, connectionId: { type: 'string', minLength: 1, description: 'A connection from autode_list_connections that holds the table.' } } },
+      annotations: { title: 'Verify a fact against data', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      handler: async (args, ws) => {
+        const ledger = new AssertionLedger(layoutPath(ws.options.workspaceRoot, 'ledger'));
+        await ledger.load();
+        const a = ledger.get(String(args.id));
+        if (!a || isMirror(a)) throw new EngineToolError('NOT_FOUND', `No fact "${String(args.id)}".`);
+        const entry = session.entry(String(args.connectionId));
+        const dialect: ProbeDialect = entry.platform === 'databricks' ? 'spark_sql' : entry.platform === 'oracle' ? 'oracle' : entry.platform === 'snowflake' ? 'snowflake' : 'ansi';
+        const manager = await session.connect(entry);
+        const executor = createSqlProbeExecutor(async (sql) => (await manager.executeQuery(sql, { maxRows: 10 })).rows as Array<Record<string, unknown>>, dialect);
+        const src = await ws.contextSources();
+        const [outcome] = await verifyAssertions(ledger, [a], executor, createProbeResolver(src.graph as Parameters<typeof createProbeResolver>[0]));
+        const after = ledger.get(a.id)!;
+        return { id: a.id, statement: a.statement, outcome, status: after.status, trust: after.trust };
+      }
+    },
     {
       name: 'autode_list_decisions',
       description: 'List AutoDE decisions — proposals waiting for a person, and what was approved, rejected or applied — with their stakes and who may resolve them.',

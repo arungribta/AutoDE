@@ -321,8 +321,20 @@ export class AssertionLedger {
     return this.get(asserted.assertionId)!;
   }
 
+  /**
+   * Confirms an assertion. A proposed correction (`supersedes` set while it
+   * was proposed, Phase C4b) retires the fact it replaces in the same write —
+   * the replacement takes effect only once a person confirmed it.
+   */
   public async confirm(id: string, actor: string, trust: TrustTier = 'confirmed'): Promise<void> {
-    await this.append([this.buildEvent('confirmed', id, actor, { trust: strongerTrust(trust, 'confirmed') })]);
+    const confirmed = this.buildEvent('confirmed', id, actor, { trust: strongerTrust(trust, 'confirmed') });
+    const events = [confirmed];
+    const a = this.get(id);
+    const target = a?.supersedes ? this.get(a.supersedes) : undefined;
+    if (target && target.status !== 'superseded' && target.status !== 'rejected') {
+      events.push(this.buildEvent('superseded', target.id, actor, { by: id, causedBy: confirmed.id }));
+    }
+    await this.append(events);
   }
 
   public async reject(id: string, actor: string, reason?: string): Promise<void> {

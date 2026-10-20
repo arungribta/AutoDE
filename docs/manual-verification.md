@@ -411,6 +411,41 @@ Use the scratch workspace from Part 16 with an active business problem and a sou
   Do: approve a specification in the panel the usual way.
   Expect: a `spec_approval` decision appears under Recent with your name.
 
+## Part 18 — v0.41.0 Facts from conversation, Context Inbox, paused steps
+
+Use a workspace with the retail reference sources imported (`test/reference/retail-orders/sources`) and an approved specification, with your usual assistant (e.g. Copilot) selected. Keep the Workflow Palette open on **Context Inbox**.
+
+- [ ] **18.1 Extraction quality (the C4b measurement, done by hand).**
+  Do: send the eleven turns of `test/reference/retail-orders/chat-script.yaml` in order, one message each.
+  Expect: after each turn the reply arrives at its normal speed, and within a few seconds facts appear in the Inbox. Compare with `golden/assertions.yaml` (the turns' `facts`): record how many golden facts appear (target ≥ 90%: at least 13 of 14) and anything extra or wrong. t10 asks for something without stating a fact.
+- [ ] **18.2 The correction (trap 2).**
+  Do: after t6, look at the CRM customer key.
+  Expect: the cust_no fact says "corrects: … customer_id" and there is no key conflict. Confirm it: the customer_id fact disappears from the Inbox and is superseded in the ledger.
+- [ ] **18.3 Confirm, edit, reject, bulk.**
+  Do: confirm one fact, edit another (change its value JSON), reject a third. Apply a business document with several documented facts and use "Confirm all … documented facts".
+  Expect: each action is logged; the edited fact is active with your text; the rejected one is gone; bulk confirmation only offers documented facts from one source.
+- [ ] **18.4 Verify now.**
+  Do: with the source connected, Verify the loyalty member_id key (from t7).
+  Expect: "Failed verification: member_id is not unique …" and the fact shows ✖ with the numbers. Without a connection: "Not verified — no live source connection".
+- [ ] **18.5 Capture commands.**
+  Do: `/define Active customer = ordered in the last 90 days`, `/rule PII must never reach the marts`, `/decide Use SCD2 for customers`, `/assume Refunds arrive within 30 days`.
+  Expect: each answers "Recorded as a proposed …" at once (no model call) and appears in the Inbox.
+- [ ] **18.6 Citations.**
+  Do: after confirming the orders key, ask "what is the key of shop.orders?".
+  Expect: the answer has a "fact 1" chip; hovering shows "order_id is the key …".
+- [ ] **18.7 A step pauses on a missing join.**
+  Do: add a plan step about "support tickets per order" and run the plan.
+  Expect: the run pauses at that step; the Inbox shows it with the missing relationship; "Continue without it" runs it, and so does stating the join in chat, confirming it, and running again.
+- [ ] **18.8 Tool-action memory.**
+  Do: in a chat with "Can edit" on, ask the assistant to write a small file; then ask "what did you just change?".
+  Expect: an "Actions: wrote …" line under the reply; the follow-up answer knows the file it wrote.
+- [ ] **18.9 Extraction never breaks chat.**
+  Do: switch to a provider that is not configured (or withdraw consent) and chat.
+  Expect: the chat reply (or its usual error) is unchanged; no extraction error appears in the chat.
+- [ ] **18.10 Facts from another agent.**
+  Do: in Claude Code, ask it to record a glossary term and a key for shop.orders through AutoDE.
+  Expect: both appear in the Inbox as from "mcp · …"; Claude Code may confirm the term after asking you, but is refused for the key.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -509,5 +544,15 @@ Use the scratch workspace from Part 16 with an active business problem and a sou
 | 17.6 |  |  |
 | 17.7 |  |  |
 | 17.8 |  |  |
+| 18.1 |  |  |
+| 18.2 |  |  |
+| 18.3 |  |  |
+| 18.4 |  |  |
+| 18.5 |  |  |
+| 18.6 |  |  |
+| 18.7 |  |  |
+| 18.8 |  |  |
+| 18.9 |  |  |
+| 18.10 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

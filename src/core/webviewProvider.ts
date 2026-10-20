@@ -51,6 +51,11 @@ import * as os from 'node:os';
 import { Decision, DecisionStore } from '../engine/decisions/decisionStore';
 import { ApplyResult, ProposalContext, applyDecision, processResolved } from '../engine/decisions/proposals';
 import { layoutPath } from '../engine/workspaceLayout';
+import { ChatTurn, citedFactIds, extractFromTurn, parseCaptureCommand } from '../engine/context/chatExtraction';
+import { createSubjectResolver, isMirror } from '../engine/context/projection';
+import { detectConflicts } from '../engine/context/conflicts';
+import { createProbeResolver, verifyAssertions } from '../engine/context/probes';
+import { Assertion } from '../engine/context/assertions';
 import { backendFor } from './platformOnboarding';
 import { sampleDataConsentFromWorkspace } from '../engine/platform/connectionsConfig';
 import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
@@ -59,6 +64,17 @@ import { classifyImplementationType } from './implementationType';
 import { buildTargetContextQuestions } from './targetContextQuestions';
 import { buildSourceContextQuestions } from './sourceContextQuestions';
 import { LAYOUT, UNSCOPED_PROBLEM, layoutRel } from '../engine/workspaceLayout';
+
+/** Tool-action memory (C4b): the meaningful actions of a chat turn — files written, commands run — in one line each. */
+export function describeActions(audit: ReadonlyArray<{ tool: string; input: Record<string, unknown>; outcome: string }> | undefined): string[] {
+  const out: string[] = [];
+  for (const e of audit ?? []) {
+    if (e.outcome !== 'ok' && e.outcome !== 'approved') continue;
+    if (/write/i.test(e.tool)) out.push(`wrote ${String(e.input.path ?? e.input.file ?? '')}`.trim());
+    else if (/command|run/i.test(e.tool)) out.push(`ran ${String(e.input.command ?? '').slice(0, 120)}`.trim());
+  }
+  return out;
+}
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoDataEngineeringHubSidebar';
@@ -467,6 +483,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (this.chatSessionManager && this.activeChatId) {
             this.chatSessionManager.appendMessage(this.activeChatId, { role: 'user', content: chatMessage, at: new Date().toISOString() }).catch(() => { /* best-effort */ });
           }
+          // C4b: /define, /rule, /decide, /assume — straight to a proposed fact, no model.
+          if (await this.captureFact(chatMessage, priorHistory.length)) break;
+          const turnRef = `chat:${this.activeChatId ?? 'none'}#${priorHistory.length}`;
+          const previousReply = [...priorHistory].reverse().find((m) => m.role === 'ai')?.content;
+          const extractionSource: ChatTurn['source'] = this.specOpsEngine || !this.specManager?.getSpec() ? 'interview' : 'chat';
+          let turnActions: string[] = [];
+          // Runs after the turn, never awaited by it: extraction must not block or fail a chat (C4b).
+          const scheduleExtraction = () => { void this.extractFactsFromTurn({ ref: turnRef, text: chatMessage, source: extractionSource, previousReply, actions: turnActions }); };
           try {
             // ── Spec-driven conversation ──
             //   discovery/revision in progress -> this message continues it (an answer, or the
@@ -480,19 +504,23 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const currentSpec = this.specManager?.getSpec();
             if (this.specOpsEngine) {
               await this.handleSpecDiscovery(chatMessage);
+              scheduleExtraction();
               break;
             }
             if (this.specManager && !currentSpec) {
               await this.handleSpecDiscovery(chatMessage);
+              scheduleExtraction();
               break;
             }
             if (this.specManager && currentSpec && currentSpec.status === 'draft') {
               await this.reviseSpec(chatMessage);
+              scheduleExtraction();
               break;
             }
             if (this.specManager && currentSpec && currentSpec.status === 'approved' && this.pendingRevision) {
               this.pendingRevision = false;
               await this.handleSpecDiscovery(chatMessage, currentSpec);
+              scheduleExtraction();
               break;
             }
 
@@ -512,7 +540,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
               if (result.newClaudeSessionId) { patch.claudeSessionId = result.newClaudeSessionId; }
               this.chatSessionManager.updateMeta(this.activeChatId, patch).catch(() => { /* best-effort */ });
             }
-            this.postMessage('chatResponse', { message: result.message });
+            // C4b tool-action memory: what the turn did goes into the transcript (and later turns' history).
+            turnActions = describeActions(result.actions);
+            if (turnActions.length && this.chatSessionManager && this.activeChatId) {
+              this.chatSessionManager.appendMessage(this.activeChatId, { role: 'log', content: turnActions.join('; '), at: new Date().toISOString() }).catch(() => { /* best-effort */ });
+            }
+            this.postMessage('chatResponse', { message: result.message, citations: this.citationsFor(result.message), actions: turnActions });
+            scheduleExtraction();
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.postMessage('chatResponse', { message: errMsg, error: true });
@@ -955,7 +989,20 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'approvePipelineSpec': { await this.approveCurrentPipelineSpec(); break; }
-        case 'listDecisions': { this.postDecisions(); break; }
+        case 'listDecisions':
+        case 'listInbox': { this.postDecisions(); break; }
+        case 'reviewFact': {
+          const m = message as unknown as { id?: unknown; action?: unknown; statement?: unknown; value?: unknown; note?: unknown };
+          if (typeof m.id === 'string' && (m.action === 'confirm' || m.action === 'reject' || m.action === 'edit')) await this.reviewFact(m.id, m.action, { statement: typeof m.statement === 'string' ? m.statement : undefined, value: typeof m.value === 'string' ? m.value : undefined, note: typeof m.note === 'string' ? m.note : undefined });
+          break;
+        }
+        case 'verifyFact': { const id = (message as unknown as { id?: unknown }).id; if (typeof id === 'string') await this.verifyFacts([id]); break; }
+        case 'bulkConfirmFacts': { const src = (message as unknown as { createdBy?: unknown }).createdBy; if (typeof src === 'string') await this.bulkConfirm(src); break; }
+        case 'continueDespiteGaps': {
+          const stepId = (message as unknown as { stepId?: unknown }).stepId;
+          if (typeof stepId === 'string') { this.hub.continueDespiteGaps(stepId); await this.hub.executePlan(); }
+          break;
+        }
         case 'resolveDecision': {
           const m = message as unknown as { id?: unknown; decision?: unknown; note?: unknown };
           if (typeof m.id === 'string' && (m.decision === 'approved' || m.decision === 'rejected')) await this.resolveDecisionInPanel(m.id, m.decision, typeof m.note === 'string' ? m.note : undefined);
@@ -1375,6 +1422,126 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Lets `extension.ts`'s command handlers (e.g. `testConnection`) surface progress/results into the chat log, not just a native VS Code notification the webview never sees. */
+  // ── Context Inbox and facts from conversation (Phase C4b) ───────────────
+
+  private ledger() { return this.contextFileManager?.getLedger(); }
+
+  /** Facts to review (proposed, needs review), conflicts, and the step waiting for context. */
+  private inboxState(): Record<string, unknown> {
+    const ledger = this.ledger();
+    const all = ledger ? ledger.assertions() : [];
+    const facts = all.filter((a) => !isMirror(a) && (a.status === 'proposed' || a.status === 'needs_review'));
+    const byId = new Map(all.map((a) => [a.id, a] as const));
+    const view = (a: Assertion) => ({
+      id: a.id, kind: a.kind, subject: a.subject, predicate: a.predicate, value: a.value, statement: a.statement, status: a.status, trust: a.trust,
+      createdBy: a.createdBy, flags: a.flags, reviewReason: a.reviewReason, evidence: a.evidence.slice(0, 3),
+      supersedes: a.supersedes ? { id: a.supersedes, statement: byId.get(a.supersedes)?.statement } : undefined,
+      verification: a.verification ? { result: a.verification.result, detail: a.verification.detail } : undefined,
+      stakes: ['business_term', 'naming_convention', 'assumption'].includes(a.kind) ? 'low' : 'high'
+    });
+    const conflicts = detectConflicts(all).map((c) => ({ rule: c.rule, key: c.key, sides: c.sides, ids: c.ids }));
+    return { facts: facts.map(view), conflicts, waitingForContext: this.hub.getPlan().waitingForContext, live: !!this.liveProbes };
+  }
+
+  /** `/define`, `/rule`, `/decide`, `/assume`: returns true when the message was a capture command. */
+  private async captureFact(text: string, turnIndex: number): Promise<boolean> {
+    const ledger = this.ledger();
+    if (!/^\/(define|rule|decide|assume)\b/i.test(text.trim())) return false;
+    if (!ledger) { this.postMessage('chatResponse', { message: 'Open a workspace to record facts.', error: true }); return true; }
+    const resolve = createSubjectResolver(this.contextFileManager!.getPackSources().graph as Parameters<typeof createSubjectResolver>[0]);
+    const parsed = parseCaptureCommand(text, `chat:${this.activeChatId ?? 'none'}#${turnIndex}`, resolve);
+    if (!parsed) return false;
+    if ('error' in parsed) { this.postMessage('chatResponse', { message: parsed.error, error: true }); return true; }
+    const a = await ledger.assert(parsed);
+    this.postMessage('chatResponse', { message: `Recorded as a proposed ${a.kind.replace('_', ' ')}: "${a.statement}". Confirm it in the Context Inbox.` });
+    this.postDecisions();
+    return true;
+  }
+
+  /** Background extraction after a turn; never throws, never blocks the reply. */
+  private async extractFactsFromTurn(turn: ChatTurn): Promise<void> {
+    const ledger = this.ledger();
+    if (!ledger || !this.contextFileManager) return;
+    try {
+      const resolve = createSubjectResolver(this.contextFileManager.getPackSources().graph as Parameters<typeof createSubjectResolver>[0]);
+      const run = await extractFromTurn({ turn, ledger, resolve, complete: (system, user, purpose) => this.hub.completeJson(system, user, purpose) });
+      if (run.error) { console.log(`[AutoDE] fact extraction skipped: ${run.error}`); return; }
+      if (run.dropped.length) console.log(`[AutoDE] fact extraction dropped ${run.dropped.length}: ${run.dropped.join('; ')}`);
+      if (!run.recorded.length) return;
+      this.postLog(`${run.recorded.length} fact(s) from this message are waiting in the Context Inbox${run.corrections.length ? ` (${run.corrections.length} correcting an earlier fact)` : ''}.`);
+      // §5.3: probes run on proposed keys, grain and relationships when a connection is live and AutoDE is read-only.
+      if (this.liveProbes && this.configManager.getSettings().readOnlyMode !== false) {
+        const probeable = run.recorded.filter((a) => ['key', 'grain', 'relationship', 'quality_expectation'].includes(a.kind) && !(a.flags ?? []).includes('unresolved_subject'));
+        if (probeable.length) await this.verifyFacts(probeable.map((a) => a.id), true);
+      }
+      await this.contextFileManager.persistCompiledGraph();
+      this.postDecisions();
+    } catch (err) {
+      console.log(`[AutoDE] fact extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private citationsFor(text: string): Record<string, string> {
+    const ledger = this.ledger();
+    const out: Record<string, string> = {};
+    if (!ledger) return out;
+    for (const id of citedFactIds(text)) { const a = ledger.get(id); if (a) out[id] = `${a.statement} (${a.status === 'proposed' ? 'proposed' : a.trust})`; }
+    return out;
+  }
+
+  private async reviewFact(id: string, action: 'confirm' | 'reject' | 'edit', edit: { statement?: string; value?: string; note?: string }): Promise<void> {
+    const ledger = this.ledger();
+    if (!ledger || !this.contextFileManager) return;
+    const a = ledger.get(id);
+    if (!a) { this.postMessage('error', { message: `No fact ${id}.` }); return; }
+    const actor = `user:${this.panelUser()}`;
+    try {
+      if (action === 'confirm') {
+        await ledger.confirm(id, actor);
+        this.postLog(`Confirmed: ${a.statement}${a.supersedes ? ' (replaces the earlier fact)' : ''}.`);
+      } else if (action === 'reject') {
+        await ledger.reject(id, actor, edit.note);
+        this.postLog(`Rejected: ${a.statement}.`);
+      } else {
+        let value: unknown = a.value;
+        if (edit.value !== undefined && edit.value.trim()) {
+          try { value = JSON.parse(edit.value); } catch { this.postMessage('error', { message: 'The value must be JSON (e.g. ["order_id"] or {"term": "…", "definition": "…"}).' }); return; }
+        }
+        const replacement = await ledger.supersede(id, { kind: a.kind, subject: a.subject, predicate: a.predicate, value, statement: edit.statement?.trim() || a.statement, evidence: [...a.evidence, { type: 'user_edit', ref: 'context-inbox' }], trust: 'confirmed', status: 'active', specId: a.specId, createdBy: actor });
+        // An edited correction still retires the fact it corrects.
+        const target = a.supersedes ? ledger.get(a.supersedes) : undefined;
+        if (target && target.status !== 'superseded' && target.status !== 'rejected') await ledger.append([ledger.buildEvent('superseded', target.id, actor, { by: replacement.id })]);
+        this.postLog(`Edited and confirmed: ${replacement.statement}.`);
+      }
+      await this.contextFileManager.persistCompiledGraph();
+    } catch (err) {
+      this.postMessage('error', { message: err instanceof Error ? err.message : String(err) });
+    }
+    this.postDecisions();
+  }
+
+  private async verifyFacts(ids: string[], quiet = false): Promise<void> {
+    const ledger = this.ledger();
+    if (!ledger || !this.contextFileManager) return;
+    if (!this.liveProbes) { if (!quiet) this.postLog('Not verified — no live source connection. Connect the source, then Verify now.'); return; }
+    const facts = ids.map((id) => ledger.get(id)).filter((a): a is Assertion => !!a);
+    const outcomes = await verifyAssertions(ledger, facts, this.liveProbes, createProbeResolver(this.contextFileManager.getPackSources().graph as Parameters<typeof createProbeResolver>[0]));
+    for (const o of outcomes) this.postLog(o.result ? `${o.result.pass ? 'Verified' : 'Failed verification'}: ${o.statement} — ${o.result.detail}` : `Not verified: ${o.statement} — ${o.skipped ?? 'no probe applies'}`);
+    await this.contextFileManager.persistCompiledGraph();
+    this.postDecisions();
+  }
+
+  /** Bulk confirmation, allowed only for documented facts from one source (§5.4). */
+  private async bulkConfirm(createdBy: string): Promise<void> {
+    const ledger = this.ledger();
+    if (!ledger || !this.contextFileManager) return;
+    const items = ledger.assertions().filter((a) => a.createdBy === createdBy && a.status === 'proposed' && a.trust === 'documented' && !isMirror(a));
+    for (const a of items) await ledger.confirm(a.id, `user:${this.panelUser()}`);
+    this.postLog(`Confirmed ${items.length} documented fact(s) from ${createdBy}.`);
+    await this.contextFileManager.persistCompiledGraph();
+    this.postDecisions();
+  }
+
   // ── Decisions (Phase PA1: docs/mcp-engine-requirements.md §9.2) ──────────
 
   private decisionStore(): DecisionStore | undefined {
@@ -1396,6 +1563,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private postDecisions(): void {
     const store = this.decisionStore();
     if (!store) return;
+    this.postMessage('inboxState', this.inboxState());
     const all = store.list();
     const pending = all.filter((d) => d.status === 'pending' || d.status === 'approved');
     const recent = all.filter((d) => d.status !== 'pending' && d.status !== 'approved').slice(-10).reverse();

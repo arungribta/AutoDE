@@ -39,9 +39,9 @@ This document states what AutoDE does and why; requirements marked *Planned* or 
 
 | Capability area (this document) | Specified in | Phases (order: [roadmap.md](roadmap.md)) |
 |---|---|---|
-| Business problem and specification (BPS), Conversation (CHT) | [context-layer-requirements.md](context-layer-requirements.md) §5.2 extraction, §5.4 Context Inbox, §7.2 cited Q&A | C4b |
-| Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §5 enrichment, §6 semantic model, §8 freshness and health | C4b, C5, C6; migration track M1–M3 (not yet written) |
-| Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §7 packs, §10 grounding checks and metrics | C4b, C5, C6 |
+| Business problem and specification (BPS), Conversation (CHT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA3 (built-in skills, incl. the interview) | PA3 |
+| Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §6 semantic model, §8 freshness and health | C5, C6; migration track M1–M3 (not yet written) |
+| Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §10 grounding checks and metrics | C5, C6 |
 | Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client (secrets passed to the server it starts) | 5 |
 | Planning and orchestration (ORC), Generation (GEN) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §3.1 and §9.2 portable architecture, §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer-requirements.md](context-layer-requirements.md) §6 semantic model | PA1, PA3, 5, 6, GOV, C5 |
 | Tool skills (SKL) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 Phases PA3, PA4, §9 Phase 6 | PA3, PA4, 6 |
@@ -107,7 +107,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **BPS-9 — Greenfield or brownfield is classified automatically and can be overridden;** the override survives revisions. It decides whether source context is required and whether discovery is in scope. *Status:* Shipped v0.10.0.
 - **BPS-10 — The specification states intent and scope; detailed clauses stay with their source documents** and are referenced, not copied. *Why:* a specification that copies a contract drifts from it. *Status:* Partial v0.33.0 — a specification drafted while the problem has a pack records the ids of the contract clauses it rests on and is drafted with them in view; the specification's own fields are not yet restructured around references.
 
-*Planned work:* interview and chat answers extracted into the ledger, the Context Inbox, an interview that survives a reload — [context-layer-requirements.md](context-layer-requirements.md) §5.2, §5.4 (C4b).
+*Planned work:* an interview that survives a reload (roadmap backlog); the interview as an AutoDE skill — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA3. Document facts: [context-layer-requirements.md](context-layer-requirements.md) §5.2, §5.4 (C4b).
 
 ### 3.3 Source and target context (STC)
 
@@ -139,7 +139,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 
 ### 3.5 Context layer (CTX)
 
-- **CTX-1 — AutoDE keeps a persistent knowledge layer per repository** built from discovery, files, business-context documents, specifications and (planned) conversations. *Why:* grounding needs memory beyond a chat. *Status:* Partial — conversations Planned (C4b).
+- **CTX-1 — AutoDE keeps a persistent knowledge layer per repository** built from discovery, files, business-context documents, specifications and conversations. *Why:* grounding needs memory beyond a chat. *Status:* Shipped; conversations since v0.41.0.
 - **CTX-2 — Every fact is an assertion with provenance, trust, status and validity, in an append-only record** (C1, C2, C4). Changes supersede, removals are recorded with a reason, and facts depending on a changed or removed object go to review. *Status:* Shipped v0.29.0.
 - **CTX-3 — Contradictions are detected and surfaced, not merged:** two definitions of one business term, two values for one fact, a claimed key that differs from the declared one. *Status:* Shipped v0.29.0. Data-contract conformance shipped v0.33.0: each source system is checked against a contract clause by clause (columns present, type family, nullability from the catalog; blanks, uniqueness and accepted values from probes) in a conformance report. A contract never overwrites what was observed.
 - **CTX-4 — Facts from one business problem's specification apply only while that problem is active;** facts about systems are shared. *Status:* Shipped v0.29.0.
@@ -148,17 +148,17 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **CTX-7 — The record can be compacted;** history is deleted only on an explicit request. *Status:* Shipped v0.29.0.
 - **CTX-8 — The context layer is visible in the UI,** read-only: layers, terms, rules, queries, relationships, conflicts. *Status:* Partial — tables, business terms, verified queries and registered sources are shown; rules, relationships, conflicts and trust are not.
 - **CTX-9 — Claims are verified against data where possible** (uniqueness, nullability, accepted values, join orphan rates, freshness), returning aggregates only. *Status:* Shipped v0.33.0 — fixed read-only templates per platform, sampled; run on a live connection, or over sample files the customer supplied when there is none. A pass raises the claim to verified; a failure sends it to review with the observed counts. On demand (a command); automatic probing of new claims is not yet on.
-- **CTX-10 — The engineer confirms, edits or rejects proposed facts in one place** (Context Inbox). *Status:* Planned (C4b).
+- **CTX-10 — The engineer confirms, edits or rejects proposed facts in one place** (Context Inbox), alongside conflicts, plan steps waiting for context, and proposed changes. A correction replaces the fact it corrects only once confirmed; facts checkable against data can be verified from there; documented facts from one source can be confirmed together. Agents in other tools may confirm only minor facts (glossary terms, naming conventions, assumptions), after asking their user. *Status:* Shipped v0.41.0.
 - **CTX-11 — A semantic model** (entities, keys, grain, relationships, measures, metrics) is derived from confirmed facts and exportable to the target's semantic formats. *Status:* Planned (C5).
 - **CTX-12 — Freshness and health are tracked;** stale facts are labelled, and a health view summarises the layer. *Status:* Planned (C6).
 
-*Planned work:* chat and interview extraction, Context Inbox — [context-layer-requirements.md](context-layer-requirements.md) §5.2, §5.4 (C4b); semantic model — §6 (C5); freshness policy and context health — §8.2, §8.4 (C6).
+*Planned work:* semantic model — §6 (C5); freshness policy and context health — §8.2, §8.4 (C6).
 
 ### 3.6 Context delivery and grounding (GRD)
 
 - **GRD-1 — Each LLM call receives context selected for its task** (C5): what the task names, related objects, STRICT rules, conflicts and items under review that touch them; unrelated schemas are left out. With nothing to scope by, it receives the project overview. *Status:* Shipped v0.30.0.
 - **GRD-2 — A context budget is never exceeded,** whichever provider is used: a conservative estimate everywhere, an exact count where the provider offers one. Pruning never cuts a block in half and never drops a STRICT rule. *Status:* Partial — the estimate and pruning rules are met; exact provider counts are not used.
-- **GRD-3 — Missing facts become questions, not guesses** (C3): a request to combine entities with no confirmed relationship raises a context gap. *Status:* Partial — detected and reported since v0.30.0; steps pause on a gap from C4b.
+- **GRD-3 — Missing facts become questions, not guesses** (C3): a request to combine entities with no confirmed relationship raises a context gap. *Status:* Shipped v0.41.0 — detected and reported since v0.30.0; since v0.41.0 a plan step that needs a missing join, key or grain pauses until the engineer answers it or explicitly continues without it.
 - **GRD-4 — Every generated artifact records what it was built from** (C6): specification revision, plan step, agent, model, primitive, the context it received, and which fact justified each design decision — or that none did. *Status:* Shipped v0.30.0.
 - **GRD-5 — Generated code is checked:** identifiers resolve to known objects, joins and casts use compatible types, STRICT rules are checked where they have a machine-checkable form (PII masking) and listed for review otherwise; each run produces a grounding report. *Status:* Shipped v0.30.0.
 - **GRD-6 — An artifact is reported stale when its specification version changed or a fact it relied on changed,** with the reason. *Status:* Shipped v0.9.0 (specification version), v0.30.0 (facts).
@@ -166,7 +166,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **GRD-8 — Retrieval finds the right objects when the request's vocabulary differs from physical names** — synonyms, abbreviations, another organisation's terms. Deterministic signals first; embeddings only as an optional signal if measurement shows they're needed. *Why:* merges and legacy estates. *Status:* Shipped v0.32.0 — abbreviations, synonyms, the customer's own vocabulary, table and column comments and glossary terms; on the reference question set 17 of 21 found, against 3 of 21 from names alone. Free paraphrases ("money customers got back") are not covered; embeddings (RET) are not scheduled, see the roadmap's decision log. Since v0.33.0 the customer's vocabulary can be captured from their documents: abbreviations are mined from names and the comments that spell them out, the LLM proposes further entries from the pack, and the engineer accepts each one. With vocabulary captured from the reference customer's glossary, 19 of 21 are found and 2 of the 4 paraphrases; the two still missed share no word with the table they mean, or rank a sibling table first.
 - **GRD-9 — Grounding and accuracy are measured on a reference problem for every release** (C7), with frozen baselines so every change shows its effect; the results become a release gate. *Status:* Shipped v0.27.0 (release gate Planned C6).
 
-*Planned work:* cited Q&A — [context-layer-requirements.md](context-layer-requirements.md) §7.2 (C4b); decision backing against the semantic model — §10.1 (C5); release metrics and ablation — §10.2, §11 Phase C6.
+*Planned work:* decision backing against the semantic model — §10.1 (C5); release metrics and ablation — §10.2, §11 Phase C6.
 
 ### 3.7 Planning and orchestration (ORC)
 
@@ -179,7 +179,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **ORC-7 — Long-running actions show progress, and completion is confirmed** with the next actions offered. *Status:* Shipped v0.9.0 / v0.10.0.
 - **ORC-8 — Every AI-proposed change is a decision with stakes,** validated before anyone sees it, and applied only after it is resolved. Consequential decisions (specifications, mappings, models, plans, generated artifacts, platform changes) are resolved only by a person, in the panel, an interactive terminal or a reviewed decision file; minor ones may be accepted through the agent that proposed them, with its user's confirmation. Every resolution records who proposed it (host, skill, model where known), who decided, and how (P3, P9). *Why:* approval must hold whichever host or skill made the proposal. *Status:* Shipped v0.40.0 for facts, specification and Pipeline Spec revisions, mappings and platform changes; the panel's specification and Pipeline Spec approvals are recorded as decisions. Resolution channels today: the panel, a reviewed decision file, and, for minor decisions, the proposing agent. The terminal channel comes with the command-line tool (MCP-3). A specification or Pipeline Spec change approved outside the panel becomes the draft; its lifecycle approval stays in the panel.
 
-*Planned work:* context gaps pause a step once the Context Inbox exists — [context-layer-requirements.md](context-layer-requirements.md) §11 Phase C4b; the extension reaches the engine through MCP — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5).
+*Planned work:* the extension reaches the engine through MCP — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5).
 
 ### 3.8 Generation (GEN)
 
@@ -199,10 +199,10 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **CHT-2 — Conversations are persisted locally,** not committed. A new chat archives the previous one (never discards it); history can be reopened and resumed; deleting a conversation is explicit and confirmed; a restart opens an empty chat. *Status:* Shipped v0.9.0 / v0.13.0.
 - **CHT-3 — An abandoned interview is never lost:** its partial answers are folded into the context layer. *Status:* Shipped v0.9.0.
 - **CHT-4 — The assistant is read-only by default;** write and command access is granted per chat, explicitly. *Status:* Shipped.
-- **CHT-5 — Facts stated in chat are captured as proposed facts, and answers cite the facts they rest on.** *Status:* Planned (C4b).
+- **CHT-5 — Facts stated in chat are captured as proposed facts, and answers cite the facts they rest on.** Capture runs after each chat and interview turn without slowing or failing it; facts can also be captured explicitly without the model; what the assistant did in a turn (files written, commands run) is remembered in the conversation. *Status:* Shipped v0.41.0. Extraction quality depends on the configured model and is checked by hand (manual verification) until a recorded evaluation exists.
 - **CHT-6 — Chat history can be searched, tagged and exported.** *Status:* Not met.
 
-*Planned work:* chat extraction into the ledger and tool-action memory — [context-layer-requirements.md](context-layer-requirements.md) §11 Phase C4b.
+*Planned work:* search, tags and export (CHT-6, roadmap backlog).
 
 ### 3.10 LLM providers (LLM)
 
@@ -228,7 +228,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 
 - **MCP-1 — AutoDE's deterministic core — primitives, specifications, context, grounding checks, platform access — is usable by other coding agents** (Claude Code, Copilot agent mode, Cursor) through the Model Context Protocol, and the extension uses the same interface. *Why:* engineers also work in those agents; they should get AutoDE's grounding instead of freehand SQL. *Status:* Partial v0.35.0 — the server ships inside the extension and runs on plain Node: transform primitives (search, describe, validate, compile), Pipeline Spec validation, compilation and design document, AutoDE's interview prompts and reviewed tool skills as prompts, the active problem's specifications and context documents as resources, and the read-only context tools (resolve text to estate objects, context packs, the assertion ledger, SQL grounding checks). Since v0.37.0 it also reaches the data platforms: list connections, test one, browse databases and schemas, extract a schema's metadata, dry-run SQL with EXPLAIN and run queries. Connections are configured in the workspace without secrets, which come from the environment or the platform CLI's own configuration, so a server started by another agent never needs VS Code's secret store. Queries are read-only unless the server is explicitly started to allow writes, and then the client is told the tool is destructive. Nothing the server offers writes to the workspace or calls an LLM, and every response is scrubbed of secrets. Setup for Claude Code, VS Code and Cursor is documented. Still planned: the extension using the server itself and registering it with other agents (5).
 
-- **MCP-2 — Other agents can propose changes, never make them:** facts, specification changes, Pipeline Specs, mappings and platform changes are submitted through validated proposals that become decisions (ORC-8). *Why:* agents in other tools should contribute to the same project without bypassing review. *Status:* Shipped v0.40.0. A platform change runs only after a person approved it, and only on a server started with write permission.
+- **MCP-2 — Other agents can propose changes, never make them:** facts (through the Context Inbox since v0.41.0), specification changes, Pipeline Specs, mappings and platform changes are submitted through validated proposals that become decisions (ORC-8). *Why:* agents in other tools should contribute to the same project without bypassing review. *Status:* Shipped v0.40.0. A platform change runs only after a person approved it, and only on a server started with write permission.
 - **MCP-3 — AutoDE works without VS Code:** its server and a command-line tool are installable on their own, at a stable location, with deterministic commands suitable for CI and human-only decision commands. *Why:* other hosts and pipelines must not depend on the VS Code extension being installed. *Status:* Planned (PA2).
 
 *Planned work:* the standalone package and CLI — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA2; the extension as a client and registration with other agents — §7 (phase 5); AutoDE skills in other hosts — PA3; verifying assertions, semantic-model resources — [context-layer-requirements.md](context-layer-requirements.md) §9 (C4b, C5).
