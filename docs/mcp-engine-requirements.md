@@ -407,32 +407,9 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 *Added 2026-10-18 for §3.1. Order and versions: roadmap.md. Phase 5 (below) belongs to the same direction.*
 
 #### Phase PA1: Decision store and proposal tools
-Scope:
-- **Decision store** in the engine. A decision records:
-  - `{ id, kind, stakes, proposal (by reference), evidence, validation report }`;
-  - `proposedBy { host, client, skill?, model? }` (model only when the host reports it);
-  - `allowedChannels`, `status`, `resolvedBy`, `channel`, `appliedAt`.
+**Status:** ✅ shipped in v0.40.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md ORC-8, MCP-2, P9; HOW: technical-design.md §7.7; usage: [mcp-setup.md](mcp-setup.md) (Proposing changes). The full specification text is in git (this file at commit 437e7e6).
 
-  Events are append-only (proposed, resolved, applied, superseded, withdrawn), like the ledger (C2), under `.autode/`, committed with the project. A decision whose subject changed before resolution is marked superseded, never applied to stale state.
-- **Stakes per kind** (D6), defined once in the engine, not by callers. A caller, skill or host can't lower a kind's stakes.
-- **Proposal tools** on the MCP server:
-  - `autode_propose_assertion` (moved here from C4b; context-layer §9), `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`;
-  - `autode_propose_platform_change`, which replaces direct writes: with `--allow-write`, a write statement becomes a proposal, and only an approved one runs.
-
-  Each tool validates (schema, grounding of every cited object and column, conformance where it applies, the read-only guard for platform changes). A failure returns `VALIDATION_FAILED` with item-level details the agent can act on. Proposals for plans and artifacts come with PA3.
-- **Decision tools:** `autode_list_decisions`, `autode_get_decision`, `autode_resolve_decision`. The last works for low-stakes decisions only; for a high-stakes one it returns `PERMISSION_DENIED`, naming the channels that may resolve it.
-- **Human channels:**
-  - a **Decisions** view in the panel (proposal, evidence, validation, proposer; Approve / Reject with a note);
-  - **decision files**: `.autode/decisions/<id>.yaml` with `resolution: approved | rejected`, `by` and `note`, picked up when they change. The file channel's identity is self-declared; the pull request is its audit.
-- **Existing approvals become decisions.** Approving the specification and the Pipeline Spec in the panel works as today and is recorded as a decision, so a proposal made from Claude Code appears in the same place.
-- **Apply:** deterministic engine code applies an approved decision, recording proposer, approver, channel and revision in the ledger or in the specification's history.
-
-Acceptance:
-- From an MCP client, `autode_propose_mapping` citing a column that doesn't exist returns `VALIDATION_FAILED` naming it, and nothing is written.
-- A valid proposal creates a pending decision. `autode_resolve_decision` on it (high stakes) is refused. Approving it in the panel, or through a decision file, applies it, and the record shows who proposed (host, client, skill), who approved, and through which channel.
-- A contract test shows that no MCP tool writes AutoDE state or runs a platform write except by applying an approved decision.
-- A decision whose subject changed in the meantime is superseded, not applied.
-- Panel approvals behave as before; `npm run eval` doesn't regress.
+In short: proposals are validated and become decisions in `.autode/decisions/`. Stakes are defined in the engine and recomputed on every resolution. High-stakes decisions are resolved only in the panel or through a committed decision file; low-stakes ones also through the proposing agent. Approved decisions are applied by engine code, and a decision whose document changed meanwhile is superseded. `autode_execute_query` no longer runs writes: a platform change is proposed, approved and then applied by an `--allow-write` server. The panel's approvals are recorded as decisions.
 
 #### Phase PA2: The engine on its own — `autode` package and CLI
 Scope:

@@ -14,6 +14,7 @@ import * as path from 'node:path';
  *                       business context, vocabulary, verified queries, snapshots
  *     config/           team customisations: skills, primitives, target environment,
  *                       connections (pointers and sample-data consent, never secrets)
+ *     decisions/        proposed changes and who resolved them (committed; PA1)
  *     local/            per engineer and rebuildable: never committed (including
  *                       personal connection fields and connection readiness)
  *   autode-output/<id>/ generated deliverables (setting `artifactDirectory`)
@@ -46,6 +47,7 @@ export const LAYOUT = {
   primitives: [AUTODE_DIR, 'config', 'primitives'],
   targetEnvironment: [AUTODE_DIR, 'config', 'target-environment.yaml'],
   connections: [AUTODE_DIR, 'config', 'connections.yaml'],
+  decisions: [AUTODE_DIR, 'decisions'],
   local: [AUTODE_DIR, 'local'],
   localConnections: [AUTODE_DIR, 'local', 'connections.yaml'],
   connectionReadiness: [AUTODE_DIR, 'local', 'connection-readiness.json'],

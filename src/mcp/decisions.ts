@@ -1,0 +1,163 @@
+import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
+import { Decision, DecisionError, DecisionStore } from '../engine/decisions/decisionStore';
+import { ProposalContext, ProposalKind, ProposalValidationError, applyDecision, processResolved, propose } from '../engine/decisions/proposals';
+import { EngineTool } from './tools';
+import { EngineToolError } from './errors';
+import { EngineWorkspace } from './workspace';
+import { PlatformSession } from './platform';
+
+/**
+ * Phase PA1 tools (docs/mcp-engine-requirements.md §9.2): agents propose
+ * changes, never make them. A proposal is validated, then becomes a pending
+ * decision in `.autode/decisions/`. Low-stakes decisions may be resolved here
+ * (the tool is destructive, so the host asks its user); high-stakes ones only
+ * by a person — the AutoDE panel, the CLI in a terminal, or a committed
+ * decision file. Approved decisions are applied by engine code.
+ */
+
+export interface DecisionToolsOptions {
+  session: PlatformSession;
+  /** The MCP client's name from `initialize`, recorded as the proposer. */
+  clientName: () => string | undefined;
+}
+
+const evidenceSchema = {
+  type: 'array', maxItems: 20,
+  items: { type: 'object', required: ['ref'], additionalProperties: false, properties: { ref: { type: 'string', minLength: 1 }, quote: { type: 'string', maxLength: 300 } } },
+  description: 'Where the proposal comes from (file and line, document section, query id) — shown to the reviewer.'
+};
+const proposerProps = {
+  skill: { type: 'string', description: 'The skill that produced the proposal, if any.' },
+  model: { type: 'string', description: 'The model that produced it, if you know it.' },
+  evidence: evidenceSchema
+};
+
+function view(d: Decision): Record<string, unknown> {
+  return {
+    id: d.id, kind: d.kind, title: d.title, summary: d.summary, stakes: d.stakes, status: d.status, problemId: d.problemId,
+    proposedBy: d.proposedBy, proposedAt: d.proposedAt, allowedChannels: d.allowedChannels,
+    validation: d.validation, resolution: d.resolution.decision ? d.resolution : undefined,
+    file: `.autode/decisions/${d.id}.yaml`
+  };
+}
+
+function toToolError(err: unknown): never {
+  if (err instanceof ProposalValidationError) {
+    throw new EngineToolError('VALIDATION_FAILED', err.message, { errors: err.report.errors, warnings: err.report.warnings, checked: err.report.checks });
+  }
+  if (err instanceof DecisionError) {
+    const code = err.code === 'NOT_FOUND' ? 'NOT_FOUND' : err.code === 'CHANNEL_NOT_ALLOWED' ? 'PERMISSION_DENIED' : 'VALIDATION_FAILED';
+    throw new EngineToolError(code, err.message, err.details);
+  }
+  throw err;
+}
+
+export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
+  const { session } = options;
+  const allowWrite = session.options.allowWrite;
+  const store = (ws: EngineWorkspace) => new DecisionStore(ws.options.workspaceRoot);
+  const context = async (ws: EngineWorkspace, withSchema = false): Promise<ProposalContext> => ({
+    workspaceRoot: ws.options.workspaceRoot,
+    problemRoot: ws.problemRoot(),
+    problemId: ws.activeProblemId(),
+    connections: session.config().connections,
+    schemaIndex: withSchema ? await ws.contextSources().then((src) => buildSchemaIndex(src.graph.nodes, src.graph.edges)) : undefined
+  });
+  const deps = () => (allowWrite ? { executePlatformChange: (id: string, sql: string) => session.executeApprovedChange(id, sql) } : {});
+  // Decisions resolved in their files (or in the panel) are applied before any answer.
+  const sync = async (ws: EngineWorkspace) => processResolved(store(ws), await context(ws), deps());
+
+  const proposalTool = (name: string, kind: ProposalKind, title: string, description: string, payloadKey: string, payloadSchema: Record<string, unknown>, withSchema = false): EngineTool => ({
+    name,
+    description: `${description} Nothing changes until a person approves the resulting decision; validation errors come back item by item so you can fix and resubmit.`,
+    inputSchema: { type: 'object', required: [payloadKey], additionalProperties: false, properties: { [payloadKey]: payloadSchema, ...proposerProps } },
+    // Writes a pending decision only; never the proposed change.
+    annotations: { title, readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, ws) => {
+      try {
+        const d = propose(store(ws), await context(ws, withSchema), kind, args[payloadKey], {
+          proposedBy: { host: 'mcp', client: options.clientName(), skill: args.skill as string | undefined, model: args.model as string | undefined },
+          evidence: args.evidence as Decision['evidence'] | undefined
+        });
+        return { decision: view(d), next: d.stakes === 'low' ? 'Ask the user, then resolve it with autode_resolve_decision, or leave it for the AutoDE panel.' : `A person must approve it: in the AutoDE panel (Decisions), or by editing ${`.autode/decisions/${d.id}.yaml`} and committing. Tell the user.` };
+      } catch (err) { return toToolError(err); }
+    }
+  });
+
+  return [
+    proposalTool('autode_propose_assertion', 'assertion', 'Propose a fact',
+      'Propose a fact for AutoDE\'s context (a business term, key, grain, relationship, rule, metric …), with evidence. Glossary terms, naming conventions and assumptions are low stakes; anything that changes joins, keys, grain, rules or metrics needs a person.',
+      'assertion', { type: 'object', required: ['kind', 'subject', 'predicate', 'statement', 'evidence'], properties: { kind: { type: 'string' }, subject: { type: 'array', items: { type: 'string' }, minItems: 1 }, predicate: { type: 'string' }, value: {}, statement: { type: 'string' }, evidence: { type: 'array', minItems: 1, items: { type: 'object', required: ['type', 'ref'], properties: { type: { type: 'string' }, ref: { type: 'string' }, quote: { type: 'string' } } } }, specId: { type: 'string' } } }),
+    proposalTool('autode_propose_spec_change', 'spec_revision', 'Propose a specification revision',
+      'Propose a revised Business Problem Specification for the active problem (the full document, as the autode://spec/business-problem resource reads). Approved, it becomes the new draft; the specification is then approved in AutoDE as usual.',
+      'spec', { type: 'object', required: ['problemStatement', 'objectives', 'scope'] }),
+    proposalTool('autode_propose_pipeline_spec', 'pipeline_spec', 'Propose a Pipeline Spec',
+      'Propose a Pipeline Spec for the active problem (validate it first with autode_validate_pipeline_spec). Approved, it becomes the new draft.',
+      'pipelineSpec', { type: 'object' }),
+    proposalTool('autode_propose_mapping', 'mapping', 'Propose a source-to-target mapping',
+      'Propose one entity mapping (source table → target, column by column) for the active problem\'s Mapping Context. Source columns are checked against the estate AutoDE knows.',
+      'mapping', { type: 'object', required: ['id', 'sourceEntityId', 'targetName', 'columns'] }, true),
+    proposalTool('autode_propose_platform_change', 'platform_change', 'Propose a platform change',
+      'Propose one statement that changes data or objects on a connection (DDL, DML, GRANT …), with the reason. autode_execute_query never runs writes; an approved change runs through autode_apply_decision on a server started with --allow-write.',
+      'change', { type: 'object', required: ['connectionId', 'sql', 'reason'], additionalProperties: false, properties: { connectionId: { type: 'string', minLength: 1 }, sql: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 1 } } }),
+    {
+      name: 'autode_list_decisions',
+      description: 'List AutoDE decisions — proposals waiting for a person, and what was approved, rejected or applied — with their stakes and who may resolve them.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { status: { type: 'string', enum: ['pending', 'approved', 'rejected', 'applied', 'superseded', 'withdrawn', 'failed'] }, kind: { type: 'string' } } },
+      annotations: { title: 'List decisions', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (args, ws) => {
+        const synced = await sync(ws);
+        const list = store(ws).list({ status: args.status as Decision['status'] | undefined, kind: args.kind as Decision['kind'] | undefined });
+        return { decisions: list.map(view), appliedNow: synced.applied.map((a) => a.message), incompleteFileResolutions: synced.incomplete };
+      }
+    },
+    {
+      name: 'autode_get_decision',
+      description: 'One decision with its proposal, validation report, evidence and history.',
+      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1 } } },
+      annotations: { title: 'Get a decision', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (args, ws) => {
+        try {
+          await sync(ws);
+          const s = store(ws);
+          const d = s.get(String(args.id));
+          return { decision: { ...view(d), evidence: d.evidence, events: d.events }, proposal: s.proposal(d.id) };
+        } catch (err) { return toToolError(err); }
+      }
+    },
+    {
+      name: 'autode_resolve_decision',
+      description: 'Approve or reject a LOW-stakes decision after asking the user. High-stakes decisions are refused here: a person resolves them in the AutoDE panel, with the CLI, or in the decision file.',
+      inputSchema: { type: 'object', required: ['id', 'decision', 'by'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1 }, decision: { type: 'string', enum: ['approved', 'rejected'] }, by: { type: 'string', minLength: 1, description: 'The user who decided.' }, note: { type: 'string' } } },
+      annotations: { title: 'Resolve a low-stakes decision', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws) => {
+        try {
+          const s = store(ws);
+          const d = s.resolve(String(args.id), { decision: args.decision as 'approved' | 'rejected', by: String(args.by), channel: 'tool', note: args.note as string | undefined });
+          if (d.status !== 'approved') return { decision: view(d) };
+          const applied = await applyDecision(s, d.id, await context(ws), deps());
+          return { decision: view(applied.decision), applied: applied.applied, message: applied.message };
+        } catch (err) { return toToolError(err); }
+      }
+    },
+    {
+      name: 'autode_apply_decision',
+      description: allowWrite
+        ? 'Run an APPROVED platform change on its connection. Only decisions a person approved can run; anything else is refused.'
+        : 'Run an approved platform change — unavailable: this server was not started with --allow-write.',
+      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1 } } },
+      annotations: { title: 'Apply an approved platform change', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      handler: async (args, ws) => {
+        try {
+          if (!allowWrite) throw new EngineToolError('WRITE_NOT_ALLOWED', 'This server was not started with --allow-write, so it applies no platform change.');
+          const s = store(ws);
+          s.syncFileResolutions();
+          const d = s.get(String(args.id));
+          if (d.kind !== 'platform_change') throw new EngineToolError('VALIDATION_FAILED', `Decision ${d.id} is a ${d.kind}; AutoDE applies it when it is approved.`);
+          const result = await applyDecision(s, d.id, await context(ws), deps());
+          return { decision: view(result.decision), applied: result.applied, message: result.message };
+        } catch (err) { return toToolError(err); }
+      }
+    }
+  ];
+}

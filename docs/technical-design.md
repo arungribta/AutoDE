@@ -89,7 +89,7 @@ The product principles are in requirements.md §2. These are the implementation 
           the same server and registers it (phase 5).
 ```
 
-**Direction from v0.40.0 (planned, not yet built).** The portable architecture of [mcp-engine-requirements.md §3.1](mcp-engine-requirements.md) changes this picture phase by phase:
+**Direction from v0.40.0 (PA1 shipped in v0.40.0: §7.7; the rest planned).** The portable architecture of [mcp-engine-requirements.md §3.1](mcp-engine-requirements.md) changes this picture phase by phase:
 - PA1 adds a decision store and proposal tools to the engine and the MCP server;
 - PA2 ships the engine on its own with a CLI;
 - phase 5 makes the extension a client of it;
@@ -1121,6 +1121,51 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
 
 ---
 
+### 7.7 Decisions and proposals (v0.40.0; ORC-8, MCP-2)
+
+**Store** (`src/engine/decisions/decisionStore.ts`). `LAYOUT.decisions` = `.autode/decisions/` (committed).
+- Each decision is `<id>.yaml` (`dec-<ULID>`), with its proposal in `<id>.proposal.json`.
+- The YAML holds `{ kind, title, summary, stakes, status, problemId, subject { document, revision | connectionId }, proposedBy { host, client, skill, model }, evidence, validation { ok, errors, warnings, checks }, allowedChannels, resolution { decision, by, note }, events[] }` under a header comment that explains the file channel.
+- `events` only grow (proposed, approved, rejected, applied, superseded, failed, withdrawn), and every write is tmp + rename.
+- Kinds: `assertion`, `spec_revision`, `pipeline_spec`, `mapping`, `platform_change`, plus `spec_approval` and `pipeline_spec_approval`, which record the panel's existing approvals (`recordResolved()`).
+
+**Stakes and channels.**
+- `stakesFor(kind, proposal)` is the only definition: `assertion` is low for `LOW_STAKES_ASSERTION_KINDS` (`business_term`, `naming_convention`, `assumption`), and everything else is high.
+- `channelsFor()`: low = panel, cli, file, tool; high = panel, cli, file.
+- `resolve()` **recomputes** stakes from the kind and the stored proposal instead of trusting the YAML, so an edited `stakes:` can't open the tool channel. A channel outside the allowed set throws `DecisionError('CHANNEL_NOT_ALLOWED')`.
+- `syncFileResolutions()` turns a pending decision whose `resolution.decision` a person filled in into a `file` resolution; it requires `by`, and reports the decision as incomplete without it.
+
+**Proposals** (`src/engine/decisions/proposals.ts`).
+- **Validation.** `validateProposal(kind, payload, ctx)` per kind:
+  - assertion: `validateAssertion()`;
+  - spec revision: required fields, list fields, same id as the active spec;
+  - Pipeline Spec: `validatePipelineSpec()`;
+  - mapping: required fields, no target column twice, and source table and columns resolved in a `SchemaIndex` built from the graph. An unknown target table and an empty estate are warnings;
+  - platform change: the connection exists, `checkSingleStatement()` finds one statement, and it is a `write`.
+- **Proposing.** `propose()` throws `ProposalValidationError(report)` or creates the decision. Its `subject.revision` is the SHA-256 of the target document at proposal time.
+- **Applying.** `applyDecision()` applies only `approved` decisions. If the target document's current revision differs from the recorded one, the decision is `superseded`, not applied. Per kind:
+  - assertion: `AssertionLedger.assert()`, active / confirmed, `createdBy: decision:<id>`, `causedBy` = the decision id;
+  - spec revision: the next draft (version + 1 if the current one is approved; `problemStatementApproved` carried over only when the problem statement is unchanged), through `writeBusinessProblemSpec()`, which archives like the manager;
+  - Pipeline Spec: the next draft, through `writePipelineSpec()`;
+  - mapping: `writeMappingUpsert()`;
+  - platform change: only with `deps.executePlatformChange`.
+
+  A failure marks the decision `failed`. `processResolved()` = `syncFileResolutions()`, then apply every approved decision this process can apply.
+
+**Shared documents** (`src/engine/documents/problemDocuments.ts`). The serialisation, parsing, history names and revision rules of the Business Problem Specification, Pipeline Spec and Mapping Context moved here verbatim from `SpecManager`, `PipelineSpecManager` and `MappingContextManager`. Those managers delegate to it (`withMappingUpserted()`, `nextMappingContextRevision()`), and the engine's Node writers use the same functions, so the two paths can't drift.
+
+**MCP** (`src/mcp/decisions.ts`, `decisionTools()`).
+- **Proposal tools:** `autode_propose_assertion | spec_change | pipeline_spec | mapping | platform_change`. Annotations are `readOnlyHint: false, destructiveHint: false`, because they write only the pending decision. `proposedBy.client` comes from `getClientVersion()`; `skill`, `model` and `evidence` are optional arguments.
+- **Decision tools:** `autode_list_decisions` and `autode_get_decision` (read-only; both run `processResolved()` first), `autode_resolve_decision` (tool channel; destructive), `autode_apply_decision` (approved platform changes; destructive; needs `--allow-write`).
+- **Errors:** `ProposalValidationError` → `VALIDATION_FAILED` with `{ errors, warnings, checked }`; `CHANNEL_NOT_ALLOWED` → `PERMISSION_DENIED`.
+- **Platform writes:** `autode_execute_query` now refuses every write, with or without `--allow-write`. `PlatformSession.executeApprovedChange()` is the only write path.
+
+**Extension** (`webviewProvider.ts`).
+- The approval handlers moved into `approveCurrentSpec()` and `approveCurrentPipelineSpec()`, which record a resolved decision.
+- `resolveDecisionInPanel()` resolves with channel `panel` and `by` = the OS user, applies the decision, and runs `afterDecisionApplied()`: it reloads the changed document; for a spec or Pipeline Spec revision approved in the panel it continues into the usual approval (one click); for a fact it reloads the ledger and runs `persistCompiledGraph()`.
+- `ContextFileWatcher` events under `.autode/decisions/` call `processDecisionFiles()`.
+- The webview's *Decisions* section (Workflow Palette) lists pending and approved decisions with kind, stakes, proposer, warnings and evidence, with Approve / Reject and an optional note, plus recent outcomes.
+
 ## 8. LLM Integration
 
 ### 8.1 Adapter Registry (Phase C, v0.9.0)
@@ -1516,7 +1561,7 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 ### 10.6 MCP server (v0.35.0; MCP-1)
 
 - **Entry:** `src/mcp/server.ts` → bundled `dist/mcp-server.js`; `node dist/mcp-server.js --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli] [--drivers <folder>]`. `findResourcesRoot()` walks up from the bundle to AutoDE's `package.json` (bundled `skills/`, `primitive-definitions/`, version). Uses the SDK's low-level `Server` with plain JSON Schemas (no zod in our code) over `StdioServerTransport`; stdout carries the protocol, logs go to stderr through `redact()`. `createAutodeServer(options)` is exported for in-process hosts (phase 5).
-- **Read-only by construction** (`src/mcp/workspace.ts`, `EngineWorkspace`): reads `.autode/**` and the extension's resources, never writes. Tool skills load with `loadToolSkillStates(..., { migrate: false })` (an unmigrated pre-S2 skill is unreviewed here). Context: `contextSources()` loads the ledger, projects the graph for the active spec (`active-problem.json` → `spec/business-problem.yaml` `id`), detects conflicts, loads the catalog with vocabulary and `glossaryAliases()` and builds its index in memory — the same `ContextPackSources` the extension builds, minus runtime facts; packs do not promote into the working set. Each source is cached by a fingerprint of path + size + mtime of its files. Primitives are re-registered (bundled + `.autode/config/primitives` + `history/`) when those folders change.
+- **Read-only by construction** (`src/mcp/workspace.ts`, `EngineWorkspace`): reads `.autode/**` and the extension's resources, never writes. Since v0.40.0 the server's only writes are decisions (`.autode/decisions/`) and the engine applying an approved decision (§7.7). Tool skills load with `loadToolSkillStates(..., { migrate: false })` (an unmigrated pre-S2 skill is unreviewed here). Context: `contextSources()` loads the ledger, projects the graph for the active spec (`active-problem.json` → `spec/business-problem.yaml` `id`), detects conflicts, loads the catalog with vocabulary and `glossaryAliases()` and builds its index in memory — the same `ContextPackSources` the extension builds, minus runtime facts; packs do not promote into the working set. Each source is cached by a fingerprint of path + size + mtime of its files. Primitives are re-registered (bundled + `.autode/config/primitives` + `history/`) when those folders change.
 - **Tools** (`src/mcp/tools.ts`, `TOOLS`): `autode_search_primitives`, `autode_describe_primitive`, `autode_validate_transform`, `autode_compile_transform` (registry, `getPrimitiveVersion()`); `autode_validate_pipeline_spec`, `autode_compile_pipeline_spec` (adds `suggestedPath` = `autode-output/<active problem>/03-build/<specId>.v<n>/<entity>/<nn>_<kind>.sql`, where `ArtifactWriter` puts build artifacts; the server assumes the default output folder), `autode_generate_design_doc`; `autode_resolve` (`resolveText` over the working set + `Catalog.search`), `autode_get_context_pack` (`buildContextPack`), `autode_list_assertions` (mirrors excluded unless `includeMirrors`), `autode_check_grounding` (`checkSqlGrounding` over `buildSchemaIndex(graph)`). All annotated `readOnlyHint: true, destructiveHint: false, idempotentHint: true`. Arguments are Ajv-validated against `inputSchema` before a handler runs (validators compiled per tool on first use, since platform tools' schemas are built per server). Workspace paths are refused if they leave the workspace.
 - **Platform tools** (v0.37.0, `src/mcp/platform.ts`): `platformTools(session)` adds `autode_list_connections`, `autode_test_connection`, `autode_list_databases`, `autode_list_schemas`, `autode_extract_metadata` (`schemaFilter: ['<database>.<schema>']`, optional `tables`, `profile` → `includeProfiling`), `autode_explain_sql` (one statement via `checkSingleStatement()`, prefixed `EXPLAIN USING TEXT` on Snowflake and `EXPLAIN` on Databricks; writes may be explained, since EXPLAIN compiles without running) and `autode_execute_query` (`checkSingleStatement()` always, `checkReadOnlySql()` unless `--allow-write`; `maxRows` default 100, schema maximum 10 000; `timeoutSeconds` default 60; result through `gateQueryResult()` with the connection's current consent). All are `openWorldHint: true`; `autode_execute_query` is `readOnlyHint: false, destructiveHint: true` when the server allows writes, and the server's `instructions` say so. `PlatformSession` holds one `ConnectionManager` per connection id, opened on first use (a failed connect is forgotten so the next call retries; `autode_test_connection` reconnects), and disposes them when the transport closes; it registers the engine's built-in resolvers (`env`, `cli`) only, and passes `cliConsent: --allow-cli` and `sampleDataConsent` (the file, re-read per call). `classifyPlatformError()` maps failures to `AUTH_FAILED` / `PERMISSION_DENIED` / `TIMEOUT` / `CONNECTION_FAILED` (connect) / `PLATFORM_ERROR` (statement), with the raw text in `details`; a missing CLI consent becomes `PERMISSION_DENIED` naming `--allow-cli`.
 - **Prompts and resources** (`src/mcp/catalogs.ts`): `autode_interview_<id>` (bundled skills overridden by `.autode/config/skills/*.json`; body = systemPrompt + questionGuidance + spec fields + examples + optional `answers_so_far`); `autode_skill_<id>` only when `isSkillExposable()` (S2) — the body states the declared tools and the tier's limits. Resources: `autode://spec/business-problem`, `spec/pipeline`, `context/{source,target,mapping,semantic-layer}` (listed only if the file exists) and `autode://primitives/{kind}` (also a resource template); contents carry `_meta.revision` (SHA-256 of the bytes) and are redacted.
@@ -1560,6 +1605,10 @@ src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
   assertions.ts, assertionSchemas.ts, catalog.ts, conflicts.ts, conformance.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, fileIngestion.ts, ledger.ts, pack.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
+src/engine/decisions/
+  decisionStore.ts, proposals.ts
+src/engine/documents/
+  problemDocuments.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
   manifest.ts, sqlGrounding.ts
 src/engine/pipelineSpec/    # Pipeline Specification
@@ -1581,7 +1630,7 @@ src/engine/transforms/declarative/    # Tier 2 declarative primitives
 src/engine/transforms/primitives/    # Tier 1 primitives
   dedup.ts, incrementalLoad.ts, renameCast.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  catalogs.ts, errors.ts, platform.ts, server.ts, tools.ts, workspace.ts
+  catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workspace.ts
 src/spokes/    # Snowflake executor (other files unused)
   architectureAgent.ts, ingestionAgent.ts, snowflakeExecutor.ts, sttmAgent.ts
 ```

@@ -6,6 +6,33 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.40.0
+
+- **Phase PA1: decisions and proposal tools**, the first phase of the portable architecture (`docs/mcp-engine-requirements.md` §3.1, §9.2; requirements ORC-8, MCP-2, P9; technical-design §7.7; usage: `docs/mcp-setup.md`, *Proposing changes*).
+- **Agents propose; people decide; AutoDE applies.** Five new MCP proposal tools: `autode_propose_assertion`, `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping` and `autode_propose_platform_change`.
+  - A proposal is validated first. Mapping source columns are checked against the estate AutoDE knows, platform changes must be exactly one write, and specifications must keep their id. Errors come back item by item.
+  - A valid proposal becomes a **decision** in `.autode/decisions/<id>.yaml` (committed), with the proposal, its validation report, evidence, and who proposed it (client, skill, and model when given).
+  - Nothing else is written until a person approves it. Then AutoDE's own code applies it:
+    - a fact enters the ledger as confirmed, attributed to the decision;
+    - a specification or Pipeline Spec revision becomes the next draft (archived as before);
+    - a mapping goes into the Mapping Context.
+  - A decision whose document changed after it was proposed is **superseded**, not applied.
+- **Stakes decide who may resolve a decision.** They are defined in the engine and recomputed at every resolution, so editing `stakes:` in the file changes nothing.
+  - **Low** (glossary terms, naming conventions, assumptions): the proposing agent may resolve it with `autode_resolve_decision`, which is marked destructive so the host asks its user.
+  - **High** (everything else): only a person, in the panel or by setting `resolution.decision` and `resolution.by` in the decision file and committing it.
+  - `autode_list_decisions` and `autode_get_decision` show what's waiting.
+- **Decisions in the panel:** a *Decisions* section in the Workflow Palette with kind, stakes, proposer, warnings and evidence, Approve / Reject with a note, and recent outcomes. Approving a specification or Pipeline Spec revision there also runs its usual approval, in one click. The panel's own specification and Pipeline Spec approvals are now recorded as decisions too. Decision files edited by hand are picked up when saved.
+- **Changed — platform writes:** `autode_execute_query` no longer runs writes, **even on a server started with `--allow-write`**. The agent proposes the change, a person approves it, and `autode_apply_decision` runs it on an `--allow-write` server. Clients that relied on 0.37–0.39's direct writes must switch to proposals.
+- **Refactored:** the serialisation, history names and revision rules of the specification, Pipeline Spec and Mapping Context moved from the three VS Code managers into `src/engine/documents/problemDocuments.ts`, moved verbatim and used by both the managers and the decision appliers, so the two can't drift.
+- **Deviations / notes:**
+  - **Lifecycle approval of a specification or Pipeline Spec stays in the panel.** Approval there syncs context, infers phases and opens the next gates, which needs the extension. A revision approved through the decision file becomes the draft, and you approve it in the panel as usual. Approved in the panel, it's one click.
+  - **The panel can approve a platform change but not run it.** Only an MCP server started with `--allow-write` applies it (`autode_apply_decision`), because running it needs that server's connection and permission.
+  - **The terminal channel comes with the CLI** (PA2). Today's human channels are the panel and the decision file.
+  - **The decision file's `by` is self-declared**; the commit is its audit. If agents in a setup can edit files, review decision files in pull requests.
+  - Each decision's history is a growing `events` list inside its YAML (one file per decision, so teams merge without conflicts) rather than a separate event log.
+  - The model behind a proposal is recorded only when the agent passes it (roadmap backlog: model identity in the host-agent path).
+- **Measured:** `npm run eval` unchanged from v0.39.0 (traps 4/5, contract violations 4/4 with none false, vocabulary 17/21, large estate 8/8, longest synchronous task 45 ms). 321 tests (5 new; the MCP tool-list, input-schema and `--allow-write` tests were updated for the new tools and the write path).
+
 ## 0.39.0
 
 - **Phase DRV2: platform onboarding in the settings cards, and named connections** (`docs/mcp-engine-requirements.md` §9.1; requirements PLT-7, PLT-8 (new); technical-design §6.14; setup: `docs/mcp-setup.md`, *Data platforms*).

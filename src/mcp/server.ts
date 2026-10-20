@@ -11,6 +11,7 @@ import { EngineToolError, redact, redactValue, toEnvelope } from './errors';
 import { EngineWorkspace } from './workspace';
 import { EngineTool, TOOLS } from './tools';
 import { PlatformSession, platformTools } from './platform';
+import { decisionTools } from './decisions';
 import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, readResource } from './catalogs';
 
 /**
@@ -102,14 +103,17 @@ export function createAutodeServer(options: ServerOptions): Server {
   const ws = new EngineWorkspace({ workspaceRoot: options.workspaceRoot, resourcesRoot: options.resourcesRoot });
   const log = (line: string) => (options.log ?? ((l: string) => process.stderr.write(l + '\n')))(redact(line));
   const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: options.allowWrite === true, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
-  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform)];
+  // The decision tools read the client's name (from `initialize`) at call time.
+  const ref: { server?: Server } = {};
+  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name })];
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {
       capabilities: { tools: {}, prompts: {}, resources: {} },
-      instructions: `AutoDE data-engineering engine. Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms; autode_explain_sql dry-runs SQL without executing it. ${platform.options.allowWrite ? 'This server was started with --allow-write: autode_execute_query also runs statements that change data or objects — confirm with the user before running one.' : 'Every tool is read-only; autode_execute_query refuses anything but SELECT, WITH, SHOW, DESCRIBE and EXPLAIN.'}`
+      instructions: `AutoDE data-engineering engine. Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms; autode_explain_sql dry-runs SQL without executing it. Nothing you do changes AutoDE's state or a data platform directly: propose changes with the autode_propose_* tools; each becomes a decision a person approves (high stakes: only in the AutoDE panel, the CLI or the decision file; low stakes: ask the user, then autode_resolve_decision). autode_execute_query runs reads only.${platform.options.allowWrite ? ' This server was started with --allow-write: approved platform changes run with autode_apply_decision.' : ''}`
     }
   );
+  ref.server = server;
   const previousOnClose = server.onclose;
   server.onclose = () => { platform.dispose(); previousOnClose?.(); };
 

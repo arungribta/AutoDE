@@ -6702,7 +6702,7 @@ async function main() {
     assert.ok(!JSON.stringify(toEnvelope(new Error('kaput password=hunter2pass'))).includes('hunter2pass'));
   });
 
-  await test('v0.35.0: the bundled server starts in plain Node and lists the expected tools, prompts and resources; every tool is read-only', async () => {
+  await test('v0.35.0: the bundled server starts in plain Node and lists the expected tools, prompts and resources; reads are read-only, changes only proposals (PA1)', async () => {
     const f = await mcpWorkspace();
     const client = await mcpSession(f.ws);
     try {
@@ -6711,8 +6711,14 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      assert.deepStrictEqual(tools.map((t) => t.name), ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query']);
-      for (const t of tools) assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], [true, false], t.name);
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision'];
+      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change'];
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_resolve_decision', 'autode_apply_decision'].sort());
+      // PA1: reads are read-only; proposals only create a pending decision; resolving and applying are destructive (the host asks first).
+      for (const t of tools) {
+        const expected = readTools.includes(t.name) ? [true, false] : proposalTools.includes(t.name) ? [false, false] : [false, true];
+        assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
+      }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
       assert.ok(prompts.includes('autode_interview_data-flow') && prompts.includes('autode_interview_requirements-discovery'), prompts.join());
       assert.deepStrictEqual(prompts.filter((p) => p.startsWith('autode_skill_')), ['autode_skill_reviewed-one'], 'unreviewed and unmigrated pre-S2 skills are not exposed');
@@ -6746,7 +6752,16 @@ async function main() {
       autode_list_schemas: [{ connectionId: 'snowflake:prod', database: 'D' }, { connectionId: 'snowflake:prod' }],
       autode_extract_metadata: [{ connectionId: 'snowflake:prod', database: 'D', schema: 'S', profile: true }, { connectionId: 'snowflake:prod', database: 'D', schema: 'S', profile: 'yes' }],
       autode_explain_sql: [{ connectionId: 'snowflake:prod', sql: 'SELECT 1' }, { connectionId: 'snowflake:prod' }],
-      autode_execute_query: [{ connectionId: 'snowflake:prod', sql: 'SELECT 1', maxRows: 10 }, { connectionId: 'snowflake:prod', sql: 'SELECT 1', maxRows: 0 }]
+      autode_execute_query: [{ connectionId: 'snowflake:prod', sql: 'SELECT 1', maxRows: 10 }, { connectionId: 'snowflake:prod', sql: 'SELECT 1', maxRows: 0 }],
+      autode_propose_assertion: [{ assertion: { kind: 'business_term', subject: ['x'], predicate: 'p', statement: 's', evidence: [{ type: 'file', ref: 'r' }] } }, { assertion: { kind: 'business_term' } }],
+      autode_propose_spec_change: [{ spec: { problemStatement: 'p', objectives: ['o'], scope: { in: [], out: [] } } }, { spec: { problemStatement: 'p' } }],
+      autode_propose_pipeline_spec: [{ pipelineSpec: {} }, { pipelineSpec: 'yaml' }],
+      autode_propose_mapping: [{ mapping: { id: 'm', sourceEntityId: 's', targetName: 't', columns: [] } }, { mapping: { id: 'm' } }],
+      autode_propose_platform_change: [{ change: { connectionId: 'c', sql: 'DELETE FROM t', reason: 'r' } }, { change: { connectionId: 'c', sql: 'DELETE FROM t' } }],
+      autode_list_decisions: [{ status: 'pending' }, { status: 'maybe' }],
+      autode_get_decision: [{ id: 'dec-x' }, {}],
+      autode_resolve_decision: [{ id: 'dec-x', decision: 'approved', by: 'me' }, { id: 'dec-x', decision: 'perhaps', by: 'me' }],
+      autode_apply_decision: [{ id: 'dec-x' }, { id: '' }]
     };
     const f = await mcpWorkspace();
     const client = await mcpSession(f.ws);
@@ -7259,14 +7274,38 @@ async function main() {
     } finally { await h.done(); }
   });
 
-  await test('v0.37.0: --allow-write marks autode_execute_query destructive and lets a single write through; connect failures map to the error contract', async () => {
+  await test('v0.40.0: a platform write is proposed, approved by a person, then applied — never run directly, even with --allow-write; connect failures map to the error contract', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const h = await platformHarness({ allowWrite: true });
     try {
       const exec = (await h.client.listTools()).tools.find((t) => t.name === 'autode_execute_query');
-      assert.deepStrictEqual([exec.annotations.readOnlyHint, exec.annotations.destructiveHint], [false, true]);
-      assert.ok(!(await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1)' })).isError);
-      assert.strictEqual((await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1); DROP TABLE t' })).structuredContent.code, 'VALIDATION_FAILED', 'one statement, even with --allow-write');
+      assert.deepStrictEqual([exec.annotations.readOnlyHint, exec.annotations.destructiveHint], [true, false]);
+      const direct = (await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1)' })).structuredContent;
+      assert.ok(direct.code === 'WRITE_NOT_ALLOWED' && /autode_propose_platform_change/.test(direct.message), JSON.stringify(direct));
+      assert.strictEqual((await h.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'SELECT 1', reason: 'x' } })).structuredContent.code, 'VALIDATION_FAILED', 'a read is not a change');
+      assert.strictEqual((await h.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1); DROP TABLE t', reason: 'x' } })).structuredContent.code, 'VALIDATION_FAILED', 'one statement');
+      const proposed = (await h.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1)', reason: 'Seed the lookup row.' } })).structuredContent;
+      const id = proposed.decision.id;
+      assert.deepStrictEqual([proposed.decision.stakes, proposed.decision.status], ['high', 'pending']);
+      assert.ok(!h.executed.some((e) => /INSERT/.test(e.sql || '')), 'nothing ran yet');
+      assert.strictEqual((await h.call('autode_apply_decision', { id })).structuredContent.code, 'VALIDATION_FAILED', 'not approved yet');
+      assert.strictEqual((await h.call('autode_resolve_decision', { id, decision: 'approved', by: 'agent' })).structuredContent.code, 'PERMISSION_DENIED', 'an agent cannot approve a high-stakes decision');
+      // The file channel: a person edits the decision file and commits it.
+      const file = nodePath.join(h.ws, '.autode', 'decisions', `${id}.yaml`);
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('decision: ""', 'decision: approved').replace('by: ""', 'by: priya'));
+      const applied = (await h.call('autode_apply_decision', { id })).structuredContent;
+      assert.ok(applied.applied === true && applied.decision.status === 'applied', JSON.stringify(applied));
+      assert.ok(h.executed.some((e) => e.sql === 'INSERT INTO t VALUES (1)'));
+      const full = (await h.call('autode_get_decision', { id })).structuredContent.decision;
+      assert.deepStrictEqual(full.events.map((e) => [e.type, e.channel || null]), [['proposed', null], ['approved', 'file'], ['applied', null]]);
+      assert.strictEqual(full.resolution.by, 'priya');
     } finally { await h.done(); }
+    const ro = await platformHarness();
+    try {
+      const p = (await ro.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'DELETE FROM t', reason: 'cleanup' } })).structuredContent;
+      assert.strictEqual(p.decision.status, 'pending', 'a read-only server may still record the proposal');
+      assert.strictEqual((await ro.call('autode_apply_decision', { id: p.decision.id })).structuredContent.code, 'WRITE_NOT_ALLOWED');
+    } finally { await ro.done(); }
     for (const [error, code] of [['Snowflake SQL API error (401): JWT token is invalid', 'AUTH_FAILED'], ['Insufficient privileges to operate on warehouse', 'PERMISSION_DENIED'], ['fetch failed: ECONNREFUSED', 'CONNECTION_FAILED'], ['Executing queries via the Snowflake CLI requires CLI-execution consent', 'PERMISSION_DENIED']]) {
       const f = await platformHarness({ connectError: error });
       try {
@@ -7906,6 +7945,118 @@ async function main() {
     for (const id of ['testConnBtn', 'testConnBtnDbx', 'testTargetConnBtn', 'testTargetConnBtnDbx', 'sfPassword', 'dbxToken', 'tgtSfPassword', 'tgtDbxToken', 'testConnBtnOra', 'oraConnectString', 'oraPassword', 'savedConnsSource', 'savedConnsTarget']) assert.ok(html.includes(`id="${id}"`), id);
     assert.ok(html.includes('data-provider="oracle"') && !html.includes('data-target-provider="oracle"'));
     for (const msg of ['checkPrerequisites', 'findExistingConnections', 'saveNamedConnection', 'useConnection', 'recheckConnection', 'removeConnection']) assert.ok(html.includes(`'${msg}'`), msg);
+  });
+
+  // ── v0.40.0: PA1 — decision store and proposal tools ──
+
+  await test('v0.40.0: a mapping proposal is grounded before anyone sees it; a valid one waits for a person, and an approved one is applied by the engine', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const f = await mcpWorkspace();
+    const client = await mcpSession(f.ws);
+    const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+    const mappingFile = nodePath.join(f.ws, '.autode', 'problems', 'retail-ab12', 'context', 'mapping-context.yaml');
+    const decisionsDir = nodePath.join(f.ws, '.autode', 'decisions');
+    try {
+      const bad = await call('autode_propose_mapping', { mapping: { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'FACT_SALES', columns: [{ sourceColumn: 'order_id', targetColumn: 'ORDER_ID' }, { sourceColumn: 'discount', targetColumn: 'DISCOUNT' }] } });
+      assert.strictEqual(bad.code, 'VALIDATION_FAILED');
+      assert.ok(bad.details.errors.some((e) => /shop\.orders\.discount does not exist/.test(e)), JSON.stringify(bad.details));
+      assert.ok(!nodeFs.existsSync(decisionsDir) && !nodeFs.existsSync(mappingFile), 'nothing written for an invalid proposal');
+      const ok = await call('autode_propose_mapping', { mapping: { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'FACT_SALES', columns: [{ sourceColumn: 'order_id', targetColumn: 'ORDER_ID' }, { sourceColumn: 'amount', targetColumn: 'NET_AMOUNT' }] }, skill: 'sttm-mapping', evidence: [{ ref: 'docs/brd.md#sales', quote: 'net amount per order' }] });
+      const id = ok.decision.id;
+      assert.deepStrictEqual([ok.decision.kind, ok.decision.stakes, ok.decision.status, ok.decision.proposedBy.client, ok.decision.proposedBy.skill], ['mapping', 'high', 'pending', 'autode-tests', 'sttm-mapping']);
+      assert.ok(ok.decision.validation.warnings.some((w) => /FACT_SALES is not in the estate/.test(w)));
+      assert.ok(!nodeFs.existsSync(mappingFile), 'the mapping is not written while the decision is pending');
+      assert.deepStrictEqual(nodeFs.readdirSync(decisionsDir).sort(), [`${id}.proposal.json`, `${id}.yaml`], 'a proposal writes only its decision');
+      assert.strictEqual((await call('autode_resolve_decision', { id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED');
+      // Someone (or something) flips the file's stakes to low: the tool channel stays closed.
+      const file = nodePath.join(decisionsDir, `${id}.yaml`);
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('stakes: high', 'stakes: low').replace(/allowedChannels:\n(  - \w+\n)+/, 'allowedChannels:\n  - tool\n'));
+      assert.strictEqual((await call('autode_resolve_decision', { id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED', 'stakes are recomputed, never read from the file');
+      // A resolution without "by" is not taken.
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('decision: ""', 'decision: approved'));
+      let listed = await call('autode_list_decisions', {});
+      assert.deepStrictEqual(listed.incompleteFileResolutions, [id]);
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('by: ""', 'by: priya'));
+      listed = await call('autode_list_decisions', {});
+      assert.ok(listed.appliedNow.some((m) => /Applied/.test(m)), JSON.stringify(listed));
+      assert.strictEqual(listed.decisions[0].status, 'applied');
+      const mc = nodeFs.readFileSync(mappingFile, 'utf8');
+      assert.ok(/FACT_SALES/.test(mc) && /NET_AMOUNT/.test(mc));
+    } finally { await client.close(); f.done(); }
+  });
+
+  await test('v0.40.0: a decision whose document changed after it was proposed is superseded, not applied; an approved spec revision becomes the next draft', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+    const P = fresh('../dist/engine/decisions/proposals.js');
+    const f = await mcpWorkspace();
+    try {
+      const problemRoot = nodePath.join(f.ws, '.autode', 'problems', 'retail-ab12');
+      const specFile = nodePath.join(problemRoot, 'spec', 'business-problem.yaml');
+      nodeFs.writeFileSync(specFile, 'id: bps-1\nversion: 2\nstatus: approved\nproblemStatement: Retail analytics\nobjectives: [Daily sales]\nscope: { in: [orders], out: [] }\nproblemStatementApproved: true\n');
+      const store = new DecisionStore(f.ws);
+      const ctx = { workspaceRoot: f.ws, problemRoot, problemId: 'retail-ab12' };
+      const revision = { id: 'bps-1', problemStatement: 'Retail analytics', objectives: ['Daily sales', 'Weekly margin'], successCriteria: [], scope: { in: ['orders'], out: [] }, constraints: [], assumptions: [] };
+      assert.throws(() => P.propose(store, ctx, 'spec_revision', { ...revision, id: 'other' }, { proposedBy: { host: 'mcp' } }), /not the active specification/);
+      const first = P.propose(store, ctx, 'spec_revision', revision, { proposedBy: { host: 'mcp', client: 'cursor' } });
+      store.resolve(first.id, { decision: 'approved', by: 'priya', channel: 'panel' });
+      const r1 = await P.applyDecision(store, first.id, ctx);
+      assert.ok(r1.applied, r1.message);
+      const spec = fresh('../dist/engine/documents/problemDocuments.js').parseBusinessProblemSpec(nodeFs.readFileSync(specFile, 'utf8'));
+      assert.deepStrictEqual([spec.version, spec.status, spec.objectives, spec.problemStatementApproved], [3, 'draft', ['Daily sales', 'Weekly margin'], true]);
+      assert.ok(nodeFs.existsSync(nodePath.join(problemRoot, 'spec', 'history', 'business-problem.v2.approved.yaml')), 'the approved version is archived');
+      const second = P.propose(store, ctx, 'spec_revision', { ...revision, problemStatement: 'Retail and returns analytics' }, { proposedBy: { host: 'mcp' } });
+      nodeFs.appendFileSync(specFile, 'domain: retail\n'); // edited meanwhile
+      store.resolve(second.id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      const r2 = await P.applyDecision(store, second.id, ctx);
+      assert.deepStrictEqual([r2.applied, r2.decision.status], [false, 'superseded']);
+      assert.ok(/domain: retail/.test(nodeFs.readFileSync(specFile, 'utf8')) && !/returns/.test(nodeFs.readFileSync(specFile, 'utf8')), 'the newer edit survives');
+      assert.throws(() => store.resolve(second.id, { decision: 'approved', by: 'x', channel: 'panel' }), /superseded, not pending/);
+      // The panel's own approvals are recorded too.
+      const rec = store.recordResolved({ kind: 'spec_approval', title: 'Approve v3', summary: '', proposal: { id: 'bps-1', version: 3 }, proposedBy: { host: 'vscode' }, by: 'priya', channel: 'panel' });
+      assert.deepStrictEqual([rec.status, rec.events.map((e) => e.type)], ['applied', ['proposed', 'approved', 'applied']]);
+    } finally { f.done(); }
+  });
+
+  await test('v0.40.0: a low-stakes fact may be accepted through the agent; it enters the ledger as confirmed, attributed to its decision', async () => {
+    const f = await mcpWorkspace();
+    const client = await mcpSession(f.ws);
+    const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+    try {
+      const fact = { kind: 'business_term', subject: ['obj:shop/prod/shop.orders'], predicate: 'defined_as', value: { term: 'Order', definition: 'A customer purchase' }, statement: 'An order is a customer purchase.', evidence: [{ type: 'file', ref: 'docs/glossary.md#order' }] };
+      const p = await call('autode_propose_assertion', { assertion: fact });
+      assert.deepStrictEqual([p.decision.stakes, p.decision.allowedChannels.includes('tool')], ['low', true], JSON.stringify(p));
+      const key = await call('autode_propose_assertion', { assertion: { ...fact, kind: 'key', predicate: 'unique', value: ['order_id'], statement: 'order_id is unique.' } });
+      assert.strictEqual(key.decision.stakes, 'high', 'a key changes joins: a person decides');
+      const r = await call('autode_resolve_decision', { id: p.decision.id, decision: 'approved', by: 'priya', note: 'checked the glossary' });
+      assert.ok(r.applied === true, JSON.stringify(r));
+      const listed = await call('autode_list_assertions', { kind: 'business_term' });
+      const a = listed.assertions.find((x) => x.statement === 'An order is a customer purchase.');
+      assert.ok(a && a.trust === 'confirmed' && a.status === 'active' && !a.specId, JSON.stringify(listed));
+      const nodeFs = require('node:fs'); const nodePath = require('node:path');
+      const ledgerDir = nodePath.join(f.ws, '.autode', 'knowledge', 'ledger');
+      const events = nodeFs.readdirSync(ledgerDir).filter((n) => n.endsWith('.jsonl')).flatMap((n) => nodeFs.readFileSync(nodePath.join(ledgerDir, n), 'utf8').split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l)));
+      const asserted = events.find((e) => e.type === 'asserted' && e.assertion.statement === 'An order is a customer purchase.');
+      assert.deepStrictEqual([asserted.assertion.createdBy, asserted.causedBy], [`decision:${p.decision.id}`, p.decision.id], 'attributed to its decision');
+    } finally { await client.close(); f.done(); }
+  });
+
+  await test('v0.40.0: the managers and the engine share one serialisation — a document written by either reads back the same', () => {
+    const D = fresh('../dist/engine/documents/problemDocuments.js');
+    const spec = { id: 'bps-9', version: 1, status: 'draft', problemStatement: 'P', objectives: ['o'], successCriteria: [], scope: { in: ['a'], out: [] }, constraints: [], assumptions: [], createdAt: 't', updatedAt: 't', dataFlows: [{ id: 'f', source: 's', target: 't', description: 'd' }] };
+    const once = D.serializeBusinessProblemSpec(D.parseBusinessProblemSpec(D.serializeBusinessProblemSpec(spec)));
+    assert.strictEqual(D.serializeBusinessProblemSpec(D.parseBusinessProblemSpec(once)), once, 'serialise → parse is stable');
+    assert.deepStrictEqual(D.parseBusinessProblemSpec(once).dataFlows[0].source, 's');
+    const mc = D.withMappingUpserted({ specId: 's', specVersion: 1, version: 2, status: 'approved', mappings: [] }, { id: 'm', sourceEntityId: 'x', sourceFqn: 'x', targetName: 'y', columns: [{ sourceColumn: 'a', targetColumn: 'b' }] }, new Date(0));
+    assert.strictEqual(mc.status, 'built', 'an edited approved mapping set needs review again');
+    const rev = D.nextMappingContextRevision({ specId: 's', specVersion: 1, version: 2, status: 'approved', mappings: [] }, mc);
+    assert.deepStrictEqual([rev.toSave.version, rev.archivePrevious], [3, true]);
+    assert.deepStrictEqual(D.parseMappingContext(D.serializeMappingContext(rev.toSave)).mappings[0].columns, [{ sourceColumn: 'a', targetColumn: 'b', transformExpression: undefined }]);
+  });
+
+  await test('v0.40.0: the panel offers decisions for review (Decisions section, approve and reject)', () => {
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    assert.ok(html.includes('id="paletteDecisions"') && html.includes("post('resolveDecision'") && html.includes("case 'decisionsList'"));
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

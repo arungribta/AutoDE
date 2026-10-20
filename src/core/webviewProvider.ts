@@ -47,6 +47,10 @@ import { publishPrimitiveDefinition, deprecatePrimitiveDefinition } from '../eng
 import { PrimitiveDefinition } from '../engine/transforms/declarative/types';
 import { ConnectionManager } from '../engine/platform/ConnectionManager';
 import type { PlatformOnboarding } from './platformOnboarding';
+import * as os from 'node:os';
+import { Decision, DecisionStore } from '../engine/decisions/decisionStore';
+import { ApplyResult, ProposalContext, applyDecision, processResolved } from '../engine/decisions/proposals';
+import { layoutPath } from '../engine/workspaceLayout';
 import { backendFor } from './platformOnboarding';
 import { sampleDataConsentFromWorkspace } from '../engine/platform/connectionsConfig';
 import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
@@ -808,29 +812,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postLog('Business problem confirmed. Review the full specification below and approve it to continue.');
           break;
         }
-        case 'approveSpec': {
-          if (!this.specManager) { this.postLog('Spec manager is not initialized.'); break; }
-          const draft = this.specManager.getSpec();
-          if (draft && !draft.problemStatementApproved) {
-            this.postMessage('error', { message: 'Confirm the inferred business problem before approving the full specification.' });
-            break;
-          }
-          const approved = await this.specManager.approve();
-          this.postSpec();
-          if (approved) {
-            this.hub.setSpec(approved.id, approved.version);
-            await this.syncContextFromApprovedSpec(approved);
-            const contextSummary = this.contextPackText('spec', approved.problemStatement, 'Phase inference');
-            this.hub.inferPhasesFromSpec(approved, contextSummary);
-            await this.initializeContextForApprovedSpec(approved);
-            this.postMessage('specApproved', { spec: approved });
-            this.postLog(approved.implementationType === 'brownfield'
-              ? `Business Problem Specification v${approved.version} approved. Build the Target Context and Source Context before generating the workflow plan.`
-              : `Business Problem Specification v${approved.version} approved. Build the Target Context before generating the workflow plan (no source system — Greenfield).`);
-            this.postContextGateStatus();
-          }
-          break;
-        }
+        case 'approveSpec': { await this.approveCurrentSpec(); break; }
         case 'setImplementationType': {
           const value = message.value === 'brownfield' ? 'brownfield' : message.value === 'greenfield' ? 'greenfield' : undefined;
           if (!value) { this.postLog('Implementation type must be "greenfield" or "brownfield".'); break; }
@@ -972,13 +954,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           await this.generatePipelineSpec();
           break;
         }
-        case 'approvePipelineSpec': {
-          if (!this.pipelineSpecManager) break;
-          const approved = await this.pipelineSpecManager.approve();
-          if (approved) {
-            this.postMessage('pipelineSpecApproved', { spec: approved });
-            this.postLog(`Pipeline Spec v${approved.version} approved.`);
-          }
+        case 'approvePipelineSpec': { await this.approveCurrentPipelineSpec(); break; }
+        case 'listDecisions': { this.postDecisions(); break; }
+        case 'resolveDecision': {
+          const m = message as unknown as { id?: unknown; decision?: unknown; note?: unknown };
+          if (typeof m.id === 'string' && (m.decision === 'approved' || m.decision === 'rejected')) await this.resolveDecisionInPanel(m.id, m.decision, typeof m.note === 'string' ? m.note : undefined);
           break;
         }
         case 'listPrimitives': {
@@ -1238,6 +1218,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         return;
       }
+      const root = this.workspaceRoot?.fsPath;
+      if (root && key.startsWith(normalizeFsPath(layoutPath(root, 'decisions')))) {
+        if (key.endsWith('.yaml')) await this.processDecisionFiles();
+        return;
+      }
       await this.reloadContextFile(key);
     } catch (err) {
       this.postLog(`Reloading ${path.basename(uri.fsPath)} failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1390,6 +1375,117 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Lets `extension.ts`'s command handlers (e.g. `testConnection`) surface progress/results into the chat log, not just a native VS Code notification the webview never sees. */
+  // ── Decisions (Phase PA1: docs/mcp-engine-requirements.md §9.2) ──────────
+
+  private decisionStore(): DecisionStore | undefined {
+    const root = this.workspaceRoot?.fsPath;
+    return root ? new DecisionStore(root) : undefined;
+  }
+
+  private decisionContext(): ProposalContext | undefined {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root) return undefined;
+    return { workspaceRoot: root, problemRoot: this.currentProblemRoot()?.fsPath, problemId: this.activeProblemId };
+  }
+
+  /** Who resolves in the panel: the OS user (the panel is a person at the keyboard; D6). */
+  private panelUser(): string {
+    try { return os.userInfo().username || 'user'; } catch { return 'user'; }
+  }
+
+  private postDecisions(): void {
+    const store = this.decisionStore();
+    if (!store) return;
+    const all = store.list();
+    const pending = all.filter((d) => d.status === 'pending' || d.status === 'approved');
+    const recent = all.filter((d) => d.status !== 'pending' && d.status !== 'approved').slice(-10).reverse();
+    const view = (d: Decision) => ({ id: d.id, kind: d.kind, title: d.title, summary: d.summary, stakes: d.stakes, status: d.status, proposedBy: d.proposedBy, proposedAt: d.proposedAt, validation: d.validation, evidence: d.evidence, resolution: d.resolution, lastNote: d.events[d.events.length - 1]?.note });
+    this.postMessage('decisionsList', { pending: pending.map(view), recent: recent.map(view) });
+  }
+
+  /** Refreshes whatever an applied decision changed; from the panel, a spec or Pipeline Spec revision then goes through its usual approval (one click, not two). */
+  private async afterDecisionApplied(result: ApplyResult, fromPanel: boolean): Promise<void> {
+    this.postLog(result.message);
+    if (!result.applied) return;
+    const kind = result.decision.kind;
+    if (kind === 'spec_revision' && this.specManager) {
+      await this.reloadContextFile(normalizeFsPath(this.specManager.getSpecUri().fsPath));
+      if (fromPanel && this.specManager.getSpec()?.problemStatementApproved) await this.approveCurrentSpec(false);
+      else this.postLog('The specification draft was updated; review and approve it in the panel.');
+    } else if (kind === 'pipeline_spec' && this.pipelineSpecManager) {
+      await this.reloadContextFile(normalizeFsPath(this.pipelineSpecManager.getSpecUri().fsPath));
+      if (fromPanel) await this.approveCurrentPipelineSpec(false);
+    } else if (kind === 'mapping' && this.mappingContextManager) {
+      await this.reloadContextFile(normalizeFsPath(this.mappingContextManager.getFileUri().fsPath));
+    } else if (kind === 'assertion' && this.contextFileManager) {
+      await this.contextFileManager.getLedger().load();
+      await this.contextFileManager.persistCompiledGraph();
+    }
+  }
+
+  private async resolveDecisionInPanel(id: string, decision: 'approved' | 'rejected', note?: string): Promise<void> {
+    const store = this.decisionStore();
+    const ctx = this.decisionContext();
+    if (!store || !ctx) return;
+    try {
+      const resolved = store.resolve(id, { decision, by: this.panelUser(), channel: 'panel', note });
+      if (resolved.status === 'approved') {
+        const result = await applyDecision(store, id, ctx);
+        await this.afterDecisionApplied(result, true);
+      } else {
+        this.postLog(`Rejected: ${resolved.title}.`);
+      }
+    } catch (err) {
+      this.postMessage('error', { message: err instanceof Error ? err.message : String(err) });
+    }
+    this.postDecisions();
+  }
+
+  /** Decisions resolved by editing their files (the file channel), and approvals made elsewhere: apply what this process can. */
+  private async processDecisionFiles(): Promise<void> {
+    const store = this.decisionStore();
+    const ctx = this.decisionContext();
+    if (!store || !ctx) return;
+    const { applied, incomplete } = await processResolved(store, ctx);
+    for (const r of applied) await this.afterDecisionApplied(r, false);
+    for (const id of incomplete) this.postLog(`Decision ${id}: resolution is set in its file but "by" is empty — fill in who decided.`);
+    this.postDecisions();
+  }
+
+  private async approveCurrentSpec(record = true): Promise<boolean> {
+    if (!this.specManager) { this.postLog('Spec manager is not initialized.'); return false; }
+    const draft = this.specManager.getSpec();
+    if (draft && !draft.problemStatementApproved) {
+      this.postMessage('error', { message: 'Confirm the inferred business problem before approving the full specification.' });
+      return false;
+    }
+    const approved = await this.specManager.approve();
+    this.postSpec();
+    if (!approved) return false;
+    if (record) this.decisionStore()?.recordResolved({ kind: 'spec_approval', title: `Approve the Business Problem Specification v${approved.version}`, summary: approved.problemStatement, proposal: { id: approved.id, version: approved.version }, proposedBy: { host: 'vscode' }, problemId: this.activeProblemId, by: this.panelUser(), channel: 'panel' });
+    this.hub.setSpec(approved.id, approved.version);
+    await this.syncContextFromApprovedSpec(approved);
+    const contextSummary = this.contextPackText('spec', approved.problemStatement, 'Phase inference');
+    this.hub.inferPhasesFromSpec(approved, contextSummary);
+    await this.initializeContextForApprovedSpec(approved);
+    this.postMessage('specApproved', { spec: approved });
+    this.postLog(approved.implementationType === 'brownfield'
+      ? `Business Problem Specification v${approved.version} approved. Build the Target Context and Source Context before generating the workflow plan.`
+      : `Business Problem Specification v${approved.version} approved. Build the Target Context before generating the workflow plan (no source system — Greenfield).`);
+    this.postContextGateStatus();
+    return true;
+  }
+
+  private async approveCurrentPipelineSpec(record = true): Promise<boolean> {
+    if (!this.pipelineSpecManager) return false;
+    const approved = await this.pipelineSpecManager.approve();
+    if (!approved) return false;
+    if (record) this.decisionStore()?.recordResolved({ kind: 'pipeline_spec_approval', title: `Approve the Pipeline Spec v${approved.version}`, summary: `${approved.entities.length} entities`, proposal: { id: approved.id, version: approved.version }, proposedBy: { host: 'vscode' }, problemId: this.activeProblemId, by: this.panelUser(), channel: 'panel' });
+    this.postMessage('pipelineSpecApproved', { spec: approved });
+    this.postLog(`Pipeline Spec v${approved.version} approved.`);
+    return true;
+  }
+
   /** Phase DRV2: named-connection onboarding in the settings cards (built in extension.ts). */
   public setPlatformOnboarding(onboarding: PlatformOnboarding): void {
     this.platformOnboarding = onboarding;

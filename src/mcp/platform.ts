@@ -140,6 +140,19 @@ export class PlatformSession {
     }
   }
 
+  /** Runs an approved platform change (Phase PA1) — the only path for a write; needs --allow-write. */
+  public async executeApprovedChange(connectionId: string, sql: string): Promise<string> {
+    if (!this.options.allowWrite) throw new EngineToolError('WRITE_NOT_ALLOWED', 'This server was not started with --allow-write, so it applies no platform change.');
+    const entry = this.entry(connectionId);
+    const manager = await this.connect(entry);
+    try {
+      const result = await withTimeout(DEFAULT_TIMEOUT_S, entry.id, () => manager.executeQuery(stripTrailingSemicolon(sql), { maxRows: 1, timeoutMs: DEFAULT_TIMEOUT_S * 1000 }));
+      return `done in ${result.executionTimeMs} ms`;
+    } catch (err) {
+      throw classifyPlatformError(err, entry.id, 'query');
+    }
+  }
+
   public dispose(): void {
     for (const pending of this.live.values()) pending.then((m) => m.dispose(), () => undefined);
     this.live.clear();
@@ -273,9 +286,7 @@ export function platformTools(session: PlatformSession): EngineTool[] {
     },
     {
       name: 'autode_execute_query',
-      description: allowWrite
-        ? 'Run one SQL statement. This server was started with --allow-write: statements that change data or objects run too — confirm with the user first. Row values are returned only if the connection allows sample data; personal-data columns are masked.'
-        : 'Run one read-only statement (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN); anything else is refused. Row values are returned only if the connection allows sample data (otherwise just columns and the row count); personal-data columns are masked.',
+      description: 'Run one read-only statement (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN); anything else is refused — propose a change with autode_propose_platform_change instead. Row values are returned only if the connection allows sample data (otherwise just columns and the row count); personal-data columns are masked.',
       inputSchema: {
         type: 'object', required: ['connectionId', 'sql'], additionalProperties: false,
         properties: {
@@ -285,15 +296,14 @@ export function platformTools(session: PlatformSession): EngineTool[] {
           timeoutSeconds: { type: 'integer', minimum: 1, maximum: 600, description: `Default ${DEFAULT_TIMEOUT_S}.` }
         }
       },
-      annotations: annotations('Execute a query', { readOnly: !allowWrite }),
+      annotations: annotations('Execute a query', { readOnly: true }),
       handler: async (args) => {
         const sql = String(args.sql);
         const single = checkSingleStatement(sql);
         if (!single.ok) throw new EngineToolError('VALIDATION_FAILED', single.reason ?? 'Not a single statement.');
-        if (!allowWrite) {
-          const check = checkReadOnlySql(sql);
-          if (!check.ok) throw new EngineToolError('WRITE_NOT_ALLOWED', `${check.reason} This server is read-only (start it with --allow-write to change that, and prefer a read-only platform role).`, { statement: check.firstKeyword });
-        }
+        // Phase PA1: a write is never run directly, with or without --allow-write; it is proposed and approved by a person.
+        const check = checkReadOnlySql(sql);
+        if (!check.ok) throw new EngineToolError('WRITE_NOT_ALLOWED', `${check.reason} Propose it with autode_propose_platform_change: a person approves it, then ${allowWrite ? 'autode_apply_decision runs it on this server' : 'a server started with --allow-write runs it (autode_apply_decision)'}.`, { statement: check.firstKeyword });
         const entry = session.entry(String(args.connectionId));
         const maxRows = Math.min(MAX_ROWS_CAP, (args.maxRows as number | undefined) ?? DEFAULT_MAX_ROWS);
         const timeoutSeconds = (args.timeoutSeconds as number | undefined) ?? DEFAULT_TIMEOUT_S;

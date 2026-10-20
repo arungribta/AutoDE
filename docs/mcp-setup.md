@@ -196,7 +196,9 @@ connections:
 
 ### Read-only by default
 
-`autode_execute_query` runs exactly one statement per call and, unless the server was started with `--allow-write`, only `SELECT`, `WITH`, `SHOW`, `DESCRIBE` and `EXPLAIN`. Comments and quoted text are taken into account, so a write hidden behind a comment or inside a second statement is refused. With `--allow-write` the tool is marked destructive, so your client asks before each call.
+`autode_execute_query` runs exactly one statement per call, and only `SELECT`, `WITH`, `SHOW`, `DESCRIBE` and `EXPLAIN`. Comments and quoted text are taken into account, so a write hidden behind a comment or inside a second statement is refused.
+
+**Changes to a platform are proposed, approved by a person, then applied** (since 0.40.0). An agent proposes the statement with `autode_propose_platform_change`. A person approves the resulting decision (see [Proposing changes](#proposing-changes)). Then `autode_apply_decision` runs it, on a server started with `--allow-write`. Until 0.39.0, `--allow-write` let `autode_execute_query` run writes directly; it no longer does.
 
 This check reads the SQL text; it can't see what a function or a view does when it runs. **The real protection is the platform role:** give the connection a role that can only read.
 
@@ -210,6 +212,37 @@ Whatever a tool returns goes into your agent's prompt, and so to its model provi
 - `autode_extract_metadata` returns structure, row counts, and distinct and null counts, but not minimum or maximum values, or query text from the platform's history (which contains literal values from real queries).
 
 When you allow sample data, values in columns that look like personal data (`email`, `phone`, `first_name`, `date_of_birth`, `iban` and similar names) are replaced by `[masked]`, as are e-mail addresses and card numbers in any column. The check works on names, so an alias such as `SELECT email AS e` gets past it. Phase GOV adds proper column classification. The AutoDE extension reads the same setting for its own connections. The server reads the file again on every call, so a change takes effect without a restart.
+
+## Proposing changes
+
+Nothing an agent does through the server changes AutoDE's state or a data platform directly. Instead:
+
+1. The agent calls an `autode_propose_*` tool.
+2. The server validates the proposal and records a **decision** in `.autode/decisions/<id>.yaml` (committed with the project).
+3. A person approves or rejects it.
+4. AutoDE applies an approved decision with its own code.
+
+Validation errors come back item by item, so the agent can fix the proposal and try again. If the document a decision would change was edited in the meantime, the decision is marked *superseded* instead of being applied.
+
+| Proposal tool | What it proposes | Stakes |
+|---|---|---|
+| `autode_propose_assertion` | A fact for AutoDE's context, with evidence | Low for glossary terms, naming conventions and assumptions; high for keys, grain, relationships, rules, metrics and the rest |
+| `autode_propose_spec_change` | A revised Business Problem Specification; approved, it becomes the new draft | High |
+| `autode_propose_pipeline_spec` | A Pipeline Spec; approved, it becomes the new draft | High |
+| `autode_propose_mapping` | One source-to-target mapping; source columns are checked against the estate | High |
+| `autode_propose_platform_change` | One statement that changes data or objects, with the reason | High |
+
+**Who may resolve a decision:**
+- **Low stakes:** the agent, with `autode_resolve_decision`, after asking you. The tool is marked destructive, so your client confirms first.
+- **High stakes:** only a person:
+  - in the AutoDE panel (**Workflow Palette → Decisions**), or
+  - in the decision file: set `resolution.decision` to `approved` or `rejected`, fill in `resolution.by`, and commit. AutoDE picks it up when the file changes, or the next time an MCP client lists decisions.
+
+  The `autode` CLI joins these channels in a later release.
+
+Who wrote a decision file is whoever committed it. If agents in your setup can edit files, review decision files in pull requests like code.
+
+`autode_list_decisions` and `autode_get_decision` show what's waiting, with the proposal, its validation report, evidence and history. Approving a specification or Pipeline Spec in the panel also runs its usual approval. Approved through the file, it becomes the draft, which you then approve in the panel.
 
 ## What the server offers
 
@@ -233,7 +266,11 @@ When you allow sample data, values in columns that look like personal data (`ema
 | `autode_list_databases` / `autode_list_schemas` | Browse what the connection can see. |
 | `autode_extract_metadata` | Read a schema's tables, columns, keys and views, and optionally sampled column profiles. |
 | `autode_explain_sql` | Dry-run a statement: the platform compiles it and returns the plan without running it. |
-| `autode_execute_query` | Run one statement, read-only unless the server allows writes, with at most 10 000 rows (100 by default). |
+| `autode_execute_query` | Run one read-only statement, with at most 10 000 rows (100 by default). |
+| `autode_propose_assertion`, `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`, `autode_propose_platform_change` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
+| `autode_list_decisions` / `autode_get_decision` | See decisions, their proposals, validation and history. |
+| `autode_resolve_decision` | Approve or reject a low-stakes decision after asking the user. |
+| `autode_apply_decision` | Run an approved platform change (server started with `--allow-write`). |
 
 **Prompts**
 - `autode_interview_<part>`: AutoDE's requirements interview, one prompt per part.

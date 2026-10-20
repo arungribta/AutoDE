@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { MappingContext, EntityMapping, ColumnMapping, ContextStatus } from '../engine/types';
-import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { MappingContext, EntityMapping } from '../engine/types';
+import { mappingContextHistoryName, nextMappingContextRevision, parseMappingContext, serializeMappingContext, withMappingUpserted } from '../engine/documents/problemDocuments';
 import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
 import { createVscodeFileIo } from './vscodeFileIo';
 
@@ -72,11 +72,7 @@ export class MappingContextManager implements vscode.Disposable {
    * silently treated as still-approved.
    */
   public async upsertMapping(mapping: EntityMapping): Promise<MappingContext> {
-    const current = this.context ?? { specId: '', specVersion: 1, status: 'pending' as const, mappings: [] };
-    const mappings = current.mappings.filter((m) => m.id !== mapping.id);
-    mappings.push(mapping);
-    const status = current.status === 'approved' ? 'built' : current.status;
-    return this.save({ ...current, status, mappings, builtAt: new Date().toISOString() });
+    return this.save(withMappingUpserted(this.context, mapping));
   }
 
   public async removeMapping(mappingId: string): Promise<MappingContext> {
@@ -89,15 +85,10 @@ export class MappingContextManager implements vscode.Disposable {
   /** Same versioning contract as `SourceContextManager.save()` — see its doc comment for the exact bump/archive semantics. */
   public async save(context: MappingContext): Promise<MappingContext> {
     const previous = this.context;
-    const sameLineage = !!previous && previous.specId === context.specId && previous.specVersion === context.specVersion;
-    const previousWasApproved = previous?.status === 'approved';
-    const version = sameLineage
-      ? (previousWasApproved ? (previous!.version ?? 1) + 1 : (previous!.version ?? 1))
-      : (context.version ?? 1);
-    if (previousWasApproved) {
-      await this.archive(previous!);
+    const { toSave, archivePrevious } = nextMappingContextRevision(previous, context);
+    if (archivePrevious && previous) {
+      await this.archive(previous);
     }
-    const toSave: MappingContext = { ...context, version };
     await this.file.write(this.serialize(toSave));
     this.context = toSave;
     this.log(`Saved Mapping Context spec-v${toSave.specVersion} rev${toSave.version} (${toSave.mappings.length} mapping(s)).`);
@@ -107,7 +98,7 @@ export class MappingContextManager implements vscode.Disposable {
   private async archive(previous: MappingContext): Promise<void> {
     const historyDir = vscode.Uri.joinPath(this.contextDir, 'history');
     await vscode.workspace.fs.createDirectory(historyDir);
-    const target = vscode.Uri.joinPath(historyDir, `mapping-context.spec${previous.specVersion}.v${previous.version ?? 1}.yaml`);
+    const target = vscode.Uri.joinPath(historyDir, mappingContextHistoryName(previous));
     try {
       await vscode.workspace.fs.stat(target);
       return;
@@ -119,55 +110,10 @@ export class MappingContextManager implements vscode.Disposable {
   }
 
   private serialize(context: MappingContext): string {
-    return '# AutoDE Mapping Context\n' + stringifyYaml(context as unknown as Record<string, unknown>);
+    return serializeMappingContext(context);
   }
 
   private parse(content: string): MappingContext {
-    const raw = parseYaml(content);
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw new Error('Invalid mapping-context YAML: root must be an object.');
-    }
-    const doc = raw as Record<string, unknown>;
-    const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-    const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
-
-    const parseColumn = (c: unknown): ColumnMapping | undefined => {
-      if (!c || typeof c !== 'object') return undefined;
-      const rec = c as Record<string, unknown>;
-      const sourceColumn = str(rec.sourceColumn);
-      const targetColumn = str(rec.targetColumn);
-      if (!sourceColumn || !targetColumn) return undefined;
-      return { sourceColumn, targetColumn, transformExpression: str(rec.transformExpression) || undefined };
-    };
-
-    const parseMapping = (m: unknown): EntityMapping | undefined => {
-      if (!m || typeof m !== 'object') return undefined;
-      const rec = m as Record<string, unknown>;
-      const id = str(rec.id);
-      const sourceEntityId = str(rec.sourceEntityId);
-      const targetName = str(rec.targetName);
-      if (!id || !sourceEntityId || !targetName) return undefined;
-      const columns = Array.isArray(rec.columns) ? rec.columns.map(parseColumn).filter((c): c is ColumnMapping => !!c) : [];
-      return {
-        id, sourceEntityId, targetName, columns,
-        sourceFqn: str(rec.sourceFqn),
-        targetEntityId: str(rec.targetEntityId) || undefined,
-        notes: str(rec.notes) || undefined
-      };
-    };
-
-    const mappings = Array.isArray(doc.mappings) ? doc.mappings.map(parseMapping).filter((m): m is EntityMapping => !!m) : [];
-
-    return {
-      specId: str(doc.specId),
-      specVersion: typeof doc.specVersion === 'number' ? doc.specVersion : 1,
-      version: typeof doc.version === 'number' ? doc.version : 1,
-      status: (str(doc.status) as ContextStatus) || 'pending',
-      sourceContextVersion: num(doc.sourceContextVersion),
-      targetContextVersion: num(doc.targetContextVersion),
-      mappings,
-      builtAt: str(doc.builtAt) || undefined,
-      approvedAt: str(doc.approvedAt) || undefined
-    };
+    return parseMappingContext(content);
   }
 }

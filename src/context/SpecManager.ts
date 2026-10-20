@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { BusinessProblemSpec, DataFlow, SourceEntry, SpecProvenance, SpecStatus } from '../engine/types';
-import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { BusinessProblemSpec } from '../engine/types';
+import { parseBusinessProblemSpec, serializeBusinessProblemSpec, specHistoryName } from '../engine/documents/problemDocuments';
 import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
 import { createVscodeFileIo } from './vscodeFileIo';
 
@@ -111,7 +111,7 @@ export class SpecManager implements vscode.Disposable {
     if (this.serialize(previous) === this.serialize(incoming)) return;
     const historyDir = vscode.Uri.joinPath(this.specDir, 'history');
     await vscode.workspace.fs.createDirectory(historyDir);
-    const name = `business-problem.v${previous.version}.${previous.status}.yaml`;
+    const name = specHistoryName(previous);
     const target = vscode.Uri.joinPath(historyDir, name);
     try {
       await vscode.workspace.fs.stat(target);
@@ -147,173 +147,10 @@ export class SpecManager implements vscode.Disposable {
   }
 
   private serialize(spec: BusinessProblemSpec): string {
-    const doc: Record<string, unknown> = {
-      id: spec.id,
-      version: spec.version,
-      status: spec.status,
-      problemStatement: spec.problemStatement,
-      objectives: spec.objectives,
-      successCriteria: spec.successCriteria,
-      scope: { in: spec.scope.in, out: spec.scope.out },
-      constraints: spec.constraints,
-      assumptions: spec.assumptions,
-      domain: spec.domain,
-      stakeholders: spec.stakeholders,
-      keyEntities: spec.keyEntities,
-      // ── Comprehensive (v2) fields — persist as NATIVE YAML (no JSON stopgap) ──
-      businessRequirements: spec.businessRequirements,
-      dataFlows: spec.dataFlows,
-      transformations: spec.transformations,
-      dependencies: spec.dependencies,
-      acceptanceCriteria: spec.acceptanceCriteria,
-      implementationConsiderations: spec.implementationConsiderations,
-      sourceCatalog: spec.sourceCatalog,
-      provenance: spec.provenance,
-      createdAt: spec.createdAt,
-      updatedAt: spec.updatedAt,
-      approvedAt: spec.approvedAt,
-      approvedBy: spec.approvedBy,
-      implementationType: spec.implementationType,
-      implementationTypeReason: spec.implementationTypeReason,
-      implementationTypeOverridden: spec.implementationTypeOverridden,
-      problemStatementApproved: spec.problemStatementApproved
-    };
-    // The `yaml` library drops `undefined` top-level keys, so optional fields are
-    // omitted automatically; empty arrays are preserved (read back as []).
-    return '# AutoDE Business Problem Specification\n' + stringifyYaml(doc);
+    return serializeBusinessProblemSpec(spec);
   }
 
   private parse(content: string): BusinessProblemSpec {
-    const raw = parseYaml(content);
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw new Error('Invalid specification YAML: root must be an object.');
-    }
-    const doc = raw as Record<string, unknown>;
-    const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-    const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
-
-    // Backward compatibility: legacy files stored scope as flat `scopeIn:`/`scopeOut:`.
-    const scopeRaw = (doc.scope && typeof doc.scope === 'object' && !Array.isArray(doc.scope))
-      ? doc.scope as Record<string, unknown>
-      : {};
-    const inScope = list(scopeRaw.in);
-    const outScope = list(scopeRaw.out);
-    const scope = {
-      in: inScope.length > 0 ? inScope : list(doc.scopeIn),
-      out: outScope.length > 0 ? outScope : list(doc.scopeOut)
-    };
-
-    const spec: BusinessProblemSpec = {
-      id: str(doc.id) || `bps-${Date.now().toString(36)}`,
-      version: typeof doc.version === 'number' ? doc.version : parseInt(str(doc.version), 10) || 1,
-      status: (str(doc.status) as SpecStatus) || 'draft',
-      problemStatement: str(doc.problemStatement),
-      objectives: list(doc.objectives),
-      successCriteria: list(doc.successCriteria),
-      scope,
-      constraints: list(doc.constraints),
-      assumptions: list(doc.assumptions),
-      domain: str(doc.domain) || undefined,
-      stakeholders: list(doc.stakeholders),
-      keyEntities: list(doc.keyEntities),
-      createdAt: str(doc.createdAt),
-      updatedAt: str(doc.updatedAt),
-      approvedAt: str(doc.approvedAt) || undefined,
-      approvedBy: str(doc.approvedBy) || undefined,
-      implementationType: (doc.implementationType === 'greenfield' || doc.implementationType === 'brownfield') ? doc.implementationType : undefined,
-      implementationTypeReason: str(doc.implementationTypeReason) || undefined,
-      implementationTypeOverridden: doc.implementationTypeOverridden === true,
-      problemStatementApproved: doc.problemStatementApproved === true
-    };
-
-    // v2 fields: native YAML keys now; legacy files may still carry a
-    // `comprehensive: <JSON>` block that was read as a flow mapping (or string).
-    const v2 = this.resolveV2Block(doc);
-    const br = list(v2.businessRequirements ?? doc.businessRequirements);
-    if (br.length > 0) spec.businessRequirements = br;
-    const transformations = list(v2.transformations ?? doc.transformations);
-    if (transformations.length > 0) spec.transformations = transformations;
-    const deps = list(v2.dependencies ?? doc.dependencies);
-    if (deps.length > 0) spec.dependencies = deps;
-    const ac = list(v2.acceptanceCriteria ?? doc.acceptanceCriteria);
-    if (ac.length > 0) spec.acceptanceCriteria = ac;
-    const ic = list(v2.implementationConsiderations ?? doc.implementationConsiderations);
-    if (ic.length > 0) spec.implementationConsiderations = ic;
-    const flows = this.parseDataFlows(v2.dataFlows ?? doc.dataFlows);
-    if (flows) spec.dataFlows = flows;
-    const catalog = this.parseSourceCatalog(v2.sourceCatalog ?? doc.sourceCatalog);
-    if (catalog) spec.sourceCatalog = catalog;
-    const provenance = this.parseProvenance(v2.provenance ?? doc.provenance);
-    if (provenance) spec.provenance = provenance;
-
-    return spec;
-  }
-
-  /** Returns the legacy `comprehensive:` block (flow-mapped object or JSON string) when present. */
-  private resolveV2Block(doc: Record<string, unknown>): Record<string, unknown> {
-    const comp = doc.comprehensive;
-    if (!comp) return {};
-    if (typeof comp === 'string') {
-      try {
-        const parsed = JSON.parse(comp) as unknown;
-        return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed as Record<string, unknown> : {};
-      } catch {
-        return {};
-      }
-    }
-    return (typeof comp === 'object' && !Array.isArray(comp)) ? comp as Record<string, unknown> : {};
-  }
-
-  private parseDataFlows(v: unknown): DataFlow[] | undefined {
-    if (!Array.isArray(v)) return undefined;
-    const flows: DataFlow[] = [];
-    for (const raw of v) {
-      if (!raw || typeof raw !== 'object') continue;
-      const f = raw as Record<string, unknown>;
-      const str = (x: unknown): string => (typeof x === 'string' ? x : '');
-      flows.push({
-        id: str(f.id),
-        source: str(f.source),
-        target: str(f.target),
-        description: str(f.description),
-        transformations: (Array.isArray(f.transformations) ? f.transformations.filter((x) => typeof x === 'string') : undefined) as string[] | undefined,
-        frequency: str(f.frequency) || undefined
-      });
-    }
-    return flows.length > 0 ? flows : undefined;
-  }
-
-  private parseSourceCatalog(v: unknown): SourceEntry[] | undefined {
-    if (!Array.isArray(v)) return undefined;
-    const catalog: SourceEntry[] = [];
-    for (const raw of v) {
-      if (!raw || typeof raw !== 'object') continue;
-      const s = raw as Record<string, unknown>;
-      const str = (x: unknown): string => (typeof x === 'string' ? x : '');
-      catalog.push({
-        name: str(s.name),
-        type: (str(s.type) as SourceEntry['type']) || 'other',
-        description: str(s.description) || undefined,
-        availability: str(s.availability) || undefined
-      });
-    }
-    return catalog.length > 0 ? catalog : undefined;
-  }
-
-  private parseProvenance(v: unknown): SpecProvenance[] | undefined {
-    if (!Array.isArray(v)) return undefined;
-    const prov: SpecProvenance[] = [];
-    for (const raw of v) {
-      if (!raw || typeof raw !== 'object') continue;
-      const p = raw as Record<string, unknown>;
-      const str = (x: unknown): string => (typeof x === 'string' ? x : '');
-      prov.push({
-        field: str(p.field),
-        source: (str(p.source) as SpecProvenance['source']) || 'synthesis',
-        questionId: str(p.questionId) || undefined,
-        skill: str(p.skill) || undefined
-      });
-    }
-    return prov.length > 0 ? prov : undefined;
+    return parseBusinessProblemSpec(content);
   }
 }

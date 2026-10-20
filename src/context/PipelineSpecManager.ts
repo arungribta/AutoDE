@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { PipelineSpec } from '../engine/pipelineSpec/types';
 import { CURRENT_PIPELINE_SPEC_VERSION } from '../engine/pipelineSpec/types';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
-import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { parsePipelineSpecDocument, pipelineSpecHistoryName, serializePipelineSpec } from '../engine/documents/problemDocuments';
 import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';
 import { createVscodeFileIo } from './vscodeFileIo';
 
@@ -102,7 +102,7 @@ export class PipelineSpecManager implements vscode.Disposable {
     if (this.serialize(previous) === this.serialize(incoming)) return;
     const historyDir = vscode.Uri.joinPath(this.specDir, 'history');
     await vscode.workspace.fs.createDirectory(historyDir);
-    const name = `pipeline.v${previous.version}.${previous.status}.yaml`;
+    const name = pipelineSpecHistoryName(previous);
     const target = vscode.Uri.joinPath(historyDir, name);
     try {
       await vscode.workspace.fs.stat(target);
@@ -134,31 +134,10 @@ export class PipelineSpecManager implements vscode.Disposable {
   }
 
   private serialize(spec: PipelineSpec): string {
-    return '# AutoDE Pipeline Spec\n' + stringifyYaml(spec as unknown as Record<string, unknown>);
+    return serializePipelineSpec(spec);
   }
 
-  /**
-   * A document whose `specVersion` doesn't match `CURRENT_PIPELINE_SPEC_VERSION`
-   * is loaded leniently with a logged warning rather than a hard failure —
-   * schema evolution must never brick an already-approved pipeline (Phase
-   * 2B-iv's stated discipline). Only a current-version document is required
-   * to pass full Ajv validation.
-   */
   private parse(content: string): PipelineSpec {
-    const raw = parseYaml(content);
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw new Error('Invalid Pipeline Spec YAML: root must be an object.');
-    }
-    const doc = raw as Record<string, unknown>;
-    const specVersion = typeof doc.specVersion === 'number' ? doc.specVersion : 0;
-    if (specVersion !== CURRENT_PIPELINE_SPEC_VERSION) {
-      this.log(`Pipeline Spec was authored against specVersion ${specVersion}, current is ${CURRENT_PIPELINE_SPEC_VERSION} — loading leniently.`);
-      return doc as unknown as PipelineSpec;
-    }
-    const { valid, errors } = validatePipelineSpec(doc);
-    if (!valid) {
-      throw new Error(`Invalid Pipeline Spec: ${errors.join('; ')}`);
-    }
-    return doc as unknown as PipelineSpec;
+    return parsePipelineSpecDocument(content, (msg) => this.log(msg));
   }
 }

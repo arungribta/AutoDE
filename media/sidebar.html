@@ -228,6 +228,12 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .onb-save-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--font-size-sm); }
 .onb-save-row input[type="checkbox"] { width: auto; flex: none; }
 .saved-conns { margin-bottom: var(--spacing-md); }
+/* ── Decisions (PA1) ── */
+.decision { border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 6px 8px; margin-bottom: 6px; font-size: var(--font-size-sm); }
+.decision.high { border-left: 3px solid var(--warning, #d29922); }
+.decision .d-title { font-weight: 600; overflow-wrap: anywhere; }
+.decision .d-meta, .decision .d-note { color: var(--text-muted); overflow-wrap: anywhere; }
+.decision textarea { width: 100%; min-height: 32px; margin-top: 4px; }
 .saved-conn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--font-size-sm); }
 .saved-conn .sc-id { font-weight: 600; overflow-wrap: anywhere; }
 .saved-conn .sc-badges { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
@@ -505,6 +511,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   <div class="slide-panel" id="palettePanel">
     <div class="slide-panel-header"><span class="slide-title">🧰 Workflow Palette</span><button class="icon-btn" id="paletteCloseBtn">✕</button></div>
     <div class="slide-panel-body" id="paletteBody">
+      <div class="section" id="paletteDecisions"></div>
       <div class="section" id="paletteProblems">
         <!-- Active business problem + switcher rendered by JS -->
       </div>
@@ -1582,7 +1589,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 
   // ── Palette Panel ──
   const paletteOverlay = $('#paletteOverlay'), palettePanel = $('#palettePanel'), paletteBtn = $('#paletteBtn'), paletteCloseBtn = $('#paletteCloseBtn');
-  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); renderPaletteProblems(); renderPaletteSpec(); renderPaletteContext(); renderPalettePhases(); post('checkArtifactStaleness'); post('listPrimitives'); }
+  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); post('listDecisions'); renderDecisions(); renderPaletteProblems(); renderPaletteSpec(); renderPaletteContext(); renderPalettePhases(); post('checkArtifactStaleness'); post('listPrimitives'); }
   function closePalette() { paletteOverlay.classList.remove('visible'); palettePanel.classList.remove('visible'); }
   paletteOverlay.onclick = closePalette; paletteCloseBtn.onclick = closePalette; paletteBtn.onclick = openPalette;
 
@@ -1778,6 +1785,47 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function getSelectedProvider() { var card = document.querySelector('#slideSectionConnect .card.selected'); return card ? card.getAttribute('data-provider') : 'snowflake'; }
   function getSelectedTargetProvider() { var card = document.querySelector('#slideSectionTarget .card.selected'); return card ? card.getAttribute('data-target-provider') : 'snowflake'; }
 
+  // ── Decisions (Phase PA1) ──
+  // Proposals from AutoDE and from other agents (Claude Code, Cursor …) wait
+  // here for a person. Approving applies the change; for a specification or
+  // Pipeline Spec it also runs the usual approval.
+  var decisionsState = { pending: [], recent: [] };
+  var KIND_LABEL = { assertion: 'Fact', spec_revision: 'Specification', pipeline_spec: 'Pipeline Spec', mapping: 'Mapping', platform_change: 'Platform change', spec_approval: 'Specification approval', pipeline_spec_approval: 'Pipeline Spec approval' };
+  function renderDecisions() {
+    var box = $('#paletteDecisions');
+    if (!box) return;
+    var pending = decisionsState.pending || [];
+    var html = '<div class="section-title">Decisions' + (pending.length ? ' (' + pending.length + ' waiting)' : '') + '</div>';
+    if (!pending.length) html += '<div class="onb-note">Nothing waiting. Changes proposed by AutoDE or by other agents through its MCP server appear here for your approval.</div>';
+    pending.forEach(function (d) {
+      var who = [d.proposedBy && d.proposedBy.host, d.proposedBy && d.proposedBy.client, d.proposedBy && d.proposedBy.skill ? 'skill ' + d.proposedBy.skill : ''].filter(Boolean).join(' · ');
+      var warn = (d.validation && d.validation.warnings || []).map(function (w) { return '<div class="d-note">⚠ ' + escapeHtml(w) + '</div>'; }).join('');
+      var ev = (d.evidence || []).slice(0, 3).map(function (e) { return '<div class="d-note">↳ ' + escapeHtml(e.ref) + (e.quote ? ' — “' + escapeHtml(e.quote) + '”' : '') + '</div>'; }).join('');
+      html += '<div class="decision ' + escapeHtml(d.stakes) + '"><div class="d-title">' + escapeHtml(d.title) + '</div>' +
+        '<div class="d-meta">' + escapeHtml(KIND_LABEL[d.kind] || d.kind) + ' · ' + escapeHtml(d.stakes) + ' stakes · from ' + escapeHtml(who || 'unknown') + '</div>' +
+        (d.summary ? '<div>' + escapeHtml(d.summary) + '</div>' : '') + warn + ev +
+        (d.status === 'approved'
+          ? '<div class="d-note">Approved' + (d.lastNote ? ' — ' + escapeHtml(d.lastNote) : '') + '</div>'
+          : '<textarea placeholder="Note (optional)" data-note="' + escapeHtml(d.id) + '"></textarea><div class="btn-row"><button class="primary" data-resolve="approved" data-id="' + escapeHtml(d.id) + '">Approve</button><button data-resolve="rejected" data-id="' + escapeHtml(d.id) + '">Reject</button></div>') +
+        '</div>';
+    });
+    var recent = decisionsState.recent || [];
+    if (recent.length) {
+      html += '<details><summary class="onb-note">Recent (' + recent.length + ')</summary>';
+      recent.forEach(function (d) { html += '<div class="d-note">' + escapeHtml(d.status) + ' — ' + escapeHtml(d.title) + (d.resolution && d.resolution.by ? ' (' + escapeHtml(d.resolution.by) + ')' : '') + '</div>'; });
+      html += '</details>';
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('button[data-resolve]').forEach(function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-id');
+        var noteEl = box.querySelector('textarea[data-note="' + id + '"]');
+        b.disabled = true;
+        post('resolveDecision', { id: id, decision: b.getAttribute('data-resolve'), note: noteEl ? noteEl.value : '' });
+      };
+    });
+  }
+
   // ── Platform onboarding in the cards (Phase DRV2) ──
   // Each platform card gets: what it needs (prerequisites, checked on click),
   // the backend it will use, existing CLI connections / tnsnames aliases, and
@@ -1971,6 +2019,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         if (pendingNamedSave) { var ns = pendingNamedSave; pendingNamedSave = null; post('saveNamedConnection', ns); }
         break;
       case 'platformsState': platformsState = msg.state; renderPlatformsState(); break;
+      case 'decisionsList': decisionsState = { pending: msg.pending || [], recent: msg.recent || [] }; renderDecisions(); break;
       case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
       case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;
@@ -2141,6 +2190,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   setInterval(function () { vscode.setState({ chatHtml: chatStream.innerHTML }); }, 3000);
   post('settingsLoaded', {});
   post('platformsState');
+  post('listDecisions');
 })();
 </script>
 </body>

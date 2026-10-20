@@ -382,6 +382,35 @@ Use a scratch workspace with a git repository (to see what would be committed). 
   Do: with the 16.4 entry, start the MCP server (mcp-setup.md) without and then with `AUTODE_SNOWFLAKE_<REF>_PASSWORD` in the client's `env`; call `autode_list_connections` and `autode_test_connection`.
   Expect: the listing shows `secretFromEnv`; without the variable the test fails naming it; with it, it connects.
 
+## Part 17 — v0.40.0 Decisions and proposal tools
+
+Use the scratch workspace from Part 16 with an active business problem and a source assessed (so AutoDE knows some tables). Register AutoDE's MCP server in Claude Code (mcp-setup.md) and keep the Workflow Palette open.
+
+- [ ] **17.1 A bad proposal is refused item by item.**
+  Do: in Claude Code ask "propose a mapping from <a known table> to FACT_X, mapping a column that doesn't exist".
+  Expect: the tool answers `VALIDATION_FAILED` naming the column; nothing appears in `.autode/decisions/`.
+- [ ] **17.2 A valid proposal waits for you.**
+  Do: ask for a correct mapping. Then ask Claude Code to approve it.
+  Expect: a decision appears under **Decisions** (high stakes, "from mcp · Claude Code"); the agent's approval is refused, naming the panel and the decision file; `mapping-context.yaml` is unchanged.
+- [ ] **17.3 Approve in the panel.**
+  Do: Approve it with a note.
+  Expect: `mapping-context.yaml` has the mapping; the decision moves to Recent as applied with your user name; its YAML shows the approved and applied events.
+- [ ] **17.4 Approve through the file.**
+  Do: ask for a spec change (e.g. one more objective). In `.autode/decisions/<id>.yaml` set `resolution.decision: approved` and `resolution.by: <you>`; save.
+  Expect: the specification becomes a new draft version with the objective; approve it in the panel as usual. Without `by`, the log says it is incomplete and nothing happens.
+- [ ] **17.5 Superseded, not applied.**
+  Do: propose another spec change; before approving it, edit the specification by hand; then approve the decision.
+  Expect: the decision is superseded and your hand edit stays.
+- [ ] **17.6 Low-stakes fact through the agent.**
+  Do: ask Claude Code to add a glossary term and accept it.
+  Expect: Claude Code asks you first (destructive tool); after you agree, the term is in the ledger as confirmed (`autode_list_assertions`).
+- [ ] **17.7 Platform writes need approval.**
+  Do: with the server started with `--allow-write`, ask Claude Code to insert a row into a scratch table.
+  Expect: `autode_execute_query` refuses and the agent proposes the change instead; after you approve it in the panel, the agent's `autode_apply_decision` runs it once. Without `--allow-write`, apply is refused.
+- [ ] **17.8 Panel approvals are recorded.**
+  Do: approve a specification in the panel the usual way.
+  Expect: a `spec_approval` decision appears under Recent with your name.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -472,5 +501,13 @@ Use a scratch workspace with a git repository (to see what would be committed). 
 | 16.7 |  |  |
 | 16.8 |  |  |
 | 16.9 |  |  |
+| 17.1 |  |  |
+| 17.2 |  |  |
+| 17.3 |  |  |
+| 17.4 |  |  |
+| 17.5 |  |  |
+| 17.6 |  |  |
+| 17.7 |  |  |
+| 17.8 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.
