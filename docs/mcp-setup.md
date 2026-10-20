@@ -200,7 +200,7 @@ Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATA
 
 **Without the file.** If `AUTODE_SNOWFLAKE_ACCOUNT` or `AUTODE_DATABRICKS_WORKSPACE_URL` is set, the server offers that connection as a source, with sample data off. This is the simplest set-up for CI.
 
-**VS Code's secret store.** A server started by Claude Code or Cursor can't read the passwords and tokens you saved in AutoDE's settings panel. For a `resolver: vscode` entry, set the variables `autode_list_connections` lists in `secretFromEnv` (e.g. `AUTODE_SNOWFLAKE_ACME_PASSWORD`) in the client's `env` block, or use a CLI connection. (When the AutoDE extension starts the server itself, in a later release, it passes those secrets as environment variables.)
+**VS Code's secret store.** A server started by Claude Code or Cursor can't read the passwords and tokens you saved in AutoDE's settings panel. For a `resolver: vscode` entry, set the variables `autode_list_connections` lists in `secretFromEnv` (e.g. `AUTODE_SNOWFLAKE_ACME_PASSWORD`) in the client's `env` block, or use a CLI connection. In VS Code's agent mode (since 0.43.0) none of this is needed: AutoDE passes those secrets to the server when VS Code starts it.
 
 **Renamed in 0.39.0:** Snowflake's role is `snowflakeRole` in these files. `role` always meant source or target, so a Snowflake role given as `role` made the entry invalid.
 
