@@ -15,7 +15,9 @@ import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { conformanceFailures, loadProfiles, packConformance, probeCandidates, readPackDocument, readPackFile, sampleProbeExecutor } from '../engine/context/packChecks';
 import { ProbeDialect, ProbeExecutor, combineProbeExecutors, createProbeResolver, createSqlProbeExecutor, probeAssertions } from '../engine/context/probes';
 import { checkPrerequisites } from '../engine/platform/prerequisites';
-import { connectionStatus, readReadiness } from '../engine/platform/connectionReadiness';
+import { connectionStatus, forgetReadiness, readReadiness, recordReadiness } from '../engine/platform/connectionReadiness';
+import { ConnectionDraft, ConnectionRole, loadConnectionsConfig, removeConnection, saveConnection, validateConnectionDraft } from '../engine/platform/connectionsConfig';
+import { credentialNeeds, discoverCliConnections, draftEntry, setupFields } from '../engine/platform/connectionSetup';
 import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStore';
 import { DataPlatformProvider } from '../engine/types';
 import { Catalog } from '../engine/context/catalog';
@@ -89,6 +91,14 @@ Deterministic (never change AutoDE's state):
   doctor                       Prerequisites, drivers, connections and their readiness
   check                        CI gate: validate, and no pending high-stakes decision affects the problem
 
+Connections:
+  connections list             Each connection, whether it is ready, and what MCP clients still need
+  connections test <id>        Connect read-only and record readiness on this machine
+  connections add              (terminal) Set one up: pick a Snowflake CLI connection or Databricks profile, or give fields;
+                               tested before it is saved. Flags: --platform --role --resolver cli|env --ref <name>
+                               --set key=value (repeat) --scope team|personal --allow-sample-data --no-test
+  connections remove <id>      (terminal) Remove it from the connections files
+
 Human (an interactive terminal; refused when CI is set):
   decisions list [--status <s>] [--kind <k>]
   decisions show <id>
@@ -120,11 +130,19 @@ const OPTIONS = {
   kind: { type: 'string' },
   note: { type: 'string' },
   by: { type: 'string' },
+  platform: { type: 'string' },
+  role: { type: 'string' },
+  resolver: { type: 'string' },
+  ref: { type: 'string' },
+  scope: { type: 'string' },
+  set: { type: 'string', multiple: true },
+  'allow-sample-data': { type: 'boolean' },
+  'no-test': { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
 
-type Values = { [K in keyof typeof OPTIONS]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean };
+type Values = { [K in Exclude<keyof typeof OPTIONS, 'set'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[] };
 
 class CliError extends Error {
   public constructor(public readonly exit: number, message: string) { super(message); }
@@ -175,6 +193,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'doctor': return await cmdDoctor(ctx);
       case 'check': return await cmdCheck(ctx);
       case 'decisions': return await cmdDecisions(ctx, rest);
+      case 'connections': return await cmdConnections(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -499,8 +518,7 @@ async function cmdDecisions(ctx: Ctx, rest: string[]): Promise<number> {
   }
 
   // approve / reject: a person at an interactive terminal (D6).
-  if (ciIsSet(ctx.io.env)) throw new CliError(EXIT.REFUSED, `Refused: CI is set. A non-interactive run never resolves a decision; resolve ${d.id} in the AutoDE panel, in a terminal, or in .autode/decisions/${d.id}.yaml.`);
-  if (!ctx.io.interactive) throw new CliError(EXIT.REFUSED, `Refused: decisions ${sub} needs an interactive terminal (stdin and stdout). Resolve ${d.id} in the AutoDE panel, in a terminal, or in .autode/decisions/${d.id}.yaml.`);
+  requirePerson(ctx, `decisions ${sub}`, `A non-interactive run never resolves a decision; resolve ${d.id} in the AutoDE panel, in a terminal, or in .autode/decisions/${d.id}.yaml.`);
   if (d.status !== 'pending') throw new CliError(EXIT.FAILED, `Decision ${d.id} is ${d.status}, not pending.`);
   const decision = sub === 'approve' ? 'approved' : 'rejected';
   const by = (ctx.values.by ?? safeUsername()).trim();
@@ -513,6 +531,171 @@ async function cmdDecisions(ctx: Ctx, rest: string[]): Promise<number> {
   const applied = await applyDecision(store, resolved.id, { workspaceRoot: ctx.workspaceRoot, problemRoot, problemId: resolved.problemId, connections: platformSession(ctx).config().connections });
   emit(ctx, { ok: applied.decision.status !== 'failed', decision: decisionView(applied.decision), applied: applied.applied, message: applied.message }, applied.message);
   return applied.decision.status === 'failed' ? EXIT.FAILED : EXIT.OK;
+}
+
+/** Commands only a person runs: an interactive terminal, and CI not set (D6). */
+function requirePerson(ctx: Ctx, what: string, otherwise: string): void {
+  if (ciIsSet(ctx.io.env)) throw new CliError(EXIT.REFUSED, `Refused: CI is set. ${otherwise}`);
+  if (!ctx.io.interactive) throw new CliError(EXIT.REFUSED, `Refused: ${what} needs an interactive terminal (stdin and stdout). ${otherwise}`);
+}
+
+// ── connections (v0.43.1) ────────────────────────────────────────────────────
+
+const PLATFORMS = ['snowflake', 'databricks', 'oracle'] as const;
+
+async function cmdConnections(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub, id, ...extra] = rest;
+  if (sub === 'list') { if (id) throw new CliError(EXIT.USAGE, 'connections list takes no argument.'); return connectionsList(ctx); }
+  if (sub === 'add') { if (id) throw new CliError(EXIT.USAGE, 'connections add takes options, not arguments (see --help).'); return connectionsAdd(ctx); }
+  if (sub === 'test' || sub === 'remove') {
+    if (!id || extra.length) throw new CliError(EXIT.USAGE, `connections ${sub} takes one connection id (see autode connections list).`);
+    return sub === 'test' ? connectionsTest(ctx, id) : connectionsRemove(ctx, id);
+  }
+  throw new CliError(EXIT.USAGE, 'connections takes list, test <id>, add or remove <id>.');
+}
+
+function connectionsList(ctx: Ctx): number {
+  const config = loadConnectionsConfig(ctx.workspaceRoot, ctx.io.env);
+  const readiness = readReadiness(ctx.workspaceRoot);
+  const rows = config.connections.map((c) => ({ id: c.id, platform: c.platform, role: c.role, origin: c.origin, credentials: c.credentials, status: connectionStatus(c, readiness[c.id]), needs: credentialNeeds(c, ctx.io.env) }));
+  const lines = rows.length ? rows.map((r) => {
+    const missing = r.needs.variables.filter((v) => !v.set).map((v) => v.name);
+    return `${r.status.autode === 'ready' ? '✓' : '·'} ${r.id}  ${r.role}, ${r.credentials.resolver}${r.credentials.ref ? `:${r.credentials.ref}` : ''}, ${r.origin} — ${r.status.autode}${r.status.checkedAt ? ` at ${r.status.checkedAt}` : ''}`
+      + `\n    ${r.needs.summary}${missing.length ? ` Not set here: ${missing.join(', ')}.` : ''}`;
+  }) : [`No connections. Add one with \`autode connections add\`, or write ${config.file} (docs/mcp-setup.md).`];
+  emit(ctx, { ok: config.errors.length === 0, file: config.file, localFile: config.localFile, connections: rows, configErrors: config.errors }, [...lines, ...config.errors.map((e) => `✗ ${e}`)].join('\n'));
+  return config.errors.length ? EXIT.FAILED : EXIT.OK;
+}
+
+async function connectionsTest(ctx: Ctx, id: string): Promise<number> {
+  const session = platformSession(ctx);
+  try {
+    const entry = session.entry(id);
+    try {
+      await session.connect(entry, true);
+    } catch (err) {
+      recordReadiness(ctx.workspaceRoot, entry, false, platformReason(err));
+      throw err;
+    }
+    const record = recordReadiness(ctx.workspaceRoot, entry, true, `connected (${entry.platform}, CLI)`);
+    emit(ctx, { ok: true, id: entry.id, readiness: record }, `✓ ${entry.id} connected. Recorded as ready on this machine.`);
+    return EXIT.OK;
+  } finally { session.dispose(); }
+}
+
+/** The classified message plus what the platform itself said — the part an engineer acts on. Redacted. */
+function platformReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const raw = err instanceof EngineToolError && typeof err.details.raw === 'string' && err.details.raw !== message ? ` (${err.details.raw.slice(0, 500)})` : '';
+  return redact(`${message}${raw}`);
+}
+
+/** One answer from the terminal; `choices` are matched case-insensitively, blank takes the default. */
+async function ask(ctx: Ctx, question: string, options: { default?: string; choices?: readonly string[]; required?: boolean } = {}): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const suffix = options.default ? ` [${options.default}]` : options.required ? '' : ' (optional)';
+    const answer = (await ctx.io.prompt(`${question}${suffix}: `)).trim() || options.default || '';
+    if (options.choices && answer && !options.choices.some((c) => c.toLowerCase() === answer.toLowerCase())) { ctx.io.out(`  Choose one of: ${options.choices.join(', ')}.`); continue; }
+    if (options.required && !answer) { ctx.io.out('  This one is needed.'); continue; }
+    return options.choices ? (options.choices.find((c) => c.toLowerCase() === answer.toLowerCase()) ?? answer) : answer;
+  }
+  throw new CliError(EXIT.USAGE, `No usable answer for "${question}".`);
+}
+
+function parseSet(values: readonly string[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const v of values ?? []) {
+    const i = v.indexOf('=');
+    if (i <= 0) throw new CliError(EXIT.USAGE, `--set takes key=value, not "${v}".`);
+    out[v.slice(0, i).trim()] = v.slice(i + 1).trim();
+  }
+  return out;
+}
+
+async function connectionsAdd(ctx: Ctx): Promise<number> {
+  requirePerson(ctx, 'connections add', `Write ${'.autode/config/connections.yaml'} instead (docs/mcp-setup.md), or have an agent propose it (autode_propose_connection) for a person to approve.`);
+  const v = ctx.values;
+  const env = ctx.io.env;
+  const platform = (v.platform ?? await ask(ctx, `Platform (${PLATFORMS.join(', ')})`, { choices: PLATFORMS, required: true })) as (typeof PLATFORMS)[number];
+  if (!PLATFORMS.includes(platform)) throw new CliError(EXIT.USAGE, `--platform is one of: ${PLATFORMS.join(', ')}.`);
+  const role = (v.role ?? (platform === 'oracle' ? 'source' : await ask(ctx, 'Role (source, target)', { choices: ['source', 'target'], default: 'source' }))) as ConnectionRole;
+  const discovered = await discoverCliConnections(env);
+  let resolver = v.resolver;
+  let ref = v.ref;
+  if (!resolver) {
+    const known = platform === 'snowflake' ? discovered.snowflake.map((n) => ({ name: n, note: 'Snowflake CLI connection' }))
+      : platform === 'databricks' ? discovered.databricks.map((p) => ({ name: p.name, note: p.host ? `profile, ${p.host}` : 'profile' })) : [];
+    if (known.length) {
+      ctx.io.out(`Your ${platform === 'snowflake' ? 'Snowflake CLI connections (connections.toml)' : 'Databricks profiles (.databrickscfg)'}:`);
+      known.forEach((k, i) => ctx.io.out(`  ${i + 1}. ${k.name} — ${k.note}`));
+      const pick = await ask(ctx, `Use which one? A number, or "env" to give the settings yourself (secret from environment variables)`, { choices: [...known.map((_k, i) => String(i + 1)), 'env'], default: '1' });
+      if (pick === 'env') resolver = 'env'; else { resolver = 'cli'; ref = known[Number(pick) - 1].name; }
+    } else {
+      resolver = 'env';
+      if (platform !== 'oracle') ctx.io.out(`No ${platform === 'snowflake' ? 'Snowflake CLI connection' : 'Databricks profile'} found on this machine; the secret will come from an environment variable.`);
+    }
+  }
+  if (resolver !== 'cli' && resolver !== 'env') throw new CliError(EXIT.USAGE, 'Outside VS Code --resolver is cli or env (VS Code\'s secret storage is only reachable from the extension).');
+  if (ref === undefined && resolver === 'env') ref = await ask(ctx, 'A short name for it, used in its environment variable names (e.g. prod)');
+  const fields = parseSet(v.set);
+  if (platform === 'oracle' && discovered.oracleAliases.length && !fields.connectString) ctx.io.out(`tnsnames.ora aliases here: ${discovered.oracleAliases.slice(0, 20).join(', ')}`);
+  for (const f of setupFields(platform, resolver)) {
+    if (fields[f.field] !== undefined) continue;
+    const answer = await ask(ctx, `${f.label}${f.personal ? ' — kept in your personal file' : ''}`, { required: f.required });
+    if (answer) fields[f.field] = answer;
+  }
+  const draft: ConnectionDraft = { platform, role, fields, credentials: { resolver, ref: ref ?? '' }, scope: (v.scope as ConnectionDraft['scope']) ?? 'team', allowSampleDataInPrompts: v['allow-sample-data'] === true };
+  const problems = validateConnectionDraft(draft);
+  if (problems.length) { emit(ctx, { ok: false, errors: problems }, problems.map((p) => `✗ ${p}`).join('\n')); return EXIT.FAILED; }
+  const entry = draftEntry(draft);
+  const needs = credentialNeeds(draft, env);
+  const missing = needs.variables.filter((x) => !x.set).map((x) => x.name);
+  ctx.io.out([
+    '',
+    `Connection ${entry.id} (${platform}, ${role}${draft.scope === 'personal' ? ', personal' : ''})`,
+    ...Object.entries(entry.fields).map(([k, val]) => `  ${k}: ${val}`),
+    `  credentials: ${resolver}${draft.credentials.ref ? ` (${draft.credentials.ref})` : ''}`,
+    `  sample data in prompts: ${draft.allowSampleDataInPrompts ? 'allowed' : 'not allowed'}`,
+    `  ${needs.summary}${missing.length ? ` Not set in this terminal: ${missing.join(', ')}.` : ''}`
+  ].join('\n'));
+  let tested = false;
+  if (v['no-test'] !== true) {
+    const session = platformSession(ctx);
+    try {
+      ctx.io.out('Testing the connection (read-only)…');
+      await session.connect(entry, true);
+      tested = true;
+      ctx.io.out('✓ Connected.');
+    } catch (err) {
+      ctx.io.err(`✗ The connection failed: ${platformReason(err)}`);
+      ctx.io.err(`Nothing was saved. Fix it and run the command again${missing.length ? ` (set ${missing.join(', ')} first)` : ''}, or add --no-test to save it untested.`);
+      return EXIT.PLATFORM;
+    } finally { session.dispose(); }
+  }
+  const files = draft.scope === 'personal' ? '.autode/local/connections.yaml' : '.autode/config/connections.yaml (and your personal fields in .autode/local/connections.yaml)';
+  if ((await ctx.io.prompt(`Type save to write ${files}: `)).trim().toLowerCase() !== 'save') { ctx.io.out('Not saved.'); return EXIT.REFUSED; }
+  const saved = saveConnection(ctx.workspaceRoot, draft, env);
+  const after = loadConnectionsConfig(ctx.workspaceRoot, env).connections.find((c) => c.id === saved.id);
+  if (tested && after) recordReadiness(ctx.workspaceRoot, after, true, `connected (${platform}, CLI)`);
+  const next = [
+    ...saved.written.map((f) => `wrote ${f}`),
+    tested ? 'Recorded as ready on this machine.' : 'Saved untested: run `autode connections test ' + saved.id + '` when its credentials are in place.',
+    draft.scope !== 'personal' ? 'Commit .autode/config/connections.yaml so your team has it; each engineer supplies their own credentials.' : '',
+    resolver === 'env' && needs.variables.length ? `MCP clients need ${needs.variables.map((x) => x.name).join(' and ')} in their environment (the "env" block of .mcp.json).` : ''
+  ].filter(Boolean);
+  emit(ctx, { ok: true, id: saved.id, written: saved.written, tested, needs }, next.join('\n'));
+  return EXIT.OK;
+}
+
+async function connectionsRemove(ctx: Ctx, id: string): Promise<number> {
+  requirePerson(ctx, 'connections remove', 'Edit .autode/config/connections.yaml instead.');
+  const entry = loadConnectionsConfig(ctx.workspaceRoot, ctx.io.env).connections.find((c) => c.id.toLowerCase() === id.toLowerCase());
+  if (!entry) throw new CliError(EXIT.NOT_FOUND, `No connection "${id}" (see autode connections list).`);
+  if ((await ctx.io.prompt(`Remove ${entry.id} from the connections files? Type remove to confirm: `)).trim().toLowerCase() !== 'remove') { ctx.io.out('Not removed.'); return EXIT.REFUSED; }
+  const changed = removeConnection(ctx.workspaceRoot, entry.id, ctx.io.env);
+  forgetReadiness(ctx.workspaceRoot, entry.id);
+  emit(ctx, { ok: true, id: entry.id, written: changed }, [...changed.map((f) => `updated ${f}`), `Removed ${entry.id}.`].join('\n'));
+  return EXIT.OK;
 }
 
 function describeDecision(d: Decision, proposal: unknown): string {

@@ -19,6 +19,8 @@ import { layoutPath } from '../workspaceLayout';
 
 export type DecisionKind =
   | 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change'
+  /** A new or changed data-platform connection (v0.43.1). */
+  | 'connection'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 

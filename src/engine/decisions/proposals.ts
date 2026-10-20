@@ -7,7 +7,8 @@ import { Evidence } from '../context/assertions';
 import { computeRevision } from '../context/contextStore';
 import { SchemaIndex } from '../grounding/sqlGrounding';
 import { checkSingleStatement } from '../platform/sqlGuard';
-import { ConnectionEntry } from '../platform/connectionsConfig';
+import { ConnectionDraft, ConnectionEntry, saveConnection, validateConnectionDraft } from '../platform/connectionsConfig';
+import { credentialNeeds, draftEntry } from '../platform/connectionSetup';
 import { layoutPath } from '../workspaceLayout';
 import {
   ProblemDocumentKind, parseBusinessProblemSpec, parsePipelineSpecDocument, readProblemDocument,
@@ -22,7 +23,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  * proposal tools, the extension and (PA2) the CLI.
  */
 
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection'>;
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -148,6 +149,24 @@ export function validatePlatformChange(p: PlatformChangeProposal, ctx: ProposalC
   return finish(r);
 }
 
+/**
+ * A connection (v0.43.1): the same checks as saving one from a settings card or
+ * `autode connections add`. Which platforms agents may reach is a person's call,
+ * so it is high stakes; it is tested once it is saved, not here.
+ */
+export function validateConnectionProposal(p: ConnectionDraft, ctx: ProposalContext): ValidationReport {
+  const r = report();
+  r.checks.push('supported platform and role', 'no secret in the files', 'known fields and credential source');
+  if (!p || typeof p !== 'object') { r.errors.push('connection must be an object.'); return finish(r); }
+  r.errors.push(...validateConnectionDraft({ ...p, fields: p.fields ?? {} }));
+  if (r.errors.length) return finish(r);
+  const entry = draftEntry({ ...p, fields: p.fields ?? {} });
+  if ((ctx.connections ?? []).some((c) => c.id.toLowerCase() === entry.id.toLowerCase())) r.warnings.push(`${entry.id} exists: approving changes its settings.`);
+  r.warnings.push(credentialNeeds(entry).summary);
+  if (p.allowSampleDataInPrompts) r.warnings.push('It lets row values from this connection reach language models (allowSampleDataInPrompts).');
+  return finish(r);
+}
+
 // ── Proposing ────────────────────────────────────────────────────────────────
 
 function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown): Decision['subject'] {
@@ -157,6 +176,7 @@ function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown):
     return { document: doc, revision: text === undefined ? 'none' : computeRevision(text) };
   }
   if (kind === 'platform_change') return { connectionId: (payload as PlatformChangeProposal).connectionId };
+  if (kind === 'connection') return { connectionId: draftEntry({ ...(payload as ConnectionDraft), fields: (payload as ConnectionDraft).fields ?? {} }).id };
   return undefined;
 }
 
@@ -167,6 +187,7 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'pipeline_spec': { const s = payload as PipelineSpec; return { title: `Pipeline Spec: ${s.entities?.length ?? 0} entities`, summary: `Pipeline Spec derived from ${s.derivedFromBpsId ?? 'the active problem'} v${s.derivedFromBpsVersion ?? '?'}` }; }
     case 'mapping': { const m = payload as EntityMapping; return { title: `Map ${m.sourceFqn || m.sourceEntityId} → ${m.targetName} (${m.columns?.length ?? 0} columns)`, summary: m.notes ?? '' }; }
     case 'platform_change': { const p = payload as PlatformChangeProposal; return { title: `Run on ${p.connectionId}: ${p.sql.trim().split(/\s+/).slice(0, 6).join(' ')}…`, summary: p.reason }; }
+    case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
   }
 }
 
@@ -177,6 +198,7 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'pipeline_spec': return validatePipelineSpecProposal(payload as PipelineSpec, ctx);
     case 'mapping': return validateMappingProposal(payload as EntityMapping, ctx);
     case 'platform_change': return validatePlatformChange(payload as PlatformChangeProposal, ctx);
+    case 'connection': return validateConnectionProposal(payload as ConnectionDraft, ctx);
   }
 }
 
@@ -272,6 +294,11 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         const outcome = await deps.executePlatformChange(p.connectionId, p.sql);
         const done = store.markApplied(id, `Ran on ${p.connectionId}: ${outcome}`);
         return { decision: done, applied: true, message: `Applied ${id} (approved by ${approver}): ${outcome}` };
+      }
+      case 'connection': {
+        const saved = saveConnection(ctx.workspaceRoot, store.proposal<ConnectionDraft>(id));
+        const done = store.markApplied(id, `Approved by ${approver}; wrote ${saved.written.join(', ')}.`);
+        return { decision: done, applied: true, message: `Applied ${id}: connection ${saved.id} saved (approved by ${approver}). Test it before use: autode connections test ${saved.id}, or autode_test_connection.` };
       }
       default:
         return { decision: d, applied: false, message: `Decision ${id} (${d.kind}) has nothing to apply.` };

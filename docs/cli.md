@@ -49,6 +49,34 @@ These commands never change AutoDE's state, so they are safe in CI.
 
 `check` reads committed files only. A decision approved in the panel or in its file passes. A proposal nobody has looked at blocks the merge until a person resolves it.
 
+## Connections
+
+Connections to Snowflake, Databricks and Oracle (Oracle as a source) are kept in `.autode/config/connections.yaml`, which is committed and shared by the team, and in your personal `.autode/local/connections.yaml`. Neither file ever holds a secret. These commands manage those files without VS Code. They write exactly what the extension's settings cards write.
+
+| Command | |
+|---|---|
+| `autode connections list` | Each connection: its role and credential source, whether it is ready on this machine, and what it still needs, such as the environment variables not set in this terminal. |
+| `autode connections test <id>` | Connects read-only and records the result on this machine. |
+| `autode connections add` | Sets one up, interactively. |
+| `autode connections remove <id>` | Removes the entry from both files, after you type `remove` to confirm. |
+
+**`add`, step by step:**
+1. It asks for the platform and the role (source or target).
+2. **It offers the connections your platform tools already know**: the named connections in the Snowflake CLI's `connections.toml`, or the profiles in `.databrickscfg`. Pick one, and AutoDE stores only its name. Or answer `env` to give the settings yourself and supply the secret through an environment variable.
+3. It asks only for what is still missing, for example the SQL warehouse's HTTP path for a Databricks profile. Fields that differ per engineer (username, key path) go to your personal file.
+4. **It tests the connection before saving it.** If the test fails, nothing is written, and you see the platform's own error.
+5. It shows what will be written and asks you to type `save`.
+
+You can answer any question up front with flags: `--platform`, `--role`, `--resolver cli|env`, `--ref <connection or profile name>`, `--set key=value` (repeatable), `--scope team|personal`, `--allow-sample-data`, and `--no-test` to save without testing.
+
+```
+autode connections add --platform databricks --resolver cli --ref prod --set httpPath=/sql/1.0/warehouses/abc123
+```
+
+`add` and `remove` need an interactive terminal and refuse when `CI` is set, like `decisions approve`. A connection decides which platforms AutoDE and its agents can reach, so a person sets it up. An agent in Claude Code or another MCP client can propose one with `autode_propose_connection`, and a person approves it with `autode decisions approve`. In a pipeline, commit the file instead.
+
+Secrets never go in these files. A field such as `password` or `token` is refused. They come from the platform CLI's configuration (`--resolver cli`) or from environment variables (`--resolver env`). `connections list` names the variables. VS Code's secret storage (`resolver: vscode`, used by the extension's settings cards) is reachable only from the extension. Outside it, the same connection takes its secret from the variables `connections list` shows.
+
 ## Decisions
 
 | Command | |

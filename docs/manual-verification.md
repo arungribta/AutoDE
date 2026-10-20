@@ -501,6 +501,29 @@ Use VS Code 1.101 or later with Copilot, and the reference workspace from Part 1
   Do: run the full flow (Part 7) on the reference problem with v0.42.0 and with v0.43.0, then diff the two `autode-output/<problem>/` trees.
   Expect: the same artifacts and grounding manifests. Only timestamps and generated ids differ.
 
+## Part 21 — v0.43.1 Connections without VS Code
+
+Use a terminal with the `autode` command (Part 19), a scratch folder, and at least one existing Snowflake CLI connection (`snow connection list`) or Databricks profile (`~/.databrickscfg`).
+
+- [ ] **21.1 Add from an existing CLI connection.**
+  Do: `autode connections add` in the scratch folder. Choose your platform, pick your connection or profile from the list, and answer the remaining questions (for Databricks, the SQL warehouse HTTP path).
+  Expect: only the missing settings are asked for, the test connects, and after you type `save` the file `.autode/config/connections.yaml` names the connection or profile with no secret in it. `autode connections list` shows it as ready.
+- [ ] **21.2 A failing test saves nothing.**
+  Do: run `add` again with `--ref` set to a profile that has an expired token (or a wrong HTTP path).
+  Expect: "✗ The connection failed: …" with the platform's own message, then "Nothing was saved".
+- [ ] **21.3 Environment variables.**
+  Do: `autode connections add --platform snowflake --resolver env --ref prod` with a key-pair user, without setting any `AUTODE_*` variable. Answer the questions, then save with `--no-test`. Next, set the variables `connections list` names and run `autode connections test snowflake:<account>`.
+  Expect: the username and key path are in `.autode/local/connections.yaml`, not the team file. `list` names the missing variables. After the test passes, the connection is ready.
+- [ ] **21.4 Only a person.**
+  Do: run `autode connections add` from Claude Code's agent (or as `echo | autode connections add`), and again with `CI=1`.
+  Expect: both are refused with exit code 4.
+- [ ] **21.5 An agent proposes; you approve.**
+  Do: in Claude Code with AutoDE's MCP server, ask "set up a connection to my Databricks profile prod with warehouse path …". Then run `autode decisions list` and `autode decisions approve <id>`.
+  Expect: the agent proposes it, and it can't approve it itself. After your approval, `autode connections list` shows it. The agent can then test it with `autode_test_connection`.
+- [ ] **21.6 The same files as the settings card.**
+  Do: open the scratch folder in VS Code with the extension.
+  Expect: the connection added in 21.1 is in the Saved connections list of its tab.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -624,5 +647,11 @@ Use VS Code 1.101 or later with Copilot, and the reference workspace from Part 1
 | 20.5 |  |  |
 | 20.6 |  |  |
 | 20.7 |  |  |
+| 21.1 |  |  |
+| 21.2 |  |  |
+| 21.3 |  |  |
+| 21.4 |  |  |
+| 21.5 |  |  |
+| 21.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

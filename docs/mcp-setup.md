@@ -132,6 +132,8 @@ On macOS the executable is `/Applications/Visual Studio Code.app/Contents/MacOS/
 
 The server reads connections from `.autode/config/connections.yaml` in the workspace, plus your personal `.autode/local/connections.yaml`. The first file is committed with the rest of `.autode/config/`; the second is gitignored. Neither holds **secrets**: an entry with a `password`, `token` or private key in it is refused. Secrets come from environment variables, from the platform CLI's own configuration, or (inside VS Code) from VS Code's secret storage.
 
+**Without VS Code**, `autode connections add` sets a connection up in a terminal (see [cli.md](cli.md#connections)). It offers your existing Snowflake CLI connections and Databricks profiles, tests the connection, and writes these files. An agent can propose a connection with `autode_propose_connection`; it is saved once a person approves it.
+
 In VS Code you rarely edit these files by hand. Fill in a platform card in AutoDE's settings (Source or Target) and click **Save as named connection**. AutoDE checks the connection first and saves it only if the check passes. The shared settings go to the committed file and your username and file paths to the personal one; a password or token you typed goes to VS Code's secret storage. The **Saved connections** list at the top of the tab shows, for each connection, whether it is ready in AutoDE and what an MCP client still needs.
 
 ```yaml

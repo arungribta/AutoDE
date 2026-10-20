@@ -137,6 +137,19 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
     proposalTool('autode_propose_platform_change', 'platform_change', 'Propose a platform change',
       'Propose one statement that changes data or objects on a connection (DDL, DML, GRANT …), with the reason. autode_execute_query never runs writes; an approved change runs through autode_apply_decision on a server started with --allow-write.',
       'change', { type: 'object', required: ['connectionId', 'sql', 'reason'], additionalProperties: false, properties: { connectionId: { type: 'string', minLength: 1 }, sql: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 1 } } }),
+    proposalTool('autode_propose_connection', 'connection', 'Propose a data-platform connection',
+      'Propose a new or changed connection to Snowflake, Databricks or Oracle (a source). Settings that are not secret only — never a password, token or key: credentials come from the platform CLI\'s own configuration (credentials.resolver "cli", ref = the Snowflake CLI connection or Databricks profile name) or from environment variables (resolver "env"). A person approves it (AutoDE panel, `autode decisions approve`, or the decision file); then test it with autode_test_connection.',
+      'connection', {
+        type: 'object', required: ['platform', 'role', 'credentials'], additionalProperties: false,
+        properties: {
+          platform: { type: 'string', enum: ['snowflake', 'databricks', 'oracle'] },
+          role: { type: 'string', enum: ['source', 'target'] },
+          fields: { type: 'object', additionalProperties: { type: 'string' }, description: 'Snowflake: account, username, warehouse, database, schema, snowflakeRole, authMode, keyPath. Databricks: workspaceUrl, httpPath, catalog, schema. Oracle: connectString, username, configDir.' },
+          credentials: { type: 'object', required: ['resolver'], additionalProperties: false, properties: { resolver: { type: 'string', enum: ['cli', 'env'] }, ref: { type: 'string' } } },
+          scope: { type: 'string', enum: ['team', 'personal'], description: 'team (default): shared settings in the committed file; personal: only this engineer\'s file.' },
+          allowSampleDataInPrompts: { type: 'boolean', description: 'Whether row values may reach language models. Default false; say why if you propose true.' }
+        }
+      }),
     {
       name: 'autode_review_assertion',
       description: 'Confirm or reject a proposed LOW-stakes fact (glossary term, naming convention, assumption) after asking the user. Other facts are refused here: a person confirms them in the AutoDE Context Inbox.',

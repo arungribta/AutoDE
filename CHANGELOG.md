@@ -6,6 +6,28 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.43.1
+
+- **Connections on every surface** (first step of surface parity, roadmap 2026-10-20; requirements PLT-8, MCP-2; technical-design §10.8, §7.7; reference: `docs/cli.md` *Connections*). A data engineer without the VS Code extension can now set up the connections the MCP server and the CLI use.
+- **`autode connections add`** sets one up in a terminal:
+  - It offers the connections the platform tools already know: Snowflake CLI connections from `connections.toml`, and Databricks profiles from `.databrickscfg`. These files are read directly; the CLIs aren't run.
+  - It asks only for what is missing, for example the SQL warehouse HTTP path.
+  - It tests the connection read-only before saving. If the test fails, nothing is written, and the platform's own error is shown.
+  - It writes the same files as the settings cards: shared settings to `.autode/config/connections.yaml`, and the username and key path to the personal `.autode/local/connections.yaml`.
+
+  Flags answer any question up front (`--platform`, `--role`, `--resolver cli|env`, `--ref`, `--set key=value`, `--scope`, `--allow-sample-data`, `--no-test`). Secrets are refused; they come from the CLI's configuration or from `AUTODE_*` environment variables.
+- **The other subcommands:**
+  - `autode connections list` shows each connection's readiness on this machine and what it still needs, naming the environment variables not set.
+  - `autode connections test <id>` re-checks a connection and records the result.
+  - `autode connections remove <id>` removes it.
+- **MCP:** new tool `autode_propose_connection`. An agent proposes a connection: settings only, with credentials from the CLI's configuration or the environment. It becomes a high-stakes decision, so the agent can't approve it. A person approves it in the panel, with `autode decisions approve`, or in the decision file, and AutoDE then saves it. The server's instructions point agents to it when a connection is missing.
+- **Refactored:** the draft checks in `saveConnection()` moved into `validateConnectionDraft()`, which the cards, the CLI and the proposal all use. New engine module `src/engine/platform/connectionSetup.ts` (discovery, questions, credential needs, the entry to test).
+- **Deviations / notes:**
+  - **`add` and `remove` need a person** (an interactive terminal; refused when `CI` is set), like `decisions approve`. A connection decides which platforms AutoDE's agents can reach. Pipelines commit the file instead, and agents propose.
+  - **`--resolver vscode` is refused outside the extension.** VS Code's secret storage is reachable only from there. Such entries still work in the CLI and MCP through the `AUTODE_*` variables `connections list` names.
+  - An approved connection proposal is saved untested; the result message says to test it.
+- **Measured:** 342 tests (3 new: add from a Databricks profile including a failing test, add with environment variables plus test, list and remove, and an MCP proposal approved through the CLI; the MCP tool-list and schema tests include the new tool). Lint 0 errors. Eval unchanged.
+
 ## 0.43.0
 
 - **Phase 5: the extension as an MCP client, and AutoDE in VS Code's agent mode**, restructured at the user's direction (roadmap decision log 2026-10-20; `docs/mcp-engine-requirements.md` §9 Phase 5; requirements MCP-1, SKL-2; technical-design §10.9; usage: `docs/mcp-setup.md`).

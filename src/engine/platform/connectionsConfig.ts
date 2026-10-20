@@ -379,18 +379,35 @@ function writeDoc(file: string, doc: Document): void {
  * personal fields to the local file. Returns the id the connection has.
  * Throws on a secret field, an unknown platform/field or resolver.
  */
-export function saveConnection(workspaceRoot: string, draft: ConnectionDraft, env: NodeJS.ProcessEnv = process.env): SavedConnection {
+/**
+ * What makes a draft unsaveable, item by item (empty = valid): an unknown platform,
+ * Oracle as a target, a secret field, an unknown field or resolver, a bad role or scope.
+ * Shared by `saveConnection`, the CLI and the MCP connection proposal (v0.43.1).
+ */
+export function validateConnectionDraft(draft: ConnectionDraft): string[] {
+  const errors: string[] = [];
   const allowed = CONNECTION_FIELDS[draft.platform];
-  if (!allowed) throw new Error(`Platform "${draft.platform}" is not supported (snowflake, databricks, oracle).`);
-  if (draft.platform === 'oracle' && draft.role === 'target') throw new Error('Oracle is supported as a source only.');
-  const secrets = secretKeys(draft.fields);
-  if (secrets.length) throw new Error(`${secrets.join(', ')} can't be written to a connections file; it goes to the credentials resolver.`);
-  if (!CONNECTION_RESOLVERS.includes(draft.credentials.resolver)) throw new Error('credentials.resolver must be env, cli or vscode.');
+  if (!allowed) { errors.push(`Platform "${draft.platform}" is not supported (snowflake, databricks, oracle).`); return errors; }
+  if (draft.role !== 'source' && draft.role !== 'target') errors.push('role must be source or target.');
+  if (draft.platform === 'oracle' && draft.role === 'target') errors.push('Oracle is supported as a source only.');
+  if (draft.scope !== undefined && draft.scope !== 'team' && draft.scope !== 'personal') errors.push('scope must be team or personal.');
+  const fields = draft.fields ?? {};
+  const secrets = secretKeys(fields);
+  if (secrets.length) errors.push(`${secrets.join(', ')} can't be written to a connections file; it goes to the credentials resolver (environment variables, the platform CLI's configuration, or VS Code's secret storage).`);
+  if (!draft.credentials || !CONNECTION_RESOLVERS.includes(draft.credentials.resolver)) errors.push('credentials.resolver must be env, cli or vscode.');
+  if (draft.platform === 'oracle' && draft.credentials?.resolver === 'cli') errors.push('Oracle has no CLI configuration to read credentials from: use resolver env (or vscode inside VS Code).');
+  for (const k of Object.keys(fields)) if (!allowed.includes(k) && !secrets.includes(k)) errors.push(`Unknown ${draft.platform} field "${k}" (known: ${allowed.join(', ')}).`);
+  return errors;
+}
+
+export function saveConnection(workspaceRoot: string, draft: ConnectionDraft, env: NodeJS.ProcessEnv = process.env): SavedConnection {
+  const problems = validateConnectionDraft(draft);
+  if (problems.length) throw new Error(problems[0]);
   const fields: Record<string, string> = {};
   for (const [k, v] of Object.entries(draft.fields)) {
-    if (!allowed.includes(k)) throw new Error(`Unknown ${draft.platform} field "${k}".`);
     if (v !== undefined && v !== null && String(v).trim() !== '') fields[k] = String(v).trim();
   }
+  const allowed = CONNECTION_FIELDS[draft.platform]!;
   const id = connectionIdFor(draft.platform, fields, draft.credentials);
   ensureLayout(workspaceRoot);
   const teamFile = layoutPath(workspaceRoot, 'connections');

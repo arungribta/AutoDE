@@ -6712,7 +6712,7 @@ async function main() {
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
       const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision'];
-      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change'];
+      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
@@ -6758,6 +6758,7 @@ async function main() {
       autode_propose_pipeline_spec: [{ pipelineSpec: {} }, { pipelineSpec: 'yaml' }],
       autode_propose_mapping: [{ mapping: { id: 'm', sourceEntityId: 's', targetName: 't', columns: [] } }, { mapping: { id: 'm' } }],
       autode_propose_platform_change: [{ change: { connectionId: 'c', sql: 'DELETE FROM t', reason: 'r' } }, { change: { connectionId: 'c', sql: 'DELETE FROM t' } }],
+      autode_propose_connection: [{ connection: { platform: 'databricks', role: 'source', fields: { httpPath: '/sql/1.0/warehouses/w' }, credentials: { resolver: 'cli', ref: 'DEFAULT' } } }, { connection: { platform: 'databricks', role: 'source', credentials: { resolver: 'vscode' } } }],
       autode_list_decisions: [{ status: 'pending' }, { status: 'maybe' }],
       autode_get_decision: [{ id: 'dec-x' }, {}],
       autode_resolve_decision: [{ id: 'dec-x', decision: 'approved', by: 'me' }, { id: 'dec-x', decision: 'perhaps', by: 'me' }],
@@ -8615,6 +8616,131 @@ async function main() {
       } finally { await client.close(); }
       assert.strictEqual(M.isStaleExtensionEntry({ command: 'node', args: [bundle, 'mcp'] }, '/ext'), false, 'the stable copy is never stale');
     } finally { f.done(); nodeFs.rmSync(storage, { recursive: true, force: true }); }
+  });
+
+  // ── v0.43.1: connections on every surface ──
+
+  // A workspace, a .databrickscfg and a Snowflake connections.toml of its own, and a CLI whose platforms are fakes.
+  const connHarness = (opts = {}) => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-conn-'));
+    const home = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-conn-home-'));
+    nodeFs.writeFileSync(nodePath.join(home, '.databrickscfg'), '[DEFAULT]\nhost = https://adb-1.azuredatabricks.net\ntoken = dapi-default\n\n[prod]\nhost = https://adb-2.azuredatabricks.net\ntoken = dapi-prod\n');
+    nodeFs.mkdirSync(nodePath.join(home, 'sf'));
+    nodeFs.writeFileSync(nodePath.join(home, 'sf', 'connections.toml'), '[dev]\naccount = "ACME-DEV"\nuser = "me"\n');
+    const saved = { DATABRICKS_CONFIG_FILE: process.env.DATABRICKS_CONFIG_FILE, SNOWFLAKE_HOME: process.env.SNOWFLAKE_HOME };
+    process.env.DATABRICKS_CONFIG_FILE = nodePath.join(home, '.databrickscfg');
+    process.env.SNOWFLAKE_HOME = nodePath.join(home, 'sf');
+    const connected = [];
+    const { PlatformSession } = fresh('../dist/mcp/platform.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const fake = (platform) => (creds) => ({
+      async connect() { if (opts.fail) throw new Error(opts.fail); connected.push({ platform, creds }); return { connected: true, platform, databaseName: 'D', schemaName: 'S', version: '1', capabilities: {} }; },
+      async disconnect() {}, dispose() {}, getConnectionId: () => `${platform}:x`, getCapabilities: () => ({}),
+      async executeQuery() { return { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 }; }
+    });
+    const platform = (o) => new PlatformSession({ ...o, allowWrite: false, log: () => {}, createManager: (log, options) => { const m = new ConnectionManager(log, options); for (const p of ['snowflake', 'databricks', 'oracle']) m.registerAdapterFactory(p, fake(p)); return m; } });
+    return {
+      ws, connected, platform,
+      file: (...p) => nodePath.join(ws, ...p),
+      read: (...p) => nodeFs.readFileSync(nodePath.join(ws, ...p), 'utf8'),
+      exists: (...p) => nodeFs.existsSync(nodePath.join(ws, ...p)),
+      done: () => { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } nodeFs.rmSync(ws, { recursive: true, force: true }); nodeFs.rmSync(home, { recursive: true, force: true }); }
+    };
+  };
+
+  await test('v0.43.1: autode connections add — picks an existing Databricks profile, asks only for what is missing, tests before saving, and records readiness; the token never reaches a file', async () => {
+    const h = connHarness();
+    try {
+      const W = ['--workspace', h.ws];
+      // Answers: platform, role (default), profile 2 = prod, HTTP path, catalog, schema, confirm.
+      const r = await cli(['connections', 'add', ...W], { interactive: true, platform: h.platform, answers: ['databricks', '', '2', '/sql/1.0/warehouses/abc', 'main', '', 'save'] });
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.ok(/1\. DEFAULT — profile, https:\/\/adb-1/.test(r.out) && /2\. prod/.test(r.out), r.out);
+      assert.ok(/Testing the connection/.test(r.out) && /✓ Connected/.test(r.out));
+      assert.strictEqual(h.connected.length, 1);
+      assert.deepStrictEqual([h.connected[0].creds.profile, h.connected[0].creds.token], ['prod', undefined], 'a pointer to the profile; the adapter reads the token itself');
+      const team = h.read('.autode', 'config', 'connections.yaml');
+      assert.ok(/platform: databricks/.test(team) && /httpPath: \/sql\/1.0\/warehouses\/abc/.test(team) && /catalog: main/.test(team) && /resolver: cli, ref: prod/.test(team), team);
+      assert.ok(!/dapi/.test(team), 'no token in the file');
+      const list = await cli(['connections', 'list', ...W, '--json']);
+      const row = list.json().connections[0];
+      assert.deepStrictEqual([row.id, row.status.autode], ['databricks:prod', 'ready']);
+      assert.ok(/profile \[prod\]/.test(row.needs.summary), row.needs.summary);
+      // A failing test saves nothing.
+      const bad = connHarness({ fail: 'Invalid access token' });
+      try {
+        const b = await cli(['connections', 'add', '--workspace', bad.ws, '--platform', 'databricks', '--role', 'source', '--resolver', 'cli', '--ref', 'DEFAULT', '--set', 'httpPath=/sql/1.0/warehouses/x'], { interactive: true, platform: bad.platform, answers: ['', '', 'save'] });
+        assert.strictEqual(b.code, 6, b.out + b.err);
+        assert.ok(/Invalid access token/.test(b.err) && /Nothing was saved/.test(b.err));
+        assert.ok(!bad.exists('.autode', 'config', 'connections.yaml'));
+      } finally { bad.done(); }
+    } finally { h.done(); }
+  });
+
+  await test('v0.43.1: autode connections add with environment variables — personal fields to the local file, untested save, list names the variables still to set; refusals and bad input', async () => {
+    const h = connHarness();
+    try {
+      const W = ['--workspace', h.ws];
+      const flags = ['--platform', 'snowflake', '--role', 'target', '--resolver', 'env', '--ref', 'prod', '--set', 'account=ACME-XY1', '--set', 'username=JDOE', '--set', 'database=ANALYTICS', '--no-test'];
+      // Remaining prompts: authMode, keyPath, warehouse, schema, snowflakeRole — all left blank; then confirm.
+      const r = await cli(['connections', 'add', ...W, ...flags], { interactive: true, platform: h.platform, answers: ['', '', 'WH', '', '', 'save'] });
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.ok(/AUTODE_SNOWFLAKE_PROD_PRIVATE_KEY_PASSPHRASE/.test(r.out) && /only if the private key is encrypted/.test(r.out), r.out);
+      assert.ok(/Saved untested/.test(r.out));
+      assert.strictEqual(h.connected.length, 0, '--no-test connects to nothing');
+      const team = h.read('.autode', 'config', 'connections.yaml');
+      assert.ok(/account: ACME-XY1/.test(team) && /warehouse: WH/.test(team) && !/JDOE/.test(team), 'the username is personal');
+      assert.ok(/JDOE/.test(h.read('.autode', 'local', 'connections.yaml')));
+      const list = (await cli(['connections', 'list', ...W, '--json'], { env: {} })).json();
+      assert.deepStrictEqual([list.connections[0].id, list.connections[0].status.autode, list.connections[0].needs.variables.map((v) => [v.name, v.set])], ['snowflake:ACME-XY1', 'unchecked', [['AUTODE_SNOWFLAKE_PROD_PRIVATE_KEY_PASSPHRASE', false]]]);
+      // A secret is refused before anything is asked about saving.
+      const s = await cli(['connections', 'add', ...W, ...flags, '--set', 'password=hunter2'], { interactive: true, platform: h.platform, answers: ['', '', '', '', ''] });
+      assert.strictEqual(s.code, 1);
+      assert.ok(/can't be written to a connections file/.test(s.out) && !/hunter2/.test(h.read('.autode', 'config', 'connections.yaml')));
+      // A person, in a terminal.
+      assert.strictEqual((await cli(['connections', 'add', ...W, ...flags], { interactive: false })).code, 4);
+      assert.strictEqual((await cli(['connections', 'add', ...W, ...flags], { interactive: true, env: { CI: 'true' } })).code, 4);
+      assert.strictEqual((await cli(['connections', 'add', ...W, '--platform', 'oracle', '--role', 'source', '--resolver', 'vscode', '--ref', 'x'], { interactive: true })).code, 2, 'VS Code secret storage is not reachable here');
+      assert.strictEqual((await cli(['connections', 'frob', ...W])).code, 2);
+      // test: records failure and success; unknown id is not found.
+      const failing = connHarness({ fail: 'JWT token is invalid' });
+      try {
+        const t = await cli(['connections', 'test', 'snowflake:ACME-XY1', ...W], { platform: failing.platform, env: {} });
+        assert.strictEqual(t.code, 6, t.err);
+        assert.strictEqual((await cli(['connections', 'list', ...W, '--json'])).json().connections[0].status.autode, 'failed');
+      } finally { failing.done(); }
+      const ok = await cli(['connections', 'test', 'snowflake:ACME-XY1', ...W], { platform: h.platform, env: {} });
+      assert.strictEqual(ok.code, 0, ok.err);
+      assert.strictEqual((await cli(['connections', 'list', ...W, '--json'])).json().connections[0].status.autode, 'ready');
+      assert.strictEqual((await cli(['connections', 'test', 'snowflake:nope', ...W], { platform: h.platform })).code, 5);
+      // remove: confirmed by a person.
+      assert.strictEqual((await cli(['connections', 'remove', 'snowflake:ACME-XY1', ...W], { interactive: true, answers: ['no'] })).code, 4);
+      const rm = await cli(['connections', 'remove', 'snowflake:ACME-XY1', ...W], { interactive: true, answers: ['remove'] });
+      assert.strictEqual(rm.code, 0, rm.out);
+      assert.deepStrictEqual((await cli(['connections', 'list', ...W, '--json'])).json().connections, []);
+    } finally { h.done(); }
+  });
+
+  await test('v0.43.1: an agent proposes a connection over MCP; a person approves it (not the agent) and the engine saves it', async () => {
+    const f = await mcpWorkspace();
+    const client = await mcpSession(f.ws);
+    const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+    try {
+      const secret = await call('autode_propose_connection', { connection: { platform: 'snowflake', role: 'source', fields: { account: 'ACME', token: 'abc' }, credentials: { resolver: 'env' } } });
+      assert.strictEqual(secret.code, 'VALIDATION_FAILED');
+      assert.ok(secret.details.errors.some((e) => /can't be written/.test(e)));
+      const p = await call('autode_propose_connection', { connection: { platform: 'databricks', role: 'source', fields: { httpPath: '/sql/1.0/warehouses/w', catalog: 'main' }, credentials: { resolver: 'cli', ref: 'prod' } }, skill: 'onboarding' });
+      assert.deepStrictEqual([p.decision.kind, p.decision.stakes, p.decision.status, p.decision.title], ['connection', 'high', 'pending', 'Connection databricks:prod (databricks, source)']);
+      assert.ok(p.decision.validation.warnings.some((w) => /profile \[prod\]/.test(w)));
+      assert.strictEqual((await call('autode_resolve_decision', { id: p.decision.id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED', 'an agent cannot approve its own connection');
+      assert.ok(!require('node:fs').existsSync(require('node:path').join(f.ws, '.autode', 'config', 'connections.yaml')));
+      const r = await cli(['decisions', 'approve', p.decision.id, '--workspace', f.ws, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.ok(/connection databricks:prod saved/.test(r.out) && /autode connections test databricks:prod/.test(r.out), r.out);
+      const listed = await call('autode_list_connections', {});
+      assert.ok(listed.connections.some((c) => c.id === 'databricks:prod'), JSON.stringify(listed));
+    } finally { await client.close(); f.done(); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {
