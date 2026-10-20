@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.43.1 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.43.2 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -138,7 +138,7 @@ Imported Claude Agent Skills (`SKILL.md` folders) that run with real tools on an
 
 Inside VS Code (since v0.43.0) the extension reaches the same server in-process through `src/core/engineClient.ts` (MCP over an in-memory transport, started on first use): imported tool skills get its tools within their `allowed-tools` and trust tier, and PA3's executor will use it. VS Code's agent mode gets the server from a provider (`registerMcpProvider` in `src/core/mcpConfig.ts`) with no configuration. The extension still imports `src/engine` directly for in-process work; the boundary that matters is that changes go through decisions. *Design §10.9.*
 
-The **`autode` CLI** (since v0.42.0) runs the same checks without VS Code: `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor`, and `check`, the CI gate that also fails while a high-stakes decision is pending. `validate`, `compile` and `grounding` call the MCP tools' own handlers. `decisions approve | reject` and `connections add | remove` change state, and they need a person at an interactive terminal; `connections list | test` manage connections without VS Code (since v0.43.1). The exit codes are stable. The `autode` package (`npm run package:cli`) contains the same `dist/autode.js` the VSIX ships. *Design §10.8; reference: [cli.md](cli.md).*
+The **`autode` CLI** (since v0.42.0) runs the same checks without VS Code: `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor`, and `check`, the CI gate that also fails while a high-stakes decision is pending. `validate`, `compile` and `grounding` call the MCP tools' own handlers. `problems new | use` and `estate ingest | extract` start problems and load the estate (since v0.43.2; the same over MCP); `decisions approve | reject` and `connections add | remove` change state, and they need a person at an interactive terminal; `connections list | test` manage connections without VS Code (since v0.43.1). The exit codes are stable. The `autode` package (`npm run package:cli`) contains the same `dist/autode.js` the VSIX ships. *Design §10.8; reference: [cli.md](cli.md).*
 
 ### 4.11 Where AutoDE keeps things
 `.autode/` holds AutoDE's working state, grouped by lifecycle: `problems/<id>/` (spec, plan, context documents, pack — committed), `knowledge/` (ledger, estate, sources, profiles, business context, vocabulary — committed), `config/` (skills, primitives, target environment, connections — committed) and `local/` (active problem, chats, derived graph, catalog — never committed; AutoDE writes `.autode/.gitignore` for it). Generated deliverables go to the visible `autode-output/<problem-id>/` (setting `artifactDirectory`). Every path comes from `src/engine/workspaceLayout.ts`; never build one by hand. A workspace from before v0.36.0 (`.ai-context/`) is moved over on activation (`workspaceMigration.ts`). *Design §2.1–2.2.*
@@ -181,7 +181,7 @@ The full, generated tree is technical-design §12. The files that matter most, i
 | 2 | `src/extension.ts` | What is registered, and how the pieces are wired. |
 | 3 | `src/core/webviewProvider.ts` | The chat router, gates, and most command implementations (~2 500 lines; read by feature). |
 | 4 | `src/core/agentHub.ts` | The orchestrator and every LLM call (~1 700 lines). |
-| 5 | `src/context/ContextFileManager.ts` | Loading, ledger sync, catalog and working set, packs. |
+| 5 | `src/engine/context/contextFileManager.ts` | Loading, ledger sync, catalog and working set, packs (moved into the engine in v0.43.2; the extension injects its file watcher). |
 | 6 | `src/engine/context/assertions.ts`, `ledger.ts`, `projection.ts` | The context layer's core. |
 | 7 | `src/engine/context/contextPack.ts`, `retrieval.ts`, `catalog.ts` | How context reaches an LLM. |
 | 8 | `src/engine/grounding/sqlGrounding.ts`, `manifest.ts` | How output is checked. |

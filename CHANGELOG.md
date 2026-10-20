@@ -6,6 +6,29 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.43.2
+
+- **Parity step 1a: business problems and the estate without VS Code** (roadmap 2026-10-20, *Surface parity*; requirements WS-2, STC-10; technical-design §10.6, §10.8; reference: `docs/cli.md` *Business problems*, *Estate*). These were the two biggest gaps of the parity audit: outside VS Code, a problem couldn't be started, and the estate couldn't be filled.
+- **Business problems**, using the same folders, first draft and active-problem pointer as the panel:
+  - CLI: `autode problems list | new "<statement>" | use <id>`.
+  - MCP: `autode_list_problems`, `autode_start_problem` and `autode_select_problem`.
+
+  A started problem holds only its statement, as an unapproved v1 draft. A problem started in a terminal or by an agent opens in the panel, and the reverse.
+- **The estate:**
+  - CLI: `autode estate show`, `autode estate ingest <file>...` (DDL, CSV or JSON) and `autode estate extract --connection <id> --schema <DB.SCHEMA>`, with options to bind to an estate system and to read sampled profiles.
+  - MCP: `autode_ingest_file` (files inside the workspace) and `autode_ingest_metadata` (a connection's schemas).
+
+  Both go into the catalog, the working set and the ledger through the panel's own code, so grounding, `autode_resolve`, context packs and conformance know the tables afterwards. A connection's binding remembers its schemas for the next extract.
+- **Refactored:**
+  - `ContextFileManager` and `GraphManager` moved from `src/context/` into the engine (`src/engine/context/contextFileManager.ts`, `graphManager.ts`, `graphPersistence.ts`). They have no VS Code dependency: the extension injects its watcher of `.autode/knowledge/`, and re-exports remain at the old paths.
+  - `generateProblemSlug` moved to `src/engine/documents/problemSlug.ts`.
+  - New engine modules `src/engine/documents/problems.ts` and `src/engine/context/estateIngest.ts`, and `ConnectionManager.snapshotGraph()`.
+- **Deviations / notes:**
+  - **The MCP server now writes more than proposals** (decision log 2026-10-20). It writes a new problem's draft, the local active-problem pointer, and observed metadata. These tools are marked as writing but not destructive. Inferred knowledge still goes through proposals.
+  - **A running panel doesn't see ledger changes made by the CLI or an agent until *Re-index Context* or a reload.** Its watcher covers the knowledge files, not the ledger folder. Nothing is lost, because the ledger is append-only per session.
+  - `--system` on `estate ingest` applies to every file in that command.
+- **Measured:** 345 tests (3 new: problems across the CLI, MCP and the panel's reader; files into the estate with grounding and resolve; a connection's schemas through the CLI and MCP; the MCP tool-list and schema tests include the five new tools). The knowledge-watcher test now injects its watcher. Lint 0 errors. Eval unchanged.
+
 ## 0.43.1
 
 - **Connections on every surface** (first step of surface parity, roadmap 2026-10-20; requirements PLT-8, MCP-2; technical-design §10.8, §7.7; reference: `docs/cli.md` *Connections*). A data engineer without the VS Code extension can now set up the connections the MCP server and the CLI use.

@@ -6711,12 +6711,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || t.name === 'autode_verify_assertion') ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6759,6 +6759,11 @@ async function main() {
       autode_propose_mapping: [{ mapping: { id: 'm', sourceEntityId: 's', targetName: 't', columns: [] } }, { mapping: { id: 'm' } }],
       autode_propose_platform_change: [{ change: { connectionId: 'c', sql: 'DELETE FROM t', reason: 'r' } }, { change: { connectionId: 'c', sql: 'DELETE FROM t' } }],
       autode_propose_connection: [{ connection: { platform: 'databricks', role: 'source', fields: { httpPath: '/sql/1.0/warehouses/w' }, credentials: { resolver: 'cli', ref: 'DEFAULT' } } }, { connection: { platform: 'databricks', role: 'source', credentials: { resolver: 'vscode' } } }],
+      autode_list_problems: [{}, { x: 1 }],
+      autode_start_problem: [{ problemStatement: 'Merge two estates into one' }, { problemStatement: 'short' }],
+      autode_select_problem: [{ id: 'p' }, {}],
+      autode_ingest_file: [{ path: 'a.ddl', system: 's' }, { path: '' }],
+      autode_ingest_metadata: [{ connectionId: 'c', schemas: ['DB.S'] }, { connectionId: 'c', schemas: [] }],
       autode_list_decisions: [{ status: 'pending' }, { status: 'maybe' }],
       autode_get_decision: [{ id: 'dec-x' }, {}],
       autode_resolve_decision: [{ id: 'dec-x', decision: 'approved', by: 'me' }, { id: 'dec-x', decision: 'perhaps', by: 'me' }],
@@ -7071,12 +7076,13 @@ async function main() {
       const { ContextFileManager } = withMock(mock, () => require('../dist/context/ContextFileManager.js'));
       const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
       const graph = new GraphManager();
-      const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {});
+      // Since v0.43.2 the host injects its watcher (the extension passes VS Code's); the engine names the knowledge folder.
+      const cfm = new ContextFileManager({ fsPath: dir }, graph, () => {}, undefined, (folder, onChange) => { const w = { folder, onChange, dispose: () => {} }; watchers.push(w); return w; });
       await cfm.initialize();
-      const w = watchers.find((x) => /[\\/]\.autode[\\/]knowledge$/.test(x.pattern.base.fsPath));
-      assert.ok(w && w.pattern.pattern === '*.{yaml,yml,json}', 'the knowledge folder is watched');
+      const w = watchers.find((x) => /[\\/]\.autode[\\/]knowledge$/.test(x.folder));
+      assert.ok(w, 'the knowledge folder is watched');
       nodeFs.writeFileSync(p.join(dir, '.autode', 'knowledge', 'business-context.yaml'), 'business_terms:\n  - term: Churn\n    description: customers lost in a month\n');
-      w.handlers.change({ fsPath: p.join(dir, '.autode', 'knowledge', 'business-context.yaml') });
+      w.onChange();
       await new Promise((r) => setTimeout(r, 700));
       assert.ok(graph.serializeSnapshot().nodes.some((n) => n.type === 'business_term' && /churn/i.test(n.label)), 'the edited term is loaded');
       cfm.dispose();
@@ -8741,6 +8747,128 @@ async function main() {
       const listed = await call('autode_list_connections', {});
       assert.ok(listed.connections.some((c) => c.id === 'databricks:prod'), JSON.stringify(listed));
     } finally { await client.close(); f.done(); }
+  });
+
+  // ── v0.43.2: parity step 1a — business problems and the estate without VS Code ──
+
+  await test('v0.43.2: business problems from the CLI and MCP — start, list, select; a problem started in a terminal is the one an agent proposes against, and the panel reads it', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-prob-'));
+    const W = ['--workspace', ws];
+    let client;
+    try {
+      assert.ok(/No business problems yet/.test((await cli(['problems', 'list', ...W])).out));
+      const a = await cli(['problems', 'new', 'Merge the shop and CRM customer data into one analytics model', ...W, '--json']);
+      assert.strictEqual(a.code, 0, a.err);
+      const idA = a.json().id;
+      assert.ok(/^merge-shop-crm-customer-data-/.test(idA), idA);
+      const spec = fresh('../dist/engine/documents/problemDocuments.js').parseBusinessProblemSpec(nodeFs.readFileSync(nodePath.join(ws, '.autode', 'problems', idA, 'spec', 'business-problem.yaml'), 'utf8'));
+      assert.deepStrictEqual([spec.status, spec.version, spec.problemStatementApproved, spec.problemStatement], ['draft', 1, false, 'Merge the shop and CRM customer data into one analytics model'], 'a first draft, nothing approved');
+      // The panel's own reader lists it (same folders, same pointer).
+      const { ActiveProblemManager } = withMock(createMock(), () => fresh('../dist/context/ActiveProblemManager.js'));
+      void ActiveProblemManager;
+      assert.strictEqual(fresh('../dist/engine/documents/problems.js').activeProblemId(ws), idA);
+      assert.strictEqual((await cli(['problems', 'new', ...W])).code, 2);
+      // An agent: list, start another, select back; then a proposal works against the selected problem.
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const b = await call('autode_start_problem', { problemStatement: 'Modernize the legacy HR payroll feeds onto Databricks' });
+      assert.ok(b.active && b.status === 'draft', JSON.stringify(b));
+      assert.deepStrictEqual((await call('autode_list_problems', {})).problems.filter((p) => p.isActive).map((p) => p.id), [b.id]);
+      assert.strictEqual((await call('autode_select_problem', { id: 'nope' })).code, 'NOT_FOUND');
+      assert.deepStrictEqual(await call('autode_select_problem', { id: idA }), { id: idA, active: true });
+      const prop = await call('autode_propose_spec_change', { spec: { problemStatement: 'Merge the shop and CRM customer data into one analytics model', objectives: ['One customer view'], scope: { in: ['shop', 'crm'], out: [] } } });
+      assert.strictEqual(prop.decision.problemId, idA, JSON.stringify(prop));
+      const listed = await cli(['problems', 'list', ...W]);
+      assert.ok(new RegExp(`\\* ${idA}`).test(listed.out) && listed.out.includes(b.id), listed.out);
+      assert.strictEqual((await cli(['problems', 'use', b.id, ...W])).code, 0);
+      assert.strictEqual(fresh('../dist/engine/documents/problems.js').activeProblemId(ws), b.id);
+      assert.strictEqual((await cli(['problems', 'use', 'nope', ...W])).code, 5);
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.43.2: the estate without VS Code — DDL files and a connection\'s schemas into catalog, working set and ledger, through the panel\'s own ContextFileManager; grounding and resolve then know them', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-estate-'));
+    const W = ['--workspace', ws];
+    const ref = (f) => nodePath.join(__dirname, 'reference', 'retail-orders', 'sources', f);
+    let client;
+    try {
+      const r = await cli(['estate', 'ingest', ref('shop.ddl'), ...W, '--system', 'shop', '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      assert.deepStrictEqual([r.json().results[0].system, r.json().results[0].tables], ['shop', 11]);
+      const r2 = await cli(['estate', 'ingest', ref('crm.ddl'), ...W, '--system', 'crm']);
+      assert.ok(/system crm/.test(r2.out), r2.out);
+      const show = (await cli(['estate', 'show', ...W, '--json'])).json();
+      assert.deepStrictEqual(show.estate.systems.map((s) => s.id).sort(), ['crm', 'shop']);
+      assert.deepStrictEqual(show.catalog.map((c) => [c.key, c.tables]).sort(), [['crm/default', 9], ['shop/default', 11]]);
+      assert.ok(/shop\.ddl → shop/.test((await cli(['estate', 'show', ...W])).out));
+      // The estate is AutoDE's for every surface: grounding knows the tables now.
+      nodeFs.writeFileSync(nodePath.join(ws, 'q.sql'), 'SELECT o.order_id FROM shop.orders o');
+      assert.strictEqual((await cli(['grounding', nodePath.join(ws, 'q.sql'), ...W])).code, 0);
+      assert.strictEqual((await cli(['estate', 'ingest', nodePath.join(ws, 'q.txt'), ...W])).code, 5);
+      nodeFs.writeFileSync(nodePath.join(ws, 'notes.txt'), 'hello');
+      assert.strictEqual((await cli(['estate', 'ingest', nodePath.join(ws, 'notes.txt'), ...W])).code, 1, 'unsupported type');
+      assert.strictEqual((await cli(['estate', 'extract', ...W])).code, 2, '--connection is needed');
+      // MCP: a file inside the workspace only; then resolve finds what it brought in.
+      nodeFs.copyFileSync(ref('hr_legacy.ddl'), nodePath.join(ws, 'hr_legacy.ddl'));
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      assert.strictEqual((await call('autode_ingest_file', { path: '../outside.ddl' })).code, 'PERMISSION_DENIED');
+      const m = await call('autode_ingest_file', { path: 'hr_legacy.ddl', system: 'hr' });
+      assert.ok(m.result.tables > 0 && m.result.system === 'hr', JSON.stringify(m));
+      const tools = (await client.listTools()).tools;
+      for (const n of ['autode_ingest_file', 'autode_ingest_metadata', 'autode_start_problem', 'autode_select_problem']) {
+        const t = tools.find((x) => x.name === n);
+        assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], [false, false], `${n} records, never destroys`);
+      }
+      const hits = await call('autode_resolve', { text: 'employee' });
+      assert.ok(hits.matches.some((x) => /obj:hr\//.test(x.id)), JSON.stringify(hits.matches.slice(0, 3)));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.43.2: a connection\'s schemas come in with `autode estate extract` and `autode_ingest_metadata`, under the estate system they are bound to', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { PlatformSession } = fresh('../dist/mcp/platform.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const { BaseDataSourceAdapter } = fresh('../dist/engine/platform/BaseAdapter.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-extract-'));
+    nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    username: me\n    database: SALES\n');
+    const asked = [];
+    const snapshot = (schema) => ({ platform: 'snowflake', connectionId: 'snowflake:ACME', extractedAt: 't', views: [], foreignKeys: [], lineage: [], tables: [{ schema, name: 'ORDERS', fqn: `SALES.${schema}.ORDERS`, type: 'TABLE', columns: [{ name: 'ORDER_ID', dataType: 'NUMBER', isNullable: false, isPrimaryKey: true, isForeignKey: false, ordinalPosition: 1 }, { name: 'AMOUNT', dataType: 'NUMBER(12,2)', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2 }] }] });
+    const fakeAdapter = () => ({
+      async connect() { return { connected: true, platform: 'snowflake', databaseName: 'SALES', schemaName: 'RAW', version: '9', capabilities: {} }; },
+      async disconnect() {}, dispose() {}, getConnectionId: () => 'snowflake:ACME', getCapabilities: () => ({}),
+      async extractMetadata(o) { asked.push(o); return snapshot(o.schemaFilter[0].split('.').pop()); },
+      snapshotToGraph: (s, identity) => BaseDataSourceAdapter.prototype.snapshotToGraph.call({}, s, identity)
+    });
+    const platform = (o) => new PlatformSession({ ...o, allowWrite: false, log: () => {}, createManager: (log, options) => { const m = new ConnectionManager(log, options); m.registerAdapterFactory('snowflake', fakeAdapter); return m; } });
+    try {
+      const r = await cli(['estate', 'extract', '--connection', 'snowflake:ACME', '--schema', 'SALES.RAW', '--system', 'sales', '--workspace', ws, '--json'], { platform });
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.deepStrictEqual([r.json().results[0].system, r.json().results[0].tables, asked[0].schemaFilter, asked[0].includeProfiling], ['sales', 1, ['SALES.RAW'], false]);
+      const show = (await cli(['estate', 'show', '--workspace', ws, '--json'])).json();
+      assert.deepStrictEqual(show.estate.bindings.map((b) => [b.connection, b.system, b.schemas]), [['snowflake:ACME', 'sales', ['SALES.RAW']]]);
+      // The binding remembers the schemas: a second extract needs none.
+      assert.strictEqual((await cli(['estate', 'extract', '--connection', 'snowflake:ACME', '--workspace', ws], { platform })).code, 0);
+      assert.deepStrictEqual(asked[1].schemaFilter, ['SALES.RAW']);
+      // Over MCP, through the server's own session (here: a fake adapter in-process).
+      const { createAutodeServer } = fresh('../dist/mcp/server.js');
+      const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+      const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+      const server = createAutodeServer({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..'), version: 't', platform: platform({ workspaceRoot: ws, allowCli: false }), log: () => {} });
+      const [x, y] = InMemoryTransport.createLinkedPair();
+      await server.connect(x);
+      const client = new Client({ name: 't', version: '1' });
+      await client.connect(y);
+      try {
+        const m = (await client.callTool({ name: 'autode_ingest_metadata', arguments: { connectionId: 'snowflake:ACME', schemas: ['SALES.MART'] } })).structuredContent;
+        assert.deepStrictEqual([m.result.system, m.result.tables], ['sales', 1], JSON.stringify(m));
+        const g = (await client.callTool({ name: 'autode_check_grounding', arguments: { content: 'SELECT order_id, amount FROM sales.mart.orders' } })).structuredContent;
+        assert.strictEqual(g.unresolved.length, 0, JSON.stringify(g));
+      } finally { await client.close(); }
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

@@ -2,7 +2,13 @@
 
 AutoDE ships an MCP server that gives Claude Code, Codex, VS Code's agent mode, Cursor, Cline and any other MCP client the same deterministic engine the AutoDE panel uses: reviewed transform primitives that compile to SQL, Pipeline Spec validation and compilation, AutoDE's requirements-interview prompts, the context layer (what the estate and the business problem hold), a grounding check for SQL, and access to your Snowflake and Databricks connections.
 
-The server never writes to your workspace and never calls an LLM. Your agent writes files with its own tools, after you approve them. Queries against your data platforms are **read-only** unless you start the server with `--allow-write`, and row values are returned only for connections where you allowed it ([Data platforms](#data-platforms)).
+The server never calls an LLM. It changes nothing on its own judgement. It writes only:
+- proposals, which a person approves;
+- a new business problem's first draft;
+- which problem is active;
+- metadata it reads from your schema files or connections.
+
+Your agent writes your code files with its own tools, after you approve them. Queries against your data platforms are **read-only** unless you start the server with `--allow-write`, and row values are returned only for connections where you allowed it ([Data platforms](#data-platforms)).
 
 ## What you need
 
@@ -294,6 +300,9 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 
 | Tool | Use it to |
 |---|---|
+| `autode_list_problems` / `autode_start_problem` / `autode_select_problem` | See the business problems, start one from its statement (a first draft, nothing approved), or choose the active one. The spec, context and proposal tools work on the active problem. |
+| `autode_ingest_file` | Bring a DDL, CSV or JSON file in the workspace into AutoDE's estate (catalog and working set), optionally under an estate system. |
+| `autode_ingest_metadata` | Bring a connection's schemas into the estate (read-only extraction). `autode_extract_metadata` only looks; this records. |
 | `autode_search_primitives` | Find a transform primitive (deduplication, incremental load, rename and cast, and your team's own) instead of writing the SQL by hand. |
 | `autode_describe_primitive` | Read a primitive's parameter schema. |
 | `autode_validate_transform` | Check parameters against that schema. |
@@ -313,7 +322,7 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_execute_query` | Run one read-only statement, with at most 10 000 rows (100 by default). |
 | `autode_propose_assertion` | Propose a fact; a person confirms it in the Context Inbox, or you confirm a low-stakes one with `autode_review_assertion` after asking ([Proposing changes](#proposing-changes)). |
 | `autode_review_assertion` / `autode_verify_assertion` | Confirm or reject a low-stakes fact; verify a fact against data. |
-| `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`, `autode_propose_platform_change` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
+| `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`, `autode_propose_platform_change`, `autode_propose_connection` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
 | `autode_list_decisions` / `autode_get_decision` | See decisions, their proposals, validation and history. |
 | `autode_resolve_decision` | Approve or reject a low-stakes decision after asking the user. |
 | `autode_apply_decision` | Run an approved platform change (server started with `--allow-write`). |

@@ -49,6 +49,30 @@ These commands never change AutoDE's state, so they are safe in CI.
 
 `check` reads committed files only. A decision approved in the panel or in its file passes. A proposal nobody has looked at blocks the merge until a person resolves it.
 
+## Business problems
+
+Work in AutoDE happens in a business problem, a folder under `.autode/problems/`.
+
+| Command | |
+|---|---|
+| `autode problems list` | Every problem with its status and specification version; `*` marks the active one. |
+| `autode problems new "<problem statement>"` | Starts a problem. It creates the folder (named from the statement, as the panel names it) and a first draft specification holding the statement, and makes the problem active. Nothing is approved: the interview, the specification and its approval follow, in the AutoDE panel or with an AutoDE skill in your agent. |
+| `autode problems use <id>` | Makes another problem active. The panel follows, and so does the MCP server. |
+
+The active problem is per engineer (`.autode/local/`), so in CI pass `--problem <id>` or let the checking commands cover every problem.
+
+## Estate
+
+The estate is what AutoDE knows about your systems: their tables and columns, organised by system and environment (`.autode/knowledge/estate.yaml`). Grounding, context packs, conformance and mappings all rely on it. These commands load it with the same code as the panel's *Ingest File* and Source Assessment. What they record is what the file or platform says. That's an observation, not a judgement, so it needs no approval.
+
+| Command | |
+|---|---|
+| `autode estate show` | Systems, bindings (which connection or file feeds which system, and which schemas), how many tables the catalog holds per system, and the working set agents get as context. |
+| `autode estate ingest <file>... [--system <s>] [--environment <e>]` | Imports DDL (`.sql`, `.ddl`), CSV or JSON. With `--system`, the files are bound to that system first; otherwise an existing binding applies, or a system named after the file is created. |
+| `autode estate extract --connection <id> --schema <DATABASE.SCHEMA>... [--system <s>] [--profile]` | Reads the structure of a connection's schemas: tables, columns, keys and views. With `--profile` it also reads sampled counts, and row values only where the connection allows sample data. `--system` binds the connection and its schemas, so the next `extract` needs only `--connection`. |
+
+Large estates go into the catalog in full. The working set, the part agents get as context, takes what fits and grows as tasks use more.
+
 ## Connections
 
 Connections to Snowflake, Databricks and Oracle (Oracle as a source) are kept in `.autode/config/connections.yaml`, which is committed and shared by the team, and in your personal `.autode/local/connections.yaml`. Neither file ever holds a secret. These commands manage those files without VS Code. They write exactly what the extension's settings cards write.

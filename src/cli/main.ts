@@ -18,6 +18,8 @@ import { checkPrerequisites } from '../engine/platform/prerequisites';
 import { connectionStatus, forgetReadiness, readReadiness, recordReadiness } from '../engine/platform/connectionReadiness';
 import { ConnectionDraft, ConnectionRole, loadConnectionsConfig, removeConnection, saveConnection, validateConnectionDraft } from '../engine/platform/connectionsConfig';
 import { credentialNeeds, discoverCliConnections, draftEntry, setupFields } from '../engine/platform/connectionSetup';
+import { listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
+import { IngestResult, ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
 import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStore';
 import { DataPlatformProvider } from '../engine/types';
 import { Catalog } from '../engine/context/catalog';
@@ -91,6 +93,16 @@ Deterministic (never change AutoDE's state):
   doctor                       Prerequisites, drivers, connections and their readiness
   check                        CI gate: validate, and no pending high-stakes decision affects the problem
 
+Business problems:
+  problems list                Every business problem; * marks the active one
+  problems new "<statement>"   Start one: a first draft specification, made active
+  problems use <id>            Make another one active (the AutoDE panel follows)
+
+Estate (observed metadata; recorded without a decision):
+  estate show                  Systems, environments, bindings, and what the catalog holds
+  estate ingest <file>...      DDL (.sql/.ddl), CSV or JSON into the catalog and working set [--system <s>] [--environment <e>]
+  estate extract --connection <id> --schema <DB.SCHEMA>...   A connection's schemas [--system <s>] [--profile] [--allow-cli]
+
 Connections:
   connections list             Each connection, whether it is ready, and what MCP clients still need
   connections test <id>        Connect read-only and record readiness on this machine
@@ -138,11 +150,15 @@ const OPTIONS = {
   set: { type: 'string', multiple: true },
   'allow-sample-data': { type: 'boolean' },
   'no-test': { type: 'boolean' },
+  system: { type: 'string' },
+  environment: { type: 'string' },
+  schema: { type: 'string', multiple: true },
+  profile: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
 
-type Values = { [K in Exclude<keyof typeof OPTIONS, 'set'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[] };
+type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[] };
 
 class CliError extends Error {
   public constructor(public readonly exit: number, message: string) { super(message); }
@@ -194,6 +210,8 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'check': return await cmdCheck(ctx);
       case 'decisions': return await cmdDecisions(ctx, rest);
       case 'connections': return await cmdConnections(ctx, rest);
+      case 'problems': return await cmdProblems(ctx, rest);
+      case 'estate': return await cmdEstate(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -537,6 +555,92 @@ async function cmdDecisions(ctx: Ctx, rest: string[]): Promise<number> {
 function requirePerson(ctx: Ctx, what: string, otherwise: string): void {
   if (ciIsSet(ctx.io.env)) throw new CliError(EXIT.REFUSED, `Refused: CI is set. ${otherwise}`);
   if (!ctx.io.interactive) throw new CliError(EXIT.REFUSED, `Refused: ${what} needs an interactive terminal (stdin and stdout). ${otherwise}`);
+}
+
+// ── problems and estate (v0.43.2) ────────────────────────────────────────────
+
+async function cmdProblems(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub, ...args] = rest;
+  if (sub === 'list') {
+    const list = listProblems(ctx.workspaceRoot);
+    emit(ctx, { ok: true, problems: list }, list.length
+      ? list.map((p) => `${p.isActive ? '*' : ' '} ${p.id}  ${p.status} v${p.specVersion}  ${p.problemStatement.replace(/\s+/g, ' ').slice(0, 90)}`).join('\n')
+      : 'No business problems yet. Start one with `autode problems new "<problem statement>"`.');
+    return EXIT.OK;
+  }
+  if (sub === 'new') {
+    const statement = args.join(' ').trim();
+    if (!statement) throw new CliError(EXIT.USAGE, 'problems new takes the problem statement, in quotes.');
+    const { id, spec } = startProblem(ctx.workspaceRoot, statement);
+    emit(ctx, { ok: true, id, specId: spec.id, active: true }, `Started ${id} (active). Its first draft specification holds the statement; the interview and approval follow (AutoDE panel, or an AutoDE skill in your agent).`);
+    return EXIT.OK;
+  }
+  if (sub === 'use') {
+    if (args.length !== 1) throw new CliError(EXIT.USAGE, 'problems use takes one problem id (see autode problems list).');
+    if (!listProblems(ctx.workspaceRoot).some((p) => p.id === args[0])) throw new CliError(EXIT.NOT_FOUND, `No business problem "${args[0]}" (see autode problems list).`);
+    setActiveProblem(ctx.workspaceRoot, args[0]);
+    emit(ctx, { ok: true, id: args[0] }, `${args[0]} is now the active business problem.`);
+    return EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, 'problems takes list, new "<statement>" or use <id>.');
+}
+
+const ingestLine = (r: IngestResult) => `✓ ${r.source} → system ${r.system} (${r.environment}): ${r.tables} table(s), ${r.columns} column(s); catalogued ${r.catalogued}, ${r.promoted} in the working set${r.warnings.length ? `\n    ! ${r.warnings.join(' ')}` : ''}`;
+
+async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub, ...args] = rest;
+  const log = (m: string) => ctx.io.err(m);
+  if (sub === 'show') {
+    const cfm = await openContext(ctx.workspaceRoot, () => undefined);
+    try {
+      const estate = cfm.getEstate();
+      const entries = cfm.getCatalog().all();
+      const bySystem = new Map<string, number>();
+      for (const e of entries) bySystem.set(`${e.system}/${e.environment}`, (bySystem.get(`${e.system}/${e.environment}`) ?? 0) + 1);
+      const stats = cfm.getContextStats();
+      const lines = [
+        'Systems:',
+        ...(estate.systems.length ? estate.systems.map((sys) => `  ${sys.id} — ${sys.name}, ${sys.role}`) : ['  none']),
+        'Bindings:',
+        ...(estate.bindings.length ? estate.bindings.map((b) => `  ${b.connection ?? b.file} → ${b.system}${b.environment ? ` (${b.environment})` : ''}${b.schemas?.length ? ` [${b.schemas.join(', ')}]` : ''}`) : ['  none']),
+        `Catalog: ${entries.length} table(s)${bySystem.size ? ` — ${[...bySystem.entries()].map(([k, n]) => `${k}: ${n}`).join(', ')}` : ''}`,
+        `Working set (what agents get as context): ${stats.tables} table(s), ${stats.columns} column(s), ${stats.terms} business term(s), ${stats.rules} rule(s)`
+      ];
+      emit(ctx, { ok: true, estate, catalog: [...bySystem.entries()].map(([key, tables]) => ({ key, tables })), stats }, lines.join('\n'));
+      return EXIT.OK;
+    } finally { cfm.dispose(); }
+  }
+  if (sub === 'ingest') {
+    if (!args.length) throw new CliError(EXIT.USAGE, 'estate ingest takes one or more files (.sql, .ddl, .csv, .json).');
+    const files = args.map((a) => path.resolve(ctx.io.cwd, a));
+    for (const f of files) if (!fs.existsSync(f)) throw new CliError(EXIT.NOT_FOUND, `No file "${f}".`);
+    const cfm = await openContext(ctx.workspaceRoot, log);
+    try {
+      const results: IngestResult[] = [];
+      for (const f of files) {
+        try { results.push(await ingestFile(cfm, f, { system: ctx.values.system, environment: ctx.values.environment })); } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+      }
+      emit(ctx, { ok: true, results }, results.map(ingestLine).join('\n'));
+      return EXIT.OK;
+    } finally { cfm.dispose(); }
+  }
+  if (sub === 'extract') {
+    if (args.length) throw new CliError(EXIT.USAGE, 'estate extract takes options: --connection <id> --schema <DB.SCHEMA> (repeatable).');
+    if (!ctx.values.connection) throw new CliError(EXIT.USAGE, 'estate extract needs --connection <id> (see autode connections list).');
+    const session = platformSession(ctx);
+    const cfm = await openContext(ctx.workspaceRoot, log);
+    try {
+      const entry = session.entry(ctx.values.connection);
+      const manager = await session.connect(entry);
+      const r = await ingestConnection(cfm, manager, entry.id, { schemas: ctx.values.schema, system: ctx.values.system, environment: ctx.values.environment, profile: ctx.values.profile === true });
+      emit(ctx, { ok: true, results: [r] }, ingestLine(r));
+      return EXIT.OK;
+    } catch (err) {
+      if (err instanceof Error && /Name the schemas/.test(err.message)) throw new CliError(EXIT.USAGE, err.message);
+      throw err;
+    } finally { cfm.dispose(); session.dispose(); }
+  }
+  throw new CliError(EXIT.USAGE, 'estate takes show, ingest <file>... or extract --connection <id> --schema <DB.SCHEMA>.');
 }
 
 // ── connections (v0.43.1) ────────────────────────────────────────────────────

@@ -302,6 +302,12 @@ export class ConnectionManager implements Disposable {
     return getSupportedProviders().filter((p) => this.adapterFactories.has(p));
   }
 
+  /** The snapshot as graph nodes and edges, with the active connection's estate identity (v0.43.2: the CLI and MCP ingest it directly). */
+  snapshotGraph(snapshot: SchemaSnapshot): { nodes: BaseNode[]; edges: GraphEdge[] } {
+    if (!this.activeAdapter) throw new Error('No active connection.');
+    return this.activeAdapter.snapshotToGraph(snapshot, this.activeIdentity());
+  }
+
   /**
    * Persists the snapshot's graph form to `<workspaceRoot>/.autode/local/schema-graph.json`
    * (atomic write). `io` defaults to Node's `fs`; the extension passes its

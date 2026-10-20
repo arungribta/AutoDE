@@ -524,6 +524,26 @@ Use a terminal with the `autode` command (Part 19), a scratch folder, and at lea
   Do: open the scratch folder in VS Code with the extension.
   Expect: the connection added in 21.1 is in the Saved connections list of its tab.
 
+## Part 22 — v0.43.2 Business problems and the estate without VS Code
+
+Use the `autode` command (Part 19) and an empty scratch folder with the reference DDL files from `test/reference/retail-orders/sources/`.
+
+- [ ] **22.1 Start and switch problems in a terminal.**
+  Do: `autode problems new "Merge the shop and CRM customer data into one analytics model"`, then a second problem, then `autode problems list` and `autode problems use <first id>`.
+  Expect: each problem's folder holds a v1 draft with only the statement, and the active one is marked with `*`. Open the folder in VS Code: the panel shows the same problems and the same active one.
+- [ ] **22.2 Load the estate from files.**
+  Do: `autode estate ingest sources/shop.ddl --system shop`, then `autode estate ingest sources/crm.ddl --system crm`, then `autode estate show`.
+  Expect: two systems and two bindings, with 11 and 9 tables catalogued. `autode grounding` on a query over `shop.orders` passes. In VS Code, *Open Estate* shows the same systems.
+- [ ] **22.3 Load the estate from a connection.**
+  Do: `autode estate extract --connection <id> --schema <DATABASE.SCHEMA> --system <name>`, then run it again with only `--connection`.
+  Expect: the schema's tables arrive under that system; the second run reuses the bound schema. With `--profile` and sample data not allowed for the connection, no row values appear in the catalog.
+- [ ] **22.4 An agent does the same.**
+  Do: in Claude Code with the server, say "start a business problem for modernizing the HR payroll feeds, and bring in sources/hr_legacy.ddl as system hr".
+  Expect: it calls `autode_start_problem` and `autode_ingest_file`. `autode problems list` and `autode estate show` show the results, and the agent's next proposals are about this problem.
+- [ ] **22.5 The panel sees agent and terminal work.**
+  Do: with the panel open, ingest a file from the terminal, then run *Re-index Context* in VS Code.
+  Expect: the new tables are in the context drawer. Without a re-index, the panel picks them up at the next reload.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -653,5 +673,10 @@ Use a terminal with the `autode` command (Part 19), a scratch folder, and at lea
 | 21.4 |  |  |
 | 21.5 |  |  |
 | 21.6 |  |  |
+| 22.1 |  |  |
+| 22.2 |  |  |
+| 22.3 |  |  |
+| 22.4 |  |  |
+| 22.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

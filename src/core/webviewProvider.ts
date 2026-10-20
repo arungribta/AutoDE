@@ -12,7 +12,7 @@ import { composeSynthesisPrompt } from './specOpsPrompts';
 import { buildDiscoveryProgress as buildDiscoveryProgressPure, skillNameForField, DiscoveryProgress } from './discoveryProgress';
 import { GraphManager } from '../context/GraphManager';
 import { BaseNode, GraphEdge } from '../engine/context/types';
-import { ContextFileManager } from '../context/ContextFileManager';
+import { ContextFileManager, KnowledgeWatcher } from '../context/ContextFileManager';
 import type { CatalogFetcher } from '../engine/context/catalog';
 import { ContextValidator } from '../engine/context/ContextValidator';
 import { SourceRegistry } from '../context/SourceRegistry';
@@ -75,6 +75,14 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
   }
   return out;
 }
+
+
+/** VS Code's watcher for `.autode/knowledge/` edits, injected into the engine's ContextFileManager (v0.43.2). */
+const watchKnowledge: KnowledgeWatcher = (dir, onChange) => {
+  const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), '*.{yaml,yml,json}'));
+  w.onDidChange(onChange); w.onDidCreate(onChange); w.onDidDelete(onChange);
+  return w;
+};
 
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoDataEngineeringHubSidebar';
@@ -243,7 +251,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       workspaceRoot,
       this.graphManager,
       (msg: string) => this.postLog(msg),
-      this.createContextValidator()
+      this.createContextValidator(),
+      watchKnowledge
     );
     this.configureContextFileManager(this.contextFileManager);
     try {
@@ -715,7 +724,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
             const activeSpecId = this.contextFileManager.getActiveSpecId();
             this.contextFileManager.dispose();
-            this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator());
+            this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator(), watchKnowledge);
             this.configureContextFileManager(this.contextFileManager);
             this.contextFileManager.setActiveSpecId(activeSpecId);
             await this.contextFileManager.initialize();
