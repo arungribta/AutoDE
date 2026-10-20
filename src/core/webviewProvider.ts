@@ -52,8 +52,7 @@ import { Decision, DecisionStore } from '../engine/decisions/decisionStore';
 import { ApplyResult, ProposalContext, applyDecision, processResolved } from '../engine/decisions/proposals';
 import { layoutPath } from '../engine/workspaceLayout';
 import { ChatTurn, citedFactIds, extractFromTurn, parseCaptureCommand } from '../engine/context/chatExtraction';
-import { createSubjectResolver, isMirror } from '../engine/context/projection';
-import { detectConflicts } from '../engine/context/conflicts';
+import { createSubjectResolver } from '../engine/context/projection';
 import { createProbeResolver, verifyAssertions } from '../engine/context/probes';
 import { Assertion } from '../engine/context/assertions';
 import { backendFor } from './platformOnboarding';
@@ -77,6 +76,7 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 }
 
 
+import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
 /** VS Code's watcher for `.autode/knowledge/` edits, injected into the engine's ContextFileManager (v0.43.2). */
 const watchKnowledge: KnowledgeWatcher = (dir, onChange) => {
   const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), '*.{yaml,yml,json}'));
@@ -1438,18 +1438,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** Facts to review (proposed, needs review), conflicts, and the step waiting for context. */
   private inboxState(): Record<string, unknown> {
     const ledger = this.ledger();
-    const all = ledger ? ledger.assertions() : [];
-    const facts = all.filter((a) => !isMirror(a) && (a.status === 'proposed' || a.status === 'needs_review'));
-    const byId = new Map(all.map((a) => [a.id, a] as const));
-    const view = (a: Assertion) => ({
-      id: a.id, kind: a.kind, subject: a.subject, predicate: a.predicate, value: a.value, statement: a.statement, status: a.status, trust: a.trust,
-      createdBy: a.createdBy, flags: a.flags, reviewReason: a.reviewReason, evidence: a.evidence.slice(0, 3),
-      supersedes: a.supersedes ? { id: a.supersedes, statement: byId.get(a.supersedes)?.statement } : undefined,
-      verification: a.verification ? { result: a.verification.result, detail: a.verification.detail } : undefined,
-      stakes: ['business_term', 'naming_convention', 'assumption'].includes(a.kind) ? 'low' : 'high'
-    });
-    const conflicts = detectConflicts(all).map((c) => ({ rule: c.rule, key: c.key, sides: c.sides, ids: c.ids }));
-    return { facts: facts.map(view), conflicts, waitingForContext: this.hub.getPlan().waitingForContext, live: !!this.liveProbes };
+    const { facts, conflicts } = ledger ? inbox(ledger) : { facts: [], conflicts: [] };
+    return { facts, conflicts, waitingForContext: this.hub.getPlan().waitingForContext, live: !!this.liveProbes };
   }
 
   /** `/define`, `/rule`, `/decide`, `/assume`: returns true when the message was a capture command. */
@@ -1505,23 +1495,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!a) { this.postMessage('error', { message: `No fact ${id}.` }); return; }
     const actor = `user:${this.panelUser()}`;
     try {
-      if (action === 'confirm') {
-        await ledger.confirm(id, actor);
-        this.postLog(`Confirmed: ${a.statement}${a.supersedes ? ' (replaces the earlier fact)' : ''}.`);
-      } else if (action === 'reject') {
-        await ledger.reject(id, actor, edit.note);
-        this.postLog(`Rejected: ${a.statement}.`);
-      } else {
-        let value: unknown = a.value;
-        if (edit.value !== undefined && edit.value.trim()) {
-          try { value = JSON.parse(edit.value); } catch { this.postMessage('error', { message: 'The value must be JSON (e.g. ["order_id"] or {"term": "…", "definition": "…"}).' }); return; }
-        }
-        const replacement = await ledger.supersede(id, { kind: a.kind, subject: a.subject, predicate: a.predicate, value, statement: edit.statement?.trim() || a.statement, evidence: [...a.evidence, { type: 'user_edit', ref: 'context-inbox' }], trust: 'confirmed', status: 'active', specId: a.specId, createdBy: actor });
-        // An edited correction still retires the fact it corrects.
-        const target = a.supersedes ? ledger.get(a.supersedes) : undefined;
-        if (target && target.status !== 'superseded' && target.status !== 'rejected') await ledger.append([ledger.buildEvent('superseded', target.id, actor, { by: replacement.id })]);
-        this.postLog(`Edited and confirmed: ${replacement.statement}.`);
-      }
+      this.postLog(await reviewFact(ledger, id, action, actor, edit));
       await this.contextFileManager.persistCompiledGraph();
     } catch (err) {
       this.postMessage('error', { message: err instanceof Error ? err.message : String(err) });
@@ -1544,9 +1518,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private async bulkConfirm(createdBy: string): Promise<void> {
     const ledger = this.ledger();
     if (!ledger || !this.contextFileManager) return;
-    const items = ledger.assertions().filter((a) => a.createdBy === createdBy && a.status === 'proposed' && a.trust === 'documented' && !isMirror(a));
-    for (const a of items) await ledger.confirm(a.id, `user:${this.panelUser()}`);
-    this.postLog(`Confirmed ${items.length} documented fact(s) from ${createdBy}.`);
+    const n = await bulkConfirmDocumented(ledger, createdBy, `user:${this.panelUser()}`);
+    this.postLog(`Confirmed ${n} documented fact(s) from ${createdBy}.`);
     await this.contextFileManager.persistCompiledGraph();
     this.postDecisions();
   }

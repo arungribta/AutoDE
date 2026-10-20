@@ -9,6 +9,11 @@ import { SchemaIndex } from '../grounding/sqlGrounding';
 import { checkSingleStatement } from '../platform/sqlGuard';
 import { ConnectionDraft, ConnectionEntry, saveConnection, validateConnectionDraft } from '../platform/connectionsConfig';
 import { credentialNeeds, draftEntry } from '../platform/connectionSetup';
+import { VocabularyProposal, mergeVocabularyFile } from '../context/vocabulary';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+export interface VocabularyProposalPayload { entries: Array<Pick<VocabularyProposal, 'kind' | 'from' | 'to'>> }
 import { layoutPath } from '../workspaceLayout';
 import {
   ProblemDocumentKind, parseBusinessProblemSpec, parsePipelineSpecDocument, readProblemDocument,
@@ -23,7 +28,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  * proposal tools, the extension and (PA2) the CLI.
  */
 
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection' | 'vocabulary'>;
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -167,6 +172,22 @@ export function validateConnectionProposal(p: ConnectionDraft, ctx: ProposalCont
   return finish(r);
 }
 
+/** Vocabulary (v0.43.3): single words only, since retrieval matches words; low stakes. */
+export function validateVocabularyProposal(p: VocabularyProposalPayload): ValidationReport {
+  const r = report();
+  r.checks.push('abbreviation or synonym', 'single words');
+  if (!p || !Array.isArray(p.entries) || p.entries.length === 0) { r.errors.push('entries must list at least one abbreviation or synonym.'); return finish(r); }
+  p.entries.forEach((e, i) => {
+    if (e.kind !== 'abbreviation' && e.kind !== 'synonym') r.errors.push(`entries[${i}].kind must be abbreviation or synonym.`);
+    for (const k of ['from', 'to'] as const) {
+      const v = String(e[k] ?? '').trim();
+      if (!v) r.errors.push(`entries[${i}].${k} is required.`);
+      else if (e.kind === 'synonym' && /\s/.test(v)) r.errors.push(`entries[${i}].${k}: synonyms are single words (retrieval matches words).`);
+    }
+  });
+  return finish(r);
+}
+
 // ── Proposing ────────────────────────────────────────────────────────────────
 
 function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown): Decision['subject'] {
@@ -187,6 +208,7 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'pipeline_spec': { const s = payload as PipelineSpec; return { title: `Pipeline Spec: ${s.entities?.length ?? 0} entities`, summary: `Pipeline Spec derived from ${s.derivedFromBpsId ?? 'the active problem'} v${s.derivedFromBpsVersion ?? '?'}` }; }
     case 'mapping': { const m = payload as EntityMapping; return { title: `Map ${m.sourceFqn || m.sourceEntityId} → ${m.targetName} (${m.columns?.length ?? 0} columns)`, summary: m.notes ?? '' }; }
     case 'platform_change': { const p = payload as PlatformChangeProposal; return { title: `Run on ${p.connectionId}: ${p.sql.trim().split(/\s+/).slice(0, 6).join(' ')}…`, summary: p.reason }; }
+    case 'vocabulary': { const v = payload as VocabularyProposalPayload; return { title: `Vocabulary: ${v.entries.map((e) => e.kind === 'abbreviation' ? `${e.from.toUpperCase()}=${e.to}` : `${e.from}~${e.to}`).join(', ')}`.slice(0, 160), summary: `${v.entries.length} retrieval vocabulary entr${v.entries.length === 1 ? 'y' : 'ies'}.` }; }
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
   }
 }
@@ -199,6 +221,7 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'mapping': return validateMappingProposal(payload as EntityMapping, ctx);
     case 'platform_change': return validatePlatformChange(payload as PlatformChangeProposal, ctx);
     case 'connection': return validateConnectionProposal(payload as ConnectionDraft, ctx);
+    case 'vocabulary': return validateVocabularyProposal(payload as VocabularyProposalPayload);
   }
 }
 
@@ -294,6 +317,13 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         const outcome = await deps.executePlatformChange(p.connectionId, p.sql);
         const done = store.markApplied(id, `Ran on ${p.connectionId}: ${outcome}`);
         return { decision: done, applied: true, message: `Applied ${id} (approved by ${approver}): ${outcome}` };
+      }
+      case 'vocabulary': {
+        const file = layoutPath(ctx.workspaceRoot, 'vocabulary');
+        const entries = store.proposal<VocabularyProposalPayload>(id).entries.map((e) => ({ ...e, source: 'llm' as const, support: 0 }));
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, mergeVocabularyFile(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined, entries));
+        break;
       }
       case 'connection': {
         const saved = saveConnection(ctx.workspaceRoot, store.proposal<ConnectionDraft>(id));

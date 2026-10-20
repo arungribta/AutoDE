@@ -6,6 +6,26 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.43.3
+
+- **Parity step 1b: facts, the pack, vocabulary and SQL without VS Code** (roadmap 2026-10-20, *Surface parity*; requirements CTX-10, GRD-8; technical-design §10.8; reference: `docs/cli.md` *Knowledge*, *SQL and documents*). With this, someone without VS Code can confirm a key or grain fact. Before, a fact an agent proposed could only be confirmed in the panel.
+- **The Context Inbox in a terminal:** `autode facts` (`list`, `show`, `confirm`, `reject`, `edit`, `conflicts`), plus `confirm --from <source>` for documented facts from one source. `confirm`, `reject` and `edit` need a person (an interactive terminal, refused with `CI` set) and a typed confirmation. The panel and the CLI now run the same engine code (`src/engine/context/factReview.ts`).
+- **The pack:**
+  - CLI: `autode pack list | add | apply`.
+  - MCP: `autode_pack_list`, `autode_pack_add` and `autode_pack_apply`.
+  - Structured documents are read through their **confirmed** profile, with no model. A document without one is reported, never guessed. An agent can add only **draft** documents; marking one signed is a person's call.
+- **Conformance over MCP:** `autode_check_conformance` (catalog, samples, and read-only probes with a connection). The CLI has had `autode conformance` since v0.42.0.
+- **Vocabulary:**
+  - CLI: `autode vocabulary mine | accept`.
+  - MCP: `autode_mine_vocabulary`, and `autode_propose_vocabulary`, a new **low-stakes** decision kind `vocabulary`. The agent may approve it after asking you, and it is applied to `vocabulary.yaml`.
+- **SQL and documents from the terminal:** `autode design-doc`, `autode query` and `autode explain`. These call the MCP tools' own handlers, so the read-only guard and the sample-data gate are identical.
+- **Refactored:** `BusinessPackManager` moved into the engine (re-export at the old path), and the panel's fact review now delegates to `factReview.ts`.
+- **Deviations / notes:**
+  - The pack's document version is `--doc-version`, because `--version` prints AutoDE's version.
+  - Free-text pack documents and interpretation-profile proposals still need a model, so they stay with the panel or with an MCP host's model through the extraction prompt (PA3 makes this a skill).
+  - Profiles are confirmed by editing `status: confirmed` in `.autode/knowledge/profiles/`, as in the panel.
+- **Measured:** 349 tests (4 new: facts in a terminal; the pack via CLI and MCP with conformance; vocabulary mining, acceptance and a low-stakes proposal; design-doc, query and explain; the MCP tool-list and schema tests include the new tools). Lint 0 errors. Eval unchanged.
+
 ## 0.43.2
 
 - **Parity step 1a: business problems and the estate without VS Code** (roadmap 2026-10-20, *Surface parity*; requirements WS-2, STC-10; technical-design §10.6, §10.8; reference: `docs/cli.md` *Business problems*, *Estate*). These were the two biggest gaps of the parity audit: outside VS Code, a problem couldn't be started, and the estate couldn't be filled.

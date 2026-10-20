@@ -6711,12 +6711,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems'];
-      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary'];
+      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6760,6 +6760,12 @@ async function main() {
       autode_propose_platform_change: [{ change: { connectionId: 'c', sql: 'DELETE FROM t', reason: 'r' } }, { change: { connectionId: 'c', sql: 'DELETE FROM t' } }],
       autode_propose_connection: [{ connection: { platform: 'databricks', role: 'source', fields: { httpPath: '/sql/1.0/warehouses/w' }, credentials: { resolver: 'cli', ref: 'DEFAULT' } } }, { connection: { platform: 'databricks', role: 'source', credentials: { resolver: 'vscode' } } }],
       autode_list_problems: [{}, { x: 1 }],
+      autode_pack_list: [{}, { x: 1 }],
+      autode_pack_add: [{ path: 'a.yaml', role: 'contract', version: '1' }, { path: 'a.yaml', role: 'memo', version: '1' }],
+      autode_pack_apply: [{ ids: ['a'] }, { ids: 'a' }],
+      autode_check_conformance: [{}, { connectionId: '' }],
+      autode_mine_vocabulary: [{}, { x: 1 }],
+      autode_propose_vocabulary: [{ vocabulary: { entries: [{ kind: 'synonym', from: 'guest', to: 'patron' }] } }, { vocabulary: { entries: [{ kind: 'alias', from: 'a', to: 'b' }] } }],
       autode_start_problem: [{ problemStatement: 'Merge two estates into one' }, { problemStatement: 'short' }],
       autode_select_problem: [{ id: 'p' }, {}],
       autode_ingest_file: [{ path: 'a.ddl', system: 's' }, { path: '' }],
@@ -8869,6 +8875,152 @@ async function main() {
         assert.strictEqual(g.unresolved.length, 0, JSON.stringify(g));
       } finally { await client.close(); }
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.43.3: parity step 1b — facts, pack, vocabulary, design doc and SQL without VS Code ──
+
+  await test('v0.43.3: autode facts — the Context Inbox in a terminal: list with stakes and corrections, confirm, reject, edit, bulk-confirm documented facts; only a person, and the panel shares the logic', async () => {
+    const f = await mcpWorkspace();
+    const W = ['--workspace', f.ws];
+    try {
+      const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+      const nodePath = require('node:path');
+      const ledger = new AssertionLedger(nodePath.join(f.ws, '.autode', 'knowledge', 'ledger'));
+      await ledger.load();
+      const key = await ledger.assert({ kind: 'key', subject: ['obj:shop/prod/shop.orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key of shop.orders', evidence: [{ type: 'chat_message', ref: 'chat:1#2' }], createdBy: 'mcp:claude-code' });
+      const term = await ledger.assert({ kind: 'business_term', subject: ['obj:shop/prod/shop.orders'], predicate: 'defined_as', value: { term: 'Order', definition: 'A purchase' }, statement: 'An order is a purchase.', evidence: [{ type: 'file', ref: 'docs/glossary.md' }], createdBy: 'mcp:claude-code' });
+      const docs = [];
+      for (const n of ['customer_id', 'email']) docs.push(await ledger.assert({ kind: 'business_term', subject: [`obj:shop/prod/shop.customers.${n}`], predicate: 'defined_as', value: { term: n, definition: n }, statement: `${n} is documented.`, evidence: [{ type: 'file', ref: 'brd.md' }], trust: 'documented', createdBy: 'pack:brd' }));
+      const list = await cli(['facts', ...W, '--json']);
+      const byId = new Map(list.json().facts.map((x) => [x.id, x]));
+      assert.deepStrictEqual([byId.get(key.id).stakes, byId.get(term.id).stakes, list.json().facts.length], ['high', 'low', 4]);
+      assert.ok(/order_id is the key of shop\.orders/.test((await cli(['facts', 'list', ...W])).out));
+      assert.ok(/chat:1#2/.test((await cli(['facts', 'show', key.id, ...W])).out));
+      // A person, in a terminal.
+      assert.strictEqual((await cli(['facts', 'confirm', key.id, ...W])).code, 4);
+      assert.strictEqual((await cli(['facts', 'confirm', key.id, ...W], { interactive: true, env: { CI: '1' }, answers: ['confirm'] })).code, 4);
+      assert.strictEqual((await cli(['facts', 'confirm', key.id, ...W], { interactive: true, answers: ['no'] })).code, 4);
+      const c = await cli(['facts', 'confirm', key.id, ...W, '--by', 'priya'], { interactive: true, answers: ['confirm'] });
+      assert.strictEqual(c.code, 0, c.out + c.err);
+      const after = async () => { const l = new AssertionLedger(nodePath.join(f.ws, '.autode', 'knowledge', 'ledger')); await l.load(); return l; };
+      let l = await after();
+      assert.deepStrictEqual([l.get(key.id).status, l.get(key.id).trust], ['active', 'confirmed']);
+      // Edit: replaced by a confirmed fact with the new value.
+      const e = await cli(['facts', 'edit', term.id, ...W, '--value', '{"term":"Order","definition":"A paid purchase"}'], { interactive: true, answers: ['edit'] });
+      assert.strictEqual(e.code, 0, e.out + e.err);
+      l = await after();
+      assert.strictEqual(l.get(term.id).status, 'superseded');
+      assert.ok(l.assertions().some((a) => a.status === 'active' && a.value && a.value.definition === 'A paid purchase'));
+      assert.strictEqual((await cli(['facts', 'edit', term.id, ...W, '--value', 'not json'], { interactive: true, answers: ['edit'] })).code, 1);
+      // Bulk: documented facts from one source only.
+      const b = await cli(['facts', 'confirm', ...W, '--from', 'pack:brd'], { interactive: true, answers: ['confirm'] });
+      assert.ok(b.code === 0 && /Confirmed 2 documented/.test(b.out), b.out + b.err);
+      assert.strictEqual((await cli(['facts', 'confirm', ...W, '--from', 'mcp:claude-code'], { interactive: true, answers: ['confirm'] })).code, 5, 'not documented facts');
+      assert.ok(/Nothing waits for review/.test((await cli(['facts', ...W])).out));
+      assert.strictEqual((await cli(['facts', 'show', 'nope', ...W])).code, 5);
+      // The panel uses the same engine functions (no copy of the logic).
+      const src = require('node:fs').readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
+      assert.ok(/from '\.\.\/engine\/context\/factReview'/.test(src) && !/ledger\.supersede\(/.test(src));
+    } finally { f.done(); }
+  });
+
+  await test('v0.43.3: the pack without VS Code — add, apply through a confirmed profile, conformance on samples (CLI and MCP); an agent adds only drafts', async () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const env = await k2.cfm();
+    let client;
+    try {
+      const big = require('../dist/engine/context/fileIngestion.js').parseFile(c4a.read('sources/crm.ddl'), 'crm.ddl', { system: 'crm', environment: 'prod' });
+      await env.cfm.ingestParsed(big.nodes, big.edges);
+      fs.mkdirSync(p.join(env.dir, 'docs'), { recursive: true });
+      fs.writeFileSync(p.join(env.dir, 'docs', 'contract.yaml'), c4a.read('documents/pack/customer-contract.v1.yaml'));
+      fs.writeFileSync(p.join(env.dir, 'docs', 'crm.csv'), c4a.read('sources/samples/crm_customers.csv'));
+      const W = ['--workspace', env.dir];
+      assert.strictEqual((await cli(['problems', 'new', 'Merge customer data against the contract', ...W])).code, 0);
+      const add = await cli(['pack', 'add', p.join(env.dir, 'docs', 'contract.yaml'), '--role', 'contract', '--authority', 'signed', '--doc-version', '1', ...W], { interactive: true });
+      assert.strictEqual(add.code, 0, add.out + add.err);
+      assert.strictEqual((await cli(['pack', 'add', p.join(env.dir, 'docs', 'contract.yaml'), '--role', 'contract', '--authority', 'signed', '--doc-version', '1', ...W])).code, 4, 'a signed document is a person\'s call');
+      // No confirmed profile yet: reported, nothing guessed.
+      let ap = await cli(['pack', 'apply', ...W]);
+      assert.strictEqual(ap.code, 1);
+      assert.ok(/no confirmed profile fits/.test(ap.out), ap.out);
+      fs.mkdirSync(p.join(env.dir, '.autode', 'knowledge', 'profiles'), { recursive: true });
+      fs.writeFileSync(p.join(env.dir, '.autode', 'knowledge', 'profiles', 'house-contract.yaml'), c4a.read('documents/pack/profile.house-contract.yaml'));
+      ap = await cli(['pack', 'apply', ...W, '--json']);
+      assert.strictEqual(ap.code, 0, ap.out + ap.err);
+      assert.deepStrictEqual([ap.json().results[0].status, ap.json().results[0].reconcile.asserted], ['applied', 7]);
+      assert.ok(/contract\.yaml/.test((await cli(['pack', 'list', ...W])).out));
+      // Over MCP: the agent adds the sample as a draft (its authority is forced), then checks conformance.
+      client = await mcpSession(env.dir);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const s = await call('autode_pack_add', { path: 'docs/crm.csv', role: 'sample', version: '1', table: 'obj:crm/prod/crm.customers' });
+      assert.strictEqual(s.document.authority, 'draft');
+      assert.strictEqual((await call('autode_pack_add', { path: 'docs/crm.csv', role: 'sample', version: '1' })).code, 'VALIDATION_FAILED', 'a sample names its table');
+      const conf = await call('autode_check_conformance', {});
+      assert.ok(conf.failures > 0 && /unique/.test(conf.markdown), JSON.stringify(conf).slice(0, 400));
+      assert.strictEqual((await cli(['conformance', ...W])).code, 1, 'the CLI reports the same failure');
+      const applied = await call('autode_pack_apply', {});
+      assert.ok(applied.results.some((r) => r.status === 'applied') && applied.results.some((r) => r.status === 'registered'), JSON.stringify(applied));
+      assert.strictEqual((await call('autode_pack_list', {})).documents.length, 2);
+    } finally { if (client) await client.close(); env.cleanup(); }
+  });
+
+  await test('v0.43.3: vocabulary — mined in a terminal or by an agent; accepted by a person, or proposed by an agent as a low-stakes decision it may resolve after asking', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-vocab-'));
+    const W = ['--workspace', ws];
+    let client;
+    try {
+      nodeFs.writeFileSync(nodePath.join(ws, 'loyalty.ddl'), "CREATE TABLE loy.ptrn_acct (ptrn_no VARCHAR(20) COMMENT 'Patron number', engmt_id INT COMMENT 'Engagement identifier', ptrn_seg VARCHAR(10) COMMENT 'Patron segment');\nCREATE TABLE loy.ptrn_visit (ptrn_no VARCHAR(20) COMMENT 'Patron number', visit_dt DATE);\n");
+      assert.strictEqual((await cli(['estate', 'ingest', nodePath.join(ws, 'loyalty.ddl'), ...W])).code, 0);
+      const mined = (await cli(['vocabulary', 'mine', ...W, '--json'])).json().proposals;
+      assert.ok(mined.some((m) => m.from === 'ptrn' && m.to === 'patron'), JSON.stringify(mined));
+      assert.strictEqual((await cli(['vocabulary', 'accept', ...W])).code, 4);
+      const acc = await cli(['vocabulary', 'accept', ...W], { interactive: true, answers: ['1'] });
+      assert.strictEqual(acc.code, 0, acc.out + acc.err);
+      const file = nodePath.join(ws, '.autode', 'knowledge', 'vocabulary.yaml');
+      assert.ok(nodeFs.existsSync(file) && /ptrn|patron/.test(nodeFs.readFileSync(file, 'utf8')));
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const agentMined = await call('autode_mine_vocabulary', {});
+      assert.ok(!agentMined.proposals.some((m) => m.from === mined[0].from), 'accepted entries are no longer proposed');
+      assert.strictEqual((await call('autode_propose_vocabulary', { vocabulary: { entries: [{ kind: 'synonym', from: 'client account', to: 'customer' }] } })).code, 'VALIDATION_FAILED', 'single words');
+      const pr = await call('autode_propose_vocabulary', { vocabulary: { entries: [{ kind: 'synonym', from: 'guest', to: 'patron' }] } });
+      assert.deepStrictEqual([pr.decision.kind, pr.decision.stakes], ['vocabulary', 'low']);
+      const res = await call('autode_resolve_decision', { id: pr.decision.id, decision: 'approved', by: 'jdoe' });
+      assert.ok(res.applied, JSON.stringify(res));
+      assert.ok(/guest/.test(nodeFs.readFileSync(file, 'utf8')));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.43.3: design-doc, query and explain from the CLI use the MCP tools\' handlers (the same read-only guard and sample-data gate)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const f = await mcpWorkspace();
+    const W = ['--workspace', f.ws];
+    const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-dd-'));
+    try {
+      const d = await cli(['design-doc', ...W]);
+      assert.strictEqual(d.code, 0, d.err);
+      assert.ok(/^#/m.test(d.out), d.out.slice(0, 200));
+      assert.strictEqual((await cli(['design-doc', ...W, '--out', nodePath.join(out, 'design.md')])).code, 0);
+      assert.ok(/^#/m.test(nodeFs.readFileSync(nodePath.join(out, 'design.md'), 'utf8')));
+      // query/explain over a fake Snowflake: rows withheld without consent; writes refused.
+      nodeFs.mkdirSync(nodePath.join(f.ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(f.ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    username: me\n    database: D\n');
+      const { PlatformSession } = fresh('../dist/mcp/platform.js');
+      const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+      const executed = [];
+      const fake = () => ({ async connect() { return { connected: true, platform: 'snowflake', databaseName: 'D', schemaName: 'S', version: '9', capabilities: {} }; }, async disconnect() {}, dispose() {}, getConnectionId: () => 'snowflake:ACME', getCapabilities: () => ({}),
+        async executeQuery(sql) { executed.push(sql); return /^EXPLAIN/i.test(sql) ? { columns: ['plan'], rows: [{ plan: 'TableScan ORDERS' }], rowCount: 1, executionTimeMs: 1 } : { columns: ['order_id', 'email'], rows: [{ order_id: 7, email: 'pat@example.com' }], rowCount: 1, executionTimeMs: 1 }; } });
+      const platform = (o) => new PlatformSession({ ...o, allowWrite: false, log: () => {}, createManager: (log, options) => { const m = new ConnectionManager(log, options); m.registerAdapterFactory('snowflake', fake); return m; } });
+      const q = await cli(['query', '--connection', 'snowflake:ACME', 'SELECT order_id, email FROM orders', ...W], { platform });
+      assert.strictEqual(q.code, 0, q.err);
+      assert.ok(/1 row\(s\) — row values withheld/.test(q.out) && !/pat@example\.com/.test(q.out), q.out);
+      assert.strictEqual((await cli(['query', '--connection', 'snowflake:ACME', 'DELETE FROM orders', ...W], { platform })).code, 4, 'a write is refused');
+      assert.ok(executed.every((s) => !/DELETE/i.test(s)));
+      const e = await cli(['explain', '--connection', 'snowflake:ACME', 'SELECT 1', ...W], { platform });
+      assert.ok(e.code === 0 && /TableScan ORDERS/.test(e.out), e.out + e.err);
+      assert.strictEqual((await cli(['query', 'SELECT 1', ...W])).code, 2, '--connection is needed');
+    } finally { f.done(); nodeFs.rmSync(out, { recursive: true, force: true }); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

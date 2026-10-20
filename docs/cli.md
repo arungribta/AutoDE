@@ -73,6 +73,38 @@ The estate is what AutoDE knows about your systems: their tables and columns, or
 
 Large estates go into the catalog in full. The working set, the part agents get as context, takes what fits and grows as tasks use more.
 
+## Knowledge: facts, pack, vocabulary
+
+AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms, metrics, rules and decisions. Agents and documents *propose* facts; a person confirms them. These commands are the panel's Context Inbox in a terminal.
+
+| Command | |
+|---|---|
+| `autode facts` (or `facts list`) | What waits for review (proposed, or flagged for review after a failed check or a conflict). For each fact it shows its stakes, trust, what it corrects, any probe result, and where it came from. `--kind <k>` narrows the list; `--all` shows every fact. |
+| `autode facts show <id>` | One fact with its value, subject and evidence. |
+| `autode facts confirm <id>...` | Confirms the facts. A correction replaces the fact it corrects. |
+| `autode facts confirm --from <source>` | Confirms every **documented** fact from one source, for example a pack document. This is the only bulk confirmation. |
+| `autode facts reject <id> [--note <text>]` | Rejects a fact. |
+| `autode facts edit <id> [--statement <text>] [--value <json>]` | Replaces a fact with your corrected version, confirmed. |
+| `autode facts conflicts` | Facts that contradict each other. |
+
+`confirm`, `reject` and `edit` show the facts and ask you to type the verb. They need an interactive terminal and refuse when `CI` is set. `--by` names you; the default is your OS user. Agents can confirm low-stakes facts (terms, naming conventions, assumptions) themselves, after asking you. Every other fact waits for you, here or in the panel.
+
+| Command | |
+|---|---|
+| `autode pack list` | The active problem's documents: contracts, BRDs, KPI definitions, mappings, data dictionaries and samples. |
+| `autode pack add <file> --role <role> --authority signed\|draft --doc-version <v> [--table <object id>]` | Adds a document. `signed` makes its clauses confirmed facts; `draft` makes them documented facts, to review. A sample needs `--table`. Needs a terminal. An agent can add only drafts. |
+| `autode pack apply [<doc id>...]` | Reads structured documents (YAML, JSON) through their **confirmed** interpretation profile, deterministically. A document with no confirmed profile is reported: profiles are in `.autode/knowledge/profiles/`, and a person sets `status: confirmed`. Free-text documents need a model: use the panel, or the extraction prompt in an MCP host. |
+| `autode vocabulary mine` | Abbreviations mined from table and column names and comments (for example `PTRN = patron`) that aren't in the vocabulary yet. |
+| `autode vocabulary accept` | Shows the mined entries and lets you pick which are right for this customer. They go to `.autode/knowledge/vocabulary.yaml`. Needs a terminal. |
+
+## SQL and documents
+
+| Command | |
+|---|---|
+| `autode design-doc [path] [--out <file>]` | The Pipeline Spec's design document, as Markdown. |
+| `autode query --connection <id> "<sql>" [--max-rows <n>]` | Runs one read-only statement. It uses the same guard as the MCP server, so writes are refused. Row values are shown only when the connection allows sample data; otherwise you get the columns and the row count. |
+| `autode explain --connection <id> "<sql>"` | The platform's plan for a statement, which may be DDL or DML. Nothing runs. |
+
 ## Connections
 
 Connections to Snowflake, Databricks and Oracle (Oracle as a source) are kept in `.autode/config/connections.yaml`, which is committed and shared by the team, and in your personal `.autode/local/connections.yaml`. Neither file ever holds a secret. These commands manage those files without VS Code. They write exactly what the extension's settings cards write.

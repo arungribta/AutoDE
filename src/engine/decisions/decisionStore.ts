@@ -21,6 +21,8 @@ export type DecisionKind =
   | 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change'
   /** A new or changed data-platform connection (v0.43.1). */
   | 'connection'
+  /** Retrieval vocabulary: abbreviations and synonyms (v0.43.3; low stakes — it changes what is found, not what is true). */
+  | 'vocabulary'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 
@@ -90,6 +92,7 @@ export const LOW_STAKES_ASSERTION_KINDS: readonly string[] = ['business_term', '
 
 /** Stakes are defined here, once; no caller, skill or host can lower them. */
 export function stakesFor(kind: DecisionKind, proposal?: unknown): Stakes {
+  if (kind === 'vocabulary') return 'low';
   if (kind === 'assertion') {
     const k = proposal && typeof proposal === 'object' ? String((proposal as { kind?: unknown }).kind ?? '') : '';
     return LOW_STAKES_ASSERTION_KINDS.includes(k) ? 'low' : 'high';

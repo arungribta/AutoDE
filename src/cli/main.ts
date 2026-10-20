@@ -20,6 +20,12 @@ import { ConnectionDraft, ConnectionRole, loadConnectionsConfig, removeConnectio
 import { credentialNeeds, discoverCliConnections, draftEntry, setupFields } from '../engine/platform/connectionSetup';
 import { listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
 import { IngestResult, ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
+import { FactView, ReviewAction, bulkConfirmDocumented, factView, inbox, reviewFact } from '../engine/context/factReview';
+import { BusinessPackManager } from '../engine/context/businessPackManager';
+import { DOCUMENT_ROLES, DocumentAuthority, DocumentRole } from '../engine/context/pack';
+import { buildVocabulary, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, VocabularyProposal } from '../engine/context/vocabulary';
+import { isMirror } from '../engine/context/projection';
+import { platformTools } from '../mcp/platform';
 import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStore';
 import { DataPlatformProvider } from '../engine/types';
 import { Catalog } from '../engine/context/catalog';
@@ -103,6 +109,22 @@ Estate (observed metadata; recorded without a decision):
   estate ingest <file>...      DDL (.sql/.ddl), CSV or JSON into the catalog and working set [--system <s>] [--environment <e>]
   estate extract --connection <id> --schema <DB.SCHEMA>...   A connection's schemas [--system <s>] [--profile] [--allow-cli]
 
+Knowledge (confirming, rejecting, editing and adding are a person's: interactive terminal):
+  facts [list]                 What waits for review (proposed, needs review), with stakes and what each corrects [--kind k] [--all]
+  facts show <id>              One fact: value, evidence, verification, history
+  facts confirm <id>...        Confirm; or --from <source> for every documented fact from one source
+  facts reject <id> [--note <text>]
+  facts edit <id> [--statement <text>] [--value <json>]   Correct it, confirmed
+  facts conflicts              Contradicting facts
+  pack list                    The active problem's documents (contracts, BRDs, samples …)
+  pack add <file> --role <r> --authority signed|draft --doc-version <v> [--table <obj id>]   (terminal)
+  pack apply [<doc id>...]     Read structured documents through their confirmed profiles into facts
+  vocabulary mine              Abbreviations mined from table and column names and comments
+  vocabulary accept            (terminal) Pick mined entries to add to .autode/knowledge/vocabulary.yaml
+  design-doc [path] [--out <file>]   The Pipeline Spec's design document
+  query --connection <id> "<sql>"    One read-only statement (row values only where the connection allows sample data)
+  explain --connection <id> "<sql>"  Dry-run: the platform's plan, nothing runs
+
 Connections:
   connections list             Each connection, whether it is ready, and what MCP clients still need
   connections test <id>        Connect read-only and record readiness on this machine
@@ -154,6 +176,14 @@ const OPTIONS = {
   environment: { type: 'string' },
   schema: { type: 'string', multiple: true },
   profile: { type: 'boolean' },
+  all: { type: 'boolean' },
+  from: { type: 'string' },
+  statement: { type: 'string' },
+  value: { type: 'string' },
+  authority: { type: 'string' },
+  table: { type: 'string' },
+  'max-rows': { type: 'string' },
+  'doc-version': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -212,6 +242,11 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'connections': return await cmdConnections(ctx, rest);
       case 'problems': return await cmdProblems(ctx, rest);
       case 'estate': return await cmdEstate(ctx, rest);
+      case 'facts': return await cmdFacts(ctx, rest);
+      case 'pack': return await cmdPack(ctx, rest);
+      case 'vocabulary': return await cmdVocabulary(ctx, rest);
+      case 'design-doc': return await cmdDesignDoc(ctx, rest);
+      case 'query': case 'explain': return await cmdSql(ctx, command, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -641,6 +676,215 @@ async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
     } finally { cfm.dispose(); session.dispose(); }
   }
   throw new CliError(EXIT.USAGE, 'estate takes show, ingest <file>... or extract --connection <id> --schema <DB.SCHEMA>.');
+}
+
+// ── facts, pack, vocabulary, design doc, SQL (v0.43.3) ───────────────────────
+
+const actorOf = (ctx: Ctx) => `user:${(ctx.values.by ?? safeUsername()).trim()}`;
+
+function factLine(f: FactView): string {
+  const tags = [f.stakes === 'high' ? 'high stakes' : 'low stakes', f.status, f.trust, ...(f.flags ?? [])].join(', ');
+  return `${f.id}  [${f.kind}] ${f.statement}\n    ${tags}${f.supersedes ? `; corrects: ${f.supersedes.statement ?? f.supersedes.id}` : ''}${f.verification ? `; probe ${f.verification.result}${f.verification.detail ? ` (${f.verification.detail})` : ''}` : ''}${f.reviewReason ? `; ${f.reviewReason}` : ''}\n    from ${f.createdBy ?? 'unknown'}${f.evidence[0] ? `, ${f.evidence[0].ref}` : ''}`;
+}
+
+async function cmdFacts(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list', ...ids] = rest;
+  const cfm = await openContext(ctx.workspaceRoot, () => undefined);
+  try {
+    const ledger = cfm.getLedger();
+    if (sub === 'list') {
+      const box = inbox(ledger);
+      const byId = new Map(ledger.assertions().map((a) => [a.id, a] as const));
+      const facts = ctx.values.all ? ledger.assertions().filter((a) => !isMirror(a)).map((a) => factView(a, byId)) : box.facts;
+      const shown = facts.filter((f) => !ctx.values.kind || f.kind === ctx.values.kind);
+      emit(ctx, { ok: true, facts: shown, conflicts: box.conflicts }, shown.length
+        ? `${shown.map(factLine).join('\n')}\n${shown.length} fact(s)${ctx.values.all ? '' : ' waiting for review'}; ${box.conflicts.length} conflict(s).`
+        : `Nothing waits for review.${box.conflicts.length ? ` ${box.conflicts.length} conflict(s): autode facts conflicts.` : ''}`);
+      return EXIT.OK;
+    }
+    if (sub === 'conflicts') {
+      const box = inbox(ledger);
+      emit(ctx, { ok: true, conflicts: box.conflicts }, box.conflicts.length ? box.conflicts.map((c) => `${c.rule} on ${c.key}: ${c.ids.map((id) => `${id} "${ledger.get(id)?.statement ?? ''}"`).join(' vs ')}`).join('\n') : 'No conflicts.');
+      return EXIT.OK;
+    }
+    if (sub === 'show') {
+      if (ids.length !== 1) throw new CliError(EXIT.USAGE, 'facts show takes one fact id.');
+      const a = ledger.get(ids[0]);
+      if (!a || isMirror(a)) throw new CliError(EXIT.NOT_FOUND, `No fact "${ids[0]}".`);
+      const v = factView(a, new Map(ledger.assertions().map((x) => [x.id, x] as const)));
+      emit(ctx, { ok: true, fact: { ...v, evidence: a.evidence } }, `${factLine(v)}\n    value: ${JSON.stringify(a.value)}\n    subject: ${a.subject.join(', ')}\n    evidence:${a.evidence.map((e) => `\n      - ${e.type}: ${e.ref}${'quote' in e && e.quote ? ` — "${String(e.quote)}"` : ''}`).join('')}`);
+      return EXIT.OK;
+    }
+    if (sub !== 'confirm' && sub !== 'reject' && sub !== 'edit') throw new CliError(EXIT.USAGE, 'facts takes list, show <id>, confirm <id>..., reject <id>, edit <id>, or conflicts.');
+    requirePerson(ctx, `facts ${sub}`, 'Review facts in the AutoDE panel (Context Inbox), or in a terminal.');
+    const actor = actorOf(ctx);
+    if (sub === 'confirm' && ctx.values.from) {
+      const n = ledger.assertions().filter((a) => a.createdBy === ctx.values.from && a.status === 'proposed' && a.trust === 'documented' && !isMirror(a)).length;
+      if (!n) throw new CliError(EXIT.NOT_FOUND, `No documented fact from "${ctx.values.from}" waits for confirmation (bulk confirmation is for documented facts from one source).`);
+      if ((await ctx.io.prompt(`Confirm ${n} documented fact(s) from ${ctx.values.from}? Type confirm: `)).trim().toLowerCase() !== 'confirm') { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+      const done = await bulkConfirmDocumented(ledger, ctx.values.from, actor);
+      await cfm.persistCompiledGraph();
+      emit(ctx, { ok: true, confirmed: done }, `Confirmed ${done} documented fact(s) from ${ctx.values.from}.`);
+      return EXIT.OK;
+    }
+    if (!ids.length || (sub !== 'confirm' && ids.length > 1)) throw new CliError(EXIT.USAGE, sub === 'confirm' ? 'facts confirm takes fact ids (or --from <source>).' : `facts ${sub} takes one fact id.`);
+    for (const id of ids) { const a = ledger.get(id); if (!a || isMirror(a)) throw new CliError(EXIT.NOT_FOUND, `No fact "${id}".`); ctx.io.out(factLine(factView(a, new Map()))); }
+    if (sub === 'edit' && ctx.values.statement === undefined && ctx.values.value === undefined) throw new CliError(EXIT.USAGE, 'facts edit needs --statement and/or --value <json>.');
+    if ((await ctx.io.prompt(`${sub === 'confirm' ? 'Confirm' : sub === 'reject' ? 'Reject' : 'Replace with your edit and confirm'} ${ids.length > 1 ? `these ${ids.length} facts` : 'this fact'}? Type ${sub}: `)).trim().toLowerCase() !== sub) { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+    const lines: string[] = [];
+    for (const id of ids) {
+      try { lines.push(await reviewFact(ledger, id, sub as ReviewAction, actor, { statement: ctx.values.statement, value: ctx.values.value, note: ctx.values.note })); } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+    }
+    await cfm.persistCompiledGraph();
+    emit(ctx, { ok: true, results: lines }, lines.join('\n'));
+    return EXIT.OK;
+  } finally { cfm.dispose(); }
+}
+
+async function packManager(ctx: Ctx): Promise<{ pm: BusinessPackManager; dispose: () => void }> {
+  const id = singleProblem(ctx);
+  if (!id) throw new CliError(EXIT.NOT_FOUND, 'No business problem in this workspace: start one with `autode problems new`.');
+  const cfm = await openContext(ctx.workspaceRoot, (m) => ctx.io.err(m));
+  const pm = new BusinessPackManager(path.join(layoutPath(ctx.workspaceRoot, 'problems', id), 'pack'), ctx.workspaceRoot, () => cfm, (m) => ctx.io.err(m));
+  await pm.load();
+  return { pm, dispose: () => cfm.dispose() };
+}
+
+async function cmdPack(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list', ...args] = rest;
+  const { pm, dispose } = await packManager(ctx);
+  try {
+    if (sub === 'list') {
+      const docs = pm.getPack().documents;
+      emit(ctx, { ok: true, documents: docs }, docs.length ? docs.map((d) => `${d.id}  ${d.role}, ${d.authority}, v${d.version}  ${d.path}${d.table ? ` (sample of ${d.table})` : ''}${d.profileId ? ` · profile ${d.profileId}` : ''}`).join('\n') : 'No documents in this problem\'s pack yet: autode pack add <file> --role … --authority … --doc-version ….');
+      return EXIT.OK;
+    }
+    if (sub === 'add') {
+      requirePerson(ctx, 'pack add', 'Add documents in the AutoDE panel, or in a terminal; an agent may add draft documents with autode_pack_add.');
+      if (args.length !== 1) throw new CliError(EXIT.USAGE, 'pack add takes one file.');
+      const role = ctx.values.role as DocumentRole | undefined;
+      const authority = ctx.values.authority as DocumentAuthority | undefined;
+      if (!role || !DOCUMENT_ROLES.includes(role)) throw new CliError(EXIT.USAGE, `--role is one of: ${DOCUMENT_ROLES.join(', ')}.`);
+      if (authority !== 'signed' && authority !== 'draft') throw new CliError(EXIT.USAGE, '--authority is signed (its clauses become confirmed facts) or draft (documented facts, to review).');
+      if (!ctx.values['doc-version']) throw new CliError(EXIT.USAGE, '--doc-version is needed (the document\'s own version, e.g. 1.2).');
+      if (role === 'sample' && !ctx.values.table) throw new CliError(EXIT.USAGE, 'A sample needs --table <object id> (the table it is a sample of, from autode estate show or autode_resolve).');
+      const file = path.resolve(ctx.io.cwd, args[0]);
+      if (!fs.existsSync(file)) throw new CliError(EXIT.NOT_FOUND, `No file "${args[0]}".`);
+      const doc = await pm.addDocument({ path: file, role, authority, version: ctx.values['doc-version'] as string, table: ctx.values.table });
+      emit(ctx, { ok: true, document: doc }, `Added ${doc.id} (${doc.role}, ${doc.authority}). Read it in with: autode pack apply ${doc.id}`);
+      return EXIT.OK;
+    }
+    if (sub === 'apply') {
+      const docs = pm.getPack().documents.filter((d) => !args.length || args.includes(d.id));
+      if (args.length && docs.length !== args.length) throw new CliError(EXIT.NOT_FOUND, `No document ${args.filter((a) => !docs.some((d) => d.id === a)).join(', ')} in the pack.`);
+      const results: Array<Record<string, unknown>> = [];
+      let blocked = false;
+      for (const d of docs) {
+        const r = await pm.applyDocument(d.id);
+        results.push({ id: d.id, ...r });
+        if (r.status === 'needs_profile' || r.status === 'needs_llm' || r.status === 'error') blocked = true;
+      }
+      const lines = results.map((r) => {
+        switch (r.status) {
+          case 'applied': return `✓ ${String(r.id)}: ${JSON.stringify(r.reconcile)} (profile ${String(r.profileId)})`;
+          case 'registered': return `· ${String(r.id)}: sample registered for probes`;
+          case 'needs_profile': return `✗ ${String(r.id)}: ${String(r.reason)}. Profiles are in .autode/knowledge/profiles/; a person sets status: confirmed.`;
+          case 'needs_llm': return `✗ ${String(r.id)}: ${String(r.reason)} — read it with your host's model (AutoDE panel, or the extraction prompt in an MCP host).`;
+          default: return `✗ ${String(r.id)}: ${String(r.reason ?? r.status)}`;
+        }
+      });
+      emit(ctx, { ok: !blocked, results }, lines.join('\n') || 'No documents to apply.');
+      return blocked ? EXIT.FAILED : EXIT.OK;
+    }
+    throw new CliError(EXIT.USAGE, 'pack takes list, add <file> or apply [<doc id>...].');
+  } finally { dispose(); }
+}
+
+async function minedVocabulary(ctx: Ctx): Promise<VocabularyProposal[]> {
+  const cfm = await openContext(ctx.workspaceRoot, () => undefined);
+  try {
+    const file = layoutPath(ctx.workspaceRoot, 'vocabulary');
+    const vocab = buildVocabulary(parseVocabularyFile(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined));
+    const items = cfm.getCatalog().all().flatMap((e) => [{ name: e.table.label, comment: e.table.description }, ...(e.columns ?? []).map((c) => ({ name: c.label, comment: c.description }))]);
+    return mineAbbreviations(items, vocab);
+  } finally { cfm.dispose(); }
+}
+
+async function cmdVocabulary(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'mine'] = rest;
+  const mined = await minedVocabulary(ctx);
+  const line = (p: VocabularyProposal, i: number) => `${i + 1}. ${p.kind === 'abbreviation' ? `${p.from.toUpperCase()} = ${p.to}` : `${p.from} means ${p.to}`}  (${p.support} name(s)/comment(s)${p.example ? `, e.g. ${p.example}` : ''})`;
+  if (sub === 'mine') {
+    emit(ctx, { ok: true, proposals: mined }, mined.length ? mined.map(line).join('\n') : 'Nothing new to propose from the catalog\'s names and comments.');
+    return EXIT.OK;
+  }
+  if (sub === 'accept') {
+    requirePerson(ctx, 'vocabulary accept', 'Accept vocabulary in the AutoDE panel (Propose Vocabulary), in a terminal, or approve an agent\'s autode_propose_vocabulary.');
+    if (!mined.length) { ctx.io.out('Nothing new to propose.'); return EXIT.OK; }
+    ctx.io.out(mined.map(line).join('\n'));
+    const answer = (await ctx.io.prompt('Which are right for this customer? Numbers separated by commas, "all", or blank for none: ')).trim().toLowerCase();
+    const picked = answer === 'all' ? mined : answer.split(/[\s,]+/).filter(Boolean).map((n) => mined[Number(n) - 1]).filter((p): p is VocabularyProposal => !!p);
+    if (!picked.length) { ctx.io.out('Nothing added.'); return EXIT.OK; }
+    const file = layoutPath(ctx.workspaceRoot, 'vocabulary');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, mergeVocabularyFile(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined, picked));
+    emit(ctx, { ok: true, added: picked }, `Added ${picked.length} entr${picked.length === 1 ? 'y' : 'ies'} to ${'.autode/knowledge/vocabulary.yaml'}.`);
+    return EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, 'vocabulary takes mine or accept.');
+}
+
+async function cmdDesignDoc(ctx: Ctx, rest: string[]): Promise<number> {
+  if (rest.length > 1) throw new CliError(EXIT.USAGE, 'design-doc takes at most one path.');
+  const args: Record<string, unknown> = {};
+  let ws: EngineWorkspace;
+  if (rest[0]) {
+    const file = path.resolve(ctx.io.cwd, rest[0]);
+    if (!fs.existsSync(file)) throw new CliError(EXIT.NOT_FOUND, `No file "${rest[0]}".`);
+    args.path = rel(ctx, file);
+    ws = workspace(ctx, ctx.values.problem);
+  } else {
+    const id = singleProblem(ctx);
+    if (!id) throw new CliError(EXIT.NOT_FOUND, 'No business problem in this workspace; pass the path of a Pipeline Spec.');
+    ws = workspace(ctx, id);
+  }
+  const r = await tool('autode_generate_design_doc').handler(args, ws) as { markdown: string; source: string };
+  if (ctx.values.out) {
+    const out = path.resolve(ctx.io.cwd, ctx.values.out);
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, r.markdown);
+    emit(ctx, { ok: true, written: out }, `wrote ${path.relative(ctx.io.cwd, out)}`);
+  } else {
+    emit(ctx, { ok: true, ...r }, r.markdown);
+  }
+  return EXIT.OK;
+}
+
+/** `query` and `explain` run the MCP tools' own handlers: the same read-only guard and the same sample-data gate. */
+async function cmdSql(ctx: Ctx, command: 'query' | 'explain', rest: string[]): Promise<number> {
+  if (!ctx.values.connection) throw new CliError(EXIT.USAGE, `${command} needs --connection <id> (see autode connections list).`);
+  const sql = rest.join(' ').trim();
+  if (!sql) throw new CliError(EXIT.USAGE, `${command} takes the SQL statement, in quotes.`);
+  const session = platformSession(ctx);
+  try {
+    const name = command === 'query' ? 'autode_execute_query' : 'autode_explain_sql';
+    const t = platformTools(session).find((x) => x.name === name)!;
+    const args: Record<string, unknown> = { connectionId: ctx.values.connection, sql };
+    if (command === 'query' && ctx.values['max-rows']) args.maxRows = Number(ctx.values['max-rows']);
+    const r = await t.handler(args, workspace(ctx, ctx.values.problem)) as Record<string, unknown>;
+    if (ctx.json) { emit(ctx, { ok: true, ...r }, ''); return EXIT.OK; }
+    if (command === 'explain') {
+      // The plan comes back as rows (one text column on most platforms).
+      const plan = Array.isArray(r.plan) ? (r.plan as Array<Record<string, unknown>>) : [];
+      ctx.io.out(plan.map((row) => Object.values(row).map(String).join('\t')).join('\n') || JSON.stringify(r, null, 2));
+      return EXIT.OK;
+    }
+    const rows = (r.rows as Array<Record<string, unknown>> | undefined) ?? [];
+    const columns = (r.columns as string[] | undefined) ?? (rows[0] ? Object.keys(rows[0]) : []);
+    const body = rows.map((row) => columns.map((c) => String(row[c] ?? '')).join('\t'));
+    ctx.io.out([columns.join('\t'), ...body, `${String(r.rowCount ?? rows.length)} row(s)${r.withheld ? ' — row values withheld: this connection does not allow sample data' : ''}${r.truncated ? ' (truncated)' : ''}`].join('\n'));
+    return EXIT.OK;
+  } finally { session.dispose(); }
 }
 
 // ── connections (v0.43.1) ────────────────────────────────────────────────────

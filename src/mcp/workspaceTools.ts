@@ -4,6 +4,14 @@ import { EngineWorkspace } from './workspace';
 import { PlatformSession } from './platform';
 import { listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
 import { ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { BusinessPackManager } from '../engine/context/businessPackManager';
+import { DOCUMENT_ROLES, DocumentRole } from '../engine/context/pack';
+import { buildVocabulary, mineAbbreviations, parseVocabularyFile } from '../engine/context/vocabulary';
+import { conformanceFailures, packConformance, readPackDocument } from '../engine/context/packChecks';
+import { ProbeDialect, ProbeExecutor, combineProbeExecutors, createSqlProbeExecutor } from '../engine/context/probes';
+import { layoutPath } from '../engine/workspaceLayout';
 
 /**
  * Business problems and the estate over MCP (parity step 1a, v0.43.2): what an
@@ -20,7 +28,92 @@ import { ingestConnection, ingestFile, openContext } from '../engine/context/est
 const recordsOnly = (title: string, idempotent: boolean, openWorld = false) => ({ title, readOnlyHint: false, destructiveHint: false, idempotentHint: idempotent, openWorldHint: openWorld });
 
 export function workspaceTools(session: PlatformSession): EngineTool[] {
+  /** The active problem's pack, over the shared context layer (dispose the context when done). */
+  const pack = async (ws: EngineWorkspace) => {
+    const root = ws.problemRoot();
+    if (!root) throw new EngineToolError('NOT_FOUND', 'No active business problem: start or select one (autode_start_problem, autode_select_problem).');
+    const cfm = await openContext(ws.options.workspaceRoot);
+    const pm = new BusinessPackManager(path.join(root, 'pack'), ws.options.workspaceRoot, () => cfm, () => undefined);
+    await pm.load();
+    return { pm, cfm };
+  };
+  const dialectOf = (platform: string): ProbeDialect => platform === 'databricks' ? 'spark_sql' : platform === 'oracle' ? 'oracle' : platform === 'snowflake' ? 'snowflake' : 'ansi';
+
   return [
+    {
+      name: 'autode_pack_list',
+      description: "The active business problem's pack: the documents that describe it (contracts, BRDs, KPI definitions, mappings, data dictionaries, samples), their authority and version.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: { title: 'List the pack', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (_args, ws) => {
+        const { pm, cfm } = await pack(ws);
+        try { return { documents: pm.getPack().documents }; } finally { cfm.dispose(); }
+      }
+    },
+    {
+      name: 'autode_pack_add',
+      description: "Add a workspace document to the active problem's pack as a DRAFT (its facts arrive as documented, for a person to confirm). Marking a document signed is a person's call: AutoDE panel or `autode pack add --authority signed`. Then read it in with autode_pack_apply.",
+      inputSchema: { type: 'object', required: ['path', 'role', 'version'], additionalProperties: false, properties: { path: { type: 'string', minLength: 1 }, role: { type: 'string', enum: DOCUMENT_ROLES }, version: { type: 'string', minLength: 1 }, table: { type: 'string', minLength: 1, description: 'For a sample: the object id of the table it samples.' } } },
+      annotations: recordsOnly('Add a document to the pack', true),
+      handler: async (args, ws) => {
+        const file = ws.resolveInWorkspace(String(args.path));
+        if (!fs.existsSync(file)) throw new EngineToolError('NOT_FOUND', `No file "${String(args.path)}".`);
+        if (args.role === 'sample' && !args.table) throw new EngineToolError('VALIDATION_FAILED', 'A sample needs "table": the object id of the table it samples (autode_resolve).');
+        const { pm, cfm } = await pack(ws);
+        try { return { document: await pm.addDocument({ path: file, role: args.role as DocumentRole, authority: 'draft', version: String(args.version), table: args.table as string | undefined }) }; } finally { cfm.dispose(); }
+      }
+    },
+    {
+      name: 'autode_pack_apply',
+      description: "Read pack documents into AutoDE's knowledge: structured ones (YAML/JSON) through their confirmed interpretation profile, deterministically. A document with no confirmed profile, or free text, is reported back: free text is read with your model through the autode_extract_assertions prompt and proposed with autode_propose_assertion.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: { ids: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Document ids (default: all).' } } },
+      annotations: recordsOnly('Apply pack documents', true),
+      handler: async (args, ws) => {
+        const { pm, cfm } = await pack(ws);
+        try {
+          const wanted = args.ids as string[] | undefined;
+          const docs = pm.getPack().documents.filter((d) => !wanted || wanted.includes(d.id));
+          const results: Array<Record<string, unknown>> = [];
+          for (const d of docs) results.push({ id: d.id, path: d.path, ...(await pm.applyDocument(d.id)) as unknown as Record<string, unknown> });
+          return { results };
+        } finally { cfm.dispose(); }
+      }
+    },
+    {
+      name: 'autode_check_conformance',
+      description: "Check the source systems against the pack's contracts (those with a confirmed profile): names, types, keys and data clauses, using the catalog, the pack's samples and, with connectionId, read-only aggregate probes on live data. Returns the reports and the number of failing clauses; records nothing.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: { connectionId: { type: 'string', minLength: 1 } } },
+      annotations: { title: 'Check conformance', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      handler: async (args, ws) => {
+        const { pm, cfm } = await pack(ws);
+        try {
+          let live: ProbeExecutor | undefined;
+          if (args.connectionId) {
+            const entry = session.entry(String(args.connectionId));
+            const manager = await session.connect(entry);
+            live = createSqlProbeExecutor(async (sql) => (await manager.executeQuery(sql, { maxRows: 10 })).rows as Array<Record<string, unknown>>, dialectOf(entry.platform));
+          }
+          const executor = combineProbeExecutors([live, pm.sampleExecutor()]);
+          const r = await packConformance(pm.getPack(), pm.getProfiles(), (d) => readPackDocument(ws.options.workspaceRoot, d), cfm.getCatalog(), executor);
+          return { failures: conformanceFailures(r.reports), reports: r.reports as unknown as Record<string, unknown>[], skipped: r.skipped, markdown: r.markdown };
+        } finally { cfm.dispose(); }
+      }
+    },
+    {
+      name: 'autode_mine_vocabulary',
+      description: "Abbreviations and synonyms mined from the estate's table and column names and comments, not yet in the vocabulary: candidates to show the user and propose with autode_propose_vocabulary. Records nothing.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: { title: 'Mine vocabulary', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (_args, ws) => {
+        const cfm = await openContext(ws.options.workspaceRoot);
+        try {
+          const file = layoutPath(ws.options.workspaceRoot, 'vocabulary');
+          const vocab = buildVocabulary(parseVocabularyFile(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined));
+          const items = cfm.getCatalog().all().flatMap((e) => [{ name: e.table.label, comment: e.table.description }, ...(e.columns ?? []).map((c) => ({ name: c.label, comment: c.description }))]);
+          return { proposals: mineAbbreviations(items, vocab) as unknown as Record<string, unknown>[] };
+        } finally { cfm.dispose(); }
+      }
+    },
     {
       name: 'autode_list_problems',
       description: 'List the business problems in this workspace (id, statement, status, which one is active).',

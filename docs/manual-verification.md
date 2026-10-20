@@ -544,6 +544,23 @@ Use the `autode` command (Part 19) and an empty scratch folder with the referenc
   Do: with the panel open, ingest a file from the terminal, then run *Re-index Context* in VS Code.
   Expect: the new tables are in the context drawer. Without a re-index, the panel picks them up at the next reload.
 
+## Part 23 — v0.43.3 Facts, pack, vocabulary and SQL without VS Code
+
+Use the workspace from Part 22 and Claude Code with the AutoDE server.
+
+- [ ] **23.1 Review facts in a terminal.**
+  Do: ask Claude Code to record "order_id is the key of shop.orders" and the term "Order = a customer purchase" through AutoDE. Then run `autode facts`, `autode facts confirm <key id>`, `autode facts edit <term id> --value '{"term":"Order","definition":"A paid purchase"}'`, and a reject with `--note`.
+  Expect: the key shows as high stakes and the term as low stakes. Each change asks you to type the verb, and the panel's Context Inbox shows the same result. Piped or with `CI=1`, the commands are refused.
+- [ ] **23.2 A pack without VS Code.**
+  Do: `autode pack add docs/customer-contract.yaml --role contract --authority signed --doc-version 1`, then `autode pack apply`, then put the confirmed profile in `.autode/knowledge/profiles/` and apply again. Next, have the agent add the CRM sample (`autode_pack_add`) and run `autode_check_conformance`.
+  Expect: the first apply reports that no confirmed profile fits; the second applies 7 clauses. The agent's document is a draft, and conformance reports the duplicate `cust_no` from the sample, matching `autode conformance`.
+- [ ] **23.3 Vocabulary.**
+  Do: `autode vocabulary mine` on an estate with cryptic names, then `autode vocabulary accept` and pick one. Next, ask the agent to propose a synonym; it asks you, then approves.
+  Expect: entries in `.autode/knowledge/vocabulary.yaml`, and `autode_resolve` finds tables by the new words.
+- [ ] **23.4 SQL from the terminal.**
+  Do: `autode query --connection <id> "SELECT * FROM <table>"` on a connection without sample-data consent, then `autode query … "DELETE FROM <table>"`, then `autode explain --connection <id> "<a MERGE statement>"`.
+  Expect: columns and the row count without values; the DELETE refused; a plan for the MERGE, with nothing run.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -678,5 +695,9 @@ Use the `autode` command (Part 19) and an empty scratch folder with the referenc
 | 22.3 |  |  |
 | 22.4 |  |  |
 | 22.5 |  |  |
+| 23.1 |  |  |
+| 23.2 |  |  |
+| 23.3 |  |  |
+| 23.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.
