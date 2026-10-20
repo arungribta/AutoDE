@@ -840,6 +840,33 @@ export interface AgentHost {
   fileIo: FileIo;
 }
 
+/** One of the engine's MCP tools, as a tool loop offers it to a model (phase 5). */
+export interface EngineToolSpec {
+  name: string;
+  description: string;
+  /** The tool's JSON Schema input. */
+  parameters: Record<string, unknown>;
+}
+
+/**
+ * The engine's tools for one tool-loop run (phase 5): already narrowed to what the
+ * run may use (mode, the skill's allowed-tools, trust). `call` returns the text the
+ * model sees — the tool's JSON result, or an error envelope.
+ */
+export interface EngineToolSet {
+  specs: EngineToolSpec[];
+  call(name: string, input: Record<string, unknown>): Promise<{ text: string; isError: boolean }>;
+}
+
+/** The engine as an agent reaches it: the same MCP tools any host agent calls, started on first use. */
+export interface EngineAccess {
+  /** Engine tools for a run in `mode`, narrowed by a skill's declared `allowed-tools` (undefined = no narrowing). */
+  toolSet(mode: ToolExecutionMode, declared: readonly string[] | undefined): Promise<EngineToolSet>;
+  /** Whether `declared` names an engine tool that changes something (a proposal) — such a skill may need `'full'` mode. */
+  declaresWrite(declared: readonly string[] | undefined): Promise<boolean>;
+  dispose(): Promise<void>;
+}
+
 /** Options for `AgentExecutionContext.runWithTools` (v0.28.0). */
 export interface AgentToolRunOptions {
   systemPrompt: string;
@@ -849,6 +876,8 @@ export interface AgentToolRunOptions {
   justification?: string;
   /** Claude Code only: the whole-run approval text (it can't approve per call). */
   approvalPrompt?: string;
+  /** Engine tools offered next to the file tools (phase 5). AutoDE-owned loops only; Claude Code's own loop ignores them. */
+  engineTools?: EngineToolSet;
 }
 
 export interface AgentExecutionContext {
@@ -878,6 +907,8 @@ export interface AgentExecutionContext {
   runWithTools?: (prompt: string, opts: AgentToolRunOptions) => Promise<{ text: string; audit: ToolCallAuditEntry[]; provider: LlmProvider }>;
   /** The hosting environment (v0.26.0). Optional so hand-built contexts in tests keep compiling. */
   host?: AgentHost;
+  /** The engine's MCP tools, through an in-process client (phase 5). Optional: absent in hand-built contexts. */
+  engine?: EngineAccess;
   /** Only populated for `toolSkillAgent` — the workspace root, for sandboxing tool execution. */
   workspaceRoot?: string;
   /** Which skill to run + the user's instruction — populated by the caller (plan step or chat). */

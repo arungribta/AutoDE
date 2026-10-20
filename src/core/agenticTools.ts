@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { exec as execCb } from 'node:child_process';
-import { ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
+import { EngineToolSet, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
 export { resolveAllowedToolNames } from '../engine/skills/toolAllowList';
 
 /**
@@ -84,10 +84,36 @@ export function filterToolSpecsByAllowList(specs: JsonSchemaToolSpec[], allowed:
   return specs.filter((s) => set.has(s.name));
 }
 
-/** Read-only tools for `'read-only'`, read-only + write/exec for `'full'`, none otherwise — then narrowed to `allowed`. */
-export function toolSpecsForMode(mode: ToolExecutionMode | undefined, allowed?: readonly string[]): JsonSchemaToolSpec[] {
+/**
+ * Read-only tools for `'read-only'`, read-only + write/exec for `'full'`, none otherwise — then narrowed to `allowed`.
+ * The run's engine tools (phase 5; already narrowed by their caller) follow whenever the mode allows tools.
+ */
+export function toolSpecsForMode(mode: ToolExecutionMode | undefined, allowed?: readonly string[], engine?: EngineToolSet): JsonSchemaToolSpec[] {
   const base = mode === 'full' ? [...READ_ONLY_TOOL_SPECS, ...WRITE_TOOL_SPECS] : mode === 'read-only' ? READ_ONLY_TOOL_SPECS : [];
-  return filterToolSpecsByAllowList(base, allowed);
+  const files = filterToolSpecsByAllowList(base, allowed);
+  if (!engine || mode === undefined || mode === 'none') return files;
+  return [...files, ...engine.specs.map((s) => ({ name: s.name, description: s.description, parameters: s.parameters as unknown as JsonSchemaToolSpec['parameters'] }))];
+}
+
+/**
+ * A JSON Schema reduced to what Gemini's function declarations accept (an OpenAPI subset):
+ * type, description, enum, items, properties, required. Other providers take the schema as is.
+ */
+export function geminiSchema(schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  const s = schema as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (typeof s.type === 'string') out.type = s.type;
+  if (typeof s.description === 'string') out.description = s.description;
+  if (Array.isArray(s.enum)) out.enum = s.enum.map(String);
+  if (s.items) out.items = geminiSchema(s.items);
+  if (s.properties && typeof s.properties === 'object') {
+    out.properties = Object.fromEntries(Object.entries(s.properties as Record<string, unknown>).map(([k, v]) => [k, geminiSchema(v)]));
+  }
+  if (Array.isArray(s.required)) out.required = s.required;
+  if (out.type === 'object' && !out.properties) out.properties = {};
+  if (!out.type) out.type = out.properties ? 'object' : 'string';
+  return out;
 }
 
 /** Resolves a model-supplied relative path against the workspace root, rejecting any escape (`..`, absolute paths elsewhere). */
@@ -176,13 +202,26 @@ export async function executeAgenticTool(
   audit: ToolCallAuditEntry[],
   /** The tool names this run was offered. A call to anything else is refused and audited as denied (v0.28.0) —
    *  models normally only call offered tools, but an allow-list must not depend on that. */
-  offered?: ReadonlySet<string>
+  offered?: ReadonlySet<string>,
+  /** The run's engine tools (phase 5): calls to them go through the engine client, audited like any other. */
+  engine?: EngineToolSet
 ): Promise<string> {
   const input = call.input ?? {};
   const at = new Date().toISOString();
   if (offered && !offered.has(call.name)) {
     audit.push({ tool: call.name, input, outcome: 'denied', detail: 'tool not offered to this run', at });
     return `Error: the tool "${call.name}" is not available in this run.`;
+  }
+  if (engine && engine.specs.some((s) => s.name === call.name)) {
+    try {
+      const r = await engine.call(call.name, input);
+      audit.push({ tool: call.name, input, outcome: r.isError ? 'error' : 'ok', detail: r.isError ? r.text.slice(0, 500) : undefined, at });
+      return r.text.slice(0, MAX_TOOL_OUTPUT_CHARS);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      audit.push({ tool: call.name, input, outcome: 'error', detail: message, at });
+      return `Error: ${message}`;
+    }
   }
   try {
     switch (call.name) {

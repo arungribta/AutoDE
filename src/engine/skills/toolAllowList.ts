@@ -54,8 +54,10 @@ export function resolveAllowedToolNames(declared: readonly string[] | undefined)
 /**
  * The most a skill may be granted, from what it declared: a skill whose allow-list has no
  * write/exec tool never runs in `'full'` mode. Phase S2 lowers this further by trust tier.
+ * `declaresEngineWrite` (phase 5): the skill declared an engine tool that proposes a change,
+ * which needs `'full'` even with no file write or command declared.
  */
-export function toolModeCeiling(allowed: readonly string[] | undefined): ToolExecutionMode {
-  if (allowed && !allowed.some((t) => WRITE_TOOLS.has(t))) return 'read-only';
+export function toolModeCeiling(allowed: readonly string[] | undefined, declaresEngineWrite = false): ToolExecutionMode {
+  if (allowed && !allowed.some((t) => WRITE_TOOLS.has(t)) && !declaresEngineWrite) return 'read-only';
   return 'full';
 }

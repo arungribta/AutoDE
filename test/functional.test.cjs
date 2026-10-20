@@ -8451,6 +8451,172 @@ async function main() {
     assert.ok(bundle.startsWith('#!/usr/bin/env node'));
   });
 
+  // ── v0.43.0: phase 5 — the extension as an MCP client; exposure to other agents ──
+
+  await test('v0.43.0: EngineClient — the engine\'s MCP tools in-process, started on first use; a skill run gets read-only tools, proposals only in full mode, never a destructive tool', async () => {
+    const nodePath = require('node:path');
+    const { EngineClient, selectEngineTools, declaredEngineTools, EngineError } = fresh('../dist/core/engineClient.js');
+    const f = await mcpWorkspace();
+    const engine = new EngineClient({ workspaceRoot: f.ws, resourcesRoot: nodePath.join(__dirname, '..'), version: 't', log: () => {} });
+    try {
+      assert.strictEqual(engine.pending, undefined, 'constructing the client starts nothing');
+      const tools = await engine.listTools();
+      const external = await mcpSession(f.ws);
+      try { assert.deepStrictEqual(tools.map((t) => t.name), (await external.listTools()).tools.map((t) => t.name), 'the same tools as autode mcp'); } finally { await external.close(); }
+      const ro = selectEngineTools(tools, 'read-only', undefined).map((t) => t.name);
+      const full = selectEngineTools(tools, 'full', undefined).map((t) => t.name);
+      assert.ok(ro.includes('autode_compile_transform') && ro.includes('autode_check_grounding') && !ro.some((n) => /^autode_propose_/.test(n)), ro.join());
+      assert.ok(full.includes('autode_propose_mapping') && !full.includes('autode_resolve_decision') && !full.includes('autode_apply_decision'), 'proposals in full mode; resolving or applying a decision never');
+      assert.deepStrictEqual(selectEngineTools(tools, 'none', undefined), []);
+      assert.deepStrictEqual([...declaredEngineTools(['Read', 'autode_resolve', 'mcp__autode__autode_compile_transform', 'mcp__other__x'], tools.map((t) => t.name))].sort(), ['autode_compile_transform', 'autode_resolve']);
+      assert.strictEqual(declaredEngineTools(['mcp__autode__*'], tools.map((t) => t.name)).size, tools.length);
+      assert.strictEqual(await engine.declaresWrite(['Read', 'mcp__autode__autode_compile_transform']), false);
+      assert.strictEqual(await engine.declaresWrite(['mcp__autode__autode_propose_mapping']), true);
+      assert.strictEqual(await engine.declaresWrite(['mcp__autode__autode_resolve_decision']), false, 'a destructive tool is never granted, so it raises nothing');
+      // A run's tool set: the model sees the tool's JSON; anything outside the selection is refused.
+      const set = await engine.toolSet('read-only', ['mcp__autode__autode_search_primitives', 'mcp__autode__autode_compile_pipeline_spec']);
+      assert.deepStrictEqual(set.specs.map((s) => s.name).sort(), ['autode_compile_pipeline_spec', 'autode_search_primitives']);
+      const ok = await set.call('autode_compile_pipeline_spec', { dialect: 'snowflake' });
+      assert.ok(!ok.isError && JSON.parse(ok.text).entities.length > 0, ok.text);
+      const bad = await set.call('autode_compile_pipeline_spec', { dialect: 'cobol' });
+      assert.ok(bad.isError && /VALIDATION_FAILED/.test(bad.text));
+      assert.ok((await set.call('autode_propose_mapping', { mapping: {} })).isError, 'not in this run');
+      await assert.rejects(engine.call('autode_describe_primitive', { kind: 'nope' }), (e) => e instanceof EngineError && e.code === 'UNKNOWN_PRIMITIVE');
+      // Disposed (or gone), the next call starts it again.
+      await engine.dispose();
+      assert.strictEqual(engine.pending, undefined);
+      assert.ok((await engine.call('autode_search_primitives', {})).items.length > 0, 'recovers on the next call');
+    } finally { await engine.dispose(); f.done(); }
+  });
+
+  await test('v0.43.0: every AutoDE tool loop offers the run\'s engine tools next to the file tools and routes their calls to the engine, audited', async () => {
+    const mock = createMock();
+    const T = withMock(mock, () => fresh('../dist/core/agenticTools.js'));
+    const calls = [];
+    const engine = { specs: [{ name: 'autode_resolve', description: 'Resolve', parameters: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1 } } } }], call: async (name, input) => { calls.push([name, input]); return { text: '{"matches":[]}', isError: false }; } };
+    assert.deepStrictEqual(T.toolSpecsForMode('read-only', ['autode_read_file'], engine).map((s) => s.name), ['autode_read_file', 'autode_resolve']);
+    assert.deepStrictEqual(T.toolSpecsForMode('none', undefined, engine), [], 'no tools in none mode, engine tools included');
+    assert.deepStrictEqual(T.toolSpecsForMode('read-only', undefined).map((s) => s.name), ['autode_read_file', 'autode_list_dir', 'autode_search_files'], 'without an engine set: unchanged');
+    const audit = [];
+    const offered = new Set(['autode_resolve']);
+    const out = await withMock(mock, () => T.executeAgenticTool({ id: '1', name: 'autode_resolve', input: { text: 'orders' } }, '/ws', audit, offered, engine));
+    assert.strictEqual(out, '{"matches":[]}');
+    assert.deepStrictEqual(calls, [['autode_resolve', { text: 'orders' }]]);
+    assert.deepStrictEqual(audit.map((a) => [a.tool, a.outcome]), [['autode_resolve', 'ok']]);
+    const denied = await withMock(mock, () => T.executeAgenticTool({ id: '2', name: 'autode_propose_mapping', input: {} }, '/ws', audit, offered, engine));
+    assert.ok(/not available/.test(denied) && audit[1].outcome === 'denied');
+    // Gemini takes an OpenAPI subset of JSON Schema.
+    assert.deepStrictEqual(T.geminiSchema(engine.specs[0].parameters), { type: 'object', properties: { text: { type: 'string' }, limit: { type: 'integer' } }, required: ['text'] });
+  });
+
+  await test('v0.43.0: ToolSkillAgent offers engine tools by the skill\'s allowed-tools and trust — a declared proposal raises a trusted skill to full; a reviewed skill gets read-only; Claude Code gets none', async () => {
+    const os = require('node:os'); const nodePath = require('node:path'); const nodeFs = require('node:fs');
+    const L = fresh('../dist/engine/skills/lifecycle.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-skill-eng-'));
+    const mk = (id, md, tier) => { const d = nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', id); nodeFs.mkdirSync(d, { recursive: true }); nodeFs.writeFileSync(nodePath.join(d, 'SKILL.md'), md); L.recordImport(d, { source: 'local' }, 't'); L.setTrustTier(d, tier, 't'); };
+    mk('mapper', '---\nname: mapper\nallowed-tools: [Read, mcp__autode__autode_resolve, mcp__autode__autode_propose_mapping]\n---\nPropose a mapping.\n', 'trusted');
+    mk('peek', '---\nname: peek\nallowed-tools: [Read, mcp__autode__autode_resolve, mcp__autode__autode_propose_mapping]\n---\nLook.\n', 'reviewed');
+    try {
+      const { executeToolSkillAgent } = withMock(createMock(), () => fresh('../dist/agents/build/ToolSkillAgent.js'));
+      const asked = []; let disposed = 0;
+      const engine = {
+        declaresWrite: async (d) => d.some((x) => /propose/.test(x)),
+        toolSet: async (mode, d) => { asked.push([mode, d]); return { specs: [{ name: 'autode_resolve', description: '', parameters: {} }, ...(mode === 'full' ? [{ name: 'autode_propose_mapping', description: '', parameters: {} }] : [])], call: async () => ({ text: '{}', isError: false }) }; },
+        dispose: async () => { disposed++; }
+      };
+      const run = async (skillId, provider) => {
+        let seen;
+        const settings = { activeLlmProvider: provider, languageModelProgrammaticConsent: true };
+        const result = await executeToolSkillAgent({ id: 's', assignedAgent: 'toolSkillAgent', taskDescription: 'go', status: 'running', skillId }, {
+          objective: '', settings, workspaceRoot: ws, log: () => {}, configManager: { getSecret: async () => undefined, getSettings: () => settings }, engine,
+          runWithTools: async (_p, o) => { seen = o; return { text: 'ok', audit: [], provider }; }
+        });
+        return { result, seen };
+      };
+      let r = await run('mapper', 'openai');
+      assert.strictEqual(r.result.success, true, r.result.message);
+      assert.deepStrictEqual([r.seen.toolExecutionMode, r.seen.allowedToolNames, r.seen.engineTools.specs.map((s) => s.name)], ['full', ['autode_read_file'], ['autode_resolve', 'autode_propose_mapping']], 'a declared proposal needs full mode; file tools stay Read only');
+      assert.deepStrictEqual(r.result.details.engineTools, ['autode_resolve', 'autode_propose_mapping']);
+      r = await run('peek', 'openai');
+      assert.deepStrictEqual([r.seen.toolExecutionMode, r.seen.engineTools.specs.map((s) => s.name)], ['read-only', ['autode_resolve']], 'a reviewed skill never gets a write-capable engine tool');
+      assert.deepStrictEqual(asked.map((a) => a[0]), ['full', 'read-only']);
+      r = await run('mapper', 'claude');
+      assert.strictEqual(r.seen.engineTools, undefined, 'Claude Code runs its own loop: no engine tools');
+      assert.strictEqual(r.seen.toolExecutionMode, 'read-only', 'and so no proposal raises its mode');
+      assert.strictEqual(disposed, 3, 'the engine is released after every run');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.43.0: VS Code agent mode gets the AutoDE server from a provider — VS Code\'s runtime, no config file; VS Code-stored secrets only when it starts; older VS Code is left alone', async () => {
+    const os = require('node:os'); const nodePath = require('node:path'); const nodeFs = require('node:fs');
+    const M = fresh('../dist/core/mcpConfig.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-prov-'));
+    try {
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: databricks\n    ref: prod\n    workspaceUrl: https://adb-1.azuredatabricks.net\n    httpPath: /sql/1.0/warehouses/w\n    credentials: { resolver: vscode, ref: prod }\n  - platform: snowflake\n    account: ACME\n    username: me\n');
+      const secretEnv = () => M.vscodeSecretEnv(ws, async (entry) => entry.platform === 'databricks' ? { token: 'tok-123', clientSecret: 'not-a-field-of-this-entry' } : undefined);
+      assert.deepStrictEqual(await secretEnv(), { AUTODE_DATABRICKS_PROD_TOKEN: 'tok-123' }, 'only the entry\'s secret fields, under their stand-in names');
+      // A fake VS Code with the provider API.
+      let registered; const events = [];
+      class Def { constructor(label, command, args, env, version) { Object.assign(this, { label, command, args, env, version }); } }
+      const fakeVs = {
+        lm: { registerMcpServerDefinitionProvider: (id, p) => { registered = { id, p }; return { dispose: () => events.push('unregistered') }; } },
+        McpStdioServerDefinition: Def,
+        EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} dispose() {} },
+        Uri: { file: (p) => ({ fsPath: p }) },
+        workspace: { onDidChangeWorkspaceFolders: () => ({ dispose() {} }) }
+      };
+      const ext = nodePath.join(os.tmpdir(), 'ext');
+      const disposable = M.registerMcpProvider(fakeVs, { extensionPath: ext, version: '0.43.0', workspaceRoot: () => ws, secretEnv, log: () => {} });
+      assert.strictEqual(registered.id, 'autode');
+      const [def] = await registered.p.provideMcpServerDefinitions();
+      assert.deepStrictEqual([def.label, def.command, def.args, def.env, def.version, def.cwd.fsPath], ['AutoDE', process.execPath, [nodePath.join(ext, 'dist', 'autode.js'), 'mcp', '--workspace', ws], { ELECTRON_RUN_AS_NODE: '1' }, '0.43.0', ws]);
+      assert.ok(!JSON.stringify(def).includes('tok-123'), 'no secret in the listed definition');
+      const resolved = await registered.p.resolveMcpServerDefinition(def);
+      assert.deepStrictEqual(resolved.env, { ELECTRON_RUN_AS_NODE: '1', AUTODE_DATABRICKS_PROD_TOKEN: 'tok-123' });
+      disposable.dispose();
+      assert.deepStrictEqual(events, ['unregistered']);
+      assert.deepStrictEqual(await (M.registerMcpProvider(fakeVs, { extensionPath: ext, version: '1', workspaceRoot: () => undefined, secretEnv, log: () => {} }), registered.p.provideMcpServerDefinitions()), [], 'no folder, no server');
+      assert.strictEqual(M.registerMcpProvider({ lm: {} }, { extensionPath: ext, version: '1', workspaceRoot: () => ws, secretEnv, log: () => {} }), undefined, 'feature-detected');
+      const pkg = require('../package.json');
+      assert.deepStrictEqual(pkg.contributes.mcpServerDefinitionProviders, [{ id: 'autode', label: 'AutoDE' }]);
+      assert.ok(pkg.activationEvents.includes('onMcpCollection:autode'));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.43.0: the stable server copy — made by Configure MCP, refreshed after an update (never created at activation), and it runs as the same server', async () => {
+    const os = require('node:os'); const nodePath = require('node:path'); const nodeFs = require('node:fs');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+    const M = fresh('../dist/core/mcpConfig.js');
+    const storage = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-store-'));
+    const root = nodePath.join(__dirname, '..');
+    const f = await mcpWorkspace();
+    try {
+      assert.deepStrictEqual(M.SERVER_FILES, require('../scripts/pack-cli.cjs').CONTENT, 'the same files as the autode package');
+      assert.strictEqual(M.refreshStableServer(root, storage, '1.0.0'), false, 'activation never creates a copy');
+      assert.ok(!nodeFs.existsSync(M.stableServerDir(storage)));
+      const bundle = M.ensureStableServer(root, storage, '1.0.0');
+      assert.strictEqual(bundle, nodePath.join(M.stableServerDir(storage), 'dist', 'autode.js'));
+      assert.strictEqual(M.stableServerVersion(storage), '1.0.0');
+      const stamp = nodeFs.statSync(bundle).mtimeMs;
+      assert.strictEqual(M.ensureStableServer(root, storage, '1.0.0'), bundle);
+      assert.strictEqual(nodeFs.statSync(bundle).mtimeMs, stamp, 'same version: not copied again');
+      assert.strictEqual(M.refreshStableServer(root, storage, '1.1.0'), true, 'an update refreshes the existing copy');
+      assert.strictEqual(M.stableServerVersion(storage), '1.1.0');
+      const c = M.chooseMcpEntry({ extensionPath: '/ext', env: { PATH: '' }, stableBundle: bundle, execPath: '/code' });
+      assert.deepStrictEqual([c.source, c.entry.args[0]], ['stable', bundle]);
+      // The copy runs as the server and finds its bundled prompts (its package.json is named autode).
+      const client = new Client({ name: 't', version: '1' });
+      await client.connect(new StdioClientTransport({ command: process.execPath, args: [bundle, 'mcp', '--workspace', f.ws], stderr: 'pipe' }));
+      try {
+        assert.strictEqual(client.getServerVersion().version, '1.1.0');
+        assert.ok((await client.listPrompts()).prompts.some((p) => /^autode_interview_/.test(p.name)));
+      } finally { await client.close(); }
+      assert.strictEqual(M.isStaleExtensionEntry({ command: 'node', args: [bundle, 'mcp'] }, '/ext'), false, 'the stable copy is never stale');
+    } finally { f.done(); nodeFs.rmSync(storage, { recursive: true, force: true }); }
+  });
+
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {
     const { spawnSync } = require('node:child_process');
     const nodePath = require('node:path');

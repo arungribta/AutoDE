@@ -475,6 +475,32 @@ Build the package first: `npm run package:cli` (the tarball is `dist/autode-0.42
   Do: `npx vsce package --no-dependencies`, install the VSIX with the network off, and open the panel. Then point a client at `node <extension>/dist/mcp-server.js`.
   Expect: the extension activates as before, and the old server path still connects.
 
+## Part 20 — v0.43.0 Extension as MCP client, agent mode, stable server copy
+
+Use VS Code 1.101 or later with Copilot, and the reference workspace from Part 18. Remove any `.vscode/mcp.json` that defines an `autode` server first.
+
+- [ ] **20.1 Agent mode without configuration.**
+  Do: reload the window, open Copilot Chat in agent mode and its tools picker, then run **MCP: List Servers**.
+  Expect: an **AutoDE** server with AutoDE's tools; starting it needs no Node.js on `PATH`. Ask "which transform primitives does AutoDE have?" and the agent calls `autode_search_primitives`.
+- [ ] **20.2 VS Code-stored secrets reach it, and only at start.**
+  Do: with a Databricks or Snowflake connection saved from a settings card (secret in VS Code's storage) and no `AUTODE_*` variables set, ask agent mode to list that connection's schemas. Then run **MCP: List Servers → AutoDE → Show Configuration**.
+  Expect: the schemas come back. The configuration shows the command and `ELECTRON_RUN_AS_NODE`, but no secret.
+- [ ] **20.3 Nothing starts at activation.**
+  Do: reload the window and watch the process list (Task Manager or `ps`) without opening agent mode or running a skill.
+  Expect: no extra AutoDE server process appears until agent mode starts one.
+- [ ] **20.4 A skill uses the engine.**
+  Do: import a skill whose `SKILL.md` declares `allowed-tools: [Read, mcp__autode__autode_search_primitives, mcp__autode__autode_compile_transform]` and says "compile a dedup of shop.orders on order_id with AutoDE's primitive". Review and trust it, then run it on Copilot or an API-key provider.
+  Expect: the run's log reports "… engine tool(s)", the result holds SQL from the `dedup` primitive, and the audit lists the engine calls. Set the skill back to *reviewed* and run it again: it runs read-only, and a declared `autode_propose_mapping` is not offered.
+- [ ] **20.5 Claude Code is offered none.**
+  Do: run the trusted skill from 20.4 with Claude Code as the provider.
+  Expect: it runs as before (whole-run approval); no engine tools are offered.
+- [ ] **20.6 `.mcp.json` survives an update.**
+  Do: make sure `autode` isn't on `PATH`, run **AutoDE: Configure MCP for Claude Code**, then install a VSIX with a higher version and reload.
+  Expect: `.mcp.json` points into `globalStorage/…/autode-server/`. After the update, the log says the copy was updated, and Claude Code's `/mcp` still connects and reports the new version.
+- [ ] **20.7 Same artifacts as v0.42.0.**
+  Do: run the full flow (Part 7) on the reference problem with v0.42.0 and with v0.43.0, then diff the two `autode-output/<problem>/` trees.
+  Expect: the same artifacts and grounding manifests. Only timestamps and generated ids differ.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -591,5 +617,12 @@ Build the package first: `npm run package:cli` (the tarball is `dist/autode-0.42
 | 19.6 |  |  |
 | 19.7 |  |  |
 | 19.8 |  |  |
+| 20.1 |  |  |
+| 20.2 |  |  |
+| 20.3 |  |  |
+| 20.4 |  |  |
+| 20.5 |  |  |
+| 20.6 |  |  |
+| 20.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

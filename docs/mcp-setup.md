@@ -9,10 +9,10 @@ The server never writes to your workspace and never calls an LLM. Your agent wri
 - Node.js 18 or later on your `PATH`. Alternatively, use VS Code's own runtime, as described [below](#without-nodejs).
 - The AutoDE server. Two ways to get it:
   - **The `autode` command (preferred, since v0.42.0):** install the package with `npm install -g autode-<version>.tgz` (see [cli.md](cli.md#install)). The server is then `autode mcp`, and its path doesn't change when the extension updates. The same package gives you the [`autode` CLI](cli.md) for CI checks and for resolving decisions in a terminal.
-  - **The extension's own copy:** `~/.vscode/extensions/<publisher>.auto-data-engineering-hub-<version>/dist/autode.js` (Windows: `%USERPROFILE%\.vscode\extensions\…`), run as `node <that path> mcp`. The folder name changes with every extension update. The extension tells you when `.mcp.json` points at an old folder and offers to update it. `dist/mcp-server.js` in the same folder still works and starts the same server. In a source checkout, run `npm install` and then `npm run compile`; the file is `<checkout>/dist/autode.js`.
+  - **The extension's own copy:** **AutoDE: Configure MCP for Claude Code** copies the server into VS Code's global storage (`…/globalStorage/arun-gribta.auto-data-engineering-hub/autode-server/dist/autode.js`) and points `.mcp.json` there. AutoDE refreshes that copy when the extension updates, so the entry keeps working. The bundle inside the extension folder (`~/.vscode/extensions/<publisher>.auto-data-engineering-hub-<version>/dist/autode.js`) works too, but that folder changes with every update; the extension tells you when `.mcp.json` points at an old one. `dist/mcp-server.js` in the same folder still works and starts the same server. In a source checkout, run `npm install` and then `npm run compile`; the file is `<checkout>/dist/autode.js`.
 - A workspace that AutoDE has worked in, meaning it has an `.autode/` folder. Without one, the primitive and Pipeline Spec tools still work, but the context tools find nothing.
 
-In VS Code, **AutoDE: Configure MCP for Claude Code** writes the project's `.mcp.json` for you. It uses `autode` when that is on your `PATH`, and otherwise the extension's copy. It keeps any other servers in the file, and it shows what it will write before writing.
+In VS Code, **AutoDE: Configure MCP for Claude Code** writes the project's `.mcp.json` for you. It uses `autode` when that is on your `PATH`, and otherwise the stable copy in global storage. It keeps any other servers in the file, and it shows what it will write before writing.
 
 The server takes these arguments:
 
@@ -65,7 +65,9 @@ Or from the command line: `codex mcp add autode -- autode mcp --workspace /path/
 
 ## VS Code (agent mode)
 
-Add `.vscode/mcp.json` to the workspace:
+Since 0.43.0 there is nothing to configure. With the AutoDE extension installed (VS Code 1.101 or later), agent mode lists the **AutoDE** server, and VS Code starts it with its own runtime, so Node.js isn't needed. Open the tools picker in Copilot Chat's agent mode to see AutoDE's tools, and **MCP: List Servers** to start, stop or inspect the server. Connections whose secrets you saved from a settings card (`resolver: vscode`) work there too. AutoDE passes their secrets to the server only when VS Code starts it, never in the server's listed definition.
+
+On an older VS Code, or to run the server without the extension, add `.vscode/mcp.json` to the workspace:
 
 ```json
 {
@@ -79,7 +81,7 @@ Add `.vscode/mcp.json` to the workspace:
 }
 ```
 
-A later release registers the server automatically (phase 5), so this file won't be needed.
+If you have both this file and the extension, agent mode lists two AutoDE servers; remove the file.
 
 ## Cursor
 
@@ -329,7 +331,6 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 ## Not yet available
 
 The following arrive in later releases:
-- Automatic registration in VS Code (phase 5).
 - AutoDE's own capabilities as Agent Skills you can copy into your host's skills folder (PA3).
 
 ## Troubleshooting

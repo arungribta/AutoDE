@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { LlmAdapter, LlmAdapterContext, LlmCompleteOptions, LlmHistoryTurn, extractJsonText } from './llmAdapter';
-import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
-import { AgenticToolCall, executeAgenticTool, toolSpecsForMode } from './agenticTools';
+import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet } from '../engine/types';
+import { AgenticToolCall, executeAgenticTool, geminiSchema, toolSpecsForMode } from './agenticTools';
 
 const MAX_TOOL_LOOP_TURNS = 12;
 
@@ -10,10 +10,11 @@ interface ToolRun {
   mode: ToolExecutionMode;
   allowed?: string[];
   audit?: ToolCallAuditEntry[];
+  engine?: EngineToolSet;
 }
 
 function toolRunFrom(opts: LlmCompleteOptions): ToolRun {
-  return { mode: opts.toolExecutionMode ?? 'none', allowed: opts.allowedToolNames, audit: opts.auditSink };
+  return { mode: opts.toolExecutionMode ?? 'none', allowed: opts.allowedToolNames, audit: opts.auditSink, engine: opts.engineTools };
 }
 
 interface OpenAiStyleToolCall {
@@ -46,7 +47,7 @@ async function runOpenAiStyleToolLoop(
   history: LlmHistoryTurn[] | undefined,
   sendChat: (messages: OpenAiStyleMessage[], tools: unknown[]) => Promise<{ content?: string | null; tool_calls?: OpenAiStyleToolCall[] }>
 ): Promise<string> {
-  const toolSpecs = toolSpecsForMode(run.mode, run.allowed);
+  const toolSpecs = toolSpecsForMode(run.mode, run.allowed, run.engine);
   if (toolSpecs.length === 0) {
     const message = await sendChat(
       [{ role: 'system', content: systemPrompt }, ...historyToOpenAiStyle(history), { role: 'user', content: userPrompt }],
@@ -84,7 +85,7 @@ async function runOpenAiStyleToolLoop(
         input = call.function.arguments ?? {};
       }
       const toolCall: AgenticToolCall = { id, name: call.function.name, input };
-      const output = await executeAgenticTool(toolCall, workspaceRoot, audit, offered);
+      const output = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, run.engine);
       messages.push({ role: 'tool', tool_call_id: id, content: output });
     }
   }
@@ -145,7 +146,7 @@ class CopilotLlmAdapter implements LlmAdapter {
       if (mode === 'none') {
         return await adapter.complete(prompt, { model: opts.model, timeoutMs: 60000, systemPrompt: opts.systemPrompt, justification: opts.justification, history: opts.history });
       }
-      const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history, allowedToolNames: opts.allowedToolNames });
+      const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history, allowedToolNames: opts.allowedToolNames, engineTools: opts.engineTools });
       if (opts.auditSink) opts.auditSink.push(...result.audit);
       return result.text;
     } catch (err) {
@@ -241,7 +242,7 @@ class AnthropicLlmAdapter implements LlmAdapter {
       throw new Error('Anthropic API key is missing. Add it in the settings panel.');
     }
 
-    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode, opts.allowedToolNames);
+    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode, opts.allowedToolNames, opts.engineTools);
     const offered = new Set(toolSpecs.map((t) => t.name));
     const tools = toolSpecs.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
     const workspaceRoot = ctx.getWorkspaceRoot();
@@ -279,7 +280,7 @@ class AnthropicLlmAdapter implements LlmAdapter {
       messages.push({ role: 'assistant', content: blocks });
       const resultBlocks: AnthropicBlock[] = [];
       for (const tu of toolUses) {
-        const output = await executeAgenticTool({ id: tu.id ?? tu.name ?? 'tool', name: tu.name ?? '', input: tu.input ?? {} }, workspaceRoot!, audit, offered);
+        const output = await executeAgenticTool({ id: tu.id ?? tu.name ?? 'tool', name: tu.name ?? '', input: tu.input ?? {} }, workspaceRoot!, audit, offered, opts.engineTools);
         resultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content: output });
       }
       messages.push({ role: 'user', content: resultBlocks });
@@ -333,9 +334,9 @@ class GeminiLlmAdapter implements LlmAdapter {
       throw new Error('Gemini API key is missing. Add it in the settings panel.');
     }
 
-    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode, opts.allowedToolNames);
+    const toolSpecs = toolSpecsForMode(opts.toolExecutionMode, opts.allowedToolNames, opts.engineTools);
     const offered = new Set(toolSpecs.map((t) => t.name));
-    const tools = toolSpecs.length > 0 ? [{ functionDeclarations: toolSpecs.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) }] : undefined;
+    const tools = toolSpecs.length > 0 ? [{ functionDeclarations: toolSpecs.map((t) => ({ name: t.name, description: t.description, parameters: geminiSchema(t.parameters) })) }] : undefined;
     const workspaceRoot = ctx.getWorkspaceRoot();
     if (toolSpecs.length > 0 && !workspaceRoot) {
       throw new Error('A workspace folder is required for tool execution.');
@@ -374,7 +375,7 @@ class GeminiLlmAdapter implements LlmAdapter {
       const responseParts: GeminiPart[] = [];
       for (const p of funcCalls) {
         const call = p.functionCall!;
-        const output = await executeAgenticTool({ id: call.name, name: call.name, input: call.args ?? {} }, workspaceRoot!, audit, offered);
+        const output = await executeAgenticTool({ id: call.name, name: call.name, input: call.args ?? {} }, workspaceRoot!, audit, offered, opts.engineTools);
         responseParts.push({ functionResponse: { name: call.name, response: { result: output } } });
       }
       contents.push({ role: 'user', parts: responseParts });

@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.42.0 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.43.0 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -135,6 +135,8 @@ Imported Claude Agent Skills (`SKILL.md` folders) that run with real tools on an
 
 ### 4.10 The MCP server and the CLI
 `autode mcp` (in `dist/autode.js`; `dist/mcp-server.js` is a shim for it) exposes the engine to other agents: primitives, Pipeline Spec, context tools (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), data-platform tools (`autode_list_connections` … `autode_execute_query`, since v0.37.0), interview and reviewed-skill prompts, and resources. No workspace writes, no LLM calls, secrets redacted. Platform connections come from `.autode/config/connections.yaml` plus the personal `.autode/local/connections.yaml` (no secrets; credentials from `AUTODE_*` env vars, the CLI's configuration, or — for `resolver: vscode` entries saved from a settings card — env variables standing in for VS Code's secret storage); queries are read-only; changes (facts, spec and Pipeline Spec revisions, mappings, platform writes) are proposed and become decisions a person approves (since v0.40.0, design §7.7); row values are withheld unless the connection sets `allowSampleDataInPrompts`. *Design §6.12, §10.6; setup: [mcp-setup.md](mcp-setup.md).*
+
+Inside VS Code (since v0.43.0) the extension reaches the same server in-process through `src/core/engineClient.ts` (MCP over an in-memory transport, started on first use): imported tool skills get its tools within their `allowed-tools` and trust tier, and PA3's executor will use it. VS Code's agent mode gets the server from a provider (`registerMcpProvider` in `src/core/mcpConfig.ts`) with no configuration. The extension still imports `src/engine` directly for in-process work; the boundary that matters is that changes go through decisions. *Design §10.9.*
 
 The **`autode` CLI** (since v0.42.0) runs the same checks without VS Code: `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor`, and `check`, the CI gate that also fails while a high-stakes decision is pending. `validate`, `compile` and `grounding` call the MCP tools' own handlers. `decisions approve | reject` is the only state change, and it needs a person at an interactive terminal. The exit codes are stable. The `autode` package (`npm run package:cli`) contains the same `dist/autode.js` the VSIX ships. *Design §10.8; reference: [cli.md](cli.md).*
 

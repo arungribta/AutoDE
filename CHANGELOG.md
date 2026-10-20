@@ -6,6 +6,31 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.43.0
+
+- **Phase 5: the extension as an MCP client, and AutoDE in VS Code's agent mode**, restructured at the user's direction (roadmap decision log 2026-10-20; `docs/mcp-engine-requirements.md` §9 Phase 5; requirements MCP-1, SKL-2; technical-design §10.9; usage: `docs/mcp-setup.md`).
+- **Agent mode lists AutoDE's tools with nothing to configure.** On VS Code 1.101 and later, the extension registers the AutoDE server with VS Code's MCP server definition provider API. VS Code runs it with its own runtime, so Node.js isn't needed and no `.vscode/mcp.json` is required. The API is feature-detected, so older VS Code versions are unaffected and `engines.vscode` stays at ^1.90.
+- **Connections whose secrets VS Code keeps work there too.** For each `resolver: vscode` connection, AutoDE passes the secrets as the matching `AUTODE_*` variables, and only when VS Code starts the server. The listed server definition never contains a secret.
+- **`.mcp.json` survives extension updates without the `autode` package.** *Configure MCP for Claude Code* copies the server into VS Code's global storage and points `.mcp.json` there. AutoDE refreshes an existing copy after an update; it never creates one at activation. The installed `autode` is still preferred when it is on `PATH`.
+- **The extension reaches its own engine through MCP.** `EngineClient` connects to the same server other hosts get from `autode mcp`, over an in-memory transport: the same tools, validation and error envelope, without a child process. It starts on first use, never at activation, and a closed client starts again on the next call.
+- **Imported tool skills can use AutoDE's tools:** primitives, the Pipeline Spec, context, grounding, read-only platform access and proposals. A skill declares them like any other tool (`autode_compile_transform`, `mcp__autode__autode_compile_transform`, or `mcp__autode__*`). The existing caps apply:
+  - only declared tools are offered;
+  - read-only tools in read-only mode, and proposals only in full mode;
+  - a *reviewed* skill gets read-only tools only;
+  - no skill may resolve or apply a decision.
+
+  A declared proposal tool lets a trusted skill run in full mode even if it declares no file write. Every engine call is audited with the run. Gemini receives the tools' schemas in the subset it accepts.
+- **Deviations / notes (the restructuring):**
+  - **Not built: the lint ban on value imports from `src/engine` outside `src/mcp`.** There are 221 such imports across 55 files. Since PA2 the extension and `autode mcp` are one build, so the ban would have guarded against drift that can't happen, at the cost of a process hop for pure helpers. The boundary that matters is that every change is a decision (PA1).
+  - **Not built: panel approvals through the MCP decision tools.** The panel is the person channel. For the server to accept a "panel" claim, any agent could make that claim, which would undo PA1's stakes model. The panel already uses the engine's own `DecisionStore`.
+  - **Not built: routing the built-in agents' registry, compile and connection calls through the client.** PA3 replaces those agents with skills and deletes their old paths.
+  - **Not built: a supervised child process** (lazy spawn, version check, restart with backoff). In-process gives the same contract, and VS Code starts and supervises the agent-mode server itself.
+  - The §7.4 host decoupling of the agents (`host.confirm`, `host.workspaceRoot`, no `extensionContext`) was already in place from v0.26.0.
+  - **Claude Code is offered no engine tools.** It runs its own loop; passing AutoDE's server to it with `--mcp-config` is left for PA3.
+  - Activation event `onMcpCollection:autode` added so VS Code can activate AutoDE when agent mode needs the server.
+  - `extension.js` grows from 829 KB to 1050 KB (production) because it now carries the server for the in-process client.
+- **Measured:** 339 tests (5 new: the in-process client and tool selection, engine tools in the tool loops, the skill runner's caps, agent-mode registration and secrets, the stable copy). Lint 0 errors. `npm run eval` unchanged (traps 5/5, answerability 18/26, contract violations 4/4 with none false, plan-step context 529 tokens median). The end-to-end artifact comparison with v0.42.0 is a manual check (manual-verification Part 20.7), not run.
+
 ## 0.42.0
 
 - **Phase PA2: the engine on its own, as the `autode` package and CLI** (`docs/mcp-engine-requirements.md` §3.1 D7, §9.2; requirements MCP-3, P9; technical-design §10.8; reference: `docs/cli.md`; per-host set-up: `docs/mcp-setup.md`).

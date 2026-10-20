@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { AgentExecutionContext, AgentExecutionResult, PlanStep, ToolExecutionMode, ToolSkillDefinition } from '../../engine/types';
+import { AgentExecutionContext, AgentExecutionResult, EngineToolSet, PlanStep, ToolExecutionMode, ToolSkillDefinition } from '../../engine/types';
 import { resolveAllowedToolNames, toolModeCeiling } from '../../engine/skills/toolAllowList';
 import { TrustTier, isClaudeCliEligible, minMode, notRunnableReason, resolveSkillVersion, tierModeCeiling } from '../../engine/skills/lifecycle';
 import { layoutPath, layoutRel } from '../../engine/workspaceLayout';
@@ -25,6 +25,14 @@ import { layoutPath, layoutRel } from '../../engine/workspaceLayout';
  * it by trust tier too — reviewed skills run read-only at most and never through
  * Claude Code; unreviewed, draft and retired skills don't run — and resolves a
  * pinned `skillVersion` from the skill's version history.
+ *
+ * Phase 5: the engine's MCP tools (primitives, Pipeline Spec, context, grounding,
+ * read-only platform access, proposals) are offered next to the file tools, through
+ * `context.engine`, so a skill can compile with a primitive instead of writing SQL.
+ * The same caps apply — the declared `allowed-tools` (engine tools by name or as
+ * `mcp__autode__*`), the mode, and so the trust tier: a reviewed skill gets read-only
+ * engine tools only, and no skill gets a destructive one. Claude Code runs its own
+ * loop and is offered none.
  */
 
 export async function executeToolSkillAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
@@ -62,8 +70,11 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
   }
 
   const allowed = resolveAllowedToolNames(skill.declaredTools);
-  const mode = resolveToolExecutionMode(skill, allowed, tier);
   const provider = context.settings.activeLlmProvider;
+  const engine = provider === 'claude' ? undefined : context.engine;
+  let engineWrite = false;
+  try { engineWrite = engine ? await engine.declaresWrite(skill.declaredTools) : false; } catch (err) { context.log(`Engine tools unavailable for this run: ${err instanceof Error ? err.message : String(err)}`); }
+  const mode = resolveToolExecutionMode(skill, allowed, tier, engineWrite);
   if (provider === 'claude' && !isClaudeCliEligible(tier)) {
     return {
       success: false,
@@ -71,13 +82,19 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
       error: 'skill not eligible for the Claude CLI path'
     };
   }
-  const toolsLabel = allowed === undefined ? 'all workspace tools' : allowed.length === 0 ? 'no tools' : allowed.join(', ');
+  let engineTools: EngineToolSet | undefined;
+  if (engine) {
+    try { engineTools = await engine.toolSet(mode, skill.declaredTools); } catch (err) { context.log(`Engine tools unavailable for this run: ${err instanceof Error ? err.message : String(err)}`); }
+  }
+  const fileTools = allowed === undefined ? 'all workspace tools' : allowed.length === 0 ? 'no file tools' : allowed.join(', ');
+  const toolsLabel = engineTools?.specs.length ? `${fileTools}; ${engineTools.specs.length} engine tool(s)` : fileTools;
 
   try {
     const { text, audit } = await context.runWithTools(instruction, {
       systemPrompt: buildSkillSystemPrompt(skill, context),
       toolExecutionMode: mode,
       allowedToolNames: allowed,
+      engineTools,
       justification: `Run imported skill "${skill.name}"`,
       approvalPrompt: provider === 'claude'
         ? `Run skill "${skill.name}" via Claude Code with ${mode === 'full' ? 'file write and command' : 'read-only'} access (${toolsLabel}) in this workspace? ` +
@@ -88,18 +105,20 @@ export async function executeToolSkillAgent(step: PlanStep, context: AgentExecut
     return {
       success: true,
       message: text || `Skill "${skill.name}" completed (${audit.length} tool call(s), no final text).`,
-      details: { provider, skillId: skill.id, skillVersion: state.sidecar.version, trustTier: tier, contentChecksum: state.checksum, mode, allowedTools: allowed ?? 'unrestricted', audit: audit as unknown as Record<string, unknown> }
+      details: { provider, skillId: skill.id, skillVersion: state.sidecar.version, trustTier: tier, contentChecksum: state.checksum, mode, allowedTools: allowed ?? 'unrestricted', engineTools: engineTools?.specs.map((s) => s.name) ?? [], audit: audit as unknown as Record<string, unknown> }
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     context.log(`Skill "${skill.name}" failed via ${provider}: ${message}`);
     return { success: false, message: `Skill run failed: ${message}`, error: message };
+  } finally {
+    await context.engine?.dispose().catch(() => undefined);
   }
 }
 
-/** The mode a skill runs in: the lower of its declared-tools ceiling (S1) and its trust tier's ceiling (S2). */
-export function resolveToolExecutionMode(_skill: ToolSkillDefinition, allowed: readonly string[] | undefined, tier: TrustTier = 'trusted'): ToolExecutionMode {
-  return minMode(toolModeCeiling(allowed), tierModeCeiling(tier));
+/** The mode a skill runs in: the lower of its declared-tools ceiling (S1; phase 5 counts declared engine proposals) and its trust tier's ceiling (S2). */
+export function resolveToolExecutionMode(_skill: ToolSkillDefinition, allowed: readonly string[] | undefined, tier: TrustTier = 'trusted', declaresEngineWrite = false): ToolExecutionMode {
+  return minMode(toolModeCeiling(allowed, declaresEngineWrite), tierModeCeiling(tier));
 }
 
 function buildSkillSystemPrompt(skill: ToolSkillDefinition, context: AgentExecutionContext): string {

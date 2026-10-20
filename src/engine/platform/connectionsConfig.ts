@@ -263,6 +263,20 @@ export function secretFieldsFor(platform: DataPlatformProvider, fields: Readonly
   return [];
 }
 
+/**
+ * The stand-in `env` for a `vscode` entry's secrets, from the values VS Code's secret
+ * storage holds (phase 5): what the extension passes to a server it has VS Code start,
+ * so the connection is ready there too. Only the entry's secret fields are passed.
+ */
+export function standInEnv(entry: Pick<ConnectionEntry, 'platform' | 'fields' | 'credentials'>, secrets: Readonly<Record<string, string>>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const field of secretFieldsFor(entry.platform, entry.fields)) {
+    const name = envCredentialVariable(entry.platform, entry.credentials.ref, field);
+    if (name && secrets[field]) env[name] = secrets[field];
+  }
+  return env;
+}
+
 /** The `env` variables that stand in for a `vscode` entry's secrets outside VS Code. */
 export function envStandInVariables(entry: Pick<ConnectionEntry, 'platform' | 'fields' | 'credentials'>): string[] {
   return secretFieldsFor(entry.platform, entry.fields).map((f) => envCredentialVariable(entry.platform, entry.credentials.ref, f)).filter((v): v is string => !!v);

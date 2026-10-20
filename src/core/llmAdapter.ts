@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DataAgentHubSettings, LlmProvider, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
+import { DataAgentHubSettings, LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet } from '../engine/types';
 
 /**
  * The provider-agnostic contract every LLM provider implements (Phase C).
@@ -59,6 +59,9 @@ export interface LlmCompleteOptions {
   /** Claude-only: replaces the generic whole-run approval text in `'full'` mode, so the caller can say
    *  what is being approved (e.g. which skill). */
   approvalPrompt?: string;
+  /** The engine's MCP tools for this run (phase 5), offered next to the file tools by every AutoDE-owned
+   *  loop when the mode allows tools. Ignored by the Claude adapter, whose CLI runs its own loop. */
+  engineTools?: EngineToolSet;
 }
 
 /**

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
+import { ToolCallAuditEntry, ToolExecutionMode, EngineToolSet } from '../engine/types';
 import { AgenticToolCall, executeAgenticTool, toolSpecsForMode } from './agenticTools';
 import { LlmHistoryTurn } from './llmAdapter';
 
@@ -230,6 +230,8 @@ export class LanguageModelAdapter {
       history?: LlmHistoryTurn[];
       /** Narrows the mode's tools to these AutoDE tool names (v0.28.0, a skill's allowed-tools). */
       allowedToolNames?: string[];
+      /** The run's engine tools (phase 5). */
+      engineTools?: EngineToolSet;
       cancellationToken?: vscode.CancellationToken;
     }
   ): Promise<{ text: string; audit: ToolCallAuditEntry[] }> {
@@ -243,7 +245,7 @@ export class LanguageModelAdapter {
     const workspaceRoot = opts.workspaceRoot;
     const model = opts.model ? await this.selectModel(opts.model) : this.model;
 
-    const toolSpecs = toolSpecsForMode(opts.mode, opts.allowedToolNames);
+    const toolSpecs = toolSpecsForMode(opts.mode, opts.allowedToolNames, opts.engineTools);
     const offered = new Set(toolSpecs.map((t) => t.name));
     const tools: vscode.LanguageModelChatTool[] = toolSpecs.map((t) => ({ name: t.name, description: t.description, inputSchema: t.parameters }));
 
@@ -286,7 +288,7 @@ export class LanguageModelAdapter {
       const resultParts: vscode.LanguageModelToolResultPart[] = [];
       for (const call of toolCalls) {
         const toolCall: AgenticToolCall = { id: call.callId, name: call.name, input: (call.input ?? {}) as Record<string, unknown> };
-        const outcome = await executeAgenticTool(toolCall, workspaceRoot, audit, offered);
+        const outcome = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, opts.engineTools);
         resultParts.push(new vscode.LanguageModelToolResultPart(call.callId, [new vscode.LanguageModelTextPart(outcome)]));
       }
       messages.push(vscode.LanguageModelChatMessage.User(resultParts));

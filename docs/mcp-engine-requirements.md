@@ -237,6 +237,8 @@ There is deliberately no vendor-named tool (`execute_snowflake_query` etc.); the
 
 ## 7. Extension integration
 
+*Superseded in part by phase 5's restructuring (roadmap decision log 2026-10-20): §7.1's child process, §7.3 and the import ban were not built; §7.2's client is in-process; §7.4 and §7.5 shipped. See §9 Phase 5.*
+
 ### 7.1 Engine host — `src/core/mcp/engineHost.ts`
 
 - Spawns `dist/mcp-server.js` via `process.execPath`, env `ELECTRON_RUN_AS_NODE=1` plus credential env (§6), cwd = workspace root, args `--workspace <root>` (+ `--allow-write` when permitted).
@@ -383,16 +385,9 @@ In short: `dist/mcp-server.js`, bundled with esbuild and runnable in plain Node,
 In short: the §5.3 tools over connections defined in `.autode/config/connections.yaml` (pointers and non-secret settings; secrets from env vars or the platform CLI's configuration, §6). `autode_execute_query` runs one statement, read-only unless the server is started with `--allow-write`, behind a lexical guard that reads the SQL under two quoting conventions. Row values — query results, profile minimums and maximums, query-history text — reach a prompt only when the connection's `allowSampleDataInPrompts` is on; personal-data columns are masked when it is. The live acceptance checks (Snowflake CLI and key-pair, Databricks PAT, a machine without CLIs) are in manual-verification.md Part 14.
 
 ### Phase 5: Extension as an MCP client; exposure to other agents
-Scope: §7.1–7.3, §7.5, widened by §3.1 (2026-10-18):
-- The panel's Decisions view and approvals go through the engine (PA1's decision tools and channels), not directly to files.
-- When the extension starts the server, it passes `resolver: vscode` secrets as the matching `AUTODE_*` variables, so those connections become ready for the server it started.
-- The in-process executor calls tools through the client like any host agent. This makes PA3 a change of who calls the tools, not of what they do.
-Acceptance:
-- The extension no longer imports `src/engine/**` directly except for types (lint rule: value imports from `src/engine` banned outside `src/mcp`).
-- Activation does not spawn the server; first engine use does. Killing the server process mid-session recovers on the next call.
-- End-to-end manual run of the full flow (§1) produces the same artifacts (and grounding manifests) as the previous release for the same inputs (diff the `artifacts/` tree); `npm run eval` metrics do not regress.
-- Copilot agent mode lists AutoDE tools without manual config (on VS Code versions that support the provider API).
-- `AutoDE: Configure MCP for Claude Code` writes a working `.mcp.json` entry that survives an extension update.
+**Status:** ✅ shipped in v0.43.0, **restructured** (roadmap decision log 2026-10-20). What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, SKL-2; HOW: technical-design.md §10.9; usage: [mcp-setup.md](mcp-setup.md). The full specification text is in git (this file at commit bc10a2c).
+
+In short: VS Code's agent mode lists AutoDE's tools with no configuration (MCP server definition provider, feature-detected; `resolver: vscode` secrets added only when VS Code starts the server). `.mcp.json` survives extension updates through the installed `autode` or a stable copy in global storage. The extension reaches the engine through an in-process `EngineClient` (MCP over an in-memory transport); imported tool skills get the engine's tools within their `allowed-tools`, mode and trust tier, and PA3's in-process executor uses the same client. Not done, by decision: the lint ban on engine value imports, panel approvals through the MCP tools, rerouting the built-in agents, and a supervised child process. §7 below describes the original plan.
 
 ### Phase 6: Skill governance hardening
 Scope (S3's import work moved to PA4; publishing a primitive or skill goes through PA1's decisions):

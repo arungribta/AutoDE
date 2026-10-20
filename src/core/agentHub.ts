@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ConfigurationManager } from './configManager';
-import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry } from '../engine/types';
+import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, EngineAccess } from '../engine/types';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeIngestionAgent } from '../agents/build/IngestionPipelineAgent';
 import { executeSttmAgent } from '../agents/model/SttmMapperAgent';
@@ -133,6 +133,12 @@ export class DataAgentHubHub {
   private nextPlanGenerationReason: 'initial' | 're-plan' = 'initial';
 
   public constructor(private readonly configManager: ConfigurationManager) {}
+
+  /** Phase 5: makes the engine client each agent context gets (started on first use; the tool-skill runner disposes it). */
+  private engineFactory: (() => EngineAccess | undefined) | undefined;
+  public setEngineFactory(factory: () => EngineAccess | undefined): void {
+    this.engineFactory = factory;
+  }
 
   public setStateListener(listener: (state: PlanState) => void): void {
     this.stateListener = listener;
@@ -579,6 +585,7 @@ export class DataAgentHubHub {
       workspaceRoot: this.getWorkspaceRoot(),
       runWithTools: (prompt: string, opts: AgentToolRunOptions) => this.runConfiguredLlmWithTools(prompt, opts),
       host: this.buildAgentHost(),
+      engine: this.engineFactory?.(),
       skillId,
       skillInstruction: instruction
     };
@@ -1214,6 +1221,7 @@ Message: ${message}`;
           workspaceRoot: this.getWorkspaceRoot(),
           runWithTools: (prompt: string, opts: AgentToolRunOptions) => this.runConfiguredLlmWithTools(prompt, opts),
           host: this.buildAgentHost(),
+          engine: readyStep.assignedAgent === 'toolSkillAgent' ? this.engineFactory?.() : undefined,
           skillId: readyStep.skillId,
           skillInstruction: readyStep.taskDescription,
           callLlm: (prompt: string, systemPrompt?: string) => this.callConfiguredLlm(prompt, systemPrompt),
@@ -1559,7 +1567,8 @@ Message: ${message}`;
         toolExecutionMode: opts.toolExecutionMode,
         allowedToolNames: opts.allowedToolNames,
         auditSink: audit,
-        approvalPrompt: opts.approvalPrompt
+        approvalPrompt: opts.approvalPrompt,
+        engineTools: opts.engineTools
       },
       this.buildLlmContext()
     );

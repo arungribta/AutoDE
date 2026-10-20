@@ -8,7 +8,10 @@ import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './engine/platform/ConnectionManager';
 import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
 import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, PrerequisiteHost } from './core/platformPrerequisites';
-import { configureMcpForClaudeCode, hintStaleMcpJson } from './core/mcpConfig';
+import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, registerMcpProvider, vscodeSecretEnv } from './core/mcpConfig';
+import { EngineClient } from './core/engineClient';
+import { getCredentialResolver } from './engine/platform/credentials';
+import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
 import { PlatformOnboarding } from './core/platformOnboarding';
 import { secretStorageKey } from './core/credentials/VsCodeSecretStorageResolver';
 import { SECRET_KEYS } from './core/extensionIdentity';
@@ -288,9 +291,27 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Phase PA2: the project's .mcp.json entry for the AutoDE server (installed `autode mcp` preferred).
+  const extensionVersion = String((context.extension?.packageJSON as { version?: string } | undefined)?.version ?? '0.0.0');
+  const firstFolder = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Always set by VS Code; absent only in hand-built test contexts.
+  const storagePath: string | undefined = context.globalStorageUri?.fsPath;
   const configureMcpCommandId = `${EXTENSION_ID}.configureMcpClaudeCode`;
-  const configureMcp = vscode.commands.registerCommand(configureMcpCommandId, () => configureMcpForClaudeCode(vscode, { workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, extensionPath: context.extensionPath, log: (line) => sidebarProvider.logToChat(line) }));
-  hintStaleMcpJson(vscode, { workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, extensionPath: context.extensionPath, commandId: configureMcpCommandId });
+  const configureMcp = vscode.commands.registerCommand(configureMcpCommandId, () => configureMcpForClaudeCode(vscode, { workspaceRoot: firstFolder(), extensionPath: context.extensionPath, storagePath, version: extensionVersion, log: (line) => sidebarProvider.logToChat(line) }));
+  hintStaleMcpJson(vscode, { workspaceRoot: firstFolder(), extensionPath: context.extensionPath, commandId: configureMcpCommandId });
+  // Phase 5: keep an existing stable server copy current (it is created only by the command above); off the activation path.
+  setTimeout(() => {
+    try { if (storagePath && refreshStableServer(context.extensionPath, storagePath, extensionVersion)) sidebarProvider.logToChat(`AutoDE's MCP server copy in global storage updated to ${extensionVersion}.`); } catch (err) { console.warn('AutoDE: could not refresh the stable MCP server copy', err); }
+  }, 3000);
+  // Phase 5: VS Code agent mode lists AutoDE's tools with no configuration; VS Code starts the server itself.
+  const vscodeSecrets = (entry: { platform: DataPlatformProvider; credentials: { ref: string } }) =>
+    getCredentialResolver(VSCODE_SECRET_RESOLVER_ID)?.resolve({ platform: entry.platform, principalType: 'interactive-user', ref: entry.credentials.ref, resolverId: VSCODE_SECRET_RESOLVER_ID }) ?? Promise.resolve(undefined);
+  const mcpProvider = registerMcpProvider(vscode, { extensionPath: context.extensionPath, version: extensionVersion, workspaceRoot: firstFolder, secretEnv: () => vscodeSecretEnv(firstFolder(), vscodeSecrets), log: (line) => console.log(line) });
+  if (mcpProvider) context.subscriptions.push(mcpProvider);
+  // Phase 5: agents reach the engine's MCP tools through an in-process client, started on first use.
+  hub.setEngineFactory(() => {
+    const root = firstFolder();
+    return root ? new EngineClient({ workspaceRoot: root, resourcesRoot: context.extensionPath, version: extensionVersion, log: (line) => console.log(`[engine] ${line}`), driversRoot: () => configManager.getSettings().driversDirectory, allowCli: () => configManager.getSettings().dataPlatformCliConsent === true }) : undefined;
+  });
 
   const asLmProvider = (v: unknown): 'copilot' | 'claude' | undefined =>
     v === 'claude' || v === 'copilot' ? v : undefined;
