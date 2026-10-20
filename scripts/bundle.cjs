@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
  * Bundles AutoDE's two entry points with esbuild (docs/mcp-engine-requirements.md
- * §3 D1/D2, phase 3):
+ * §3 D1/D2, phase 3; §3.1 D7, phase PA2):
  *   dist/extension.js   — the VS Code extension (external: vscode)
- *   dist/mcp-server.js  — the MCP server (no externals; runs on any Node ≥ 18)
- * Both are self-contained, so the VSIX ships no node_modules/.
+ *   dist/autode.js      — the `autode` CLI, `autode mcp` included (no externals; any Node ≥ 18)
+ *   dist/mcp-server.js  — a two-line shim for `autode mcp`, kept for existing client configurations
+ * All are self-contained, so the VSIX ships no node_modules/, and the VSIX and
+ * the `autode` package (scripts/pack-cli.cjs) carry the same dist/autode.js.
  *
  * `tsc` still compiles every module to dist/** for the tests and the eval;
  * this runs after it and replaces dist/extension.js with the bundle.
@@ -34,7 +36,7 @@ const common = {
 async function main() {
   const builds = [
     { entryPoints: [path.join(root, 'src/extension.ts')], outfile: path.join(root, 'dist/extension.js'), external: ['vscode'] },
-    { entryPoints: [path.join(root, 'src/mcp/server.ts')], outfile: path.join(root, 'dist/mcp-server.js') }
+    { entryPoints: [path.join(root, 'src/cli/main.ts')], outfile: path.join(root, 'dist/autode.js'), banner: { js: '#!/usr/bin/env node' } }
   ];
   const bundledPackages = new Map();
   for (const b of builds) {
@@ -48,8 +50,16 @@ async function main() {
       if (m) bundledPackages.set(m[2].replace(/\\/g, '/'), path.join(root, input.slice(0, m.index + m[0].length)));
     }
   }
+  fs.writeFileSync(path.join(root, 'dist', 'mcp-server.js'), MCP_SHIM);
+  console.log('wrote dist/mcp-server.js (shim for autode mcp)');
   writeNotices(bundledPackages);
 }
+
+/** The phase-3 server path, still in users' MCP configurations: the same server as `autode mcp`. */
+const MCP_SHIM = `#!/usr/bin/env node
+// AutoDE MCP server. The server is \`autode mcp\` in autode.js (docs/mcp-setup.md); this path stays for existing configurations.
+require('./autode.js').main(['mcp', ...process.argv.slice(2)]).catch((err) => { process.stderr.write('autode: ' + (err && err.message ? err.message : String(err)) + '\\n'); process.exit(1); });
+`;
 
 /**
  * The bundles strip comments, so the licences of the libraries they contain
@@ -67,7 +77,7 @@ function writeNotices(packages) {
     const text = licenseFile ? fs.readFileSync(path.join(dir, licenseFile), 'utf8').trim() : `No licence file in the package; package.json declares: ${licence}.`;
     sections.push(`## ${name}${pkg.version ? ` ${pkg.version}` : ''} — ${licence}\n\n${pkg.homepage || (pkg.repository && (pkg.repository.url || pkg.repository)) || ''}\n\n\`\`\`\n${text}\n\`\`\`\n`);
   }
-  const header = '# Third-party notices\n\nAutoDE (MIT, see LICENSE) bundles the following open-source packages into dist/extension.js and dist/mcp-server.js. Their licences and notices follow.\n\n';
+  const header = '# Third-party notices\n\nAutoDE (MIT, see LICENSE) bundles the following open-source packages into dist/extension.js and dist/autode.js. Their licences and notices follow.\n\n';
   fs.writeFileSync(path.join(root, 'dist', 'THIRD-PARTY-NOTICES.md'), header + sections.join('\n'));
   console.log(`wrote dist/THIRD-PARTY-NOTICES.md (${packages.size} packages)`);
 }

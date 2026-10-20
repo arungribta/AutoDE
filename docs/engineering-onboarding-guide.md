@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.41.0 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.42.0 (2026-10-20). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -47,7 +47,8 @@ Things that surprise newcomers:
 | How it is built | [technical-design.md](technical-design.md) | Modules, formats, algorithms. §10.5 (settings) and §12 (source tree) are generated from the code. |
 | What changed in each version | [CHANGELOG.md](../CHANGELOG.md) | Includes every deliberate deviation from a spec. |
 | How to check a release by hand | [manual-verification.md](manual-verification.md) | F5 checklists per version. |
-| How other agents use AutoDE | [mcp-setup.md](mcp-setup.md) | Claude Code, VS Code, Cursor. |
+| How other agents use AutoDE | [mcp-setup.md](mcp-setup.md) | Claude Code, Codex, VS Code, Cursor, Cline. |
+| The `autode` command line | [cli.md](cli.md) | CI gate, decisions from a terminal, exit codes. |
 | How AutoDE is measured | [test/reference/retail-orders/README.md](../test/reference/retail-orders/README.md) | The reference problem and `npm run eval`. |
 
 The doc map with precedence rules is [README.md](README.md). **Rule of thumb:** requirements say *what*, the design says *how*, the roadmap says *when*, the changelog says *what changed*. Don't put a file path in requirements.md, and don't restate a requirement in the design.
@@ -81,13 +82,15 @@ The doc map with precedence rules is [README.md](README.md). **Rule of thumb:** 
                      media/sidebar.html (one-file webview: chat, context
                      drawer, workflow palette, settings) + custom editors
 
-dist/mcp-server.js — src/mcp over src/engine: a separate, read-only, LLM-free
-process (stdio) for Claude Code, VS Code agent mode, Cursor.
+dist/autode.js — src/cli + src/mcp over src/engine: the autode CLI and, as
+`autode mcp`, a separate, LLM-free MCP server (stdio) for Claude Code, Codex,
+VS Code agent mode, Cursor, Cline. Also packed on its own as the `autode`
+package (dist/mcp-server.js is a shim for `autode mcp`).
 ```
 
 Three ideas carry most of the design:
 
-1. **The engine boundary.** `src/engine/**` and `src/mcp/**` never touch the VS Code API, so the same code runs in the extension, the MCP server and plain-Node tests. Host concerns come in as parameters (`FileIo`, `AgentHost`, `CompleteJson`). See technical-design §10.2.
+1. **The engine boundary.** `src/engine/**`, `src/mcp/**` and `src/cli/**` never touch the VS Code API, so the same code runs in the extension, the MCP server, the CLI and plain-Node tests. Host concerns come in as parameters (`FileIo`, `AgentHost`, `CompleteJson`). See technical-design §10.2.
 2. **The ledger is the system of record for context.** Facts are append-only *assertions* with status and trust; the graph the agents read is a projection of them, rebuilt, never edited in place. See §4.4 and technical-design §5.3.
 3. **Packs, not dumps.** Each LLM call gets a task-scoped *context pack* within a token budget, and every generated artifact gets a *manifest* of what it rested on. See technical-design §5.5–5.7.
 
@@ -97,7 +100,7 @@ Three ideas carry most of the design:
 - a change to AutoDE's state becomes a validated **proposal** that a person approves as a **decision**;
 - the host (VS Code, Claude Code, Cursor, Codex …) supplies the model.
 
-VS Code stays the first-class host; other hosts use the same engine through MCP, the skills pack and a CLI. Today's agents and `AgentHub` flows are migrated phase by phase, and a migrated path is deleted in the same release.
+VS Code stays the first-class host; other hosts use the same engine through MCP, the skills pack (PA3) and the `autode` CLI (since v0.42.0). Today's agents and `AgentHub` flows are migrated phase by phase, and a migrated path is deleted in the same release.
 
 Bundling: `tsc` compiles every module to `dist/**` (used by tests); esbuild then bundles `dist/extension.js` and `dist/mcp-server.js`, which are all the package ships (technical-design §10.7).
 
@@ -130,8 +133,10 @@ The customer's documents — contract, BRD, KPI definitions, mapping, data dicti
 ### 4.9 Tool skills
 Imported Claude Agent Skills (`SKILL.md` folders) that run with real tools on any of the seven LLM providers. What a skill can use is capped by its declared `allowed-tools` and by its **trust tier**: `unreviewed` (doesn't run), `reviewed` (read-only, not via Claude Code), `trusted` (full). Trust belongs to the reviewed content's checksum — change a file and it's unreviewed again. *Design §7.6.*
 
-### 4.10 The MCP server
-`dist/mcp-server.js` exposes the engine to other agents: primitives, Pipeline Spec, context tools (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), data-platform tools (`autode_list_connections` … `autode_execute_query`, since v0.37.0), interview and reviewed-skill prompts, and resources. No workspace writes, no LLM calls, secrets redacted. Platform connections come from `.autode/config/connections.yaml` plus the personal `.autode/local/connections.yaml` (no secrets; credentials from `AUTODE_*` env vars, the CLI's configuration, or — for `resolver: vscode` entries saved from a settings card — env variables standing in for VS Code's secret storage); queries are read-only; changes (facts, spec and Pipeline Spec revisions, mappings, platform writes) are proposed and become decisions a person approves (since v0.40.0, design §7.7); row values are withheld unless the connection sets `allowSampleDataInPrompts`. *Design §6.12, §10.6; setup: [mcp-setup.md](mcp-setup.md).*
+### 4.10 The MCP server and the CLI
+`autode mcp` (in `dist/autode.js`; `dist/mcp-server.js` is a shim for it) exposes the engine to other agents: primitives, Pipeline Spec, context tools (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), data-platform tools (`autode_list_connections` … `autode_execute_query`, since v0.37.0), interview and reviewed-skill prompts, and resources. No workspace writes, no LLM calls, secrets redacted. Platform connections come from `.autode/config/connections.yaml` plus the personal `.autode/local/connections.yaml` (no secrets; credentials from `AUTODE_*` env vars, the CLI's configuration, or — for `resolver: vscode` entries saved from a settings card — env variables standing in for VS Code's secret storage); queries are read-only; changes (facts, spec and Pipeline Spec revisions, mappings, platform writes) are proposed and become decisions a person approves (since v0.40.0, design §7.7); row values are withheld unless the connection sets `allowSampleDataInPrompts`. *Design §6.12, §10.6; setup: [mcp-setup.md](mcp-setup.md).*
+
+The **`autode` CLI** (since v0.42.0) runs the same checks without VS Code: `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor`, and `check`, the CI gate that also fails while a high-stakes decision is pending. `validate`, `compile` and `grounding` call the MCP tools' own handlers. `decisions approve | reject` is the only state change, and it needs a person at an interactive terminal. The exit codes are stable. The `autode` package (`npm run package:cli`) contains the same `dist/autode.js` the VSIX ships. *Design §10.8; reference: [cli.md](cli.md).*
 
 ### 4.11 Where AutoDE keeps things
 `.autode/` holds AutoDE's working state, grouped by lifecycle: `problems/<id>/` (spec, plan, context documents, pack — committed), `knowledge/` (ledger, estate, sources, profiles, business context, vocabulary — committed), `config/` (skills, primitives, target environment, connections — committed) and `local/` (active problem, chats, derived graph, catalog — never committed; AutoDE writes `.autode/.gitignore` for it). Generated deliverables go to the visible `autode-output/<problem-id>/` (setting `artifactDirectory`). Every path comes from `src/engine/workspaceLayout.ts`; never build one by hand. A workspace from before v0.36.0 (`.ai-context/`) is moved over on activation (`workspaceMigration.ts`). *Design §2.1–2.2.*
@@ -181,10 +186,10 @@ The full, generated tree is technical-design §12. The files that matter most, i
 | 9 | `src/engine/transforms/registry.ts` + one primitive | Deterministic generation. |
 | 10 | `src/agents/build/TransformationScaffolderAgent.ts`, `src/agents/llmParamSelector.ts` | Primitive-first codegen with LLM fallback. |
 | 11 | `src/core/llmProviders.ts`, `agenticTools.ts` | Providers and tool loops. |
-| 12 | `src/mcp/server.ts`, `tools.ts` | The MCP surface. |
+| 12 | `src/mcp/server.ts`, `tools.ts`; `src/cli/main.ts` | The MCP surface, and the CLI that reuses its handlers. |
 | 13 | `test/functional.test.cjs` (search for the feature) | Executable documentation for nearly everything above. |
 
-Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (step executors), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview skills), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, docs generator).
+Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (step executors), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/cli` (the `autode` command line), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview skills), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, `autode` package, docs generator).
 
 **Safe to ignore at first:** the AutoDE Dashboard panel (`panel.html`, `panelProvider.ts` — parked), `src/spokes/` other than `snowflakeExecutor.ts`, CSS in `sidebar.html`, `mock_activate.js`.
 
@@ -193,7 +198,8 @@ Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `s
 ### 7.1 Setup and running
 ```bash
 npm install
-npm run compile        # tsc to dist/** + esbuild bundles (dist/extension.js, dist/mcp-server.js)
+npm run compile        # tsc to dist/** + esbuild bundles (dist/extension.js, dist/autode.js) + the mcp-server.js shim
+node dist/autode.js --help   # the CLI; npm run package:cli builds the autode tarball in dist/
 ```
 Press **F5** ("Run Extension (Development Host)"); it compiles first. In the new window, open a scratch workspace — the reference problem's files in `test/reference/retail-orders/` make a good one ([manual-verification.md](manual-verification.md) Part 0). Commands run from the Command Palette *of the Development Host window*. Log lines appear in the panel's chat stream; tool-skill transitions also go to the `AutoDE: Tool Skills` output channel.
 

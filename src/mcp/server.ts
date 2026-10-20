@@ -21,20 +21,25 @@ import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, rea
  * Deterministic — no LLM calls (D5) — and it never writes to the workspace
  * (§8). Platform statements are read-only unless started with --allow-write.
  *
- *   node dist/mcp-server.js --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli] [--drivers <folder>]
+ *   autode mcp --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli] [--drivers <folder>]
+ *   (node dist/mcp-server.js … starts the same server)
+ *
+ * The entry point is src/cli/main.ts. In a bundle every inlined module sees
+ * `require.main === module`, so this module never starts itself.
  *
  * stdout carries the protocol; logs go to stderr, redacted.
  */
 
-const PACKAGE_NAME = 'auto-data-engineering-hub';
+/** The extension, and the standalone `autode` package (PA2), which lays its resources out the same way. */
+const PACKAGE_NAMES = ['auto-data-engineering-hub', 'autode'];
 
-/** The extension root (bundled `skills/`, `primitive-definitions/`, `package.json`): the nearest ancestor holding AutoDE's package.json. */
+/** The resources root (bundled `skills/`, `primitive-definitions/`, `package.json`): the nearest ancestor holding AutoDE's package.json — the extension's or the `autode` package's. */
 export function findResourcesRoot(start: string = __dirname): string | undefined {
   let dir = path.resolve(start);
   for (;;) {
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { name?: string };
-      if (pkg.name === PACKAGE_NAME) return dir;
+      if (pkg.name && PACKAGE_NAMES.includes(pkg.name)) return dir;
     } catch { /* keep walking */ }
     const parent = path.dirname(dir);
     if (parent === dir) return undefined;
@@ -196,11 +201,4 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const server = createAutodeServer({ workspaceRoot: args.workspaceRoot, resourcesRoot: resourcesRoot ?? args.workspaceRoot, version, allowWrite: args.allowWrite, allowCli: args.allowCli, driversRoot: args.driversRoot });
   await server.connect(new StdioServerTransport());
   process.stderr.write(`autode MCP server ${version} — workspace ${args.workspaceRoot}${args.allowWrite ? ' — platform writes allowed (--allow-write)' : ''}\n`);
-}
-
-if (require.main === module) {
-  main().catch((err) => {
-    process.stderr.write(`autode: ${redact(err instanceof Error ? err.message : String(err))}\n`);
-    process.exit(1);
-  });
 }

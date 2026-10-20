@@ -412,18 +412,9 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 In short: proposals are validated and become decisions in `.autode/decisions/`. Stakes are defined in the engine and recomputed on every resolution. High-stakes decisions are resolved only in the panel or through a committed decision file; low-stakes ones also through the proposing agent. Approved decisions are applied by engine code, and a decision whose document changed meanwhile is superseded. `autode_execute_query` no longer runs writes: a platform change is proposed, approved and then applied by an `--allow-write` server. The panel's approvals are recorded as decisions. *Changed in v0.41.0 (C4b):* facts go through the ledger's own gate (proposed, then confirmed in the Context Inbox) rather than decision files; decisions remain the gate for documents, mappings and platform changes.
 
 #### Phase PA2: The engine on its own — `autode` package and CLI
-Scope:
-- **Package** (D7): the engine, `autode mcp`, the CLI, the skills pack (from PA3), and a `package.json` that packs to a tarball. No `vscode`, and no new runtime dependency (arguments through `node:util` `parseArgs`). The VSIX bundles the same build.
-- **Commands.** Deterministic: `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor` (prerequisites, connection readiness), and `check`, the CI gate: validations pass and no pending high-stakes decision affects the artifacts. Human: `decisions list | show | approve | reject`; approve and reject require an interactive terminal and refuse when `CI` is set. Exit codes are documented and stable.
-- **Stable server path.** `autode mcp` passes the same contract tests as `dist/mcp-server.js`. `AutoDE: Configure MCP for Claude Code` and `docs/mcp-setup.md` prefer it when it is installed.
-- **Docs:** a CLI reference and per-host set-up (Claude Code, Codex, Cursor, Cline).
+**Status:** ✅ shipped in v0.42.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-3, P9; HOW: technical-design.md §10.8; usage: [cli.md](cli.md) (commands, exit codes) and [mcp-setup.md](mcp-setup.md) (per-host set-up). The full specification text is in git (this file at commit fd73fff).
 
-Acceptance:
-- The MCP contract suite passes against `autode mcp`.
-- `autode check` returns the documented exit codes on fixtures: clean, a validation failure, a pending high-stakes decision.
-- `autode decisions approve` refuses without a terminal and with `CI` set.
-- The packed tarball contains no `vscode` reference and stays within a size budget. The VSIX still works offline.
-- Publishing to a registry stays a separate, owner-approved step.
+In short: one `autode` package (engine, `autode mcp`, CLI, bundled resources; no runtime dependency) that the VSIX ships as the same `dist/autode.js`. The deterministic commands are `validate`, `compile`, `grounding`, `conformance`, `probe` (report only), `doctor` and `check` (the CI gate). The `decisions` commands are human only (interactive terminal, refused with `CI` set). Exit codes are stable. `AutoDE: Configure MCP for Claude Code` prefers the installed `autode mcp`. The skills pack joins the package in PA3. Publishing to a registry remains the owner's step.
 
 #### Phase PA3: AutoDE skills — built-in capabilities as standard skills over deterministic tools
 Scope:

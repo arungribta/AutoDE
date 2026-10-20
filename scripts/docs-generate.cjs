@@ -38,6 +38,7 @@ const FOLDER_NOTES = {
   'src/engine/transforms/declarative': 'Tier 2 declarative primitives',
   'src/engine/transforms/primitives': 'Tier 1 primitives',
   'src/mcp': 'MCP server (no vscode; §10.6)',
+  'src/cli': 'the autode command line (no vscode; §10.8)',
   'src/spokes': 'Snowflake executor (other files unused)'
 };
 

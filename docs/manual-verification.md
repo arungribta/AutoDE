@@ -446,6 +446,35 @@ Use a workspace with the retail reference sources imported (`test/reference/reta
   Do: in Claude Code, ask it to record a glossary term and a key for shop.orders through AutoDE.
   Expect: both appear in the Inbox as from "mcp · …"; Claude Code may confirm the term after asking you, but is refused for the key.
 
+## Part 19 — v0.42.0 The `autode` package and CLI
+
+Build the package first: `npm run package:cli` (the tarball is `dist/autode-0.42.0.tgz`). Install it into a scratch prefix, so your global npm stays clean: `npm install --prefix <scratch> dist/autode-0.42.0.tgz`. The command is then `<scratch>/node_modules/.bin/autode` (`autode.cmd` on Windows). Below, `autode` means that command. Use the reference workspace from Part 18, which has `.autode/`.
+
+- [ ] **19.1 Install and identity.**
+  Do: `autode --version`, then `autode doctor` in the workspace.
+  Expect: the version is 0.42.0. `doctor` lists Node, the workspace with its problems and the active one, the drivers folder, the prerequisites of the platforms your connections use, and each saved connection with its readiness for AutoDE and for MCP clients (as shown in the settings card's Saved connections).
+- [ ] **19.2 The CI gate.**
+  Do: run `autode check; echo $?` (PowerShell: `autode check; $LASTEXITCODE`). Then ask Claude Code to propose a mapping through AutoDE, and run `check` again. Then break `spec/pipeline.yaml` (for example `entities: 5`) and run it once more.
+  Expect: 0 and "check passed"; then 3, naming the pending mapping decision; then 1, naming the broken document (a validation failure outranks the decision). Restore the file.
+- [ ] **19.3 Decisions need a person.**
+  Do: `autode decisions list`, then `autode decisions approve <id> | cat` (piped, so there is no terminal), then `CI=1 autode decisions approve <id>` (PowerShell: `$env:CI=1`, and clear it afterwards). Finally run `autode decisions approve <id>` in a plain terminal, type something other than `approve`, and then run it again typing `approve`.
+  Expect: the piped run and the CI run are refused with exit 4. The wrong word changes nothing. Typing `approve` applies the mapping: the Mapping Context has it, the panel's Context Inbox no longer lists it, and `decisions show <id>` shows *approved* on channel `cli` by your OS user name.
+- [ ] **19.4 Compile and grounding.**
+  Do: `autode compile --dialect snowflake`, then `autode compile --dialect spark_sql --out <scratch>/out`, then `autode grounding <scratch>/out/<entity>/01_*.sql`.
+  Expect: the SQL matches what the panel's Pipeline Spec build produces. The files land under `<scratch>/out`, not in the workspace. Grounding is ✓ for tables AutoDE knows, and a misspelled table gives exit 1.
+- [ ] **19.5 Conformance and probe.**
+  Do: with the Part 10 pack (signed contract and a CRM sample) in place, run `autode conformance` and `autode probe`. If you have a source connection, add `--connection <id>`.
+  Expect: the same failing clauses as *Run Conformance* in the panel. The probe shows ✗ for cust_no with "(sample data)" and ends with "Nothing was recorded". The Inbox shows no new verification.
+- [ ] **19.6 `autode mcp` in Claude Code.**
+  Do: put the scratch `node_modules/.bin` folder on your `PATH`, then in VS Code run **AutoDE: Configure MCP for Claude Code**. Read the modal, write the file, and start Claude Code in the workspace. Then remove the folder from `PATH` and run the command again.
+  Expect: the first `.mcp.json` runs `autode mcp --workspace .` (`cmd /c autode …` on Windows), any other servers in the file are kept, and `/mcp` shows autode connected with the same tools as before. The second run offers the extension's own `dist/autode.js` and says its folder changes with updates.
+- [ ] **19.7 A stale path is noticed.**
+  Do: edit `.mcp.json` so the autode entry runs `…/auto-data-engineering-hub-0.41.0/dist/mcp-server.js`, then reload the window.
+  Expect: an info message ".mcp.json runs the AutoDE MCP server from an older extension version" with *Update .mcp.json*. Nothing is written until you click it.
+- [ ] **19.8 The VSIX still works offline.**
+  Do: `npx vsce package --no-dependencies`, install the VSIX with the network off, and open the panel. Then point a client at `node <extension>/dist/mcp-server.js`.
+  Expect: the extension activates as before, and the old server path still connects.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -554,5 +583,13 @@ Use a workspace with the retail reference sources imported (`test/reference/reta
 | 18.8 |  |  |
 | 18.9 |  |  |
 | 18.10 |  |  |
+| 19.1 |  |  |
+| 19.2 |  |  |
+| 19.3 |  |  |
+| 19.4 |  |  |
+| 19.5 |  |  |
+| 19.6 |  |  |
+| 19.7 |  |  |
+| 19.8 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

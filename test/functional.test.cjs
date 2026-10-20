@@ -6876,9 +6876,10 @@ async function main() {
   await test('v0.35.0: src/engine and src/mcp never import vscode (the bundle has no vscode reference)', () => {
     const nodeFs = require('node:fs');
     const nodePath = require('node:path');
-    const bundle = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'mcp-server.js'), 'utf8');
+    // Since v0.42.0 the server lives in the CLI bundle (dist/mcp-server.js is a shim for `autode mcp`).
+    const bundle = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'autode.js'), 'utf8');
     assert.ok(!/require\(["']vscode["']\)/.test(bundle), 'the MCP bundle requires vscode');
-    assert.ok(bundle.length < 1.5 * 1024 * 1024, `mcp-server.js is ${Math.round(bundle.length / 1024)} KB (budget 1.5 MB)`);
+    assert.ok(bundle.length < 1.5 * 1024 * 1024, `autode.js is ${Math.round(bundle.length / 1024)} KB (budget 1.5 MB)`);
   });
 
   // ── v0.36.0: .autode/ workspace layout, visible deliverables, migration from .ai-context/ ──
@@ -7686,7 +7687,7 @@ async function main() {
     for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) assert.ok(!pkg[section] || !pkg[section].oracledb, `oracledb in ${section}`);
     const notices = nodePath.join(__dirname, '..', 'dist', 'THIRD-PARTY-NOTICES.md');
     if (nodeFs.existsSync(notices)) assert.ok(!/oracledb/.test(nodeFs.readFileSync(notices, 'utf8')), 'oracledb was bundled');
-    for (const b of ['extension.js', 'mcp-server.js']) {
+    for (const b of ['extension.js', 'autode.js']) {
       const text = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', b), 'utf8');
       assert.ok(!/node_modules[\\/]+oracledb/.test(text), `${b} contains oracledb sources`);
     }
@@ -8189,6 +8190,265 @@ async function main() {
   await test('v0.40.0: the panel offers decisions for review (Decisions section, approve and reject)', () => {
     const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
     assert.ok(html.includes('id="paletteDecisions"') && html.includes("post('resolveDecision'") && html.includes("case 'decisionsList'"));
+  });
+
+  // ── v0.42.0: PA2 — the autode package and CLI ──
+
+  // The CLI in-process, with a scripted terminal.
+  const cli = async (argv, { interactive = false, env = {}, answers = [], platform } = {}) => {
+    const { run } = fresh('../dist/cli/main.js');
+    const out = []; const err = []; const asked = [];
+    const io = { out: (t) => out.push(t), err: (t) => err.push(t), env, cwd: process.cwd(), interactive, prompt: async (q) => { asked.push(q); return answers.shift() ?? ''; }, platform };
+    const code = await run(argv, io);
+    return { code, out: out.join('\n'), err: err.join('\n'), asked, json: () => JSON.parse(out.join('\n')) };
+  };
+  const pendingDecision = (ws, kind, proposal, problemId = 'retail-ab12') => {
+    const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+    return new DecisionStore(ws).create({ kind, title: `${kind} proposal`, summary: 's', proposal, proposedBy: { host: 'mcp', client: 'test' }, validation: { ok: true, errors: [], warnings: [], checks: [] }, problemId });
+  };
+  const goodMapping = { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'FACT_SALES', columns: [{ sourceColumn: 'amount', targetColumn: 'NET_AMOUNT' }] };
+
+  await test('v0.42.0: autode check — 0 when clean, 1 on a validation failure, 3 on a pending high-stakes decision; a file resolution passes, an edited stakes: low does not', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const f = await mcpWorkspace();
+    try {
+      const W = ['--workspace', f.ws];
+      let r = await cli(['check', ...W]);
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.ok(/✓ retail-ab12: spec\/pipeline\.yaml/.test(r.out) && /check passed/.test(r.out), r.out);
+      // A low-stakes fact waiting for review doesn't block; a mapping (high stakes) does.
+      pendingDecision(f.ws, 'assertion', { kind: 'business_term', subject: ['x'], predicate: 'defined_as', value: {}, statement: 's', evidence: [] });
+      assert.strictEqual((await cli(['check', ...W])).code, 0);
+      const d = pendingDecision(f.ws, 'mapping', goodMapping);
+      r = await cli(['check', ...W, '--json']);
+      assert.strictEqual(r.code, 3);
+      assert.deepStrictEqual([r.json().exitCode, r.json().pendingDecisions.map((x) => x.id)], [3, [d.id]]);
+      // Someone edits the file's stakes: recomputed, still blocking.
+      const file = nodePath.join(f.ws, '.autode', 'decisions', `${d.id}.yaml`);
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('stakes: high', 'stakes: low'));
+      assert.strictEqual((await cli(['check', ...W])).code, 3, 'stakes are recomputed');
+      // A decision for another problem doesn't block this one.
+      assert.strictEqual((await cli(['check', ...W, '--problem', 'retail-ab12'])).code, 3);
+      nodeFs.mkdirSync(nodePath.join(f.ws, '.autode', 'problems', 'other', 'spec'), { recursive: true });
+      assert.strictEqual((await cli(['check', ...W, '--problem', 'other'])).code, 0);
+      // A person resolved it in the committed file (decision + by): it passes, and check wrote nothing.
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('decision: ""', 'decision: approved').replace('by: ""', 'by: priya'));
+      const before = treeState(f.ws);
+      assert.strictEqual((await cli(['check', ...W])).code, 0);
+      assert.strictEqual(treeState(f.ws), before, 'check never resolves or applies');
+      // A validation failure outranks a pending decision. CI has no active problem: every problem is checked.
+      pendingDecision(f.ws, 'mapping', goodMapping);
+      nodeFs.writeFileSync(nodePath.join(f.ws, '.autode', 'problems', 'other', 'spec', 'pipeline.yaml'), 'id: p\nentities: 5\n');
+      nodeFs.rmSync(nodePath.join(f.ws, '.autode', 'local'), { recursive: true, force: true });
+      r = await cli(['check', ...W, '--json']);
+      assert.strictEqual(r.code, 1);
+      assert.deepStrictEqual(r.json().problems, ['other', 'retail-ab12']);
+      assert.ok(r.json().findings.some((x) => x.problem === 'other' && !x.ok), JSON.stringify(r.json().findings));
+      assert.strictEqual((await cli(['check', ...W, '--problem', 'nope'])).code, 5);
+      assert.strictEqual((await cli(['chekc', ...W])).code, 2);
+      assert.strictEqual((await cli(['check', '--frobnicate'])).code, 2);
+    } finally { f.done(); }
+  });
+
+  await test('v0.42.0: autode decisions approve refuses without a terminal and with CI set; in a terminal it needs the typed confirmation, then the engine applies it', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const { spawnSync } = require('node:child_process');
+    const f = await mcpWorkspace();
+    try {
+      const W = ['--workspace', f.ws];
+      const d = pendingDecision(f.ws, 'mapping', goodMapping);
+      const mappingFile = nodePath.join(f.ws, '.autode', 'problems', 'retail-ab12', 'context', 'mapping-context.yaml');
+      // The real binary over pipes: no terminal.
+      const env = { ...process.env }; delete env.CI;
+      let p = spawnSync(process.execPath, [nodePath.join(__dirname, '..', 'dist', 'autode.js'), 'decisions', 'approve', d.id, ...W], { encoding: 'utf8', env });
+      assert.strictEqual(p.status, 4, p.stderr);
+      assert.ok(/interactive terminal/.test(p.stderr), p.stderr);
+      p = spawnSync(process.execPath, [nodePath.join(__dirname, '..', 'dist', 'autode.js'), 'decisions', 'reject', d.id, ...W], { encoding: 'utf8', env: { ...env, CI: 'true' } });
+      assert.strictEqual(p.status, 4);
+      assert.ok(/CI is set/.test(p.stderr), p.stderr);
+      // Even with a terminal, CI wins.
+      assert.strictEqual((await cli(['decisions', 'approve', d.id, ...W], { interactive: true, env: { CI: '1' }, answers: ['approve'] })).code, 4);
+      // Not confirmed: nothing changes.
+      let r = await cli(['decisions', 'approve', d.id, ...W], { interactive: true, answers: ['y'] });
+      assert.strictEqual(r.code, 4);
+      assert.ok(/Type approve to confirm/.test(r.asked[0]) && /mapping proposal/.test(r.out), r.out);
+      assert.strictEqual((await cli(['decisions', 'list', ...W, '--status', 'pending', '--json'])).json().decisions.length, 1);
+      // Confirmed by a person: resolved on the cli channel and applied by the engine.
+      r = await cli(['decisions', 'approve', d.id, ...W, '--by', 'priya', '--note', 'checked'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.ok(/Applied/.test(r.out), r.out);
+      const shown = (await cli(['decisions', 'show', d.id, ...W, '--json'])).json();
+      assert.strictEqual(shown.decision.status, 'applied');
+      assert.ok(shown.decision.events.some((e) => e.type === 'approved' && e.channel === 'cli' && e.actor === 'priya'));
+      assert.ok(/NET_AMOUNT/.test(nodeFs.readFileSync(mappingFile, 'utf8')));
+      assert.strictEqual((await cli(['decisions', 'approve', d.id, ...W], { interactive: true, answers: ['approve'] })).code, 1, 'no longer pending');
+      assert.strictEqual((await cli(['decisions', 'show', 'dec-01ARZ3NDEKTSV4RRFFQ69G5FAV', ...W])).code, 5);
+      // Reject works the same way.
+      const d2 = pendingDecision(f.ws, 'platform_change', { connectionId: 'snowflake:x', sql: 'DROP TABLE t', reason: 'r' });
+      r = await cli(['decisions', 'reject', d2.id, ...W], { interactive: true, answers: ['reject'] });
+      assert.strictEqual(r.code, 0);
+      assert.strictEqual((await cli(['decisions', 'show', d2.id, ...W, '--json'])).json().decision.status, 'rejected');
+    } finally { f.done(); }
+  });
+
+  await test('v0.42.0: validate, compile and grounding give the MCP tools\' answers; compile --out writes files; usage errors exit 2', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+    const f = await mcpWorkspace();
+    const client = await mcpSession(f.ws);
+    const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cli-out-'));
+    try {
+      const W = ['--workspace', f.ws];
+      const viaMcp = (await client.callTool({ name: 'autode_compile_pipeline_spec', arguments: { dialect: 'snowflake' } })).structuredContent;
+      const viaCli = (await cli(['compile', '--dialect', 'snowflake', ...W, '--json'])).json();
+      assert.deepStrictEqual(viaCli.entities, viaMcp.entities, 'same handler, same answer');
+      assert.ok(viaMcp.entities.length > 0);
+      assert.strictEqual((await cli(['compile', ...W])).code, 2, '--dialect is required');
+      assert.strictEqual((await cli(['compile', '--dialect', 'cobol', ...W])).code, 2);
+      const written = await cli(['compile', '--dialect', 'postgres', ...W, '--out', out, '--json']);
+      assert.strictEqual(written.code, 0, written.err);
+      assert.ok(written.json().written.length > 0 && written.json().written.every((x) => nodeFs.existsSync(x) && x.startsWith(out)));
+      assert.ok(!nodeFs.existsSync(nodePath.join(f.ws, 'autode-output')), 'nothing written into the workspace');
+      // grounding: known tables pass, unknown ones fail.
+      nodeFs.writeFileSync(nodePath.join(out, 'good.sql'), 'SELECT o.order_id, c.email FROM shop.orders o JOIN shop.customers c ON o.customer_id = c.customer_id');
+      nodeFs.writeFileSync(nodePath.join(out, 'bad.sql'), 'SELECT x FROM shop.refunds');
+      const good = await cli(['grounding', nodePath.join(out, 'good.sql'), ...W]);
+      assert.strictEqual(good.code, 0, good.out);
+      const bad = await cli(['grounding', nodePath.join(out, 'bad.sql'), ...W, '--json']);
+      assert.strictEqual(bad.code, 1);
+      const mcpBad = (await client.callTool({ name: 'autode_check_grounding', arguments: { content: 'SELECT x FROM shop.refunds', name: nodePath.join(out, 'bad.sql') } })).structuredContent;
+      assert.deepStrictEqual(bad.json().results[0].unresolved, mcpBad.unresolved);
+      assert.strictEqual((await cli(['grounding', ...W])).code, 2);
+      assert.strictEqual((await cli(['grounding', nodePath.join(out, 'missing.sql'), ...W])).code, 5);
+      // validate with a path, and an invalid spec.
+      nodeFs.writeFileSync(nodePath.join(f.ws, 'broken.yaml'), 'id: p\nentities: 5\n');
+      assert.strictEqual((await cli(['validate', nodePath.join(f.ws, 'broken.yaml'), ...W])).code, 1);
+      assert.strictEqual((await cli(['validate', ...W])).code, 0);
+      // doctor: machine-readable, no connections configured is fine.
+      const doc = await cli(['doctor', ...W, '--json'], { env: {} });
+      assert.strictEqual(doc.code, 0, doc.out);
+      assert.deepStrictEqual([doc.json().hasAutode, doc.json().connections, doc.json().configErrors], [true, [], []]);
+      const v = await cli(['--version']);
+      assert.deepStrictEqual([v.code, v.out], [0, require('../package.json').version]);
+    } finally { await client.close(); f.done(); nodeFs.rmSync(out, { recursive: true, force: true }); }
+  });
+
+  await test('v0.42.0: autode conformance and probe run on the pack\'s samples, report failures (exit 1) and record nothing', async () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const env = await k2.cfm();
+    try {
+      const big = require('../dist/engine/context/fileIngestion.js').parseFile(c4a.read('sources/crm.ddl'), 'crm.ddl', { system: 'crm', environment: 'prod' });
+      await env.cfm.ingestParsed(big.nodes, big.edges);
+      fs.mkdirSync(p.join(env.dir, 'docs'), { recursive: true });
+      fs.writeFileSync(p.join(env.dir, 'docs', 'contract.yaml'), c4a.read('documents/pack/customer-contract.v1.yaml'));
+      fs.writeFileSync(p.join(env.dir, 'docs', 'crm.csv'), c4a.read('sources/samples/crm_customers.csv'));
+      const { BusinessPackManager } = require('../dist/context/BusinessPackManager.js');
+      const pm = new BusinessPackManager(p.join(env.dir, '.autode', 'problems', 'x', 'pack'), env.dir, () => env.cfm, () => {}, async () => ({ ...c4a.profile(), id: 'house-contract' }));
+      await pm.load();
+      const doc = await pm.addDocument({ path: 'docs/contract.yaml', role: 'contract', authority: 'signed', version: '1' });
+      const first = await pm.applyDocument(doc.id);
+      fs.writeFileSync(first.profilePath, fs.readFileSync(first.profilePath, 'utf8').replace('status: proposed', 'status: confirmed'));
+      await pm.load();
+      assert.strictEqual((await pm.applyDocument(doc.id)).status, 'applied');
+      await pm.addDocument({ path: 'docs/crm.csv', role: 'sample', authority: 'signed', version: '1', table: 'obj:crm/prod/crm.customers' });
+      await env.cfm.getLedger().assert({ kind: 'key', subject: ['obj:crm/prod/crm.customers'], predicate: 'primary', value: ['cust_no'], statement: 'cust_no is the key of crm.customers', evidence: [{ type: 'chat_message', ref: 't1' }], status: 'active', trust: 'confirmed' });
+      await env.cfm.persistCompiledGraph();
+      const W = ['--workspace', env.dir, '--problem', 'x'];
+      const panel = await pm.conformance(pm.probeExecutor());
+      const before = treeState(p.join(env.dir, '.autode'));
+      const conf = await cli(['conformance', ...W, '--json']);
+      assert.strictEqual(conf.code, 1, conf.out + conf.err);
+      assert.deepStrictEqual(conf.json().reports.map((r) => r.tables.map((t) => t.results.map((x) => x.status))), panel.reports.map((r) => r.tables.map((t) => t.results.map((x) => x.status))), 'the panel and the CLI report the same');
+      const probe = await cli(['probe', ...W]);
+      assert.strictEqual(probe.code, 1, probe.out + probe.err);
+      assert.ok(/✗ cust_no is the key of crm\.customers/.test(probe.out) && /sample data/.test(probe.out) && /Nothing was recorded/.test(probe.out), probe.out);
+      assert.strictEqual(treeState(p.join(env.dir, '.autode')), before, 'conformance and probe write nothing');
+      assert.strictEqual((await cli(['probe', '--workspace', env.dir, '--problem', 'x', '--connection', 'snowflake:nope'])).code, 5, 'an unknown connection is not found');
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.42.0: the autode package — packs to a tarball with no vscode reference, within budget; autode mcp from it answers like dist/mcp-server.js', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+    const { stage, pack } = fresh('../scripts/pack-cli.cjs');
+    const tmp = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pkg-'));
+    const f = await mcpWorkspace();
+    const clients = [];
+    try {
+      const dir = stage(nodePath.join(tmp, 'package'));
+      const pkg = JSON.parse(nodeFs.readFileSync(nodePath.join(dir, 'package.json'), 'utf8'));
+      assert.deepStrictEqual([pkg.name, pkg.version, pkg.bin.autode, pkg.dependencies], ['autode', require('../package.json').version, 'dist/autode.js', undefined], 'no runtime dependency');
+      const packed = pack(dir, tmp);
+      assert.ok(nodeFs.existsSync(packed.tarball));
+      assert.ok(packed.size < 600 * 1024, `tarball ${Math.round(packed.size / 1024)} KB (budget 600 KB)`);
+      assert.ok(packed.unpackedSize < 2 * 1024 * 1024, `unpacked ${Math.round(packed.unpackedSize / 1024)} KB (budget 2 MB)`);
+      for (const want of ['package.json', 'README.md', 'LICENSE', 'dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'media/autode-icon-64.png', 'skills/requirements-discovery.json']) assert.ok(packed.files.includes(want), `missing ${want}`);
+      for (const rel of packed.files) {
+        const text = nodeFs.readFileSync(nodePath.join(dir, rel), 'utf8');
+        assert.ok(!/require\(["']vscode["']\)|from ["']vscode["']/.test(text), `${rel} references vscode`);
+      }
+      assert.ok(!/\]\((?!https?:|#)/.test(nodeFs.readFileSync(nodePath.join(dir, 'README.md'), 'utf8')), 'README links are absolute');
+      // The MCP contract: autode mcp from the package and the extension's mcp-server.js answer the same.
+      const connect = async (args) => {
+        const c = new Client({ name: 'autode-tests', version: '1' });
+        await c.connect(new StdioClientTransport({ command: process.execPath, args: [...args, '--workspace', f.ws], stderr: 'pipe' }));
+        clients.push(c);
+        return c;
+      };
+      const pkgClient = await connect([nodePath.join(dir, 'dist', 'autode.js'), 'mcp']);
+      const extClient = await connect([nodePath.join(__dirname, '..', 'dist', 'mcp-server.js')]);
+      assert.deepStrictEqual(pkgClient.getServerVersion().version, extClient.getServerVersion().version);
+      assert.deepStrictEqual((await pkgClient.listTools()).tools, (await extClient.listTools()).tools);
+      assert.deepStrictEqual((await pkgClient.listPrompts()).prompts, (await extClient.listPrompts()).prompts, 'the package finds its bundled interview prompts');
+      assert.deepStrictEqual((await pkgClient.listResources()).resources, (await extClient.listResources()).resources);
+      for (const [name, args] of [['autode_compile_pipeline_spec', { dialect: 'spark_sql' }], ['autode_search_primitives', {}], ['autode_resolve', { text: 'customer email' }], ['autode_list_decisions', {}], ['autode_execute_query', { connectionId: 'x', sql: 'DROP TABLE t' }]]) {
+        assert.deepStrictEqual((await pkgClient.callTool({ name, arguments: args })).structuredContent, (await extClient.callTool({ name, arguments: args })).structuredContent, name);
+      }
+    } finally { for (const c of clients) await c.close(); f.done(); nodeFs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
+  await test('v0.42.0: Configure MCP for Claude Code prefers the installed autode, keeps other servers, and flags an entry left behind by an update', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const M = fresh('../dist/core/mcpConfig.js');
+    const bin = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-bin-'));
+    try {
+      const ext = nodePath.join(os.homedir(), '.vscode', 'extensions', 'arun-gribta.auto-data-engineering-hub-0.42.0');
+      // Nothing on PATH: VS Code's runtime runs the extension's bundle.
+      // PATH lists are split the platform's way, so this runs on the native platform.
+      const win = process.platform === 'win32';
+      const env = { PATH: bin, PATHEXT: '.EXE;.CMD' };
+      let c = M.chooseMcpEntry({ extensionPath: ext, env, execPath: '/opt/code/code' });
+      assert.deepStrictEqual([c.source, c.entry.command, c.entry.args, c.entry.env], ['extension', '/opt/code/code', [nodePath.join(ext, 'dist', 'autode.js'), 'mcp', '--workspace', '.'], { ELECTRON_RUN_AS_NODE: '1' }]);
+      nodeFs.writeFileSync(nodePath.join(bin, win ? 'node.EXE' : 'node'), '');
+      c = M.chooseMcpEntry({ extensionPath: ext, env });
+      assert.deepStrictEqual([c.source, c.entry.command], ['extension', 'node']);
+      nodeFs.writeFileSync(nodePath.join(bin, win ? 'autode.CMD' : 'autode'), '');
+      c = M.chooseMcpEntry({ extensionPath: ext, env });
+      // npm's .cmd shims need cmd /c on Windows.
+      assert.deepStrictEqual([c.source, c.entry], ['installed', win ? { command: 'cmd', args: ['/c', 'autode', 'mcp', '--workspace', '.'] } : { command: 'autode', args: ['mcp', '--workspace', '.'] }]);
+      // Merge keeps everything else; a repeat is no change; bad JSON is refused.
+      const existing = JSON.stringify({ mcpServers: { other: { command: 'x' } }, extra: true });
+      const m = M.mergeMcpJson(existing, c.entry);
+      assert.deepStrictEqual(JSON.parse(m.text), { mcpServers: { other: { command: 'x' }, autode: c.entry }, extra: true });
+      assert.strictEqual(M.mergeMcpJson(m.text, c.entry).changed, false);
+      assert.throws(() => M.mergeMcpJson('[1]', c.entry), /not a JSON object/);
+      // An entry pointing into an older extension folder is stale; this one's own, or an installed autode, is not.
+      const old = { command: 'node', args: [nodePath.join(os.homedir(), '.vscode', 'extensions', 'arun-gribta.auto-data-engineering-hub-0.41.0', 'dist', 'mcp-server.js'), '--workspace', '.'] };
+      assert.strictEqual(M.isStaleExtensionEntry(old, ext), true);
+      assert.strictEqual(M.isStaleExtensionEntry({ command: 'node', args: [nodePath.join(ext, 'dist', 'autode.js'), 'mcp'] }, ext), false);
+      assert.strictEqual(M.isStaleExtensionEntry({ command: 'autode', args: ['mcp'] }, ext), false);
+      const pkg = require('../package.json');
+      assert.ok(pkg.contributes.commands.some((x) => x.command === 'autoDataEngineeringHub.configureMcpClaudeCode'));
+    } finally { nodeFs.rmSync(bin, { recursive: true, force: true }); }
+  });
+
+  await test('v0.42.0: the VSIX ships the CLI bundle and the mcp-server.js shim; the shim is the same server', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ignore = nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8');
+    for (const f of ['!dist/autode.js', '!dist/mcp-server.js', '!dist/extension.js']) assert.ok(ignore.includes(f), f);
+    const shim = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'mcp-server.js'), 'utf8');
+    assert.ok(shim.length < 1024 && /require\('\.\/autode\.js'\)\.main\(\['mcp'/.test(shim), shim);
+    const bundle = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'autode.js'), 'utf8');
+    assert.ok(bundle.startsWith('#!/usr/bin/env node'));
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

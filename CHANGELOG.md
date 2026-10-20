@@ -6,6 +6,36 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.42.0
+
+- **Phase PA2: the engine on its own, as the `autode` package and CLI** (`docs/mcp-engine-requirements.md` §3.1 D7, §9.2; requirements MCP-3, P9; technical-design §10.8; reference: `docs/cli.md`; per-host set-up: `docs/mcp-setup.md`).
+- **One build, two packages.** `dist/autode.js` is a single self-contained bundle (no `vscode`, no runtime dependency) holding the engine, the CLI and the MCP server. The VSIX ships it, and `npm run package:cli` packs it with the bundled interview prompts, icon and licences into `dist/autode-<version>.tgz` (205 KB, 660 KB unpacked, production build). Install it with `npm install -g autode-<version>.tgz`. **Nothing is published to a registry**; that remains the owner's step.
+- **`autode mcp`** is the MCP server at a path that doesn't change with extension updates. `dist/mcp-server.js` still works: it is now a two-line shim for `autode mcp`, so existing client configurations keep working.
+- **Deterministic commands** (they never change AutoDE's state):
+  - `validate`: business problem, Pipeline Spec, mapping documents, workspace primitives and `connections.yaml`.
+  - `compile --dialect <d>`: to stdout, or files under `--out`.
+  - `grounding <file.sql>…`
+  - `conformance` and `probe`: pack samples, and live read-only probes with `--connection`.
+  - `doctor`: prerequisites, drivers, connections and their readiness.
+  - **`check`, the CI gate:** everything `validate` checks, and it fails while a high-stakes decision is pending for the problem.
+
+  `validate`, `compile` and `grounding` call the MCP tools' own handlers, so the CLI and the server can't disagree (a test compares them). With no active problem (normal in CI, because `.autode/local/` isn't committed), commands run over every problem, or take `--problem <id>`.
+- **Human commands:** `decisions list | show | approve | reject`. Approve and reject work only in an interactive terminal, refuse whenever `CI` is set, and need the verb typed back to confirm. This is the *CLI* channel PA1 already allowed for high-stakes decisions. An approved document change is applied by the engine at once; an approved platform change still runs only on an `--allow-write` server.
+- **Stable exit codes:** 0 ok, 1 failed, 2 usage, 3 pending high-stakes decision, 4 refused (a person is needed), 5 not found, 6 platform error, 70 internal. `--json` gives machine-readable output.
+- **`AutoDE: Configure MCP for Claude Code`** (new command) writes the project's `.mcp.json`. It uses the installed `autode mcp` when that is on `PATH` (`cmd /c autode …` on Windows), else `node <extension>/dist/autode.js mcp`, else VS Code's own runtime. It keeps other servers, and shows the command line before writing. At activation AutoDE notices an entry left pointing at an older extension folder and offers to update it; it never writes on its own.
+- **Docs:** new `docs/cli.md` (the CLI reference, also the package README). `docs/mcp-setup.md` now prefers `autode mcp`, adds Codex and Cline, documents the Windows `cmd /c` form, and lists the CLI as a decision channel.
+- **Refactored:** conformance, sample probes and probe candidates moved from `BusinessPackManager` into the engine (`src/engine/context/packChecks.ts`), so the panel and the CLI run the same code; `verifyAssertions()` is now `probeAssertions()` (run) plus recording. `EngineWorkspace` takes an explicit `problemId`. The MCP server module no longer starts itself when it is the main module, because inside a bundle every module looks like the main one; the entry point is the CLI.
+- **Deviations / notes:**
+  - **`autode probe` reports and records nothing.** The spec didn't say. Recording a verification changes the ledger, so the CLI leaves that to the panel's *Verify Claims* and `autode_verify_assertion`, which keeps every CLI command except `decisions` CI-safe.
+  - **"No pending high-stakes decision affects the artifacts"** is implemented as: no pending decision with recomputed high stakes for a checked problem, or for no problem. A decision a person resolved in its committed file counts as resolved; `check` doesn't sync or apply it. Decisions aren't yet linked to individual artifacts, so a pending platform change also blocks.
+  - **`decisions list` and `show` don't apply file resolutions** (the MCP `autode_list_decisions` does), so they never write.
+  - **The MCP contract test against `autode mcp`** compares the packed server with `dist/mcp-server.js`: identical tool, prompt and resource lists, identical results for five tool calls, and a passing refusal. It doesn't re-run every MCP test against both entry points; the existing suite still runs against `dist/mcp-server.js`, which is now the same code.
+  - **The skills pack** named in D7 isn't in the package yet; it arrives with PA3.
+  - **The spec assumed `AutoDE: Configure MCP for Claude Code` already existed;** it didn't, so it was added here.
+  - **Codex and Cline set-up** is written from their documented configuration formats and hasn't been tried live (manual-verification Part 19).
+  - **Whether the package name `autode` is free on npm** wasn't checked. It matters only when the owner publishes; a Tiger Analytics fork would need its own name anyway.
+- **Measured:** 334 tests (7 new: `check` exit codes, decisions refusal and confirmation, CLI ↔ MCP parity, conformance and probe on samples, the packed package and its server, Configure MCP, VSIX contents). Lint 0 errors. `npm run eval` unchanged from v0.41.0 (traps 5/5, contract violations 4/4, none false). Bundles in production: `extension.js` 829 KB, `autode.js` 632 KB.
+
 ## 0.41.0
 
 - **Phase C4b: facts from conversation, the Context Inbox, and tool-action memory** (`docs/context-layer-requirements.md` §5.2–5.4, §7.2, §11; requirements CHT-5, CTX-10, GRD-3, CTX-1; technical-design §5.14; usage: `docs/mcp-setup.md`).

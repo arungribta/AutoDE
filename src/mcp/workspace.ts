@@ -32,6 +32,8 @@ export interface WorkspaceOptions {
   workspaceRoot: string;
   /** Where the extension's bundled `skills/` and `primitive-definitions/` live. */
   resourcesRoot: string;
+  /** The business problem to read, instead of the active one (`.autode/local/`, absent in CI) — the CLI's `--problem`. */
+  problemId?: string;
 }
 
 /** The per-problem documents exposed as resources (§5.5), relative to the active problem's folder. */
@@ -91,11 +93,21 @@ export class EngineWorkspace {
   }
 
   public activeProblemId(): string | undefined {
+    if (this.options.problemId !== undefined) return /^[A-Za-z0-9_.-]+$/.test(this.options.problemId) ? this.options.problemId : undefined;
     try {
       const raw = JSON.parse(fs.readFileSync(this.at('activeProblem'), 'utf8')) as { problemId?: string };
       return typeof raw.problemId === 'string' && /^[A-Za-z0-9_.-]+$/.test(raw.problemId) ? raw.problemId : undefined;
     } catch {
       return undefined;
+    }
+  }
+
+  /** Every business problem folder under `.autode/problems/`. */
+  public problemIds(): string[] {
+    try {
+      return fs.readdirSync(this.at('problems'), { withFileTypes: true }).filter((e) => e.isDirectory() && /^[A-Za-z0-9_.-]+$/.test(e.name)).map((e) => e.name).sort();
+    } catch {
+      return [];
     }
   }
 

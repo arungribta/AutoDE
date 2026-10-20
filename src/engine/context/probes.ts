@@ -305,13 +305,12 @@ export interface VerifyOutcome {
 }
 
 /**
- * Probes each assertion and records the outcome in the ledger: a pass is a
- * `verified` event (trust → verified), a fail a `verification_failed` event
- * (status → needs_review, the observed numbers as the reason). Undecided or
- * unrunnable probes record nothing.
+ * Runs the probes for each assertion without recording anything — the
+ * `autode probe` report (Phase PA2). `verifyAssertions` records the same
+ * outcomes in the ledger.
  */
-export async function verifyAssertions(ledger: AssertionLedger, assertions: readonly Assertion[], executor: ProbeExecutor, resolve: ProbeResolver, now: () => Date = () => new Date()): Promise<VerifyOutcome[]> {
-  const out: VerifyOutcome[] = [];
+export async function probeAssertions(assertions: readonly Assertion[], executor: ProbeExecutor, resolve: ProbeResolver): Promise<Array<VerifyOutcome & { probeId?: string }>> {
+  const out: Array<VerifyOutcome & { probeId?: string }> = [];
   for (const a of assertions) {
     const specs = probesFor(a, resolve);
     if (specs.length === 0) { out.push({ assertionId: a.id, statement: a.statement, result: undefined, skipped: 'no probe for this kind of claim, or its subject is not a known table' }); continue; }
@@ -324,11 +323,24 @@ export async function verifyAssertions(ledger: AssertionLedger, assertions: read
         continue;
       }
       if (!result) { out.push({ assertionId: a.id, statement: a.statement, result: undefined, skipped: 'not verified — no connection or sample reaches this table' }); continue; }
-      out.push({ assertionId: a.id, statement: a.statement, result });
-      if (result.pass === undefined) continue;
-      const verification: Verification = { method: 'probe', at: now().toISOString(), result: result.pass ? 'pass' : 'fail', detail: `${result.detail}${result.source === 'sample' ? ' (sample data)' : ''}`, probeId: `${spec.check}:${spec.table.fqn}:${spec.columns.join('+')}` };
-      await ledger.recordVerification(a.id, verification);
+      out.push({ assertionId: a.id, statement: a.statement, result, probeId: `${spec.check}:${spec.table.fqn}:${spec.columns.join('+')}` });
     }
   }
   return out;
+}
+
+/**
+ * Probes each assertion and records the outcome in the ledger: a pass is a
+ * `verified` event (trust → verified), a fail a `verification_failed` event
+ * (status → needs_review, the observed numbers as the reason). Undecided or
+ * unrunnable probes record nothing.
+ */
+export async function verifyAssertions(ledger: AssertionLedger, assertions: readonly Assertion[], executor: ProbeExecutor, resolve: ProbeResolver, now: () => Date = () => new Date()): Promise<VerifyOutcome[]> {
+  const outcomes = await probeAssertions(assertions, executor, resolve);
+  for (const o of outcomes) {
+    if (!o.result || o.result.pass === undefined) continue;
+    const verification: Verification = { method: 'probe', at: now().toISOString(), result: o.result.pass ? 'pass' : 'fail', detail: `${o.result.detail}${o.result.source === 'sample' ? ' (sample data)' : ''}`, probeId: o.probeId };
+    await ledger.recordVerification(o.assertionId, verification);
+  }
+  return outcomes.map(({ probeId: _probeId, ...o }) => o);
 }

@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -230,6 +230,10 @@
       {
         "command": "autoDataEngineeringHub.checkPlatformPrerequisites",
         "title": "AutoDE: Check Platform Prerequisites"
+      },
+      {
+        "command": "autoDataEngineeringHub.configureMcpClaudeCode",
+        "title": "AutoDE: Configure MCP for Claude Code"
       },
       {
         "command": "autoDataEngineeringHub.installOracleDriver",
@@ -733,7 +737,8 @@
     "bundle": "node scripts/bundle.cjs",
     "vscode:prepublish": "tsc -p ./ && node scripts/bundle.cjs --production",
     "package": "vsce package",
-    "mcp": "node dist/mcp-server.js",
+    "mcp": "node dist/autode.js mcp",
+    "package:cli": "tsc -p ./ && node scripts/bundle.cjs --production && node scripts/pack-cli.cjs --pack",
     "docs:generate": "node scripts/docs-generate.cjs",
     "test": "npm run compile && node test/functional.test.cjs",
     "eval": "npm run compile && node test/eval/run-eval.cjs",

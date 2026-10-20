@@ -8,6 +8,7 @@ import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './engine/platform/ConnectionManager';
 import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
 import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, PrerequisiteHost } from './core/platformPrerequisites';
+import { configureMcpForClaudeCode, hintStaleMcpJson } from './core/mcpConfig';
 import { PlatformOnboarding } from './core/platformOnboarding';
 import { secretStorageKey } from './core/credentials/VsCodeSecretStorageResolver';
 import { SECRET_KEYS } from './core/extensionIdentity';
@@ -285,6 +286,11 @@ export function activate(context: vscode.ExtensionContext): void {
     await configManager.setOraclePassword(value);
     vscode.window.showInformationMessage('Oracle password saved in secret storage.');
   });
+
+  // Phase PA2: the project's .mcp.json entry for the AutoDE server (installed `autode mcp` preferred).
+  const configureMcpCommandId = `${EXTENSION_ID}.configureMcpClaudeCode`;
+  const configureMcp = vscode.commands.registerCommand(configureMcpCommandId, () => configureMcpForClaudeCode(vscode, { workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, extensionPath: context.extensionPath, log: (line) => sidebarProvider.logToChat(line) }));
+  hintStaleMcpJson(vscode, { workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, extensionPath: context.extensionPath, commandId: configureMcpCommandId });
 
   const asLmProvider = (v: unknown): 'copilot' | 'claude' | undefined =>
     v === 'claude' || v === 'copilot' ? v : undefined;
@@ -1122,7 +1128,7 @@ export function activate(context: vscode.ExtensionContext): void {
     importToolSkill, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential,
-    checkPlatformPrerequisites, installOracleDriver, verifyOracleDriver, setOraclePassword
+    checkPlatformPrerequisites, installOracleDriver, verifyOracleDriver, setOraclePassword, configureMcp
   );
 }
 

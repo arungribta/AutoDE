@@ -32,10 +32,10 @@ module.exports = {
       // Engine layer (v0.26.0, docs/mcp-engine-requirements.md §4.4): runs in the
       // extension host today and in the standalone MCP server from Phase 3, so it
       // must never depend on the VS Code API — not even for types.
-      files: ['src/engine/**/*.ts', 'src/mcp/**/*.ts'],
+      files: ['src/engine/**/*.ts', 'src/mcp/**/*.ts', 'src/cli/**/*.ts'],
       rules: {
         'no-restricted-imports': ['error', {
-          paths: [{ name: 'vscode', message: 'src/engine and src/mcp must stay host-agnostic — take what you need through a parameter (see FileIo, AgentHost).' }]
+          paths: [{ name: 'vscode', message: 'src/engine, src/mcp and src/cli must stay host-agnostic — take what you need through a parameter (see FileIo, AgentHost).' }]
         }]
       }
     }

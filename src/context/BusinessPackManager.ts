@@ -2,14 +2,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ContextFileManager } from './ContextFileManager';
 import { BusinessPack, DocumentAuthority, DocumentRole, PackDocument, contentSha, emptyPack, parsePack, serializePack, upsertDocument } from '../engine/context/pack';
-import { InterpretationProfile, applyProfile, buildProfileProposalPrompt, parseProfile, parseProfileProposal, parseStructured, profileMatches, serializeProfile } from '../engine/context/profiles';
+import { InterpretationProfile, applyProfile, buildProfileProposalPrompt, parseProfileProposal, parseStructured, profileMatches, serializeProfile } from '../engine/context/profiles';
 import { ReconcileResult, documentClauses, reconcileContract } from '../engine/context/contracts';
-import { ConformanceReport, checkConformance, renderConformanceReport } from '../engine/context/conformance';
-import { ProbeExecutor, ProbeResolver, VerifyOutcome, combineProbeExecutors, createProbeResolver, createSampleProbeExecutor, parseSampleCsv, verifyAssertions } from '../engine/context/probes';
+import { ConformanceReport } from '../engine/context/conformance';
+import { ProbeExecutor, ProbeResolver, VerifyOutcome, combineProbeExecutors, createProbeResolver, verifyAssertions } from '../engine/context/probes';
+import { STRUCTURED_DOCUMENT, loadProfiles, packConformance, probeCandidates, profileFor, readPackDocument, readPackFile, sampleProbeExecutor } from '../engine/context/packChecks';
 import { buildDocumentExtractionPrompt, parseDocumentExtraction, recordExtraction, splitSections } from '../engine/context/documentExtraction';
 import { VocabularyProposal, buildVocabulary, buildVocabularyProposalPrompt, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, parseVocabularyProposal } from '../engine/context/vocabulary';
-import { createSubjectResolver, isMirror } from '../engine/context/projection';
-import { isLive } from '../engine/context/assertions';
+import { createSubjectResolver } from '../engine/context/projection';
 import { writeFileAtomic, nodeFileIo } from '../engine/context/contextStore';
 import { layoutPath } from '../engine/workspaceLayout';
 
@@ -25,7 +25,7 @@ export type ApplyOutcome =
   | { status: 'registered' }
   | { status: 'error'; reason: string };
 
-const STRUCTURED = /\.(ya?ml|json)$/i;
+const STRUCTURED = STRUCTURED_DOCUMENT;
 
 /**
  * The business-problem pack of the active problem (Phase C4a): its documents
@@ -52,14 +52,8 @@ export class BusinessPackManager {
   private get profilesDir(): string { return layoutPath(this.workspaceRoot, 'profiles'); }
 
   public async load(): Promise<void> {
-    this.pack = fs.existsSync(this.packFile) ? parsePack(fs.readFileSync(this.packFile, 'utf8')) : emptyPack();
-    this.profiles = [];
-    if (fs.existsSync(this.profilesDir)) {
-      for (const f of fs.readdirSync(this.profilesDir).filter((x) => /\.ya?ml$/i.test(x)).sort()) {
-        const { profile, errors } = parseProfile(fs.readFileSync(path.join(this.profilesDir, f), 'utf8'));
-        if (profile) this.profiles.push(profile); else this.log(`Profile ${f} is not valid and is ignored: ${errors.join('; ')}`);
-      }
-    }
+    this.pack = readPackFile(this.packDir);
+    this.profiles = loadProfiles(this.workspaceRoot, this.log);
   }
 
   public getPack(): BusinessPack { return this.pack; }
@@ -77,7 +71,7 @@ export class BusinessPackManager {
   }
 
   private read(doc: PackDocument): string {
-    return fs.readFileSync(path.isAbsolute(doc.path) ? doc.path : path.join(this.workspaceRoot, doc.path), 'utf8');
+    return readPackDocument(this.workspaceRoot, doc);
   }
 
   /** Registers (or updates) a document; applying it is a separate step. */
@@ -88,8 +82,7 @@ export class BusinessPackManager {
   }
 
   private profileFor(doc: PackDocument, parsed: unknown): InterpretationProfile | undefined {
-    const confirmed = this.profiles.filter((p) => p.status === 'confirmed');
-    return (doc.profileId ? confirmed.find((p) => p.id === doc.profileId) : undefined) ?? confirmed.find((p) => profileMatches(parsed, p));
+    return profileFor(this.profiles, doc, parsed);
   }
 
   /**
@@ -144,12 +137,7 @@ export class BusinessPackManager {
 
   /** Probes over the pack's sample documents, keyed by the table each is a sample of. */
   public sampleExecutor(): ProbeExecutor | undefined {
-    const samples = new Map<string, Array<Record<string, string>>>();
-    for (const d of this.pack.documents) {
-      if (d.role !== 'sample' || !d.table) continue;
-      try { samples.set(d.table, parseSampleCsv(this.read(d))); } catch (err) { this.log(`Sample ${d.path} unreadable: ${err instanceof Error ? err.message : String(err)}`); }
-    }
-    return samples.size ? createSampleProbeExecutor(samples) : undefined;
+    return sampleProbeExecutor(this.pack, (d) => this.read(d), this.log);
   }
 
   /** Live probes where a connection reaches the table, else samples. */
@@ -159,14 +147,8 @@ export class BusinessPackManager {
 
   /** Every contract document with a confirmed profile, checked against the catalog and probes. */
   public async conformance(executor?: ProbeExecutor): Promise<{ reports: ConformanceReport[]; markdown: string }> {
-    const reports: ConformanceReport[] = [];
-    for (const doc of this.pack.documents.filter((d) => d.role === 'contract' && STRUCTURED.test(d.path))) {
-      const parsed = parseStructured(this.read(doc));
-      const profile = this.profileFor(doc, parsed);
-      if (!profile) { this.log(`Conformance: ${doc.path} has no confirmed profile — apply it first.`); continue; }
-      reports.push(await checkConformance(doc, applyProfile(parsed, profile), this.cfm.getCatalog(), executor));
-    }
-    return { reports, markdown: reports.map(renderConformanceReport).join('\n---\n\n') };
+    const { reports, markdown } = await packConformance(this.pack, this.profiles, (d) => this.read(d), this.cfm.getCatalog(), executor, this.log);
+    return { reports, markdown };
   }
 
   /** Resolves graph table/column ids to probe targets. */
@@ -181,8 +163,7 @@ export class BusinessPackManager {
    */
   public async verifyClaims(executor: ProbeExecutor | undefined): Promise<VerifyOutcome[]> {
     if (!executor) return [];
-    const candidates = this.cfm.getLedger().assertions().filter((a) => !isMirror(a) && (isLive(a.status) || a.status === 'proposed') && a.trust !== 'verified'
-      && ['key', 'grain', 'relationship', 'quality_expectation'].includes(a.kind) && !a.subject[0]?.startsWith('contract:'));
+    const candidates = probeCandidates(this.cfm.getLedger().assertions());
     const out = await verifyAssertions(this.cfm.getLedger(), candidates, executor, this.probeResolver());
     if (out.some((o) => o.result && o.result.pass !== undefined)) await this.cfm.persistCompiledGraph();
     return out;

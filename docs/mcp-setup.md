@@ -1,37 +1,43 @@
 # Using AutoDE from other coding agents (MCP)
 
-AutoDE ships an MCP server that gives Claude Code, VS Code's agent mode, Cursor and any other MCP client the same deterministic engine the AutoDE panel uses: reviewed transform primitives that compile to SQL, Pipeline Spec validation and compilation, AutoDE's requirements-interview prompts, the context layer (what the estate and the business problem hold), a grounding check for SQL, and access to your Snowflake and Databricks connections.
+AutoDE ships an MCP server that gives Claude Code, Codex, VS Code's agent mode, Cursor, Cline and any other MCP client the same deterministic engine the AutoDE panel uses: reviewed transform primitives that compile to SQL, Pipeline Spec validation and compilation, AutoDE's requirements-interview prompts, the context layer (what the estate and the business problem hold), a grounding check for SQL, and access to your Snowflake and Databricks connections.
 
 The server never writes to your workspace and never calls an LLM. Your agent writes files with its own tools, after you approve them. Queries against your data platforms are **read-only** unless you start the server with `--allow-write`, and row values are returned only for connections where you allowed it ([Data platforms](#data-platforms)).
 
 ## What you need
 
 - Node.js 18 or later on your `PATH`. Alternatively, use VS Code's own runtime, as described [below](#without-nodejs).
-- The server file `dist/mcp-server.js`. It has no dependencies, and you can find it in either of two places:
-  - **Installed extension:** `~/.vscode/extensions/<publisher>.auto-data-engineering-hub-<version>/dist/mcp-server.js` (Windows: `%USERPROFILE%\.vscode\extensions\…`). The folder name changes with every extension update, so update the path after updating. A command that writes a stable path for you comes in a later release.
-  - **Source checkout:** run `npm install` and then `npm run compile`. The server is `<checkout>/dist/mcp-server.js`.
+- The AutoDE server. Two ways to get it:
+  - **The `autode` command (preferred, since v0.42.0):** install the package with `npm install -g autode-<version>.tgz` (see [cli.md](cli.md#install)). The server is then `autode mcp`, and its path doesn't change when the extension updates. The same package gives you the [`autode` CLI](cli.md) for CI checks and for resolving decisions in a terminal.
+  - **The extension's own copy:** `~/.vscode/extensions/<publisher>.auto-data-engineering-hub-<version>/dist/autode.js` (Windows: `%USERPROFILE%\.vscode\extensions\…`), run as `node <that path> mcp`. The folder name changes with every extension update. The extension tells you when `.mcp.json` points at an old folder and offers to update it. `dist/mcp-server.js` in the same folder still works and starts the same server. In a source checkout, run `npm install` and then `npm run compile`; the file is `<checkout>/dist/autode.js`.
 - A workspace that AutoDE has worked in, meaning it has an `.autode/` folder. Without one, the primitive and Pipeline Spec tools still work, but the context tools find nothing.
+
+In VS Code, **AutoDE: Configure MCP for Claude Code** writes the project's `.mcp.json` for you. It uses `autode` when that is on your `PATH`, and otherwise the extension's copy. It keeps any other servers in the file, and it shows what it will write before writing.
 
 The server takes these arguments:
 
 | Argument | Meaning |
 |---|---|
 | `--workspace <folder>` | The project whose `.autode/` the server reads. Defaults to the current directory. |
-| `--resources <folder>` | The extension's root folder, which holds the bundled interview prompts and primitives. Found automatically next to the server file, so pass it only if you copied `mcp-server.js` somewhere else. |
+| `--resources <folder>` | The folder that holds the bundled interview prompts and primitives. It is found automatically next to the server file, so pass it only if you copied `autode.js` somewhere else. |
 | `--allow-cli` | Lets the server run the Snowflake CLI (`snow`). Needed for connections from `connections.toml` and for username/password sign-in; key-pair and Databricks connections don't need it. |
 | `--drivers <folder>` | Where drivers you installed with AutoDE's guidance live (the Oracle driver). Defaults to `AUTODE_DRIVERS_DIR`, else `~/.autode/drivers`, which is the same folder the extension uses. |
-| `--allow-write` | Lets `autode_execute_query` run statements that change data or objects. Leave it off unless you need it; see [Read-only by default](#read-only-by-default). |
+| `--allow-write` | Lets the server run platform changes that a person approved (`autode_apply_decision`). Leave it off unless you need it; see [Read-only by default](#read-only-by-default). |
+
+In the examples below, `autode mcp` is the installed command. Without the package, replace `"command": "autode", "args": ["mcp", …]` with `"command": "node", "args": ["/path/to/dist/autode.js", "mcp", …]`.
+
+**Windows:** native Windows clients can't start npm's `autode.cmd` directly. Use `"command": "cmd", "args": ["/c", "autode", "mcp", …]`. *Configure MCP for Claude Code* does this for you.
 
 ## Claude Code
 
-Add a `.mcp.json` file in the project root:
+Run **AutoDE: Configure MCP for Claude Code** in VS Code, or add a `.mcp.json` file in the project root:
 
 ```json
 {
   "mcpServers": {
     "autode": {
-      "command": "node",
-      "args": ["/path/to/dist/mcp-server.js", "--workspace", "."]
+      "command": "autode",
+      "args": ["mcp", "--workspace", "."]
     }
   }
 }
@@ -40,10 +46,22 @@ Add a `.mcp.json` file in the project root:
 Or add the server from the command line:
 
 ```bash
-claude mcp add autode -- node /path/to/dist/mcp-server.js --workspace .
+claude mcp add autode -- autode mcp --workspace .
 ```
 
-Run `/mcp` in Claude Code to check that `autode` is connected.
+Run `/mcp` in Claude Code to check that `autode` is connected. Claude Code asks you to approve a project's servers the first time it starts.
+
+## Codex
+
+Add the server to `~/.codex/config.toml`. Codex starts servers in its own working directory, so give the workspace as an absolute path:
+
+```toml
+[mcp_servers.autode]
+command = "autode"
+args = ["mcp", "--workspace", "/path/to/project"]
+```
+
+Or from the command line: `codex mcp add autode -- autode mcp --workspace /path/to/project`. Run `/mcp` in Codex to check it.
 
 ## VS Code (agent mode)
 
@@ -54,14 +72,14 @@ Add `.vscode/mcp.json` to the workspace:
   "servers": {
     "autode": {
       "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/dist/mcp-server.js", "--workspace", "${workspaceFolder}"]
+      "command": "autode",
+      "args": ["mcp", "--workspace", "${workspaceFolder}"]
     }
   }
 }
 ```
 
-A later release registers the server automatically, so this file won't be needed.
+A later release registers the server automatically (phase 5), so this file won't be needed.
 
 ## Cursor
 
@@ -71,8 +89,24 @@ Add `.cursor/mcp.json` to the project, or `~/.cursor/mcp.json` to use it in ever
 {
   "mcpServers": {
     "autode": {
-      "command": "node",
-      "args": ["/path/to/dist/mcp-server.js", "--workspace", "${workspaceFolder}"]
+      "command": "autode",
+      "args": ["mcp", "--workspace", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+## Cline
+
+Open Cline's *MCP Servers* view, choose *Configure MCP Servers*, and add AutoDE to `cline_mcp_settings.json`. Cline's settings apply to every project, so give the workspace as an absolute path:
+
+```json
+{
+  "mcpServers": {
+    "autode": {
+      "command": "autode",
+      "args": ["mcp", "--workspace", "/path/to/project"],
+      "disabled": false
     }
   }
 }
@@ -85,12 +119,12 @@ VS Code's own executable can run the server as plain Node. Set `ELECTRON_RUN_AS_
 ```json
 {
   "command": "/path/to/Code.exe",
-  "args": ["/path/to/dist/mcp-server.js", "--workspace", "."],
+  "args": ["/path/to/dist/autode.js", "mcp", "--workspace", "."],
   "env": { "ELECTRON_RUN_AS_NODE": "1" }
 }
 ```
 
-On macOS the executable is `/Applications/Visual Studio Code.app/Contents/MacOS/Electron`.
+On macOS the executable is `/Applications/Visual Studio Code.app/Contents/MacOS/Electron`. *Configure MCP for Claude Code* writes this form when it finds neither `autode` nor `node` on your `PATH`.
 
 ## Data platforms
 
@@ -154,8 +188,8 @@ Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATA
 {
   "mcpServers": {
     "autode": {
-      "command": "node",
-      "args": ["/path/to/dist/mcp-server.js", "--workspace", "."],
+      "command": "autode",
+      "args": ["mcp", "--workspace", "."],
       "env": { "AUTODE_DATABRICKS_TOKEN": "${DATABRICKS_TOKEN}" }
     }
   }
@@ -240,10 +274,11 @@ Validation errors come back item by item, so the agent can fix the proposal and 
 **Who may resolve a decision:**
 - **Low stakes:** the agent, with `autode_resolve_decision`, after asking you. The tool is marked destructive, so your client confirms first.
 - **High stakes:** only a person:
-  - in the AutoDE panel (**Workflow Palette → Context Inbox**), or
+  - in the AutoDE panel (**Workflow Palette → Context Inbox**);
+  - in a terminal, with `autode decisions approve <id>` or `autode decisions reject <id>` (since 0.42.0; [cli.md](cli.md#decisions)). These need an interactive terminal and refuse when `CI` is set; or
   - in the decision file: set `resolution.decision` to `approved` or `rejected`, fill in `resolution.by`, and commit. AutoDE picks it up when the file changes, or the next time an MCP client lists decisions.
 
-  The `autode` CLI joins these channels in a later release.
+  In CI, `autode check` fails (exit 3) while a high-stakes decision is still pending.
 
 Who wrote a decision file is whoever committed it. If agents in your setup can edit files, review decision files in pull requests like code.
 
@@ -294,9 +329,8 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 ## Not yet available
 
 The following arrive in later releases:
-- Proposing facts to AutoDE's context.
-- Automatic registration in VS Code.
-- A stable server path that survives extension updates.
+- Automatic registration in VS Code (phase 5).
+- AutoDE's own capabilities as Agent Skills you can copy into your host's skills folder (PA3).
 
 ## Troubleshooting
 

@@ -6,8 +6,10 @@
 !README.md
 !CHANGELOG.md
 !LICENSE
-# The two esbuild bundles and the licences of what they contain (phase 3).
+# The esbuild bundles and the licences of what they contain (phase 3): the
+# extension, the autode CLI and MCP server (PA2), and the mcp-server.js shim.
 !dist/extension.js
+!dist/autode.js
 !dist/mcp-server.js
 !dist/THIRD-PARTY-NOTICES.md
 # Icons: marketplace PNG, the MCP server's PNG, the activity-bar glyph.
