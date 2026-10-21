@@ -411,9 +411,9 @@ In short: proposals are validated and become decisions in `.autode/decisions/`. 
 
 In short: one `autode` package (engine, `autode mcp`, CLI, bundled resources; no runtime dependency) that the VSIX ships as the same `dist/autode.js`. The deterministic commands are `validate`, `compile`, `grounding`, `conformance`, `probe` (report only), `doctor` and `check` (the CI gate). The `decisions` commands are human only (interactive terminal, refused with `CI` set). Exit codes are stable. `AutoDE: Configure MCP for Claude Code` prefers the installed `autode mcp`. The skills pack joins the package in PA3. Publishing to a registry remains the owner's step.
 
-#### Phase PA3 (revised 2026-10-21, for final approval): planned workflows, agents and skills — the same AutoDE in every host
+#### Phase PA3 (revised and approved 2026-10-21): planned workflows, agents and skills — the same AutoDE in every host
 
-*This replaces the PA3 of 2026-10-18 and the first draft of 2026-10-21. It implements the roadmap decision log of 2026-10-20 (Surface parity; Workflows and agents as definitions) and the owner's review of 2026-10-21. The templates and stage kinds are in [workflow-templates.md](workflow-templates.md). The roadmap changes when this spec is approved.*
+*Approved by the owner on 2026-10-21; it replaces the PA3 of 2026-10-18. It implements the roadmap decision log of 2026-10-20 and 2026-10-21. The templates and stage kinds are in [workflow-templates.md](workflow-templates.md).*
 
 **Goal.** A data engineer in any host that brings a model gets the same AutoDE process as in VS Code:
 - **hosts:** VS Code; Claude Code, Cortex Code and the GitHub Copilot CLI through the plugin; any other MCP client through prompts and tools;
