@@ -24,6 +24,7 @@ const CONTENT = [
   'dist/THIRD-PARTY-NOTICES.md',
   'skills',
   'primitive-definitions',
+  'workflows',
   'media/autode-icon-64.png',
   'LICENSE'
 ];
@@ -72,7 +73,7 @@ function stage(outDir = path.join(root, 'dist', 'package')) {
     bin: { autode: 'dist/autode.js' },
     main: 'dist/autode.js',
     engines: { node: '>=18' },
-    files: ['dist/', 'skills/', 'primitive-definitions/', 'media/', 'README.md', 'LICENSE']
+    files: ['dist/', 'skills/', 'primitive-definitions/', 'workflows/', 'media/', 'README.md', 'LICENSE']
   };
   fs.writeFileSync(path.join(outDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
   return outDir;

@@ -1,0 +1,75 @@
+# AutoDE workflow template: greenfield (docs/workflow-templates.md §2).
+# Basis: the Kimball Lifecycle. The planning stage's output is the workflow for one problem;
+# this is the catalogue it starts from. Copy to .autode/config/workflows/ to change it.
+id: greenfield
+version: 1
+title: Greenfield
+description: A new warehouse or lakehouse model, built from the business requirements.
+suggestWhen: [new warehouse, new data platform, greenfield, build a new, from scratch, first data product]
+stages:
+  - id: specify
+    title: Business problem and specification
+    kind: specify
+    inclusion: mandatory
+  - id: plan
+    title: Plan the workflow
+    kind: plan
+    inclusion: mandatory
+    after: [specify (approved)]
+  - id: target
+    title: Target context
+    kind: target-context
+    inclusion: mandatory
+    after: [plan (approved)]
+  - id: sources
+    title: Source assessment
+    kind: source-assessment
+    inclusion: default
+    repeat: per-source-system
+    join: all
+    after: [plan (approved)]
+  - id: quality
+    title: Quality rules
+    kind: quality-rules
+    inclusion: default
+    after: [sources]
+  - id: mapping
+    title: Source-to-target mapping
+    kind: mapping
+    inclusion: mandatory
+    after: [sources (approved), target (approved)]
+  - id: model
+    title: Data model
+    kind: modelling
+    inclusion: mandatory
+    after: [mapping (approved)]
+  - id: build
+    title: Pipeline Spec and build artifacts
+    kind: build
+    inclusion: mandatory
+    after: [model (approved)]
+  - id: validate
+    title: Validate
+    kind: validate
+    inclusion: default
+    after: [build]
+  - id: platform-setup
+    title: Environment and security
+    kind: platform-setup
+    inclusion: optional
+    after: [target (approved)]
+  - id: bi
+    title: BI and reports
+    kind: bi-migration
+    inclusion: optional
+    after: [model (approved)]
+  - id: deploy
+    title: Deploy
+    kind: deploy
+    inclusion: optional
+    after: [validate (approved)]
+  - id: document
+    title: Documentation
+    kind: document
+    inclusion: default
+    after: [build]

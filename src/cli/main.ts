@@ -26,6 +26,14 @@ import { DOCUMENT_ROLES, DocumentAuthority, DocumentRole } from '../engine/conte
 import { buildVocabulary, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, VocabularyProposal } from '../engine/context/vocabulary';
 import { isMirror } from '../engine/context/projection';
 import { platformTools } from '../mcp/platform';
+import { WorkflowScope, diffWorkflow, ensureWorkflow, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
+import { draftWorkflow, readWorkflow, sourceSystems, workflowFacts } from '../engine/workflows/instance';
+import type { WorkflowTemplate } from '../engine/workflows/templates';
+
+function draftWorkflowFor(t: WorkflowTemplate, scope: { workspaceRoot: string; problemId: string }, problemRoot: string) {
+  return draftWorkflow(t, scope.problemId, workflowFacts(scope.workspaceRoot, problemRoot), sourceSystems(scope.workspaceRoot));
+}
 import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStore';
 import { DataPlatformProvider } from '../engine/types';
 import { Catalog } from '../engine/context/catalog';
@@ -109,6 +117,17 @@ Estate (observed metadata; recorded without a decision):
   estate ingest <file>...      DDL (.sql/.ddl), CSV or JSON into the catalog and working set [--system <s>] [--environment <e>]
   estate extract --connection <id> --schema <DB.SCHEMA>...   A connection's schemas [--system <s>] [--profile] [--allow-cli]
 
+Workflow (the planned stages of a problem; approving is a person's: interactive terminal):
+  workflow templates           The workflow templates (bundled and this workspace's)
+  workflow status              Each stage: done, ready, waiting (and for what), stale, skipped
+  workflow plan [--template <id>]   Draft the workflow from a template (default: AutoDE's suggestion) and propose it for approval
+  workflow next                What to do now, and by which role
+  workflow start <stage>       Mark a stage in progress (working ahead of its dependencies is allowed, with a warning)
+  workflow complete <stage> --output <file>... --summary <text>   Hand in a stage; its gate decision goes to a person
+  workflow approve [<stage>]   (terminal) Approve the pending workflow, or a stage's gate
+  workflow skip <stage> --reason <text>     A default or optional stage only
+  workflow reopen <stage> --reason <text>   Everything downstream becomes stale
+
 Knowledge (confirming, rejecting, editing and adding are a person's: interactive terminal):
   facts [list]                 What waits for review (proposed, needs review), with stakes and what each corrects [--kind k] [--all]
   facts show <id>              One fact: value, evidence, verification, history
@@ -184,11 +203,15 @@ const OPTIONS = {
   table: { type: 'string' },
   'max-rows': { type: 'string' },
   'doc-version': { type: 'string' },
+  template: { type: 'string' },
+  output: { type: 'string', multiple: true },
+  summary: { type: 'string' },
+  reason: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
 
-type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[] };
+type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[] };
 
 class CliError extends Error {
   public constructor(public readonly exit: number, message: string) { super(message); }
@@ -243,6 +266,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'problems': return await cmdProblems(ctx, rest);
       case 'estate': return await cmdEstate(ctx, rest);
       case 'facts': return await cmdFacts(ctx, rest);
+      case 'workflow': return await cmdWorkflow(ctx, rest);
       case 'pack': return await cmdPack(ctx, rest);
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
       case 'design-doc': return await cmdDesignDoc(ctx, rest);
@@ -676,6 +700,104 @@ async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
     } finally { cfm.dispose(); session.dispose(); }
   }
   throw new CliError(EXIT.USAGE, 'estate takes show, ingest <file>... or extract --connection <id> --schema <DB.SCHEMA>.');
+}
+
+// ── workflow (PA3a, v0.44.0) ────────────────────────────────────────────────
+
+const STATUS_MARK: Record<string, string> = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
+
+async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'status', ...args] = rest;
+  if (sub === 'templates') {
+    const { templates, errors } = templatesFor({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot });
+    emit(ctx, { ok: errors.length === 0, templates: templates.map((t) => ({ id: t.id, version: t.version, title: t.title, origin: t.origin, stages: t.stages.map((x) => ({ id: x.id, kind: x.kind, inclusion: x.inclusion, when: x.when })) })), errors },
+      [...templates.map((t) => `${t.id} v${t.version} (${t.origin}) — ${t.title}\n${t.stages.map((x) => `    ${x.inclusion.padEnd(11)} ${x.id} [${x.kind}]${x.when ? ` when ${x.when}` : ''}`).join('\n')}`), ...errors.map((e) => `✗ ${e}`)].join('\n'));
+    return errors.length ? EXIT.FAILED : EXIT.OK;
+  }
+  const problemId = singleProblem(ctx);
+  if (!problemId) throw new CliError(EXIT.NOT_FOUND, 'No business problem: start one with `autode problems new`.');
+  const scope: WorkflowScope = { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId };
+  const rctx = { workspaceRoot: ctx.workspaceRoot, problemRoot: layoutPath(ctx.workspaceRoot, 'problems', problemId), problemId };
+  const by = (ctx.values.by ?? safeUsername()).trim();
+  try {
+    if (sub === 'status') {
+      const st = statusFor(scope);
+      emit(ctx, { ok: true, ...st }, [`${problemId} — ${st.template}${st.approved ? '' : ' (not approved yet)'}`, ...st.stages.map((x) => `  ${STATUS_MARK[x.status] ?? ' '} ${x.id.padEnd(18)} ${x.status}${x.why ? ` — ${x.why}` : ''}`), st.next ? `Next: ${st.next.id} (${st.next.status})` : 'Nothing to do now.'].join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'plan') {
+      const suggestion = suggestFor(scope);
+      const w = redraftOrKeep(scope, ctx.values.template);
+      const { templates } = templatesFor(scope);
+      const diff = diffWorkflow(w, templates.find((t) => t.id === w.template.id)!);
+      const d = proposeWorkflow(scope, w, { host: 'cli', client: by });
+      const lines = [
+        `Workflow for ${problemId}: ${w.template.id}${!ctx.values.template && suggestion ? ` (suggested: ${suggestion.reason})` : ''}`,
+        ...w.stages.map((x) => `  ${x.included ? '+' : '−'} ${x.id} [${x.kind}]${x.included ? '' : ` — ${x.reason ?? 'optional, not included'}`}${x.systems?.length ? ` (per source system: ${x.systems.join(', ')})` : ''}`),
+        ...diff.dropped.map((x) => `  left out: ${x.id} — ${x.reason ?? 'no reason'}`),
+        d.validation.ok ? `Proposed as decision ${d.id}. Approve it with \`autode workflow approve\` (or in the panel).` : `✗ ${d.validation.errors.join('; ')}`
+      ];
+      emit(ctx, { ok: d.validation.ok, decisionId: d.id, workflow: w, diff, validation: d.validation }, lines.join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'next') {
+      ensureWorkflow(scope);
+      const n = nextAssignment(rctx);
+      emit(ctx, { ok: true, next: n ?? null }, n ? `${n.stage.id} (${n.stage.status}): ${n.instructions}` : 'Nothing to do now: every included stage is done or waiting for something outside AutoDE.');
+      return EXIT.OK;
+    }
+    if (sub === 'start') {
+      if (args.length !== 1) throw new CliError(EXIT.USAGE, 'workflow start takes one stage id.');
+      const r = startStage(rctx, args[0], by);
+      emit(ctx, { ok: true, ...r }, `${args[0]} is in progress.${r.warning ? `\n! ${r.warning}` : ''}`);
+      return EXIT.OK;
+    }
+    if (sub === 'complete') {
+      if (args.length !== 1) throw new CliError(EXIT.USAGE, 'workflow complete takes one stage id.');
+      const r = completeStage(rctx, args[0], { outputs: (ctx.values.output ?? []).map((o) => rel(ctx, path.resolve(ctx.io.cwd, o))), summary: ctx.values.summary ?? '', by, host: 'cli' });
+      emit(ctx, { ok: true, ...r }, r.message);
+      return EXIT.OK;
+    }
+    if (sub === 'skip' || sub === 'reopen') {
+      if (args.length !== 1 || !ctx.values.reason) throw new CliError(EXIT.USAGE, `workflow ${sub} takes one stage id and --reason <text>.`);
+      if (sub === 'skip') { const v = skipStage(rctx, args[0], ctx.values.reason, by); emit(ctx, { ok: true, stage: v }, `${args[0]} skipped: ${ctx.values.reason}`); }
+      else { const r = reopenStage(rctx, args[0], by, ctx.values.reason); emit(ctx, { ok: true, ...r }, `${args[0]} re-opened.${r.stale.length ? ` Now stale: ${r.stale.join(', ')}.` : ''}`); }
+      return EXIT.OK;
+    }
+    if (sub === 'approve') {
+      const store = new DecisionStore(ctx.workspaceRoot);
+      const pending = store.list({ status: 'pending' }).filter((d) => d.problemId === problemId);
+      const target = args[0]
+        ? pending.find((d) => d.kind === 'gate' && d.subject?.document === `workflow:${args[0]}`)
+        : pending.find((d) => d.kind === 'workflow') ?? pending.find((d) => d.kind === 'gate');
+      if (!target) throw new CliError(EXIT.NOT_FOUND, args[0] ? `Nothing of stage ${args[0]} waits for approval.` : 'No workflow or stage approval is pending.');
+      return cmdDecisions(ctx, ['approve', target.id]);
+    }
+  } catch (err) {
+    if (err instanceof WorkflowError) throw new CliError(err.code === 'NOT_FOUND' ? EXIT.NOT_FOUND : err.code === 'CHECK_FAILED' ? EXIT.FAILED : EXIT.REFUSED, err.message);
+    throw err;
+  }
+  throw new CliError(EXIT.USAGE, 'workflow takes templates, status, plan, next, start, complete, approve, skip or reopen.');
+}
+
+/** A new draft from the chosen template (or the suggestion); an approved workflow is re-planned from itself. */
+function redraftOrKeep(scope: WorkflowScope, templateId: string | undefined) {
+  const current = readWorkflow(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
+  if (current && current.status === 'approved') {
+    // Re-planning: a fresh draft from the current facts, proposed as a revision. The same template keeps the
+    // shared stages' state when approved; a new template restarts the workflow (owner, 2026-10-21).
+    const id = templateId ?? current.template.id;
+    if (!templatesFor(scope).templates.some((x) => x.id === id)) throw new CliError(EXIT.NOT_FOUND, `No workflow template "${id}".`);
+    return ensureDraftFrom(scope, id);
+  }
+  return redraft(scope, templateId);
+}
+
+function ensureDraftFrom(scope: WorkflowScope, templateId: string) {
+  const { templates } = templatesFor(scope);
+  const t = templates.find((x) => x.id === templateId)!;
+  const root = layoutPath(scope.workspaceRoot, 'problems', scope.problemId);
+  return draftWorkflowFor(t, scope, root);
 }
 
 // ── facts, pack, vocabulary, design doc, SQL (v0.43.3) ───────────────────────

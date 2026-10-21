@@ -23,4 +23,6 @@
 # Bundled interview skills and Tier-2 primitives; JSON Schemas for yamlValidation.
 !skills/*.json
 !primitive-definitions/**
+# Workflow templates (PA3a).
+!workflows/*.yaml
 !docs/schemas/*.json

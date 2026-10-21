@@ -6711,12 +6711,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6765,6 +6765,14 @@ async function main() {
       autode_pack_apply: [{ ids: ['a'] }, { ids: 'a' }],
       autode_check_conformance: [{}, { connectionId: '' }],
       autode_mine_vocabulary: [{}, { x: 1 }],
+      autode_workflow_templates: [{}, { x: 1 }],
+      autode_workflow_status: [{}, { x: 1 }],
+      autode_workflow_next: [{}, { x: 1 }],
+      autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
+      autode_workflow_start_stage: [{ stage: 'sources' }, {}],
+      autode_workflow_complete_stage: [{ stage: 'quality', summary: 'rules', outputs: ['q.md'] }, { stage: 'quality' }],
+      autode_workflow_skip_stage: [{ stage: 'bi', reason: 'no reports in scope' }, { stage: 'bi', reason: 'no' }],
+      autode_workflow_reopen_stage: [{ stage: 'mapping', reason: 'new source column' }, { stage: 'mapping' }],
       autode_propose_vocabulary: [{ vocabulary: { entries: [{ kind: 'synonym', from: 'guest', to: 'patron' }] } }, { vocabulary: { entries: [{ kind: 'alias', from: 'a', to: 'b' }] } }],
       autode_start_problem: [{ problemStatement: 'Merge two estates into one' }, { problemStatement: 'short' }],
       autode_select_problem: [{ id: 'p' }, {}],
@@ -9021,6 +9029,184 @@ async function main() {
       assert.ok(e.code === 0 && /TableScan ORDERS/.test(e.out), e.out + e.err);
       assert.strictEqual((await cli(['query', 'SELECT 1', ...W])).code, 2, '--connection is needed');
     } finally { f.done(); nodeFs.rmSync(out, { recursive: true, force: true }); }
+  });
+
+  // ── v0.44.0: PA3a — workflow templates and runtime ──
+
+  const wfRes = () => require('node:path').join(__dirname, '..');
+
+  await test('v0.44.0: the bundled templates validate; a broken template is refused item by item; a workspace template overrides by id', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const T = fresh('../dist/engine/workflows/templates.js');
+    const { templates, errors } = T.loadTemplates(wfRes());
+    assert.deepStrictEqual([templates.map((t) => t.id), errors], [['estate-merge', 'greenfield', 'modernization'], []]);
+    const mod = templates.find((t) => t.id === 'modernization');
+    assert.deepStrictEqual(mod.stages.filter((s) => s.inclusion === 'mandatory').map((s) => s.id), ['specify', 'plan', 'sources', 'target', 'mapping', 'build', 'reconcile', 'validate'], 'reconciliation is mandatory (owner, 2026-10-21)');
+    assert.strictEqual(mod.stages.find((s) => s.id === 'model').inclusion, 'default', 'a lift-and-shift may drop the model');
+    const broken = T.parseTemplate({ id: 'x', version: 1, stages: [
+      { id: 'plan', kind: 'plan', inclusion: 'mandatory' },
+      { id: 'specify', kind: 'specify', inclusion: 'default' },
+      { id: 'a', kind: 'warp-drive' },
+      { id: 'b', kind: 'conformance', inclusion: 'conditional' },
+      { id: 'c', kind: 'reconcile', when: 'moon.phase > 2', after: ['d'] },
+      { id: 'd', kind: 'validate', after: ['c'] },
+      { id: 'e', kind: 'modelling', consumes: ['spec', 'mapping'] }
+    ] }, 'test');
+    const msg = broken.errors.join('\n');
+    for (const want of [/first stage must be of kind specify/, /second stage must be of kind plan/, /unknown kind "warp-drive"/, /conditional stage needs "when"/, /Unknown fact "moon\.phase"/, /Dependency cycle: c → d → c|Dependency cycle: d → c → d/, /consumes mapping, which no stage/]) assert.ok(want.test(msg), `${want}\n${msg}`);
+    const c = T.parseCondition('estate.sources > 1');
+    assert.deepStrictEqual([c.test({ 'estate.sources': 2 }), c.test({ 'estate.sources': 1 }), T.parseCondition('not pack.has_contract').test({ 'pack.has_contract': true })], [true, false, false]);
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-wft-'));
+    try {
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config', 'workflows'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'workflows', 'greenfield.yaml'), nodeFs.readFileSync(nodePath.join(wfRes(), 'workflows', 'greenfield.yaml'), 'utf8').replace('version: 1', 'version: 2').replace('title: Greenfield', 'title: Greenfield (house style)'));
+      const r = T.loadTemplates(wfRes(), ws);
+      const g = r.templates.find((t) => t.id === 'greenfield');
+      assert.deepStrictEqual([g.version, g.title, r.templates.length], [2, 'Greenfield (house style)', 3]);
+      assert.strictEqual(T.suggestTemplate(r.templates, 'Migrate the legacy warehouse', {}).id, 'modernization');
+      assert.strictEqual(T.suggestTemplate(r.templates, 'Consolidate customer data after the acquisition', {}).id, 'estate-merge');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.44.0: the deterministic draft and the plan checks — conditions decide, mandatory stages and gates stay, reasons are required, roles and tiers are bounded, consumed artifacts need producers', () => {
+    const T = fresh('../dist/engine/workflows/templates.js');
+    const I = fresh('../dist/engine/workflows/instance.js');
+    const { templates } = T.loadTemplates(wfRes());
+    const mod = templates.find((t) => t.id === 'modernization');
+    const facts = { 'estate.sources': 2, 'estate.systems': 3, 'pack.has_contract': true, 'estate.has_legacy_code': false };
+    const w = I.draftWorkflow(mod, 'p1', facts, ['crm', 'shop']);
+    const st = (id) => w.stages.find((s) => s.id === id);
+    assert.deepStrictEqual([st('conformance').included, st('code-conversion').included, st('code-conversion').reason, st('bi').included], [true, false, 'condition "estate.has_legacy_code" is false', false]);
+    assert.deepStrictEqual(st('sources').tasks.map((t) => t.id), ['sources:crm', 'sources:shop'], 'repeat per source system: tasks inside the stage');
+    assert.deepStrictEqual(I.checkWorkflow(w, mod).errors, []);
+    const bad = JSON.parse(JSON.stringify(w));
+    const b = (id) => bad.stages.find((s) => s.id === id);
+    b('reconcile').included = false; b('reconcile').reason = 'tight deadline';
+    b('model').included = false;
+    b('mapping').gates = ['check'];
+    b('quality').agent = { role: 'pipeline-engineer', tier: 'propose' };
+    b('sources').agent = { role: 'source-assessor', tier: 'workspace-write' };
+    bad.stages.push({ id: 'rehearsal', title: 'Cutover rehearsal', kind: 'deploy', origin: 'added', inclusion: 'optional', included: true, after: [{ stage: 'validate', approved: true }], consumes: ['artifacts'], produces: ['deployment'], gates: ['approve'], tasks: [], record: { status: 'pending' } });
+    const r = I.checkWorkflow(bad, mod);
+    const msg = r.errors.join('\n');
+    for (const want of [/reconcile: a mandatory stage of modernization can't be left out/, /model: a default stage left out needs a reason/, /mapping: the approve gate can't be removed/, /quality: role pipeline-engineer can't do a quality-rules stage/, /sources: tier workspace-write is above the source-assessment ceiling \(platform-read\)/, /rehearsal: an added stage needs a reason/]) assert.ok(want.test(msg), `${want}\n${msg}`);
+    assert.ok(r.warnings.some((x) => /Added stage rehearsal/.test(x)), 'added stages are flagged to the approver');
+    // Dropping the sources leaves the mapping without its input.
+    const noSrc = I.draftWorkflow(templates.find((t) => t.id === 'greenfield'), 'p2', { ...facts }, []);
+    const s2 = noSrc.stages.find((s) => s.id === 'sources'); s2.included = false; s2.reason = 'no sources';
+    assert.ok(I.checkWorkflow(noSrc, templates.find((t) => t.id === 'greenfield')).errors.some((e) => /mapping: (depends on sources|consumes source-context)/.test(e)));
+    const d = I.diffWorkflow(w, mod);
+    assert.ok(d.included.some((x) => x.id === 'conformance') && d.dropped.some((x) => x.id === 'code-conversion'));
+  });
+
+  await test('v0.44.0: the runtime from the CLI and MCP — specify, plan gate (a person, never the agent), stages ready by dependency, a gate stage handed in and approved, staleness when an input changes, skip and re-open; the panel and surfaces read the same state', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-wfr-'));
+    const W = ['--workspace', ws];
+    let client;
+    try {
+      const id = (await cli(['problems', 'new', 'Migrate the legacy Oracle warehouse to Snowflake', ...W, '--json'])).json().id;
+      const prob = nodePath.join(ws, '.autode', 'problems', id);
+      let st = (await cli(['workflow', 'status', ...W, '--json'])).json();
+      assert.deepStrictEqual([st.template, st.approved, st.stages[0].status, st.stages[1].status], ['modernization v1', false, 'awaiting-approval', 'pending']);
+      // The spec is approved in its document (as the panel does): specify is done; plan is next.
+      const specFile = nodePath.join(prob, 'spec', 'business-problem.yaml');
+      nodeFs.writeFileSync(specFile, nodeFs.readFileSync(specFile, 'utf8').replace('status: draft', 'status: approved').replace('problemStatementApproved: false', 'problemStatementApproved: true'));
+      st = (await cli(['workflow', 'status', ...W, '--json'])).json();
+      assert.deepStrictEqual([st.stages[0].status, st.next.id], ['done', 'plan']);
+      // An agent proposes the workflow; it can't approve it.
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const p = await call('autode_propose_workflow', {});
+      assert.deepStrictEqual([p.decision.kind, p.decision.stakes, p.decision.validation.ok], ['workflow', 'high', true], JSON.stringify(p));
+      assert.strictEqual((await call('autode_resolve_decision', { id: p.decision.id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED');
+      assert.strictEqual((await cli(['workflow', 'approve', ...W])).code, 4, 'a terminal is needed');
+      const ap = await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(ap.code, 0, ap.out + ap.err);
+      st = await call('autode_workflow_status', {});
+      const s = (x) => st.stages.find((y) => y.id === x);
+      assert.deepStrictEqual([st.approved, s('plan').status, s('sources').status, s('target').status, s('mapping').status], [true, 'done', 'ready', 'ready', 'pending']);
+      assert.ok(/waits for sources \(approved\), target \(approved\)/.test(s('mapping').why), s('mapping').why);
+      // The CLI and MCP say the same.
+      const cliSt = (await cli(['workflow', 'status', ...W, '--json'])).json();
+      assert.deepStrictEqual(cliSt.stages.map((x) => [x.id, x.status]), st.stages.map((x) => [x.id, x.status]));
+      const next = await call('autode_workflow_next', {});
+      assert.ok(/role source-assessor, at most platform-read/.test(next.next.instructions), next.next.instructions);
+      // Contexts approved in their documents (as the panel does).
+      nodeFs.mkdirSync(nodePath.join(prob, 'context'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(prob, 'context', 'source-context.yaml'), 'specId: x\nspecVersion: 1\nstatus: approved\nsources: []\n');
+      nodeFs.writeFileSync(nodePath.join(prob, 'context', 'target-context.yaml'), 'specId: x\nspecVersion: 1\nstatus: approved\n');
+      // A gate stage handed in by the agent: the check, then a person.
+      assert.strictEqual((await call('autode_workflow_complete_stage', { stage: 'quality', summary: 'rules', outputs: ['nope.md'] })).code, 'VALIDATION_FAILED');
+      nodeFs.writeFileSync(nodePath.join(ws, 'quality-rules.md'), '# rules\n');
+      const q = await call('autode_workflow_complete_stage', { stage: 'quality', summary: 'Rules for every critical attribute', outputs: ['quality-rules.md'] });
+      assert.ok(q.decisionId && q.stage.status === 'awaiting-approval', JSON.stringify(q));
+      assert.strictEqual((await cli(['workflow', 'approve', 'quality', ...W], { interactive: true, answers: ['approve'] })).code, 0);
+      // The mapping, approved in its document; then the source context changes: mapping is stale.
+      nodeFs.writeFileSync(nodePath.join(prob, 'context', 'mapping-context.yaml'), 'specId: x\nspecVersion: 1\nversion: 1\nstatus: approved\nmappings: []\n');
+      st = (await cli(['workflow', 'status', ...W, '--json'])).json();
+      assert.deepStrictEqual([s('quality') && st.stages.find((y) => y.id === 'quality').status, st.stages.find((y) => y.id === 'mapping').status], ['done', 'done']);
+      nodeFs.writeFileSync(nodePath.join(prob, 'context', 'source-context.yaml'), 'specId: x\nspecVersion: 1\nstatus: approved\nsources: [{ connectionId: crm, platform: oracle, method: described }]\n');
+      st = (await cli(['workflow', 'status', ...W, '--json'])).json();
+      const mp = st.stages.find((y) => y.id === 'mapping');
+      assert.deepStrictEqual([mp.status, /source-context changed/.test(mp.why)], ['stale', true], JSON.stringify(mp));
+      // Skip: a default stage with a reason; never a mandatory one.
+      assert.strictEqual((await cli(['workflow', 'skip', 'reconcile', '--reason', 'deadline', ...W])).code, 4);
+      assert.strictEqual((await cli(['workflow', 'skip', 'deploy', '--reason', 'the client cuts over themselves', ...W])).code, 0);
+      // Re-open makes everything downstream stale.
+      const ro = await cli(['workflow', 'reopen', 'quality', '--reason', 'a new attribute', ...W, '--json']);
+      assert.strictEqual(ro.code, 0, ro.err);
+      assert.ok(Array.isArray(ro.json().stale));
+      const wf = fresh('../dist/engine/workflows/instance.js').readWorkflow(prob);
+      assert.deepStrictEqual([wf.status, wf.stages.find((x) => x.id === 'deploy').record.status], ['approved', 'skipped']);
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.44.0: problems from before PA3a migrate — brownfield becomes modernization, greenfield stays greenfield, their approvals are read from their documents; a new template restarts the workflow', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const S = fresh('../dist/engine/workflows/service.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-wfm-'));
+    try {
+      const mk = (id, extra) => { const d = nodePath.join(ws, '.autode', 'problems', id, 'spec'); nodeFs.mkdirSync(d, { recursive: true }); nodeFs.writeFileSync(nodePath.join(d, 'business-problem.yaml'), `id: bps-${id}\nversion: 2\nstatus: approved\nproblemStatementApproved: true\nproblemStatement: Daily sales reporting for the stores\nobjectives: [daily sales]\nscope: { in: [orders], out: [] }\n${extra}`); };
+      mk('old-brown', 'implementationType: brownfield\n');
+      mk('old-green', 'implementationType: greenfield\n');
+      const brown = S.statusFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: 'old-brown' });
+      const green = S.statusFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: 'old-green' });
+      assert.deepStrictEqual([brown.template, green.template], ['modernization v1', 'greenfield v1']);
+      assert.deepStrictEqual([brown.stages[0].status, brown.approved, brown.next.id], ['done', false, 'plan'], 'the approved spec carries over; the workflow is approved once');
+      // Restart on a template change: the approved modernization is replaced by an estate-merge draft with fresh states.
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: 'old-brown' };
+      const d1 = S.proposeWorkflow(scope, S.ensureWorkflow(scope), { host: 'test' });
+      await S.approveWorkflow(scope, d1.id, 'priya', 'cli');
+      const I = fresh('../dist/engine/workflows/instance.js');
+      const T = fresh('../dist/engine/workflows/templates.js');
+      const em = T.loadTemplates(wfRes()).templates.find((t) => t.id === 'estate-merge');
+      const d2 = S.proposeWorkflow(scope, I.draftWorkflow(em, 'old-brown', I.workflowFacts(ws, undefined), []), { host: 'test' });
+      assert.ok(d2.validation.warnings.some((w) => /restarts after the specification/.test(w)), d2.validation.warnings.join('\n'));
+      await S.approveWorkflow(scope, d2.id, 'priya', 'cli');
+      const after = S.statusFor(scope);
+      assert.strictEqual(after.template, 'estate-merge v1');
+      assert.ok(after.stages.find((x) => x.id === 'entity-resolution'));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.44.0: the bundled templates pass the template JSON Schema that editors use (yamlValidation)', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const Ajv = require('ajv');
+    const validate = new Ajv({ allErrors: true, strict: false }).compile(JSON.parse(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'docs', 'schemas', 'workflow-template.schema.json'), 'utf8')));
+    const { parseYaml } = fresh('../dist/engine/context/Yaml.js');
+    for (const f of nodeFs.readdirSync(nodePath.join(__dirname, '..', 'workflows'))) {
+      assert.ok(validate(parseYaml(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'workflows', f), 'utf8'))), `${f}: ${JSON.stringify(validate.errors)}`);
+    }
+    assert.ok(require('../package.json').contributes.yamlValidation.some((y) => /workflow-template/.test(y.url)));
+  });
+
+  await test('v0.44.0: the templates ship in the VSIX, the autode package and the stable server copy', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    assert.ok(nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8').includes('!workflows/*.yaml'));
+    assert.ok(require('../scripts/pack-cli.cjs').CONTENT.includes('workflows'));
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    assert.ok(html.includes('id="paletteWorkflow"') && html.includes("case 'workflowState'") && html.includes("post('workflowAction'"));
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

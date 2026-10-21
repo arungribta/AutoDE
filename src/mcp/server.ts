@@ -13,6 +13,7 @@ import { EngineTool, TOOLS } from './tools';
 import { PlatformSession, platformTools } from './platform';
 import { decisionTools } from './decisions';
 import { workspaceTools } from './workspaceTools';
+import { workflowTools } from './workflowTools';
 import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, readResource } from './catalogs';
 
 /**
@@ -114,12 +115,12 @@ export function createAutodeServer(options: ServerOptions): Server {
   const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: options.allowWrite === true, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   // The decision tools read the client's name (from `initialize`) at call time.
   const ref: { server?: Server } = {};
-  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name })];
+  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name })];
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {
       capabilities: { tools: {}, prompts: {}, resources: {} },
-      instructions: `AutoDE data-engineering engine. Work happens in a business problem: autode_list_problems, autode_start_problem, autode_select_problem. Bring the estate in with autode_ingest_file (DDL/CSV/JSON) or autode_ingest_metadata (a connection's schemas). Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms (if one is missing, propose it with autode_propose_connection); autode_explain_sql dry-runs SQL without executing it. Nothing you do changes AutoDE's state or a data platform directly: propose changes with the autode_propose_* tools; each becomes a decision a person approves (high stakes: only in the AutoDE panel, the CLI or the decision file; low stakes: ask the user, then autode_resolve_decision). autode_execute_query runs reads only.${platform.options.allowWrite ? ' This server was started with --allow-write: approved platform changes run with autode_apply_decision.' : ''}`
+      instructions: `AutoDE data-engineering engine. Work happens in a business problem: autode_list_problems, autode_start_problem, autode_select_problem. Its workflow is the hub: autode_workflow_status and autode_workflow_next say what to do next; hand stages in with autode_workflow_complete_stage; a person approves gates. Bring the estate in with autode_ingest_file (DDL/CSV/JSON) or autode_ingest_metadata (a connection's schemas). Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms (if one is missing, propose it with autode_propose_connection); autode_explain_sql dry-runs SQL without executing it. Nothing you do changes AutoDE's state or a data platform directly: propose changes with the autode_propose_* tools; each becomes a decision a person approves (high stakes: only in the AutoDE panel, the CLI or the decision file; low stakes: ask the user, then autode_resolve_decision). autode_execute_query runs reads only.${platform.options.allowWrite ? ' This server was started with --allow-write: approved platform changes run with autode_apply_decision.' : ''}`
     }
   );
   ref.server = server;

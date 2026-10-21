@@ -6,6 +6,38 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.44.0
+
+- **Phase PA3a: workflow templates and runtime** (`docs/mcp-engine-requirements.md` §9.2 PA3, approved 2026-10-21; `docs/workflow-templates.md`; requirements ORC-9, with ORC-1, ORC-3, ORC-6 and BPS-9 updated; technical-design §7.8). Each business problem now gets a **planned workflow**: drafted from a template, checked by the engine, approved by a person, and the same on every surface.
+- **17 stage kinds and three templates**, built from published practice:
+  - **greenfield** (the Kimball Lifecycle);
+  - **modernization**, which replaces brownfield (Snowflake's and Databricks' migration guides, Practical Data Migration);
+  - **estate merge** (master-data consolidation).
+
+  Each stage is mandatory, default, conditional (`when:` on facts, for example a contract in the pack) or optional, with dependencies (`after`, optionally `(approved)`), the artifacts it consumes and produces, gates (check, approve), and `repeat: per-source-system`. A workspace adapts them in `.autode/config/workflows/`, and editors validate the files against `docs/schemas/workflow-template.schema.json`.
+- **The planning stage produces the workflow.** After the specification is approved, AutoDE suggests a template and drafts the problem's workflow deterministically. The engine refuses a workflow that:
+  - drops a mandatory stage or one of its gates;
+  - leaves out a default or conditional stage without a reason;
+  - gives a stage a role or permission tier its kind doesn't allow;
+  - has unknown or circular dependencies;
+  - leaves a stage without its inputs.
+
+  The approver sees it as a diff against the template, and approves it as a `workflow` decision (high stakes).
+- **The runtime is the hub.** It says which stage is ready, which waits and for what, and which is stale. Stages whose output is a document with its own approval (spec, target and source context, mapping, Pipeline Spec) read that approval, so the panel, CLI and MCP always agree. Other stages are handed in with their outputs and approved through a `gate` decision. **Staleness:** a stage whose approved inputs change becomes stale and needs approval again. Optional and default stages can be skipped with a reason; a re-opened stage makes everything downstream stale. Changing the template restarts the workflow.
+- **On every surface:**
+  - **Panel:** a Workflow section in the Workflow Palette (draft, hand in, skip, re-open; approvals in the Context Inbox).
+  - **CLI:** `autode workflow templates | status | plan | next | start | complete | approve | skip | reopen`.
+  - **MCP:** `autode_workflow_templates`, `_status`, `_next`, `_start_stage`, `_complete_stage`, `_skip_stage`, `_reopen_stage` and `autode_propose_workflow`. No tool approves.
+- **Changed — the plan gate:** Generate Plan and Pipeline Spec generation now also need the approved workflow. Whether source context applies is now decided by the workflow's source-assessment stage, not the greenfield/brownfield flag.
+- **Migration:** a problem from before 0.44.0 gets a draft workflow on first use (greenfield → greenfield, brownfield → modernization). Its approved documents still count; the workflow needs one approval.
+- **Deviations / notes:**
+  - **The planner agent and agents working from briefs are PA3b.** Here the deterministic draft stands in for the planner, today's agents still do the stage work in VS Code, and every stage's agent is the kind's first role at its ceiling.
+  - **Repeated stages are one stage with a task per source system** (owner's decision: tasks inside stages), approved once rather than per system.
+  - **Re-approving a stale stage** goes through a gate decision even for document-backed stages, because their documents stay `approved` when an input changes.
+  - Named outputs of a handed-in stage must exist whatever its gates.
+  - `estate.has_legacy_code` is not detected yet; it stays false until the planner (PA3b) or a person sets it, so code conversion is added deliberately.
+- **Measured:** 355 tests (6 new: templates and their errors, the draft and plan checks, the runtime from the CLI and MCP, migration and template restart, schema validation, packaging). The MCP tool-list and schema tests include the eight new tools. Lint 0 errors. Eval unchanged.
+
 ## 0.43.3
 
 - **Parity step 1b: facts, the pack, vocabulary and SQL without VS Code** (roadmap 2026-10-20, *Surface parity*; requirements CTX-10, GRD-8; technical-design §10.8; reference: `docs/cli.md` *Knowledge*, *SQL and documents*). With this, someone without VS Code can confirm a key or grain fact. Before, a fact an agent proposed could only be confirmed in the panel.

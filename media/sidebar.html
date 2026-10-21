@@ -520,6 +520,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       <div class="section" id="paletteSpec">
         <!-- Business Problem Specification rendered by JS -->
       </div>
+      <div class="section" id="paletteWorkflow">
+        <!-- The problem's planned workflow (PA3a) rendered by JS -->
+      </div>
       <div class="section" id="paletteContext">
         <!-- Source/Target Context rendered by JS -->
       </div>
@@ -1794,7 +1797,44 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   // here for a person. Approving applies the change; for a specification or
   // Pipeline Spec it also runs the usual approval.
   var decisionsState = { pending: [], recent: [] };
-  var KIND_LABEL = { assertion: 'Fact', spec_revision: 'Specification', pipeline_spec: 'Pipeline Spec', mapping: 'Mapping', platform_change: 'Platform change', spec_approval: 'Specification approval', pipeline_spec_approval: 'Pipeline Spec approval' };
+  var KIND_LABEL = { assertion: 'Fact', spec_revision: 'Specification', pipeline_spec: 'Pipeline Spec', mapping: 'Mapping', platform_change: 'Platform change', spec_approval: 'Specification approval', pipeline_spec_approval: 'Pipeline Spec approval', connection: 'Connection', vocabulary: 'Vocabulary', workflow: 'Workflow', gate: 'Stage approval' };
+
+  // ── Workflow (PA3a): the problem's planned stages, from the engine's runtime ──
+  var workflowState = {};
+  var WF_MARK = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
+  var DOC_KINDS = ['specify', 'target-context', 'source-assessment', 'mapping', 'build', 'plan'];
+  function renderWorkflow() {
+    var box = $('#paletteWorkflow');
+    if (!box) return;
+    var w = workflowState;
+    if (!w || !w.problemId) { box.innerHTML = ''; return; }
+    var html = '<div class="section-title">Workflow</div>';
+    if (w.error) { box.innerHTML = html + '<div class="onb-note">' + escapeHtml(w.error) + '</div>'; return; }
+    html += '<div class="d-meta">' + escapeHtml(w.template || '') + (w.approved ? ' · approved' : ' · not approved yet') + (w.suggested ? ' · suggested: ' + escapeHtml(w.suggested.id) + ' (' + escapeHtml(w.suggested.reason) + ')' : '') + '</div>';
+    if (!w.approved) {
+      var opts = (w.templates || []).map(function (t) { return '<option value="' + escapeHtml(t.id) + '"' + (w.template && w.template.indexOf(t.id + ' ') === 0 ? ' selected' : '') + '>' + escapeHtml(t.title) + '</option>'; }).join('');
+      html += '<div class="btn-row"><select id="wfTemplate">' + opts + '</select><button class="primary" id="wfPropose">' + (w.pendingDecision ? 'Re-draft' : 'Draft the workflow') + '</button></div>';
+      if (w.pendingDecision) html += '<div class="onb-note">Waiting for approval in the Context Inbox: ' + escapeHtml(w.pendingDecision.title) + '</div>';
+      else html += '<div class="onb-note">The planning stage: AutoDE drafts the stages from the template and what it knows; you review and approve it.</div>';
+    }
+    (w.stages || []).forEach(function (st) {
+      var acts = '';
+      if (w.approved && st.status !== 'skipped') {
+        if (st.status === 'done') acts += '<button data-wf="reopen" data-stage="' + escapeHtml(st.id) + '">Re-open</button>';
+        if ((st.status === 'ready' || st.status === 'in-progress' || st.status === 'stale') && DOC_KINDS.indexOf(st.kind) < 0) acts += '<button data-wf="complete" data-stage="' + escapeHtml(st.id) + '">Hand in…</button>';
+        if (st.status === 'stale' && DOC_KINDS.indexOf(st.kind) >= 0) acts += '<button data-wf="complete" data-stage="' + escapeHtml(st.id) + '">Approve again…</button>';
+        if (st.inclusion !== 'mandatory' && st.status !== 'done') acts += '<button data-wf="skip" data-stage="' + escapeHtml(st.id) + '">Skip…</button>';
+      }
+      html += '<div class="decision ' + (st.status === 'stale' ? 'high' : 'low') + '"><div class="d-title">' + (WF_MARK[st.status] || '') + ' ' + escapeHtml(st.title) + '</div>' +
+        '<div class="d-meta">' + escapeHtml(st.kind) + ' · ' + escapeHtml(st.inclusion) + ' · ' + escapeHtml(st.status) + (st.agent ? ' · ' + escapeHtml(st.agent.role) : '') + '</div>' +
+        (st.why ? '<div class="d-note">' + escapeHtml(st.why) + '</div>' : '') + (acts ? '<div class="btn-row">' + acts + '</div>' : '') + '</div>';
+    });
+    if (w.next) html += '<div class="onb-note">Next: ' + escapeHtml(w.next.title) + ' (' + escapeHtml(w.next.status) + ')</div>';
+    box.innerHTML = html;
+    var p = $('#wfPropose');
+    if (p) p.onclick = function () { p.disabled = true; post('workflowAction', { action: 'propose', arg: ($('#wfTemplate') || {}).value }); };
+    box.querySelectorAll('button[data-wf]').forEach(function (b) { b.onclick = function () { post('workflowAction', { action: b.getAttribute('data-wf'), stage: b.getAttribute('data-stage') }); }; });
+  }
   var inboxState = { facts: [], conflicts: [] };
   function factHtml(f) {
     var meta = escapeHtml(f.kind.replace('_', ' ')) + ' · ' + escapeHtml(f.trust) + ' · ' + escapeHtml(f.status) + ' · ' + escapeHtml(f.stakes) + ' stakes · from ' + escapeHtml(f.createdBy);
@@ -2069,6 +2109,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'platformsState': platformsState = msg.state; renderPlatformsState(); break;
       case 'decisionsList': decisionsState = { pending: msg.pending || [], recent: msg.recent || [] }; renderDecisions(); break;
       case 'inboxState': inboxState = msg; renderDecisions(); break;
+      case 'workflowState': workflowState = msg; renderWorkflow(); break;
       case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
       case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;

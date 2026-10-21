@@ -1,0 +1,98 @@
+# AutoDE workflow template: modernization (previously brownfield; legacy migration).
+# docs/workflow-templates.md §3. Basis: Snowflake's migration guides, Databricks' EDW migration
+# guide, Practical Data Migration (BCS). Reconciliation against the legacy system is mandatory.
+id: modernization
+version: 1
+title: Modernization
+description: An existing system or warehouse moved or re-built on a new platform.
+suggestWhen: [migrat, moderni, legacy, replatform, re-platform, decommission, lift and shift, existing warehouse, brownfield]
+stages:
+  - id: specify
+    title: Business problem and specification
+    kind: specify
+    inclusion: mandatory
+  - id: plan
+    title: Plan the workflow
+    kind: plan
+    inclusion: mandatory
+    after: [specify (approved)]
+  - id: sources
+    title: Landscape assessment
+    kind: source-assessment
+    inclusion: mandatory
+    repeat: per-source-system
+    join: all
+    after: [plan (approved)]
+  - id: target
+    title: Target context
+    kind: target-context
+    inclusion: mandatory
+    after: [plan (approved)]
+  - id: conformance
+    title: Contract conformance
+    kind: conformance
+    inclusion: conditional
+    when: pack.has_contract
+    after: [sources]
+  - id: quality
+    title: Quality rules
+    kind: quality-rules
+    inclusion: default
+    after: [sources]
+  - id: mapping
+    title: Mapping (gap analysis)
+    kind: mapping
+    inclusion: mandatory
+    after: [sources (approved), target (approved)]
+  - id: code-conversion
+    title: Code conversion (import converter output)
+    kind: code-conversion
+    inclusion: conditional
+    when: estate.has_legacy_code
+    after: [sources]
+  - id: model
+    title: Data model
+    kind: modelling
+    inclusion: default
+    after: [mapping (approved)]
+    note: A lift-and-shift may drop it, with a reason.
+  - id: build
+    title: Pipeline Spec and build artifacts
+    kind: build
+    inclusion: mandatory
+    after: [mapping (approved)]
+  - id: reconcile
+    title: Reconcile with the legacy system
+    kind: reconcile
+    inclusion: mandatory
+    after: [build]
+  - id: validate
+    title: Validate
+    kind: validate
+    inclusion: mandatory
+    after: [reconcile]
+  - id: platform-setup
+    title: Environment and security
+    kind: platform-setup
+    inclusion: optional
+    after: [target (approved)]
+  - id: bi
+    title: BI and reports
+    kind: bi-migration
+    inclusion: optional
+    after: [mapping (approved)]
+  - id: deploy
+    title: Deploy and cut over
+    kind: deploy
+    inclusion: default
+    after: [validate (approved)]
+  - id: decommission
+    title: Decommission plan
+    kind: document
+    inclusion: optional
+    after: [deploy]
+  - id: document
+    title: Documentation
+    kind: document
+    inclusion: default
+    after: [build]

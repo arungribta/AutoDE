@@ -561,6 +561,35 @@ Use the workspace from Part 22 and Claude Code with the AutoDE server.
   Do: `autode query --connection <id> "SELECT * FROM <table>"` on a connection without sample-data consent, then `autode query … "DELETE FROM <table>"`, then `autode explain --connection <id> "<a MERGE statement>"`.
   Expect: columns and the row count without values; the DELETE refused; a plan for the MERGE, with nothing run.
 
+## Part 24 — v0.44.0 Workflow templates and runtime
+
+Use the reference workspace in VS Code, the `autode` command, and Claude Code with the server.
+
+- [ ] **24.1 Suggestion and draft.**
+  Do: start a problem whose statement mentions migrating a legacy warehouse, then approve its specification in the panel. Open the Workflow Palette → **Workflow**.
+  Expect: the suggestion is modernization, with the words it matched. **Draft the workflow** lists the stages. Conformance is included only if the pack has a contract; code conversion is left out "condition … is false". A workflow decision appears in the Context Inbox.
+- [ ] **24.2 The plan gate.**
+  Do: before approving the workflow, try Generate Plan; then approve the workflow in the Context Inbox.
+  Expect: Generate Plan is blocked with "Plan the workflow and approve it". After approval, sources and target are ready, and the mapping waits for both to be approved.
+- [ ] **24.3 The same state everywhere.**
+  Do: run `autode workflow status`, and ask Claude Code "what's the next step in AutoDE's workflow?".
+  Expect: the same stages and states; the agent names the next stage and role from `autode_workflow_next`.
+- [ ] **24.4 A gate stage.**
+  Do: ask the agent to hand in the quality-rules stage with a file it wrote, then approve it with `autode workflow approve quality` in a terminal.
+  Expect: the agent can't approve it itself. After your approval the stage is done in the panel too.
+- [ ] **24.5 Staleness.**
+  Do: approve the mapping, then revise and re-approve the source context.
+  Expect: the mapping turns stale "source-context changed since it was approved", and shows *Approve again…*.
+- [ ] **24.6 Skip and re-open.**
+  Do: skip *Deploy* with a reason, try to skip *Reconcile*, then re-open *Quality rules*.
+  Expect: Deploy is skipped with the reason shown; Reconcile is refused as mandatory; re-opening turns the stages after it stale.
+- [ ] **24.7 An existing problem.**
+  Do: open a problem created before v0.44.0.
+  Expect: a draft workflow from its old greenfield or brownfield setting. Its approved spec counts; the workflow needs one approval.
+- [ ] **24.8 Your own template.**
+  Do: copy `workflows/modernization.yaml` into `.autode/config/workflows/`, add an optional stage, and break one dependency on purpose.
+  Expect: the editor flags schema problems while you type, and `autode workflow templates` names the broken dependency. Fix it: the new stage is offered in the next draft.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -699,5 +728,13 @@ Use the workspace from Part 22 and Claude Code with the AutoDE server.
 | 23.2 |  |  |
 | 23.3 |  |  |
 | 23.4 |  |  |
+| 24.1 |  |  |
+| 24.2 |  |  |
+| 24.3 |  |  |
+| 24.4 |  |  |
+| 24.5 |  |  |
+| 24.6 |  |  |
+| 24.7 |  |  |
+| 24.8 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

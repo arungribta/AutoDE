@@ -73,6 +73,22 @@ The estate is what AutoDE knows about your systems: their tables and columns, or
 
 Large estates go into the catalog in full. The working set, the part agents get as context, takes what fits and grows as tasks use more.
 
+## Workflow
+
+Each business problem has a **workflow**: its stages, planned from a template (greenfield, modernization, estate merge, or your workspace's own in `.autode/config/workflows/`). See [workflow-templates.md](workflow-templates.md).
+
+| Command | |
+|---|---|
+| `autode workflow templates` | The templates, each stage with its kind and inclusion (mandatory, default, conditional, optional). |
+| `autode workflow status` | Each stage: done, ready, in progress, waiting for approval, pending (and what it waits for), stale (and why), skipped (and the reason). The `next` line says what to do now. |
+| `autode workflow plan [--template <id>]` | The planning stage. Drafts the workflow from the template (default: AutoDE's suggestion, from the spec and the estate) and proposes it. Conditional stages are decided from facts, for example a contract in the pack switches conformance on. Re-run it to re-plan. A different template restarts the workflow. |
+| `autode workflow approve [<stage>]` | Approves the pending workflow, or a stage's gate. Needs an interactive terminal, like `decisions approve`. |
+| `autode workflow next` | The next assignment: stage, role, permission tier, what it consumes and produces. |
+| `autode workflow start <stage>` | Marks a stage in progress. Working ahead of its dependencies is allowed; it just can't be approved before them. |
+| `autode workflow complete <stage> --output <file>... --summary <text>` | Hands in a stage. The files must exist; the approval goes to a person. Stages whose output is a document with its own approval (spec, contexts, mapping, Pipeline Spec) complete when that document is approved. |
+| `autode workflow skip <stage> --reason <text>` | Skips a default, conditional or optional stage. Never a mandatory one, nor one whose output a later stage needs. |
+| `autode workflow reopen <stage> --reason <text>` | Re-opens a done stage. Everything downstream becomes stale and needs approval again. |
+
 ## Knowledge: facts, pack, vocabulary
 
 AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms, metrics, rules and decisions. Agents and documents *propose* facts; a person confirms them. These commands are the panel's Context Inbox in a terminal.

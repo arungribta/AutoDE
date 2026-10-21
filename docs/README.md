@@ -11,6 +11,7 @@ Each document answers one kind of question. When two disagree, the precedence ru
 | What **changed** in each version? | [CHANGELOG.md](../CHANGELOG.md) | Newest first, including deliberate deviations from the specs. |
 | How do I get oriented as a new engineer? | [engineering-onboarding-guide.md](engineering-onboarding-guide.md) | Orientation for new engineers: concepts, flows, code tour, daily loop, how to extend, known risks (v0.35.0). Links into the documents above for detail. |
 | How do I use AutoDE from Claude Code, Codex, VS Code agent mode, Cursor or Cline? | [mcp-setup.md](mcp-setup.md) | MCP server configuration per host and what it offers (v0.35.0; `autode mcp` since v0.42.0). |
+| Which stages does an engagement go through? | [workflow-templates.md](workflow-templates.md) | Stage kinds and the greenfield, modernization and estate-merge templates, with sources (v0.44.0). |
 | How do I run AutoDE's checks in CI, or approve a decision from a terminal? | [cli.md](cli.md) | The `autode` command line: commands, the `check` gate, decisions, exit codes (v0.42.0). |
 | How do I verify a release by hand? | [manual-verification.md](manual-verification.md) | F5 checklist for v0.25.0–v0.36.0, one part per version. |
 | Data formats | [schemas/](schemas/) | JSON Schemas for context envelopes and primitive definitions. |

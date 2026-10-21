@@ -1170,6 +1170,29 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
 
 ---
 
+### 7.8 Workflow templates and runtime (v0.44.0; ORC-9, PA3a)
+
+- **Stage kinds** (`src/engine/workflows/stageKinds.ts`). There are 17 kinds, each with roles, a permission ceiling (`TIERS`: read < propose < platform-read < workspace-write), `consumes` / `produces` artifacts (`ARTIFACTS`; `contract`, `legacy-code` and `estate` count as external) and default gates.
+- **Templates** (`templates.ts`; bundled `workflows/*.yaml`, overridden by id from `.autode/config/workflows/`; schema `docs/schemas/workflow-template.schema.json`, registered under `yamlValidation`).
+  - `parseTemplate()` reports every error.
+  - `when:` uses `parseCondition()`: a fact (`estate.sources`, `estate.systems`, `pack.has_contract`, `estate.has_legacy_code`), `not <fact>`, or `<fact> <op> <n>`.
+  - `after:` entries may end in `(approved)`.
+  - `checkStructure()` enforces: specify then plan first and mandatory; dependencies known and acyclic (`findCycle()`); every consumed artifact has a producer.
+  - `suggestTemplate()` scores `suggestWhen` keywords, plus the number of source systems for estate-merge.
+- **Instance** (`instance.ts`; `.autode/problems/<id>/workflow.yaml`). `draftWorkflow()` builds a deterministic draft: mandatory and default stages; conditional ones from `workflowFacts()` (estate source systems, a contract in the pack); optional ones left out; repeated stages carry the source systems as tasks; each stage gets its kind's first role at the ceiling.
+  - `checkWorkflow()` enforces the plan rules: mandatory stages and their gates kept; reasons for default and conditional stages left out and for added stages; roles and tiers allowed by the kind; included dependencies and producers.
+  - `diffWorkflow()` gives the approver's summary.
+- **Runtime** (`runtime.ts`), the hub. `syncWorkflow()` brings `record`s up to date.
+  - **Document-backed stages** (specify, target context, source assessment, mapping, build) take their approval from their documents' `status` (specify also needs `problemStatementApproved`). The panel, CLI and MCP therefore can't disagree, and no panel handler was rewired.
+  - **Other stages** are approved by a `gate` decision.
+  - **Staleness.** On approval the stage records the revisions of its inputs: documents by content hash, gated artifacts by the approving decision. A later difference marks it `stale`, and a stale stage is approved again through a gate decision.
+  - **Actions:** `startStage()` (working ahead is allowed, with a warning), `completeStage()` (named outputs must exist; with `check`, at least one is needed; with `approve`, a `gate` decision is created), `skipStage()` (never a mandatory stage, nor one whose output a later stage consumes), `reopenStage()` (everything downstream turns `stale`) and `nextAssignment()` (stage, role, tier, consumes, produces, instructions).
+- **Service** (`service.ts`), shared by the panel, CLI and MCP: `ensureWorkflow()` drafts on first use, which also migrates older problems (brownfield to modernization), plus `redraft()`, `statusFor()`, `suggestFor()`, `proposeWorkflow()` (withdraws an older pending proposal) and `approveWorkflow()`.
+- **Decisions.** New kinds: `workflow` (high stakes; `validateWorkflowProposal()` uses `ProposalContext.resourcesRoot` to load templates, and warns that a template change restarts; applying it writes the instance as approved, keeping stage records when the template is the same and resetting them otherwise) and `gate` (applied as a no-op; the runtime reads the decision).
+- **Panel.** A Workflow section in the Workflow Palette (`workflowState` and `workflowAction` messages): draft and propose, then approve in the Context Inbox; hand in, skip, re-open. `computeContextGateStatus()` now requires the approved workflow, and takes "source context applies" from the workflow's source-assessment stage instead of the brownfield flag. `AgentHub`'s `contextGateReady` follows from it.
+- **CLI:** `autode workflow templates | status | plan | next | start | complete | approve | skip | reopen`.
+- **MCP** (`src/mcp/workflowTools.ts`): `autode_workflow_templates`, `_status`, `_next`, `_start_stage`, `_complete_stage`, `_skip_stage`, `_reopen_stage` and `autode_propose_workflow`. None of them approve.
+
 ### 7.7 Decisions and proposals (v0.40.0; ORC-8, MCP-2)
 
 *Since v0.41.0 facts no longer become decisions: they use the ledger's gate (§5.14); the `assertion` kind remains for decisions recorded before.*
@@ -1727,8 +1750,10 @@ src/engine/transforms/declarative/    # Tier 2 declarative primitives
   adapter.ts, lifecycle.ts, loader.ts, schema.ts, templateEngine.ts, types.ts
 src/engine/transforms/primitives/    # Tier 1 primitives
   dedup.ts, incrementalLoad.ts, renameCast.ts
+src/engine/workflows/
+  instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workspace.ts, workspaceTools.ts
+  catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 src/spokes/    # Snowflake executor (other files unused)
   architectureAgent.ts, ingestionAgent.ts, snowflakeExecutor.ts, sttmAgent.ts
 ```

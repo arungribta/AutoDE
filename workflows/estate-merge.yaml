@@ -1,0 +1,93 @@
+# AutoDE workflow template: estate merge (consolidation). docs/workflow-templates.md §4.
+# Basis: master data consolidation practice (profiling, standardisation, matching, survivorship)
+# and conformed dimensions. Reconciliation of every source against the merged result is mandatory.
+id: estate-merge
+version: 1
+title: Estate merge
+description: Several source systems, often from different organisations, merged into one target.
+suggestWhen: [merge, merger, consolidat, combine, unify, single view, golden record, acquisition, two systems, several systems]
+stages:
+  - id: specify
+    title: Business problem and specification
+    kind: specify
+    inclusion: mandatory
+  - id: plan
+    title: Plan the workflow
+    kind: plan
+    inclusion: mandatory
+    after: [specify (approved)]
+  - id: sources
+    title: Source assessment
+    kind: source-assessment
+    inclusion: mandatory
+    repeat: per-source-system
+    join: all
+    after: [plan (approved)]
+  - id: target
+    title: Target context
+    kind: target-context
+    inclusion: mandatory
+    after: [plan (approved)]
+  - id: conformance
+    title: Contract conformance
+    kind: conformance
+    inclusion: conditional
+    when: pack.has_contract
+    after: [sources]
+  - id: quality
+    title: Quality and standardisation rules
+    kind: quality-rules
+    inclusion: mandatory
+    after: [sources]
+  - id: mapping
+    title: Mapping
+    kind: mapping
+    inclusion: mandatory
+    repeat: per-source-system
+    join: all
+    after: [sources (approved), target (approved)]
+  - id: entity-resolution
+    title: Entity resolution (matching, survivorship, conformed dimensions)
+    kind: entity-resolution
+    inclusion: mandatory
+    after: [mapping (approved)]
+  - id: model
+    title: Data model
+    kind: modelling
+    inclusion: mandatory
+    after: [entity-resolution (approved)]
+  - id: build
+    title: Pipeline Spec and build artifacts
+    kind: build
+    inclusion: mandatory
+    after: [model (approved)]
+  - id: reconcile
+    title: Reconcile each source with the merged result
+    kind: reconcile
+    inclusion: mandatory
+    after: [build]
+  - id: validate
+    title: Validate
+    kind: validate
+    inclusion: default
+    after: [reconcile]
+  - id: platform-setup
+    title: Environment and security
+    kind: platform-setup
+    inclusion: optional
+    after: [target (approved)]
+  - id: bi
+    title: BI and reports
+    kind: bi-migration
+    inclusion: optional
+    after: [model (approved)]
+  - id: deploy
+    title: Deploy
+    kind: deploy
+    inclusion: optional
+    after: [validate (approved)]
+  - id: document
+    title: Documentation
+    kind: document
+    inclusion: default
+    after: [build]

@@ -303,6 +303,9 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_list_problems` / `autode_start_problem` / `autode_select_problem` | See the business problems, start one from its statement (a first draft, nothing approved), or choose the active one. The spec, context and proposal tools work on the active problem. |
 | `autode_ingest_file` | Bring a DDL, CSV or JSON file in the workspace into AutoDE's estate (catalog and working set), optionally under an estate system. |
 | `autode_ingest_metadata` | Bring a connection's schemas into the estate (read-only extraction). `autode_extract_metadata` only looks; this records. |
+| `autode_workflow_status` / `autode_workflow_next` | The problem's workflow (the hub): each stage's state, and the next assignment (stage, role, tier, what it consumes and produces). |
+| `autode_workflow_templates` / `autode_propose_workflow` | The templates, and proposing the problem's workflow (a deterministic draft, or your refinement); a person approves it. |
+| `autode_workflow_start_stage` / `autode_workflow_complete_stage` / `autode_workflow_skip_stage` / `autode_workflow_reopen_stage` | Work on stages: hand one in (its gate goes to a person), skip a non-mandatory one with a reason, re-open one (everything downstream becomes stale). |
 | `autode_pack_list` / `autode_pack_add` / `autode_pack_apply` | See the active problem's documents; add one as a draft (marking it signed is a person's call); read structured documents in through their confirmed profile. |
 | `autode_check_conformance` | Check the sources against the pack's contracts, using the catalog, samples and, with a connection, read-only aggregate probes. |
 | `autode_mine_vocabulary` / `autode_propose_vocabulary` | Find abbreviations in names and comments; propose vocabulary entries (low stakes: you may approve after asking the user). |

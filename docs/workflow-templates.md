@@ -1,6 +1,6 @@
 # Workflow templates (reviewed 2026-10-21)
 
-*Prework for the revised PA3 (docs/mcp-engine-requirements.md §9.2): the stage kinds and the three bundled templates, grounded in published practice. The owner reviewed it on 2026-10-21 (§5 records the answers). In PA3a these become `workflows/*.yaml` and the stage-kind catalogue in the engine.*
+*Prework for the revised PA3 (docs/mcp-engine-requirements.md §9.2): the stage kinds and the three bundled templates, grounded in published practice. The owner reviewed it on 2026-10-21 (§5 records the answers). Since v0.44.0 (PA3a) they are `workflows/*.yaml` and the stage-kind catalogue in `src/engine/workflows/stageKinds.ts`.*
 
 ## How to read it
 

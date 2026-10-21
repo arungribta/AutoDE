@@ -47,6 +47,10 @@ export const LAYOUT = {
   primitives: [AUTODE_DIR, 'config', 'primitives'],
   targetEnvironment: [AUTODE_DIR, 'config', 'target-environment.yaml'],
   connections: [AUTODE_DIR, 'config', 'connections.yaml'],
+  /** Workflow templates for this workspace (PA3a), overriding or adding to the bundled ones by id. */
+  workflows: [AUTODE_DIR, 'config', 'workflows'],
+  /** Which decision kinds may be approved by MCP elicitation (PA3c). */
+  approvals: [AUTODE_DIR, 'config', 'approvals.yaml'],
   decisions: [AUTODE_DIR, 'decisions'],
   local: [AUTODE_DIR, 'local'],
   localConnections: [AUTODE_DIR, 'local', 'connections.yaml'],

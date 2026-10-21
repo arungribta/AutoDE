@@ -413,6 +413,8 @@ In short: one `autode` package (engine, `autode mcp`, CLI, bundled resources; no
 
 #### Phase PA3 (revised and approved 2026-10-21): planned workflows, agents and skills — the same AutoDE in every host
 
+**Status:** PA3a ✅ shipped in v0.44.0 (CHANGELOG.md; requirements ORC-9; technical-design §7.8). PA3b and PA3c are next.
+
 *Approved by the owner on 2026-10-21; it replaces the PA3 of 2026-10-18. It implements the roadmap decision log of 2026-10-20 and 2026-10-21. The templates and stage kinds are in [workflow-templates.md](workflow-templates.md).*
 
 **Goal.** A data engineer in any host that brings a model gets the same AutoDE process as in VS Code:

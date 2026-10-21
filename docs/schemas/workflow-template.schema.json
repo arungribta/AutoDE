@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://autode/workflow-template.schema.json",
+  "title": "AutoDE workflow template",
+  "description": "A stage catalogue for a category of engagement (PA3a; docs/workflow-templates.md). The engine also checks the rules a schema can't express: specify then plan first, dependencies acyclic, every consumed artifact produced.",
+  "type": "object",
+  "required": ["id", "version", "stages"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "suggestWhen": { "type": "array", "items": { "type": "string" }, "description": "Words in a specification that suggest this template (a suggestion only)." },
+    "stages": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+          "title": { "type": "string" },
+          "kind": { "enum": ["specify", "plan", "target-context", "source-assessment", "conformance", "quality-rules", "mapping", "entity-resolution", "modelling", "code-conversion", "build", "reconcile", "validate", "deploy", "document", "platform-setup", "bi-migration"] },
+          "inclusion": { "enum": ["mandatory", "default", "conditional", "optional"], "default": "default" },
+          "when": { "type": "string", "description": "For conditional stages: a fact (estate.sources, estate.systems, pack.has_contract, estate.has_legacy_code), 'not <fact>', or '<fact> <op> <number>'." },
+          "after": { "type": "array", "items": { "type": "string", "pattern": "^\\s*[A-Za-z0-9_.-]+\\s*(\\(\\s*approved\\s*\\))?\\s*$" }, "description": "Stages this waits for; '(approved)' waits for their approval gate." },
+          "consumes": { "type": "array", "items": { "$ref": "#/definitions/artifact" } },
+          "produces": { "type": "array", "items": { "$ref": "#/definitions/artifact" } },
+          "gates": { "type": "array", "items": { "enum": ["check", "approve"] } },
+          "repeat": { "const": "per-source-system" },
+          "join": { "enum": ["all", "any"] },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "artifact": { "enum": ["spec", "workflow", "target-context", "source-context", "estate", "conformance-report", "quality-rules", "mapping", "entity-resolution", "model", "converted-code", "pipeline-spec", "artifacts", "reconciliation-report", "validation-report", "deployment", "documentation", "platform-setup-plan", "bi-migration-plan", "legacy-code", "contract"] }
+  }
+}

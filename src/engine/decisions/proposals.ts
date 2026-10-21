@@ -13,6 +13,9 @@ import { VocabularyProposal, mergeVocabularyFile } from '../context/vocabulary';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, writeWorkflow } from '../workflows/instance';
+import { loadTemplates } from '../workflows/templates';
+
 export interface VocabularyProposalPayload { entries: Array<Pick<VocabularyProposal, 'kind' | 'from' | 'to'>> }
 import { layoutPath } from '../workspaceLayout';
 import {
@@ -28,7 +31,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  * proposal tools, the extension and (PA2) the CLI.
  */
 
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection' | 'vocabulary'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection' | 'vocabulary' | 'workflow'>;
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -39,6 +42,8 @@ export interface ProposalContext {
   schemaIndex?: SchemaIndex;
   /** The connections a platform change may target. */
   connections?: readonly ConnectionEntry[];
+  /** Where the bundled workflow templates live (the extension's or the package's root); for workflow proposals. */
+  resourcesRoot?: string;
 }
 
 export interface PlatformChangeProposal { connectionId: string; sql: string; reason: string }
@@ -188,6 +193,28 @@ export function validateVocabularyProposal(p: VocabularyProposalPayload): Valida
   return finish(r);
 }
 
+/** A workflow (PA3a): the template's rules, item by item; the diff against the template is the reviewer's summary. */
+export function validateWorkflowProposal(w: WorkflowInstance, ctx: ProposalContext): ValidationReport {
+  const r = report();
+  r.checks.push('mandatory stages and gates kept', 'reasons for stages left out or added', 'roles and tiers allowed by each stage kind', 'dependencies known and acyclic', 'every consumed artifact has a producer');
+  needProblem(ctx, r);
+  if (!w || typeof w !== 'object' || !Array.isArray(w.stages)) { r.errors.push('workflow must be a workflow instance with stages.'); return finish(r); }
+  if (ctx.problemId && w.problemId !== ctx.problemId) r.errors.push(`The workflow is for problem ${w.problemId}, not the active ${ctx.problemId}.`);
+  const { templates, errors } = loadTemplates(ctx.resourcesRoot ?? ctx.workspaceRoot, ctx.workspaceRoot);
+  r.warnings.push(...errors);
+  const template = templates.find((t) => t.id === w.template?.id);
+  if (!template) { r.errors.push(`No workflow template "${w.template?.id}" (known: ${templates.map((t) => t.id).join(', ') || 'none'}).`); return finish(r); }
+  const c = checkWorkflow(w, template);
+  r.errors.push(...c.errors);
+  r.warnings.push(...c.warnings);
+  const d = diffWorkflow(w, template);
+  for (const x of d.dropped) r.warnings.push(`Left out: ${x.id} (${x.inclusion}) — ${x.reason ?? 'no reason'}.`);
+  for (const x of d.included) r.warnings.push(`Included: ${x.id} (${x.inclusion})${x.reason ? ` — ${x.reason}` : ''}.`);
+  const current = ctx.problemRoot ? readWorkflow(ctx.problemRoot) : undefined;
+  if (current && current.status === 'approved' && current.template.id !== w.template.id) r.warnings.push(`It changes the template from ${current.template.id} to ${w.template.id}: the workflow restarts after the specification (owner's decision 2026-10-21).`);
+  return finish(r);
+}
+
 // ── Proposing ────────────────────────────────────────────────────────────────
 
 function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown): Decision['subject'] {
@@ -208,6 +235,7 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'pipeline_spec': { const s = payload as PipelineSpec; return { title: `Pipeline Spec: ${s.entities?.length ?? 0} entities`, summary: `Pipeline Spec derived from ${s.derivedFromBpsId ?? 'the active problem'} v${s.derivedFromBpsVersion ?? '?'}` }; }
     case 'mapping': { const m = payload as EntityMapping; return { title: `Map ${m.sourceFqn || m.sourceEntityId} → ${m.targetName} (${m.columns?.length ?? 0} columns)`, summary: m.notes ?? '' }; }
     case 'platform_change': { const p = payload as PlatformChangeProposal; return { title: `Run on ${p.connectionId}: ${p.sql.trim().split(/\s+/).slice(0, 6).join(' ')}…`, summary: p.reason }; }
+    case 'workflow': { const w = payload as WorkflowInstance; const n = (w.stages ?? []).filter((s) => s.included).length; return { title: `Workflow: ${w.template?.id} with ${n} stages`, summary: (w.stages ?? []).filter((s) => s.included).map((s) => s.id).join(' → ') }; }
     case 'vocabulary': { const v = payload as VocabularyProposalPayload; return { title: `Vocabulary: ${v.entries.map((e) => e.kind === 'abbreviation' ? `${e.from.toUpperCase()}=${e.to}` : `${e.from}~${e.to}`).join(', ')}`.slice(0, 160), summary: `${v.entries.length} retrieval vocabulary entr${v.entries.length === 1 ? 'y' : 'ies'}.` }; }
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
   }
@@ -222,6 +250,7 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'platform_change': return validatePlatformChange(payload as PlatformChangeProposal, ctx);
     case 'connection': return validateConnectionProposal(payload as ConnectionDraft, ctx);
     case 'vocabulary': return validateVocabularyProposal(payload as VocabularyProposalPayload);
+    case 'workflow': return validateWorkflowProposal(payload as WorkflowInstance, ctx);
   }
 }
 
@@ -252,6 +281,8 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
   const d = store.get(id);
   if (d.status !== 'approved') throw new DecisionError('NOT_APPROVED', `Decision ${id} is ${d.status}; only an approved decision is applied.`, { status: d.status });
   const kind = d.kind as ProposalKind;
+  // A stage gate (PA3a): the workflow runtime reads the decision itself; nothing else to write.
+  if (d.kind === 'gate') { const done = store.markApplied(id, `Approved by ${d.resolution.by || 'unknown'}.`); return { decision: done, applied: true, message: `Approved: ${d.title}.` }; }
   const doc = DOCUMENT_OF[kind];
   if (doc) {
     if (!ctx.problemRoot) return { decision: d, applied: false, message: 'No active business problem; open it to apply this decision.' };
@@ -317,6 +348,19 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         const outcome = await deps.executePlatformChange(p.connectionId, p.sql);
         const done = store.markApplied(id, `Ran on ${p.connectionId}: ${outcome}`);
         return { decision: done, applied: true, message: `Applied ${id} (approved by ${approver}): ${outcome}` };
+      }
+      case 'workflow': {
+        const p = store.proposal<WorkflowInstance>(id);
+        const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', p.problemId);
+        const current = readWorkflow(root);
+        // Re-planning on the same template keeps the state of the stages both share; a new template restarts (owner, 2026-10-21).
+        const keep = current && current.template.id === p.template.id ? new Map(current.stages.map((s) => [s.id, s.record])) : new Map();
+        const next: WorkflowInstance = {
+          ...p, status: 'approved', approvedAt: now.toISOString(), approvedBy: approver, decisionId: id,
+          stages: p.stages.map((s) => ({ ...s, record: keep.get(s.id) ?? (s.kind === 'specify' ? s.record : { status: 'pending' }) }))
+        };
+        writeWorkflow(root, next);
+        break;
       }
       case 'vocabulary': {
         const file = layoutPath(ctx.workspaceRoot, 'vocabulary');

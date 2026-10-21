@@ -23,6 +23,10 @@ export type DecisionKind =
   | 'connection'
   /** Retrieval vocabulary: abbreviations and synonyms (v0.43.3; low stakes — it changes what is found, not what is true). */
   | 'vocabulary'
+  /** A problem's planned workflow (PA3a): the planning stage's output. */
+  | 'workflow'
+  /** A workflow stage's approval gate (PA3a), for stages whose output has no approval of its own. */
+  | 'gate'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 

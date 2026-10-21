@@ -77,6 +77,9 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 
 
 import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
+import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
+import { readWorkflow } from '../engine/workflows/instance';
 /** VS Code's watcher for `.autode/knowledge/` edits, injected into the engine's ContextFileManager (v0.43.2). */
 const watchKnowledge: KnowledgeWatcher = (dir, onChange) => {
   const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), '*.{yaml,yml,json}'));
@@ -1000,6 +1003,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'approvePipelineSpec': { await this.approveCurrentPipelineSpec(); break; }
         case 'listDecisions':
         case 'listInbox': { this.postDecisions(); break; }
+        case 'workflowRefresh': { this.postWorkflow(); break; }
+        case 'workflowAction': {
+          const m = message as unknown as { action?: unknown; stage?: unknown; arg?: unknown };
+          if (typeof m.action === 'string') await this.workflowAction(m.action, typeof m.stage === 'string' ? m.stage : undefined, typeof m.arg === 'string' ? m.arg : undefined);
+          break;
+        }
         case 'reviewFact': {
           const m = message as unknown as { id?: unknown; action?: unknown; statement?: unknown; value?: unknown; note?: unknown };
           if (typeof m.id === 'string' && (m.action === 'confirm' || m.action === 'reject' || m.action === 'edit')) await this.reviewFact(m.id, m.action, { statement: typeof m.statement === 'string' ? m.statement : undefined, value: typeof m.value === 'string' ? m.value : undefined, note: typeof m.note === 'string' ? m.note : undefined });
@@ -1585,6 +1594,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       } else {
         this.postLog(`Rejected: ${resolved.title}.`);
       }
+      if (resolved.kind === 'workflow' || resolved.kind === 'gate') this.postContextGateStatus();
     } catch (err) {
       this.postMessage('error', { message: err instanceof Error ? err.message : String(err) });
     }
@@ -2160,7 +2170,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const tc = this.targetContextManager?.getContext();
     const targetForThisVersion = !!tc && tc.specId === spec.id && tc.specVersion === spec.version;
     const targetReady = !!this.targetContextManager?.isApprovedFor(spec.id, spec.version);
-    const sourceApplicable = spec.implementationType === 'brownfield';
+    // PA3a: the workflow decides whether there is a source stage (it used to be the brownfield flag), and the plan gate comes first.
+    const wf = this.workflowGate();
+    const sourceApplicable = wf ? wf.sourcesIncluded : spec.implementationType === 'brownfield';
     const sc = this.sourceContextManager?.getContext();
     const sourceForThisVersion = !!sc && sc.specId === spec.id && sc.specVersion === spec.version;
     const sourceReady = !sourceApplicable || !!this.sourceContextManager?.isReadyFor(spec.id, spec.version);
@@ -2170,18 +2182,88 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     // orchestrator will actually enforce, in case a spec somehow reaches 'approved' status
     // without it (e.g. an older persisted spec from before this field existed).
     if (!spec.problemStatementApproved) reasons.push('Confirm the inferred business problem.');
+    if (wf && !wf.approved) reasons.push('Plan the workflow and approve it (Workflow Palette → Workflow).');
     if (!targetReady) reasons.push('Target Context needs to be built and approved.');
     if (sourceApplicable && !sourceReady) reasons.push('Source Context needs to be built and approved (or marked Not Applicable).');
     return {
       targetStatus: targetForThisVersion ? tc!.status : 'none',
       sourceApplicable,
       sourceStatus: sourceForThisVersion ? sc!.status : 'none',
-      canGeneratePlan: !!spec.problemStatementApproved && targetReady && sourceReady,
+      canGeneratePlan: !!spec.problemStatementApproved && targetReady && sourceReady && (!wf || wf.approved),
       blockingReasons: reasons
     };
   }
 
+  // ── Workflow (PA3a): the runtime is the hub; the panel shows it and acts through the same engine functions as the CLI and MCP ──
+
+  private workflowScope(): WorkflowScope | undefined {
+    const root = this.workspaceRoot?.fsPath;
+    return root && this.activeProblemId ? { workspaceRoot: root, resourcesRoot: this.context.extensionUri.fsPath, problemId: this.activeProblemId } : undefined;
+  }
+
+  /** The plan gate as the runtime sees it, once the specification exists. */
+  private workflowGate(): { approved: boolean; sourcesIncluded: boolean } | undefined {
+    const scope = this.workflowScope();
+    if (!scope) return undefined;
+    try {
+      const w = ensureWorkflow(scope);
+      const sources = w.stages.find((x) => x.kind === 'source-assessment');
+      return { approved: w.status === 'approved', sourcesIncluded: !!sources && sources.included && sources.record.status !== 'skipped' };
+    } catch { return undefined; }
+  }
+
+  private postWorkflow(): void {
+    const scope = this.workflowScope();
+    if (!scope) { this.postMessage('workflowState', { problemId: null }); return; }
+    try {
+      const status = statusFor(scope);
+      const { templates } = templatesFor(scope);
+      const pending = this.decisionStore()?.list({ status: 'pending', kind: 'workflow' }).find((d) => d.problemId === scope.problemId);
+      this.postMessage('workflowState', { ...status, templates: templates.map((t) => ({ id: t.id, title: t.title })), suggested: suggestFor(scope), pendingDecision: pending ? { id: pending.id, title: pending.title } : null });
+    } catch (err) {
+      this.postMessage('workflowState', { problemId: scope.problemId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async workflowAction(action: string, stage: string | undefined, arg: string | undefined): Promise<void> {
+    const scope = this.workflowScope();
+    if (!scope) { this.postLog('Start or open a business problem first.'); return; }
+    const rctx = { workspaceRoot: scope.workspaceRoot, problemRoot: path.join(scope.workspaceRoot, ...LAYOUT.problems, scope.problemId), problemId: scope.problemId };
+    const by = this.panelUser();
+    try {
+      if (action === 'propose') {
+        const current = readWorkflow(rctx.problemRoot);
+        if (current && current.status === 'approved') { this.postLog('The workflow is approved. To re-plan, ask an agent to propose a revision, or run `autode workflow plan` in a terminal.'); return; }
+        const w = redraft(scope, arg || undefined);
+        const d = proposeWorkflow(scope, w, { host: 'vscode' });
+        this.postLog(d.validation.ok ? `Workflow drafted from ${w.template.id}: ${d.title}. Approve it in the Context Inbox.` : `The workflow draft has problems: ${d.validation.errors.join(' ')}`);
+        this.postDecisions();
+      } else if (action === 'skip' && stage) {
+        const reason = arg ?? await vscode.window.showInputBox({ title: `Skip ${stage}`, prompt: 'Why is this stage not needed for this problem? (recorded)', ignoreFocusOut: true });
+        if (!reason) return;
+        skipStage(rctx, stage, reason, by);
+        this.postLog(`Stage ${stage} skipped: ${reason}`);
+      } else if (action === 'reopen' && stage) {
+        const reason = arg ?? await vscode.window.showInputBox({ title: `Re-open ${stage}`, prompt: 'What needs to change? Everything downstream becomes stale.', ignoreFocusOut: true });
+        if (!reason) return;
+        const r = reopenStage(rctx, stage, by, reason);
+        this.postLog(`Stage ${stage} re-opened${r.stale.length ? `; now stale: ${r.stale.join(', ')}` : ''}.`);
+      } else if (action === 'complete' && stage) {
+        const files = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Hand in', title: `What did stage ${stage} produce?`, defaultUri: this.workspaceRoot });
+        if (!files) return;
+        const summary = await vscode.window.showInputBox({ title: `Hand in ${stage}`, prompt: 'What was done (for the approver)', ignoreFocusOut: true }) ?? '';
+        const r = completeStage(rctx, stage, { outputs: files.map((f) => path.relative(scope.workspaceRoot, f.fsPath).split(path.sep).join('/')), summary, by, host: 'vscode' });
+        this.postLog(r.message);
+        this.postDecisions();
+      }
+    } catch (err) {
+      this.postMessage('error', { message: err instanceof WorkflowError || err instanceof Error ? err.message : String(err) });
+    }
+    this.postContextGateStatus();
+  }
+
   private postContextGateStatus(): void {
+    this.postWorkflow();
     const status = this.computeContextGateStatus(this.specManager?.getSpec());
     // Pushes the same readiness signal into the orchestrator (AgentHub) so plan
     // generation is gated at its actual enforcement point, not just in the UI
