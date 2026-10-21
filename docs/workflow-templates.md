@@ -1,6 +1,6 @@
-# Workflow templates (DRAFT for review, 2026-10-21)
+# Workflow templates (reviewed 2026-10-21)
 
-*Prework for the revised PA3 (docs/mcp-engine-requirements.md §9.2). It proposes the stage kinds and the three bundled templates, grounded in published practice. Once reviewed, these become `workflows/*.yaml` and the stage-kind catalogue in the engine. Nothing is built from this draft yet.*
+*Prework for the revised PA3 (docs/mcp-engine-requirements.md §9.2): the stage kinds and the three bundled templates, grounded in published practice. The owner reviewed it on 2026-10-21 (§5 records the answers). In PA3a these become `workflows/*.yaml` and the stage-kind catalogue in the engine.*
 
 ## How to read it
 
@@ -39,8 +39,14 @@ The kind decides who can do the stage, the most an agent may do there (permissio
 | `validate` | documenter, pipeline-engineer | platform-read | artifacts, quality rules | test results, grounding report | check, approve | the tests pass and the acceptance criteria are traced |
 | `deploy` | pipeline-engineer | propose | approved artifacts | platform-change decisions (run, cut over, roll back) | approve (platform change) | the changes are applied by an `--allow-write` server after approval |
 | `document` | documenter | workspace-write | everything above | design and operations docs | check | the docs are generated and linked to their artifacts |
+| `platform-setup` | target-architect | propose | target context, spec | environment and security plan (accounts, networking, roles and grants, mapped from the source's security model); platform-change proposals | approve | the plan covers every environment in the estate; changes run only as approved decisions |
+| `bi-migration` | documenter, data-modeler | read | estate, model, mapping | inventory of reports and semantic objects, the mapping of their fields to the new model, a migration plan | approve | every report in scope is mapped or listed as a gap |
 
-*Three kinds beyond the twelve we discussed:* `quality-rules` (a distinct step in published migration methods), `entity-resolution` (matching and survivorship in consolidation) and `code-conversion` (modernisation imports a converter's output; AutoDE doesn't convert code itself, per the 2026-10-15 decision).
+*Five kinds beyond the twelve first discussed:*
+- `quality-rules` (a distinct step in published migration methods);
+- `entity-resolution` (matching and survivorship in consolidation);
+- `code-conversion` (modernisation imports a converter's output; AutoDE doesn't convert code itself, per the 2026-10-15 decision);
+- `platform-setup` and `bi-migration`, two phases in the Snowflake and Databricks guides. In AutoDE they produce plans, documents and proposals only; the platform work itself runs as approved platform changes, and report tools are outside AutoDE.
 
 ## 2. Greenfield
 
@@ -57,6 +63,8 @@ The kind decides who can do the stage, the most an agent may do there (permissio
 | Data model | modelling | mandatory | mapping (approved) | Kimball puts modelling before ETL design; here mapping and model can be drafted together, but the model's approval follows mapping. |
 | Build | build | mandatory | model (approved) | |
 | Validate | validate | default | build | |
+| Environment and security | platform-setup | optional | target (approved) | Plan and proposals only. |
+| BI and reports | bi-migration | optional | model (approved) | Plan and field mapping only. |
 | Deploy | deploy | optional | validate (approved) | |
 | Document | document | default | build | |
 
@@ -83,6 +91,8 @@ All three put *assess, then design and map, then convert or build, then reconcil
 | Build | build | mandatory | mapping (approved); model (approved) when present | |
 | Reconcile | reconcile | mandatory | build | Legacy against new, by key: counts, sums, checksums. |
 | Validate | validate | mandatory | reconcile | Includes acceptance checks. |
+| Environment and security | platform-setup | optional | target (approved) | Snowflake's environment and security phase; maps the source's security model. |
+| BI and reports | bi-migration | optional | mapping (approved); model (approved) when present | Snowflake's reporting phase; Databricks' BI integration. |
 | Deploy / cutover | deploy | default | validate (approved) | Final incremental load, switch-over, rollback plan. |
 | Decommission plan | document | optional | deploy | PDM's legacy decommissioning, as a plan; switching off a system is outside AutoDE. |
 | Document | document | default | build | |
@@ -105,16 +115,18 @@ All three put *assess, then design and map, then convert or build, then reconcil
 | Build | build | mandatory | model (approved) | |
 | Reconcile | reconcile | mandatory | build | Each source against the merged result: no record lost or duplicated beyond the survivorship rules. |
 | Validate | validate | default | reconcile | |
+| Environment and security | platform-setup | optional | target (approved) | |
+| BI and reports | bi-migration | optional | model (approved) | Reports from several sources onto the merged model. |
 | Deploy | deploy | optional | validate (approved) | |
 | Document | document | default | build | |
 
-## 5. Questions for review
+## 5. Review decisions (owner, 2026-10-21)
 
-1. **The three added kinds:** `quality-rules`, `entity-resolution` and `code-conversion`. Keep them, merge them into other kinds, or drop them?
-2. **Mandatory reconciliation** in modernization and estate merge: all three sources treat it as essential. Do you agree it can't be dropped?
-3. **Data model as default, not mandatory, in modernization**, so a lift-and-shift can skip it with a reason. Is that right for your engagements?
-4. **Out of scope today, so not in the templates:** environment and security setup (accounts, RBAC), BI and report migration. Both are phases in the Snowflake and Databricks guides. Add them as optional stages that produce only plans and documents, or leave them out?
-5. **Waves:** migration waves are tasks within stages, not stages. Is that enough, or do waves need to be visible in the workflow itself?
+1. Keep `quality-rules`, `entity-resolution` and `code-conversion` as kinds.
+2. Reconciliation is mandatory in modernization and estate merge.
+3. The data model is default, not mandatory, in modernization: a lift-and-shift can drop it, with a reason.
+4. Environment and security setup, and BI and report migration, are optional stages (`platform-setup`, `bi-migration`) that produce plans, documents and proposals only.
+5. Migration waves are tasks inside stages, not stages.
 
 ## Sources
 

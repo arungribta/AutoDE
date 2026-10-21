@@ -411,244 +411,203 @@ In short: proposals are validated and become decisions in `.autode/decisions/`. 
 
 In short: one `autode` package (engine, `autode mcp`, CLI, bundled resources; no runtime dependency) that the VSIX ships as the same `dist/autode.js`. The deterministic commands are `validate`, `compile`, `grounding`, `conformance`, `probe` (report only), `doctor` and `check` (the CI gate). The `decisions` commands are human only (interactive terminal, refused with `CI` set). Exit codes are stable. `AutoDE: Configure MCP for Claude Code` prefers the installed `autode mcp`. The skills pack joins the package in PA3. Publishing to a registry remains the owner's step.
 
-#### Phase PA3 (revised 2026-10-21; DRAFT for the owner's review): workflows, agents and skills — the same AutoDE in every host
+#### Phase PA3 (revised 2026-10-21, for final approval): planned workflows, agents and skills — the same AutoDE in every host
 
-*This replaces the PA3 of 2026-10-18. It implements the roadmap decision log of 2026-10-20 (Surface parity; Workflows and agents as definitions). Nothing here is built until the owner approves it. Proposed versions are in "Releases"; the roadmap changes only after approval.*
+*This replaces the PA3 of 2026-10-18 and the first draft of 2026-10-21. It implements the roadmap decision log of 2026-10-20 (Surface parity; Workflows and agents as definitions) and the owner's review of 2026-10-21. The templates and stage kinds are in [workflow-templates.md](workflow-templates.md). The roadmap changes when this spec is approved.*
 
-**Goal.** A data engineer in any host that brings a model gets the same AutoDE process as in VS Code: VS Code itself, Claude Code, Cortex Code, the GitHub Copilot CLI, and, through MCP prompts, any other MCP client. That means the same workflow, stages, reasoning steps, context, checks, gates and deliverables. Texts differ by model; steps, checks and formats don't. The engine holds no model credentials (§3.1).
+**Goal.** A data engineer in any host that brings a model gets the same AutoDE process as in VS Code:
+- **hosts:** VS Code; Claude Code, Cortex Code and the GitHub Copilot CLI through the plugin; any other MCP client through prompts and tools;
+- **what is the same:** the planned workflow, its stages, the agents' reasoning steps, context, checks, gates and deliverables.
 
-##### 1. Four layers, each a definition file
+Texts differ by model; steps, checks and formats don't. The engine holds no model credentials (§3.1).
 
-| Layer | What it decides | Format and location | Who runs it |
+##### 1. Layers
+
+| Layer | What it is | Defined in | Run by |
 |---|---|---|---|
-| **Workflow** | Which stages, in what order, which agent does each, where a person must approve | YAML: bundled `workflows/*.yaml`, overridden per workspace in `.autode/config/workflows/` | The engine's workflow runtime (deterministic) |
-| **Agent** | Who does a stage: role, instructions, allowed tools, which skills | Markdown with frontmatter: bundled `agents/*.md`, overridden in `.autode/config/agents/` | The host's agent loop, or AutoDE's in-process executor in VS Code |
-| **Skill** | How to do one task, step by step | Agent Skills `SKILL.md` folders: bundled `skills/<id>/`, imported skills as today | The same |
-| **Tool** | Deterministic work: read, compute, check, compile, propose | AutoDE MCP tools | The engine |
+| **Template** | A stage catalogue for a category (greenfield, modernization, estate merge), with inclusion levels, stage kinds and dependencies | `workflows/*.yaml`, overridden or added per workspace in `.autode/config/workflows/` | — |
+| **Workflow instance** | The workflow for one problem: the planning stage's approved output | `.autode/problems/<id>/workflow.yaml` | The engine's workflow runtime (deterministic): **the hub** |
+| **Agent** | An assignment: a role template, plus a brief for this stage, approved skills and tools, and a permission tier | Role templates `agents/<role>.md`; the generated brief is stored in the instance | The host's agent loop, or AutoDE's in-process executor in VS Code: **the spokes** |
+| **Skill** | A method: how to do a task well | Agent Skills `SKILL.md` folders (bundled pack, reviewed imports) | The same |
+| **Tool** | Deterministic work and proposals | AutoDE MCP tools | The engine |
 
-Rules:
-- **The workflow owns the sequence.** An agent does its stage; it doesn't call other agents or skip stages.
-- **Agents and skills hold no deterministic logic.** Anything a program can decide is a tool.
-- **Every change to AutoDE's state is a proposal or a gate decision**, as today (PA1), with the same stakes model.
+Principles:
+- **The runtime decides what comes next.** An LLM decides only how to do a task.
+- **Agents never call agents.** No tool returns another agent to run. The runtime dispatches, hub-and-spoke.
+- **Methods live in skills, never in generated text.**
+- **Every change to AutoDE's state is a proposal or a gate decision** (PA1's stakes model).
 
-##### 2. Workflows
+##### 2. Templates, stage kinds and the rules a workflow must follow
 
-**Bundled workflows:** `greenfield`, `modernization` (previously brownfield; legacy migration) and `estate-merge`. A workspace can copy one into `.autode/config/workflows/`, change it, or add its own. Workflows are versioned: a problem keeps the version it started with until a person moves it to a new one.
+The **stage kinds**, 17 of them, are fixed in the engine: `specify`, `plan`, `target-context`, `source-assessment`, `conformance`, `quality-rules`, `mapping`, `entity-resolution`, `modelling`, `code-conversion`, `build`, `reconcile`, `validate`, `deploy`, `document`, `platform-setup`, `bi-migration`. Each kind defines:
+- the agent roles allowed;
+- the permission ceiling;
+- what it consumes and produces;
+- its default gates;
+- its *done when* check.
 
-```yaml
-id: estate-merge
-version: 1
-title: Merge several source systems into one target
-description: Several sources, often with a shared contract, into one model.
-suggestWhen: [merge, consolidat, combine, unify, "single view"]   # keywords for the suggestion only
-stages:
-  - id: problem
-    title: Business problem and specification
-    agent: business-analyst
-    produces: [spec/business-problem.yaml]
-    gate: approve-spec                # a person approves before later stages start
-  - id: target
-    title: Target context
-    agent: target-architect
-    after: [problem]
-    produces: [context/target-context.yaml]
-    gate: approve
-  - id: sources
-    title: Source assessment
-    agent: source-assessor
-    after: [problem]
-    repeat: per-source-system          # one instance per estate system with role source
-    produces: [context/source-context.yaml]
-  - id: contract
-    title: Contract conformance
-    agent: source-assessor
-    skill: contract-conformance
-    after: [sources]
-    optional: true
-  - id: mapping
-    title: Source-to-target mapping
-    agent: sttm-mapper
-    after: [sources, target]
-    produces: [context/mapping-context.yaml]
-    gate: approve
-  - id: model
-    title: Data model
-    agent: data-modeler
-    after: [mapping]
-    gate: approve
-  - id: build
-    title: Pipeline Spec and build artifacts
-    agent: pipeline-engineer
-    after: [model]
-    produces: [spec/pipeline.yaml]
-    gate: approve
-  - id: document
-    title: Documentation and grounding report
-    agent: documenter
-    after: [build]
-```
+A template is a catalogue of stages using these kinds. Each stage has:
+- **inclusion:** `mandatory`, `default`, `conditional` (`when:` on facts about the spec or estate) or `optional`;
+- **dependencies:** `after`, with `(approved)` to wait for the gate rather than completion; `consumes` and `produces`; `repeat: per-source-system` with `join: all | any`.
 
-**The language stays small:** `after`, `optional`, `repeat: per-source-system`, `gate: approve | approve-spec`, `agent`, `skill` (to override the agent's default skill), `produces`. There are no conditions or loops. A JSON Schema (`docs/schemas/workflow.schema.json`) validates definitions; the runtime refuses an invalid one and names the error.
+The language has no conditions beyond `when:`, and no loops. A JSON Schema validates templates (`docs/schemas/workflow-template.schema.json`).
 
-**The runtime** (`src/engine/workflows/`, deterministic) keeps each problem's state in `.autode/problems/<id>/workflow.yaml`: the workflow id and version, and each stage instance's state (`pending`, `ready`, `in-progress`, `awaiting-approval`, `done`, `skipped` with a reason and who skipped it). It answers:
-- **status:** where the problem is, what is ready, what is blocked and why;
-- **start / complete a stage:** complete checks the `produces` files exist and validate. A gated stage moves to `awaiting-approval` and creates a **gate decision**;
-- **skip:** an optional stage can be skipped with a reason. A gated stage can be skipped only by a person;
-- **change workflow:** moving to another workflow or version keeps the stages they share. This is a person's decision.
+**Rules the engine enforces on every workflow instance:**
+- The first two stages are fixed: `specify`, then `plan`.
+- Mandatory stages and their gates are present.
+- A default or conditional stage that is left out carries a reason. A conditional stage whose condition is false is skipped, with the condition as the reason.
+- An **added** stage (one not in the template) uses a known kind and a role that kind allows, and is flagged for the approver.
+- Dependencies are acyclic and name known stages, and everything consumed has a producer.
+- Each agent's permission tier is at or below its stage kind's ceiling.
 
-**Flexibility is kept on purpose:**
-- **Gates block only promotion to approved, never work.** An engineer can draft a mapping before the model stage, explore in chat, or ask any agent anything. The runtime records it and warns if an approval is missing; it doesn't refuse.
-- **Choosing the workflow:** AutoDE suggests one from `suggestWhen` and the spec, and the engineer picks. An agent may propose one (a low-stakes decision).
-- **A stage that turns out to be wrong for this engagement** is skipped with a reason, or the workflow is changed; no code changes are needed.
+##### 3. Planning produces the workflow
 
-**What happens to today's model:**
-- The four phases become stage groups.
-- `ImplementationType` and the keyword phase inference become the workflow suggestion.
-- The gates `AgentHub` enforces today (ORC-3) move into the runtime. The panel reads them from there, like every other surface.
-- Existing problems are migrated once: greenfield to `greenfield`, brownfield to `modernization`, with stage states derived from the documents and approvals they already have.
+1. **Deterministic draft.** When the spec is approved, the engine builds a draft instance from the chosen template:
+   - it evaluates `when:` conditions (number of source systems, a contract in the pack, legacy code in the estate, target platform);
+   - it expands `repeat` stages per source system;
+   - it applies the dependencies.
+2. **Planner refinement.** The planner (role `planner`, skill `workflow-planning`) refines the draft from the spec, the context and chat facts:
+   - include or drop default and optional stages, with reasons, and add stages;
+   - order stages within the dependency rules;
+   - write each stage's **task list** (entities to map, tables to build, migration waves; tasks live inside stages);
+   - **assign agents**: a role template, a generated brief and the skills and tier for each stage or task.
 
-**The plan.** Today an LLM writes a plan of steps per phase. With workflows, the stage list is the plan's backbone. Within the build stage, the pipeline engineer proposes the task list (entities, primitives, artifacts) as a `plan` proposal, which a person approves. This keeps "plan approved" and "stages confirmed" as gates, now attached to a stage.
+   It proposes the result with `autode_propose_workflow`.
+3. **Checks, then a person.** The engine checks the proposal against §2's rules and refuses it, item by item, if it breaks them. The approver sees it as a **diff against the template and the draft**: added, dropped (with reasons), reordered, and each agent's brief and tier. Approval is the plan gate, with the same channels as other gates (§6).
+4. **Re-planning.** A changed spec or new facts lead to a revised workflow, proposed and approved the same way. Completed stages stay done if they remain in the plan; stages that consumed changed outputs become stale (§5).
+5. **Changing the template** (for example modernization to estate merge) restarts the workflow after the spec stage, by the owner's decision of 2026-10-21, so that no state is carried over by mistake.
 
-##### 3. Agents
+**Choosing the template:** AutoDE suggests one from the spec (each template's `suggestWhen` keywords, the estate's systems and roles). The engineer picks it, or an agent proposes it as a low-stakes decision.
 
-Agent definitions are Markdown with a small, host-neutral frontmatter:
+##### 4. Agents: role templates, generated briefs, tiers
 
-```markdown
----
-name: sttm-mapper
-description: Maps source tables to the target, column by column, grounded in the estate and the contract.
-tools: [autode_get_context_pack, autode_resolve, autode_match_columns, autode_check_grounding, autode_propose_mapping]
-skills: [sttm-mapping]
----
-You are a senior data engineer mapping sources to a target …
-```
+- **Role templates** are reviewed and bundled: `business-analyst`, `planner`, `target-architect`, `source-assessor`, `sttm-mapper`, `data-modeler`, `pipeline-engineer`, `documenter`, `context-curator`. Each is a Markdown file stating the role, standing instructions and default skills. A workspace can add or override roles in `.autode/config/agents/`, and review applies (S2) as for skills.
+- **An agent for a stage is generated:** the planner writes a **brief** on top of a role template. The brief carries context only: which entities, which constraints, the open questions, what to produce. It never carries the method; that stays in the skills. The brief is stored in the instance and approved with the plan.
+- **Grounded tasks only.** A task is valid when:
+  - its kind is one its stage kind allows;
+  - it uses approved skills and tools only;
+  - its output is a known proposal or artifact kind.
 
-Bundled agents replace today's TypeScript agents (`src/agents/**`) and the orchestration prompts in `src/core`:
+  The engine refuses anything else at plan check. No new tool or skill is created at run time; new methods arrive through PA4's reviewed import.
+- **Permission tiers** are a predefined range:
+  - `read`: context, resolve, grounding, compile, catalog;
+  - `propose`: adds proposal tools;
+  - `platform-read`: adds query, explain and extraction;
+  - `workspace-write`: adds file writes, each approved.
 
-| Agent | Replaces | Default skills |
+  No tier includes resolving or applying decisions. The planner picks a tier at or below the stage kind's ceiling.
+- **Enforcement:** AutoDE enforces tiers and tool lists where it runs the loop (VS Code). In other hosts, the host's own tools are outside AutoDE's control (§3.1 known limit). The decision gates still protect AutoDE's state there, and the docs say so.
+
+Today's TypeScript agents (`src/agents/**`) and orchestration prompts in `src/core` are replaced by these roles and skills:
+
+| Role | Replaces | Default skills |
 |---|---|---|
-| `business-analyst` | interview, spec synthesis and revision (`specOps`, `specSynthesis`) | `business-problem-interview`, `specification-authoring` |
-| `target-architect` | target context questions | `target-context` |
-| `source-assessor` | `SourceAssessmentAgent`, source context questions | `source-assessment`, `contract-conformance` |
-| `sttm-mapper` | `SttmMapperAgent` | `sttm-mapping` |
-| `data-modeler` | `DataModelerAgent` (`architectureAgent`) | `data-modelling` |
-| `pipeline-engineer` | `TransformationScaffolderAgent`, `IngestionPipelineAgent`, Pipeline Spec synthesis, plan generation | `pipeline-planning`, `pipeline-scaffolding` |
-| `documenter` | `DocumentationAgent` | `documentation` |
-| `context-curator` | chat fact extraction, pack free-text extraction, profile and vocabulary proposals | `fact-extraction`, `document-reading`, `vocabulary` |
+| `business-analyst` | interview, spec synthesis and revision | `business-problem-interview`, `specification-authoring` |
+| `planner` | plan generation, phase inference | `workflow-planning` |
+| `target-architect` | target context questions | `target-context`, `platform-setup` |
+| `source-assessor` | `SourceAssessmentAgent`, source context questions | `source-assessment`, `contract-conformance`, `quality-rules`, `reconciliation` |
+| `sttm-mapper` | `SttmMapperAgent` | `sttm-mapping`, `entity-resolution` |
+| `data-modeler` | `DataModelerAgent` | `data-modelling` |
+| `pipeline-engineer` | `TransformationScaffolderAgent`, `IngestionPipelineAgent`, Pipeline Spec synthesis | `pipeline-scaffolding`, `code-conversion-import`, `deployment` |
+| `documenter` | `DocumentationAgent` | `documentation`, `bi-migration` |
+| `context-curator` | chat fact extraction, pack free-text reading, profile and vocabulary proposals | `fact-extraction`, `document-reading`, `vocabulary` |
 
-Imported tool skills (S1, S2) keep working. They can be used by any agent that lists them, and PA4's port-a-skill flow adds to the same library.
+##### 5. The runtime: stages, gates, staleness
 
-##### 4. Skills and new tools
+- **Stage states:** `pending`, `ready`, `in-progress`, `awaiting-check`, `awaiting-approval`, `done`, `skipped` (with a reason and who skipped it), `stale`.
+- **Gates.** `check` runs the stage kind's *done when* automatically. `approve` creates a **gate decision** (high stakes) after the check passes.
+- **Gates block promotion, not work.** Drafting ahead of a gate is allowed and recorded, with a warning.
+- **Staleness.** When an approved output changes, every stage that consumed it becomes `stale` and needs its check and approval again. This one rule replaces ORC-6's pause-on-change and the artifact staleness scan.
+- **No loops.** Re-opening a stage makes everything downstream stale.
+- **Panel parity.** The gates `AgentHub` enforces today (ORC-3) move into the runtime, and the panel reads them from there like every other surface.
+- **Migration of existing problems:** greenfield problems move to the `greenfield` template, brownfield ones to `modernization`. A one-time draft instance is derived from the documents and approvals they already have, and approved once.
 
-The **skills pack** is one `SKILL.md` folder per skill in the table above. Each one names the AutoDE tools it uses, ends in proposal tools, and carries its prompt material as resources. The interview prompt packs (`skills/*.json`) become resources of `business-problem-interview`. Skills pass an Agent Skills format check.
+##### 6. Approvals: channels and policy
 
-**New deterministic tools** for what today's agents do in code:
-- `autode_match_columns`: candidate column matches by name, type, vocabulary and past approved mappings.
-- `autode_draft_model`: a draft model from grain and keys.
-- `autode_primitive_candidates`: primitives and parameter checks for a transformation.
-- `autode_propose_plan`, `autode_propose_model`, `autode_propose_artifacts`: the missing proposal kinds. With these, artifacts written by any host get grounding manifests, so *Explain This Artifact* works for them.
-- **Workflow tools:** `autode_workflow_list`, `autode_workflow_status`, `autode_workflow_start_stage`, `autode_workflow_complete_stage`, `autode_workflow_skip_stage` (optional stages only), `autode_propose_workflow` (choose or change the workflow).
-- **Interview state:** `autode_interview_state`, and answers recorded through a proposal-free tool. See §6.
+- **Channels:** the panel; the CLI in a terminal (`autode decisions approve`, `autode workflow approve <stage>`); a committed decision file; and **MCP elicitation**. With elicitation, `autode_request_approval {decisionId}` asks the *user* in the client's UI, which the model can't answer. The answer is recorded on channel `elicitation`, with the client's name. (Approved by the owner, 2026-10-21.)
+- **Policy** (`.autode/config/approvals.yaml`, committed): which decision kinds may be approved by elicitation. **Default:**
+  - spec, plan or workflow, context, mapping, entity resolution, model, build and artifact gates: *yes*;
+  - platform changes, connections and deploy: *no* (panel, CLI or file).
 
-##### 5. Approvals inside the host (the person channel)
+  A client without elicitation gets the exact CLI command or file to use.
 
-Gate decisions are high stakes, so an agent never resolves them. The channels:
-- **VS Code:** the panel, as today.
-- **CLI:** `autode decisions approve`, and the new `autode workflow status | approve <stage>` in a terminal.
-- **Committed decision file**, as today.
-- **New: MCP elicitation.** When the client declares the elicitation capability, `autode_request_approval {decisionId}` asks the *user* directly in the client's UI. The model cannot answer that prompt; the server receives the user's answer. It shows what is being approved (title, a summary, validation, where to read the full proposal). The answer is recorded on channel `elicitation`, with the client's name.
+##### 7. Interview and session state on disk
 
-**Policy** (`.autode/config/approvals.yaml`, committed): which decision kinds may be approved by elicitation.
-- **Proposed default:** specification, context, mapping, model, plan and artifact gates *yes*; platform changes and connections *no*, so those keep panel, CLI or file.
-- A team that doesn't trust a client's elicitation prompt sets it to *no* for everything.
-- Where the client has no elicitation, the agent tells the user the exact `autode decisions approve <id>` command or the file to edit.
-
-This is the one real change to PA1's channel model. It rests on the MCP spec's guarantee that elicitation answers come from the user. A client that auto-answers would break it, which is why it's a per-team policy and not hard-wired.
-
-##### 6. Interview and session state on disk
-
-Today the interview's progress lives in the panel's memory, and BPS-7 (survive a reload) is in the backlog. In PA3 the interview state lives in `.autode/problems/<id>/interview/state.yaml`:
+The interview state lives in `.autode/problems/<id>/interview/state.yaml`:
 - the skill packs covered;
-- each question asked and its answer (with who answered, and where);
+- each question asked and its answer, with who answered and where;
 - what is still open;
 - the draft it feeds.
 
-Any surface can resume it, so you can start in Claude Code and finish in VS Code. Answers are the user's statements, not AI inferences, so recording them needs no decision; the specification they produce is still a proposal and a gate. Chat transcripts stay the host's own.
+Any surface resumes it; this closes BPS-7. Answers are the user's statements, so recording them needs no decision. The spec they produce remains a proposal and a gate.
 
-##### 7. Executors — who runs the agents
+##### 8. Executors
 
-- **VS Code (in-process executor):** reads the same agent and skill files and runs them with the configured provider (the S1 single dispatch), calling tools through the phase 5 `EngineClient`. `allowed-tools` is enforced and every call audited. `AgentHub` keeps only running agents, progress and the panel's view of the workflow runtime.
-- **Host agents** (Claude Code, Cortex Code, Copilot CLI): load the plugin (§8) and call AutoDE's tools. AutoDE can't enforce `allowed-tools` there (§3.1 known limit); the decision gates protect AutoDE's state.
-- **Other MCP clients:** the agents are also offered as MCP prompts (`autode_agent_<name>`) and the workflow as tools, so a client without skills or plugins can still be walked through a stage.
-- **Background fact extraction:** in VS Code it runs after every turn, as today. In hosts it depends on the agent following the `fact-extraction` skill. This is weaker, and the docs say so.
+- **VS Code (in-process):** runs role templates, briefs and skills with the configured provider (S1's single dispatch). It calls tools through the phase 5 `EngineClient`, enforces tiers and tool lists, and audits every call. `AgentHub` keeps only dispatching from the runtime, progress and the panel's view.
+- **Plugin hosts** (Claude Code, Cortex Code, Copilot CLI): the plugin ships the role templates, the skills and an **orchestrator skill**. That skill loops:
+  1. `autode_workflow_next` returns the next assignment: stage, role, brief, skills, tier;
+  2. the host runs it as a sub-agent with that brief;
+  3. `autode_workflow_complete_stage` hands back the result, which the runtime checks.
 
-##### 8. The plugin folder
+  Generated briefs always come through the tool, never from plugin files.
+- **Other MCP clients:** the same assignments as MCP prompts (`autode_agent_<role>`, filled with the brief), and the workflow as tools.
+- **Background fact extraction:** in VS Code it runs after every turn. In hosts it depends on the agent following the `fact-extraction` skill. This is weaker, and documented.
 
-The build writes `dist/plugin/autode/` and packs it into the `autode` package and the VSIX. It is generated from the single source in `agents/`, `skills/` and `workflows/`:
+##### 9. Tools added
 
-```
-autode/
-  .claude-plugin/plugin.json      # Claude Code; Cortex Code reads this layout too
-  plugin.json                     # GitHub Copilot CLI
-  .mcp.json                       # wires `autode mcp --workspace .`
-  agents/<name>.md                # Claude Code / Cortex Code
-  agents/<name>.agent.md          # Copilot CLI (same content)
-  skills/<id>/SKILL.md            # all three; VS Code Copilot agent mode reads .github/skills etc.
-  commands/                       # slash commands: /autode-status, /autode-next, /autode-approve
-```
+- **Workflow:** `autode_workflow_templates`, `autode_workflow_status`, `autode_workflow_next`, `autode_workflow_start_stage`, `autode_workflow_complete_stage`, `autode_workflow_skip_stage` (default and optional stages only), `autode_workflow_reopen_stage`, `autode_propose_workflow`, `autode_request_approval`.
+- **Deterministic helpers for the roles:**
+  - `autode_match_columns`: candidate column matches by name, type, vocabulary and past approved mappings;
+  - `autode_draft_model`: a draft model from grain and keys;
+  - `autode_primitive_candidates`;
+  - `autode_reconcile_plan`: reconciliation queries by key, read-only.
+- **Proposals:** `autode_propose_model`, `autode_propose_artifacts` (gives artifacts written in any host grounding manifests), `autode_propose_entity_resolution`, `autode_propose_quality_rules`.
+- **Interview:** `autode_interview_state`, `autode_interview_record_answer`.
+- **CLI:** `autode workflow templates | status | next | approve <stage> | skip <stage> --reason | reopen <stage>`, and `autode plugin install --host claude|cortex|copilot [--scope project|user]`, `autode plugin path`.
 
-`autode plugin install --host claude|cortex|copilot [--scope project|user]` installs the folder where the host looks for it, and `autode plugin path` prints it. A test checks the manifests against each host's documented fields; the format details for Cortex Code agents are verified when this is built.
+##### 10. The plugin folder
 
-##### 9. What each surface gets (target state)
+`dist/plugin/autode/` is generated from the single source in `agents/`, `skills/` and `workflows/`, and ships in the `autode` package and the VSIX:
+- `.claude-plugin/plugin.json` (Claude Code; Cortex Code reads this layout too) and `plugin.json` (Copilot CLI);
+- `.mcp.json`, wiring `autode mcp --workspace .`;
+- `agents/<role>.md` and `agents/<role>.agent.md`, the role templates;
+- `skills/<id>/SKILL.md`, including the orchestrator skill;
+- `commands/`: `/autode-status`, `/autode-next`, `/autode-approve`.
 
-| Task | VS Code | Claude Code / Cortex / Copilot CLI (plugin + MCP) | Other MCP clients | CLI |
-|---|---|---|---|---|
-| Choose the workflow, see status, next step | panel | `/autode-status`, tools | tools | `autode workflow status` |
-| Interview → spec | panel (in-process agent) | `business-analyst` agent | prompt `autode_agent_business-analyst` | 🤖 needs a host |
-| Each stage's work | panel | the stage's agent | agent prompt | 🤖 |
-| Approve a gate | panel | elicitation prompt (per policy) or terminal | elicitation or terminal | `autode decisions approve` |
-| Skip an optional stage, change workflow | panel | propose, person approves | propose | `autode workflow skip` |
+Manifest checks per host run in `npm test`. Cortex Code's agent file details are verified when this is built.
 
-The CLI holds no model by design (§3.1); it covers status, gates and every deterministic step.
-
-##### 10. Releases (proposed)
+##### 11. Releases
 
 | Version | Part | Contents |
 |---|---|---|
-| v0.44.0 | **PA3a: workflow runtime** | The workflow language, schema, the three bundled workflows; the runtime and state file; the gates moved out of `AgentHub` into the runtime (the panel reads them from there); migration of existing problems; workflow tools on MCP; `autode workflow` on the CLI; new decision kinds `gate`, `workflow`, `plan`, `model`, `artifacts`. No AI change: today's agents still run the stages in VS Code. |
-| v0.45.0 | **PA3b: agents and skills** | The agent and skill definitions; the new deterministic tools; the in-process executor; every TypeScript agent replaced and **deleted in the same release**; interview state on disk (BPS-7); agent prompts over MCP; the plugin folder and `autode plugin install`. |
-| v0.46.0 | **PA3c: same outcome, measured** | Elicitation approvals with the policy file; an eval mode that runs the reference problem through an MCP host agent (a scripted host, plus cassettes recorded with a real host's model; this closes the backlog item "record cassettes with the host's model"); parity tests (§9) in `npm test`. |
+| v0.44.0 | **PA3a: templates and runtime** | Stage kinds; the three templates (workflow-templates.md) and their schema; the runtime and instance file; §2 rule checks; the deterministic draft; staleness; gate decisions; gates moved out of `AgentHub` (the panel reads the runtime); migration of existing problems; workflow tools on MCP; `autode workflow` on the CLI; new decision kinds (`gate`, `workflow`, `model`, `artifacts`, `entity_resolution`, `quality_rules`). Today's agents still do the stage work in VS Code, and the deterministic draft stands in for the planner. |
+| v0.45.0 | **PA3b: roles, briefs, skills** | Role templates and the skills pack; the planner and generated briefs with tier checks; the deterministic helper tools; the in-process executor; every TypeScript agent replaced and **deleted in the same release**; interview state on disk; agent prompts over MCP; the plugin folder and `autode plugin install`. |
+| v0.46.0 | **PA3c: approvals in the host, same outcome measured** | Elicitation approvals and the policy file; host-agent eval (a scripted host, plus cassettes recorded with a real host's model; this closes the backlog item "record cassettes with the host's model"); parity tests in `npm test`. |
 
-After PA3, PA4 (port a skill) adds imported skills to the same library, and the later phases (GOV, C5, 6, C6) shift by two versions.
+PA4 (port a skill) follows PA3c, by the owner's decision of 2026-10-21. GOV, C5, 6 and C6 move back by three versions.
 
-##### 11. Acceptance
+##### 12. Acceptance
 
 **PA3a**
-- The three workflows validate. An invalid workflow file is refused with its errors.
-- On the reference problem, the stage sequence and gates match today's lifecycle for brownfield (`modernization`) and greenfield.
-- A gated stage can't be marked approved by an agent. It can be by the panel, the CLI in a terminal, or the decision file.
-- An optional stage is skipped with a recorded reason. An exploratory draft before its stage is allowed and recorded.
+- The templates validate; an invalid template is refused with its errors.
+- For the reference problem, the deterministic draft for `modernization` and for `greenfield` matches today's lifecycle stages and gates.
+- A proposed workflow that drops a mandatory stage or gate, leaves a consumed artifact without a producer, or contains a cycle is refused with each error.
+- A gate can't be approved by an agent. It can be by the panel, the CLI in a terminal, or the decision file.
+- Changing an approved mapping marks the model and build stages stale.
 - Existing problems migrate with their approvals intact.
-- The panel, the CLI and MCP report the same status for the same problem.
+- The panel, the CLI and MCP report the same status.
 
 **PA3b**
-- The reference problem in VS Code produces the same artifacts and grounding manifests as before the migration, and `npm run eval` doesn't regress.
-- A scripted host agent that only follows the agent and skill files and calls MCP tools reaches every gate of every bundled workflow with valid proposals.
-- No `src/agents/**` code remains. A lint rule keeps LLM calls out of `src/core`, except in the executor.
-- The plugin folder installs into Claude Code's, Cortex Code's and the Copilot CLI's documented locations, and passes each manifest check.
-- An interview started over MCP resumes in the panel, with the same questions answered.
+- The reference problem in VS Code produces the same artifacts and grounding manifests as before, and `npm run eval` doesn't regress.
+- A scripted host following only the orchestrator skill and `autode_workflow_next` completes every stage of each template's reference plan with valid proposals.
+- A brief that asks for a tool above its tier, or a task of an unknown kind, is refused at plan check.
+- No `src/agents/**` remains. A lint rule keeps LLM calls out of `src/core`, except in the executor.
+- The plugin installs into each host's documented location and passes its manifest check.
+- An interview started over MCP resumes in the panel.
 
 **PA3c**
-- An elicitation answer resolves an allowed gate; a disallowed kind is refused with the right channel named; a client without elicitation gets the terminal command.
-- The host-agent eval meets the same thresholds as VS Code on the reference problem: traps, contract violations, answerability, grounding.
-
-##### 12. Open questions for the owner
-
-1. **Elicitation as a person channel**, with the per-team policy and the proposed default (§5). Is that acceptable, or should gates in hosts always go through a terminal or file?
-2. **The plan:** it becomes the build stage's task list, proposed and approved (§2). Or keep a separate plan stage before build?
-3. **Workflow changes mid-engagement:** keep the shared stages' states (proposed), or restart?
-4. **The bundled stage lists** above: what would you change for modernization and estate merge in your engagements? For example, a reconciliation stage in modernization, or survivorship rules in estate merge.
-5. **Size:** three releases of real work. Shall PA4 (port a skill) wait until after PA3c, as proposed?
+- An elicitation answer resolves an allowed gate. A kind the policy disallows is refused, naming the channels that are allowed. A client without elicitation gets the CLI command.
+- The host-agent eval meets VS Code's thresholds on the reference problem: traps, contract violations, answerability, grounding, plan quality against the expected stages.
 
 #### Phase PA4: Port a skill — a guided step in the panel, no code
 Scope (absorbs S3):
