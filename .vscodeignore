@@ -19,6 +19,7 @@
 # Webviews and custom editors.
 !media/sidebar.html
 !media/panel.html
+!media/workflow.html
 !media/editors/*.html
 # Bundled interview skills and Tier-2 primitives; JSON Schemas for yamlValidation.
 !skills/*.json

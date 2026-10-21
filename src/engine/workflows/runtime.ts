@@ -5,6 +5,7 @@ import { computeRevision } from '../context/contextStore';
 import { DecisionStore } from '../decisions/decisionStore';
 import { STAGE_KINDS, StageKind } from './stageKinds';
 import { StageStatus, WorkflowInstance, WorkflowStage, readWorkflow, writeWorkflow } from './instance';
+import { Actor, actorFrom, actorLabel, appendEvent } from './events';
 
 /**
  * The workflow runtime (PA3a) — the hub. Deterministic: it decides what comes
@@ -72,12 +73,21 @@ function inputsOf(ctx: RuntimeContext, w: WorkflowInstance, s: WorkflowStage): R
   return Object.fromEntries(s.consumes.map((a) => [a, artifactRevision(ctx, w, a)]));
 }
 
-function gateApproved(ctx: RuntimeContext, decisionId: string | undefined): { approved: boolean; rejected: boolean; by?: string } {
+function gateApproved(ctx: RuntimeContext, decisionId: string | undefined): { approved: boolean; rejected: boolean; by?: string; channel?: string; note?: string } {
   if (!decisionId) return { approved: false, rejected: false };
   try {
     const d = new DecisionStore(ctx.workspaceRoot).get(decisionId);
-    return { approved: d.status === 'approved' || d.status === 'applied', rejected: d.status === 'rejected', by: d.resolution.by || undefined };
+    const resolved = [...d.events].reverse().find((e) => e.type === 'approved' || e.type === 'rejected');
+    return { approved: d.status === 'approved' || d.status === 'applied', rejected: d.status === 'rejected', by: d.resolution.by || undefined, channel: resolved?.channel, note: resolved?.note };
   } catch { return { approved: false, rejected: false }; }
+}
+
+/** Who approved a document-backed stage, when its document says so. */
+function documentApprover(problemRoot: string, kind: StageKind): string | undefined {
+  const rel = DOCUMENT_STAGES[kind];
+  const d = rel ? readDoc(problemRoot, rel) : undefined;
+  const by = d?.doc.approvedBy;
+  return typeof by === 'string' && by.trim() ? by : undefined;
 }
 
 const isDone = (s: WorkflowStage) => s.record.status === 'done';
@@ -120,12 +130,14 @@ export function syncWorkflow(ctx: RuntimeContext): WorkflowStatus | undefined {
   const warnings: string[] = [];
   const byId = new Map(w.stages.map((s) => [s.id, s]));
   const approvedPlan = w.status === 'approved';
+  const log = (e: Omit<Parameters<typeof appendEvent>[1], 'at'>) => appendEvent(ctx.problemRoot, { at: now, ...e });
   for (const s of w.stages) {
     if (!s.included || s.record.status === 'skipped') continue;
     const r = s.record;
     // Approval, from the document or the gate decision; a stale stage needs its gate decision again.
     let approved = false;
     let approvedBy: string | undefined;
+    let approvedChannel = 'document';
     if (s.kind === 'plan') approved = approvedPlan;
     else if (DOCUMENT_STAGES[s.kind] && r.status !== 'stale') {
       const st = documentState(ctx.problemRoot, s.kind);
@@ -136,17 +148,27 @@ export function syncWorkflow(ctx: RuntimeContext): WorkflowStatus | undefined {
     }
     if (r.decisionId && !approved) {
       const g = gateApproved(ctx, r.decisionId);
-      if (g.approved) { approved = true; approvedBy = g.by; }
-      else if (g.rejected) { r.status = 'in-progress'; r.reason = 'its approval was rejected'; r.decisionId = undefined; }
+      if (g.approved) { approved = true; approvedBy = g.by; approvedChannel = g.channel ?? 'decision'; }
+      else if (g.rejected) {
+        log({ type: 'rejected', stage: s.id, actor: actorFrom(g.by), channel: g.channel, reason: g.note, decisionId: r.decisionId });
+        r.status = 'in-progress'; r.reason = 'its approval was rejected'; r.decisionId = undefined;
+      }
     }
     if (approved && r.status !== 'done') {
+      const decisionId = r.decisionId;
+      if (s.kind === 'plan') { approvedBy = w.approvedBy; approvedChannel = 'decision'; }
+      else if (approvedChannel === 'document') approvedBy = documentApprover(ctx.problemRoot, s.kind);
       r.status = 'done'; r.approvedAt = now; r.approvedBy = approvedBy ?? r.approvedBy; r.inputs = inputsOf(ctx, w, s); r.reason = undefined;
+      log({ type: 'approved', stage: s.id, actor: actorFrom(r.approvedBy), channel: approvedChannel, decisionId: s.kind === 'plan' ? w.decisionId : decisionId });
       continue;
     }
     if (r.status === 'done') {
       const current = inputsOf(ctx, w, s);
       const changed = Object.keys(current).filter((a) => r.inputs && r.inputs[a] !== undefined && r.inputs[a] !== current[a]);
-      if (changed.length) { r.status = 'stale'; r.reason = `${changed.join(', ')} changed since it was approved`; r.decisionId = undefined; }
+      if (changed.length) {
+        r.status = 'stale'; r.reason = `${changed.join(', ')} changed since it was approved`; r.decisionId = undefined;
+        log({ type: 'stale', stage: s.id, actor: { kind: 'engine', rule: 'inputs changed' }, channel: 'engine', reason: r.reason });
+      }
       continue;
     }
     if (['stale', 'awaiting-approval', 'awaiting-check', 'in-progress'].includes(r.status)) continue;
@@ -191,13 +213,15 @@ function stageOf(w: WorkflowInstance, id: string): WorkflowStage {
 }
 
 /** Marks a stage in progress. Working ahead of its dependencies is allowed and recorded with a warning (gates block promotion, not work). */
-export function startStage(ctx: RuntimeContext, id: string, by: string): { stage: StageView; warning?: string } {
+export function startStage(ctx: RuntimeContext, id: string, who: Actor, channel = 'cli'): { stage: StageView; warning?: string } {
   const w = load(ctx);
   const s = stageOf(w, id);
   if (s.record.status === 'done') throw new WorkflowError('NOT_ALLOWED', `${id} is done; re-open it to change it.`);
   const warning = s.record.status === 'pending' ? `${id} is being worked on ahead of its dependencies (${s.record.reason ?? 'not ready'}); it can't be approved until they are.` : undefined;
-  s.record = { ...s.record, status: 'in-progress', startedAt: (ctx.now ?? (() => new Date()))().toISOString(), by };
+  const at = (ctx.now ?? (() => new Date()))().toISOString();
+  s.record = { ...s.record, status: 'in-progress', startedAt: at, by: actorLabel(who) };
   writeWorkflow(ctx.problemRoot, w);
+  appendEvent(ctx.problemRoot, { at, type: 'started', stage: id, actor: who, channel, reason: warning });
   return { stage: view(s), warning };
 }
 
@@ -206,7 +230,7 @@ export function startStage(ctx: RuntimeContext, id: string, by: string): { stage
  * one): its check runs (the outputs exist), then a gate decision is created
  * for a person if the stage has an approve gate; otherwise it is done.
  */
-export function completeStage(ctx: RuntimeContext, id: string, input: { outputs: string[]; summary: string; by: string; host?: string }): { stage: StageView; decisionId?: string; message: string } {
+export function completeStage(ctx: RuntimeContext, id: string, input: { outputs: string[]; summary: string; who: Actor; channel?: string }): { stage: StageView; decisionId?: string; message: string } {
   const w = load(ctx);
   const s = stageOf(w, id);
   if (s.record.status === 'done') throw new WorkflowError('NOT_ALLOWED', `${id} is already done.`);
@@ -225,6 +249,7 @@ export function completeStage(ctx: RuntimeContext, id: string, input: { outputs:
   if (!s.gates.includes('approve')) {
     s.record = { ...s.record, status: 'done', approvedAt: now, inputs: inputsOf(ctx, w, s), reason: undefined };
     writeWorkflow(ctx.problemRoot, w);
+    appendEvent(ctx.problemRoot, { at: now, type: 'done', stage: id, actor: input.who, channel: input.channel ?? 'cli', reason: input.summary, files: input.outputs });
     return { stage: view(s), message: `${id} is done (no approval gate).` };
   }
   const store = new DecisionStore(ctx.workspaceRoot);
@@ -232,40 +257,47 @@ export function completeStage(ctx: RuntimeContext, id: string, input: { outputs:
   const d = store.create({
     kind: 'gate', title: `Approve stage ${s.title}${s.record.status === 'stale' ? ' again (inputs changed)' : ''}`, summary: input.summary,
     proposal: { problemId: ctx.problemId, stageId: s.id, kind: s.kind, outputs: input.outputs, summary: input.summary, doneWhen: kindSpec.doneWhen, reapproval: s.record.status === 'stale' },
-    proposedBy: { host: input.host ?? 'cli', client: input.by }, validation: { ok: true, errors: [], warnings: [], checks: [`outputs exist: ${input.outputs.join(', ') || '(re-approval)'}`] },
+    proposedBy: { host: input.who.kind === 'agent' ? 'mcp' : (input.channel ?? 'cli'), client: input.who.kind === 'engine' ? 'engine' : input.who.name }, validation: { ok: true, errors: [], warnings: [], checks: [`outputs exist: ${input.outputs.join(', ') || '(re-approval)'}`] },
     problemId: ctx.problemId, subject: { document: `workflow:${s.id}` }
   });
   s.record = { ...s.record, status: 'awaiting-approval', decisionId: d.id };
   writeWorkflow(ctx.problemRoot, w);
+  appendEvent(ctx.problemRoot, { at: now, type: 'handed-in', stage: id, actor: input.who, channel: input.channel ?? 'cli', reason: input.summary, decisionId: d.id, files: input.outputs });
   return { stage: view(s), decisionId: d.id, message: `${id} waits for a person's approval: decision ${d.id}.` };
 }
 
 /** Skips a default, conditional or optional stage, with a reason. A mandatory stage can't be skipped. */
-export function skipStage(ctx: RuntimeContext, id: string, reason: string, by: string): StageView {
+export function skipStage(ctx: RuntimeContext, id: string, reason: string, who: Actor, channel = 'cli'): StageView {
   const w = load(ctx);
   const s = stageOf(w, id);
   if (s.inclusion === 'mandatory' || s.kind === 'specify' || s.kind === 'plan') throw new WorkflowError('NOT_ALLOWED', `${id} is mandatory and can't be skipped.`);
   if (!reason.trim()) throw new WorkflowError('NOT_ALLOWED', 'A skip needs a reason.');
   const dependents = w.stages.filter((x) => x.included && x.record.status !== 'skipped' && x.after.some((d) => d.stage === id) && x.consumes.some((a) => s.produces.includes(a)));
   if (dependents.length) throw new WorkflowError('NOT_ALLOWED', `${id} produces what ${dependents.map((x) => x.id).join(', ')} consume; re-plan instead.`);
-  s.record = { ...s.record, status: 'skipped', reason: reason.trim(), by };
+  s.record = { ...s.record, status: 'skipped', reason: reason.trim(), by: actorLabel(who) };
   writeWorkflow(ctx.problemRoot, w);
+  appendEvent(ctx.problemRoot, { at: (ctx.now ?? (() => new Date()))().toISOString(), type: 'skipped', stage: id, actor: who, channel, reason: reason.trim() });
   return view(s);
 }
 
 /** Re-opens a done stage; everything downstream of it becomes stale (no loops in the language). */
-export function reopenStage(ctx: RuntimeContext, id: string, by: string, reason: string): { stage: StageView; stale: string[] } {
+export function reopenStage(ctx: RuntimeContext, id: string, who: Actor, reason: string, channel = 'cli'): { stage: StageView; stale: string[] } {
   const w = load(ctx);
   const s = stageOf(w, id);
   if (s.record.status !== 'done' && s.record.status !== 'stale') throw new WorkflowError('NOT_ALLOWED', `${id} is ${s.record.status}, not done.`);
-  s.record = { status: 'in-progress', startedAt: (ctx.now ?? (() => new Date()))().toISOString(), by, reason: `re-opened: ${reason}` };
+  const at = (ctx.now ?? (() => new Date()))().toISOString();
+  s.record = { status: 'in-progress', startedAt: at, by: actorLabel(who), reason: `re-opened: ${reason}` };
+  appendEvent(ctx.problemRoot, { at, type: 'reopened', stage: id, actor: who, channel, reason });
   const stale: string[] = [];
   const queue = [id];
   while (queue.length) {
     const cur = queue.shift()!;
     for (const x of w.stages) {
       if (!x.included || stale.includes(x.id) || x.id === id) continue;
-      if (x.after.some((d) => d.stage === cur) && x.record.status === 'done') { x.record = { ...x.record, status: 'stale', reason: `${id} was re-opened`, decisionId: undefined }; stale.push(x.id); queue.push(x.id); }
+      if (x.after.some((d) => d.stage === cur) && x.record.status === 'done') {
+        x.record = { ...x.record, status: 'stale', reason: `${id} was re-opened`, decisionId: undefined }; stale.push(x.id); queue.push(x.id);
+        appendEvent(ctx.problemRoot, { at, type: 'stale', stage: x.id, actor: { kind: 'engine', rule: 'upstream re-opened' }, channel: 'engine', reason: `${id} was re-opened` });
+      }
     }
   }
   writeWorkflow(ctx.problemRoot, w);

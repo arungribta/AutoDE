@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.44.0",
+  "version": "0.44.1",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -44,7 +44,8 @@
     "onCommand:autoDataEngineeringHub.generatePlan",
     "onCommand:autoDataEngineeringHub.executePlan",
     "onCommand:autoDataEngineeringHub.resetSession",
-    "onMcpCollection:autode"
+    "onMcpCollection:autode",
+    "onView:autoDataEngineeringHubWorkflow"
   ],
   "contributes": {
     "mcpServerDefinitionProviders": [
@@ -242,6 +243,13 @@
         "command": "autoDataEngineeringHub.configureMcpClaudeCode",
         "title": "AutoDE: Configure MCP for Claude Code"
       },
+      { "command": "autoDataEngineeringHub.openWorkflow", "title": "AutoDE: Open Workflow", "icon": "$(checklist)" },
+      { "command": "autoDataEngineeringHub.refreshWorkflow", "title": "AutoDE: Refresh Workflow", "icon": "$(refresh)" },
+      { "command": "autoDataEngineeringHub.workflowHandIn", "title": "Hand In Stage…", "icon": "$(check)" },
+      { "command": "autoDataEngineeringHub.workflowApproveAgain", "title": "Approve Stage Again…" },
+      { "command": "autoDataEngineeringHub.workflowSkip", "title": "Skip Stage…" },
+      { "command": "autoDataEngineeringHub.workflowReopen", "title": "Re-open Stage…" },
+      { "command": "autoDataEngineeringHub.workflowApprove", "title": "Review and Approve…", "icon": "$(pass)" },
       {
         "command": "autoDataEngineeringHub.installOracleDriver",
         "title": "AutoDE: Install Oracle Driver"
@@ -256,7 +264,23 @@
       }
     ],
     "menus": {
+      "view/title": [
+        { "command": "autoDataEngineeringHub.openWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@1" },
+        { "command": "autoDataEngineeringHub.refreshWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@2" }
+      ],
+      "view/item/context": [
+        { "command": "autoDataEngineeringHub.workflowApprove", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve( |$)/", "group": "inline" },
+        { "command": "autoDataEngineeringHub.workflowHandIn", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )hand-in( |$)/", "group": "inline" },
+        { "command": "autoDataEngineeringHub.workflowApproveAgain", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-again( |$)/", "group": "workflow" },
+        { "command": "autoDataEngineeringHub.workflowSkip", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )skip( |$)/", "group": "workflow" },
+        { "command": "autoDataEngineeringHub.workflowReopen", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )reopen( |$)/", "group": "workflow" }
+      ],
       "commandPalette": [
+        { "command": "autoDataEngineeringHub.workflowHandIn", "when": "false" },
+        { "command": "autoDataEngineeringHub.workflowApproveAgain", "when": "false" },
+        { "command": "autoDataEngineeringHub.workflowSkip", "when": "false" },
+        { "command": "autoDataEngineeringHub.workflowReopen", "when": "false" },
+        { "command": "autoDataEngineeringHub.workflowApprove", "when": "false" },
         {
           "command": "autoDataEngineeringHub.publishToolSkill",
           "when": "config.autoDataEngineeringHub.toolSkillManagementEnabled"
@@ -293,6 +317,10 @@
           "id": "autoDataEngineeringHubSidebar",
           "name": "Workspace",
           "type": "webview"
+        },
+        {
+          "id": "autoDataEngineeringHubWorkflow",
+          "name": "Workflow"
         }
       ],
       "autoDataEngineeringHubPanel": [

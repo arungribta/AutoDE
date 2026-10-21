@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, writeWorkflow } from '../workflows/instance';
+import { appendEvent } from '../workflows/events';
 import { loadTemplates } from '../workflows/templates';
 
 export interface VocabularyProposalPayload { entries: Array<Pick<VocabularyProposal, 'kind' | 'from' | 'to'>> }
@@ -360,6 +361,8 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
           stages: p.stages.map((s) => ({ ...s, record: keep.get(s.id) ?? (s.kind === 'specify' ? s.record : { status: 'pending' }) }))
         };
         writeWorkflow(root, next);
+        const resolved = [...d.events].reverse().find((e) => e.type === 'approved');
+        appendEvent(root, { at: now.toISOString(), type: 'approved', actor: { kind: 'person', name: approver }, channel: resolved?.channel, decisionId: id, template: p.template.id, reason: keep.size ? 'the stages both workflows share keep their state' : current ? 'a new template restarts the workflow' : undefined });
         break;
       }
       case 'vocabulary': {

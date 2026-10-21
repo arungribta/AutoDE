@@ -590,6 +590,27 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: copy `workflows/modernization.yaml` into `.autode/config/workflows/`, add an optional stage, and break one dependency on purpose.
   Expect: the editor flags schema problems while you type, and `autode workflow templates` names the broken dependency. Fix it: the new stage is offered in the next draft.
 
+## Part 25 — v0.44.1 Workflow view, history and provenance
+
+- [ ] **25.1 The view.**
+  Do: open a problem whose spec is approved. Look at the **Workflow** tree in AutoDE's activity bar and the status bar, then open **AutoDE: Open Workflow**.
+  Expect:
+  - the tree lists the stages with icons and their state or reason;
+  - the status bar reads "AutoDE: <problem> · n/m · …";
+  - the editor tab shows the stage board in dependency columns and the provenance: "Suggested by the engine: … (rule: …)", then "Proposed by …" and "Approved by …".
+- [ ] **25.2 Approve from the view.**
+  Do: in the editor tab, approve the pending workflow, then hand in a gate stage and approve it.
+  Expect: each approval asks for confirmation as you (the panel channel). The stage detail shows the decision trail and a history entry "approved by <you> (panel)".
+- [ ] **25.3 Agents are labelled.**
+  Do: have Claude Code skip *Deploy* with a reason.
+  Expect: the history reads "skipped by agent <client> via MCP (tool) — <reason>", in the view and in `autode workflow history deploy`.
+- [ ] **25.4 Stale, explained.**
+  Do: approve the mapping, then re-approve the source context with a change.
+  Expect: the Mapping card turns red, "source-context changed since it was approved", with *Approve again…*; the history shows "stale by the engine (rule: inputs changed)".
+- [ ] **25.5 The agents box.**
+  Do: in the editor tab, use **AutoDE agents** to generate plan steps, approve them, confirm the stages and generate artifacts.
+  Expect: the same behaviour as the palette's old Continue button. The palette no longer shows Phases or Agents; it links to the view.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -736,5 +757,10 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 24.6 |  |  |
 | 24.7 |  |  |
 | 24.8 |  |  |
+| 25.1 |  |  |
+| 25.2 |  |  |
+| 25.3 |  |  |
+| 25.4 |  |  |
+| 25.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

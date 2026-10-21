@@ -6,6 +6,7 @@ import { readPackFile } from '../context/packChecks';
 import { layoutPath } from '../workspaceLayout';
 import { Artifact, Gate, STAGE_KINDS, StageKind, TIERS, Tier, tierRank } from './stageKinds';
 import { ConditionFacts, Dependency, Inclusion, TemplateStage, WorkflowTemplate, checkStructure, parseCondition } from './templates';
+import { Actor } from './events';
 
 /**
  * A problem's workflow (PA3a): the planning stage's approved output, kept in
@@ -76,6 +77,8 @@ export interface WorkflowInstance {
   decisionId?: string;
   /** The facts the draft was built from. */
   facts: ConditionFacts;
+  /** Who did what (v0.44.1): the engine's suggestion and draft, the person who chose the template, an agent that refined it. */
+  provenance?: { suggested?: { template: string; rule: string }; chosenBy?: Actor; draftedBy?: Actor; refinedBy?: Actor; proposedBy?: Actor };
   stages: WorkflowStage[];
 }
 

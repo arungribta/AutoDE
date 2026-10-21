@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.44.0 (2026-10-21). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.44.1 (2026-10-21). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -94,7 +94,7 @@ Three ideas carry most of the design:
 2. **The ledger is the system of record for context.** Facts are append-only *assertions* with status and trust; the graph the agents read is a projection of them, rebuilt, never edited in place. See §4.4 and technical-design §5.3.
 3. **Packs, not dumps.** Each LLM call gets a task-scoped *context pack* within a token budget, and every generated artifact gets a *manifest* of what it rested on. See technical-design §5.5–5.7.
 
-**Workflows (since v0.44.0).** Each business problem has a planned workflow, kept in `.autode/problems/<id>/workflow.yaml`. It's drafted from a template in `workflows/*.yaml` (greenfield, modernization, estate merge; see [workflow-templates.md](workflow-templates.md)) and approved by a person. The engine's runtime (`src/engine/workflows/`) is the hub: it says which stage is ready, which waits and why, and which is stale. Document-backed stages read their approval from their documents, so the panel, CLI and MCP agree. See technical-design §7.8.
+**Workflows (since v0.44.0).** Each business problem has a planned workflow, kept in `.autode/problems/<id>/workflow.yaml`. It's drafted from a template in `workflows/*.yaml` (greenfield, modernization, estate merge; see [workflow-templates.md](workflow-templates.md)) and approved by a person. The engine's runtime (`src/engine/workflows/`) is the hub: it says which stage is ready, which waits and why, and which is stale. Document-backed stages read their approval from their documents, so the panel, CLI and MCP agree. See technical-design §7.8. In VS Code the **Workflow view** shows it: a tree in AutoDE's activity bar, a Workflow editor tab with the stage board, detail, decisions and history, and a status-bar item. Everything is recorded with who did it in `workflow-events.jsonl`.
 
 **Where the architecture is going (from v0.40.0).** AutoDE is moving to a portable architecture ([mcp-engine-requirements.md §3.1](mcp-engine-requirements.md), phases PA1–PA4 and phase 5 in the [roadmap](roadmap.md)):
 - every AI capability becomes a standard agent skill (`SKILL.md`);

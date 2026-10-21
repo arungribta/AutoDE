@@ -6,6 +6,28 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.44.1
+
+- **The Workflow view, history and provenance** (owner's request, 2026-10-21: progress must be traceable and clearly visible; requirements ORC-9; technical-design §7.8).
+- **Who did what, always recorded.** Every workflow event is written by the engine to `.autode/problems/<id>/workflow-events.jsonl`, append-only:
+  - the template suggestion, labelled as **the engine's rule** with the words it matched (no model is involved);
+  - drafts, proposals and approvals, with **who** (person, engine or agent) and **through which channel** (panel, CLI, decision file, document, tool);
+  - hand-ins, skips with their reason, re-openings, and staleness with its cause.
+
+  The workflow also carries its provenance: suggested by, chosen by, drafted by, proposed by and approved by. You can read it on every surface: `autode workflow history [<stage>]`, MCP `autode_workflow_history`, and the new view.
+- **A dedicated Workflow view in VS Code:**
+  - **Tree** in AutoDE's activity bar: every stage with its state and reason, plus context actions (approve, hand in, approve again, skip, re-open).
+  - **Editor tab** (*AutoDE: Open Workflow*): the problem, its provenance and progress, a board of stages in dependency columns, and the selected stage's kind, role and tier, dependencies, inputs and outputs, gates, "done when", approval, decision trail and history. Approvals are confirmed in a modal and recorded as you (the panel channel).
+  - **Status-bar item** with the problem, progress and what needs attention.
+
+  All three follow changes made in the panel, a terminal or by an agent.
+- **The palette is slimmed.** The old Phases, Agents and Continue Workflow sections, which competed with the stages, are replaced by a link to the view. Today's agents (generate plan steps, approve, confirm, generate artifacts) now run from the view's **AutoDE agents** box, until PA3b moves agents onto the workflow.
+- **Deviations / notes:**
+  - Stage actions in the engine now take an actor (person, engine or agent) and a channel instead of a name.
+  - The history syncs the runtime first, so approvals made in documents or decision files appear in it straight away.
+  - The board's columns are dependency depth, not time.
+- **Measured:** 358 tests (3 new: history and provenance across the CLI and MCP; the view model; the view's contributions, CSP and the slimmed palette). The VS Code test mock gained the tree and status-bar APIs. Lint 0 errors. Eval unchanged.
+
 ## 0.44.0
 
 - **Phase PA3a: workflow templates and runtime** (`docs/mcp-engine-requirements.md` §9.2 PA3, approved 2026-10-21; `docs/workflow-templates.md`; requirements ORC-9, with ORC-1, ORC-3, ORC-6 and BPS-9 updated; technical-design §7.8). Each business problem now gets a **planned workflow**: drafted from a template, checked by the engine, approved by a person, and the same on every surface.

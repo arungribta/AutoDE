@@ -1,10 +1,11 @@
 import { EngineTool, ToolAnnotations } from './tools';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
-import { WorkflowScope, diffWorkflow, ensureWorkflow, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowScope, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
-import { WorkflowInstance, draftWorkflow, readWorkflow, sourceSystems, workflowFacts } from '../engine/workflows/instance';
+import { WorkflowInstance, readWorkflow } from '../engine/workflows/instance';
 import { layoutPath } from '../engine/workspaceLayout';
+import { Actor } from '../engine/workflows/events';
 
 /**
  * The workflow over MCP (PA3a): the runtime is the hub; an agent asks what to
@@ -35,6 +36,7 @@ function wrap<T>(fn: () => T): T {
 }
 
 export function workflowTools(clientName: () => string | undefined): EngineTool[] {
+  const agent = (): Actor => ({ kind: 'agent', name: clientName() ?? 'MCP client', host: 'MCP' });
   return [
     {
       name: 'autode_workflow_templates',
@@ -63,6 +65,13 @@ export function workflowTools(clientName: () => string | undefined): EngineTool[
       handler: async (_args, ws) => wrap(() => { ensureWorkflow(scopeOf(ws)); return { next: nextAssignment(rctx(ws)) ?? null }; })
     },
     {
+      name: 'autode_workflow_history',
+      description: 'The workflow\'s history: who did what (the engine\'s rules, a person, an agent), when, through which channel, why, with the decision and files involved. Optionally for one stage.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 } } },
+      annotations: read('Workflow history'),
+      handler: async (args, ws) => wrap(() => ({ events: historyFor(scopeOf(ws), args.stage as string | undefined) as unknown as Record<string, unknown>[] }))
+    },
+    {
       name: 'autode_propose_workflow',
       description: 'Propose the active problem\'s workflow (the plan gate). Without "workflow", AutoDE drafts it deterministically from "template" (default: its suggestion) and the facts about the spec and estate; with "workflow", your refinement of that draft is checked against the template\'s rules (mandatory stages and gates kept, reasons for stages left out or added, roles and tiers allowed, dependencies sound). A person approves it.',
       inputSchema: { type: 'object', additionalProperties: false, properties: { template: { type: 'string', minLength: 1 }, workflow: { type: 'object', description: 'A full workflow instance (as autode_workflow_status / the draft shows it), refined.' } } },
@@ -75,10 +84,10 @@ export function workflowTools(clientName: () => string | undefined): EngineTool[
           const current = readWorkflow(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
           if (current && current.status === 'approved') {
             const id = (args.template as string | undefined) ?? current.template.id;
-            const t = templatesFor(scope).templates.find((x) => x.id === id);
-            if (!t) throw new EngineToolError('NOT_FOUND', `No workflow template "${id}".`);
-            w = draftWorkflow(t, scope.problemId, workflowFacts(scope.workspaceRoot, layoutPath(scope.workspaceRoot, 'problems', scope.problemId)), sourceSystems(scope.workspaceRoot));
-          } else w = redraft(scope, args.template as string | undefined);
+            if (!templatesFor(scope).templates.some((x) => x.id === id)) throw new EngineToolError('NOT_FOUND', `No workflow template "${id}".`);
+            w = draftFrom(scope, id, args.template ? agent() : undefined);
+          } else w = redraft(scope, args.template as string | undefined, args.template ? agent() : undefined);
+          if (args.workflow === undefined && w.provenance && args.template) w.provenance.chosenBy = agent();
         }
         const d = proposeWorkflow(scope, w, { host: 'mcp', client: clientName() });
         const t = templatesFor(scope).templates.find((x) => x.id === w.template.id);
@@ -90,28 +99,28 @@ export function workflowTools(clientName: () => string | undefined): EngineTool[
       description: 'Mark a stage in progress. Working ahead of its dependencies is allowed (recorded with a warning); it can\'t be approved until they are.',
       inputSchema: { type: 'object', required: ['stage'], additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 } } },
       annotations: records('Start a stage'),
-      handler: async (args, ws) => wrap(() => startStage(rctx(ws), String(args.stage), `mcp:${clientName() ?? 'client'}`) as unknown as Record<string, unknown>)
+      handler: async (args, ws) => wrap(() => startStage(rctx(ws), String(args.stage), agent(), 'tool') as unknown as Record<string, unknown>)
     },
     {
       name: 'autode_workflow_complete_stage',
       description: 'Hand in a stage: its check runs (the outputs exist), then its approval gate becomes a decision for a person. Stages whose output is a document with its own approval (spec, target and source context, mapping, Pipeline Spec) complete when that document is approved through its proposal.',
       inputSchema: { type: 'object', required: ['stage', 'summary'], additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 }, outputs: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Workspace-relative files the stage produced.' }, summary: { type: 'string', minLength: 1, description: 'What was done, for the approver.' } } },
       annotations: records('Hand in a stage'),
-      handler: async (args, ws) => wrap(() => completeStage(rctx(ws), String(args.stage), { outputs: (args.outputs as string[] | undefined) ?? [], summary: String(args.summary), by: clientName() ?? 'mcp', host: 'mcp' }) as unknown as Record<string, unknown>)
+      handler: async (args, ws) => wrap(() => completeStage(rctx(ws), String(args.stage), { outputs: (args.outputs as string[] | undefined) ?? [], summary: String(args.summary), who: agent(), channel: 'tool' }) as unknown as Record<string, unknown>)
     },
     {
       name: 'autode_workflow_skip_stage',
       description: 'Skip a default, conditional or optional stage, with a reason (recorded and shown to the team). Mandatory stages can\'t be skipped, nor a stage whose output a later stage needs.',
       inputSchema: { type: 'object', required: ['stage', 'reason'], additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 5 } } },
       annotations: records('Skip a stage'),
-      handler: async (args, ws) => wrap(() => ({ stage: skipStage(rctx(ws), String(args.stage), String(args.reason), `mcp:${clientName() ?? 'client'}`) }))
+      handler: async (args, ws) => wrap(() => ({ stage: skipStage(rctx(ws), String(args.stage), String(args.reason), agent(), 'tool') }))
     },
     {
       name: 'autode_workflow_reopen_stage',
       description: 'Re-open a done stage to change its output; every stage downstream of it becomes stale and needs its approval again.',
       inputSchema: { type: 'object', required: ['stage', 'reason'], additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 5 } } },
       annotations: records('Re-open a stage'),
-      handler: async (args, ws) => wrap(() => reopenStage(rctx(ws), String(args.stage), `mcp:${clientName() ?? 'client'}`, String(args.reason)) as unknown as Record<string, unknown>)
+      handler: async (args, ws) => wrap(() => reopenStage(rctx(ws), String(args.stage), agent(), String(args.reason), 'tool') as unknown as Record<string, unknown>)
     }
   ];
 }

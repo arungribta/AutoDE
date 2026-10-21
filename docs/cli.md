@@ -88,6 +88,7 @@ Each business problem has a **workflow**: its stages, planned from a template (g
 | `autode workflow complete <stage> --output <file>... --summary <text>` | Hands in a stage. The files must exist; the approval goes to a person. Stages whose output is a document with its own approval (spec, contexts, mapping, Pipeline Spec) complete when that document is approved. |
 | `autode workflow skip <stage> --reason <text>` | Skips a default, conditional or optional stage. Never a mandatory one, nor one whose output a later stage needs. |
 | `autode workflow reopen <stage> --reason <text>` | Re-opens a done stage. Everything downstream becomes stale and needs approval again. |
+| `autode workflow history [<stage>]` | Who did what, when, through which channel, and why: the engine's suggestion (with its rule), drafts, proposals, approvals (by whom, in the panel, CLI, decision file or document), hand-ins, skips, staleness and re-openings. Agents are labelled as agents. |
 
 ## Knowledge: facts, pack, vocabulary
 

@@ -26,14 +26,10 @@ import { DOCUMENT_ROLES, DocumentAuthority, DocumentRole } from '../engine/conte
 import { buildVocabulary, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, VocabularyProposal } from '../engine/context/vocabulary';
 import { isMirror } from '../engine/context/projection';
 import { platformTools } from '../mcp/platform';
-import { WorkflowScope, diffWorkflow, ensureWorkflow, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowScope, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
-import { draftWorkflow, readWorkflow, sourceSystems, workflowFacts } from '../engine/workflows/instance';
-import type { WorkflowTemplate } from '../engine/workflows/templates';
-
-function draftWorkflowFor(t: WorkflowTemplate, scope: { workspaceRoot: string; problemId: string }, problemRoot: string) {
-  return draftWorkflow(t, scope.problemId, workflowFacts(scope.workspaceRoot, problemRoot), sourceSystems(scope.workspaceRoot));
-}
+import { Actor, actorLabel } from '../engine/workflows/events';
+import { readWorkflow } from '../engine/workflows/instance';
 import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStore';
 import { DataPlatformProvider } from '../engine/types';
 import { Catalog } from '../engine/context/catalog';
@@ -127,6 +123,7 @@ Workflow (the planned stages of a problem; approving is a person's: interactive 
   workflow approve [<stage>]   (terminal) Approve the pending workflow, or a stage's gate
   workflow skip <stage> --reason <text>     A default or optional stage only
   workflow reopen <stage> --reason <text>   Everything downstream becomes stale
+  workflow history [<stage>]   Who did what, when, through which channel, and why
 
 Knowledge (confirming, rejecting, editing and adding are a person's: interactive terminal):
   facts [list]                 What waits for review (proposed, needs review), with stakes and what each corrects [--kind k] [--all]
@@ -719,6 +716,7 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
   const scope: WorkflowScope = { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId };
   const rctx = { workspaceRoot: ctx.workspaceRoot, problemRoot: layoutPath(ctx.workspaceRoot, 'problems', problemId), problemId };
   const by = (ctx.values.by ?? safeUsername()).trim();
+  const who: Actor = { kind: 'person', name: by };
   try {
     if (sub === 'status') {
       const st = statusFor(scope);
@@ -727,7 +725,7 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
     }
     if (sub === 'plan') {
       const suggestion = suggestFor(scope);
-      const w = redraftOrKeep(scope, ctx.values.template);
+      const w = redraftOrKeep(scope, ctx.values.template, who);
       const { templates } = templatesFor(scope);
       const diff = diffWorkflow(w, templates.find((t) => t.id === w.template.id)!);
       const d = proposeWorkflow(scope, w, { host: 'cli', client: by });
@@ -740,6 +738,12 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: d.validation.ok, decisionId: d.id, workflow: w, diff, validation: d.validation }, lines.join('\n'));
       return EXIT.OK;
     }
+    if (sub === 'history') {
+      if (args.length > 1) throw new CliError(EXIT.USAGE, 'workflow history takes at most one stage id.');
+      const events = historyFor(scope, args[0]);
+      emit(ctx, { ok: true, events }, events.length ? events.map((e) => `${e.at.replace('T', ' ').slice(0, 19)}  ${e.type.padEnd(10)} ${e.stage ? `${e.stage.padEnd(16)} ` : ''.padEnd(17)}by ${actorLabel(e.actor)}${e.channel ? ` (${e.channel})` : ''}${e.template ? ` · ${e.template}` : ''}${e.decisionId ? ` · ${e.decisionId}` : ''}${e.reason ? ` — ${e.reason}` : ''}${e.files?.length ? ` [${e.files.join(', ')}]` : ''}`).join('\n') : 'No history yet.');
+      return EXIT.OK;
+    }
     if (sub === 'next') {
       ensureWorkflow(scope);
       const n = nextAssignment(rctx);
@@ -748,20 +752,20 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
     }
     if (sub === 'start') {
       if (args.length !== 1) throw new CliError(EXIT.USAGE, 'workflow start takes one stage id.');
-      const r = startStage(rctx, args[0], by);
+      const r = startStage(rctx, args[0], who, 'cli');
       emit(ctx, { ok: true, ...r }, `${args[0]} is in progress.${r.warning ? `\n! ${r.warning}` : ''}`);
       return EXIT.OK;
     }
     if (sub === 'complete') {
       if (args.length !== 1) throw new CliError(EXIT.USAGE, 'workflow complete takes one stage id.');
-      const r = completeStage(rctx, args[0], { outputs: (ctx.values.output ?? []).map((o) => rel(ctx, path.resolve(ctx.io.cwd, o))), summary: ctx.values.summary ?? '', by, host: 'cli' });
+      const r = completeStage(rctx, args[0], { outputs: (ctx.values.output ?? []).map((o) => rel(ctx, path.resolve(ctx.io.cwd, o))), summary: ctx.values.summary ?? '', who, channel: 'cli' });
       emit(ctx, { ok: true, ...r }, r.message);
       return EXIT.OK;
     }
     if (sub === 'skip' || sub === 'reopen') {
       if (args.length !== 1 || !ctx.values.reason) throw new CliError(EXIT.USAGE, `workflow ${sub} takes one stage id and --reason <text>.`);
-      if (sub === 'skip') { const v = skipStage(rctx, args[0], ctx.values.reason, by); emit(ctx, { ok: true, stage: v }, `${args[0]} skipped: ${ctx.values.reason}`); }
-      else { const r = reopenStage(rctx, args[0], by, ctx.values.reason); emit(ctx, { ok: true, ...r }, `${args[0]} re-opened.${r.stale.length ? ` Now stale: ${r.stale.join(', ')}.` : ''}`); }
+      if (sub === 'skip') { const v = skipStage(rctx, args[0], ctx.values.reason, who, 'cli'); emit(ctx, { ok: true, stage: v }, `${args[0]} skipped: ${ctx.values.reason}`); }
+      else { const r = reopenStage(rctx, args[0], who, ctx.values.reason, 'cli'); emit(ctx, { ok: true, ...r }, `${args[0]} re-opened.${r.stale.length ? ` Now stale: ${r.stale.join(', ')}.` : ''}`); }
       return EXIT.OK;
     }
     if (sub === 'approve') {
@@ -781,23 +785,16 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
 }
 
 /** A new draft from the chosen template (or the suggestion); an approved workflow is re-planned from itself. */
-function redraftOrKeep(scope: WorkflowScope, templateId: string | undefined) {
+function redraftOrKeep(scope: WorkflowScope, templateId: string | undefined, who: Actor) {
   const current = readWorkflow(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
   if (current && current.status === 'approved') {
     // Re-planning: a fresh draft from the current facts, proposed as a revision. The same template keeps the
     // shared stages' state when approved; a new template restarts the workflow (owner, 2026-10-21).
     const id = templateId ?? current.template.id;
     if (!templatesFor(scope).templates.some((x) => x.id === id)) throw new CliError(EXIT.NOT_FOUND, `No workflow template "${id}".`);
-    return ensureDraftFrom(scope, id);
+    return draftFrom(scope, id, templateId ? who : undefined);
   }
-  return redraft(scope, templateId);
-}
-
-function ensureDraftFrom(scope: WorkflowScope, templateId: string) {
-  const { templates } = templatesFor(scope);
-  const t = templates.find((x) => x.id === templateId)!;
-  const root = layoutPath(scope.workspaceRoot, 'problems', scope.problemId);
-  return draftWorkflowFor(t, scope, root);
+  return redraft(scope, templateId, templateId ? who : undefined);
 }
 
 // ── facts, pack, vocabulary, design doc, SQL (v0.43.3) ───────────────────────

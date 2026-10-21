@@ -1190,7 +1190,20 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
 - **Service** (`service.ts`), shared by the panel, CLI and MCP: `ensureWorkflow()` drafts on first use, which also migrates older problems (brownfield to modernization), plus `redraft()`, `statusFor()`, `suggestFor()`, `proposeWorkflow()` (withdraws an older pending proposal) and `approveWorkflow()`.
 - **Decisions.** New kinds: `workflow` (high stakes; `validateWorkflowProposal()` uses `ProposalContext.resourcesRoot` to load templates, and warns that a template change restarts; applying it writes the instance as approved, keeping stage records when the template is the same and resetting them otherwise) and `gate` (applied as a no-op; the runtime reads the decision).
 - **Panel.** A Workflow section in the Workflow Palette (`workflowState` and `workflowAction` messages): draft and propose, then approve in the Context Inbox; hand in, skip, re-open. `computeContextGateStatus()` now requires the approved workflow, and takes "source context applies" from the workflow's source-assessment stage instead of the brownfield flag. `AgentHub`'s `contextGateReady` follows from it.
-- **CLI:** `autode workflow templates | status | plan | next | start | complete | approve | skip | reopen`.
+- **CLI:** `autode workflow templates | status | plan | next | start | complete | approve | skip | reopen | history`.
+- **History and provenance (v0.44.1)** (`events.ts`; `.autode/problems/<id>/workflow-events.jsonl`, append-only, written only by the engine).
+  - **Events:** `suggested`, `drafted`, `proposed`, `approved`, `rejected`, `started`, `handed-in`, `done`, `stale`, `skipped` and `reopened`. Each has an `Actor` (`engine` with its rule, `person`, or `agent` with its host), plus channel, reason, decision and files.
+  - **Who writes them:** `syncWorkflow()` records approvals it observes, with the channel from the decision's resolving event, or `document` with the document's `approvedBy`, and staleness. The stage actions take an `Actor` and a channel. `draftFrom()` records the engine's suggestion, the draft and a person's choice of template. Applying a `workflow` decision records its approval.
+  - **Provenance on the instance:** `provenance` holds `suggested` (template and rule), `chosenBy`, `draftedBy`, `refinedBy` (PA3b) and `proposedBy`.
+  - **Reading:** `historyFor()` syncs first, then reads the log. `stageDetail()` adds the stage kind's rules, the record and the gate decision's trail.
+- **Workflow view (v0.44.1)** (`src/core/workflowViewModel.ts`, no `vscode`; `src/core/workflowView.ts`; `media/workflow.html`).
+  - **View model:** `buildWorkflowModel()` gives the provenance labels, a dependency depth per stage (the board's columns), and each stage's person actions (approve, hand-in, approve-again, skip, reopen).
+  - **Tree:** `autoDataEngineeringHubWorkflow`. Context values carry the actions, and the menus match them with `(^| )action( |$)`.
+  - **Editor tab:** `WorkflowPanel`, a CSP-locked webview with a nonce. Board, stage detail, decision trail and history; approvals are confirmed in a modal and go through `resolveFromView()` (the panel channel).
+  - **Status bar:** `statusBarText()`.
+  - **Refresh:** file watchers on `.autode/problems/**`, `decisions`, the active-problem pointer and the estate (debounced 300 ms; a refresh never throws).
+  - **Today's agents:** an "AutoDE agents" box runs them through `agentsRunState()` and `runAgentsAction()` until PA3b.
+  - **Palette:** its Phases, Agents and Continue Workflow sections are replaced by a link to the view.
 - **MCP** (`src/mcp/workflowTools.ts`): `autode_workflow_templates`, `_status`, `_next`, `_start_stage`, `_complete_stage`, `_skip_stage`, `_reopen_stage` and `autode_propose_workflow`. None of them approve.
 
 ### 7.7 Decisions and proposals (v0.40.0; ORC-8, MCP-2)
@@ -1717,7 +1730,7 @@ src/cli/    # the autode command line (no vscode; §10.8)
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
   ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts
+  agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
@@ -1751,7 +1764,7 @@ src/engine/transforms/declarative/    # Tier 2 declarative primitives
 src/engine/transforms/primitives/    # Tier 1 primitives
   dedup.ts, incrementalLoad.ts, renameCast.ts
 src/engine/workflows/
-  instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
+  events.ts, instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
   catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 src/spokes/    # Snowflake executor (other files unused)

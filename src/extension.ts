@@ -10,6 +10,7 @@ import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsCon
 import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, PrerequisiteHost } from './core/platformPrerequisites';
 import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, registerMcpProvider, vscodeSecretEnv } from './core/mcpConfig';
 import { EngineClient } from './core/engineClient';
+import { registerWorkflowView } from './core/workflowView';
 import { getCredentialResolver } from './engine/platform/credentials';
 import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
 import { PlatformOnboarding } from './core/platformOnboarding';
@@ -307,6 +308,15 @@ export function activate(context: vscode.ExtensionContext): void {
     getCredentialResolver(VSCODE_SECRET_RESOLVER_ID)?.resolve({ platform: entry.platform, principalType: 'interactive-user', ref: entry.credentials.ref, resolverId: VSCODE_SECRET_RESOLVER_ID }) ?? Promise.resolve(undefined);
   const mcpProvider = registerMcpProvider(vscode, { extensionPath: context.extensionPath, version: extensionVersion, workspaceRoot: firstFolder, secretEnv: () => vscodeSecretEnv(firstFolder(), vscodeSecrets), log: (line) => console.log(line) });
   if (mcpProvider) context.subscriptions.push(mcpProvider);
+  // v0.44.1: the Workflow view — tree, editor tab, status bar — over the engine's runtime and history.
+  context.subscriptions.push(...registerWorkflowView(context, {
+    scope: () => sidebarProvider.currentWorkflowScope(),
+    agentsRunState: () => sidebarProvider.agentsRunState(),
+    runAgentsAction: (action) => sidebarProvider.runAgentsAction(action),
+    resolve: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note),
+    workflowAction: (action, stage, arg) => sidebarProvider.workflowActionFromView(action, stage, arg),
+    user: skillActor
+  }));
   // Phase 5: agents reach the engine's MCP tools through an in-process client, started on first use.
   hub.setEngineFactory(() => {
     const root = firstFolder();

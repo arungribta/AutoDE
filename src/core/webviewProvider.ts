@@ -77,7 +77,7 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 
 
 import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
-import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
 import { readWorkflow } from '../engine/workflows/instance';
 /** VS Code's watcher for `.autode/knowledge/` edits, injected into the engine's ContextFileManager (v0.43.2). */
@@ -1003,7 +1003,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'approvePipelineSpec': { await this.approveCurrentPipelineSpec(); break; }
         case 'listDecisions':
         case 'listInbox': { this.postDecisions(); break; }
-        case 'workflowRefresh': { this.postWorkflow(); break; }
+        case 'openWorkflowView': { await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow'); break; }
         case 'workflowAction': {
           const m = message as unknown as { action?: unknown; stage?: unknown; arg?: unknown };
           if (typeof m.action === 'string') await this.workflowAction(m.action, typeof m.stage === 'string' ? m.stage : undefined, typeof m.arg === 'string' ? m.arg : undefined);
@@ -1736,6 +1736,42 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  // ── For the Workflow view (v0.44.1): it shows the runtime and acts through the panel's own handlers ──
+
+  /** Where today's agents are (until PA3b replaces them): the plan of steps, its gates, and the one next action. */
+  public agentsRunState(): { steps: number; planApproved: boolean; stagesConfirmed: boolean; running: boolean; canGeneratePlan: boolean; blocking: string[]; next: { action: string; label: string } | undefined } {
+    const plan = this.hub.getPlan();
+    const steps = plan.steps?.length ?? 0;
+    const gate = this.computeContextGateStatus(this.specManager?.getSpec());
+    const running = plan.status === 'running';
+    let next: { action: string; label: string } | undefined;
+    if (running) next = undefined;
+    else if (!steps) next = gate.canGeneratePlan ? { action: 'generatePlanFromSpec', label: 'Generate plan steps' } : undefined;
+    else if (!plan.planApproved) next = { action: 'approvePlan', label: 'Approve plan steps' };
+    else if (!plan.stagesConfirmed) next = { action: 'confirmStages', label: 'Confirm applicable stages' };
+    else next = { action: 'executePlan', label: 'Generate artifacts' };
+    return { steps, planApproved: !!plan.planApproved, stagesConfirmed: !!plan.stagesConfirmed, running, canGeneratePlan: gate.canGeneratePlan, blocking: gate.blockingReasons, next };
+  }
+
+  /** Runs one of the agents' plan actions exactly as the panel's buttons do. */
+  public async runAgentsAction(action: 'generatePlanFromSpec' | 'approvePlan' | 'confirmStages' | 'executePlan'): Promise<void> {
+    await this.handleMessage({ type: action } as WebviewMessage);
+  }
+
+  /** Approves or rejects a decision as the person at the keyboard (the panel channel). */
+  public async resolveFromView(id: string, decision: 'approved' | 'rejected', note?: string): Promise<void> {
+    await this.resolveDecisionInPanel(id, decision, note);
+  }
+
+  /** Workflow actions from the Workflow view: the same code as the palette used. */
+  public async workflowActionFromView(action: string, stage?: string, arg?: string): Promise<void> {
+    await this.workflowAction(action, stage, arg);
+  }
+
+  public currentWorkflowScope(): WorkflowScope | undefined {
+    return this.workflowScope();
+  }
+
   public logToChat(message: string): void {
     this.postLog(message);
   }
@@ -2212,19 +2248,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     } catch { return undefined; }
   }
 
-  private postWorkflow(): void {
-    const scope = this.workflowScope();
-    if (!scope) { this.postMessage('workflowState', { problemId: null }); return; }
-    try {
-      const status = statusFor(scope);
-      const { templates } = templatesFor(scope);
-      const pending = this.decisionStore()?.list({ status: 'pending', kind: 'workflow' }).find((d) => d.problemId === scope.problemId);
-      this.postMessage('workflowState', { ...status, templates: templates.map((t) => ({ id: t.id, title: t.title })), suggested: suggestFor(scope), pendingDecision: pending ? { id: pending.id, title: pending.title } : null });
-    } catch (err) {
-      this.postMessage('workflowState', { problemId: scope.problemId, error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
   private async workflowAction(action: string, stage: string | undefined, arg: string | undefined): Promise<void> {
     const scope = this.workflowScope();
     if (!scope) { this.postLog('Start or open a business problem first.'); return; }
@@ -2241,18 +2264,18 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       } else if (action === 'skip' && stage) {
         const reason = arg ?? await vscode.window.showInputBox({ title: `Skip ${stage}`, prompt: 'Why is this stage not needed for this problem? (recorded)', ignoreFocusOut: true });
         if (!reason) return;
-        skipStage(rctx, stage, reason, by);
+        skipStage(rctx, stage, reason, { kind: 'person', name: by }, 'panel');
         this.postLog(`Stage ${stage} skipped: ${reason}`);
       } else if (action === 'reopen' && stage) {
         const reason = arg ?? await vscode.window.showInputBox({ title: `Re-open ${stage}`, prompt: 'What needs to change? Everything downstream becomes stale.', ignoreFocusOut: true });
         if (!reason) return;
-        const r = reopenStage(rctx, stage, by, reason);
+        const r = reopenStage(rctx, stage, { kind: 'person', name: by }, reason, 'panel');
         this.postLog(`Stage ${stage} re-opened${r.stale.length ? `; now stale: ${r.stale.join(', ')}` : ''}.`);
       } else if (action === 'complete' && stage) {
         const files = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Hand in', title: `What did stage ${stage} produce?`, defaultUri: this.workspaceRoot });
         if (!files) return;
         const summary = await vscode.window.showInputBox({ title: `Hand in ${stage}`, prompt: 'What was done (for the approver)', ignoreFocusOut: true }) ?? '';
-        const r = completeStage(rctx, stage, { outputs: files.map((f) => path.relative(scope.workspaceRoot, f.fsPath).split(path.sep).join('/')), summary, by, host: 'vscode' });
+        const r = completeStage(rctx, stage, { outputs: files.map((f) => path.relative(scope.workspaceRoot, f.fsPath).split(path.sep).join('/')), summary, who: { kind: 'person', name: by }, channel: 'panel' });
         this.postLog(r.message);
         this.postDecisions();
       }
@@ -2263,7 +2286,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private postContextGateStatus(): void {
-    this.postWorkflow();
     const status = this.computeContextGateStatus(this.specManager?.getSpec());
     // Pushes the same readiness signal into the orchestrator (AgentHub) so plan
     // generation is gated at its actual enforcement point, not just in the UI
