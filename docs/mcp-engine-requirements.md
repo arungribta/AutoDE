@@ -584,7 +584,7 @@ Manifest checks per host run in `npm test`. Cortex Code's agent file details are
 | v0.45.0 | **PA3b: roles, briefs, skills** | Role templates and the skills pack; the planner and generated briefs with tier checks; the deterministic helper tools; the in-process executor; every TypeScript agent replaced and **deleted in the same release**; interview state on disk; agent prompts over MCP; the plugin folder and `autode plugin install`. |
 | v0.46.0 | **PA3c: approvals in the host, same outcome measured** | Elicitation approvals and the policy file; host-agent eval (a scripted host, plus cassettes recorded with a real host's model; this closes the backlog item "record cassettes with the host's model"); parity tests in `npm test`. |
 
-PA4 (port a skill) follows PA3c, by the owner's decision of 2026-10-21. GOV, C5, 6 and C6 move back by three versions.
+PA4 (port a skill) follows PA3c, by the owner's decision of 2026-10-21. GOV, C5, 6 and C6 move back by two versions.
 
 ##### 12. Acceptance
 
