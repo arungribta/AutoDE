@@ -6,6 +6,58 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.6
+
+- **The runner: runbooks approved by a person, run by deterministic code** (owner, 2026-10-22; requirements ORC-10; `docs/mcp-engine-requirements.md` §9.2 PA3 §8a; technical-design §7.9). Everything that changes a data platform now goes through one controlled path. No agent runs a platform command.
+- **Runbooks.** An agent proposes one with **`autode_propose_runbook`**: the steps in order, each one of
+  - one SQL statement on the connection;
+  - a Snowflake or Databricks CLI command as an argument list, never a shell string;
+  - a Databricks bundle folder,
+
+  with what it is expected to do, and a rollback for anything destructive.
+- **The engine checks the runbook before anyone sees it:**
+  - **classification:** every step is read, change or destructive, by the engine (`DROP`, `TRUNCATE`, `DELETE`, `REVOKE`, `CREATE OR REPLACE`, `ALTER … DROP`, `OVERWRITE` and `bundle destroy` are destructive), never by the agent;
+  - **CLI commands** must be on AutoDE's allowlist or the team's own;
+  - **arguments:** no profile or credential flags (the runner adds the connection's profile itself), nothing that looks like a secret, paths inside the workspace;
+  - **CLI steps** need a connection whose credentials come from the CLI's own configuration;
+  - **destructive steps** need a rollback or a stated reason;
+  - **the environment's policy** must allow the step classes.
+
+  It refuses item by item.
+- **Approval is a person's, under the team's policy.** A runbook is a high-stakes decision, approved in the panel, `autode runbook approve` in a terminal, or the decision file. `.autode/config/approvals.yaml` sets, per environment:
+  - which connections belong to it;
+  - who may approve;
+  - whether a second, different approver is needed;
+  - whether the remaining steps may run on one click;
+  - which step classes are allowed.
+
+  **A connection no environment lists counts as production**, and production needs a named approver and never runs unattended, whatever the file says. Approvals are bound to the runbook's content: editing an approved runbook voids them.
+- **Running it.** The runner (`src/engine/runner/`) is deterministic code:
+  - steps run strictly in order, one per click (or all remaining, where the environment allows), with a dry run first where the step has one (`EXPLAIN` for SQL changes, `bundle validate` for bundles);
+  - SQL goes through the same connectors as everything else; commands go through the user's own CLI, with no shell. Read steps report row counts, never values;
+  - it stops at the first failure and offers the step's rollback;
+  - every action goes to `.autode/problems/<id>/runs/<runbook>.jsonl`, **hash-chained**, with the command and output redacted and truncated. `verifyRunLog()` shows when a line was changed or removed;
+  - a runbook that belongs to a stage hands the stage in when its last step succeeds, with the runbook and its log as the outputs.
+- **The Runbook tab in VS Code** (*AutoDE: Open Runbook…*, or from the stage in the Workflow view) is the wizard. It shows:
+  - the environment's policy;
+  - every step with the engine's classification, exactly what runs, its dry run, its rollback and its state;
+  - the agent's explanation, labelled "not checked by AutoDE";
+  - the approvals and the log;
+  - buttons: Approve, Reject, Dry run, Run step, Run remaining, Roll back. Each change is confirmed in a modal that names the connection, the environment and the command.
+- **Other surfaces:** `autode runbook list | show | approve` and `autode_runbook_status` (MCP). The pipeline engineer proposes deploy runbooks. The interactive terminal runner stays in the backlog, by the owner's decision.
+- **Install guidance is data, probed before it is offered** (owner, 2026-10-22: the same concern as the external skills' install commands). The new shipped `prerequisites.yaml` holds, for the Snowflake and Databricks CLIs:
+  - the vendor's page and the date it was last verified (2026-10-22, against the vendors' pages);
+  - package-manager options per OS: Homebrew (with the `brew trust` step Homebrew 6 needs), pipx, uv and WinGet (`Databricks.DatabricksCLI`). Snowflake has no WinGet package;
+  - a note when a method is linked rather than run: the Databricks curl script, because it pipes a download into a shell.
+
+  Each option is probed (its package manager answers `--version`) before it is offered, and runs only on a click in the AutoDE terminal. `autode doctor` lists the available options. A team overrides the file in `.autode/config/prerequisites.yaml`, for example for an internal software centre. **The Oracle driver's package and range stay in code**: they are a compatibility contract with AutoDE's adapter.
+- **Deviations / notes:**
+  - **The second approval** is recorded on the runbook (the Runbook tab, or `autode runbook approve`), not as a second decision. The first approval resolves the decision.
+  - **Snowflake CLI steps** cover connection test, object list and describe, and stage list and copy. SQL goes in `sql` steps, one statement each; `snow sql -q/-f` is not allowed, because a file's statements couldn't be classified one by one. Teams add commands in `runbooks.allowCommands`.
+  - **Bundles** are Databricks only. Snowflake projects are deployed through their SQL and stage steps until the platform skills (v0.45.7).
+  - **The deploy stage's gate still goes to a person** after the run, to accept the result.
+- **Measured:** 379 tests (5 new: classification and checks; the policy; a runbook end to end, including dry runs, failure, rollback, log tampering, edits and the stage hand-in; production with two approvers across MCP and the CLI; install guidance as data). Lint 0 errors. Eval unchanged.
+
 ## 0.45.5
 
 - **The skill catalog and the naming convention** (owner, 2026-10-22; requirements SKL-9; technical-design §7.9; `docs/skills.md`). Every skill AutoDE has or works with now has one view, kept current by construction.

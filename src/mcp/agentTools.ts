@@ -17,6 +17,9 @@ import { StageKind } from '../engine/workflows/stageKinds';
 import { DataModel, checkModel, draftModel, problemMappings, renderModelDdl, targetSettings } from '../engine/agents/modelDraft';
 import { primitiveCandidates, CandidateColumn } from '../engine/agents/primitiveCandidates';
 import { skillCatalog } from '../engine/agents/skillCatalog';
+import { listRunbooks, runLogFile, runnableProblem } from '../engine/runner/runbook';
+import { loadRunbookPolicy } from '../engine/runner/policy';
+import { verifyRunLog, readRunLog } from '../engine/runner/runLog';
 import * as os from 'node:os';
 import { PipelineEntity, PipelineSpec, CURRENT_PIPELINE_SPEC_VERSION } from '../engine/pipelineSpec/types';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
@@ -78,6 +81,23 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
     } } }
   } };
   return [
+    {
+      name: 'autode_runbook_status',
+      description: "The active problem's approved runbooks and how far they have run: each step's engine classification and state, the approvals, whether it may run now (and why not), and whether its run log is intact. Runbooks run only in AutoDE's runner, started by a person; propose new ones with autode_propose_runbook.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', minLength: 1 } } },
+      annotations: read('Runbook status'),
+      handler: async (args, ws) => {
+        const { problemRoot } = problemOf(ws);
+        const policy = loadRunbookPolicy(ws.options.workspaceRoot);
+        const runbooks = listRunbooks(problemRoot).filter((r) => !args.id || r.runbook.id === args.id).map((r) => ({
+          id: r.runbook.id, title: r.runbook.title, connectionId: r.runbook.connectionId, environment: r.environment, stage: r.runbook.stage, status: r.status,
+          approvals: r.approvals.map((a) => ({ by: a.by, at: a.at, channel: a.channel })), runnable: !runnableProblem(r, policy), whyNot: runnableProblem(r, policy),
+          steps: r.runbook.steps.map((s) => ({ id: s.id, title: s.title, kind: s.kind, state: r.steps[s.id]?.state ?? 'pending' })),
+          log: { ...verifyRunLog(runLogFile(problemRoot, r.runbook.id)), last: readRunLog(runLogFile(problemRoot, r.runbook.id)).slice(-1)[0]?.at }
+        }));
+        return { runbooks } as unknown as Record<string, unknown>;
+      }
+    },
     {
       name: 'autode_skills_list',
       description: "AutoDE's skill catalog: its own skills (autode-<scope>-<capability>, with the stage kinds and platforms each serves and the roles that use it), this workspace's imported skills with their review state, the interview packs, and the vendor and community skills AutoDE works with (references only: licence, source, availability, and whether each is installed in this machine's host skills folders). Installing an external skill is a person's act (`autode skills install` in a terminal, or the AutoDE Skills view).",

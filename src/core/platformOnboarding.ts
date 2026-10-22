@@ -33,6 +33,8 @@ export interface SecretStore {
 
 export interface OnboardingHost {
   workspaceRoot: () => string | undefined;
+  /** Where `prerequisites.yaml` is: the extension's folder (v0.45.6). */
+  resourcesRoot?: () => string | undefined;
   settings: () => DataAgentHubSettings;
   secrets: SecretStore;
   /** Where a `vscode` entry's secret field is stored (`secretStorageKey`). */
@@ -130,7 +132,7 @@ export class PlatformOnboarding {
   /** Version checks only (`snow --version`, `npm --version`); run on the user's click. */
   async prerequisites(platform: DataPlatformProvider): Promise<Prerequisite[]> {
     const s = this.host.settings();
-    return checkPrerequisites({ driversRoot: driversRoot(s.driversDirectory), snowflakeCliPath: s.snowflakeCliPath, databricksCliPath: s.databricksCliPath, platforms: [platform] });
+    return checkPrerequisites({ driversRoot: driversRoot(s.driversDirectory), snowflakeCliPath: s.snowflakeCliPath, databricksCliPath: s.databricksCliPath, platforms: [platform], resourcesRoot: this.host.resourcesRoot?.(), workspaceRoot: this.host.workspaceRoot() });
   }
 
   /** Connections the platform's own configuration already has — read from files, nothing is run. */

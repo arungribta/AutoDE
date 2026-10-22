@@ -556,7 +556,7 @@ Any surface resumes it; this closes BPS-7. Answers are the user's statements, so
 - **Other MCP clients:** the same assignments as MCP prompts (`autode_agent_<role>`, filled with the brief), and the workflow as tools.
 - **Background fact extraction:** in VS Code it runs after every turn. In hosts it depends on the agent following the `fact-extraction` skill. This is weaker, and documented.
 
-##### 8a. The runner: runbooks, approved by a person, run by the engine (v0.45.6; owner, 2026-10-22)
+##### 8a. The runner: runbooks, approved by a person, run by the engine (shipped v0.45.6; owner, 2026-10-22)
 
 Everything that changes a data platform runs through one deterministic runner. Agents only write **runbooks**; a person approves them; the engine runs them. No agent runs a platform command, in AutoDE or (with the plugin's hooks, §8b) in a host. The aim is execution that is as easy as clicking through a wizard, including for people who aren't data engineers, without weakening P9.
 

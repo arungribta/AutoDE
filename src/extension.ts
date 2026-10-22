@@ -12,6 +12,7 @@ import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, regis
 import { EngineClient } from './core/engineClient';
 import { registerWorkflowView } from './core/workflowView';
 import { registerSkillsView } from './core/skillsView';
+import { registerRunbookView, RunbookPanel } from './core/runbookView';
 import { getCredentialResolver } from './engine/platform/credentials';
 import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
 import { PlatformOnboarding } from './core/platformOnboarding';
@@ -147,6 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
     'source.oracle.password': SECRET_KEYS.oraclePassword, 'source.oracle.walletPassword': SECRET_KEYS.oracleWalletPassword
   };
   const onboarding = new PlatformOnboarding({
+    resourcesRoot: () => context.extensionPath,
     workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
     settings: () => configManager.getSettings(),
     secrets: context.secrets,
@@ -280,7 +282,9 @@ export function activate(context: vscode.ExtensionContext): void {
     driversDirectory: () => configManager.getSettings().driversDirectory,
     snowflakeCliPath: () => configManager.getSettings().snowflakeCliPath,
     databricksCliPath: () => configManager.getSettings().databricksCliPath,
-    log: (line) => sidebarProvider.logToChat(line)
+    log: (line) => sidebarProvider.logToChat(line),
+    resourcesRoot: () => context.extensionPath,
+    workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
   };
   const checkPlatformPrerequisites = vscode.commands.registerCommand(`${EXTENSION_ID}.checkPlatformPrerequisites`, () => checkPrerequisitesCommand(vscode, prerequisiteHost));
   const installOracleDriver = vscode.commands.registerCommand(`${EXTENSION_ID}.installOracleDriver`, () => installDriverCommand(vscode, prerequisiteHost, 'oracle'));
@@ -311,6 +315,16 @@ export function activate(context: vscode.ExtensionContext): void {
   if (mcpProvider) context.subscriptions.push(mcpProvider);
   // v0.44.1: the Workflow view — tree, editor tab, status bar — over the engine's runtime and history.
   context.subscriptions.push(...registerSkillsView(context, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath));
+  // v0.45.6: the Runbook tab: approved platform changes, run step by step by AutoDE's runner.
+  context.subscriptions.push(...registerRunbookView(context, {
+    scope: () => sidebarProvider.currentWorkflowScope(),
+    user: skillActor,
+    resolve: async (id, decision, note) => { await sidebarProvider.resolveFromView(id, decision, note); RunbookPanel.refreshAll(); },
+    allowCli: () => configManager.getSettings().dataPlatformCliConsent === true,
+    driversRoot: () => configManager.getSettings().driversDirectory,
+    log: (line) => sidebarProvider.logToChat(line),
+    onChange: () => void vscode.commands.executeCommand('autoDataEngineeringHub.refreshWorkflow')
+  }));
   context.subscriptions.push(...registerWorkflowView(context, {
     scope: () => sidebarProvider.currentWorkflowScope(),
     resolve: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note),

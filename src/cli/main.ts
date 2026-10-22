@@ -3,6 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { PLUGIN_HOSTS, PluginHost, buildPlugin, installPlugin, serverEntry } from '../engine/agents/plugin';
 import { spawnSync } from 'node:child_process';
+import { Runbook, approveRunbook, checkRunbook, listRunbooks } from '../engine/runner/runbook';
+import { loadRunbookPolicy } from '../engine/runner/policy';
 import { CatalogEntry, CatalogGroup, Runner, probeInstaller, skillCatalog, spawnRunner } from '../engine/agents/skillCatalog';
 import { approveStageDocument, documentApprovalProblems, isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import * as readline from 'node:readline';
@@ -168,6 +170,11 @@ Skills (AutoDE's own, this workspace's imported ones, interview packs, and the v
   skills check <name>          Probe an external skill's install command on this machine (nothing is installed)
   skills install <name>        (terminal) Run the vendor's own install command after you confirm, then check it worked
 
+Runbooks (platform changes, approved by a person; they run in VS Code's Runbook tab):
+  runbook list                 The problem's runbooks: environment, approvals, status, steps run
+  runbook show <id>            Every step: the engine's classification, what runs, its dry run and rollback, its state; the log
+  runbook approve <id>         (terminal) Approve: a pending runbook decision, or the second approval an environment needs
+
 Agent hosts (Claude Code, Cortex Code, GitHub Copilot CLI):
   plugin path [--out <folder>]   Build AutoDE's plugin folder (agents, skills, commands, .mcp.json) and print where it is
   plugin install --host claude|cortex|copilot [--scope project|user]   Copy AutoDE's agents and skills into the host's folders
@@ -290,6 +297,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'query': case 'explain': return await cmdSql(ctx, command, rest);
       case 'plugin': return cmdPlugin(ctx, rest);
       case 'skills': return await cmdSkills(ctx, rest);
+      case 'runbook': return await cmdRunbook(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -561,7 +569,7 @@ async function cmdDoctor(ctx: Ctx): Promise<number> {
   const readiness = readReadiness(ctx.workspaceRoot);
   const drivers = defaultDriversRoot(ctx.values.drivers, ctx.io.env);
   const platforms = [...new Set(config.connections.map((c) => c.platform))];
-  const prerequisites = await checkPrerequisites({ driversRoot: drivers, platforms: platforms.length ? platforms : undefined });
+  const prerequisites = await checkPrerequisites({ driversRoot: drivers, platforms: platforms.length ? platforms : undefined, resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot });
   const connections = config.connections.map((c) => ({ id: c.id, platform: c.platform, role: c.role, origin: c.origin, status: connectionStatus(c, readiness[c.id]) }));
   // Only a required prerequisite of a platform this workspace uses is a failure.
   const missing = prerequisites.filter((p) => p.required && p.state !== 'ready' && platforms.includes(p.platform));
@@ -574,7 +582,7 @@ async function cmdDoctor(ctx: Ctx): Promise<number> {
     `drivers: ${drivers}`,
     '',
     'Prerequisites:',
-    ...prerequisites.map((p) => `  ${p.state === 'ready' ? '✓' : p.required && platforms.includes(p.platform) ? '✗' : '·'} ${p.title} — ${p.state}${p.version ? ` ${p.version}` : ''}${p.state !== 'ready' && p.install?.command ? `\n      install: ${p.install.command}` : ''}`),
+    ...prerequisites.map((p) => `  ${p.state === 'ready' ? '✓' : p.required && platforms.includes(p.platform) ? '✗' : '·'} ${p.title} — ${p.state}${p.version ? ` ${p.version}` : ''}${p.state !== 'ready' && p.install?.command ? `\n      install: ${p.install.command}` : ''}${p.state !== 'ready' ? (p.install?.options ?? []).filter((o) => o.available).map((o) => `\n      install with ${o.manager}: ${o.commands.map((c) => c.join(' ')).join(' && ')}${o.needs ? ` (needs ${o.needs})` : ''}`).join('') : ''}${p.state !== 'ready' && p.install?.docs && !p.install?.command ? `\n      guide: ${p.install.docs}${p.install.verifiedAt ? ` (checked ${p.install.verifiedAt})` : ''}` : ''}`),
     '',
     `Connections (${config.file}${config.fileExists ? '' : ', not present'}):`,
     ...(connections.length ? connections.map((c) => `  ${c.status.autode === 'ready' ? '✓' : '·'} ${c.id} (${c.role}, ${c.origin}) — ${c.status.autode}${c.status.checkedAt ? ` at ${c.status.checkedAt}` : ''}; MCP: ${c.status.mcp.ready ? 'ready' : c.status.mcp.note}`) : ['  none']),
@@ -724,6 +732,55 @@ async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
 // ── workflow (PA3a, v0.44.0) ────────────────────────────────────────────────
 
 const STATUS_MARK: Record<string, string> = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
+
+async function cmdRunbook(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list', id] = rest;
+  const problemId = singleProblem(ctx);
+  if (!problemId) throw new CliError(EXIT.NOT_FOUND, 'No business problem: start one with `autode problems new`.');
+  const problemRoot = layoutPath(ctx.workspaceRoot, 'problems', problemId);
+  const policy = loadRunbookPolicy(ctx.workspaceRoot);
+  const store = new DecisionStore(ctx.workspaceRoot);
+  const pending = store.list({ status: 'pending', kind: 'runbook' }).filter((d) => d.problemId === problemId);
+  const records = listRunbooks(problemRoot);
+  if (sub === 'list') {
+    const lines = [
+      ...pending.map((d) => `  ? ${d.title} — waits for approval (decision ${d.id})`),
+      ...records.map((r) => `  ${r.status === 'ran' ? '✓' : r.status === 'failed' ? '✗' : '·'} ${r.runbook.id.padEnd(28)} ${r.environment.padEnd(8)} ${r.status}  ${r.runbook.steps.filter((s) => r.steps[s.id]?.state === 'done').length}/${r.runbook.steps.length} steps  approvals: ${r.approvals.map((a) => a.by).join(', ') || 'none'}`)
+    ];
+    emit(ctx, { ok: true, pending: pending.map((d) => ({ id: d.id, title: d.title })), runbooks: records.map((r) => ({ id: r.runbook.id, environment: r.environment, status: r.status, approvals: r.approvals, steps: r.steps })) }, lines.length ? lines.join('\n') : 'No runbooks in this problem.');
+    return EXIT.OK;
+  }
+  if (!id) throw new CliError(EXIT.USAGE, `runbook ${sub} needs an id.`);
+  const record = records.find((r) => r.runbook.id === id);
+  const decision = pending.find((d) => store.proposal<Runbook>(d.id).id === id);
+  if (sub === 'show') {
+    const rb = record?.runbook ?? (decision ? store.proposal<Runbook>(decision.id) : undefined);
+    if (!rb) throw new CliError(EXIT.NOT_FOUND, `No runbook "${id}".`);
+    const check = checkRunbook(rb, { workspaceRoot: ctx.workspaceRoot, connections: platformSession(ctx).config().connections, policy });
+    const lines = [
+      `${rb.id}: ${rb.title}`, `Why: ${rb.reason}`, `Connection: ${rb.connectionId} (${check.environment.name})`, record ? `Status: ${record.status}; approvals: ${record.approvals.map((a) => `${a.by} (${a.channel})`).join(', ') || 'none'}` : `Waits for approval: decision ${decision!.id}`,
+      ...(check.ok ? [] : check.errors.map((e) => `✗ ${e}`)),
+      ...check.steps.map((s) => `  ${s.id} [${s.class}] ${s.title}\n      runs: ${s.run.sql ?? s.run.argv?.join(' ')}${s.dryRun ? `\n      dry run: ${s.dryRun.label}` : ''}${s.rollback ? `\n      rollback: ${s.rollback.steps ? s.rollback.steps.map((x) => x.run.sql ?? x.run.argv?.join(' ')).join('; ') : s.rollback.procedure}` : ''}${record ? `\n      state: ${record.steps[s.id]?.state ?? 'pending'}` : ''}`),
+      rb.explanation ? `The agent's explanation: ${rb.explanation}` : ''
+    ].filter(Boolean);
+    emit(ctx, { ok: check.ok, runbook: rb, check, record }, lines.join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'approve') {
+    if (decision) return cmdDecisions(ctx, ['approve', decision.id]);
+    if (!record) throw new CliError(EXIT.NOT_FOUND, `No runbook "${id}" waits for approval.`);
+    if (record.status !== 'awaiting-second-approval') throw new CliError(EXIT.FAILED, `${id} is ${record.status}; it needs no approval now.`);
+    requirePerson(ctx, 'Approving', 'Approve it in the Runbook tab in VS Code.');
+    const by = (ctx.values.by ?? safeUsername()).trim();
+    const answer = (await ctx.io.prompt(`Give the second approval of runbook ${id} (${record.environment}) as "${by}"? Type approve to confirm: `)).trim().toLowerCase();
+    if (answer !== 'approve') { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+    const r = approveRunbook(problemRoot, record, by, 'cli', policy);
+    if (!r.record) throw new CliError(EXIT.REFUSED, r.problem ?? 'Not approved.');
+    emit(ctx, { ok: true, status: r.record.status }, `Runbook ${id}: ${r.record.status === 'approved' ? 'approved; run it from its Runbook tab in VS Code' : 'approval recorded'}.`);
+    return EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, 'runbook list | show <id> | approve <id>');
+}
 
 async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
   const [sub = 'list', name] = rest;

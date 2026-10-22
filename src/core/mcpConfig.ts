@@ -137,7 +137,7 @@ export function hintStaleMcpJson(vscode: VsCode, options: { workspaceRoot: strin
 // ── The stable copy (phase 5, §7.5) ──────────────────────────────────────────
 
 /** What the server needs next to it, relative to the extension root; the same as the `autode` package (scripts/pack-cli.cjs). */
-export const SERVER_FILES: readonly string[] = ['dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'skills', 'primitive-definitions', 'workflows', 'agents', 'media/autode-icon-64.png', 'LICENSE'];
+export const SERVER_FILES: readonly string[] = ['dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'skills', 'primitive-definitions', 'workflows', 'agents', 'prerequisites.yaml', 'media/autode-icon-64.png', 'LICENSE'];
 
 export function stableServerDir(storagePath: string): string {
   return path.join(storagePath, 'autode-server');

@@ -1229,6 +1229,16 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
   - `draftModel()` takes the problem's mappings (`problemMappings()`), the schema index, the live assertions (active, proposed, needs review) and the target context (`targetSettings()`). It makes one entity per target name. Its kind comes from the name prefix. Grain and key come from facts on the target, else from the single source's facts mapped through the mapping, with provenance. Dimensions in a dimensional model get a surrogate `<name>_key`, with the fact key as the natural key. Foreign keys come from relationship facts whose two sources map to different entities.
   - `checkModel()` returns errors and warnings (see the changelog). `renderModelDdl()` writes `CREATE TABLE` statements in dependency order, qualified with the target's database and schema.
   - Tools: `autode_draft_model` and `autode_check_model` (`src/mcp/agentTools.ts`). The model is recorded with `autode_record_artifact` and approved at the stage's gate.
+- **The runner** (v0.45.6, `src/engine/runner/`):
+  - `runbook.ts`: `classifySql()` (`checkSingleStatement()` plus the destructive keywords), the CLI allowlist `CLI_ALLOWLIST`, `checkRunbook()` (classification, allowlist, `FORBIDDEN_FLAG` and `SECRET_VALUE` arguments, workspace paths, rollback, the environment's classes; it adds `--connection` or `--profile` from the entry), `runbookRevision()` (SHA-256 of the runbook), and the record `runbooks/<id>.yaml` with approvals bound to the revision (`approveRunbook()`, `runnableProblem()`).
+  - `policy.ts`: `.autode/config/approvals.yaml` → `RunbookPolicy`. `environmentOf()` returns prod for an unlisted connection; prod is never unattended. Also `approverProblem()` and `approvalsNeeded()`.
+  - `run.ts`: `runStep()` re-checks the runbook with today's connections and policy, enforces order, executes through a `RunnerHost`, redacts (`redactRun()`), logs, updates states and hands the stage in (`completeStage()`) when every step is done. `runRemaining()` runs the rest only where the environment is unattended.
+  - `runLog.ts`: `appendRunLog()` and `verifyRunLog()` (each entry's `prev` is the previous `hash`; `hash` is the SHA-256 of the entry).
+  - The decision kind `runbook` (`proposals.ts`): `validateRunbookProposal()`; applying writes the record and the first approval.
+  - `src/mcp/runnerHost.ts`: `createRunnerHost()` uses a write-enabled `PlatformSession` for SQL (explain, read, approved change) and `spawn()` with no shell for commands.
+  - VS Code: `src/core/runbookView.ts` (`RunbookPanel`, `autoDataEngineeringHub.openRunbook`) over `src/core/runbookViewModel.ts`, with `media/runbook.html`.
+  - CLI: `cmdRunbook()`. MCP: `autode_propose_runbook` (`decisions.ts`) and `autode_runbook_status` (`agentTools.ts`).
+- **Install guidance as data** (v0.45.6): `loadToolGuides()` (`src/engine/platform/prerequisites.ts`) reads `prerequisites.yaml` and `.autode/config/prerequisites.yaml`; `probeOptions()` keeps the options for this OS and probes their package managers; `checkPrerequisites()` puts them in `install.options`. The prerequisites picker offers them and sends their commands to the AutoDE terminal on a click.
 - **Skill catalog and naming** (v0.45.5):
   - `skillMeta()` (`src/engine/agents/definitions.ts`) checks a bundled skill's name against `AUTODE_SKILL_NAME` (`autode-<scope>-<capability>`, scopes in `SKILL_SCOPES`), and reads `metadata`: `scope` equal to the name's, `stageKinds` known, `platforms` from `SKILL_PLATFORMS` (a platform-scoped skill has exactly its platform), a whole-number `version`, and `maturity` `tested` or `preview`. `parseSkillMarkdown()` now returns `metadata` and `license`.
   - `assignmentFor()` selects with `fits()`: kind in `stageKinds`, and `any` or the target platform (`targetPlatform()`, from `context/target-context.yaml`) in `platforms`. The role is the first candidate with a fitting skill; it gets its own fitting skills plus the platform's.
@@ -1766,7 +1776,7 @@ src/cli/    # the autode command line (no vscode; §10.8)
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
   ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, skillsView.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
@@ -1793,6 +1803,8 @@ src/engine/platform/credentials/    # credential resolvers and CLI detection
   CliConfigResolver.ts, cliDetection.ts, cliRegistry.ts, databricksCfg.ts, DatabricksCli.ts, EnvVarCredentialResolver.ts, index.ts, PlatformCliDescriptor.ts, registry.ts, SnowflakeCli.ts, tnsnames.ts, types.ts
 src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
+src/engine/runner/
+  policy.ts, run.ts, runbook.ts, runLog.ts
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
   lifecycle.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
 src/engine/transforms/    # primitive registry
@@ -1804,7 +1816,7 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   documentApproval.ts, events.ts, instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, runnerHost.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 src/spokes/    # Snowflake executor
   snowflakeExecutor.ts
 ```

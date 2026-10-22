@@ -163,6 +163,18 @@ Secrets never go in these files. A field such as `password` or `token` is refuse
 
 `approve` and `reject` work only in an interactive terminal (stdin and stdout), and they refuse whenever `CI` is set (to anything other than empty, `0` or `false`). They show the decision and ask you to type `approve` or `reject` to confirm. `--by` defaults to your OS user name. This is the *CLI* channel of a decision: it may resolve high-stakes decisions, because it needs a person at the keyboard. A non-interactive run never resolves a decision (requirements P9).
 
+## Runbooks
+
+Platform changes (creating objects, grants, loading data, deploying a bundle) run only as runbooks: an agent proposes one, AutoDE checks it, a person approves it, and AutoDE's runner runs it step by step in VS Code's Runbook tab.
+
+| Command | What it does |
+|---|---|
+| `autode runbook list` | The problem's runbooks: environment, status, steps run, approvals; and those waiting for approval. |
+| `autode runbook show <id>` | Every step with AutoDE's classification (read, change, destructive), exactly what runs, its dry run and rollback, its state. |
+| `autode runbook approve <id>` | (terminal) Approves: the runbook's pending decision, or the second approval its environment needs (from a different person). |
+
+Who may approve, per environment, is set in `.autode/config/approvals.yaml` (`runbooks.environments.<env>`: `connections`, `approvers`, `secondApprover`, `unattended`, `allowedClasses`; `runbooks.allowCommands` for the team's own CLI commands). A connection no environment lists counts as production. Running a runbook from a terminal (`autode run`) is planned.
+
 ## Skills
 
 | Command | What it does |

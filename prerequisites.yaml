@@ -1,0 +1,60 @@
+# How to get the platform tools AutoDE can use (v0.45.6). This is data, not code: vendors change their install
+# methods, so each entry records where it came from and when it was last checked. Before an option is offered,
+# AutoDE probes that its package manager exists on this machine; it runs only on the user's click, in a visible
+# terminal. A team corrects or adds entries in .autode/config/prerequisites.yaml (same shape, merged by id),
+# e.g. to point at an internal software centre or mirror.
+#
+# The Oracle driver's package and supported range stay in code (src/engine/platform/driverStore.ts): they are
+# a compatibility contract with AutoDE's adapter, changed only with its tests.
+
+tools:
+  snowflake-cli:
+    platform: snowflake
+    title: Snowflake CLI (snow)
+    why: Optional. Runs queries over Snowflake's native protocol, which works where the SQL API is restricted, and is the only way to sign in with a username and password. Without it AutoDE uses the SQL API (key-pair or token). Runbooks can run its commands.
+    docs: https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation
+    verifiedAt: 2026-10-22
+    verifiedHow: against the vendor's install page (the commands were not run by AutoDE's CI)
+    options:
+      - manager: Homebrew (Snowflake's tap)
+        os: [darwin, linux]
+        probe: [brew, --version]
+        commands:
+          - [brew, tap, snowflakedb/snowflake-cli]
+          - [brew, trust, --cask, snowflakedb/snowflake-cli/snowflake-cli]
+          - [brew, install, --cask, snowflake-cli]
+      - manager: pipx
+        os: [win32, darwin, linux]
+        probe: [pipx, --version]
+        needs: Python 3.10 or later
+        commands:
+          - [pipx, install, snowflake-cli]
+      - manager: uv
+        os: [win32, darwin, linux]
+        probe: [uv, --version]
+        needs: Python 3.10 or later
+        commands:
+          - [uv, tool, install, snowflake-cli]
+    manual: On Windows without pipx or uv, use the installer from the vendor's page.
+  databricks-cli:
+    platform: databricks
+    title: Databricks CLI
+    why: Optional. Used to list the profiles in .databrickscfg and to deploy bundles from runbooks. Queries always use the Statement Execution API, so the CLI adds no connection path.
+    docs: https://docs.databricks.com/en/dev-tools/cli/install.html
+    minVersion: 0.205.0
+    verifiedAt: 2026-10-22
+    verifiedHow: against the vendor's install page (the commands were not run by AutoDE's CI)
+    options:
+      - manager: WinGet
+        os: [win32]
+        probe: [winget, --version]
+        commands:
+          - [winget, install, Databricks.DatabricksCLI]
+      - manager: Homebrew (Databricks' tap)
+        os: [darwin, linux]
+        probe: [brew, --version]
+        commands:
+          - [brew, tap, databricks/tap]
+          - [brew, trust, databricks/tap]
+          - [brew, install, databricks]
+    manual: The vendor's curl script (Linux, macOS, WSL) pipes a download into a shell, so AutoDE only links to it; see the vendor's page.

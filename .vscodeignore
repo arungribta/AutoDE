@@ -20,12 +20,14 @@
 !media/sidebar.html
 !media/panel.html
 !media/workflow.html
+!media/runbook.html
 !media/editors/*.html
 # Bundled interview skills and Tier-2 primitives; JSON Schemas for yamlValidation.
 !skills/*.json
 !primitive-definitions/**
 # Workflow templates (PA3a); agent role templates and skill folders (PA3b).
 !workflows/*.yaml
+!prerequisites.yaml
 !agents/*.md
 !skills/*/**
 !skills/external.yaml

@@ -27,6 +27,8 @@ export type DecisionKind =
   | 'workflow'
   /** A workflow stage's approval gate (PA3a), for stages whose output has no approval of its own. */
   | 'gate'
+  /** A runbook: platform changes checked by the engine and run by the runner once approved (v0.45.6). */
+  | 'runbook'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 

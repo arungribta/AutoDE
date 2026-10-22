@@ -19,6 +19,9 @@ export interface PrerequisiteHost {
   snowflakeCliPath: () => string | undefined;
   databricksCliPath: () => string | undefined;
   log: (line: string) => void;
+  /** Where `prerequisites.yaml` is, and the workspace whose override applies (v0.45.6). */
+  resourcesRoot?: () => string | undefined;
+  workspaceRoot?: () => string | undefined;
 }
 
 const ICONS: Record<Prerequisite['state'], string> = { ready: '$(check)', missing: '$(circle-slash)', unverified: '$(question)', changed: '$(warning)', unsupported: '$(error)' };
@@ -91,7 +94,8 @@ export async function installDriverCommand(vscode: VsCode, host: PrerequisiteHos
 /** Every platform's prerequisites, with their state; picking one offers its next step. */
 export async function checkPrerequisitesCommand(vscode: VsCode, host: PrerequisiteHost): Promise<void> {
   const list = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'AutoDE: checking platform prerequisites…' }, () => checkPrerequisites({
-    driversRoot: driversRoot(host.driversDirectory()), snowflakeCliPath: host.snowflakeCliPath(), databricksCliPath: host.databricksCliPath()
+    driversRoot: driversRoot(host.driversDirectory()), snowflakeCliPath: host.snowflakeCliPath(), databricksCliPath: host.databricksCliPath(),
+    resourcesRoot: host.resourcesRoot?.(), workspaceRoot: host.workspaceRoot?.()
   }));
   const items = list.map((p) => ({
     label: `${ICONS[p.state]} ${p.title}`,
@@ -108,8 +112,22 @@ export async function checkPrerequisitesCommand(vscode: VsCode, host: Prerequisi
     else await verifyDriverCommand(vscode, host, id);
     return;
   }
-  if (p.state !== 'ready' && p.install?.docs) {
-    const pick = await vscode.window.showInformationMessage(`${p.title}: ${p.why}`, 'Open install guide');
-    if (pick) await vscode.env.openExternal(vscode.Uri.parse(p.install.docs));
-  }
+  if (p.state === 'ready' || !p.install) return;
+  // v0.45.6: the options are data (prerequisites.yaml), probed on this machine; one runs only on a click.
+  const options = (p.install.options ?? []).filter((o) => o.available);
+  const choices = [
+    ...options.map((o) => ({ label: `$(terminal) ${o.manager}`, description: o.commands.map((c) => c.join(' ')).join(' && '), detail: o.needs, option: o })),
+    ...(p.install.options ?? []).filter((o) => !o.available).map((o) => ({ label: `$(circle-slash) ${o.manager}`, description: o.reason, detail: undefined, option: undefined })),
+    ...(p.install.docs ? [{ label: '$(link-external) Open the vendor\'s install guide', description: p.install.docs, detail: p.install.notes.join(' '), option: undefined }] : [])
+  ];
+  const chosen = await vscode.window.showQuickPick(choices, { title: `Install ${p.title}`, placeHolder: `${p.why}${p.install.verifiedAt ? ` (AutoDE last checked these on ${p.install.verifiedAt})` : ''}` });
+  if (!chosen) return;
+  if (!chosen.option) { if (p.install.docs && chosen.label.includes('install guide')) await vscode.env.openExternal(vscode.Uri.parse(p.install.docs)); return; }
+  const lines = chosen.option.commands.map((c) => c.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)).join(' '));
+  const ok = await vscode.window.showInformationMessage(`Install ${p.title} with ${chosen.option.manager}?`, { modal: true, detail: [`Runs, in a terminal named "AutoDE":`, ...lines, '', chosen.option.needs ? `Needs: ${chosen.option.needs}.` : '', `From ${p.install.docs ?? 'the vendor'}${p.install.verifiedAt ? `, last checked ${p.install.verifiedAt}` : ''}.`].filter(Boolean).join('\n') }, 'Run in AutoDE terminal');
+  if (ok !== 'Run in AutoDE terminal') return;
+  const terminal = autodeTerminal(vscode, host.workspaceRoot?.() ?? process.cwd());
+  terminal.show();
+  for (const l of lines) terminal.sendText(l, true);
+  host.log(`${p.title}: install commands sent to the AutoDE terminal (${lines.join('; ')}). Check again when they finish.`);
 }

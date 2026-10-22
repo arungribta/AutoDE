@@ -756,6 +756,44 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: with `databricks-pipelines` installed and the target context on Databricks, run the build stage in Claude Code with the plugin.
   Expect: the assignment lists `databricks-pipelines` under "Vendor skills installed in this host".
 
+## Part 32 — v0.45.6 The runner
+
+- [ ] **32.1 Propose.**
+  Do: in Claude Code with the plugin, ask the pipeline engineer to propose a runbook that creates a table and loads a file to a stage on your dev connection.
+  Expect: `autode_propose_runbook` returns a high-stakes decision. A step like `snow sql -q …` or one with `--connection` is refused, naming the reason.
+- [ ] **32.2 Policy.**
+  Do: create `.autode/config/approvals.yaml` with dev (your dev connection, any approver) and prod (your prod connection, two named approvers, secondApprover).
+  Expect: `autode runbook show <id>` names the environment and lists every step with its classification.
+- [ ] **32.3 The Runbook tab.**
+  Do: run *AutoDE: Open Runbook…* and pick it.
+  Expect:
+  - the policy, each step with read/change/destructive, what runs, its dry run and its rollback;
+  - the agent's explanation, labelled as not checked;
+  - Approve asks for confirmation as you.
+- [ ] **32.4 Run.**
+  Do: Dry run the create step, then Run step for each.
+  Expect:
+  - steps run only in order;
+  - each change is confirmed in a modal naming the connection and environment;
+  - a failure stops the run and offers Roll back;
+  - the log table fills, and "Hash-chained; intact" shows.
+- [ ] **32.5 Production.**
+  Do: propose one for the prod connection; approve it as one approver, then try to run it.
+  Expect:
+  - "prod needs 2 approval(s)";
+  - the same person can't approve twice;
+  - a second named approver (`autode runbook approve <id>`) makes it runnable;
+  - Run remaining is not offered.
+- [ ] **32.6 Tampering.**
+  Do: edit a step's SQL in `.autode/problems/<id>/runbooks/<rb>.yaml`.
+  Expect: the tab says it was edited after approval and can't run.
+- [ ] **32.7 Install guidance.**
+  Do: on a machine without the Snowflake CLI, run *AutoDE: Check Platform Prerequisites* and pick it.
+  Expect:
+  - the options your machine has (Homebrew, pipx or uv), the unavailable ones marked, and the vendor's guide;
+  - choosing one shows the exact commands and runs them in the AutoDE terminal only on your click;
+  - `autode doctor` lists the same options.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -938,5 +976,12 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 31.4 |  |  |
 | 31.5 |  |  |
 | 31.6 |  |  |
+| 32.1 |  |  |
+| 32.2 |  |  |
+| 32.3 |  |  |
+| 32.4 |  |  |
+| 32.5 |  |  |
+| 32.6 |  |  |
+| 32.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

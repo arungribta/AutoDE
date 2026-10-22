@@ -7,6 +7,9 @@ import { Evidence } from '../context/assertions';
 import { computeRevision } from '../context/contextStore';
 import { SchemaIndex } from '../grounding/sqlGrounding';
 import { checkSingleStatement } from '../platform/sqlGuard';
+import { Runbook, RunbookRecord, approveRunbook, checkRunbook } from '../runner/runbook';
+import { loadRunbookPolicy } from '../runner/policy';
+import { loadConnectionsConfig } from '../platform/connectionsConfig';
 import { ConnectionDraft, ConnectionEntry, saveConnection, validateConnectionDraft } from '../platform/connectionsConfig';
 import { credentialNeeds, draftEntry } from '../platform/connectionSetup';
 import { VocabularyProposal, mergeVocabularyFile } from '../context/vocabulary';
@@ -32,7 +35,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  * proposal tools, the extension and (PA2) the CLI.
  */
 
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection' | 'vocabulary' | 'workflow'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection' | 'vocabulary' | 'workflow' | 'runbook'>;
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -238,8 +241,20 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'platform_change': { const p = payload as PlatformChangeProposal; return { title: `Run on ${p.connectionId}: ${p.sql.trim().split(/\s+/).slice(0, 6).join(' ')}…`, summary: p.reason }; }
     case 'workflow': { const w = payload as WorkflowInstance; const n = (w.stages ?? []).filter((s) => s.included).length; return { title: `Workflow: ${w.template?.id} with ${n} stages`, summary: (w.stages ?? []).filter((s) => s.included).map((s) => s.id).join(' → ') }; }
     case 'vocabulary': { const v = payload as VocabularyProposalPayload; return { title: `Vocabulary: ${v.entries.map((e) => e.kind === 'abbreviation' ? `${e.from.toUpperCase()}=${e.to}` : `${e.from}~${e.to}`).join(', ')}`.slice(0, 160), summary: `${v.entries.length} retrieval vocabulary entr${v.entries.length === 1 ? 'y' : 'ies'}.` }; }
+    case 'runbook': { const r = payload as Runbook; return { title: `Runbook ${r.id}: ${r.title} (${r.steps?.length ?? 0} steps on ${r.connectionId})`.slice(0, 160), summary: r.reason ?? '' }; }
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
   }
+}
+
+/** A runbook proposal: the engine's own checks (classification, allowlist, arguments, rollback, the environment's policy). */
+export function validateRunbookProposal(rb: Runbook, ctx: ProposalContext): ValidationReport {
+  const r = report();
+  needProblem(ctx, r);
+  r.checks.push('every step classified read, change or destructive by the engine', 'CLI commands on the allowlist, no credential or profile flags, paths inside the workspace', 'destructive steps have a rollback or a reason', "the step classes the connection's environment allows");
+  const c = checkRunbook(rb, { workspaceRoot: ctx.workspaceRoot, connections: ctx.connections ?? loadConnectionsConfig(ctx.workspaceRoot).connections, policy: loadRunbookPolicy(ctx.workspaceRoot) });
+  r.errors.push(...c.errors);
+  r.warnings.push(...c.warnings, ...(c.ok ? [`Environment: ${c.environment.name} (${c.environment.approvers === 'any' ? 'any person approves' : c.environment.approvers.length ? `approvers: ${c.environment.approvers.join(', ')}` : 'no approvers configured yet'}${c.environment.secondApprover ? ', two approvals' : ''}). Steps: ${c.steps.map((s) => `${s.id} ${s.class}`).join(', ')}.`] : []));
+  return finish(r);
 }
 
 export function validateProposal(kind: ProposalKind, payload: unknown, ctx: ProposalContext): ValidationReport {
@@ -252,6 +267,7 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'connection': return validateConnectionProposal(payload as ConnectionDraft, ctx);
     case 'vocabulary': return validateVocabularyProposal(payload as VocabularyProposalPayload);
     case 'workflow': return validateWorkflowProposal(payload as WorkflowInstance, ctx);
+    case 'runbook': return validateRunbookProposal(payload as Runbook, ctx);
   }
 }
 
@@ -371,6 +387,19 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, mergeVocabularyFile(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined, entries));
         break;
+      }
+      case 'runbook': {
+        if (!ctx.problemRoot || !ctx.problemId) return { decision: d, applied: false, message: 'No active business problem; open it to apply this runbook.' };
+        const rb = store.proposal<Runbook>(id);
+        const policy = loadRunbookPolicy(ctx.workspaceRoot);
+        const check = checkRunbook(rb, { workspaceRoot: ctx.workspaceRoot, connections: ctx.connections ?? loadConnectionsConfig(ctx.workspaceRoot).connections, policy });
+        if (!check.ok) { const failed = store.markFailed(id, `It no longer passes the checks: ${check.errors.join(' ')}`); return { decision: failed, applied: false, message: failed.events[failed.events.length - 1].note ?? '' }; }
+        const channel = [...d.events].reverse().find((e) => e.type === 'approved')?.channel ?? 'file';
+        const record: RunbookRecord = { runbook: rb, revision: check.revision, environment: check.environment.name, status: 'awaiting-approval', decisionId: id, problemId: ctx.problemId, approvals: [], steps: Object.fromEntries(rb.steps.map((s) => [s.id, { state: 'pending' as const }])), createdBy: d.proposedBy?.client ?? d.proposedBy?.host };
+        const r = approveRunbook(ctx.problemRoot, record, approver, channel, policy, now);
+        if (!r.record) { const failed = store.markFailed(id, r.problem ?? 'not approved'); return { decision: failed, applied: false, message: `${id}: ${r.problem}` }; }
+        const done = store.markApplied(id, `Approved by ${approver} for ${record.environment}; ${r.record.status === 'approved' ? 'ready to run' : 'waiting for a second approver'}.`);
+        return { decision: done, applied: true, message: r.record.status === 'approved' ? `Runbook ${rb.id} approved by ${approver} (${record.environment}): run it from its Runbook tab in VS Code.` : `Runbook ${rb.id}: first approval by ${approver}; ${record.environment} needs a second approver (the Runbook tab, or autode runbook approve ${rb.id}).` };
       }
       case 'connection': {
         const saved = saveConnection(ctx.workspaceRoot, store.proposal<ConnectionDraft>(id));

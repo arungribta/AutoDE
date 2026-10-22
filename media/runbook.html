@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoDE Runbook</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 16px 20px; max-width: 1100px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; opacity: 0.85; margin: 6px 0 10px; }
+  .box { border: 1px solid var(--vscode-editorWidget-border, #555); border-radius: 6px; padding: 10px 12px; margin: 10px 0; background: var(--vscode-editorWidget-background); }
+  .note-ok { border-left: 4px solid var(--vscode-testing-iconPassed, #2ea043); }
+  .note-bad { border-left: 4px solid var(--vscode-editorError-foreground, #f14c4c); }
+  .warn { border-left: 4px solid var(--vscode-editorWarning-foreground, #cca700); }
+  .muted { opacity: 0.75; font-size: 12px; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; }
+  .step { border: 1px solid var(--vscode-editorWidget-border, #555); border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
+  .step.next { outline: 2px solid var(--vscode-focusBorder); }
+  .badge { display: inline-block; font-size: 11px; padding: 0 7px; border-radius: 8px; margin-left: 6px; border: 1px solid currentColor; }
+  .read { color: var(--vscode-testing-iconPassed, #2ea043); }
+  .change { color: var(--vscode-editorWarning-foreground, #cca700); }
+  .destructive { color: var(--vscode-editorError-foreground, #f14c4c); font-weight: 600; }
+  pre { white-space: pre-wrap; word-break: break-word; background: var(--vscode-textCodeBlock-background); padding: 6px 8px; border-radius: 4px; font-size: 12px; margin: 4px 0; }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  td, th { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }
+  button { font-family: inherit; font-size: 12px; padding: 4px 10px; margin: 6px 6px 0 0; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; cursor: pointer; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+  button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  a { color: var(--vscode-textLink-foreground); cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="root"><p class="muted">Loading the runbook…</p></div>
+<script nonce="{{nonce}}">
+(function () {
+  const vscode = acquireVsCodeApi();
+  const root = document.getElementById('root');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const send = (m) => vscode.postMessage(m);
+  const when = (iso) => iso ? String(iso).slice(0, 19).replace('T', ' ') : '';
+  let state = { model: null, note: null, busy: false };
+
+  function render() {
+    const m = state.model;
+    if (!m) { root.innerHTML = '<p class="muted">This runbook is not in the active business problem.</p>'; return; }
+    const b = state.busy;
+    let h = '<h1>' + esc(m.title) + '</h1><div class="muted">' + esc(m.reason) + '</div>' +
+      '<div class="meta"><span>Runbook <b>' + esc(m.id) + '</b></span><span>Connection <b>' + esc(m.connectionId) + '</b></span><span>Environment <b>' + esc(m.environment.name) + '</b></span><span>Status <b>' + esc(m.status) + '</b></span>' + (m.stage ? '<span>Stage ' + esc(m.stage) + '</span>' : '') + '</div>';
+    h += '<div class="box"><div class="label">The team\'s policy for ' + esc(m.environment.name) + '</div>Approvers: ' + esc(m.environment.approvers) + (m.environment.secondApprover ? ' · two approvals' : '') + ' · ' + (m.environment.unattended ? 'the remaining steps may run on one click' : 'one step at a time') + '</div>';
+    if (state.note) h += '<div class="box ' + (state.note.ok ? 'note-ok' : 'note-bad') + '">' + esc(state.note.text) + (state.note.output ? '<pre>' + esc(state.note.output) + '</pre>' : '') + '</div>';
+    if (m.errors.length) h += '<div class="box note-bad"><b>AutoDE\'s checks refuse it:</b><ul>' + m.errors.map((e) => '<li>' + esc(e) + '</li>').join('') + '</ul></div>';
+    if (m.warnings.length) h += '<div class="box warn">' + m.warnings.map(esc).join('<br>') + '</div>';
+    // Approval.
+    if (m.pendingDecisionId || m.status === 'awaiting-second-approval') {
+      h += '<div class="box warn"><b>' + (m.pendingDecisionId ? 'Waits for approval.' : 'Waits for a second approver.') + '</b> Review every step below; your approval binds to this exact content.<br>' +
+        '<button class="primary" data-act="approve"' + (b || m.errors.length ? ' disabled' : '') + '>Approve…</button>' + (m.pendingDecisionId ? '<button data-act="reject"' + (b ? ' disabled' : '') + '>Reject…</button>' : '') + '</div>';
+    } else if (m.approvals.length) {
+      h += '<div class="muted">Approved by ' + m.approvals.map((a) => esc(a.by) + ' (' + esc(a.channel) + ', ' + esc(when(a.at)) + ')').join(', ') + '.</div>';
+    }
+    if (!m.runnable && m.whyNot && !m.pendingDecisionId) h += '<div class="box warn">' + esc(m.whyNot) + '</div>';
+    if (m.explanation) h += '<div class="box"><div class="label">The agent\'s explanation (not checked by AutoDE)</div>' + esc(m.explanation) + '</div>';
+    // Steps.
+    h += '<h2 style="font-size:14px;margin-top:16px;">Steps</h2>';
+    for (const s of m.steps) {
+      const isNext = m.runnable && m.nextStep === s.id;
+      h += '<div class="step' + (isNext ? ' next' : '') + '"><b>' + esc(s.id) + '</b> ' + esc(s.title) + '<span class="badge ' + esc(s.class) + '">' + esc(s.class) + '</span><span class="badge">' + esc(s.state) + '</span>' +
+        '<div class="muted">Expected: ' + esc(s.expect) + '</div><div class="label" style="margin-top:6px;">Runs</div><pre>' + esc(s.runs) + '</pre>' +
+        (s.dryRun ? '<div class="muted">Dry run: ' + esc(s.dryRun) + '</div>' : '') +
+        (s.rollback ? '<div class="muted">Rollback: ' + esc(s.rollback) + '</div>' : '') +
+        (s.output ? '<div class="label" style="margin-top:6px;">Last output</div><pre>' + esc(s.output) + '</pre>' : '');
+      if (m.runnable) {
+        if (s.dryRun) h += '<button data-act="dryRun" data-step="' + esc(s.id) + '"' + (b ? ' disabled' : '') + '>Dry run</button>';
+        if (isNext) h += '<button class="primary" data-act="runStep" data-step="' + esc(s.id) + '"' + (b ? ' disabled' : '') + '>Run step…</button>';
+      }
+      if ((s.state === 'done' || s.state === 'failed') && s.rollback && !/^none/.test(s.rollback)) h += '<button data-act="rollback" data-step="' + esc(s.id) + '"' + (b ? ' disabled' : '') + '>Roll back…</button>';
+      h += '</div>';
+    }
+    if (m.runnable && m.environment.unattended && m.nextStep) h += '<button class="primary" data-act="runRemaining"' + (b ? ' disabled' : '') + '>Run remaining…</button>';
+    if (b) h += '<div class="muted">Running…</div>';
+    // Log.
+    h += '<h2 style="font-size:14px;margin-top:16px;">Log</h2>' + (m.logIntact ? '<div class="muted">Hash-chained; intact.</div>' : '<div class="box note-bad">The log was changed: ' + esc(m.logProblem) + '</div>') +
+      (m.log.length ? '<table><tr><th>#</th><th>When</th><th>Step</th><th>Action</th><th>Who</th><th>Result</th></tr>' + m.log.slice().reverse().map((e) => '<tr><td>' + e.seq + '</td><td>' + esc(when(e.at)) + '</td><td>' + esc(e.step || '') + '</td><td>' + esc(e.action) + '</td><td>' + esc(e.who) + '</td><td>' + (e.ok ? 'ok' : 'failed') + '</td></tr>').join('') + '</table><a data-act="openLog">Open the log file</a>' : '<div class="muted">Nothing has run yet.</div>');
+    root.innerHTML = h;
+    root.querySelectorAll('[data-act]').forEach((el) => { el.onclick = () => send({ type: el.getAttribute('data-act'), step: el.getAttribute('data-step') || undefined }); });
+  }
+
+  window.addEventListener('message', (ev) => {
+    const msg = ev.data;
+    if (msg.type === 'model') { state.model = msg.model; state.busy = !!msg.busy; if (msg.note) state.note = msg.note; render(); }
+  });
+  send({ type: 'ready' });
+})();
+</script>
+</body>
+</html>

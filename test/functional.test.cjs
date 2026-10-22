@@ -6585,8 +6585,8 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list'];
-      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status'];
+      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
@@ -6648,6 +6648,8 @@ async function main() {
       autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
       autode_draft_model: [{}, { x: 1 }],
       autode_skills_list: [{ group: 'external' }, { group: 'vendor' }],
+      autode_runbook_status: [{}, { id: '' }],
+      autode_propose_runbook: [{ runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'sql', sql: 'select 1', expect: 'one row' }] } }, { runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'shell', expect: 'x' }] } }],
       autode_primitive_candidates: [{ source: 'shop.orders' }, { source: 'shop.orders', columns: [{ source: 'a' }] }],
       autode_record_pipeline_spec: [{ entities: [{ name: 'e', source: { object: 'a', type: 'table' }, transforms: [], target: { object: 'b', materialization: 'table' } }] }, { entities: [] }],
       autode_check_model: [{ model: { entities: [{ name: 'fct_orders', kind: 'fact', columns: [{ name: 'order_id' }] }] } }, { model: { entities: [{ name: 'fct_orders', kind: 'fact' }] } }],
@@ -9919,6 +9921,218 @@ async function main() {
       const pkg = require('../package.json');
       assert.ok(pkg.contributes.views.autoDataEngineeringHub.some((v) => v.id === 'autoDataEngineeringHubSkills'));
       for (const c of ['refreshSkills', 'installSkill', 'openSkillSource']) assert.ok(pkg.contributes.commands.some((x) => x.command === `autoDataEngineeringHub.${c}`), c);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ---------- v0.45.6: the runner ----------
+
+  const conn = (id, platform, resolver = 'cli') => ({ id, platform, role: 'target', fields: {}, credentials: { resolver, ref: id.split(':')[1] }, allowSampleDataInPrompts: false, origin: 'file' });
+  const runbookWs = (policyYaml) => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-rb-'));
+    nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    credentials: { resolver: cli, ref: dev }\n  - platform: snowflake\n    credentials: { resolver: cli, ref: prod }\n  - platform: databricks\n    credentials: { resolver: cli, ref: lake }\n');
+    if (policyYaml) nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'approvals.yaml'), policyYaml);
+    return ws;
+  };
+  const POLICY = 'runbooks:\n  environments:\n    dev: { connections: [snowflake:dev, databricks:lake], approvers: any }\n    prod: { connections: [snowflake:prod], approvers: [priya, arun], secondApprover: true, unattended: true }\n';
+  const deployRunbook = (over = {}) => ({
+    id: 'deploy-orders', title: 'Deploy the orders mart', reason: 'The model was approved.', connectionId: 'snowflake:dev', explanation: 'Creates the table, then loads it.',
+    steps: [
+      { id: 'check', title: 'Count the source', kind: 'sql', sql: 'SELECT COUNT(*) FROM shop.orders', expect: 'a row count' },
+      { id: 'create', title: 'Create the mart', kind: 'sql', sql: 'CREATE TABLE mart.fct_orders (order_id INT)', expect: 'the table exists', rollback: { steps: [{ id: 'drop', title: 'Drop it', kind: 'sql', sql: 'DROP TABLE mart.fct_orders', expect: 'gone', noRollbackReason: 'it undoes the create' }] } },
+      { id: 'copy', title: 'Upload the seed file', kind: 'cli', argv: ['snow', 'stage', 'copy', 'seeds/orders.csv', '@mart.seed'], expect: 'the file is on the stage' }
+    ],
+    ...over
+  });
+
+  await test('v0.45.6: the engine classifies every runbook step itself and refuses what it can\'t allow — off-allowlist commands, profile and credential flags, paths outside the workspace, destructive steps without a rollback, CLI steps without CLI credentials', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const R = fresh('../dist/engine/runner/runbook.js');
+    const P = fresh('../dist/engine/runner/policy.js');
+    const ws = runbookWs(POLICY);
+    try {
+      assert.deepStrictEqual(['SELECT 1', 'SHOW TABLES', "INSERT INTO t VALUES ('DROP')", 'CREATE TABLE t (a INT)', 'CREATE OR REPLACE TABLE t (a INT)', 'DROP TABLE t', 'TRUNCATE TABLE t', 'ALTER TABLE t DROP COLUMN a', 'INSERT OVERWRITE t SELECT 1', 'GRANT SELECT ON t TO ROLE r'].map((q) => R.classifySql(q).class),
+        ['read', 'read', 'change', 'change', 'destructive', 'destructive', 'destructive', 'destructive', 'destructive', 'change']);
+      assert.ok(R.classifySql('SELECT 1; DROP TABLE t').problem, 'one statement per step');
+      const policy = P.loadRunbookPolicy(ws);
+      const connections = [conn('snowflake:dev', 'snowflake'), conn('snowflake:env', 'snowflake', 'env'), conn('databricks:lake', 'databricks')];
+      const ok = R.checkRunbook(deployRunbook(), { workspaceRoot: ws, connections, policy });
+      assert.ok(ok.ok, ok.errors.join('\n'));
+      assert.deepStrictEqual(ok.steps.map((s) => [s.id, s.class]), [['check', 'read'], ['create', 'change'], ['copy', 'change']]);
+      assert.deepStrictEqual(ok.steps[2].run.argv.slice(-2), ['--connection', 'dev'], 'the runner adds the profile');
+      assert.ok(ok.steps[1].dryRun && !ok.steps[0].dryRun && ok.environment.name === 'dev');
+      const bad = R.checkRunbook(deployRunbook({ steps: [
+        { id: 'a', title: 'x', kind: 'cli', argv: ['snow', 'sql', '-q', 'drop database prod'], expect: 'x' },
+        { id: 'b', title: 'x', kind: 'cli', argv: ['snow', 'stage', 'copy', 'a.csv', '@s', '--connection', 'prod'], expect: 'x' },
+        { id: 'c', title: 'x', kind: 'cli', argv: ['snow', 'stage', 'copy', '../../etc/passwd', '@s'], expect: 'x' },
+        { id: 'd', title: 'x', kind: 'sql', sql: 'DROP TABLE mart.x', expect: 'x' },
+        { id: 'e', title: 'x', kind: 'shell', expect: 'x' },
+        { id: 'f', title: 'x', kind: 'cli', argv: ['databricks', 'fs', 'ls'], expect: 'x' }
+      ] }), { workspaceRoot: ws, connections, policy }).errors.join('\n');
+      for (const x of ['`snow sql -q` is not on the allowlist', '--connection is not allowed', '../../etc/passwd is outside the workspace', 'step d is destructive: give its rollback', 'kind is sql, cli or bundle', 'so the command starts with snow']) assert.ok(bad.includes(x), `${x}\n${bad}`);
+      assert.ok(R.checkRunbook(deployRunbook({ connectionId: 'snowflake:env' }), { workspaceRoot: ws, connections, policy }).errors.some((e) => /resolver cli/.test(e)));
+      const bundle = R.checkRunbook({ id: 'deploy-lake', title: 'Deploy', reason: 'r', connectionId: 'databricks:lake', steps: [{ id: 'b', title: 'Deploy the bundle', kind: 'bundle', folder: 'bundle', target: 'dev', expect: 'deployed' }] }, { workspaceRoot: ws, connections, policy });
+      assert.ok(bundle.errors.some((e) => /no databricks\.yml/.test(e)));
+      nodeFs.mkdirSync(nodePath.join(ws, 'bundle')); nodeFs.writeFileSync(nodePath.join(ws, 'bundle', 'databricks.yml'), 'bundle: { name: x }\n');
+      const b2 = R.checkRunbook({ id: 'deploy-lake', title: 'Deploy', reason: 'r', connectionId: 'databricks:lake', steps: [{ id: 'b', title: 'Deploy the bundle', kind: 'bundle', folder: 'bundle', target: 'dev', expect: 'deployed' }] }, { workspaceRoot: ws, connections, policy });
+      assert.ok(b2.ok, b2.errors.join());
+      assert.deepStrictEqual([b2.steps[0].run.argv.slice(0, 3), b2.steps[0].dryRun.argv.slice(0, 3), b2.steps[0].run.argv.slice(-2)], [['databricks', 'bundle', 'deploy'], ['databricks', 'bundle', 'validate'], ['--profile', 'lake']]);
+      // The team's own command.
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'approvals.yaml'), POLICY + '  allowCommands:\n    - { argv: [snow, git, fetch], class: read }\n');
+      assert.ok(R.checkRunbook(deployRunbook({ steps: [{ id: 'g', title: 'x', kind: 'cli', argv: ['snow', 'git', 'fetch', 'repo'], expect: 'x' }] }), { workspaceRoot: ws, connections, policy: P.loadRunbookPolicy(ws) }).ok);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.6: the policy — an unlisted connection is production; production needs a named approver, a second one where the team asks, and never runs unattended', () => {
+    const nodeFs = require('node:fs');
+    const P = fresh('../dist/engine/runner/policy.js');
+    const ws = runbookWs();
+    try {
+      let policy = P.loadRunbookPolicy(ws);
+      const prod = P.environmentOf(policy, 'snowflake:anything');
+      assert.strictEqual(prod.name, 'prod', 'no policy file: everything is production');
+      assert.ok(/Nobody may approve runbooks for prod yet/.test(P.approverProblem(prod, 'priya', [])));
+      nodeFs.writeFileSync(require('node:path').join(ws, '.autode', 'config', 'approvals.yaml'), POLICY);
+      policy = P.loadRunbookPolicy(ws);
+      const p = P.environmentOf(policy, 'snowflake:prod');
+      assert.deepStrictEqual([p.secondApprover, p.unattended, P.approvalsNeeded(p)], [true, false, 2], 'unattended: true is ignored for prod');
+      assert.strictEqual(P.approverProblem(p, 'Priya', []), undefined);
+      assert.ok(/not an approver for prod/.test(P.approverProblem(p, 'mallory', [])));
+      assert.ok(/must come from someone else/.test(P.approverProblem(p, 'priya', ['priya'])));
+      assert.strictEqual(P.environmentOf(policy, 'snowflake:dev').unattended, true);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.6: a runbook end to end — proposed (checked), approved by a person, run step by step in order through the host, dry runs, a failure stops it, rollback, a hash-chained log that shows tampering, an edit voids the approval, the stage is handed in', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = runbookWs(POLICY);
+    try {
+      const { id, prob, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      nodeFs.mkdirSync(nodePath.join(ws, 'seeds')); nodeFs.writeFileSync(nodePath.join(ws, 'seeds', 'orders.csv'), 'order_id\n1\n');
+      const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+      const Pr = fresh('../dist/engine/decisions/proposals.js');
+      const R = fresh('../dist/engine/runner/runbook.js');
+      const Run = fresh('../dist/engine/runner/run.js');
+      const L = fresh('../dist/engine/runner/runLog.js');
+      const P = fresh('../dist/engine/runner/policy.js');
+      const store = new DecisionStore(ws);
+      const ctx = { workspaceRoot: ws, problemRoot: prob, problemId: id };
+      const badProposal = Pr.validateProposal('runbook', deployRunbook({ steps: [{ id: 'x', title: 'x', kind: 'sql', sql: 'DROP TABLE t', expect: 'x' }] }), ctx);
+      assert.ok(!badProposal.ok && /destructive/.test(badProposal.errors.join()));
+      const d = Pr.propose(store, ctx, 'runbook', deployRunbook({ stage: 'model' }), { proposedBy: { host: 'mcp', client: 'Claude Code' } });
+      assert.deepStrictEqual([d.kind, d.stakes, d.status], ['runbook', 'high', 'pending']);
+      assert.strictEqual(R.readRunbook(prob, 'deploy-orders'), undefined, 'nothing runnable before approval');
+      store.resolve(d.id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      const applied = await Pr.applyDecision(store, d.id, ctx);
+      assert.ok(applied.applied && /approved by priya \(dev\)/.test(applied.message), applied.message);
+      const calls = [];
+      let failCopy = true;
+      const host = {
+        sql: async (c, sql, mode) => { calls.push(`${mode}:${sql}`); return mode === 'read' ? '1 row(s).' : 'done'; },
+        cli: async (argv) => { calls.push(`cli:${argv.join(' ')}`); return failCopy ? { code: 1, stdout: '', stderr: 'token=abc123secret refused' } : { code: 0, stdout: 'uploaded', stderr: '' }; }
+      };
+      const policy = P.loadRunbookPolicy(ws);
+      const connections = fresh('../dist/engine/platform/connectionsConfig.js').loadConnectionsConfig(ws).connections;
+      const base = { workspaceRoot: ws, problemRoot: prob, runbookId: 'deploy-orders', who: 'priya', channel: 'panel', host, connections, policy };
+      let r = await Run.runStep({ ...base, action: 'run', stepId: 'create' });
+      assert.ok(!r.ok && /next one is check/.test(r.message), 'in order');
+      r = await Run.runStep({ ...base, action: 'dry-run', stepId: 'create' });
+      assert.ok(r.ok && calls.includes('explain:CREATE TABLE mart.fct_orders (order_id INT)'));
+      r = await Run.runStep({ ...base, action: 'run' }); assert.ok(r.ok && r.step === 'check');
+      r = await Run.runStep({ ...base, action: 'run' }); assert.ok(r.ok && r.step === 'create' && calls.includes('write:CREATE TABLE mart.fct_orders (order_id INT)'));
+      r = await Run.runStep({ ...base, action: 'run' });
+      assert.ok(!r.ok && r.step === 'copy' && /nothing after it ran/.test(r.message));
+      assert.ok(!/abc123secret/.test(r.output) && /token=\[REDACTED\]/.test(r.output), 'output is redacted');
+      assert.ok(calls.some((c) => c.startsWith('cli:snow stage copy seeds/orders.csv @mart.seed --connection dev')));
+      assert.strictEqual(R.readRunbook(prob, 'deploy-orders').status, 'failed');
+      r = await Run.runStep({ ...base, action: 'rollback', stepId: 'create' });
+      assert.ok(r.ok && calls.includes('write:DROP TABLE mart.fct_orders'));
+      // The log: intact, then tampered.
+      const logFile = R.runLogFile(prob, 'deploy-orders');
+      assert.ok(L.verifyRunLog(logFile).ok && L.readRunLog(logFile).length >= 5);
+      const lines = nodeFs.readFileSync(logFile, 'utf8').split('\n'); lines[1] = lines[1].replace('"ok":true', '"ok":false');
+      nodeFs.writeFileSync(logFile, lines.join('\n'));
+      assert.ok(!L.verifyRunLog(logFile).ok);
+      // An edit voids the approval.
+      const file = R.runbookFile(prob, 'deploy-orders');
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('CREATE TABLE mart.fct_orders', 'CREATE TABLE mart.fct_all'));
+      r = await Run.runStep({ ...base, action: 'run' });
+      assert.ok(!r.ok && /edited after it was approved/.test(r.message));
+      // A clean run hands the stage in.
+      const d2 = Pr.propose(store, ctx, 'runbook', deployRunbook({ id: 'deploy-two', stage: 'model' }), { proposedBy: { host: 'mcp', client: 'Claude Code' } });
+      store.resolve(d2.id, { decision: 'approved', by: 'priya', channel: 'panel' });
+      await Pr.applyDecision(store, d2.id, ctx);
+      failCopy = false;
+      r = await Run.runRemaining({ ...base, runbookId: 'deploy-two' });
+      assert.ok(r.ok && r.finished && /Every step ran/.test(r.message), r.message);
+      const st = fresh('../dist/engine/workflows/instance.js').readWorkflow(prob).stages.find((s) => s.id === 'model');
+      assert.ok(['awaiting-approval', 'done'].includes(st.record.status) && st.record.outputs.some((o) => o.endsWith('runbooks/deploy-two.yaml')), JSON.stringify(st.record));
+      const vm = fresh('../dist/core/runbookViewModel.js').buildRunbookModel({ workspaceRoot: ws, problemRoot: prob, problemId: id, id: 'deploy-two', connections, policy });
+      assert.ok(vm.status === 'ran' && vm.steps.every((s) => s.state === 'done') && vm.logIntact && vm.steps[1].class === 'change');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.6: production — an agent proposes over MCP; the CLI shows the engine\'s classification; two different named approvers (decision, then autode runbook approve); a non-approver is refused; status over MCP', async () => {
+    const nodeFs = require('node:fs');
+    const ws = runbookWs(POLICY);
+    let client;
+    try {
+      const { W } = await tinyFlow(ws, cli);
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const bad = await call('autode_propose_runbook', { runbook: deployRunbook({ connectionId: 'snowflake:prod', steps: [{ id: 'x', title: 'x', kind: 'cli', argv: ['snow', 'sql', '-q', 'drop schema mart'], expect: 'x' }] }) });
+      assert.ok(bad.code === 'VALIDATION_FAILED' && /not on the allowlist/.test(JSON.stringify(bad)), JSON.stringify(bad));
+      const p = await call('autode_propose_runbook', { runbook: deployRunbook({ connectionId: 'snowflake:prod', steps: deployRunbook().steps.slice(0, 2) }) });
+      assert.ok(p.decision && p.decision.stakes === 'high', JSON.stringify(p));
+      assert.strictEqual((await call('autode_resolve_decision', { id: p.decision.id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED', 'an agent never approves');
+      const show = await cli(['runbook', 'show', 'deploy-orders', ...W]);
+      assert.ok(/create \[change\]/.test(show.out) && /Waits for approval/.test(show.out) && /\(prod\)/.test(show.out), show.out);
+      assert.strictEqual((await cli(['runbook', 'approve', 'deploy-orders', ...W, '--by', 'mallory'], { interactive: true, answers: ['approve'] })).code, 1, 'mallory is not a prod approver: the decision fails to apply');
+      const p2 = await call('autode_propose_runbook', { runbook: deployRunbook({ id: 'deploy-prod', connectionId: 'snowflake:prod', steps: deployRunbook().steps.slice(0, 2) }) });
+      assert.strictEqual((await cli(['runbook', 'approve', 'deploy-prod', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      let st = (await call('autode_runbook_status', { id: 'deploy-prod' })).runbooks[0];
+      assert.deepStrictEqual([st.status, st.runnable, /2 approval/.test(st.whyNot)], ['awaiting-second-approval', false, true], JSON.stringify(st));
+      assert.strictEqual((await cli(['runbook', 'approve', 'deploy-prod', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 4, 'the same person twice');
+      assert.strictEqual((await cli(['runbook', 'approve', 'deploy-prod', ...W, '--by', 'arun'], { interactive: true, answers: ['approve'] })).code, 0);
+      st = (await call('autode_runbook_status', { id: 'deploy-prod' })).runbooks[0];
+      assert.deepStrictEqual([st.status, st.runnable, st.approvals.map((a) => a.by)], ['approved', true, ['priya', 'arun']]);
+      assert.ok(/deploy-prod\s+prod\s+approved/.test((await cli(['runbook', 'list', ...W])).out));
+      void p2;
+      // The tab and its page.
+      const pkg = require('../package.json');
+      assert.ok(pkg.contributes.commands.some((c) => c.command === 'autoDataEngineeringHub.openRunbook'));
+      const page = nodeFs.readFileSync(require('node:path').join(__dirname, '..', 'media', 'runbook.html'), 'utf8');
+      assert.ok(/script-src 'nonce-\{\{nonce\}\}'/.test(page) && page.includes('not checked by AutoDE') && page.includes('Run step…'));
+      assert.ok(nodeFs.readFileSync(require('node:path').join(__dirname, '..', '.vscodeignore'), 'utf8').includes('!media/runbook.html'));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.6: install guidance for the platform CLIs is data — vendor page, options per OS probed on this machine, last-verified date; a team overrides it; the Oracle driver\'s range stays in code', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const Q = fresh('../dist/engine/platform/prerequisites.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pre-'));
+    try {
+      let { guides, errors } = Q.loadToolGuides(wfRes(), ws);
+      assert.deepStrictEqual(errors, []);
+      const sf = guides.find((g) => g.id === 'snowflake-cli');
+      const db = guides.find((g) => g.id === 'databricks-cli');
+      assert.ok(sf.verifiedAt && /snowflake\.com/.test(sf.docs) && db.minVersion === '0.205.0');
+      const has = new Set(['winget', 'uv']);
+      const run = (argv) => ({ status: has.has(argv[0]) ? 0 : null, error: has.has(argv[0]) ? undefined : new Error('ENOENT') });
+      const win = Q.probeOptions(sf, 'win32', run);
+      assert.deepStrictEqual(win.map((o) => [o.manager, o.available]), [['pipx', false], ['uv', true]], 'no Homebrew option on Windows; pipx missing here');
+      assert.deepStrictEqual(Q.probeOptions(db, 'win32', run).map((o) => [o.manager, o.available, o.commands[0].join(' ')]), [['WinGet', true, 'winget install Databricks.DatabricksCLI']]);
+      // A team points at its own software centre.
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'prerequisites.yaml'), 'tools:\n  databricks-cli:\n    platform: databricks\n    title: Databricks CLI\n    docs: https://intranet.example.com/databricks\n    options:\n      - manager: Company Portal\n        os: [win32]\n        probe: [winget, --version]\n        commands:\n          - [winget, install, --source, corp, Databricks.DatabricksCLI]\n');
+      ({ guides, errors } = Q.loadToolGuides(wfRes(), ws));
+      const team = guides.find((g) => g.id === 'databricks-cli');
+      assert.deepStrictEqual([team.docs, team.options[0].manager], ['https://intranet.example.com/databricks', 'Company Portal']);
+      const src = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'engine', 'platform', 'driverStore.ts'), 'utf8');
+      assert.ok(/range: '\^6\.0\.0'/.test(src), 'the driver range is a reviewed contract in code');
+      for (const f of ['prerequisites.yaml']) assert.ok(nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8').includes(`!${f}`) && require('../scripts/pack-cli.cjs').CONTENT.includes(f), f);
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

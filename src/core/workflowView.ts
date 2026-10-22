@@ -140,6 +140,7 @@ export class WorkflowPanel {
         case 'propose': await this.host.workflowAction('propose', undefined, m.template); break;
         case 'openDecision': if (scope && m.decisionId) await vscode.window.showTextDocument(vscode.Uri.file(path.join(layoutPath(scope.workspaceRoot, 'decisions'), `${m.decisionId}.yaml`))); return;
         case 'openFile': if (scope && m.file) await vscode.window.showTextDocument(vscode.Uri.file(path.resolve(scope.workspaceRoot, m.file))); return;
+        case 'openRunbook': if (m.file) await vscode.commands.executeCommand('autoDataEngineeringHub.openRunbook', m.file); return;
         case 'openHistory': if (scope) await vscode.window.showTextDocument(vscode.Uri.file(path.join(layoutPath(scope.workspaceRoot, 'problems', scope.problemId), 'workflow-events.jsonl'))); return;
       }
     } catch (err) {

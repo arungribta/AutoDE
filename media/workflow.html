@@ -106,6 +106,7 @@
         '<div class="kv"><div>Kind</div><div>' + esc(s.kind) + '</div><div>Inclusion</div><div>' + esc(s.inclusion) + (s.origin === 'added' ? ' (added by the plan)' : '') + '</div>' +
         '<div>Agent</div><div>' + esc(s.role || '—') + (s.tier ? ' · tier ' + esc(s.tier) : '') + ' (ceiling ' + esc(s.ceiling) + ')' + (s.runner ? '<br>runs here: ' + esc(s.runner) : '') + '</div>' +
         (s.document ? '<div>Document</div><div><a data-file="' + esc(s.document) + '">' + esc(s.document) + '</a></div>' : '') +
+        (s.runbooks && s.runbooks.length ? '<div>Runbooks</div><div>' + s.runbooks.map((r) => '<a data-runbook="' + esc(r.id) + '">' + esc(r.id) + '</a> (' + esc(r.status) + ')').join('<br>') + '</div>' : '') +
         '<div>After</div><div>' + (s.after.length ? s.after.map(esc).join(', ') : 'nothing') + '</div>' +
         (d ? '<div>Consumes</div><div>' + (d.consumes.map(esc).join(', ') || 'nothing') + '</div><div>Produces</div><div>' + d.produces.map(esc).join(', ') + '</div><div>Gates</div><div>' + d.gates.map(esc).join(', ') + '</div><div>Done when</div><div>' + esc(d.doneWhen) + '</div>' : '') +
         (s.approvedBy ? '<div>Approved</div><div>by ' + esc(s.approvedBy) + (s.approvedVia ? ' via ' + esc(s.approvedVia) : '') + (s.approvedAt ? ' on ' + esc(when(s.approvedAt)) : '') + '</div>' : '') +
@@ -128,6 +129,7 @@
     root.querySelectorAll('[data-open-decision]').forEach((b) => { b.onclick = () => send({ type: 'openDecision', decisionId: b.getAttribute('data-open-decision') }); });
     root.querySelectorAll('[data-file]').forEach((b) => { b.onclick = () => send({ type: 'openFile', file: b.getAttribute('data-file') }); });
     root.querySelectorAll('[data-history]').forEach((b) => { b.onclick = () => send({ type: 'openHistory' }); });
+    root.querySelectorAll('[data-runbook]').forEach((b) => { b.onclick = () => send({ type: 'openRunbook', file: b.getAttribute('data-runbook') }); });
     const p = root.querySelector('[data-propose]');
     if (p) p.onclick = () => { p.disabled = true; send({ type: 'propose', template: (document.getElementById('tpl') || {}).value }); };
   }

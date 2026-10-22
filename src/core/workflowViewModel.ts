@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import { stageRunner } from './agentExecutor';
 import { documentApprovalProblems, stageDocumentFile } from '../engine/workflows/documentApproval';
+import { Runbook, listRunbooks } from '../engine/runner/runbook';
 import { readProblemDocument, parseBusinessProblemSpec } from '../engine/documents/problemDocuments';
 import { DecisionStore } from '../engine/decisions/decisionStore';
 import { readWorkflow, WorkflowInstance } from '../engine/workflows/instance';
@@ -39,6 +40,8 @@ export interface StageModel extends StageView {
   blockers: string[];
   /** One line: what moves this stage forward. */
   guide: string;
+  /** Runbooks proposed or approved for this stage (v0.45.6). */
+  runbooks: Array<{ id: string; status: string }>;
 }
 
 export type StageAction = 'approve' | 'approve-document' | 'run' | 'produce' | 'open-document' | 'hand-in' | 'approve-again' | 'skip' | 'reopen';
@@ -103,6 +106,13 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
   if (p?.refinedBy) prov.push(`Refined by ${actorLabel(p.refinedBy)}`);
   if (p?.proposedBy) prov.push(`Proposed by ${actorLabel(p.proposedBy)}`);
   if (w.status === 'approved') prov.push(`Approved by ${w.approvedBy ?? 'unknown'}${w.approvedAt ? ` on ${w.approvedAt.slice(0, 16).replace('T', ' ')}` : ''}`);
+  const decisions = new DecisionStore(scope.workspaceRoot);
+  const stageRunbooks = new Map<string, Array<{ id: string; status: string }>>();
+  for (const r of listRunbooks(root)) if (r.runbook.stage) stageRunbooks.set(r.runbook.stage, [...(stageRunbooks.get(r.runbook.stage) ?? []), { id: r.runbook.id, status: r.status }]);
+  for (const d of decisions.list({ status: 'pending', kind: 'runbook' }).filter((x) => x.problemId === scope.problemId)) {
+    const rb = decisions.proposal<Runbook>(d.id);
+    if (rb.stage) stageRunbooks.set(rb.stage, [...(stageRunbooks.get(rb.stage) ?? []), { id: rb.id, status: 'waits for approval' }]);
+  }
   const stages: StageModel[] = status.stages.map((v) => {
     const s = w.stages.find((x) => x.id === v.id)!;
     const documentBacked = DOCUMENT_KINDS.includes(s.kind);
@@ -138,7 +148,9 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
     return {
       ...v, level: lv.get(v.id) ?? 0, after: s.after.map((a) => `${a.stage}${a.approved ? ' (approved)' : ''}`), role: s.agent?.role, tier: s.agent?.tier, ceiling: STAGE_KINDS[s.kind].ceiling,
       documentBacked, approvedBy: s.record.approvedBy, approvedAt: s.record.approvedAt, approvedVia: approvals.get(s.id)?.channel, actions, runner,
-      produceLabel: documentBacked ? PRODUCE_LABEL[s.kind] : undefined, document: hasDoc ? relTo(scope.workspaceRoot, docFile!) : undefined, blockers, guide
+      produceLabel: documentBacked ? PRODUCE_LABEL[s.kind] : undefined, document: hasDoc ? relTo(scope.workspaceRoot, docFile!) : undefined, blockers,
+      guide: stageRunbooks.get(s.id)?.some((r) => r.status !== 'ran') && v.status !== 'done' ? `Its runbook ${stageRunbooks.get(s.id)!.find((r) => r.status !== 'ran')!.id} is ${stageRunbooks.get(s.id)!.find((r) => r.status !== 'ran')!.status}: open it to approve and run it.` : guide,
+      runbooks: stageRunbooks.get(s.id) ?? []
     };
   });
   const included = w.stages.filter((s) => s.included && s.record.status !== 'skipped');
