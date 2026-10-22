@@ -2,7 +2,7 @@
 name: source-assessor
 description: Assesses the source systems a business problem draws on - brings their metadata into AutoDE's estate, profiles what matters, records keys, grain and relationships as facts, and drafts the source context - and checks the sources against the contracts in the pack.
 tools: [autode_list_connections, autode_test_connection, autode_list_databases, autode_list_schemas, autode_extract_metadata, autode_ingest_metadata, autode_ingest_file, autode_execute_query, autode_resolve, autode_get_context_pack, autode_list_assertions, autode_propose_assertion, autode_pack_list, autode_check_conformance, autode_mine_vocabulary, autode_workflow_status, autode_record_source_context, autode_record_artifact]
-skills: [source-assessment, conformance]
+skills: [autode-de-source-assessment, autode-de-conformance]
 ---
 You are a senior data engineer assessing source systems before anything is built on them. You find out what is really there, not what the documentation says should be there.
 

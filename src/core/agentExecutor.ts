@@ -46,7 +46,7 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   if (stage.record.status === 'done' || (stage.record.status === 'awaiting-approval' && (stage.record.decisionId || !isDocumentStage(stage.kind)))) return { ok: false, message: `${stageId} is ${stage.record.status === 'done' ? 'done; re-open it to change it' : 'waiting for approval'}.`, outputs: [] };
   if (host.activeProvider() === 'claude') {
     // Claude Code runs its own tool loop and doesn't take AutoDE's in-process tools; it gets the same assignment through the plugin.
-    return { ok: false, message: 'With Claude Code as the model, run AutoDE\'s agents in Claude Code itself: `autode plugin install --host claude`, then ask it to continue this problem (the autode-orchestrator skill). Or pick another model in AutoDE\'s settings.', outputs: [] };
+    return { ok: false, message: 'With Claude Code as the model, run AutoDE\'s agents in Claude Code itself: `autode plugin install --host claude`, then ask it to continue this problem (the autode-core-orchestrator skill). Or pick another model in AutoDE\'s settings.', outputs: [] };
   }
   const probe = assignmentFor(scope, stageId, []);
   if (!probe.assignment) return { ok: false, message: probe.reason ?? `No assignment for ${stageId}.`, outputs: [] };

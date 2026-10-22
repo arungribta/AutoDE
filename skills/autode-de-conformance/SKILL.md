@@ -1,7 +1,14 @@
 ---
-name: conformance
+name: autode-de-conformance
 description: Check an AutoDE business problem's sources against the data contracts in its pack (catalog, samples and read-only live probes) and report every failure with what it breaks. Use it for the conformance stage of an AutoDE workflow.
 allowed-tools: [Read, Grep, Glob, mcp__autode__autode_pack_list, mcp__autode__autode_check_conformance, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_execute_query, mcp__autode__autode_workflow_status, mcp__autode__autode_record_artifact]
+metadata:
+  scope: de
+  stageKinds: [conformance]
+  platforms: [any]
+  version: 1
+  owner: AutoDE
+  maturity: tested
 ---
 # Conformance
 

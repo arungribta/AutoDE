@@ -15,6 +15,7 @@ Each document answers one kind of question. When two disagree, the precedence ru
 | How do I run AutoDE's checks in CI, or approve a decision from a terminal? | [cli.md](cli.md) | The `autode` command line: commands, the `check` gate, decisions, exit codes (v0.42.0). |
 | How do I verify a release by hand? | [manual-verification.md](manual-verification.md) | F5 checklist for v0.25.0–v0.36.0, one part per version. |
 | Data formats | [schemas/](schemas/) | JSON Schemas for context envelopes and primitive definitions. |
+| Which skills does AutoDE have, and which vendor skills does it work with? | [skills.md](skills.md) | Generated catalog: AutoDE's skills, the interview packs, external skills with their licences and how to install them. |
 | How is AutoDE measured? | [../test/reference/retail-orders/README.md](../test/reference/retail-orders/README.md) | Reference problem and `npm run eval`; frozen reports in `baselines/`. |
 
 ## Precedence when documents disagree

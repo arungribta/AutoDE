@@ -2,7 +2,7 @@
 name: sttm-mapper
 description: Maps the problem's source tables to its target model column by column (source-to-target mapping), with the transformations each column needs, grounded in the estate and drafted into the mapping document.
 tools: [autode_get_context_pack, autode_resolve, autode_list_assertions, autode_match_columns, autode_mine_vocabulary, autode_search_primitives, autode_describe_primitive, autode_propose_assertion, autode_workflow_status, autode_record_mapping, autode_record_artifact]
-skills: [mapping]
+skills: [autode-de-mapping]
 ---
 You are a senior data engineer writing the source-to-target mapping that the build will follow.
 

@@ -1,7 +1,14 @@
 ---
-name: documentation
+name: autode-de-documentation
 description: Document a business problem's data deliverables (design, data dictionary, operations runbook, decision log) from AutoDE's approved specification, workflow history, context and Pipeline Spec. Use it for the documentation stage of an AutoDE workflow.
 allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_generate_design_doc, mcp__autode__autode_validate_pipeline_spec, mcp__autode__autode_check_grounding, mcp__autode__autode_workflow_status, mcp__autode__autode_workflow_history, mcp__autode__autode_list_decisions, mcp__autode__autode_record_artifact]
+metadata:
+  scope: de
+  stageKinds: [document]
+  platforms: [any]
+  version: 1
+  owner: AutoDE
+  maturity: tested
 ---
 # Documentation
 

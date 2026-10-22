@@ -1,3 +1,4 @@
+import { STAGE_KINDS } from '../workflows/stageKinds';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseYaml } from '../context/Yaml';
@@ -33,6 +34,48 @@ export interface PackSkill {
   dir: string;
   /** Other files in the skill's folder (resources, templates), relative to it. */
   resources: string[];
+  /** The registry fields from the skill's `metadata` (v0.45.5). */
+  meta: SkillMeta;
+}
+
+/** AutoDE's registry fields, in the Agent Skills `metadata` map so the files stay standard. */
+export interface SkillMeta {
+  scope: string;
+  /** The stage kinds the skill does (empty: AutoDE's own, e.g. the orchestrator). */
+  stageKinds: string[];
+  /** `any`, or the target platforms it is for. */
+  platforms: string[];
+  version: number;
+  owner: string;
+  /** `tested` skills have a fixture test in `npm test`; `preview` ones don't yet. */
+  maturity: 'tested' | 'preview';
+}
+
+/** The naming convention of AutoDE's own skills (owner, 2026-10-22): `autode-<scope>-<capability>`. */
+export const SKILL_SCOPES = ['core', 'de', 'snowflake', 'databricks', 'oracle', 'dbt'] as const;
+export const SKILL_PLATFORMS = ['any', 'snowflake', 'databricks', 'oracle'] as const;
+export const AUTODE_SKILL_NAME = new RegExp(`^autode-(${SKILL_SCOPES.join('|')})-[a-z0-9]+(-[a-z0-9]+)*$`);
+
+const listOf = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[,\s]+/) : []).map((x) => String(x).trim()).filter(Boolean);
+
+/** The registry fields of a bundled skill, and what is wrong with them. */
+export function skillMeta(name: string, metadata: Record<string, unknown> | undefined, stageKinds: readonly string[]): { meta: SkillMeta; errors: string[] } {
+  const errors: string[] = [];
+  const m = metadata ?? {};
+  if (!AUTODE_SKILL_NAME.test(name)) errors.push(`name must follow autode-<scope>-<capability>, scope one of ${SKILL_SCOPES.join(', ')}.`);
+  const scope = String(m.scope ?? name.split('-')[1] ?? '');
+  if (scope !== name.split('-')[1]) errors.push(`metadata.scope "${scope}" must be the scope in the name.`);
+  const kinds = listOf(m.stageKinds);
+  for (const k of kinds) if (!stageKinds.includes(k)) errors.push(`metadata.stageKinds: unknown stage kind "${k}".`);
+  const platforms = listOf(m.platforms);
+  if (!platforms.length) errors.push('metadata.platforms is required (any, or the platforms it is for).');
+  for (const p of platforms) if (!(SKILL_PLATFORMS as readonly string[]).includes(p)) errors.push(`metadata.platforms: unknown platform "${p}".`);
+  if ((scope === 'snowflake' || scope === 'databricks' || scope === 'oracle') && !(platforms.length === 1 && platforms[0] === scope)) errors.push(`a ${scope} skill has platforms: [${scope}].`);
+  const version = Number(m.version ?? 0);
+  if (!Number.isInteger(version) || version < 1) errors.push('metadata.version must be a whole number, 1 or more.');
+  const maturity = m.maturity === 'preview' ? 'preview' : m.maturity === 'tested' ? 'tested' : undefined;
+  if (!maturity) errors.push('metadata.maturity is tested or preview.');
+  return { meta: { scope, stageKinds: kinds, platforms, version, owner: String(m.owner ?? 'AutoDE'), maturity: maturity ?? 'preview' }, errors };
 }
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -108,7 +151,9 @@ export function loadSkillPack(resourcesRoot: string): { skills: PackSkill[]; err
     const p = parseSkillMarkdown(text);
     const problems = checkSkillFormat(e.name, p.name, p.description, p.body);
     if (problems.length) { errors.push(...problems.map((x) => `skills/${e.name}: ${x}`)); continue; }
-    skills.push({ id: e.name, name: p.name!, description: p.description!, allowedTools: p.allowedTools ?? [], instructions: p.body, dir: path.join(dir, e.name), resources: filesUnder(path.join(dir, e.name)).filter((f) => f !== 'SKILL.md') });
+    const sm = skillMeta(e.name, p.metadata, Object.keys(STAGE_KINDS));
+    if (sm.errors.length) { errors.push(...sm.errors.map((x) => `skills/${e.name}: ${x}`)); continue; }
+    skills.push({ id: e.name, name: p.name!, description: p.description!, allowedTools: p.allowedTools ?? [], instructions: p.body, dir: path.join(dir, e.name), resources: filesUnder(path.join(dir, e.name)).filter((f) => f !== 'SKILL.md'), meta: sm.meta });
   }
   return { skills, errors };
 }

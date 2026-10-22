@@ -1,7 +1,14 @@
 ---
-name: modelling
+name: autode-de-modelling
 description: Design the target data model of an AutoDE business problem - entities, grain, keys, foreign keys and history - from AutoDE's deterministic draft, check it, and record the model, its DDL (rendered by AutoDE) and its rationale. Use it for the modelling stage of an AutoDE workflow.
 allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_draft_model, mcp__autode__autode_check_model, mcp__autode__autode_propose_assertion, mcp__autode__autode_check_grounding, mcp__autode__autode_workflow_status, mcp__autode__autode_record_artifact]
+metadata:
+  scope: de
+  stageKinds: [modelling]
+  platforms: [any]
+  version: 1
+  owner: AutoDE
+  maturity: tested
 ---
 # Data modelling
 

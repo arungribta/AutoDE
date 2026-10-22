@@ -28,4 +28,5 @@
 !workflows/*.yaml
 !agents/*.md
 !skills/*/**
+!skills/external.yaml
 !docs/schemas/*.json

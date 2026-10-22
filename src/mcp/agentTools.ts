@@ -16,6 +16,8 @@ import { EntityMapping, SourceContextEntry } from '../engine/types';
 import { StageKind } from '../engine/workflows/stageKinds';
 import { DataModel, checkModel, draftModel, problemMappings, renderModelDdl, targetSettings } from '../engine/agents/modelDraft';
 import { primitiveCandidates, CandidateColumn } from '../engine/agents/primitiveCandidates';
+import { skillCatalog } from '../engine/agents/skillCatalog';
+import * as os from 'node:os';
 import { PipelineEntity, PipelineSpec, CURRENT_PIPELINE_SPEC_VERSION } from '../engine/pipelineSpec/types';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { validateTransformSpec } from '../engine/transforms/registry';
@@ -76,6 +78,16 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
     } } }
   } };
   return [
+    {
+      name: 'autode_skills_list',
+      description: "AutoDE's skill catalog: its own skills (autode-<scope>-<capability>, with the stage kinds and platforms each serves and the roles that use it), this workspace's imported skills with their review state, the interview packs, and the vendor and community skills AutoDE works with (references only: licence, source, availability, and whether each is installed in this machine's host skills folders). Installing an external skill is a person's act (`autode skills install` in a terminal, or the AutoDE Skills view).",
+      inputSchema: { type: 'object', additionalProperties: false, properties: { group: { type: 'string', enum: ['autode', 'workspace', 'interview', 'external'] } } },
+      annotations: read('Skill catalog'),
+      handler: async (args, ws) => {
+        const r = skillCatalog({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot, home: process.env.AUTODE_HOME ?? os.homedir() });
+        return { skills: r.entries.filter((e) => !args.group || e.group === args.group), errors: r.errors } as unknown as Record<string, unknown>;
+      }
+    },
     {
       name: 'autode_primitive_candidates',
       description: "The transform steps a source table needs on its way to a target, as AutoDE primitives with their parameters filled in from what AutoDE knows: a staging projection that renames and casts the mapped columns (rename_cast), deduplication on the key fact keeping the latest row by the change column (dedup), and an incremental MERGE on the key (incremental_load). Each step has its reasons and is validated against the primitive's schema; what no primitive covers (column expressions, a missing key or change column) comes back as notes. Columns default to the problem's mapping for that source, else every source column as is.",

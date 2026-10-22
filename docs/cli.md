@@ -163,6 +163,17 @@ Secrets never go in these files. A field such as `password` or `token` is refuse
 
 `approve` and `reject` work only in an interactive terminal (stdin and stdout), and they refuse whenever `CI` is set (to anything other than empty, `0` or `false`). They show the decision and ask you to type `approve` or `reject` to confirm. `--by` defaults to your OS user name. This is the *CLI* channel of a decision: it may resolve high-stakes decisions, because it needs a person at the keyboard. A non-interactive run never resolves a decision (requirements P9).
 
+## Skills
+
+| Command | What it does |
+|---|---|
+| `autode skills list [--group autode\|workspace\|interview\|external]` | Every skill AutoDE has or works with: its own (`autode-<scope>-<capability>`, with stage kinds, platforms and maturity), this workspace's imported ones with their review state, the interview packs, and external vendor and community skills, with whether each is installed on this machine. |
+| `autode skills show <name>` | One skill: what it does, stage kinds and platforms, the roles that use it, licence, source, and how to install it. |
+| `autode skills check <name>` | Probes an external skill's install command (the CLI's version, then a harmless `--help`) without installing anything. If the vendor changed the command, it says so and gives the docs link. |
+| `autode skills install <name>` | (terminal) Runs the vendor's own install command after you type `install`, then checks that the skill was found in a host's skills folder. |
+
+External skills are references, never shipped with AutoDE: see [skills.md](skills.md) for their licences. Correct or add entries in `.autode/config/external-skills.yaml`.
+
 ## Agent hosts
 
 AutoDE's agents (role templates) and skills, for Claude Code, Cortex Code and the GitHub Copilot CLI. Your host supplies the model; the AutoDE MCP server supplies the engine, the workflow and the approvals.
@@ -172,7 +183,7 @@ AutoDE's agents (role templates) and skills, for Claude Code, Cortex Code and th
 | `autode plugin path [--out <folder>]` | Builds the plugin folder (agents, skills, `/autode-status`, `/autode-next`, `/autode-approve`, `.mcp.json`) and prints its path. Load it with `claude --plugin-dir <path>`; Cortex Code reads the same layout. |
 | `autode plugin install --host claude\|cortex\|copilot [--scope project\|user]` | Copies the agents and skills into the host's folders: `.claude/` (and the project's `.mcp.json`, other servers kept), `.cortex/skills` or `~/.snowflake/cortex/skills`, `.github/agents` and `.github/skills` or `~/.copilot/…`. Where the host has no file for MCP servers, it prints the step to add `autode`. |
 
-Then ask the agent to continue your AutoDE problem: the `autode-orchestrator` skill takes each assignment from the workflow, has the named agent do it, hands the stage in, and stops at every approval.
+Then ask the agent to continue your AutoDE problem: the `autode-core-orchestrator` skill takes each assignment from the workflow, has the named agent do it, hands the stage in, and stops at every approval.
 
 ## The MCP server
 

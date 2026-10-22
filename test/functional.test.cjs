@@ -6585,7 +6585,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -6647,6 +6647,7 @@ async function main() {
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
       autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
       autode_draft_model: [{}, { x: 1 }],
+      autode_skills_list: [{ group: 'external' }, { group: 'vendor' }],
       autode_primitive_candidates: [{ source: 'shop.orders' }, { source: 'shop.orders', columns: [{ source: 'a' }] }],
       autode_record_pipeline_spec: [{ entities: [{ name: 'e', source: { object: 'a', type: 'table' }, transforms: [], target: { object: 'b', materialization: 'table' } }] }, { entities: [] }],
       autode_check_model: [{ model: { entities: [{ name: 'fct_orders', kind: 'fact', columns: [{ name: 'order_id' }] }] } }, { model: { entities: [{ name: 'fct_orders', kind: 'fact' }] } }],
@@ -8100,10 +8101,10 @@ async function main() {
   // ── v0.42.0: PA2 — the autode package and CLI ──
 
   // The CLI in-process, with a scripted terminal.
-  const cli = async (argv, { interactive = false, env = {}, answers = [], platform } = {}) => {
+  const cli = async (argv, { interactive = false, env = {}, answers = [], platform, runner } = {}) => {
     const { run } = fresh('../dist/cli/main.js');
     const out = []; const err = []; const asked = [];
-    const io = { out: (t) => out.push(t), err: (t) => err.push(t), env, cwd: process.cwd(), interactive, prompt: async (q) => { asked.push(q); return answers.shift() ?? ''; }, platform };
+    const io = { out: (t) => out.push(t), err: (t) => err.push(t), env, cwd: process.cwd(), interactive, prompt: async (q) => { asked.push(q); return answers.shift() ?? ''; }, platform, run: runner };
     const code = await run(argv, io);
     return { code, out: out.join('\n'), err: err.join('\n'), asked, json: () => JSON.parse(out.join('\n')) };
   };
@@ -9200,14 +9201,14 @@ async function main() {
     const roles = D.loadRoles(wfRes());
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
-    assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'conformance', 'documentation', 'mapping', 'modelling', 'pipeline-build', 'quality-rules', 'source-assessment']);
+    assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-orchestrator', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-source-assessment']);
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
       const dir = nodePath.join(ws, '.autode', 'config', 'agents');
       nodeFs.mkdirSync(dir, { recursive: true });
-      nodeFs.writeFileSync(nodePath.join(dir, 'documenter.md'), '---\nname: documenter\ndescription: House-style documenter\ntools: [autode_resolve, autode_record_artifact]\nskills: [documentation]\n---\nWrite in our house style.\n');
+      nodeFs.writeFileSync(nodePath.join(dir, 'documenter.md'), '---\nname: documenter\ndescription: House-style documenter\ntools: [autode_resolve, autode_record_artifact]\nskills: [autode-de-documentation]\n---\nWrite in our house style.\n');
       nodeFs.writeFileSync(nodePath.join(dir, 'wrong.md'), '---\nname: not-the-file-name\ndescription: x\n---\nbody\n');
       const r = D.loadRoles(wfRes(), ws);
       const doc = r.roles.find((x) => x.name === 'documenter');
@@ -9259,10 +9260,10 @@ async function main() {
       const n = await call('autode_workflow_next', {});
       assert.strictEqual(n.next.stage.id, 'document');
       const a = n.assignment;
-      assert.deepStrictEqual([a.role, a.tier, a.skills.map((k) => k.id)], ['documenter', 'workspace-write', ['documentation']]);
+      assert.deepStrictEqual([a.role, a.tier, a.skills.map((k) => k.id)], ['documenter', 'workspace-write', ['autode-de-documentation']]);
       assert.ok(a.engineTools.includes('autode_record_artifact') && a.engineTools.includes('autode_resolve'));
       assert.ok(!a.engineTools.some((x) => /resolve_decision|apply_decision|workflow_complete_stage|propose_workflow/.test(x)), a.engineTools.join());
-      assert.ok(/never call another agent/i.test(a.text) && a.text.includes('## Skill: documentation'));
+      assert.ok(/never call another agent/i.test(a.text) && a.text.includes('## Skill: autode-de-documentation'));
       const r = await call('autode_record_artifact', { stage: 'document', path: 'design.md', content: '# Design\n\nOrders come from shop.orders.\n' });
       assert.ok(/03-build|04-validate/.test(r.path) && r.path.endsWith('document/design.md') && r.manifestPath.endsWith('.grounding.json'), JSON.stringify(r));
       assert.ok(nodeFs.existsSync(nodePath.join(ws, r.path)) && nodeFs.existsSync(nodePath.join(ws, r.manifestPath)));
@@ -9332,7 +9333,7 @@ async function main() {
       const p = await cli(['plugin', 'path', '--out', out, '--json']);
       assert.strictEqual(p.code, 0, p.out + p.err);
       const files = p.json().files.sort();
-      for (const f of ['.claude-plugin/plugin.json', '.mcp.json', 'agents/documenter.md', 'skills/documentation/SKILL.md', 'skills/autode-orchestrator/SKILL.md', 'commands/autode-next.md']) assert.ok(files.includes(f), f);
+      for (const f of ['.claude-plugin/plugin.json', '.mcp.json', 'agents/documenter.md', 'skills/autode-de-documentation/SKILL.md', 'skills/autode-core-orchestrator/SKILL.md', 'commands/autode-next.md']) assert.ok(files.includes(f), f);
       const manifest = JSON.parse(nodeFs.readFileSync(nodePath.join(out, '.claude-plugin', 'plugin.json'), 'utf8'));
       assert.deepStrictEqual([manifest.name, manifest.version], ['autode', require('../package.json').version]);
       assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(out, '.mcp.json'), 'utf8')).mcpServers.autode.args.slice(-3), ['mcp', '--workspace', '.']);
@@ -9345,12 +9346,12 @@ async function main() {
       assert.strictEqual(c.code, 0, c.out + c.err);
       const mcp = JSON.parse(nodeFs.readFileSync(nodePath.join(ws, '.mcp.json'), 'utf8'));
       assert.deepStrictEqual(Object.keys(mcp.mcpServers).sort(), ['autode', 'other']);
-      assert.ok(nodeFs.existsSync(nodePath.join(ws, '.claude', 'agents', 'documenter.md')) && nodeFs.existsSync(nodePath.join(ws, '.claude', 'skills', 'documentation', 'SKILL.md')));
+      assert.ok(nodeFs.existsSync(nodePath.join(ws, '.claude', 'agents', 'documenter.md')) && nodeFs.existsSync(nodePath.join(ws, '.claude', 'skills', 'autode-de-documentation', 'SKILL.md')));
       const g = await cli(['plugin', 'install', '--host', 'copilot', '--workspace', ws, '--json'], { env });
       assert.ok(nodeFs.existsSync(nodePath.join(ws, '.github', 'agents', 'documenter.agent.md')) && /\/mcp add/.test(g.json().mcp.instruction));
       assert.ok(/tools: \["read", "search", "autode\//.test(nodeFs.readFileSync(nodePath.join(ws, '.github', 'agents', 'documenter.agent.md'), 'utf8')));
       const k = await cli(['plugin', 'install', '--host', 'cortex', '--scope', 'user', '--workspace', ws, '--json'], { env });
-      assert.ok(nodeFs.existsSync(nodePath.join(tmp, 'home', '.snowflake', 'cortex', 'skills', 'autode-orchestrator', 'SKILL.md')) && /mcp\.json/.test(k.json().mcp.instruction));
+      assert.ok(nodeFs.existsSync(nodePath.join(tmp, 'home', '.snowflake', 'cortex', 'skills', 'autode-core-orchestrator', 'SKILL.md')) && /mcp\.json/.test(k.json().mcp.instruction));
       const u = await cli(['plugin', 'install', '--host', 'claude', '--scope', 'user', '--workspace', ws, '--json'], { env });
       assert.ok(/claude mcp add --scope user autode/.test(u.json().mcp.instruction));
       assert.strictEqual((await cli(['plugin', 'install', '--host', 'emacs', '--workspace', ws])).code, 2);
@@ -9453,7 +9454,7 @@ async function main() {
       wf.stages.find((s) => s.id === 'quality').agent.role = 'source-assessor';
       fresh('../dist/engine/workflows/instance.js').writeWorkflow(prob, wf);
       const a = fresh('../dist/engine/agents/assignment.js').assignmentFor(scope, 'quality', []).assignment;
-      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id)], ['quality-engineer', ['quality-rules']]);
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id)], ['quality-engineer', ['autode-de-quality-rules']]);
       const m = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope);
       const st = (x) => m.stages.find((s) => s.id === x);
       assert.deepStrictEqual([st('quality').runner, st('quality').actions.includes('run')], ['quality-engineer', true]);
@@ -9523,10 +9524,10 @@ async function main() {
       client = await mcpSession(ws);
       const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
       let n = await call('autode_workflow_next', {});
-      assert.deepStrictEqual([n.next.stage.id, n.assignment.role, n.assignment.skills.map((k) => k.id), n.assignment.tier], ['sources', 'source-assessor', ['source-assessment'], 'platform-read']);
+      assert.deepStrictEqual([n.next.stage.id, n.assignment.role, n.assignment.skills.map((k) => k.id), n.assignment.tier], ['sources', 'source-assessor', ['autode-de-source-assessment'], 'platform-read']);
       for (const t of ['autode_ingest_file', 'autode_ingest_metadata', 'autode_record_source_context', 'autode_execute_query']) assert.ok(n.assignment.engineTools.includes(t), t);
       const A = fresh('../dist/engine/agents/assignment.js');
-      assert.deepStrictEqual(A.assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'conformance', []).assignment.skills.map((k) => k.id), ['conformance'], 'the same role, the skill of its stage');
+      assert.deepStrictEqual(A.assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'conformance', []).assignment.skills.map((k) => k.id), ['autode-de-conformance'], 'the same role, the skill of its stage');
       assert.strictEqual((await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' })).code, undefined);
       assert.strictEqual((await call('autode_record_source_context', { sources: [{ connectionId: 'shop', method: 'guessed' }] })).code, 'VALIDATION_FAILED');
       const sc = await call('autode_record_source_context', { sources: [{ connectionId: 'shop', method: 'file', sourceType: 'database', description: 'The web shop' }] });
@@ -9538,7 +9539,7 @@ async function main() {
       n = await call('autode_workflow_next', {});
       const next = n.next.stage.id === 'mapping' ? n : null;
       const mapAsg = A.assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'mapping', (await client.listTools()).tools).assignment;
-      assert.deepStrictEqual([mapAsg.role, mapAsg.skills.map((k) => k.id)], ['sttm-mapper', ['mapping']]);
+      assert.deepStrictEqual([mapAsg.role, mapAsg.skills.map((k) => k.id)], ['sttm-mapper', ['autode-de-mapping']]);
       assert.ok(mapAsg.engineTools.includes('autode_match_columns') && mapAsg.engineTools.includes('autode_record_mapping') && !mapAsg.engineTools.includes('autode_execute_query'), 'propose tier: no platform reads');
       void next;
       const m = await call('autode_match_columns', { source: 'shop.orders', targetColumns: [{ name: 'order_id', type: 'INTEGER' }, { name: 'customer_number', type: 'STRING' }, { name: 'status', type: 'STRING' }] });
@@ -9671,7 +9672,7 @@ async function main() {
       await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
       fresh('../dist/engine/documents/problemDocuments.js').writeMappingUpsert(prob, { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: [{ sourceColumn: 'order_id', targetColumn: 'order_id' }, { sourceColumn: 'amount', targetColumn: 'net_amount' }] });
       const a = fresh('../dist/engine/agents/assignment.js').assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'model', (await client.listTools()).tools).assignment;
-      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id), a.tier], ['data-modeler', ['modelling'], 'propose']);
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id), a.tier], ['data-modeler', ['autode-de-modelling'], 'propose']);
       assert.ok(a.engineTools.includes('autode_draft_model') && a.engineTools.includes('autode_check_model') && a.engineTools.includes('autode_record_artifact'));
       const d = await call('autode_draft_model', {});
       const fct = d.model.entities.find((x) => x.name === 'fct_orders');
@@ -9726,7 +9727,7 @@ async function main() {
       assert.strictEqual((await cli(['facts', 'confirm', keyId, ...W, '--by', 'priya'], { interactive: true, answers: ['confirm'] })).code, 0);
       fresh('../dist/engine/documents/problemDocuments.js').writeMappingUpsert(prob, { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: [{ sourceColumn: 'order_id', targetColumn: 'order_id' }, { sourceColumn: 'amount', targetColumn: 'net_amount' }, { sourceColumn: 'updated_at', targetColumn: 'updated_at' }] });
       const a = fresh('../dist/engine/agents/assignment.js').assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'build', (await client.listTools()).tools).assignment;
-      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id), a.tier], ['pipeline-engineer', ['pipeline-build'], 'workspace-write']);
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id), a.tier], ['pipeline-engineer', ['autode-de-pipeline-build'], 'workspace-write']);
       for (const t of ['autode_primitive_candidates', 'autode_record_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_explain_sql']) assert.ok(a.engineTools.includes(t), t);
       const c = await call('autode_primitive_candidates', { source: 'shop.orders' });
       assert.deepStrictEqual([c.entity.name, c.entity.transforms.map((t) => t.kind)], ['fct_orders', ['rename_cast', 'dedup', 'incremental_load']], JSON.stringify(c));
@@ -9753,6 +9754,172 @@ async function main() {
       const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
       assert.ok(/ingestionAgent: 'The build'/.test(hub) && /VALID_AGENT_TYPES: AgentType\[\] = \['snowflakeExecutor'\]/.test(hub) && !/runStageSteps/.test(hub));
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ---------- v0.45.5: the skill catalog and the naming convention ----------
+
+  // A copy of AutoDE's resources (agents, skills, workflows) that a test can add skills to.
+  const resourcesCopy = (extraSkills = {}) => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const res = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-res-'));
+    for (const d of ['agents', 'skills', 'workflows']) nodeFs.cpSync(nodePath.join(wfRes(), d), nodePath.join(res, d), { recursive: true });
+    for (const [name, text] of Object.entries(extraSkills)) { nodeFs.mkdirSync(nodePath.join(res, 'skills', name), { recursive: true }); nodeFs.writeFileSync(nodePath.join(res, 'skills', name, 'SKILL.md'), text); }
+    return res;
+  };
+  const skillMd = (name, meta, body = 'Do it.') => `---\nname: ${name}\ndescription: A test skill.\nmetadata:\n${Object.entries(meta).map(([k, v]) => `  ${k}: ${Array.isArray(v) ? `[${v.join(', ')}]` : v}`).join('\n')}\n---\n${body}\n`;
+
+  await test('v0.45.5: AutoDE\'s skills follow autode-<scope>-<capability> and declare their stage kinds, platforms, version and maturity; a skill that doesn\'t is refused item by item (an underscore name too: hosts reject it)', () => {
+    const nodeFs = require('node:fs');
+    const D = fresh('../dist/engine/agents/definitions.js');
+    const pack = D.loadSkillPack(wfRes());
+    assert.deepStrictEqual(pack.errors, []);
+    assert.ok(pack.skills.length >= 8 && pack.skills.every((k) => D.AUTODE_SKILL_NAME.test(k.id) && k.meta.version >= 1 && ['tested', 'preview'].includes(k.meta.maturity)));
+    assert.deepStrictEqual(pack.skills.find((k) => k.id === 'autode-de-mapping').meta, { scope: 'de', stageKinds: ['mapping'], platforms: ['any'], version: 1, owner: 'AutoDE', maturity: 'tested' });
+    const res = resourcesCopy({
+      'autode_de_bad': skillMd('autode_de_bad', { scope: 'de', stageKinds: ['build'], platforms: ['any'], version: 1, maturity: 'tested' }),
+      'autode-snowflake-wide': skillMd('autode-snowflake-wide', { scope: 'snowflake', stageKinds: ['build'], platforms: ['any'], version: 1, maturity: 'preview' }),
+      'autode-de-odd': skillMd('autode-de-odd', { scope: 'de', stageKinds: ['brewing'], platforms: ['mainframe'], version: 0, maturity: 'beta' })
+    });
+    try {
+      const errors = D.loadSkillPack(res).errors.join('\n');
+      assert.ok(/autode_de_bad: name must be lowercase words joined by dashes/.test(errors), errors);
+      assert.ok(/autode-snowflake-wide: a snowflake skill has platforms: \[snowflake\]/.test(errors), errors);
+      for (const x of ['unknown stage kind "brewing"', 'unknown platform "mainframe"', 'version must be a whole number', 'maturity is tested or preview']) assert.ok(errors.includes(x), x);
+    } finally { nodeFs.rmSync(res, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.5: a stage gets the skills for its kind and the problem\'s target platform — a Snowflake skill joins the build on Snowflake, not on Databricks — and installed vendor skills are named in its assignment', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-plat-'));
+    const home = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-home-'));
+    const res = resourcesCopy({ 'autode-snowflake-loading': skillMd('autode-snowflake-loading', { scope: 'snowflake', stageKinds: ['build'], platforms: ['snowflake'], version: 1, maturity: 'preview' }, 'Load with COPY INTO.') });
+    try {
+      const { id, prob, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      const A = fresh('../dist/engine/agents/assignment.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: res, problemId: id, home };
+      const ctxFile = nodePath.join(prob, 'context', 'target-context.yaml');
+      nodeFs.mkdirSync(nodePath.dirname(ctxFile), { recursive: true });
+      nodeFs.writeFileSync(ctxFile, 'specId: x\nspecVersion: 1\nstatus: built\nplatform: snowflake\n');
+      let a = A.assignmentFor(scope, 'build', []).assignment;
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id).sort()], ['pipeline-engineer', ['autode-de-pipeline-build', 'autode-snowflake-loading']]);
+      assert.ok(a.text.includes('Load with COPY INTO.'));
+      nodeFs.writeFileSync(ctxFile, 'specId: x\nspecVersion: 1\nstatus: built\nplatform: databricks\n');
+      a = A.assignmentFor(scope, 'build', []).assignment;
+      assert.deepStrictEqual(a.skills.map((k) => k.id), ['autode-de-pipeline-build']);
+      assert.ok(a.externalSkills.some((e) => e.name === 'databricks-pipelines' && !e.installed) && !/Vendor skills installed/.test(a.text), 'relevant, not installed: in the data, not the text');
+      nodeFs.mkdirSync(nodePath.join(home, '.claude', 'skills', 'databricks-pipelines'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(home, '.claude', 'skills', 'databricks-pipelines', 'SKILL.md'), '---\nname: databricks-pipelines\n---\n');
+      a = A.assignmentFor(scope, 'build', []).assignment;
+      assert.ok(/## Vendor skills installed in this host[\s\S]*- databricks-pipelines \(Databricks\)/.test(a.text) && /AutoDE's rules still apply/.test(a.text), a.text.slice(-400));
+      assert.ok(!a.externalSkills.some((e) => /^cortex|^coco/.test(e.name)), 'Snowflake references stay out of a Databricks problem');
+    } finally { for (const d of [ws, home, res]) nodeFs.rmSync(d, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.5: the catalog — AutoDE, workspace, interview and external groups; external entries are references with a licence, a source and an own-words summary; a team corrects one without a release; install commands are probed, never trusted', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const C = fresh('../dist/engine/agents/skillCatalog.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cat-'));
+    try {
+      let r = C.skillCatalog({ resourcesRoot: wfRes(), workspaceRoot: ws, home: ws, env: { PATH: '' } });
+      assert.deepStrictEqual(r.errors, []);
+      const groups = new Set(r.entries.map((e) => e.group));
+      assert.ok(groups.has('autode') && groups.has('interview') && groups.has('external'));
+      const dabs = r.entries.find((e) => e.name === 'databricks-dabs');
+      assert.deepStrictEqual([dabs.availability, dabs.licence.redistribution, dabs.installer.command, dabs.installed], ['installable', false, ['databricks', 'aitools', 'install'], []]);
+      assert.ok(r.entries.find((e) => e.name === 'autode-de-mapping').roles.includes('sttm-mapper'));
+      // No vendor text: the reference list holds no SKILL.md content, only metadata.
+      const ext = nodeFs.readFileSync(nodePath.join(wfRes(), 'skills', 'external.yaml'), 'utf8');
+      assert.ok(!/^---\nname:/m.test(ext) && !/allowed-tools/.test(ext));
+      // A team corrects the command and adds a skill of its own.
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'external-skills.yaml'), 'installers:\n  databricks-agent-skills:\n    command: [databricks, aitools, skills, install]\n    docs: https://example.com\nentries:\n  - id: house-loader\n    vendor: Our team\n    source: https://git.example.com/house-loader\n    licence: nowhere\n    availability: importable\n');
+      r = C.skillCatalog({ resourcesRoot: wfRes(), workspaceRoot: ws, home: ws, env: { PATH: '' } });
+      assert.deepStrictEqual(r.entries.find((e) => e.name === 'databricks-dabs').installer.command, ['databricks', 'aitools', 'skills', 'install']);
+      assert.ok(r.errors.some((e) => /house-loader: licence "nowhere"/.test(e)) && r.errors.some((e) => /house-loader: a summary/.test(e)), r.errors.join('\n'));
+      // Probes: an old CLI, a vanished subcommand, a good one.
+      const inst = { id: 'x', command: ['databricks', 'aitools', 'install'], probe: ['databricks', 'aitools', '--help'], minCliVersion: '1.0.0', versionCommand: ['databricks', '--version'], docs: 'https://docs', verifiedAt: '2026-10-22' };
+      const fake = (version, probeCode) => (argv) => argv.includes('--version') ? { code: 0, stdout: `Databricks CLI v${version}`, stderr: '' } : { code: probeCode, stdout: '', stderr: 'unknown command "aitools"' };
+      assert.ok(/older than 1\.0\.0/.test(C.probeInstaller(inst, fake('0.240.0', 0)).reason));
+      const gone = C.probeInstaller(inst, fake('1.20.0', 1));
+      assert.ok(!gone.ok && /may have changed how these skills are installed/.test(gone.reason) && /2026-10-22/.test(gone.reason) && /https:\/\/docs/.test(gone.reason), gone.reason);
+      assert.ok(C.probeInstaller(inst, fake('1.20.0', 0)).ok);
+      assert.ok(/not installed|isn't installed/.test(C.probeInstaller(inst, () => ({ code: null, stdout: '', stderr: '', error: 'spawn databricks ENOENT' })).reason));
+      // The generated page lists the references with their licences.
+      const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'docs', 'skills.md'), 'utf8');
+      assert.ok(page.includes('`autode-de-mapping`') && page.includes('[`databricks-dabs`]') && page.includes('Databricks License') && /Redistributable/.test(page));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.5: autode skills list / show / check / install and autode_skills_list — installing is a person\'s act in a terminal, and "installed" means found in a host\'s skills folder', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-sk-'));
+    const home = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-skh-'));
+    let client;
+    try {
+      const env = { AUTODE_HOME: home, PATH: '' };
+      const W = ['--workspace', ws];
+      const l = await cli(['skills', 'list', ...W, '--json'], { env });
+      assert.strictEqual(l.code, 0, l.out + l.err);
+      assert.ok(l.json().skills.some((e) => e.name === 'autode-core-orchestrator') && l.json().skills.some((e) => e.group === 'external'));
+      assert.ok(/External skills \(references; not shipped with AutoDE\)/.test((await cli(['skills', 'list', ...W], { env })).out));
+      assert.strictEqual((await cli(['skills', 'list', '--group', 'vendors', ...W], { env })).code, 2);
+      assert.ok(/Licence: Databricks License/.test((await cli(['skills', 'show', 'databricks-dabs', ...W], { env })).out));
+      assert.strictEqual((await cli(['skills', 'show', 'nope', ...W], { env })).code, 5);
+      assert.strictEqual((await cli(['skills', 'install', 'cortex-code-built-in', ...W], { env })).code, 1, 'host-only: nothing to install');
+      const runs = [];
+      const runner = (argv) => {
+        runs.push(argv.join(' '));
+        if (argv.includes('--version')) return { code: 0, stdout: 'Databricks CLI v1.20.0', stderr: '' };
+        if (argv.includes('--help')) return { code: 0, stdout: 'install', stderr: '' };
+        nodeFs.mkdirSync(nodePath.join(home, '.claude', 'skills', 'databricks-dabs'), { recursive: true });
+        nodeFs.writeFileSync(nodePath.join(home, '.claude', 'skills', 'databricks-dabs', 'SKILL.md'), '---\nname: databricks-dabs\n---\n');
+        return { code: 0, stdout: '', stderr: '' };
+      };
+      assert.strictEqual((await cli(['skills', 'check', 'databricks-dabs', ...W], { env, runner })).code, 0);
+      assert.ok(!runs.includes('databricks aitools install'), 'check never installs');
+      assert.strictEqual((await cli(['skills', 'install', 'databricks-dabs', ...W], { env, runner })).code, 4, 'a person at a terminal');
+      assert.strictEqual((await cli(['skills', 'install', 'databricks-dabs', ...W], { env, runner, interactive: true, answers: ['no'] })).code, 4);
+      assert.ok(!runs.includes('databricks aitools install'));
+      const ok = await cli(['skills', 'install', 'databricks-dabs', ...W, '--json'], { env, runner, interactive: true, answers: ['install'] });
+      assert.strictEqual(ok.code, 0, ok.out + ok.err);
+      assert.ok(runs.includes('databricks aitools install') && ok.json().installed[0].includes(nodePath.join('.claude', 'skills')));
+      // MCP: the same catalog, filtered.
+      client = await mcpSession(ws);
+      const m = (await client.callTool({ name: 'autode_skills_list', arguments: { group: 'autode' } })).structuredContent;
+      assert.ok(m.skills.length >= 8 && m.skills.every((e) => e.group === 'autode'));
+    } finally { if (client) await client.close(); for (const d of [ws, home]) nodeFs.rmSync(d, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.5: autode plugin install removes AutoDE\'s pre-v0.45.5 skill folders and anything its last install put there, never the user\'s own; the catalog ships everywhere; the Skills view is contributed', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-prune-'));
+    try {
+      const skills = nodePath.join(ws, '.claude', 'skills');
+      const mk = (name, text) => { nodeFs.mkdirSync(nodePath.join(skills, name), { recursive: true }); nodeFs.writeFileSync(nodePath.join(skills, name, 'SKILL.md'), text); };
+      mk('documentation', '---\nname: documentation\nallowed-tools: [mcp__autode__autode_resolve]\n---\nold AutoDE skill\n');
+      mk('mapping', '---\nname: mapping\n---\nthe user\'s own mapping skill\n');
+      const env = { AUTODE_HOME: nodePath.join(ws, 'home') };
+      const r = await cli(['plugin', 'install', '--host', 'claude', '--workspace', ws, '--json'], { env });
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.ok(!nodeFs.existsSync(nodePath.join(skills, 'documentation')), 'AutoDE\'s old folder is gone');
+      assert.ok(nodeFs.existsSync(nodePath.join(skills, 'mapping', 'SKILL.md')), 'the user\'s own skill of an old AutoDE name is kept');
+      assert.ok(nodeFs.existsSync(nodePath.join(skills, 'autode-de-documentation', 'SKILL.md')));
+      const manifest = JSON.parse(nodeFs.readFileSync(nodePath.join(skills, '.autode-installed.json'), 'utf8'));
+      assert.ok(manifest.skills.includes('autode-de-mapping') && !manifest.skills.includes('mapping'));
+      // A skill the last install recorded that AutoDE no longer has is removed next time.
+      manifest.skills.push('autode-de-retired'); nodeFs.writeFileSync(nodePath.join(skills, '.autode-installed.json'), JSON.stringify(manifest));
+      mk('autode-de-retired', '---\nname: autode-de-retired\n---\n');
+      assert.strictEqual((await cli(['plugin', 'install', '--host', 'claude', '--workspace', ws], { env })).code, 0);
+      assert.ok(!nodeFs.existsSync(nodePath.join(skills, 'autode-de-retired')));
+      // Packaging and the view.
+      const staged = require('../scripts/pack-cli.cjs').stage(nodePath.join(ws, 'pkg'));
+      for (const f of ['skills/external.yaml', 'skills/autode-de-mapping/SKILL.md']) assert.ok(nodeFs.existsSync(nodePath.join(staged, f)), f);
+      assert.ok(nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8').includes('!skills/external.yaml'));
+      const pkg = require('../package.json');
+      assert.ok(pkg.contributes.views.autoDataEngineeringHub.some((v) => v.id === 'autoDataEngineeringHubSkills'));
+      for (const c of ['refreshSkills', 'installSkill', 'openSkillSource']) assert.ok(pkg.contributes.commands.some((x) => x.command === `autoDataEngineeringHub.${c}`), c);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

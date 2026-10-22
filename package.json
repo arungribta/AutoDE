@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.45.4",
+  "version": "0.45.5",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -246,6 +246,9 @@
       { "command": "autoDataEngineeringHub.openWorkflow", "title": "AutoDE: Open Workflow", "icon": "$(checklist)" },
       { "command": "autoDataEngineeringHub.refreshWorkflow", "title": "AutoDE: Refresh Workflow", "icon": "$(refresh)" },
       { "command": "autoDataEngineeringHub.workflowRun", "title": "Run Stage Agent", "icon": "$(play)" },
+      { "command": "autoDataEngineeringHub.refreshSkills", "title": "Refresh Skills", "icon": "$(refresh)" },
+      { "command": "autoDataEngineeringHub.installSkill", "title": "Install Skill…", "icon": "$(cloud-download)" },
+      { "command": "autoDataEngineeringHub.openSkillSource", "title": "Open Skill Source", "icon": "$(link-external)" },
       { "command": "autoDataEngineeringHub.workflowApproveDocument", "title": "Approve Stage Document…", "icon": "$(pass)" },
       { "command": "autoDataEngineeringHub.workflowProduce", "title": "Produce Stage Document", "icon": "$(edit)" },
       { "command": "autoDataEngineeringHub.workflowOpenDocument", "title": "Open Stage Document", "icon": "$(go-to-file)" },
@@ -270,11 +273,14 @@
     "menus": {
       "view/title": [
         { "command": "autoDataEngineeringHub.openWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@1" },
-        { "command": "autoDataEngineeringHub.refreshWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@2" }
+        { "command": "autoDataEngineeringHub.refreshWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@2" },
+        { "command": "autoDataEngineeringHub.refreshSkills", "when": "view == autoDataEngineeringHubSkills", "group": "navigation@1" }
       ],
       "view/item/context": [
         { "command": "autoDataEngineeringHub.workflowApprove", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.workflowRun", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )run( |$)/", "group": "inline" },
+        { "command": "autoDataEngineeringHub.installSkill", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )installable( |$)/", "group": "inline" },
+        { "command": "autoDataEngineeringHub.openSkillSource", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )hasSource( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-document( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.workflowProduce", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )produce( |$)/", "group": "workflow" },
         { "command": "autoDataEngineeringHub.workflowOpenDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )open-document( |$)/", "group": "workflow" },
@@ -285,6 +291,8 @@
       ],
       "commandPalette": [
         { "command": "autoDataEngineeringHub.workflowRun", "when": "false" },
+        { "command": "autoDataEngineeringHub.installSkill", "when": "false" },
+        { "command": "autoDataEngineeringHub.openSkillSource", "when": "false" },
         { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "false" },
         { "command": "autoDataEngineeringHub.workflowProduce", "when": "false" },
         { "command": "autoDataEngineeringHub.workflowOpenDocument", "when": "false" },
@@ -333,6 +341,10 @@
         {
           "id": "autoDataEngineeringHubWorkflow",
           "name": "Workflow"
+        },
+        {
+          "id": "autoDataEngineeringHubSkills",
+          "name": "Skills"
         }
       ],
       "autoDataEngineeringHubPanel": [

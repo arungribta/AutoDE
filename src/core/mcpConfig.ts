@@ -169,7 +169,7 @@ export function ensureStableServer(extensionPath: string, storagePath: string, v
     const from = path.join(extensionPath, ...rel.split('/'));
     if (!fs.existsSync(from)) continue;
     if (rel === 'skills') {
-      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json') || fs.existsSync(path.join(from, x, 'SKILL.md')))) copyInto(path.join(from, f), path.join(staging, 'skills', f));
+      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json') || x === 'external.yaml' || fs.existsSync(path.join(from, x, 'SKILL.md')))) copyInto(path.join(from, f), path.join(staging, 'skills', f));
       continue;
     }
     copyInto(from, path.join(staging, ...rel.split('/')));

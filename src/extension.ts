@@ -11,6 +11,7 @@ import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, P
 import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, registerMcpProvider, vscodeSecretEnv } from './core/mcpConfig';
 import { EngineClient } from './core/engineClient';
 import { registerWorkflowView } from './core/workflowView';
+import { registerSkillsView } from './core/skillsView';
 import { getCredentialResolver } from './engine/platform/credentials';
 import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
 import { PlatformOnboarding } from './core/platformOnboarding';
@@ -309,6 +310,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const mcpProvider = registerMcpProvider(vscode, { extensionPath: context.extensionPath, version: extensionVersion, workspaceRoot: firstFolder, secretEnv: () => vscodeSecretEnv(firstFolder(), vscodeSecrets), log: (line) => console.log(line) });
   if (mcpProvider) context.subscriptions.push(mcpProvider);
   // v0.44.1: the Workflow view — tree, editor tab, status bar — over the engine's runtime and history.
+  context.subscriptions.push(...registerSkillsView(context, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath));
   context.subscriptions.push(...registerWorkflowView(context, {
     scope: () => sidebarProvider.currentWorkflowScope(),
     resolve: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note),

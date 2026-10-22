@@ -6,6 +6,51 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.5
+
+- **The skill catalog and the naming convention** (owner, 2026-10-22; requirements SKL-9; technical-design §7.9; `docs/skills.md`). Every skill AutoDE has or works with now has one view, kept current by construction.
+- **AutoDE's skills are named `autode-<scope>-<capability>`** with hyphens. Scopes: `core` (how AutoDE works), `de` (platform-neutral data engineering), `snowflake`, `databricks`, `oracle`, `dbt`. The 8 skills are renamed:
+
+  | Was | Now |
+  |---|---|
+  | `autode-orchestrator` | `autode-core-orchestrator` |
+  | `documentation` | `autode-de-documentation` |
+  | `quality-rules` | `autode-de-quality-rules` |
+  | `source-assessment` | `autode-de-source-assessment` |
+  | `conformance` | `autode-de-conformance` |
+  | `mapping` | `autode-de-mapping` |
+  | `modelling` | `autode-de-modelling` |
+  | `pipeline-build` | `autode-de-pipeline-build` |
+
+  The prefix also keeps AutoDE's skills from colliding with other skills in a host's shared skills folder.
+- **Skills declare what they are for** in the Agent Skills `metadata` map: `scope`, `stageKinds`, `platforms`, `version`, `owner` and `maturity` (`tested`, or `preview` without a fixture test). The files stay standard, and the loader refuses a skill that breaks the convention, item by item.
+- **Stages pick skills by metadata, not by name.** A stage gets the skills whose `stageKinds` include its kind and whose `platforms` fit the problem's target platform (from the target context). A Snowflake skill joins a build on Snowflake, not one on Databricks. The role chosen is the one that has such a skill (the planned role first). This replaces the v0.45.2 rule that a skill's name equals its stage kind.
+- **The catalog** has four groups:
+  - AutoDE's skills, from their frontmatter, with the roles that use them;
+  - this workspace's imported skills, with their review state;
+  - the interview packs;
+  - **external skills**, which are references only.
+
+  It is shown in the new **Skills view** in VS Code, by `autode skills list | show` and `autode_skills_list` (MCP), and on the generated page `docs/skills.md` (`npm run docs:generate`, checked by `npm test`).
+- **External skills without breaking their licences.** `skills/external.yaml` lists 14 vendor and community skills with their source, licence, availability (installable, host-only or importable), the stage kinds and platforms they help with, and a summary in AutoDE's own words. No vendor text is copied:
+  - the 11 Databricks agent skills AutoDE's stages use are under the Databricks License, so they are marked "referenced, not redistributed";
+  - Cortex Code's built-in skills are host-only, available inside Cortex Code;
+  - two Snowflake-Labs community skills are importable after their per-skill licence is checked.
+
+  Installed vendor skills are detected in the hosts' skills folders. An assignment names the installed ones for its stage, with "AutoDE's rules still apply"; uninstalled ones appear only in its data, so a UI can offer them.
+- **Install commands are data that is checked, not trusted:**
+  - each installer records its command, minimum CLI version and the date it was last verified;
+  - `autode skills check <name>` and the view's Install button **probe** it first (CLI version, then a harmless `--help`). If the vendor has changed it, AutoDE shows the docs link instead of a stale command;
+  - a team corrects or adds entries in `.autode/config/external-skills.yaml` without waiting for an AutoDE release;
+  - **installing is a person's act**: `autode skills install` needs an interactive terminal and a typed confirmation, and the view runs the command in the visible AutoDE terminal only on a click;
+  - "installed" means the skill was found in a host's skills folder afterwards, not that the command exited 0.
+- **Re-installing the plugin cleans up after itself.** `autode plugin install` now records what it installed (`.autode-installed.json` in each skills folder). On the next install it removes what it installed before and no longer ships, and AutoDE's pre-v0.45.5 skill folders. It never touches a folder it didn't install: an old name is removed only when its `SKILL.md` is AutoDE's (it names AutoDE's tools).
+- **Deviations / notes:**
+  - **Hyphens, not the requested underscores** (`autode_*`). The Agent Skills standard that Claude Code, Copilot and Cortex Code follow allows only lowercase letters, digits and hyphens, so hosts would reject an underscore name. MCP names keep underscores (`autode_skills_list`), as their convention is.
+  - **The registry release went first.** It became v0.45.5, so the runner moves to v0.45.6, the platform skills to v0.45.7, and the business analyst with the planner and the context curator to v0.45.8 and v0.45.9. Renaming before the platform skills arrive means they don't need renaming later.
+  - **Probing the install commands in CI** (catching a vendor change before users do) goes to the backlog.
+- **Measured:** 374 tests (5 new: naming and metadata; platform-aware selection and vendor skills in assignments; the catalog, team overrides and probes; the CLI and MCP; plugin clean-up, packaging and the view). Lint 0 errors. Eval unchanged.
+
 ## 0.45.4
 
 - **Phase PA3b, step 4: the pipeline engineer** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6, GEN-1, GEN-2; technical-design §7.9). The build stage is done by the `pipeline-engineer` role with the `pipeline-build` skill, the same in VS Code (Run agent) and in any host. It drafts the Pipeline Spec from AutoDE's primitive candidates, compiles it with AutoDE's compiler, and records the code with grounding manifests. Deleted:

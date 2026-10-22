@@ -1,7 +1,14 @@
 ---
-name: mapping
+name: autode-de-mapping
 description: Write the source-to-target mapping of an AutoDE business problem - entity by entity and column by column, with transformations, using AutoDE's deterministic column matcher as evidence - into the problem's mapping document. Use it for the mapping stage of an AutoDE workflow.
 allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_match_columns, mcp__autode__autode_mine_vocabulary, mcp__autode__autode_search_primitives, mcp__autode__autode_describe_primitive, mcp__autode__autode_propose_assertion, mcp__autode__autode_workflow_status, mcp__autode__autode_record_mapping, mcp__autode__autode_record_artifact]
+metadata:
+  scope: de
+  stageKinds: [mapping]
+  platforms: [any]
+  version: 1
+  owner: AutoDE
+  maturity: tested
 ---
 # Source-to-target mapping
 

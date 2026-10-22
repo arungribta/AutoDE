@@ -1,7 +1,14 @@
 ---
-name: autode-orchestrator
+name: autode-core-orchestrator
 description: Run an AutoDE business problem's workflow in this host - find the next stage, have the right agent do it, hand it in, and tell the user what needs their approval. Use it when the user asks to work on, continue, or check progress of an AutoDE problem.
 allowed-tools: [mcp__autode__autode_list_problems, mcp__autode__autode_select_problem, mcp__autode__autode_workflow_status, mcp__autode__autode_workflow_next, mcp__autode__autode_workflow_history, mcp__autode__autode_workflow_complete_stage, mcp__autode__autode_propose_workflow, mcp__autode__autode_list_decisions]
+metadata:
+  scope: core
+  stageKinds: []
+  platforms: [any]
+  version: 1
+  owner: AutoDE
+  maturity: tested
 ---
 # AutoDE orchestrator
 

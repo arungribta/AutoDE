@@ -1229,6 +1229,15 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
   - `draftModel()` takes the problem's mappings (`problemMappings()`), the schema index, the live assertions (active, proposed, needs review) and the target context (`targetSettings()`). It makes one entity per target name. Its kind comes from the name prefix. Grain and key come from facts on the target, else from the single source's facts mapped through the mapping, with provenance. Dimensions in a dimensional model get a surrogate `<name>_key`, with the fact key as the natural key. Foreign keys come from relationship facts whose two sources map to different entities.
   - `checkModel()` returns errors and warnings (see the changelog). `renderModelDdl()` writes `CREATE TABLE` statements in dependency order, qualified with the target's database and schema.
   - Tools: `autode_draft_model` and `autode_check_model` (`src/mcp/agentTools.ts`). The model is recorded with `autode_record_artifact` and approved at the stage's gate.
+- **Skill catalog and naming** (v0.45.5):
+  - `skillMeta()` (`src/engine/agents/definitions.ts`) checks a bundled skill's name against `AUTODE_SKILL_NAME` (`autode-<scope>-<capability>`, scopes in `SKILL_SCOPES`), and reads `metadata`: `scope` equal to the name's, `stageKinds` known, `platforms` from `SKILL_PLATFORMS` (a platform-scoped skill has exactly its platform), a whole-number `version`, and `maturity` `tested` or `preview`. `parseSkillMarkdown()` now returns `metadata` and `license`.
+  - `assignmentFor()` selects with `fits()`: kind in `stageKinds`, and `any` or the target platform (`targetPlatform()`, from `context/target-context.yaml`) in `platforms`. The role is the first candidate with a fitting skill; it gets its own fitting skills plus the platform's.
+  - Assignments also carry `externalSkills`: catalog references for the kind and platform, `installed` when found in `hostSkillDirs()`. The installed ones are listed in the text.
+  - `skillCatalog()` (`src/engine/agents/skillCatalog.ts`) merges the pack, the workspace's tool skills (`loadToolSkillStates`), the interview packs and `externalCatalog()`. The latter is `skills/external.yaml` with `.autode/config/external-skills.yaml` merged by id; each entry is validated (a source, a described licence, an own-words summary, a known availability, an installer when installable, no "importable" without a licence allowing it).
+  - `probeInstaller()` runs the version command and the probe through an injectable `Runner` (`spawnRunner`: no shell, 15 s timeout).
+  - `renderCatalogMarkdown()` is used by `scripts/docs-generate.cjs` for `docs/skills.md`.
+  - **Surfaces:** `autode skills list | show | check | install` (`src/cli/main.ts`; install needs a TTY and a typed `install`, and is judged by detection afterwards); `autode_skills_list` (`src/mcp/agentTools.ts`); the Skills view (`src/core/skillsView.ts`: `autoDataEngineeringHubSkills`, Install in the AutoDE terminal after a probe and a modal).
+  - **Plugin clean-up:** `pruneSkills()` in `src/engine/agents/plugin.ts` removes what `.autode-installed.json` lists that is no longer shipped, and `LEGACY_SKILLS` folders whose `SKILL.md` names `mcp__autode__`, then writes the manifest.
 - **The pipeline engineer** (v0.45.4):
   - `primitiveCandidates()` (`src/engine/agents/primitiveCandidates.ts`) chains `rename_cast` (source → `stg_<schema>_<table>` view, the mapped columns without expressions), `dedup` (partition by the key fact's mapped columns, order by the first temporal column whose name looks like a change column, `DESC`) and `incremental_load` (MERGE into the target on the key, updating the other columns). Each step is validated with `validateTransformSpec()`. A key fact matches its table by fully qualified name, or by bare name only when unqualified.
   - `autode_record_pipeline_spec` (`src/mcp/agentTools.ts`) builds the `PipelineSpec` envelope (id `ps-<problem>`, version, lineage, `draft`), strips the candidates' reasons, validates it (schema and every step), then calls `writePipelineSpec()`.
@@ -1748,24 +1757,24 @@ Generated from `src/` (`npm run docs:generate`; `npm test` fails when it is stal
 ```
 src/    # activation and command registration
   extension.ts
-src/agents/    # shared codegen paths (primitive selection, freehand, Pipeline Spec synthesis)
+src/agents/    # Pipeline Spec synthesis (the panel)
   pipelineSpecSynthesis.ts
-src/agents/build/    # build-phase agents, including the tool-skill runner
+src/agents/build/    # the tool-skill runner
   ToolSkillAgent.ts
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
   ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, skillsView.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
   DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SttmEditorProvider.ts
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
-src/engine/agents/
-  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, sourceContextDraft.ts
+src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
+  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, skillCatalog.ts, sourceContextDraft.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
   assertions.ts, assertionSchemas.ts, businessPackManager.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/decisions/
@@ -1792,11 +1801,11 @@ src/engine/transforms/declarative/    # Tier 2 declarative primitives
   adapter.ts, lifecycle.ts, loader.ts, schema.ts, templateEngine.ts, types.ts
 src/engine/transforms/primitives/    # Tier 1 primitives
   dedup.ts, incrementalLoad.ts, renameCast.ts
-src/engine/workflows/
+src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   documentApproval.ts, events.ts, instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
   agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
-src/spokes/    # Snowflake executor (other files unused)
+src/spokes/    # Snowflake executor
   snowflakeExecutor.ts
 ```
 <!-- /generated:source-tree -->

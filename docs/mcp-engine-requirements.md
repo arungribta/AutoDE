@@ -556,7 +556,7 @@ Any surface resumes it; this closes BPS-7. Answers are the user's statements, so
 - **Other MCP clients:** the same assignments as MCP prompts (`autode_agent_<role>`, filled with the brief), and the workflow as tools.
 - **Background fact extraction:** in VS Code it runs after every turn. In hosts it depends on the agent following the `fact-extraction` skill. This is weaker, and documented.
 
-##### 8a. The runner: runbooks, approved by a person, run by the engine (v0.45.5; owner, 2026-10-22)
+##### 8a. The runner: runbooks, approved by a person, run by the engine (v0.45.6; owner, 2026-10-22)
 
 Everything that changes a data platform runs through one deterministic runner. Agents only write **runbooks**; a person approves them; the engine runs them. No agent runs a platform command, in AutoDE or (with the plugin's hooks, §8b) in a host. The aim is execution that is as easy as clicking through a wizard, including for people who aren't data engineers, without weakening P9.
 
@@ -597,7 +597,7 @@ Everything that changes a data platform runs through one deterministic runner. A
   The interactive terminal runner (`autode run <runbook>`) is in the backlog, by the owner's decision of 2026-10-22. Until it exists, runs happen in VS Code. This is a deliberate exception to surface parity.
 - **Stages:** the deploy and platform-setup stages produce runbooks, and are done when their run succeeds. `autode_apply_decision` keeps working for single platform-change decisions.
 
-##### 8b. Platform skills and vendor skills (v0.45.6; owner, 2026-10-22)
+##### 8b. Platform skills and vendor skills (v0.45.7; owner, 2026-10-22; naming and the catalog shipped in v0.45.5)
 
 - **AutoDE's own platform skills**, written from the vendors' public documentation and AutoDE's tools, not from vendor skill text:
   - Snowflake: ingestion (stages, file formats, `COPY INTO`, Snowpipe), pipelines (streams and tasks, dynamic tables), governance (roles and grants, masking and row-access policies, tags), performance (warehouse sizing, clustering), deployment (Snowflake CLI projects as runbooks);
@@ -605,10 +605,10 @@ Everything that changes a data platform runs through one deterministic runner. A
   - cross-platform: reconciliation (counts, aggregates and key hashes, read-only), dbt (a project and tests from the quality rules).
 
   Each ships with a fixture and a test: its SQL or YAML resolves against the estate, uses the platform's dialect, and its runbook passes the engine's checks.
-- **Platform-aware selection:** a skill's frontmatter may carry `platforms: [snowflake]`. An assignment picks the skill for its stage kind and the problem's target platform.
+- **Naming and selection (shipped v0.45.5):** AutoDE's skills are named `autode-<scope>-<capability>` and declare `metadata.stageKinds` and `metadata.platforms`. An assignment picks the skills for its stage kind and the problem's target platform. Platform skills are named `autode-snowflake-*` and `autode-databricks-*`.
 - **Vendor skills by reference, never copied.** The Databricks agent skills are under the Databricks License (use only with Databricks Services; may be terminated on notice), so they aren't redistributed. When they are installed in the host, AutoDE detects them and names the relevant ones in the assignment ("for bundle deployment, see `databricks-dabs`"). When they aren't installed, AutoDE offers the moderated install (`databricks aitools install`, run in a visible terminal only on click, as for drivers). Cortex Code's built-in skills run only inside Cortex Code; where a user has Cortex Code, AutoDE can hand Snowflake work to it, but it is never required. Community skills with an open licence (for example Apache-2.0 skills in Snowflake-Labs/coco-skills) may be imported through PA4 with their attribution. AutoDE's own skills work with no vendor skill installed.
 - **Hooks in the plugin:** in hosts that support hooks (Claude Code, Cortex Code), the AutoDE plugin blocks platform-changing `snow` and `databricks` commands that don't come from an approved runbook. Where a host has no hooks, this is documented as a convention, not a guarantee.
-- **A compatibility page** (`docs/platform-skills.md`): AutoDE's platform skills, the vendor skills AutoDE works with, at which stage, and their licences.
+- **The catalog (shipped v0.45.5)** lists AutoDE's platform skills and the vendor skills AutoDE works with, at which stage, with their licences: the Skills view, `autode skills`, `autode_skills_list`, and `docs/skills.md` (generated).
 
 ##### 9. Tools added
 

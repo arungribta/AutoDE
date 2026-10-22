@@ -24,6 +24,9 @@ export interface ParsedSkillMarkdown {
   name?: string;
   description?: string;
   allowedTools?: string[];
+  /** The Agent Skills `metadata` map (AutoDE's skill registry fields live here, v0.45.5). */
+  metadata?: Record<string, unknown>;
+  license?: string;
   body: string;
 }
 
@@ -38,12 +41,16 @@ export function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
   let name: string | undefined;
   let description: string | undefined;
   let allowedTools: string[] | undefined;
+  let metadata: Record<string, unknown> | undefined;
+  let license: string | undefined;
   try {
     const parsed = parseYaml(frontmatterMatch[1]);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const record = parsed as Record<string, unknown>;
       name = typeof record.name === 'string' ? record.name.trim() : undefined;
       description = typeof record.description === 'string' ? record.description.trim() : undefined;
+      if (record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)) metadata = record.metadata as Record<string, unknown>;
+      if (typeof record.license === 'string') license = record.license.trim();
       const rawTools = record['allowed-tools'] ?? record.allowedTools ?? record.allowed_tools;
       if (Array.isArray(rawTools)) {
         allowedTools = rawTools.filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
@@ -55,7 +62,7 @@ export function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
     // Malformed frontmatter — fall back to treating the whole file as the body.
     return { body: text.trim() };
   }
-  return { name, description, allowedTools, body };
+  return { name, description, allowedTools, metadata, license, body };
 }
 
 /** Lists every file under `dir` (recursively), relative to `dir`, excluding SKILL.md itself and AutoDE's own sidecar and version history (Phase S2). */

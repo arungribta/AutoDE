@@ -728,6 +728,34 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: run a plan saved before v0.45.4 with `ingestionAgent` or `transformScaffoldAgent` steps.
   Expect: "The build moved to the workflow…".
 
+## Part 31 — v0.45.5 Skill catalog and naming
+
+- [ ] **31.1 The Skills view.**
+  Do: open the Skills view in AutoDE's activity bar.
+  Expect:
+  - groups: AutoDE skills (all `autode-*`, each with its stage kinds), Interview packs, External skills, and, if the workspace imported any, Imported in this workspace;
+  - external skills show the vendor, installed or not, and the licence in the tooltip.
+- [ ] **31.2 Install a Databricks skill.**
+  Do: with the Databricks CLI installed, choose Install on `databricks-dabs`.
+  Expect:
+  - a modal showing `databricks aitools install`, the Databricks License summary, and that it was probed just now;
+  - Run in AutoDE terminal runs it visibly;
+  - after Check, the item shows "installed".
+- [ ] **31.3 A changed command.**
+  Do: in `.autode/config/external-skills.yaml`, set the installer's probe to a command that fails, then choose Install.
+  Expect: a warning that the vendor may have changed how the skills are installed, with the docs link; nothing runs.
+- [ ] **31.4 The terminal.**
+  Do: run `autode skills list`, `autode skills show databricks-dabs`, `autode skills check databricks-dabs`, then `autode skills install databricks-dabs` (type `install`).
+  Expect: the same catalog; the install runs only after confirmation and reports where the skill was found.
+- [ ] **31.5 Upgrading a host.**
+  Do: run `autode plugin install --host claude` in a project installed with an earlier version.
+  Expect:
+  - the old folders (`documentation`, `mapping` …) are replaced by `autode-de-*`;
+  - a skill of your own with one of those names, which doesn't name AutoDE's tools, is left alone.
+- [ ] **31.6 Platform skills in an assignment.**
+  Do: with `databricks-pipelines` installed and the target context on Databricks, run the build stage in Claude Code with the plugin.
+  Expect: the assignment lists `databricks-pipelines` under "Vendor skills installed in this host".
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -904,5 +932,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 30.2 |  |  |
 | 30.3 |  |  |
 | 30.4 |  |  |
+| 31.1 |  |  |
+| 31.2 |  |  |
+| 31.3 |  |  |
+| 31.4 |  |  |
+| 31.5 |  |  |
+| 31.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

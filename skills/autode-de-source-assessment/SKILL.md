@@ -1,7 +1,14 @@
 ---
-name: source-assessment
+name: autode-de-source-assessment
 description: Assess the source systems of an AutoDE business problem - bring their metadata into the estate, profile keys, grain, volumes and freshness with read-only aggregate queries, propose keys, grain and relationships as facts, and draft the source context. Use it for the source-assessment stage of an AutoDE workflow.
 allowed-tools: [Read, Grep, Glob, mcp__autode__autode_list_connections, mcp__autode__autode_test_connection, mcp__autode__autode_list_databases, mcp__autode__autode_list_schemas, mcp__autode__autode_extract_metadata, mcp__autode__autode_ingest_metadata, mcp__autode__autode_ingest_file, mcp__autode__autode_execute_query, mcp__autode__autode_resolve, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_assertions, mcp__autode__autode_propose_assertion, mcp__autode__autode_pack_list, mcp__autode__autode_mine_vocabulary, mcp__autode__autode_workflow_status, mcp__autode__autode_record_source_context, mcp__autode__autode_record_artifact]
+metadata:
+  scope: de
+  stageKinds: [source-assessment]
+  platforms: [any]
+  version: 1
+  owner: AutoDE
+  maturity: tested
 ---
 # Source assessment
 

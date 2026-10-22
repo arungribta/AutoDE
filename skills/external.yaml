@@ -1,0 +1,156 @@
+# External skills AutoDE works with (v0.45.5). REFERENCES ONLY: no vendor skill text is copied
+# here or anywhere in AutoDE, because their licences don't allow redistribution. The summaries
+# are AutoDE's own words. A team corrects or adds entries in .autode/config/external-skills.yaml
+# (same shape, merged by id) without waiting for an AutoDE release.
+#
+# availability:
+#   installable   the user installs it with the vendor's own command (AutoDE offers it, runs it only on a click)
+#   host-only     it exists only inside the vendor's host (nothing to install into another host)
+#   importable    openly licensed: may be imported through PA4 with its attribution, after its licence is checked
+
+installers:
+  databricks-agent-skills:
+    title: Databricks agent skills
+    # Probed before it is offered: if the subcommand is gone, AutoDE shows the docs link instead of a stale command.
+    command: [databricks, aitools, install]
+    probe: [databricks, aitools, --help]
+    minCliVersion: 1.0.0
+    versionCommand: [databricks, --version]
+    hostAlternatives:
+      claude: "In Claude Code: /plugin marketplace add databricks/databricks-agent-skills, then /plugin install databricks@databricks-agent-skills"
+      copilot: "copilot plugin marketplace add databricks/databricks-agent-skills, then copilot plugin install databricks@databricks-agent-skills"
+    docs: https://github.com/databricks/databricks-agent-skills
+    verifiedAt: 2026-10-22
+    verifiedHow: against the vendor's README (the command was not run by AutoDE's CI yet)
+
+licences:
+  databricks-license:
+    name: Databricks License
+    url: https://raw.githubusercontent.com/databricks/databricks-agent-skills/main/LICENSE
+    redistribution: false
+    summary: Use only in connection with Databricks Services; modified files must say so; Databricks may end the licence on notice, after which copies must be deleted. AutoDE references these skills and never ships them.
+  snowflake-cortex-code:
+    name: Part of Snowflake Cortex Code
+    url: https://www.snowflake.com/en/product/snowflake-coco/
+    redistribution: false
+    summary: Built into Cortex Code and available only inside it.
+  coco-skills-per-skill:
+    name: Per skill (Apache-2.0 for community contributions, a Snowflake licence for Snowflake employees' contributions)
+    url: https://github.com/Snowflake-Labs/coco-skills
+    redistribution: check
+    summary: Each skill carries its own LICENSE file; check it before importing. Snowflake does not guarantee these skills' correctness.
+
+entries:
+  - id: databricks-core
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-core
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Databricks CLI basics - authentication, profiles, exploring data; the base the other Databricks skills build on.
+    usedFor: { stageKinds: [source-assessment, platform-setup, deploy], platforms: [databricks] }
+  - id: databricks-dabs
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-dabs
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Deploying jobs, pipelines and other resources as bundles.
+    usedFor: { stageKinds: [deploy], platforms: [databricks] }
+  - id: databricks-jobs
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-jobs
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Orchestrating work as Lakeflow Jobs - task types, triggers, schedules, notifications.
+    usedFor: { stageKinds: [build, deploy], platforms: [databricks] }
+  - id: databricks-pipelines
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-pipelines
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Batch and streaming pipelines with Lakeflow Declarative Pipelines (formerly Delta Live Tables).
+    usedFor: { stageKinds: [build], platforms: [databricks] }
+  - id: databricks-dbsql
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-dbsql
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Working with Databricks SQL warehouses.
+    usedFor: { stageKinds: [build, validate, reconcile], platforms: [databricks] }
+  - id: databricks-unity-catalog
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-unity-catalog
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Unity Catalog system tables for lineage, audit and billing.
+    usedFor: { stageKinds: [source-assessment, platform-setup, validate], platforms: [databricks] }
+  - id: databricks-spark-structured-streaming
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-spark-structured-streaming
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Streaming patterns with Spark Structured Streaming.
+    usedFor: { stageKinds: [build], platforms: [databricks] }
+  - id: databricks-lakeflow-connect
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-lakeflow-connect
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Managed ingestion with Lakeflow Connect connectors.
+    usedFor: { stageKinds: [source-assessment, build], platforms: [databricks] }
+  - id: databricks-iceberg
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-iceberg
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Apache Iceberg tables and interoperability on Databricks.
+    usedFor: { stageKinds: [modelling, build], platforms: [databricks] }
+  - id: databricks-metric-views
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-metric-views
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Governed metrics as Unity Catalog metric views.
+    usedFor: { stageKinds: [modelling], platforms: [databricks] }
+  - id: databricks-serverless-migration
+    vendor: Databricks
+    source: https://github.com/databricks/databricks-agent-skills/tree/main/skills/databricks-serverless-migration
+    licence: databricks-license
+    availability: installable
+    installer: databricks-agent-skills
+    summary: Moving classic-compute workloads to serverless compute.
+    usedFor: { stageKinds: [code-conversion, deploy], platforms: [databricks] }
+  - id: cortex-code-built-in
+    vendor: Snowflake
+    title: Cortex Code built-in skills
+    source: https://www.snowflake.com/en/product/snowflake-coco/
+    licence: snowflake-cortex-code
+    availability: host-only
+    detect: { command: cortex }
+    summary: Snowflake's own skills inside Cortex Code (dynamic tables, Iceberg, semantic views, dbt, Airflow and more). Where a user has Cortex Code, Snowflake work can be handed to it; AutoDE never requires it.
+    usedFor: { stageKinds: [build, modelling, platform-setup, deploy], platforms: [snowflake] }
+  - id: coco-rbac
+    vendor: Snowflake-Labs (community)
+    title: rbac
+    source: https://github.com/Snowflake-Labs/coco-skills
+    licence: coco-skills-per-skill
+    availability: importable
+    summary: Designing Snowflake role hierarchies and access-role patterns.
+    usedFor: { stageKinds: [platform-setup], platforms: [snowflake] }
+  - id: coco-semantic-view-patterns
+    vendor: Snowflake-Labs (community)
+    title: semantic-view-patterns
+    source: https://github.com/Snowflake-Labs/coco-skills
+    licence: coco-skills-per-skill
+    availability: importable
+    summary: Patterns for Snowflake semantic views (joins, metrics, dimensions, access).
+    usedFor: { stageKinds: [modelling], platforms: [snowflake] }

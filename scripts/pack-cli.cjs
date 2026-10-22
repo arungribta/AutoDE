@@ -52,7 +52,7 @@ function stage(outDir = path.join(root, 'dist', 'package')) {
     // skills/ ships the interview prompt packs and the skill folders (SKILL.md, PA3b), as in the VSIX; primitive-definitions/ may not exist yet.
     if (!fs.existsSync(from)) continue;
     if (rel === 'skills') {
-      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json') || fs.existsSync(path.join(from, x, 'SKILL.md')))) copy(path.join(from, f), path.join(outDir, 'skills', f));
+      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json') || x === 'external.yaml' || fs.existsSync(path.join(from, x, 'SKILL.md')))) copy(path.join(from, f), path.join(outDir, 'skills', f));
       continue;
     }
     copy(from, path.join(outDir, rel));

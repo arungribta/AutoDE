@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { PLUGIN_HOSTS, PluginHost, buildPlugin, installPlugin, serverEntry } from '../engine/agents/plugin';
+import { spawnSync } from 'node:child_process';
+import { CatalogEntry, CatalogGroup, Runner, probeInstaller, skillCatalog, spawnRunner } from '../engine/agents/skillCatalog';
 import { approveStageDocument, documentApprovalProblems, isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import * as readline from 'node:readline';
 import { parseArgs } from 'node:util';
@@ -78,6 +80,8 @@ export interface CliIo {
   prompt: (question: string) => Promise<string>;
   /** Tests: a session with fake platform adapters. */
   platform?: (options: { workspaceRoot: string; allowCli: boolean; driversRoot?: string }) => PlatformSession;
+  /** Tests: runs a vendor command (probes and installs) instead of spawning it. */
+  run?: Runner;
 }
 
 export function nodeIo(): CliIo {
@@ -158,6 +162,12 @@ Human (an interactive terminal; refused when CI is set):
   decisions approve <id> [--note <text>] [--by <name>]
   decisions reject <id> [--note <text>] [--by <name>]
 
+Skills (AutoDE's own, this workspace's imported ones, interview packs, and the vendor skills AutoDE works with):
+  skills list [--group autode|workspace|interview|external]   The catalog, with whether external skills are installed
+  skills show <name>           One skill: what it does, its stage kinds and platforms, licence, source, how to install
+  skills check <name>          Probe an external skill's install command on this machine (nothing is installed)
+  skills install <name>        (terminal) Run the vendor's own install command after you confirm, then check it worked
+
 Agent hosts (Claude Code, Cortex Code, GitHub Copilot CLI):
   plugin path [--out <folder>]   Build AutoDE's plugin folder (agents, skills, commands, .mcp.json) and print where it is
   plugin install --host claude|cortex|copilot [--scope project|user]   Copy AutoDE's agents and skills into the host's folders
@@ -213,6 +223,7 @@ const OPTIONS = {
   summary: { type: 'string' },
   reason: { type: 'string' },
   host: { type: 'string' },
+  group: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -278,6 +289,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'design-doc': return await cmdDesignDoc(ctx, rest);
       case 'query': case 'explain': return await cmdSql(ctx, command, rest);
       case 'plugin': return cmdPlugin(ctx, rest);
+      case 'skills': return await cmdSkills(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -713,6 +725,56 @@ async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
 
 const STATUS_MARK: Record<string, string> = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
 
+async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list', name] = rest;
+  const home = ctx.io.env.AUTODE_HOME ?? os.homedir();
+  const cat = skillCatalog({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, home, env: ctx.io.env });
+  const line = (e: CatalogEntry) => `  ${e.name.padEnd(38)} ${e.group === 'external' ? `${(e.owner ?? '').padEnd(12)} ${e.availability}${e.availability === 'installable' ? (e.installed?.length ? ', installed' : ', not installed') : e.availability === 'host-only' && e.installed?.length ? ', available' : ''}` : `${e.stageKinds.join(', ') || '—'}${e.platforms.length && !e.platforms.includes('any') ? ` [${e.platforms.join(', ')}]` : ''}${e.maturity ? ` · ${e.maturity}` : ''}${e.status ? ` · ${e.status}` : ''}`}`;
+  if (sub === 'list') {
+    const groups: CatalogGroup[] = ['autode', 'workspace', 'interview', 'external'];
+    if (ctx.values.group && !groups.includes(ctx.values.group as CatalogGroup)) throw new CliError(EXIT.USAGE, `--group is one of ${groups.join(', ')}.`);
+    const entries = cat.entries.filter((e) => !ctx.values.group || e.group === ctx.values.group);
+    const title: Record<CatalogGroup, string> = { autode: 'AutoDE skills', workspace: 'This workspace\'s imported skills', interview: 'Interview packs', external: 'External skills (references; not shipped with AutoDE)' };
+    const text = groups.filter((g) => entries.some((e) => e.group === g)).map((g) => `${title[g]}:\n${entries.filter((e) => e.group === g).map(line).join('\n')}`).join('\n\n');
+    emit(ctx, { ok: cat.errors.length === 0, skills: entries, errors: cat.errors }, [text || 'No skills.', ...cat.errors.map((e) => `✗ ${e}`)].join('\n'));
+    return cat.errors.length ? EXIT.FAILED : EXIT.OK;
+  }
+  const e = cat.entries.find((x) => x.name === name);
+  if (!name) throw new CliError(EXIT.USAGE, `skills ${sub} needs a skill name.`);
+  if (!e) throw new CliError(EXIT.NOT_FOUND, `No skill "${name}" (see \`autode skills list\`).`);
+  if (sub === 'show') {
+    const lines = [
+      `${e.name} (${e.group})`, e.summary,
+      e.stageKinds.length ? `Stage kinds: ${e.stageKinds.join(', ')}` : '', e.platforms.length ? `Platforms: ${e.platforms.join(', ')}` : '',
+      e.version !== undefined ? `Version: ${e.version}${e.maturity ? ` (${e.maturity})` : ''}` : '', e.roles?.length ? `Used by: ${e.roles.join(', ')}` : '',
+      e.owner ? `Owner: ${e.owner}` : '', e.status ? `State: ${e.status}` : '', e.source ? `Source: ${e.source}` : '',
+      e.licence ? `Licence: ${e.licence.name}${e.licence.url ? ` (${e.licence.url})` : ''}. ${e.licence.summary ?? ''}` : '',
+      e.availability ? `Availability: ${e.availability}${e.installed ? ` — ${e.installed.length ? `found: ${e.installed.join(', ')}` : 'not found on this machine'}` : ''}` : '',
+      e.installer ? `Install: ${e.installer.command.join(' ')} (last verified ${e.installer.verifiedAt ?? '—'}; \`autode skills check ${e.name}\` probes it first)` : ''
+    ].filter(Boolean);
+    emit(ctx, { ok: true, skill: e }, lines.join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'check' || sub === 'install') {
+    if (!e.installer) throw new CliError(EXIT.FAILED, e.availability === 'host-only' ? `${e.name} exists only inside its vendor's host; there is nothing to install elsewhere.` : `${e.name} has no install command: ${e.availability === 'importable' ? 'it is imported through AutoDE (check its licence first)' : 'see its source'}.`);
+    const run = ctx.io.run ?? spawnRunner;
+    const probe = probeInstaller(e.installer, run);
+    if (sub === 'check' || !probe.ok) { emit(ctx, { ok: probe.ok, skill: e.name, probe }, `${probe.ok ? '✓' : '✗'} ${probe.reason}`); return probe.ok ? EXIT.OK : EXIT.FAILED; }
+    requirePerson(ctx, 'Installing', `Run it yourself: ${e.installer.command.join(' ')}`);
+    // With --json, stdout carries only the JSON result.
+    (ctx.json ? ctx.io.err : ctx.io.out)([`This runs the vendor's own command: ${e.installer.command.join(' ')}`, e.licence ? `Licence: ${e.licence.name}. ${e.licence.summary ?? ''}` : '', e.installer.docs ? `Vendor docs: ${e.installer.docs}` : ''].filter(Boolean).join('\n'));
+    const answer = (await ctx.io.prompt('Type install to run it: ')).trim().toLowerCase();
+    if (answer !== 'install') { (ctx.json ? ctx.io.err : ctx.io.out)('Not confirmed; nothing was run.'); return EXIT.REFUSED; }
+    // The vendor's output goes straight to the terminal; AutoDE then checks the result, not the exit code.
+    const r = (ctx.io.run ?? ((argv: string[]) => { const x = spawnSync(argv[0], argv.slice(1), { stdio: 'inherit', shell: false, windowsHide: true }); return { code: x.status, stdout: '', stderr: '', error: x.error?.message }; }))(e.installer.command);
+    const after = skillCatalog({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, home, env: ctx.io.env }).entries.find((x) => x.name === e.name);
+    const found = after?.installed ?? [];
+    emit(ctx, { ok: found.length > 0, skill: e.name, exitCode: r.code, installed: found }, found.length ? `✓ ${e.name} is installed: ${found.join(', ')}` : `✗ ${e.installer.command.join(' ')} ${r.code === 0 ? 'finished' : `exited with ${r.code ?? r.error}`}, but ${e.name} wasn't found in a host's skills folder. Check the vendor's output above${e.installer.docs ? `, or ${e.installer.docs}` : ''}.`);
+    return found.length ? EXIT.OK : EXIT.FAILED;
+  }
+  throw new CliError(EXIT.USAGE, 'skills list | show <name> | check <name> | install <name>');
+}
+
 function cmdPlugin(ctx: Ctx, rest: string[]): number {
   const [sub] = rest;
   const entry = serverEntry(ctx.resourcesRoot, ctx.io.env);
@@ -734,7 +796,7 @@ function cmdPlugin(ctx: Ctx, rest: string[]): number {
       ...r.written.map((f) => `  ${f}`),
       r.mcp.file ? (r.mcp.changed ? `MCP server set in ${r.mcp.file}.` : `MCP server already set in ${r.mcp.file}.`) : `Next: ${r.mcp.instruction}`,
       ...r.notes, ...r.errors.map((e) => `✗ ${e}`),
-      'Then ask the agent to continue your AutoDE problem (the autode-orchestrator skill).'
+      'Then ask the agent to continue your AutoDE problem (the autode-core-orchestrator skill).'
     ];
     emit(ctx, { ok: r.errors.length === 0, host, scope, written: r.written, mcp: r.mcp, notes: r.notes, errors: r.errors }, lines.join('\n'));
     return r.errors.length ? EXIT.FAILED : EXIT.OK;

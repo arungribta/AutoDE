@@ -1,7 +1,14 @@
 ---
-name: pipeline-build
+name: autode-de-pipeline-build
 description: Build an AutoDE business problem's pipelines - a Pipeline Spec of transform primitives (staging, deduplication, incremental loads) drafted from the approved mapping, model and facts, compiled by AutoDE into code with grounding manifests. Use it for the build stage of an AutoDE workflow.
 allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_primitive_candidates, mcp__autode__autode_search_primitives, mcp__autode__autode_describe_primitive, mcp__autode__autode_validate_transform, mcp__autode__autode_compile_transform, mcp__autode__autode_validate_pipeline_spec, mcp__autode__autode_compile_pipeline_spec, mcp__autode__autode_record_pipeline_spec, mcp__autode__autode_check_grounding, mcp__autode__autode_explain_sql, mcp__autode__autode_list_connections, mcp__autode__autode_workflow_status, mcp__autode__autode_record_artifact]
+metadata:
+  scope: de
+  stageKinds: [build]
+  platforms: [any]
+  version: 1
+  owner: AutoDE
+  maturity: tested
 ---
 # Pipeline build
 

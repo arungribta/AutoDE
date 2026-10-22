@@ -47,7 +47,7 @@ function roleBody(r: RoleTemplate, skills: readonly PackSkill[]): string {
   return [
     r.instructions.trim(),
     '## How you get work',
-    'AutoDE\'s workflow assigns your work: the `autode-orchestrator` skill gives you an assignment from `autode_workflow_next` (its stage, brief, permission tier and the AutoDE tools you may call, in `assignment.text`). Follow it; record each deliverable with `autode_record_artifact`; then reply with a short summary. Never start another agent, hand stages in or approve anything.',
+    'AutoDE\'s workflow assigns your work: the `autode-core-orchestrator` skill gives you an assignment from `autode_workflow_next` (its stage, brief, permission tier and the AutoDE tools you may call, in `assignment.text`). Follow it; record each deliverable with `autode_record_artifact`; then reply with a short summary. Never start another agent, hand stages in or approve anything.',
     own.length ? `Skills: ${own.map((k) => `\`${k.id}\` (${k.description})`).join('; ')}.` : ''
   ].filter(Boolean).join('\n\n') + '\n';
 }
@@ -67,7 +67,7 @@ export function copilotAgent(r: RoleTemplate, skills: readonly PackSkill[]): str
 /** Slash commands (Claude Code). Approving stays a person's act: the command says how, it never approves. */
 export const COMMANDS: Record<string, string> = {
   'autode-status': '---\ndescription: Show the AutoDE workflow of the active business problem\n---\nCall `autode_workflow_status` and show each stage with its state, then what comes next and who (or what approval) it waits for. Use `autode_workflow_history` if the user asks who did what.\n',
-  'autode-next': '---\ndescription: Do the next stage of the AutoDE workflow\n---\nUse the `autode-orchestrator` skill: take the next assignment from `autode_workflow_next`, have the named AutoDE agent do it, and hand the stage in. Stop at anything that needs a person\'s approval and tell the user how to give it.\n',
+  'autode-next': '---\ndescription: Do the next stage of the AutoDE workflow\n---\nUse the `autode-core-orchestrator` skill: take the next assignment from `autode_workflow_next`, have the named AutoDE agent do it, and hand the stage in. Stop at anything that needs a person\'s approval and tell the user how to give it.\n',
   'autode-approve': '---\ndescription: What waits for approval in AutoDE, and how to approve it\n---\nCall `autode_workflow_status` and `autode_list_decisions` (status pending). For each item that waits, tell the user what it is and how to approve it: `autode workflow approve [<stage>]` or `autode decisions approve <id>` in their own terminal, the AutoDE panel in VS Code, or the decision file under `.autode/decisions/`. You never approve it yourself.\n'
 };
 
@@ -105,7 +105,30 @@ export function buildPlugin(input: { resourcesRoot: string; outDir: string; vers
   return { dir: input.outDir, files, errors };
 }
 
-export interface InstallResult { written: string[]; mcp: { file?: string; changed?: boolean; instruction?: string }; errors: string[]; notes: string[] }
+export interface InstallResult { written: string[]; mcp: { file?: string; changed?: boolean; instruction?: string }; errors: string[]; notes: string[]; removed: string[] }
+
+/** AutoDE's skill names before v0.45.5's `autode-<scope>-<capability>` convention. */
+const LEGACY_SKILLS = ['autode-orchestrator', 'documentation', 'quality-rules', 'source-assessment', 'conformance', 'mapping', 'modelling', 'pipeline-build'];
+const INSTALLED_MANIFEST = '.autode-installed.json';
+
+/**
+ * Removes the AutoDE skills this folder had that the new install doesn't: those its manifest lists,
+ * and AutoDE's pre-v0.45.5 names (only when the folder's SKILL.md is AutoDE's: it names AutoDE's MCP
+ * tools). Never touches anything else. Then records what is installed now.
+ */
+function pruneSkills(skillsDir: string, keep: readonly string[], removed: string[]): void {
+  const manifest = path.join(skillsDir, INSTALLED_MANIFEST);
+  let before: string[] = [];
+  try { before = (JSON.parse(fs.readFileSync(manifest, 'utf8')) as { skills?: string[] }).skills ?? []; } catch { /* none yet */ }
+  const isAutode = (id: string) => { try { return /mcp__autode__/.test(fs.readFileSync(path.join(skillsDir, id, 'SKILL.md'), 'utf8')); } catch { return false; } };
+  for (const id of new Set([...before, ...LEGACY_SKILLS])) {
+    if (keep.includes(id) || !/^[a-z0-9-]+$/.test(id)) continue;
+    const dir = path.join(skillsDir, id);
+    if (fs.existsSync(dir) && (before.includes(id) || isAutode(id))) { fs.rmSync(dir, { recursive: true, force: true }); removed.push(dir); }
+  }
+  fs.mkdirSync(skillsDir, { recursive: true });
+  fs.writeFileSync(manifest, JSON.stringify({ installedBy: 'autode', skills: [...keep].sort() }, null, 2) + '\n');
+}
 
 /** The `.mcp.json`-style text with the `autode` server set; other servers and keys are kept. */
 export function mergeServers(existing: string | undefined, entry: ServerEntry): { text: string; changed: boolean } {
@@ -127,11 +150,14 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
   const { roles, skills, errors } = definitions(input.resourcesRoot, input.workspaceRoot);
   const written: string[] = [];
   const notes: string[] = [];
+  const removed: string[] = [];
+  const ids = skills.map((k) => k.id);
   const base = input.scope === 'project' ? input.workspaceRoot : input.home;
   let mcp: InstallResult['mcp'];
   if (input.host === 'claude') {
     const dir = path.join(base, '.claude');
     for (const r of roles) write(path.join(dir, 'agents', `${r.name}.md`), claudeAgent(r, skills), written);
+    pruneSkills(path.join(dir, 'skills'), ids, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, 'skills', k.id), written);
     for (const [name, text] of Object.entries(COMMANDS)) write(path.join(dir, 'commands', `${name}.md`), text, written);
     if (input.scope === 'project') {
@@ -142,14 +168,17 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
     } else mcp = { instruction: `claude mcp add --scope user autode -- ${shellLine(input.entry)}` };
   } else if (input.host === 'cortex') {
     const dir = input.scope === 'project' ? path.join(base, '.cortex', 'skills') : path.join(input.home, '.snowflake', 'cortex', 'skills');
+    pruneSkills(dir, ids, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, k.id), written);
     notes.push('Cortex Code takes sub-agents from plugins: for AutoDE\'s agents as sub-agents, install the plugin folder (`autode plugin path`). Without it, the orchestrator skill follows each assignment itself.');
     mcp = { instruction: `Add AutoDE's server to ${path.join(input.home, '.snowflake', 'cortex', 'mcp.json')} under "mcpServers": ${JSON.stringify({ autode: input.entry })}` };
   } else {
     const dir = input.scope === 'project' ? path.join(base, '.github') : path.join(input.home, '.copilot');
     for (const r of roles) write(path.join(dir, 'agents', `${r.name}.agent.md`), copilotAgent(r, skills), written);
+    pruneSkills(path.join(dir, 'skills'), ids, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, 'skills', k.id), written);
     mcp = { instruction: `In the Copilot CLI: /mcp add — name autode, type local, command: ${shellLine(input.entry)}` };
   }
-  return { written, mcp, errors, notes };
+  if (removed.length) notes.push(`Removed ${removed.length} AutoDE skill folder(s) from an earlier install (renamed or retired).`);
+  return { written, mcp, errors, notes, removed };
 }
