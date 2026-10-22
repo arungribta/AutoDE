@@ -690,6 +690,25 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: run a plan saved before v0.45.2 that has `sourceAssessmentAgent` or `sttmAgent` steps.
   Expect: those steps fail with "… moved to the workflow: run its stage from the Workflow view…".
 
+## Part 29 — v0.45.3 The data modeler
+
+- [ ] **29.1 The draft.**
+  Do: with an approved mapping and some key and grain facts, call `autode_draft_model` from Claude Code (or read the start of Run agent's log on Modelling).
+  Expect: the mapped entities with their source types, grain and keys labelled with the facts they came from, surrogate keys on dimensions, and gaps for whatever is unknown.
+- [ ] **29.2 Run agent on Modelling.**
+  Do: with a model other than Claude Code, choose Run agent on the Modelling stage.
+  Expect:
+  - `model.yaml`, `model.sql` and `model.md` under the stage's folder;
+  - the DDL matches what `autode_check_model` renders: no hand-written DDL;
+  - grain and key choices proposed as facts in the Context Inbox;
+  - the stage waits for your approval at its gate.
+- [ ] **29.3 Refusals.**
+  Do: give `autode_check_model` a model with an entity without a grain, and a foreign key to an entity that isn't there.
+  Expect: both are errors, each named.
+- [ ] **29.4 An old plan.**
+  Do: run a plan saved before v0.45.3 with a `dataModelerAgent` step.
+  Expect: "Data modelling moved to the workflow: run its stage from the Workflow view…".
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -858,5 +877,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 28.3 |  |  |
 | 28.4 |  |  |
 | 28.5 |  |  |
+| 29.1 |  |  |
+| 29.2 |  |  |
+| 29.3 |  |  |
+| 29.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

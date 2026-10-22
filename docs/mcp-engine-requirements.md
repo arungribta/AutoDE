@@ -510,7 +510,7 @@ Today's TypeScript agents (`src/agents/**`) and orchestration prompts in `src/co
 | `source-assessor` | `SourceAssessmentAgent`, source context questions | `source-assessment`, `conformance` (shipped v0.45.2); `reconciliation` later |
 | `quality-engineer` | (new in v0.45.1: nothing produced quality rules) | `quality-rules` (shipped) |
 | `sttm-mapper` | `SttmMapperAgent` | `mapping` (shipped v0.45.2); `entity-resolution` later |
-| `data-modeler` | `DataModelerAgent` | `data-modelling` |
+| `data-modeler` | `DataModelerAgent` | `modelling` (shipped v0.45.3) |
 | `pipeline-engineer` | `TransformationScaffolderAgent`, `IngestionPipelineAgent`, Pipeline Spec synthesis | `pipeline-scaffolding`, `code-conversion-import`, `deployment` |
 | `documenter` | `DocumentationAgent` | `documentation` (shipped v0.45.0); `bi-migration` later |
 | `context-curator` | chat fact extraction, pack free-text reading, profile and vocabulary proposals | `fact-extraction`, `document-reading`, `vocabulary` |
@@ -561,10 +561,10 @@ Any surface resumes it; this closes BPS-7. Answers are the user's statements, so
 - **Workflow:** `autode_workflow_templates`, `autode_workflow_status`, `autode_workflow_next`, `autode_workflow_start_stage`, `autode_workflow_complete_stage`, `autode_workflow_skip_stage` (default and optional stages only), `autode_workflow_reopen_stage`, `autode_propose_workflow`, `autode_request_approval`.
 - **Deterministic helpers for the roles:**
   - `autode_match_columns`: candidate column matches by name, type, vocabulary and past approved mappings;
-  - `autode_draft_model`: a draft model from grain and keys;
+  - `autode_draft_model`: a draft model from grain and keys (shipped v0.45.3, with `autode_check_model`, which checks it and renders the DDL);
   - `autode_primitive_candidates`;
   - `autode_reconcile_plan`: reconciliation queries by key, read-only.
-- **Proposals:** `autode_propose_model`, `autode_propose_artifacts` (gives artifacts written in any host grounding manifests), `autode_propose_entity_resolution`, `autode_propose_quality_rules`.
+- **Proposals:** `autode_propose_model` (not built: since v0.45.0 a stage's deliverables are drafts approved at its gate, v0.45.3), `autode_propose_artifacts` (built as `autode_record_artifact`, v0.45.0) (gives artifacts written in any host grounding manifests), `autode_propose_entity_resolution`, `autode_propose_quality_rules`.
 - **Interview:** `autode_interview_state`, `autode_interview_record_answer`.
 - **CLI:** `autode workflow templates | status | next | approve <stage> | skip <stage> --reason | reopen <stage>`, and `autode plugin install --host claude|cortex|copilot [--scope project|user]`, `autode plugin path`.
 

@@ -6,6 +6,37 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.3
+
+- **Phase PA3b, step 3: the data modeler** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6; technical-design §7.9). The modelling stage is done by the `data-modeler` role with the `modelling` skill, the same in VS Code (Run agent) and in any host. The TypeScript `dataModelerAgent` is **deleted**. Whenever its model call failed, it fell back to a fixed customer/product/sales template.
+- **`autode_draft_model`** (read-only, deterministic) drafts the model from what AutoDE knows:
+  - one entity per mapped target, with the mapped columns (types from the source columns, or from the target table when it exists) and their transforms;
+  - the kind from the name (`fct_`, `dim_`, `bridge_`, `hub_`, `link_`, `sat_`);
+  - grain and keys from key and grain facts (confirmed or proposed, never rejected), about the target or about its single source through the mapping, each with where it came from;
+  - in a dimensional model, a surrogate key for each dimension, with the business key as its natural key;
+  - foreign keys from relationship facts between sources mapped to different targets;
+  - the target context's approach, naming, database and schema.
+
+  What isn't known comes back as gaps: no grain, no key, SCD type not decided, an unknown type, a fact with no foreign keys, a relationship or grain that isn't fully mapped.
+- **`autode_check_model`** (read-only) checks the refined model:
+  - errors: every entity has a grain and a primary key made of its own columns; foreign keys reference entities and columns in the model with matching arity; no duplicates; every mapped target column is in the model;
+  - warnings: naming convention, SCD type, missing types, facts without foreign keys.
+
+  It returns the **DDL that AutoDE renders from the model**: referenced entities first, primary and foreign keys, the grain as a comment. The agent records that DDL and never writes it by hand.
+- **The data modeler**:
+  - starts from the draft;
+  - closes the gaps: a grain or key that is a choice is proposed as a fact for the Context Inbox, not assumed;
+  - applies the approach (surrogate keys, SCD types, conformed date dimension, a home for every measure in a dimensional model; hubs, links and satellites in a data vault);
+  - checks the model, and records `model.yaml`, `model.sql` (the rendered DDL) and `model.md` (entities, decisions, proposed facts, warnings).
+
+  The stage is handed in, and a person approves the model at its gate.
+- **Deviations / notes:**
+  - **No `autode_propose_model`.** The spec listed a model proposal. Like the other deliverables since v0.45.0, the model is recorded as the stage's artifacts and approved once, at the stage's gate.
+  - **Only the build stage still uses AutoDE's old agents** (ingestion and transformation, v0.45.4).
+  - **The development build's size budget moved from 1.5 to 2 MB.** The unminified `dist/autode.js` grew to 1.55 MB. The shipped build is minified (about 830 KB), and the package test still budgets the tarball.
+  - **Eval:** the reference plan loses its model step. Identifier grounding stays at 0% offline, as before (the template tier, until a cassette is recorded), but the count moves from 0/2 to 0/5: the ingestion step now runs without the model step's output, so its fallback SQL names more identifiers. Every other metric is unchanged.
+- **Measured:** 374 tests (3 new: the draft from mapping and facts; the check and the DDL; the data modeler over MCP). Tests that used `dataModelerAgent` as a generic plan agent now use the ingestion or transformation agent; the v0.45.1 per-stage legacy test now runs the build stage. Lint 0 errors.
+
 ## 0.45.2
 
 - **Phase PA3b, step 2: the source assessor and the mapper** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6; technical-design §7.9). Source assessment, conformance and source-to-target mapping are now role templates with skills. They work the same in VS Code (Run agent) and in any host (`autode_workflow_next`, the plugin). The TypeScript `sourceAssessmentAgent` and `sttmAgent` are **deleted**, with the unused `src/spokes/{sttmAgent,ingestionAgent}.ts`.

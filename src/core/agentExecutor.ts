@@ -23,7 +23,6 @@ import { readWorkflow } from '../engine/workflows/instance';
  * migrates to a role template (PA3b). Nothing else runs them.
  */
 export const LEGACY_AGENTS: Partial<Record<StageKind, Array<{ agent: AgentType; task: string }>>> = {
-  'modelling': [{ agent: 'dataModelerAgent', task: 'Design the target data model for the approved specification and mapping: entities, grain, keys and relationships.' }],
   'build': [
     { agent: 'ingestionAgent', task: 'Build the ingestion of the mapped source tables into the raw layer, incremental where the specification says so.' },
     { agent: 'transformScaffoldAgent', task: 'Scaffold the transformations (staging, dimensions, facts) from the approved mapping and model.' }

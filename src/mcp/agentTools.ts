@@ -14,6 +14,7 @@ import { readWorkflow } from '../engine/workflows/instance';
 import { appendEvent, Actor } from '../engine/workflows/events';
 import { EntityMapping, SourceContextEntry } from '../engine/types';
 import { StageKind } from '../engine/workflows/stageKinds';
+import { DataModel, checkModel, draftModel, problemMappings, renderModelDdl, targetSettings } from '../engine/agents/modelDraft';
 
 /**
  * The tools of the source assessor and the mapper (PA3b, v0.45.2): a
@@ -58,7 +59,43 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
   const note = (ws: EngineWorkspace, problemRoot: string, stage: string | undefined, file: string) => {
     if (stage) appendEvent(problemRoot, { at: new Date().toISOString(), type: 'recorded', stage, actor: agent(), channel: 'tool', files: [path.relative(ws.options.workspaceRoot, file).split(path.sep).join('/')] });
   };
+  const modelSchema = { type: 'object', required: ['entities'], properties: {
+    approach: { type: 'string', enum: ['dimensional', 'data-vault', 'obt', '3nf', 'raw-pass-through'] }, naming: { type: 'string', enum: ['snake_case', 'camelCase', 'PascalCase'] },
+    database: { type: 'string' }, schema: { type: 'string' },
+    entities: { type: 'array', items: { type: 'object', required: ['name', 'kind', 'columns'], properties: {
+      name: { type: 'string', minLength: 1 }, kind: { type: 'string' }, description: { type: 'string' }, scd: { enum: [1, 2] },
+      grain: { type: 'array', items: { type: 'string' } }, primaryKey: { type: 'array', items: { type: 'string' } }, naturalKey: { type: 'array', items: { type: 'string' } },
+      columns: { type: 'array', items: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1 }, type: { type: 'string' }, nullable: { type: 'boolean' }, source: { type: 'string' }, transform: { type: 'string' }, description: { type: 'string' } } } },
+      foreignKeys: { type: 'array', items: { type: 'object', required: ['columns', 'references'], properties: { columns: { type: 'array', items: { type: 'string' } }, references: { type: 'string' }, referencedColumns: { type: 'array', items: { type: 'string' } } } } },
+      sources: { type: 'array', items: { type: 'string' } }
+    } } }
+  } };
   return [
+    {
+      name: 'autode_draft_model',
+      description: "A first draft of the target data model, deterministic: the mapping's target entities and columns, the source columns' types, grain, keys and foreign keys from the key, grain and relationship facts (confirmed or proposed, each with where it came from), the kind from the name (fct_, dim_, hub_ …), surrogate keys for dimensions in a dimensional model, and the target context's approach and naming. What isn't known comes back as gaps. Refine it, then check it with autode_check_model.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: read('Draft the data model'),
+      handler: async (_args, ws) => {
+        const { problemRoot } = problemOf(ws);
+        const src = await ws.contextSources();
+        const r = draftModel({ mappings: problemMappings(problemRoot), schemaIndex: buildSchemaIndex(src.graph.nodes, src.graph.edges), assertions: src.assertions, nodes: src.graph.nodes, ...targetSettings(problemRoot) });
+        return r as unknown as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_check_model',
+      description: "Check a data model (as autode_draft_model returns it, refined): every entity has a grain and a primary key made of its own columns, foreign keys reference entities and columns in the model with matching arity, no duplicates, every mapped target column is in the model, naming follows the convention. Returns errors (fix them), warnings (tell the reviewer), and the DDL AutoDE renders from the model — record that, never hand-written DDL.",
+      inputSchema: { type: 'object', required: ['model'], additionalProperties: false, properties: { model: modelSchema } },
+      annotations: read('Check the data model'),
+      handler: async (args, ws) => {
+        const { problemRoot } = problemOf(ws);
+        const model = { approach: 'dimensional', naming: 'snake_case', ...(args.model as object) } as DataModel;
+        model.entities = model.entities.map((e) => ({ ...e, columns: e.columns ?? [], foreignKeys: e.foreignKeys ?? [], sources: e.sources ?? [] }));
+        const r = checkModel(model, { mappings: problemMappings(problemRoot) });
+        return { ...r, ddl: renderModelDdl(model) };
+      }
+    },
     {
       name: 'autode_match_columns',
       description: 'Candidate column matches from a source table to a target table, deterministic, each with a score and its reasons: the same name, the same name without the table prefix, the same meaning through the vocabulary (CUST_NO ~ customer_number), words in common, and earlier approved mappings; types that can\'t convert lower the score. The target is a table in the estate, or a planned table given as targetColumns. Use it before drafting a mapping; you decide.',

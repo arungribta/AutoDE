@@ -5,7 +5,6 @@ import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, Engine
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeIngestionAgent } from '../agents/build/IngestionPipelineAgent';
 import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
-import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
 import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
 import { executeToolSkillAgent } from '../agents/build/ToolSkillAgent';
 import { ArtifactWriter } from '../context/ArtifactWriter';
@@ -79,24 +78,23 @@ import {
 // that explicit path can execute it like any other step.
 // PA3b v0.45.0: architectureAgent is gone; documentation is the workflow's document stage (agents/documenter.md).
 // v0.45.2: sourceAssessmentAgent and sttmAgent are gone too (agents/source-assessor.md, agents/sttm-mapper.md).
-const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'snowflakeExecutor', 'dataModelerAgent', 'transformScaffoldAgent'];
+// v0.45.3: and dataModelerAgent (agents/data-modeler.md).
+const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'snowflakeExecutor', 'transformScaffoldAgent'];
 
 const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string; artifacts?: GeneratedArtifact[] }>> = {
   ingestionAgent: executeIngestionAgent,
   snowflakeExecutor: executeSnowflakeAgent,
-  dataModelerAgent: executeDataModelerAgent,
   transformScaffoldAgent: executeTransformScaffoldAgent,
   toolSkillAgent: executeToolSkillAgent
 };
 
-const MOVED: Record<string, string> = { architectureAgent: 'Documentation', sourceAssessmentAgent: 'Source assessment', sttmAgent: 'Source-to-target mapping' };
+const MOVED: Record<string, string> = { architectureAgent: 'Documentation', sourceAssessmentAgent: 'Source assessment', sttmAgent: 'Source-to-target mapping', dataModelerAgent: 'Data modelling' };
 const MOVED_AGENT = (agent: string): string => MOVED[agent]
   ? `${MOVED[agent]} moved to the workflow: run its stage from the Workflow view (Run agent), or from a host agent with the AutoDE plugin.`
   : `No agent "${agent}" in this version of AutoDE.`;
 
 // Agent-to-phase mapping
 const AGENT_PHASE: Partial<Record<AgentType, WorkflowPhase>> = {
-  dataModelerAgent: 'model',
   ingestionAgent: 'build',
   transformScaffoldAgent: 'build',
   snowflakeExecutor: 'build',
@@ -1532,7 +1530,7 @@ Message: ${message}`;
 - Outputs: ${t.outputFormats.join(', ')}`;
     }
 
-    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${phaseBlock}${implementationBlock}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, snowflakeExecutor, dataModelerAgent, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
+    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${phaseBlock}${implementationBlock}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, snowflakeExecutor, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
   }
 
   // ── LLM Calls ──

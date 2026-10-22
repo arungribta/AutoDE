@@ -196,7 +196,7 @@ assertionRefs: { net_revenue: [01J...], order.grain: [01J...] }   # traceability
 Requirements:
 - Concepts align with dbt MetricFlow semantic models (entities, dimensions, measures, metrics), so an export maps one-to-one.
 - **Exports are primitives:** dbt `semantic_models` / `metrics` YAML, Snowflake semantic view DDL, and Databricks metric views where the platform supports them. Each is a Tier-2 `PrimitiveDefinition`, so exports are deterministic and versioned. Track the emerging cross-vendor semantic interchange formats as future export targets; do not adopt them as the internal format.
-- **Consumption (principle C3):** the `sttm-mapper` role (until v0.45.2 `SttmMapperAgent`), `DataModelerAgent`, `TransformationScaffolderAgent` and `llmParamSelector` read grain, keys, join paths and metric definitions from the semantic model. When a step needs one that doesn't exist (e.g. a join between two entities with no `relationship` assertion), the step pauses with a **context gap** (§7.3). It must not invent one.
+- **Consumption (principle C3):** the `sttm-mapper` role (until v0.45.2 `SttmMapperAgent`), the `data-modeler` role through `autode_draft_model` (until v0.45.3 `DataModelerAgent`), `TransformationScaffolderAgent` and `llmParamSelector` read grain, keys, join paths and metric definitions from the semantic model. When a step needs one that doesn't exist (e.g. a join between two entities with no `relationship` assertion), the step pauses with a **context gap** (§7.3). It must not invent one.
 - A model element backed only by `inferred` assertions is shown as such and cannot be part of an `approved` model unless the user explicitly confirms it.
 
 ---

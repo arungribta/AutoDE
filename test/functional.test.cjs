@@ -1451,7 +1451,7 @@ async function main() {
   await test('validatePlanResponse() rejects duplicate step IDs', async () => {
     const bad = JSON.stringify([
       { id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: [] },
-      { id: 's', assignedAgent: 'dataModelerAgent', taskDescription: 'b', dependsOn: [] }
+      { id: 's', assignedAgent: 'transformScaffoldAgent', taskDescription: 'b', dependsOn: [] }
     ]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /duplicate step ID/i);
@@ -1472,7 +1472,7 @@ async function main() {
   await test('validatePlanResponse() rejects a multi-step circular dependency', async () => {
     const bad = JSON.stringify([
       { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['s2'] },
-      { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'b', dependsOn: ['s1'] }
+      { id: 's2', assignedAgent: 'transformScaffoldAgent', taskDescription: 'b', dependsOn: ['s1'] }
     ]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /circular dependency/i);
@@ -1487,12 +1487,12 @@ async function main() {
   });
 
   await test('validatePlanResponse() rejects a step outside the required phases', async () => {
-    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'design the model', dependsOn: [] }]);
+    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'load the tables', dependsOn: [] }]);
     const { hub, mock } = hubForPlanResponse(outOfPhase);
     const spec = {
       id: 'bps-1', version: 1, status: 'approved', problemStatementApproved: true,
-      problemStatement: 'Build dbt pipelines and load into the warehouse.',
-      objectives: ['Build a dbt pipeline.'], successCriteria: [], scope: { in: [], out: [] },
+      problemStatement: 'Assess the existing source systems and document what they hold.',
+      objectives: ['An inventory of the source systems.'], successCriteria: [], scope: { in: [], out: [] },
       constraints: [], assumptions: [], createdAt: '', updatedAt: ''
     };
     await assert.rejects(() => withMock(mock, () => hub.generatePlanFromSpec(spec)), /not among the required phases/i);
@@ -5563,13 +5563,13 @@ async function main() {
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'revenue', schemaContext: 'GLOBAL DUMP',
         steps: [
-          { id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
-          { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
+          { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
+          { id: 's2', assignedAgent: 'ingestionAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
         ],
         status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1
       });
       await hub.executePlan();
-      assert.deepStrictEqual(built, ['Plan step s1 (dataModelerAgent)', 'Plan step s2 (dataModelerAgent)']);
+      assert.deepStrictEqual(built, ['Plan step s1 (ingestionAgent)', 'Plan step s2 (ingestionAgent)']);
       const p1 = hub.getStepPack('s1'), p2 = hub.getStepPack('s2');
       assert.ok(p1.text.includes('shop.refunds') && !p1.text.includes('support_tickets'));
       assert.ok(p2.text.includes('support_tickets') && !p2.text.includes('shop.refunds'));
@@ -6175,7 +6175,7 @@ async function main() {
       });
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'x', schemaContext: '',
-        steps: [{ id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
+        steps: [{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
         status: 'ready', planApproved: true, stagesConfirmed: true
       });
       await hub.executePlan();
@@ -6708,7 +6708,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -6769,6 +6769,8 @@ async function main() {
       autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
       autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
+      autode_draft_model: [{}, { x: 1 }],
+      autode_check_model: [{ model: { entities: [{ name: 'fct_orders', kind: 'fact', columns: [{ name: 'order_id' }] }] } }, { model: { entities: [{ name: 'fct_orders', kind: 'fact' }] } }],
       autode_record_mapping: [{ mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [{ sourceColumn: 'a', targetColumn: 'b' }] } }, { mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [] } }],
       autode_record_source_context: [{ sources: [{ connectionId: 'shop', method: 'file' }] }, { sources: [{ connectionId: 'shop', method: 'guessed' }] }],
       autode_workflow_start_stage: [{ stage: 'sources' }, {}],
@@ -6901,7 +6903,8 @@ async function main() {
     // Since v0.42.0 the server lives in the CLI bundle (dist/mcp-server.js is a shim for `autode mcp`).
     const bundle = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'autode.js'), 'utf8');
     assert.ok(!/require\(["']vscode["']\)/.test(bundle), 'the MCP bundle requires vscode');
-    assert.ok(bundle.length < 1.5 * 1024 * 1024, `autode.js is ${Math.round(bundle.length / 1024)} KB (budget 1.5 MB)`);
+    // The unminified development build (v0.45.3: 1.55 MB); the shipped build is minified (about 830 KB) and the package test budgets the tarball.
+    assert.ok(bundle.length < 2 * 1024 * 1024, `autode.js is ${Math.round(bundle.length / 1024)} KB (development budget 2 MB)`);
   });
 
   // ── v0.36.0: .autode/ workspace layout, visible deliverables, migration from .ai-context/ ──
@@ -8179,8 +8182,8 @@ async function main() {
         sources: () => c3.sources(env.ledger, env.project()), supplementary: () => '', specRevision: () => 'sha256:spec'
       });
       hub.loadPersistedPlan({ id: 'p', version: 1, objective: 'tickets', schemaContext: '', steps: [
-        { id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
-        { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
+        { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
+        { id: 's2', assignedAgent: 'ingestionAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
       ], status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1 });
       await hub.executePlan();
       let st = hub.getPlan();
@@ -9319,7 +9322,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'conformance', 'documentation', 'mapping', 'quality-rules', 'source-assessment']);
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'conformance', 'documentation', 'mapping', 'modelling', 'quality-rules', 'source-assessment']);
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -9495,7 +9498,7 @@ async function main() {
     const dir = nodePath.join(ws, '.autode', 'config', 'workflows');
     nodeFs.mkdirSync(dir, { recursive: true });
     const st = (id, kind, extra = '') => `  - id: ${id}\n    title: ${id}\n    kind: ${kind}\n    inclusion: default\n    consumes: [spec]\n    after: [plan (approved)]\n${extra}`;
-    nodeFs.writeFileSync(nodePath.join(dir, 'tiny.yaml'), 'id: tiny\nversion: 1\ntitle: Tiny\ndescription: Three stages after the plan.\nstages:\n  - id: specify\n    title: Specification\n    kind: specify\n    inclusion: mandatory\n  - id: plan\n    title: Plan\n    kind: plan\n    inclusion: mandatory\n    after: [specify (approved)]\n' + st('quality', 'quality-rules') + st('mapping', 'mapping') + st('model', 'modelling') + st('bi', 'bi-migration').replace('inclusion: default', 'inclusion: optional'));
+    nodeFs.writeFileSync(nodePath.join(dir, 'tiny.yaml'), 'id: tiny\nversion: 1\ntitle: Tiny\ndescription: Three stages after the plan.\nstages:\n  - id: specify\n    title: Specification\n    kind: specify\n    inclusion: mandatory\n  - id: plan\n    title: Plan\n    kind: plan\n    inclusion: mandatory\n    after: [specify (approved)]\n' + st('quality', 'quality-rules') + st('mapping', 'mapping') + st('model', 'modelling') + st('build', 'build') + st('bi', 'bi-migration').replace('inclusion: default', 'inclusion: optional'));
     const W = ['--workspace', ws];
     const id = (await cliFn(['problems', 'new', 'Daily revenue from the shop orders', ...W, '--json'])).json().id;
     const prob = nodePath.join(ws, '.autode', 'problems', id);
@@ -9558,7 +9561,7 @@ async function main() {
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
-  await test('v0.45.1: every stage has a way forward — quality rules by the quality engineer (even where the plan named another role), modelling by AutoDE\'s not-yet-migrated agent for that stage only, its files recorded and handed in', async () => {
+  await test('v0.45.1: every stage has a way forward — quality rules by the quality engineer (even where the plan named another role), the build by AutoDE\'s not-yet-migrated agents for that stage only, its files recorded to it', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-legacy-'));
     try {
@@ -9575,23 +9578,21 @@ async function main() {
       const m = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope);
       const st = (x) => m.stages.find((s) => s.id === x);
       assert.deepStrictEqual([st('quality').runner, st('quality').actions.includes('run')], ['quality-engineer', true]);
-      assert.deepStrictEqual([st('model').runner, st('model').actions.includes('run')], ['dataModelerAgent', true]);
-      // The legacy run: only the model stage's agent, its files recorded to the stage and handed in.
+      assert.deepStrictEqual([st('model').runner, st('build').runner, st('build').actions.includes('run')], ['data-modeler', 'ingestionAgent + transformScaffoldAgent', true]);
+      // The legacy run: only the build stage's agents, their files recorded to the stage; the Pipeline Spec's approval completes it.
       const { runStage } = fresh('../dist/core/agentExecutor.js');
-      const out = nodePath.join(ws, 'autode-output', id, '02-model', 'model.sql');
+      const out = nodePath.join(ws, 'autode-output', id, '03-build', 'stg_orders.sql');
       let asked;
       const host = {
         createEngine: () => undefined, activeProvider: () => 'claude', log: () => {}, runAgentWithTools: async () => { throw new Error('not used'); },
         runStageSteps: async (stageId, objective, steps) => { asked = { stageId, objective, agents: steps.map((s) => s.agent) }; nodeFs.mkdirSync(nodePath.dirname(out), { recursive: true }); nodeFs.writeFileSync(out, 'create table fct_orders (order_id int);'); return { ok: true, files: [out], message: '1 step(s) done; 1 file(s) written.' }; }
       };
-      const r = await runStage(host, scope, 'model');
-      assert.ok(r.ok, r.message);
-      assert.deepStrictEqual([asked.stageId, asked.agents, /Daily revenue/.test(asked.objective)], ['model', ['dataModelerAgent'], true], 'it runs on any model, Claude Code included');
-      assert.deepStrictEqual(r.outputs, [`autode-output/${id}/02-model/model.sql`]);
-      const events = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'model' });
-      assert.ok(events.some((e) => e.type === 'recorded' && e.actor.name === 'dataModelerAgent' && e.actor.host === 'VS Code'));
-      const after = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope).stages.find((s) => s.id === 'model');
-      assert.ok(['awaiting-approval', 'done'].includes(after.status), after.status);
+      const r = await runStage(host, scope, 'build');
+      assert.ok(r.ok && /document is approved/.test(r.message), r.message);
+      assert.deepStrictEqual([asked.stageId, asked.agents, /Daily revenue/.test(asked.objective)], ['build', ['ingestionAgent', 'transformScaffoldAgent'], true], 'it runs on any model, Claude Code included');
+      assert.deepStrictEqual(r.outputs, [`autode-output/${id}/03-build/stg_orders.sql`]);
+      const events = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'build' });
+      assert.ok(events.some((e) => e.type === 'recorded' && e.actor.name === 'ingestionAgent + transformScaffoldAgent' && e.actor.host === 'VS Code'));
       // A stage with no agent at all says so, and offers hand-in or skip.
       const bi = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope).stages.find((s) => s.id === 'bi');
       assert.ok(!bi || bi.status === 'skipped' || /hand in/.test(bi.guide));
@@ -9725,6 +9726,100 @@ async function main() {
       assert.ok(/sttmAgent: 'Source-to-target mapping'/.test(hub) && !/executeSttmAgent|executeSourceAssessmentAgent/.test(hub));
       void prob;
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ---------- v0.45.3: PA3b step 3 — the data modeler ----------
+
+  const modelFixture = () => {
+    const table = (fqn, cols) => ({ fqn, name: fqn.split('.').pop(), columns: new Map(Object.entries(cols)) });
+    const tables = [table('shop.orders', { order_id: 'INT', customer_id: 'INT', amount: 'NUMBER(12,2)', ordered_at: 'TIMESTAMP' }), table('shop.customers', { customer_id: 'INT', email: 'VARCHAR', segment: 'VARCHAR' })];
+    const byName = new Map(tables.map((t) => [t.name, [t]]));
+    const fact = (id, kind, subject, value, status = 'active') => ({ id, kind, subject, predicate: kind, value, statement: id, status, trust: 'confirmed', evidence: [], validFrom: '', createdBy: 'user:t', createdAt: '' });
+    return {
+      mappings: [
+        { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: [{ sourceColumn: 'order_id', targetColumn: 'order_id' }, { sourceColumn: 'customer_id', targetColumn: 'customer_id' }, { sourceColumn: 'amount', targetColumn: 'net_amount' }, { sourceColumn: 'ordered_at', targetColumn: 'ordered_at' }] },
+        { id: 'm2', sourceEntityId: 'shop.customers', sourceFqn: 'shop.customers', targetName: 'dim_customer', columns: [{ sourceColumn: 'customer_id', targetColumn: 'customer_id' }, { sourceColumn: 'email', targetColumn: 'email_hash', transformExpression: 'SHA2(email)' }, { sourceColumn: 'segment', targetColumn: 'segment' }] }
+      ],
+      schemaIndex: { tables, byName },
+      nodes: [],
+      assertions: [
+        fact('g1', 'grain', ['shop.orders'], ['order_id']),
+        fact('k1', 'key', ['shop.orders'], ['order_id']),
+        fact('k2', 'key', ['shop.customers'], ['customer_id'], 'proposed'),
+        fact('r1', 'relationship', ['shop.orders', 'shop.customers'], { from: { entity: 'shop.orders', columns: ['customer_id'] }, to: { entity: 'shop.customers', columns: ['customer_id'] }, cardinality: 'N:1' }),
+        fact('x1', 'key', ['shop.customers'], ['email'], 'rejected')
+      ]
+    };
+  };
+
+  await test('v0.45.3: autode_draft_model drafts from the mapping and the facts — kinds, types, grain and keys through the mapping with their provenance, surrogate keys, foreign keys from relationships — and says what is not known', () => {
+    const M = fresh('../dist/engine/agents/modelDraft.js');
+    const { model, gaps } = M.draftModel({ ...modelFixture(), approach: 'dimensional', naming: 'snake_case' });
+    const e = (n) => model.entities.find((x) => x.name === n);
+    assert.deepStrictEqual([e('fct_orders').kind, e('dim_customer').kind], ['fact', 'dimension']);
+    assert.deepStrictEqual([e('fct_orders').grain, e('fct_orders').primaryKey], [['order_id'], ['order_id']]);
+    assert.ok(e('fct_orders').provenance.some((p) => /grain of shop\.orders \(fact g1, confirmed\) through the mapping/.test(p)), e('fct_orders').provenance.join('|'));
+    assert.deepStrictEqual([e('dim_customer').primaryKey, e('dim_customer').naturalKey, e('dim_customer').columns[0].name], [['customer_key'], ['customer_id'], 'customer_key'], 'a surrogate key; the proposed key is the natural key (a rejected one is ignored)');
+    assert.strictEqual(e('fct_orders').columns.find((c) => c.name === 'net_amount').type, 'NUMBER(12,2)');
+    assert.strictEqual(e('dim_customer').columns.find((c) => c.name === 'email_hash').transform, 'SHA2(email)');
+    assert.deepStrictEqual(e('fct_orders').foreignKeys.map((f) => [f.columns, f.references, f.referencedColumns]), [[['customer_id'], 'dim_customer', ['customer_id']]]);
+    assert.ok(gaps.some((g) => /dim_customer: no grain/.test(g)) && gaps.some((g) => /SCD type/.test(g)), gaps.join('\n'));
+    assert.ok(M.draftModel({ ...modelFixture(), mappings: [] }).gaps.some((g) => /draft the mapping first/.test(g)));
+  });
+
+  await test('v0.45.3: autode_check_model refuses a model that can\'t be built (no grain or key, a key or foreign key on columns that aren\'t there, a mapped column missing) and renders the DDL, referenced entities first', () => {
+    const M = fresh('../dist/engine/agents/modelDraft.js');
+    const fx = modelFixture();
+    const { model } = M.draftModel({ ...fx, approach: 'dimensional', naming: 'snake_case' });
+    let r = M.checkModel(model, { mappings: fx.mappings });
+    assert.ok(!r.ok && r.errors.some((x) => /dim_customer: the grain is required/.test(x)), r.errors.join('\n'));
+    const dim = model.entities.find((x) => x.name === 'dim_customer');
+    dim.grain = ['customer_id']; dim.scd = 2;
+    const fct = model.entities.find((x) => x.name === 'fct_orders');
+    fct.foreignKeys = [{ columns: ['customer_key'], references: 'dim_customer' }];
+    r = M.checkModel(model, { mappings: fx.mappings });
+    assert.ok(r.errors.some((x) => /foreign key column customer_key is not a column/.test(x)), r.errors.join('\n'));
+    fct.columns.push({ name: 'customer_key', type: 'INTEGER' });
+    r = M.checkModel(model, { mappings: fx.mappings });
+    assert.deepStrictEqual(r.errors, []);
+    assert.ok(r.ok);
+    const broken = JSON.parse(JSON.stringify(model));
+    broken.entities[0].columns = broken.entities[0].columns.filter((c) => c.name !== 'net_amount');
+    broken.entities[0].foreignKeys.push({ columns: ['customer_key'], references: 'dim_nothing' });
+    const rb = M.checkModel(broken, { mappings: fx.mappings });
+    assert.ok(rb.errors.some((x) => /net_amount is mapped but not in the model/.test(x)) && rb.errors.some((x) => /dim_nothing, which is not in the model/.test(x)), rb.errors.join('\n'));
+    const ddl = M.renderModelDdl({ ...model, database: 'DW', schema: 'MART' });
+    assert.ok(ddl.indexOf('CREATE TABLE DW.MART.dim_customer') < ddl.indexOf('CREATE TABLE DW.MART.fct_orders'), 'dimensions first');
+    assert.ok(/CONSTRAINT pk_dim_customer PRIMARY KEY \(customer_key\)/.test(ddl) && /FOREIGN KEY \(customer_key\) REFERENCES DW\.MART\.dim_customer \(customer_key\)/.test(ddl) && /one row per order_id/.test(ddl) && /\(SCD2\)/.test(ddl), ddl);
+  });
+
+  await test('v0.45.3: the data modeler over MCP — its assignment and skill, a draft from the problem\'s mapping and estate, the check and its DDL; dataModelerAgent is gone', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-model-'));
+    let client;
+    try {
+      const { id, prob, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), 'CREATE TABLE shop.orders (\n  order_id INT NOT NULL,\n  amount NUMBER(12,2)\n);\n');
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
+      fresh('../dist/engine/documents/problemDocuments.js').writeMappingUpsert(prob, { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: [{ sourceColumn: 'order_id', targetColumn: 'order_id' }, { sourceColumn: 'amount', targetColumn: 'net_amount' }] });
+      const a = fresh('../dist/engine/agents/assignment.js').assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'model', (await client.listTools()).tools).assignment;
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id), a.tier], ['data-modeler', ['modelling'], 'propose']);
+      assert.ok(a.engineTools.includes('autode_draft_model') && a.engineTools.includes('autode_check_model') && a.engineTools.includes('autode_record_artifact'));
+      const d = await call('autode_draft_model', {});
+      const fct = d.model.entities.find((x) => x.name === 'fct_orders');
+      assert.ok(fct && fct.kind === 'fact' && /NUMBER/.test(fct.columns.find((c) => c.name === 'net_amount').type), JSON.stringify(d));
+      assert.ok(d.gaps.some((g) => /no grain/.test(g)));
+      let c = await call('autode_check_model', { model: d.model });
+      assert.ok(!c.ok && c.errors.length && /CREATE TABLE fct_orders/.test(c.ddl), JSON.stringify(c));
+      fct.grain = ['order_id']; fct.primaryKey = ['order_id'];
+      c = await call('autode_check_model', { model: d.model });
+      assert.ok(c.ok, c.errors.join('\n'));
+      assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', 'src', 'agents', 'model', 'DataModelerAgent.ts')));
+      assert.ok(/dataModelerAgent: 'Data modelling'/.test(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8')));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {
