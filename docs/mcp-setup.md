@@ -310,6 +310,7 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_record_artifact` | Record a stage's deliverable (a document, SQL, YAML) with its grounding manifest; a draft until the stage is approved. |
 | `autode_record_source_context` / `autode_record_mapping` | Draft the stage's own document: the source context (each source system and how AutoDE knows it), or one entity mapping (validated against the estate). A person approves the document. |
 | `autode_match_columns` | Candidate source → target column matches with a score and reasons (name, prefix, vocabulary, earlier approved mappings, types), deterministic. |
+| `autode_primitive_candidates` / `autode_record_pipeline_spec` | The transform primitives a mapped source needs, with parameters filled in from the facts and their reasons; drafting the Pipeline Spec from them (validated step by step), which a person approves. Record compiled files with `autode_record_artifact` and its `primitives` so their manifests show which facts back each decision. |
 | `autode_draft_model` / `autode_check_model` | A deterministic first draft of the target data model (from the mapping and the key, grain and relationship facts, with gaps), and checking a refined model, which returns its errors, warnings and the DDL AutoDE renders. |
 | `autode_workflow_templates` / `autode_propose_workflow` | The templates, and proposing the problem's workflow (a deterministic draft, or your refinement); a person approves it. |
 | `autode_workflow_start_stage` / `autode_workflow_complete_stage` / `autode_workflow_skip_stage` / `autode_workflow_reopen_stage` | Work on stages: hand one in (its gate goes to a person), skip a non-mandatory one with a reason, re-open one (everything downstream becomes stale). |
@@ -355,7 +356,7 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 ## Not yet available
 
 The following arrive in later releases:
-- AutoDE's other agents as role templates and skills, one per release to v0.45.6 (today: the orchestrator, the documenter, the quality engineer, the source assessor, the mapper and the data modeler).
+- AutoDE's other agents as role templates and skills, one per release to v0.45.6 (today: the orchestrator, the documenter, the quality engineer, the source assessor, the mapper, the data modeler and the pipeline engineer).
 - Approvals inside the host, through MCP elicitation (PA3c).
 
 ## Troubleshooting

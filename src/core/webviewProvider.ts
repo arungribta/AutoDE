@@ -2230,7 +2230,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       } else if (action === 'run' && stage) {
         this.postLog(`Running the agent for stage ${stage}…`);
         const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: running ${stage}`, cancellable: false },
-          () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), runStageSteps: (id, obj, steps) => this.hub.runStageSteps(id, obj, steps), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
+          () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
             { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
         this.postLog(r.ok ? `${r.message}${r.outputs.length ? ` Recorded: ${r.outputs.join(', ')}.` : ''}` : r.message);
         if (!r.ok) void vscode.window.showWarningMessage(r.message.split('\n')[0]);

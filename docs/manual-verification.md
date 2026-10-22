@@ -709,6 +709,25 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: run a plan saved before v0.45.3 with a `dataModelerAgent` step.
   Expect: "Data modelling moved to the workflow: run its stage from the Workflow view…".
 
+## Part 30 — v0.45.4 The pipeline engineer
+
+- [ ] **30.1 Candidates.**
+  Do: with an approved mapping and a confirmed key fact on a source that has an `updated_at` column, call `autode_primitive_candidates` for it from Claude Code.
+  Expect: `rename_cast`, `dedup` (by the key, latest by `updated_at`) and `incremental_load`, each with its reasons (the key fact and its trust), and notes for any column expressions.
+- [ ] **30.2 Run agent on Build.**
+  Do: with a model other than Claude Code, choose Run agent on the build stage.
+  Expect:
+  - a draft `spec/pipeline.yaml`;
+  - compiled files under the stage's folder, each with a `.grounding.json` whose decisions are backed by the key fact;
+  - `build-notes.md`;
+  - the stage waits for Approve… on the Pipeline Spec.
+- [ ] **30.3 Not confirmed yet.**
+  Do: repeat 30.1 with the key fact only proposed.
+  Expect: the dedup reason says the fact is not confirmed yet, and the recorded file's manifest shows the decision unbacked.
+- [ ] **30.4 An old plan.**
+  Do: run a plan saved before v0.45.4 with `ingestionAgent` or `transformScaffoldAgent` steps.
+  Expect: "The build moved to the workflow…".
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -881,5 +900,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 29.2 |  |  |
 | 29.3 |  |  |
 | 29.4 |  |  |
+| 30.1 |  |  |
+| 30.2 |  |  |
+| 30.3 |  |  |
+| 30.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

@@ -324,7 +324,7 @@ async function main() {
   });
 
   await test('generatePlan() with consent', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
     const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
       sendRequest: async () => ({ text: textIter(plan) }) };
     const mock = createMock({ models: [model] });
@@ -407,7 +407,7 @@ async function main() {
     const plan = [
       { id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'x', status: 'completed', phase: 'discover' },
       { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'x', status: 'completed', phase: 'model' },
-      { id: 's3', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending', phase: 'build' },
+      { id: 's3', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', status: 'pending', phase: 'build' },
       { id: 's4', assignedAgent: 'architectureAgent', taskDescription: 'x', status: 'pending', phase: 'validate' }
     ];
     const live = computePhaseStatuses(base, plan, 'build');
@@ -420,8 +420,8 @@ async function main() {
 
   await test('generatePlanFromSpec() infers phases and tags plan steps', async () => {
     const plan = JSON.stringify([
-      { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'build ingestion pipeline', dependsOn: [], validationRules: [] },
-      { id: 's2', assignedAgent: 'transformScaffoldAgent', taskDescription: 'scaffold the dbt marts', dependsOn: ['s1'], validationRules: [] }
+      { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'build ingestion pipeline', dependsOn: [], validationRules: [] },
+      { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'scaffold the dbt marts', dependsOn: ['s1'], validationRules: [] }
     ]);
     const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
       sendRequest: async () => ({ text: textIter(plan) }) };
@@ -1443,43 +1443,43 @@ async function main() {
   });
 
   await test('validatePlanResponse() rejects a step with no taskDescription', async () => {
-    const bad = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: '   ', dependsOn: [] }]);
+    const bad = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: '   ', dependsOn: [] }]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /does not include a taskDescription/i);
   });
 
   await test('validatePlanResponse() rejects duplicate step IDs', async () => {
     const bad = JSON.stringify([
-      { id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: [] },
-      { id: 's', assignedAgent: 'transformScaffoldAgent', taskDescription: 'b', dependsOn: [] }
+      { id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: [] },
+      { id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'b', dependsOn: [] }
     ]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /duplicate step ID/i);
   });
 
   await test('validatePlanResponse() rejects a dependency on a missing step ID', async () => {
-    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['ghost'] }]);
+    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: ['ghost'] }]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /depends on missing step IDs/i);
   });
 
   await test('validatePlanResponse() rejects a step that depends on itself', async () => {
-    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['s1'] }]);
+    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: ['s1'] }]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /cannot depend on itself/i);
   });
 
   await test('validatePlanResponse() rejects a multi-step circular dependency', async () => {
     const bad = JSON.stringify([
-      { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['s2'] },
-      { id: 's2', assignedAgent: 'transformScaffoldAgent', taskDescription: 'b', dependsOn: ['s1'] }
+      { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: ['s2'] },
+      { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'b', dependsOn: ['s1'] }
     ]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /circular dependency/i);
   });
 
   await test('validatePlanResponse() tolerates a markdown-fenced JSON array', async () => {
-    const plan = '```json\n' + JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [] }]) + '\n```';
+    const plan = '```json\n' + JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [] }]) + '\n```';
     const { hub, mock } = hubForPlanResponse(plan);
     const steps = await withMock(mock, () => hub.generatePlan('build'));
     assert.strictEqual(steps.length, 1);
@@ -1487,7 +1487,7 @@ async function main() {
   });
 
   await test('validatePlanResponse() rejects a step outside the required phases', async () => {
-    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'load the tables', dependsOn: [] }]);
+    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'load the tables', dependsOn: [] }]);
     const { hub, mock } = hubForPlanResponse(outOfPhase);
     const spec = {
       id: 'bps-1', version: 1, status: 'approved', problemStatementApproved: true,
@@ -1507,7 +1507,7 @@ async function main() {
     ];
     const steps = [
       { id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'x', status: 'pending', phase: 'discover' },
-      { id: 's2', assignedAgent: 'ingestionAgent', taskDescription: 'y', status: 'pending', phase: 'build', dependsOn: ['s1'] }
+      { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'y', status: 'pending', phase: 'build', dependsOn: ['s1'] }
     ];
     const readyResult = computePhaseStatuses(phases, steps, undefined, 'ready');
     assert.strictEqual(readyResult.find((p) => p.phase === 'discover').status, 'pending-review', 'required phase awaits review before anything has run');
@@ -1519,27 +1519,8 @@ async function main() {
     assert.strictEqual(runningResult.find((p) => p.phase === 'build').status, 'blocked', 'build genuinely is blocked on discover mid-execution');
   });
 
-  await test('generateWithLlm() only accepts a properly fenced response, falling back to undefined otherwise', async () => {
-    const { generateWithLlm } = require('../dist/agents/llmCodegen.js');
-    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Load orders', status: 'pending' };
-    const baseContext = { objective: 'obj', schemaContext: 'ctx', sourceProvider: 'snowflake', settings: {}, configManager: { getSecret: async () => undefined, getSettings: () => ({}) }, log: () => {} };
-
-    const fenced = await generateWithLlm({ ...baseContext, callLlm: async () => '```sql\nSELECT 1;\n```' }, step, { role: 'x', instructions: 'y', fence: 'sql' });
-    assert.strictEqual(fenced, 'SELECT 1;', 'extracts the fenced content verbatim');
-
-    const unfenced = await generateWithLlm({ ...baseContext, callLlm: async () => 'Sure, here is the SQL: SELECT 1;' }, step, { role: 'x', instructions: 'y', fence: 'sql' });
-    assert.strictEqual(unfenced, undefined, 'an unfenced response is not treated as valid content — never risk shipping prose as an artifact');
-
-    const throwing = await generateWithLlm({ ...baseContext, callLlm: async () => { throw new Error('LLM unavailable'); } }, step, { role: 'x', instructions: 'y', fence: 'sql' });
-    assert.strictEqual(throwing, undefined, 'a failed LLM call falls back cleanly, never throws out of generateWithLlm');
-
-    const noLlm = await generateWithLlm(baseContext, step, { role: 'x', instructions: 'y', fence: 'sql' });
-    assert.strictEqual(noLlm, undefined, 'no callLlm on the context at all falls back the same way');
-  });
-
   await test('snowflakeExecutor degrades gracefully instead of failing when there is no target connection', async () => {
     const plan = JSON.stringify([
-      { id: 'ingest', assignedAgent: 'ingestionAgent', taskDescription: 'Generate ingestion DDL', dependsOn: [], validationRules: [] },
       { id: 'snowflake-check', assignedAgent: 'snowflakeExecutor', taskDescription: 'Validate against Snowflake', dependsOn: [], validationRules: [] }
     ]);
     const { hub, mock } = hubForPlanResponse(plan);
@@ -1555,23 +1536,14 @@ async function main() {
     await withMock(mock, () => hub.executePlan());
 
     const finalState = hub.getPlan();
-    const ingestStep = finalState.steps.find((s) => s.id === 'ingest');
     const snowflakeStep = finalState.steps.find((s) => s.id === 'snowflake-check');
-    assert.strictEqual(ingestStep.status, 'completed');
     assert.strictEqual(snowflakeStep.status, 'completed', 'snowflake validation is skipped, not failed, when there is no connection');
     assert.strictEqual(finalState.status, 'completed', 'the plan completes even though nothing could actually reach Snowflake');
 
     const artifacts = finalState.artifacts || [];
     const snowflakeArtifact = artifacts.find((a) => a.generatedBy === 'snowflakeExecutor');
-    const ingestArtifact = artifacts.find((a) => a.generatedBy === 'ingestionAgent');
     assert.ok(snowflakeArtifact, 'the unexecuted validation query was saved as an artifact for manual review');
     assert.ok(/not executed/i.test(snowflakeArtifact.content));
-    // The mocked LLM (shared across every call in this test) returns the plan
-    // JSON text, not a fenced SQL block — ingestionAgent's LLM attempt must
-    // therefore fall back to its real template, not ship that JSON as "SQL".
-    assert.ok(ingestArtifact, 'ingestion produced an artifact');
-    assert.ok(/CREATE OR REPLACE TABLE/.test(ingestArtifact.content), 'falls back to the real template SQL rather than an unfenced LLM response');
-    assert.ok(!/assignedAgent/.test(ingestArtifact.content), 'the raw plan JSON was never mistaken for generated SQL content');
   });
 
   await test('setPhaseOverride() flips a phase and survives a subsequent re-inference', async () => {
@@ -1847,7 +1819,7 @@ async function main() {
     const base = {
       id: 'plan-1', specId: 'bps-1', specVersion: 1, implementationType: 'greenfield',
       objective: 'do the thing', schemaContext: '', status: 'ready',
-      steps: [{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 't', status: 'pending', dependsOn: [], validationRules: [] }],
+      steps: [{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 't', status: 'pending', dependsOn: [], validationRules: [] }],
       inferredPhases: undefined, targetEnvironment: undefined, generationReason: 'initial'
     };
     const saved1 = await withMock(mock, () => mgr.savePlan(base));
@@ -2142,7 +2114,7 @@ async function main() {
 
   // ── Lifecycle Orchestration (v0.13.0) — requirements.md §8.12 ──
   await test('generatePlan() orchestrator gate blocks a caller with no active, context-ready business problem', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
     const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
       sendRequest: async () => ({ text: textIter(plan) }) };
     const mock = createMock({ models: [model] });
@@ -2170,7 +2142,7 @@ async function main() {
   });
 
   await test('generatePlanFromSpec() enforces spec approval, business-problem confirmation, and context readiness independently', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
     const { hub, mock } = hubForPlanResponse(plan);
     const baseSpec = {
       id: 'bps-1', version: 1, problemStatement: 'Build a dbt pipeline.',
@@ -2202,7 +2174,7 @@ async function main() {
   });
 
   await test('executePlan() requires an explicit Plan Approval and Stage Confirmation, independently of each other', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
     const { hub, mock } = hubForPlanResponse(plan);
     hub.inferPhasesFromSpec({
       id: 'bps-test', version: 1, status: 'approved', implementationType: 'greenfield',
@@ -2227,7 +2199,7 @@ async function main() {
   });
 
   await test('setPhaseOverride() invalidates a prior Stage Confirmation', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
+    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
     const { hub, mock } = hubForPlanResponse(plan);
     hub.inferPhasesFromSpec({
       id: 'bps-test', version: 1, status: 'approved', implementationType: 'greenfield',
@@ -2450,73 +2422,6 @@ async function main() {
     return { objective: 'obj', schemaContext: 'ctx', sourceProvider: 'snowflake', settings: {}, configManager: { getSecret: async () => undefined, getSettings: () => ({}) }, log: () => {}, callLlm };
   }
 
-  await test('selectTransformSpec() returns a validated spec for a well-formed fenced JSON response, merging in fixedParams last', async () => {
-    const { selectTransformSpec } = require('../dist/agents/llmParamSelector.js');
-    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Dedup customers by id', status: 'pending' };
-    const context = baseAgentContext(async () => '```json\n{"kind": "dedup", "params": {"sourceObject": "src.c", "targetObject": "IGNORED", "partitionByColumns": ["customer_id"], "orderByColumn": "updated_at"}}\n```');
-    const spec = await selectTransformSpec(context, step, ['dedup'], { targetObject: 'tgt.c_dedup' });
-    assert.strictEqual(spec.kind, 'dedup');
-    assert.strictEqual(spec.params.targetObject, 'tgt.c_dedup', 'fixedParams overrides whatever the LLM put in that field');
-  });
-
-  await test('selectTransformSpec() returns undefined (never throws) for malformed JSON, an out-of-candidate kind, or invalid params', async () => {
-    const { selectTransformSpec } = require('../dist/agents/llmParamSelector.js');
-    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
-
-    const notJson = await selectTransformSpec(baseAgentContext(async () => 'Sure! Here is some SQL: SELECT 1;'), step, ['dedup']);
-    assert.strictEqual(notJson, undefined);
-
-    const wrongKind = await selectTransformSpec(baseAgentContext(async () => '```json\n{"kind": "incremental_load", "params": {}}\n```'), step, ['dedup']);
-    assert.strictEqual(wrongKind, undefined, 'incremental_load was not in the candidate list');
-
-    const missingParams = await selectTransformSpec(baseAgentContext(async () => '```json\n{"kind": "dedup", "params": {"sourceObject": "s"}}\n```'), step, ['dedup']);
-    assert.strictEqual(missingParams, undefined, 'dedup requires targetObject/partitionByColumns/orderByColumn');
-
-    const throwing = await selectTransformSpec(baseAgentContext(async () => { throw new Error('LLM down'); }), step, ['dedup']);
-    assert.strictEqual(throwing, undefined);
-
-    const noLlm = await selectTransformSpec(baseAgentContext(undefined), step, ['dedup']);
-    assert.strictEqual(noLlm, undefined);
-  });
-
-  await test('generateViaPrimitiveOrFallback() compiles byte-identical SQL across two separate calls given the same LLM response', async () => {
-    const { generateViaPrimitiveOrFallback } = require('../dist/agents/llmParamSelector.js');
-    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Dedup customers by id, latest wins', status: 'pending' };
-    const context = baseAgentContext(async () => '```json\n{"kind": "dedup", "params": {"sourceObject": "src.c", "targetObject": "tgt.c", "partitionByColumns": ["customer_id"], "orderByColumn": "updated_at"}}\n```');
-    const target = { platform: 'snowflake', database: 'd', schema: 's' };
-
-    const first = await generateViaPrimitiveOrFallback(context, step, ['dedup'], target, 'snowflake', async () => 'FREEHAND FALLBACK', () => 'TEMPLATE FALLBACK');
-    const second = await generateViaPrimitiveOrFallback(context, step, ['dedup'], target, 'snowflake', async () => 'FREEHAND FALLBACK', () => 'TEMPLATE FALLBACK');
-
-    assert.strictEqual(first.source, 'primitive');
-    assert.strictEqual(second.source, 'primitive');
-    assert.strictEqual(first.content, second.content, 'the LLM only chose kind+params — the compiler produced identical SQL both times');
-  });
-
-  await test('generateViaPrimitiveOrFallback() falls back to the freehand tier, then the template tier, when primitive selection fails', async () => {
-    const { generateViaPrimitiveOrFallback } = require('../dist/agents/llmParamSelector.js');
-    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
-    const target = { platform: 'snowflake', database: 'd', schema: 's' };
-
-    const noValidSpec = baseAgentContext(async () => 'not json at all');
-    const freehandResult = await generateViaPrimitiveOrFallback(noValidSpec, step, ['dedup'], target, 'snowflake', async () => 'FREEHAND SQL', () => 'TEMPLATE SQL');
-    assert.deepStrictEqual(freehandResult, { content: 'FREEHAND SQL', source: 'freehand' });
-
-    const templateResult = await generateViaPrimitiveOrFallback(noValidSpec, step, ['dedup'], target, 'snowflake', async () => undefined, () => 'TEMPLATE SQL');
-    assert.deepStrictEqual(templateResult, { content: 'TEMPLATE SQL', source: 'template' });
-  });
-
-  await test('generateViaPrimitiveOrFallback() honors context.transformSpec as a direct bypass of LLM selection', async () => {
-    const { generateViaPrimitiveOrFallback } = require('../dist/agents/llmParamSelector.js');
-    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
-    const target = { platform: 'snowflake', database: 'd', schema: 's' };
-    const context = { ...baseAgentContext(async () => { throw new Error('should never be called'); }),
-      transformSpec: { kind: 'rename_cast', params: { sourceObject: 's.raw', targetObject: 't.clean', columns: [{ source: 'a', target: 'b' }] } } };
-
-    const result = await generateViaPrimitiveOrFallback(context, step, ['rename_cast'], target, 'snowflake', async () => 'FREEHAND', () => 'TEMPLATE');
-    assert.strictEqual(result.source, 'primitive');
-    assert.ok(result.content.includes('t.clean'));
-  });
 
   // ── Phase 2B-ii: primitive extensibility (Tier 2, declarative) ──
 
@@ -2950,34 +2855,6 @@ async function main() {
     assert.strictEqual(isSelectable({ kind: 'x', status: 'draft' }), false);
     assert.strictEqual(isSelectable({ kind: 'x', status: 'deprecated' }), false);
     assert.strictEqual(isSelectable({ kind: 'x', status: 'retired' }), false);
-  });
-
-  await test('selectTransformSpec() never offers a draft/deprecated Tier-2 primitive to the LLM as a candidate, but compileTransformSpec() still compiles it directly', async () => {
-    const registry = require('../dist/engine/transforms/registry.js');
-    const { createDeclarativePrimitive } = require('../dist/engine/transforms/declarative/adapter.js');
-    const { selectTransformSpec } = require('../dist/agents/llmParamSelector.js');
-    const yaml = require('yaml');
-
-    const draftDef = yaml.parse(validPrimitiveDefinitionYaml('window_running_total_draft'));
-    draftDef.status = 'draft';
-    registry.registerPrimitives([createDeclarativePrimitive(draftDef)]);
-
-    const step = { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'x', status: 'pending' };
-    // Even if the LLM somehow guesses the draft kind, it must not be accepted.
-    const context = { objective: 'o', schemaContext: '', sourceProvider: 'snowflake', settings: {}, configManager: { getSecret: async () => undefined, getSettings: () => ({}) }, log: () => {},
-      callLlm: async (prompt) => {
-        assert.ok(!prompt.includes('window_running_total_draft'), 'the draft kind must not even appear in the candidate catalog shown to the LLM');
-        return `\`\`\`json\n{"kind": "window_running_total_draft", "params": ${JSON.stringify(draftDef.previewParams)}}\n\`\`\``;
-      }
-    };
-    const result = await selectTransformSpec(context, step, ['window_running_total_draft']);
-    assert.strictEqual(result, undefined, 'a non-selectable kind is rejected even if the LLM returns it');
-
-    // But it still compiles directly — a deprecated/draft primitive stays usable by anything that already references it.
-    const compiled = registry.compileTransformSpec({ kind: 'window_running_total_draft', params: draftDef.previewParams }, { platform: 'snowflake', database: 'd', schema: 's' }, 'snowflake');
-    assert.ok(compiled.content.includes('running_total'));
-
-    registry.resetDeclarativePrimitives();
   });
 
   await test('publishPrimitiveDefinition() keeps the version on a first publish, then bumps + archives on a republish', () => {
@@ -5563,13 +5440,13 @@ async function main() {
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'revenue', schemaContext: 'GLOBAL DUMP',
         steps: [
-          { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
-          { id: 's2', assignedAgent: 'ingestionAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
+          { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
+          { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
         ],
         status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1
       });
       await hub.executePlan();
-      assert.deepStrictEqual(built, ['Plan step s1 (ingestionAgent)', 'Plan step s2 (ingestionAgent)']);
+      assert.deepStrictEqual(built, ['Plan step s1 (snowflakeExecutor)', 'Plan step s2 (snowflakeExecutor)']);
       const p1 = hub.getStepPack('s1'), p2 = hub.getStepPack('s2');
       assert.ok(p1.text.includes('shop.refunds') && !p1.text.includes('support_tickets'));
       assert.ok(p2.text.includes('support_tickets') && !p2.text.includes('shop.refunds'));
@@ -6175,7 +6052,7 @@ async function main() {
       });
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'x', schemaContext: '',
-        steps: [{ id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
+        steps: [{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
         status: 'ready', planApproved: true, stagesConfirmed: true
       });
       await hub.executePlan();
@@ -6708,12 +6585,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6770,6 +6647,8 @@ async function main() {
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
       autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
       autode_draft_model: [{}, { x: 1 }],
+      autode_primitive_candidates: [{ source: 'shop.orders' }, { source: 'shop.orders', columns: [{ source: 'a' }] }],
+      autode_record_pipeline_spec: [{ entities: [{ name: 'e', source: { object: 'a', type: 'table' }, transforms: [], target: { object: 'b', materialization: 'table' } }] }, { entities: [] }],
       autode_check_model: [{ model: { entities: [{ name: 'fct_orders', kind: 'fact', columns: [{ name: 'order_id' }] }] } }, { model: { entities: [{ name: 'fct_orders', kind: 'fact' }] } }],
       autode_record_mapping: [{ mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [{ sourceColumn: 'a', targetColumn: 'b' }] } }, { mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [] } }],
       autode_record_source_context: [{ sources: [{ connectionId: 'shop', method: 'file' }] }, { sources: [{ connectionId: 'shop', method: 'guessed' }] }],
@@ -8182,8 +8061,8 @@ async function main() {
         sources: () => c3.sources(env.ledger, env.project()), supplementary: () => '', specRevision: () => 'sha256:spec'
       });
       hub.loadPersistedPlan({ id: 'p', version: 1, objective: 'tickets', schemaContext: '', steps: [
-        { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
-        { id: 's2', assignedAgent: 'ingestionAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
+        { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
+        { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
       ], status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1 });
       await hub.executePlan();
       let st = hub.getPlan();
@@ -9322,7 +9201,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'conformance', 'documentation', 'mapping', 'modelling', 'quality-rules', 'source-assessment']);
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'conformance', 'documentation', 'mapping', 'modelling', 'pipeline-build', 'quality-rules', 'source-assessment']);
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -9578,21 +9457,7 @@ async function main() {
       const m = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope);
       const st = (x) => m.stages.find((s) => s.id === x);
       assert.deepStrictEqual([st('quality').runner, st('quality').actions.includes('run')], ['quality-engineer', true]);
-      assert.deepStrictEqual([st('model').runner, st('build').runner, st('build').actions.includes('run')], ['data-modeler', 'ingestionAgent + transformScaffoldAgent', true]);
-      // The legacy run: only the build stage's agents, their files recorded to the stage; the Pipeline Spec's approval completes it.
-      const { runStage } = fresh('../dist/core/agentExecutor.js');
-      const out = nodePath.join(ws, 'autode-output', id, '03-build', 'stg_orders.sql');
-      let asked;
-      const host = {
-        createEngine: () => undefined, activeProvider: () => 'claude', log: () => {}, runAgentWithTools: async () => { throw new Error('not used'); },
-        runStageSteps: async (stageId, objective, steps) => { asked = { stageId, objective, agents: steps.map((s) => s.agent) }; nodeFs.mkdirSync(nodePath.dirname(out), { recursive: true }); nodeFs.writeFileSync(out, 'create table fct_orders (order_id int);'); return { ok: true, files: [out], message: '1 step(s) done; 1 file(s) written.' }; }
-      };
-      const r = await runStage(host, scope, 'build');
-      assert.ok(r.ok && /document is approved/.test(r.message), r.message);
-      assert.deepStrictEqual([asked.stageId, asked.agents, /Daily revenue/.test(asked.objective)], ['build', ['ingestionAgent', 'transformScaffoldAgent'], true], 'it runs on any model, Claude Code included');
-      assert.deepStrictEqual(r.outputs, [`autode-output/${id}/03-build/stg_orders.sql`]);
-      const events = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'build' });
-      assert.ok(events.some((e) => e.type === 'recorded' && e.actor.name === 'ingestionAgent + transformScaffoldAgent' && e.actor.host === 'VS Code'));
+      assert.deepStrictEqual([st('model').runner, st('build').runner, st('build').actions.includes('run')], ['data-modeler', 'pipeline-engineer', true], 'since v0.45.4 every stage with an agent has a role template');
       // A stage with no agent at all says so, and offers hand-in or skip.
       const bi = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope).stages.find((s) => s.id === 'bi');
       assert.ok(!bi || bi.status === 'skipped' || /hand in/.test(bi.guide));
@@ -9605,7 +9470,7 @@ async function main() {
     assert.ok(/case 'generatePlan': case 'generatePlanFromSpec': case 'approvePlan': case 'confirmStages': case 'executePlan': \{\s*this\.postLog\('AutoDE now works stage by stage/.test(src));
     assert.ok(!/this\.hub\.generatePlanFromSpec\(/.test(src) && !/case 'executePlan': \{ await this\.hub\.executePlan/.test(src));
     const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
-    assert.ok(/if \(firstFailedStep && !this\.stageRunFiles\)/.test(hub));
+    assert.ok(!/runStageSteps/.test(hub), 'v0.45.4: no per-stage legacy runs remain');
     const pkg = require('../package.json');
     for (const c of ['workflowRun', 'workflowApproveDocument', 'workflowProduce', 'workflowOpenDocument']) assert.ok(pkg.contributes.commands.some((x) => x.command === `autoDataEngineeringHub.${c}`), c);
   });
@@ -9819,6 +9684,74 @@ async function main() {
       assert.ok(c.ok, c.errors.join('\n'));
       assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', 'src', 'agents', 'model', 'DataModelerAgent.ts')));
       assert.ok(/dataModelerAgent: 'Data modelling'/.test(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8')));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ---------- v0.45.4: PA3b step 4 — the pipeline engineer ----------
+
+  await test('v0.45.4: autode_primitive_candidates fills primitives from the facts — staging projection, dedup on the key fact by the change column, incremental MERGE — validated, with notes for what no primitive covers; a key on another system\'s table of the same name is not used', () => {
+    const C = fresh('../dist/engine/agents/primitiveCandidates.js');
+    const table = (fqn, cols) => ({ fqn, name: fqn.split('.').pop(), columns: new Map(Object.entries(cols)) });
+    const tables = [table('shop.customers', { customer_id: 'INT', email: 'VARCHAR', updated_at: 'TIMESTAMP' }), table('crm.customers', { cust_no: 'VARCHAR', name: 'VARCHAR' })];
+    const schemaIndex = { tables, byName: new Map([['customers', tables]]) };
+    const fact = (id, kind, subject, value) => ({ id, kind, subject, predicate: kind, value, statement: id, status: 'active', trust: 'confirmed', evidence: [], validFrom: '', createdBy: 'user:t', createdAt: '' });
+    const r = C.primitiveCandidates({ source: 'shop.customers', target: 'dim_customer', columns: [{ source: 'customer_id', target: 'customer_id' }, { source: 'email', target: 'email_hash', transform: 'SHA2(email)' }, { source: 'updated_at', target: 'updated_at' }], schemaIndex, nodes: [], assertions: [fact('k1', 'key', ['shop.customers'], ['customer_id']), fact('k2', 'key', ['crm.customers'], ['cust_no'])] });
+    assert.deepStrictEqual(r.entity.transforms.map((t) => [t.kind, t.valid]), [['rename_cast', true], ['dedup', true], ['incremental_load', true]]);
+    const [stage, dedup, merge] = r.entity.transforms;
+    assert.deepStrictEqual([stage.params.sourceObject, stage.params.targetObject, stage.params.columns.map((c) => c.target)], ['shop.customers', 'stg_shop_customers', ['customer_id', 'updated_at']]);
+    assert.deepStrictEqual([dedup.params.partitionByColumns, dedup.params.orderByColumn, dedup.params.sourceObject], [['customer_id'], 'updated_at', 'stg_shop_customers']);
+    assert.ok(dedup.reasons.some((x) => /key from fact k1/.test(x)));
+    assert.deepStrictEqual([merge.params.targetObject, merge.params.keyColumns, merge.params.updateColumns], ['dim_customer', ['customer_id'], ['email_hash', 'updated_at']]);
+    assert.ok(r.notes.some((n) => /email_hash = SHA2\(email\)/.test(n)), 'an expression is reported, not hidden');
+    const crm = C.primitiveCandidates({ source: 'crm.customers', schemaIndex, nodes: [], assertions: [fact('k1', 'key', ['shop.customers'], ['customer_id'])] });
+    assert.deepStrictEqual([crm.entity.name, crm.entity.transforms.map((t) => t.kind)], ['crm_customers', ['rename_cast']]);
+    assert.ok(crm.notes.some((n) => /No key is known for crm\.customers/.test(n)), 'shop.customers\' key is not crm.customers\'');
+  });
+
+  await test('v0.45.4: the pipeline engineer over MCP — candidates from the problem\'s mapping, the Pipeline Spec drafted (identity and lineage filled in, every step validated), compiled, recorded with decision backing; approved as the build stage\'s document', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-build-'));
+    let client;
+    try {
+      const { id, prob, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), 'CREATE TABLE shop.orders (\n  order_id INT NOT NULL,\n  amount NUMBER(12,2),\n  updated_at TIMESTAMP\n);\n');
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
+      const proposed = await call('autode_propose_assertion', { assertion: { kind: 'key', subject: ['shop.orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id identifies an order', evidence: [{ type: 'file', ref: 'shop.sql' }] } });
+      const keyId = proposed.assertion ? proposed.assertion.id : proposed.id;
+      assert.ok(keyId, JSON.stringify(proposed));
+      // A person confirms the key (a proposed fact backs nothing).
+      assert.strictEqual((await cli(['facts', 'confirm', keyId, ...W, '--by', 'priya'], { interactive: true, answers: ['confirm'] })).code, 0);
+      fresh('../dist/engine/documents/problemDocuments.js').writeMappingUpsert(prob, { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: [{ sourceColumn: 'order_id', targetColumn: 'order_id' }, { sourceColumn: 'amount', targetColumn: 'net_amount' }, { sourceColumn: 'updated_at', targetColumn: 'updated_at' }] });
+      const a = fresh('../dist/engine/agents/assignment.js').assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'build', (await client.listTools()).tools).assignment;
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id), a.tier], ['pipeline-engineer', ['pipeline-build'], 'workspace-write']);
+      for (const t of ['autode_primitive_candidates', 'autode_record_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_explain_sql']) assert.ok(a.engineTools.includes(t), t);
+      const c = await call('autode_primitive_candidates', { source: 'shop.orders' });
+      assert.deepStrictEqual([c.entity.name, c.entity.transforms.map((t) => t.kind)], ['fct_orders', ['rename_cast', 'dedup', 'incremental_load']], JSON.stringify(c));
+      const bad = await call('autode_record_pipeline_spec', { entities: [{ ...c.entity, transforms: [{ kind: 'dedup', params: { sourceObject: 'x' } }] }] });
+      assert.ok(bad.code === 'VALIDATION_FAILED' && /step 1 \(dedup\)/.test(bad.message), JSON.stringify(bad));
+      const ok = await call('autode_record_pipeline_spec', { entities: [c.entity] });
+      assert.deepStrictEqual([ok.status, ok.version, ok.entities], ['draft', 1, 1], JSON.stringify(ok));
+      const P = fresh('../dist/engine/documents/problemDocuments.js');
+      const spec = P.parsePipelineSpecDocument(P.readProblemDocument(prob, 'pipelineSpec'));
+      const bps = P.parseBusinessProblemSpec(P.readProblemDocument(prob, 'spec'));
+      assert.deepStrictEqual([spec.derivedFromBpsId, spec.entities[0].transforms[0].reasons], [bps.id, undefined], 'lineage filled in; candidate reasons are not part of the spec');
+      const compiled = await call('autode_compile_pipeline_spec', { dialect: 'snowflake' });
+      assert.strictEqual(compiled.entities[0].artifacts.length, 3);
+      const dedupSql = compiled.entities[0].artifacts[1].content;
+      const rec = await call('autode_record_artifact', { stage: 'build', path: 'sql/fct_orders/2_dedup.sql', content: dedupSql, primitives: [{ kind: 'dedup', params: c.entity.transforms[1].params, lineage: 'shop.orders' }] });
+      const manifest = JSON.parse(nodeFs.readFileSync(nodePath.join(ws, rec.manifestPath), 'utf8'));
+      assert.ok(manifest.decisions.some((d) => d.usedFor === 'dedup.partitionByColumns' && d.backedBy), JSON.stringify(manifest.decisions));
+      const st = (await call('autode_workflow_status', {})).stages.find((s) => s.id === 'build');
+      assert.strictEqual(st.status, 'awaiting-approval');
+      const ap = await cli(['workflow', 'approve', 'build', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(ap.code, 0, ap.out + ap.err);
+      // The old agents are gone.
+      for (const f of ['src/agents/build/IngestionPipelineAgent.ts', 'src/agents/build/TransformationScaffolderAgent.ts', 'src/agents/llmCodegen.ts', 'src/agents/llmParamSelector.ts']) assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', f)), f);
+      const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
+      assert.ok(/ingestionAgent: 'The build'/.test(hub) && /VALID_AGENT_TYPES: AgentType\[\] = \['snowflakeExecutor'\]/.test(hub) && !/runStageSteps/.test(hub));
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

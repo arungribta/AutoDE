@@ -12,7 +12,7 @@ export interface AuthModeDescriptor {
   mode: string;
   principalTypes: PrincipalType[];
 }
-export type AgentType = 'ingestionAgent' | 'snowflakeExecutor' | 'transformScaffoldAgent' | 'toolSkillAgent';
+export type AgentType = 'snowflakeExecutor' | 'toolSkillAgent';
 export type PlanStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type SessionStatus = 'idle' | 'planning' | 'ready' | 'running' | 'paused' | 'failed' | 'completed';
 export type EnvironmentProfile = 'development' | 'staging' | 'production';

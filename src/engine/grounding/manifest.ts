@@ -18,6 +18,8 @@ export interface PrimitiveUse {
   version?: number;
   params: Record<string, unknown>;
   source: 'primitive' | 'freehand' | 'template';
+  /** The estate table the step's columns trace to, when its own input is an intermediate object (a staging view): v0.45.4. */
+  lineage?: string;
 }
 
 export interface DecisionRecord {
@@ -98,9 +100,11 @@ export function backDecisions(
   assertions: readonly Assertion[]
 ): DecisionRecord[] {
   const resolve = createSubjectResolver(graph);
-  const source = typeof use.params.sourceObject === 'string' ? use.params.sourceObject : undefined;
+  const source = use.lineage ?? (typeof use.params.sourceObject === 'string' ? use.params.sourceObject : undefined);
   const table = source ? resolve(source) ?? resolve(source.split('.').slice(-2).join('.')) ?? resolve(source.split('.').pop()!) : undefined;
   const live = assertions.filter((a) => isLive(a.status) && !isMirror(a));
+  // A fact's subject as written (shop.orders) or as resolved (obj:shop/default/shop.orders): v0.45.4.
+  const isAbout = (a: Assertion, t: string) => a.subject.some((s) => s === t || resolve(s) === t);
   const records: DecisionRecord[] = [];
   for (const [param, value] of Object.entries(use.params)) {
     if (!DECISION_PARAM.test(param)) continue;
@@ -111,7 +115,7 @@ export function backDecisions(
     const isKeyLike = /(key|partition|grain|dedup|merge)/i.test(param);
     let backing: Assertion | undefined;
     if (table && isKeyLike) {
-      backing = live.find((a) => (a.kind === 'key' || a.kind === 'grain') && a.subject.includes(table) && Array.isArray(a.value) && sameColumns(a.value as string[], cols));
+      backing = live.find((a) => (a.kind === 'key' || a.kind === 'grain') && isAbout(a, table) && Array.isArray(a.value) && sameColumns(a.value as string[], cols));
       if (!backing) {
         // The schema's own declared primary key.
         const colIds = new Set(graph.edges.filter((e) => e.type === 'contains' && e.source === table).map((e) => e.target));
@@ -122,7 +126,7 @@ export function backDecisions(
         }
       }
     } else if (table) {
-      backing = live.find((a) => a.kind === 'decision' && a.subject.includes(table) &&
+      backing = live.find((a) => a.kind === 'decision' && isAbout(a, table) &&
         Object.values((a.value ?? {}) as Record<string, unknown>).some((v) => typeof v === 'string' && cols.some((c) => c.toLowerCase() === v.toLowerCase())));
     }
     if (backing) {

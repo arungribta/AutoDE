@@ -13,6 +13,7 @@
  * writes a Markdown report plus eval-results.json. It measures; it does not pass/fail — the
  * release gate on these numbers arrives with Phase C6.
  */
+const { deterministicBuild } = require('./lib/deterministicBuild.cjs');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -244,8 +245,11 @@ async function main() {
       }
     }
 
-    // ── Plan execution → artifacts → grounding ──
-    const run = await sut.runPlan(plan, target);
+    // ── The build → artifacts → grounding ──
+    // v0.45.4: AutoDE's deterministic build (primitive candidates → Pipeline Spec → compiler); the plan's
+    // TypeScript agents are gone, and agent judgement is measured with host-agent runs (PA3c).
+    const run = deterministicBuild({ dist, cfm: sut.internals().cfm, plan });
+    results.build = { entities: run.spec.entities.map((e) => ({ name: e.name, steps: e.transforms.map((t) => t.kind) })), notes: run.notes };
     // Score each artifact once; duplicates in the plan state are reported as a finding.
     const seen = new Set();
     const artifacts = run.artifacts.filter((a) => {
@@ -641,8 +645,8 @@ function renderReport(r) {
   L.push('', '## LLM calls', '', `Calls: ${r.llm.calls}; replayed: ${r.llm.hits}; cassette misses: ${r.llm.misses}; recorded: ${r.llm.recorded}; refused (offline): ${r.llm.failures}.`);
   L.push('', '## Limits of this measurement', '');
   L.push('- Grounding checks scan SQL with patterns, not a parser: `FROM`/`JOIN` targets and `alias.column` references are checked, unqualified columns are not.');
-  L.push('- Offline mode measures AutoDE with its LLM paths disabled, so artifacts come from the template fallbacks. Replay/record runs measure the LLM paths.');
-  L.push('- The plan is the fixed reference plan in `plan.yaml`, so planning quality itself is not scored here.');
+  L.push('- Since v0.45.4 the artifacts come from AutoDE\'s deterministic build: `autode_primitive_candidates` for each source in `plan.yaml`\'s `buildSources`, every valid step accepted, compiled by the engine. It measures what the engine gives a pipeline engineer to start from; the agent\'s own choices (and its custom SQL) are measured with host-agent runs (PA3c).');
+  L.push('- The plan steps in `plan.yaml` are used only to measure context delivery per step.');
   L.push('- Ablation: run with `--sut ledger` (the global dump, same ledger) or `--sut baseline` to compare against context packs on identical inputs.');
   for (const n of r.notes || []) L.push(`- ${n}`);
   return L.join('\n') + '\n';

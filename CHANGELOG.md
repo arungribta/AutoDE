@@ -6,6 +6,41 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.4
+
+- **Phase PA3b, step 4: the pipeline engineer** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6, GEN-1, GEN-2; technical-design §7.9). The build stage is done by the `pipeline-engineer` role with the `pipeline-build` skill, the same in VS Code (Run agent) and in any host. It drafts the Pipeline Spec from AutoDE's primitive candidates, compiles it with AutoDE's compiler, and records the code with grounding manifests. Deleted:
+  - the TypeScript `ingestionAgent` and `transformScaffoldAgent`;
+  - their LLM codegen helpers (`src/agents/llmCodegen.ts`, `src/agents/llmParamSelector.ts`);
+  - the v0.45.1 per-stage bridge to the old agents (`AgentHub.runStageSteps`, `LEGACY_AGENTS`), since every stage with an agent now has a role template.
+
+  The plan of steps keeps only `snowflakeExecutor` until it goes (v0.45.6).
+- **`autode_primitive_candidates`** (read-only, deterministic) gives the steps a mapped source needs, with parameters filled in from what AutoDE knows:
+  - `rename_cast`: a staging view that projects, renames and casts the mapped columns;
+  - `dedup`: one row per key (from the key fact), the latest by the change column (`updated_at`, `modified` …);
+  - `incremental_load`: a MERGE on the key.
+
+  Each step has its reasons, including the fact and its trust, and whether it is still unconfirmed. Each is validated against its primitive. What no primitive covers comes back as notes: column expressions such as `SHA2(email)`, a missing key or change column, a key that isn't fully mapped. Columns default to the problem's mapping for that source.
+- **`autode_record_pipeline_spec`** drafts the problem's Pipeline Spec:
+  - AutoDE fills in its id, version (bumped after an approved revision, which is archived) and lineage (the specification it derives from);
+  - the spec and every step are validated against its primitive, with errors step by step.
+
+  A person approves it as the build stage's document. `autode_compile_pipeline_spec` then gives the code.
+- **Decision backing for host agents.** `autode_record_artifact` takes `primitives`: the steps a compiled file came from, with `lineage`, the estate table their columns trace to. The file's grounding manifest then records which facts back each key and order decision, the same as AutoDE's own build. The `lineage` field is new on grounding manifests' primitive uses.
+- **Fixed in grounding manifests:** a key or grain fact written with a table's name (`shop.orders`, as agents propose them over MCP) now backs a decision about that table. The manifest used to compare only resolved node ids, so such facts never counted.
+- **The eval measures the deterministic build.** Its offline artifacts used to come from the deleted agents' template fallbacks. They now come from AutoDE's own path: `autode_primitive_candidates` for each source in `plan.yaml`'s new `buildSources`, every valid step accepted, compiled by the engine, with a grounding manifest per file. The plan steps remain only as context probes. New baseline `baselines/v0.45.4-offline.*`:
+  - expected artifact properties **4/8**, was 1/8 (E1 deduplicates orders on `order_id`, E6, E7, E8);
+  - identifier grounding **100% (5/5)**, was 0% from the template tier;
+  - decision backing **83% (5/6)**, was n/a.
+
+  The agent's own choices and its custom SQL (masking, net-revenue filters, SCD2, the refunds join: E3–E6) are measured with host-agent runs in PA3c. This compares a different producer, not an improved one.
+- **Findings from the eval:**
+  - **The `incremental_load` primitive has no watermark.** It compiles a plain MERGE of the whole source, so property E2 ("orders load incrementally on updated_at") fails. It goes to the backlog for the primitive.
+  - **Fixed in `autode_primitive_candidates`:** a key fact on `crm.customers` was matched to `shop.customers` by the bare table name across systems. Two systems' `customers` tables also produced two entities with the same name. Only an unqualified subject now matches by name, and default names keep the schema (`shop_customers`, `stg_shop_customers`).
+- **Deviations / notes:**
+  - The skill is `pipeline-build`, not the spec's `pipeline-scaffolding`. Code-conversion import and deployment are not part of this step: their stages keep hand-in.
+  - **GEN-2 changes shape.** The LLM no longer picks a primitive inside a plan step. The engine proposes the primitives and their parameters from facts; the agent accepts them into the Pipeline Spec; the compiler generates the code.
+- **Measured:** 369 tests (2 new: the candidates; the pipeline engineer over MCP, through the compile, decision backing and approval). Removed 7 unit tests of the deleted codegen helpers. Tests that used the build agents as generic plan agents now use `snowflakeExecutor`. Lint 0 errors (30 warnings, 3 fewer).
+
 ## 0.45.3
 
 - **Phase PA3b, step 3: the data modeler** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6; technical-design §7.9). The modelling stage is done by the `data-modeler` role with the `modelling` skill, the same in VS Code (Run agent) and in any host. The TypeScript `dataModelerAgent` is **deleted**. Whenever its model call failed, it fell back to a fixed customer/product/sales template.

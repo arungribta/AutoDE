@@ -3,9 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ConfigurationManager } from './configManager';
 import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, EngineAccess } from '../engine/types';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
-import { executeIngestionAgent } from '../agents/build/IngestionPipelineAgent';
 import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
-import { executeTransformScaffoldAgent } from '../agents/build/TransformationScaffolderAgent';
 import { executeToolSkillAgent } from '../agents/build/ToolSkillAgent';
 import { ArtifactWriter } from '../context/ArtifactWriter';
 import { PlanManager } from '../context/PlanManager';
@@ -79,24 +77,21 @@ import {
 // PA3b v0.45.0: architectureAgent is gone; documentation is the workflow's document stage (agents/documenter.md).
 // v0.45.2: sourceAssessmentAgent and sttmAgent are gone too (agents/source-assessor.md, agents/sttm-mapper.md).
 // v0.45.3: and dataModelerAgent (agents/data-modeler.md).
-const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'snowflakeExecutor', 'transformScaffoldAgent'];
+// v0.45.4: and the ingestion and transformation agents (agents/pipeline-engineer.md): only the Snowflake check remains.
+const VALID_AGENT_TYPES: AgentType[] = ['snowflakeExecutor'];
 
 const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string; artifacts?: GeneratedArtifact[] }>> = {
-  ingestionAgent: executeIngestionAgent,
   snowflakeExecutor: executeSnowflakeAgent,
-  transformScaffoldAgent: executeTransformScaffoldAgent,
   toolSkillAgent: executeToolSkillAgent
 };
 
-const MOVED: Record<string, string> = { architectureAgent: 'Documentation', sourceAssessmentAgent: 'Source assessment', sttmAgent: 'Source-to-target mapping', dataModelerAgent: 'Data modelling' };
+const MOVED: Record<string, string> = { architectureAgent: 'Documentation', sourceAssessmentAgent: 'Source assessment', sttmAgent: 'Source-to-target mapping', dataModelerAgent: 'Data modelling', ingestionAgent: 'The build', transformScaffoldAgent: 'The build' };
 const MOVED_AGENT = (agent: string): string => MOVED[agent]
   ? `${MOVED[agent]} moved to the workflow: run its stage from the Workflow view (Run agent), or from a host agent with the AutoDE plugin.`
   : `No agent "${agent}" in this version of AutoDE.`;
 
 // Agent-to-phase mapping
 const AGENT_PHASE: Partial<Record<AgentType, WorkflowPhase>> = {
-  ingestionAgent: 'build',
-  transformScaffoldAgent: 'build',
   snowflakeExecutor: 'build',
   toolSkillAgent: 'build'
 };
@@ -148,39 +143,6 @@ export class DataAgentHubHub {
 
   public activeProvider(): LlmProvider {
     return this.configManager.getSettings().activeLlmProvider ?? 'copilot';
-  }
-
-  /** Set while a workflow stage runs its agents (v0.45.1): the files they write, workspace-relative; no re-plan on failure. */
-  private stageRunFiles: string[] | undefined;
-
-  /**
-   * v0.45.1: runs the agents of one workflow stage whose role isn't a
-   * definition yet, as a plan of only that stage's steps — the workflow, not a
-   * plan of the whole problem, decides what runs. Returns what they wrote.
-   */
-  public async runStageSteps(stageId: string, objective: string, steps: Array<{ agent: AgentType; task: string }>): Promise<{ ok: boolean; files: string[]; paused?: string; message: string }> {
-    if (this.state.status === 'running') return { ok: false, files: [], message: 'AutoDE is already running agents; wait for them to finish.' };
-    this.state.objective = objective;
-    this.state.steps = steps.map((s, i) => ({ id: `${stageId}-${i + 1}`, assignedAgent: s.agent, taskDescription: s.task, status: 'pending' as PlanStatus, dependsOn: i ? [`${stageId}-${i}`] : [], validationRules: [] }));
-    // The workflow's own gates stand in for the plan's: its stage was approved to run.
-    this.state.planApproved = true;
-    this.state.stagesConfirmed = true;
-    const written: string[] = [];
-    this.stageRunFiles = written;
-    try {
-      await this.executePlan();
-    } catch (err) {
-      return { ok: false, files: [...new Set(written)], message: err instanceof Error ? err.message : String(err) };
-    } finally {
-      this.stageRunFiles = undefined;
-    }
-    const files = [...new Set(written)];
-    const waiting = this.state.waitingForContext;
-    if (waiting) return { ok: false, files, paused: waiting.stepId, message: `Paused: it needs ${waiting.gaps.map((g) => `${g.needed} (${g.text})`).join('; ')}. Answer it in the Context Inbox, then run the stage again.` };
-    const failed = this.state.steps.filter((s) => s.status === 'failed');
-    return failed.length
-      ? { ok: false, files, message: `${failed.length} of ${steps.length} step(s) failed: ${this.state.lastError ?? 'see the log'}.` }
-      : { ok: true, files, message: `${steps.length} step(s) done; ${files.length} file(s) written.` };
   }
 
   public setStateListener(listener: (state: PlanState) => void): void {
@@ -1308,8 +1270,7 @@ Message: ${message}`;
             if (this.artifactWriter) {
               written = await this.artifactWriter.write(artifact);
               artifact.filePath = written.fsPath;
-              this.stageRunFiles?.push(written.fsPath);
-            }
+                          }
             if (sources && schemaIndex) {
               const manifest = buildGroundingManifest({
                 artifact: {
@@ -1363,8 +1324,7 @@ Message: ${message}`;
       this.log(`Execution finished with ${failedIds.size} failed step(s) and ${completedIds.size} completed step(s) — ${artifactCount} artifact(s) generated from the steps that succeeded.`);
       this.emitState();
       const firstFailedStep = this.state.steps.find((step) => failedIds.has(step.id));
-      // A workflow stage's run reports its failure to the stage; it never re-plans the problem.
-      if (firstFailedStep && !this.stageRunFiles) {
+      if (firstFailedStep) {
         await this.handleFailure(firstFailedStep, this.state.lastError ?? 'One or more steps failed.');
       }
       return;
@@ -1530,7 +1490,7 @@ Message: ${message}`;
 - Outputs: ${t.outputFormats.join(', ')}`;
     }
 
-    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${phaseBlock}${implementationBlock}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, snowflakeExecutor, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
+    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${phaseBlock}${implementationBlock}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"snowflakeExecutor","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only this assignedAgent value: snowflakeExecutor. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
   }
 
   // ── LLM Calls ──
@@ -1679,7 +1639,7 @@ Message: ${message}`;
 
       const candidate = item as Record<string, unknown>;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : `step-${index + 1}`;
-      const assignedAgent = typeof candidate.assignedAgent === 'string' ? candidate.assignedAgent : 'ingestionAgent';
+      const assignedAgent = typeof candidate.assignedAgent === 'string' ? candidate.assignedAgent : '';
       const taskDescription = typeof candidate.taskDescription === 'string' ? candidate.taskDescription.trim() : '';
       const dependsOn = Array.isArray(candidate.dependsOn) ? candidate.dependsOn.filter((value): value is string => typeof value === 'string') : [];
       const validationRules = Array.isArray(candidate.validationRules) ? candidate.validationRules.filter((value): value is string => typeof value === 'string') : [];

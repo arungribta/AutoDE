@@ -60,7 +60,7 @@ export interface Assignment {
 }
 
 /** The skill that does a stage kind, where its id isn't the kind's own. */
-const KIND_SKILL: Partial<Record<StageKind, string>> = { 'document': 'documentation' };
+const KIND_SKILL: Partial<Record<StageKind, string>> = { 'document': 'documentation', 'build': 'pipeline-build' };
 
 export interface AssignmentScope { workspaceRoot: string; resourcesRoot: string; problemId: string }
 

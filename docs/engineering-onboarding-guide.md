@@ -188,7 +188,7 @@ The full, generated tree is technical-design §12. The files that matter most, i
 | 7 | `src/engine/context/contextPack.ts`, `retrieval.ts`, `catalog.ts` | How context reaches an LLM. |
 | 8 | `src/engine/grounding/sqlGrounding.ts`, `manifest.ts` | How output is checked. |
 | 9 | `src/engine/transforms/registry.ts` + one primitive | Deterministic generation. |
-| 10 | `src/agents/build/TransformationScaffolderAgent.ts`, `src/agents/llmParamSelector.ts` | Primitive-first codegen with LLM fallback. |
+| 10 | `src/engine/agents/` (`assignment.ts`, `primitiveCandidates.ts`, `modelDraft.ts`) and `agents/`, `skills/` | AutoDE's agents as role templates and skills, and the deterministic tools they build on (v0.45). |
 | 11 | `src/core/llmProviders.ts`, `agenticTools.ts` | Providers and tool loops. |
 | 12 | `src/mcp/server.ts`, `tools.ts`; `src/cli/main.ts` | The MCP surface, and the CLI that reuses its handlers. |
 | 13 | `test/functional.test.cjs` (search for the feature) | Executable documentation for nearly everything above. |
@@ -260,7 +260,7 @@ Each recipe lists the touch points; the design section has the detail.
 
 **A Tier-2 primitive (no TypeScript).** Add `.autode/config/primitives/<kind>.yaml` (or `primitive-definitions/<kind>.yaml` to ship it) with `kind`, `version`, `status: draft`, `description`, `paramSchema`, `platformTemplates`, `previewParams` (template syntax: `src/engine/transforms/declarative/templateEngine.ts`). Preview it in the panel's Primitives section; publish it with `primitiveManagementEnabled` on. To have an agent offer it, add the kind to that agent's `candidateKinds`. It appears in the MCP server automatically. *Design §9.2, §9.5.*
 
-**An agent.** *Being replaced:* from PA3, a capability is an AutoDE skill (`SKILL.md`) plus deterministic tools, not an agent class. Until then: add the type to `AgentType` (`src/engine/types.ts`); write `execute<Name>(step, context)` under `src/agents/<phase>/`; register it in `AGENT_EXECUTORS`, `VALID_AGENT_TYPES` and `AGENT_PHASE` (`agentHub.ts`) and the planner's allowed list; return artifacts in `result.artifacts`; add a test. Prefer a primitive path with LLM fallback (`llmParamSelector.ts`). *Design §7.2.*
+**An agent.** Since v0.45 an agent is a role template (`agents/<role>.md`: name, description, the AutoDE tools it may use, its skills, its instructions) and its method is a skill (`skills/<id>/SKILL.md`, named after the stage kind it does). Add the role to its stage kind's roles (`src/engine/workflows/stageKinds.ts`); put deterministic help in an MCP tool (`src/mcp/agentTools.ts`) rather than in the prompt; have it record deliverables with `autode_record_artifact` or its stage's document tool; add a test through MCP. *Design §7.9.*
 
 **An LLM provider.** One `LlmAdapter` class plus an entry in `LLM_ADAPTERS` (`src/core/llmProviders.ts`); add the enum value to `activeLlmProvider` in `package.json` and to the guard in `webviewProvider.updateSettings`; a provider card in `sidebar.html`. Tool loops: see the existing adapters and `agenticTools.ts`. *Design §8.*
 

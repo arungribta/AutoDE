@@ -15,6 +15,11 @@ import { appendEvent, Actor } from '../engine/workflows/events';
 import { EntityMapping, SourceContextEntry } from '../engine/types';
 import { StageKind } from '../engine/workflows/stageKinds';
 import { DataModel, checkModel, draftModel, problemMappings, renderModelDdl, targetSettings } from '../engine/agents/modelDraft';
+import { primitiveCandidates, CandidateColumn } from '../engine/agents/primitiveCandidates';
+import { PipelineEntity, PipelineSpec, CURRENT_PIPELINE_SPEC_VERSION } from '../engine/pipelineSpec/types';
+import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
+import { validateTransformSpec } from '../engine/transforms/registry';
+import { parseBusinessProblemSpec, parsePipelineSpecDocument, readProblemDocument, writePipelineSpec } from '../engine/documents/problemDocuments';
 
 /**
  * The tools of the source assessor and the mapper (PA3b, v0.45.2): a
@@ -71,6 +76,67 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
     } } }
   } };
   return [
+    {
+      name: 'autode_primitive_candidates',
+      description: "The transform steps a source table needs on its way to a target, as AutoDE primitives with their parameters filled in from what AutoDE knows: a staging projection that renames and casts the mapped columns (rename_cast), deduplication on the key fact keeping the latest row by the change column (dedup), and an incremental MERGE on the key (incremental_load). Each step has its reasons and is validated against the primitive's schema; what no primitive covers (column expressions, a missing key or change column) comes back as notes. Columns default to the problem's mapping for that source, else every source column as is.",
+      inputSchema: { type: 'object', required: ['source'], additionalProperties: false, properties: {
+        source: { type: 'string', minLength: 1 }, target: { type: 'string', minLength: 1, description: 'The target object (default: the mapping\'s target, else the source table\'s name).' },
+        columns: { type: 'array', items: { type: 'object', required: ['source', 'target'], additionalProperties: false, properties: { source: { type: 'string', minLength: 1 }, target: { type: 'string', minLength: 1 }, type: { type: 'string' }, transform: { type: 'string' } } } }
+      } },
+      annotations: read('Primitive candidates'),
+      handler: async (args, ws) => {
+        ws.ensurePrimitives();
+        const { problemRoot } = problemOf(ws);
+        const src = await ws.contextSources();
+        const index = buildSchemaIndex(src.graph.nodes, src.graph.edges);
+        let columns = args.columns as CandidateColumn[] | undefined;
+        let target = args.target as string | undefined;
+        if (!columns?.length) {
+          const s = String(args.source).toLowerCase();
+          const maps = problemMappings(problemRoot).filter((m) => (m.sourceFqn || m.sourceEntityId).toLowerCase() === s && (!target || m.targetName.toLowerCase() === target.toLowerCase()));
+          if (maps.length) { target = target ?? maps[0].targetName; columns = maps.filter((m) => m.targetName === target).flatMap((m) => m.columns.map((c) => ({ source: c.sourceColumn, target: c.targetColumn, transform: c.transformExpression }))); }
+        }
+        try {
+          return primitiveCandidates({ source: String(args.source), target, columns, schemaIndex: index, assertions: src.assertions, nodes: src.graph.nodes }) as unknown as Record<string, unknown>;
+        } catch (err) { throw new EngineToolError('NOT_FOUND', err instanceof Error ? err.message : String(err)); }
+      }
+    },
+    {
+      name: 'autode_record_pipeline_spec',
+      description: "Draft the active problem's Pipeline Spec: the entities, each with its source, its transform steps (primitives with parameters, as autode_primitive_candidates gives them) and its target. AutoDE fills in the identity and lineage (the specification it derives from), validates the spec and every step against its primitive, archives an approved previous revision, and writes it as a draft. A person approves it as the build stage's document; then autode_compile_pipeline_spec gives the code. Replaces the previous draft.",
+      inputSchema: { type: 'object', required: ['entities'], additionalProperties: false, properties: {
+        entities: { type: 'array', minItems: 1, items: { type: 'object', required: ['name', 'source', 'transforms', 'target'] } },
+        targetPlatform: { type: 'string', minLength: 1 },
+        stage: { type: 'string', minLength: 1 }
+      } },
+      annotations: records('Draft the Pipeline Spec'),
+      handler: async (args, ws) => {
+        ws.ensurePrimitives();
+        const { problemId, problemRoot } = problemOf(ws);
+        const specText = readProblemDocument(problemRoot, 'spec');
+        if (!specText) throw new EngineToolError('NOT_FOUND', 'The problem has no specification yet.');
+        const bps = parseBusinessProblemSpec(specText);
+        const prevText = readProblemDocument(problemRoot, 'pipelineSpec');
+        const prev = prevText ? parsePipelineSpecDocument(prevText) : undefined;
+        const now = new Date().toISOString();
+        // Steps carry only kind, params and version in the spec (candidates also carry their reasons).
+        const entities = (args.entities as PipelineEntity[]).map((e) => ({ ...e, transforms: (e.transforms ?? []).map((t) => ({ kind: t.kind, params: t.params, ...(t.primitiveVersion !== undefined ? { primitiveVersion: t.primitiveVersion } : {}) })) }));
+        const spec: PipelineSpec = {
+          specVersion: CURRENT_PIPELINE_SPEC_VERSION, id: prev?.id ?? `ps-${problemId}`,
+          version: prev ? (prev.status === 'approved' ? prev.version + 1 : prev.version) : 1, status: 'draft',
+          derivedFromBpsId: bps.id, derivedFromBpsVersion: bps.version,
+          targetPlatform: (args.targetPlatform as string | undefined) ?? prev?.targetPlatform ?? 'snowflake',
+          entities, createdAt: prev?.createdAt ?? now, updatedAt: now
+        };
+        const errors = [...validatePipelineSpec(spec).errors];
+        for (const e of entities) for (const [i, t] of e.transforms.entries()) { const v = validateTransformSpec({ kind: t.kind, params: t.params, primitiveVersion: t.primitiveVersion }); if (!v.valid) errors.push(...v.errors.map((x) => `${e.name} step ${i + 1} (${t.kind}): ${x}`)); }
+        if (errors.length) throw new EngineToolError('VALIDATION_FAILED', `The Pipeline Spec isn't valid: ${errors.join(' ')}`, { errors });
+        writePipelineSpec(problemRoot, spec);
+        const file = problemDocumentPath(problemRoot, 'pipelineSpec');
+        note(ws, problemRoot, stageFor(problemRoot, 'build', args.stage), file);
+        return { id: spec.id, version: spec.version, status: spec.status, entities: entities.length, file: path.relative(ws.options.workspaceRoot, file).split(path.sep).join('/'), next: 'Compile it with autode_compile_pipeline_spec and record the files with autode_record_artifact; then tell the user the Pipeline Spec is ready for their approval.' };
+      }
+    },
     {
       name: 'autode_draft_model',
       description: "A first draft of the target data model, deterministic: the mapping's target entities and columns, the source columns' types, grain, keys and foreign keys from the key, grain and relationship facts (confirmed or proposed, each with where it came from), the kind from the name (fct_, dim_, hub_ …), surrogate keys for dimensions in a dimensional model, and the target context's approach and naming. What isn't known comes back as gaps. Refine it, then check it with autode_check_model.",

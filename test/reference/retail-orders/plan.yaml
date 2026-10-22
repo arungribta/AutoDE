@@ -1,14 +1,15 @@
-# A fixed reference plan, shaped like what AutoDE's planner produces for this problem. Offline
-# runs execute this plan through AgentHub.executePlan() so artifact generation can be measured
-# without an LLM; replay/record runs can also exercise the real planner.
+# The reference problem's build inputs. `steps` are context probes: each task description is used to
+# measure the context a step gets (no agent runs them since v0.45.4). `buildSources` are the source
+# tables AutoDE's deterministic build (primitive candidates → Pipeline Spec → compiler) builds from.
 objective: Daily net revenue and 90-day retention reporting in Snowflake (dbt, dimensional) from shop and crm.
+buildSources: [shop.orders, shop.order_items, shop.refunds, shop.customers, crm.customers]
 steps:
   - id: s4
-    assignedAgent: ingestionAgent
+    assignedAgent: pipeline-engineer
     phase: build
     taskDescription: Ingest shop.orders, shop.order_items, shop.refunds, shop.customers and crm.customers into the RAW layer; load orders incrementally on updated_at.
   - id: s5
-    assignedAgent: transformScaffoldAgent
+    assignedAgent: pipeline-engineer
     phase: build
     dependsOn: [s4]
     taskDescription: Scaffold the dbt project — stg_orders (dedup on order_id, incremental on updated_at), dim_customer (SCD2), fct_daily_revenue (net revenue excluding cancelled orders, net of refunds).

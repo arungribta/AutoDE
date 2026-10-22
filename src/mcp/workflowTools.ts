@@ -108,7 +108,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
     {
       name: 'autode_record_artifact',
       description: 'Record a deliverable of a stage you were assigned (a document, SQL, YAML): AutoDE writes it to the problem\'s output folder for that stage, archives the previous revision, checks its grounding against the estate (unresolved tables and columns are reported) and notes it in the workflow\'s history. It is a draft: the stage\'s approval is where a person accepts it. List the returned paths as the stage\'s outputs when it is handed in.',
-      inputSchema: { type: 'object', required: ['stage', 'path', 'content'], additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 }, path: { type: 'string', minLength: 1, description: 'File name relative to the stage\'s folder, e.g. design.md or sql/stg_orders.sql.' }, content: { type: 'string' }, language: { type: 'string', description: 'sql, markdown, yaml, python, json; default from the extension.' } } },
+      inputSchema: { type: 'object', required: ['stage', 'path', 'content'], additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 }, path: { type: 'string', minLength: 1, description: 'File name relative to the stage\'s folder, e.g. design.md or sql/stg_orders.sql.' }, content: { type: 'string' }, language: { type: 'string', description: 'sql, markdown, yaml, python, json; default from the extension.' }, primitives: { type: 'array', description: 'For compiled code: the Pipeline Spec steps it came from (kind, params, and lineage: the estate table its columns trace to), so its grounding manifest records which facts back each decision.', items: { type: 'object', required: ['kind', 'params'], properties: { kind: { type: 'string', minLength: 1 }, params: { type: 'object' }, lineage: { type: 'string' } } } } } },
       annotations: records('Record a deliverable'),
       handler: async (args, ws) => {
         const r = rctx(ws);
@@ -116,7 +116,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         const s = w?.stages.find((x) => x.id === args.stage);
         if (!w || !s || !s.included) throw new EngineToolError('NOT_FOUND', `No stage "${String(args.stage)}" in the active problem's workflow.`);
         try {
-          return recordArtifact({ workspaceRoot: r.workspaceRoot, problemId: r.problemId, problemRoot: r.problemRoot, stage: { id: s.id, kind: s.kind }, path: String(args.path), content: String(args.content), language: args.language as string | undefined, who: agent(), channel: 'tool', sources: await ws.contextSources() }) as unknown as Record<string, unknown>;
+          return recordArtifact({ workspaceRoot: r.workspaceRoot, problemId: r.problemId, problemRoot: r.problemRoot, stage: { id: s.id, kind: s.kind }, path: String(args.path), content: String(args.content), language: args.language as string | undefined, who: agent(), channel: 'tool', sources: await ws.contextSources(), primitiveUses: ((args.primitives as Array<{ kind: string; params: Record<string, unknown>; lineage?: string }> | undefined) ?? []).map((p) => ({ kind: p.kind, params: p.params, lineage: p.lineage, source: 'primitive' as const })) }) as unknown as Record<string, unknown>;
         } catch (err) {
           throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
         }
