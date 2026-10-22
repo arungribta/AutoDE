@@ -311,8 +311,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // v0.44.1: the Workflow view — tree, editor tab, status bar — over the engine's runtime and history.
   context.subscriptions.push(...registerWorkflowView(context, {
     scope: () => sidebarProvider.currentWorkflowScope(),
-    agentsRunState: () => sidebarProvider.agentsRunState(),
-    runAgentsAction: (action) => sidebarProvider.runAgentsAction(action),
     resolve: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note),
     workflowAction: (action, stage, arg) => sidebarProvider.workflowActionFromView(action, stage, arg),
     user: skillActor

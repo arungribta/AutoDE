@@ -42,7 +42,9 @@
   button:disabled { opacity: 0.5; cursor: default; }
   select { font-family: inherit; font-size: 12px; padding: 3px; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); }
   a { color: var(--vscode-textLink-foreground); cursor: pointer; }
-  .agents { margin-top: var(--gap); }
+  .guide { margin: 8px 0; padding: 6px 8px; border-radius: 4px; background: var(--vscode-textBlockQuote-background); font-size: 12px; }
+  .proposal td, .proposal th { text-align: left; font-size: 12px; padding: 3px 8px 3px 0; vertical-align: top; }
+  .out { opacity: 0.6; }
   .tag { display: inline-block; font-size: 10px; padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; opacity: 0.8; margin-left: 4px; }
 </style>
 </head>
@@ -52,10 +54,10 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
-  let state = { model: null, details: {}, selected: null, agents: null };
+  let state = { model: null, details: {}, selected: null };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const MARK = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
-  const ACTION_LABEL = { approve: 'Approve…', run: 'Run agent', 'hand-in': 'Hand in…', 'approve-again': 'Approve again…', skip: 'Skip…', reopen: 'Re-open…' };
+  const ACTION_LABEL = { approve: 'Approve…', 'approve-document': 'Approve…', run: 'Run agent', 'open-document': 'Open document', 'hand-in': 'Hand in…', 'approve-again': 'Approve again…', skip: 'Skip…', reopen: 'Re-open…' };
   const send = (m) => vscode.postMessage(m);
   const when = (iso) => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
 
@@ -70,6 +72,14 @@
     if (m.provenance.length) h += '<div class="prov">' + m.provenance.map((p) => '<div>' + esc(p) + '</div>').join('') + '<div><a data-history="1">Full history</a></div></div>';
     if (!m.approved) {
       h += '<div class="panel"><h2>Plan the workflow</h2>';
+      if (m.proposal) {
+        const p = m.proposal;
+        h += '<div class="muted">Proposed: ' + esc(p.template) + '. Review what is in and what is left out, then approve it.</div>' +
+          '<table class="proposal"><tr><th>Stage</th><th>Kind</th><th>Inclusion</th><th>In the workflow</th></tr>' + p.stages.map((x) =>
+            '<tr class="' + (x.included ? '' : 'out') + '"><td>' + esc(x.title) + (x.origin === 'added' ? '<span class="tag">added</span>' : '') + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.inclusion) + '</td><td>' +
+            (x.included ? 'yes' + (x.systems && x.systems.length ? ' (per source system: ' + x.systems.map(esc).join(', ') + ')' : '') : 'no — ' + esc(x.reason || 'optional, not included')) + '</td></tr>').join('') + '</table>' +
+          (p.errors.length ? '<div class="guide">The engine refuses it: ' + p.errors.map(esc).join(' ') + '</div>' : '');
+      }
       if (m.pendingWorkflowDecision) {
         h += '<div class="muted">Waiting for a person: ' + esc(m.pendingWorkflowDecision.title) + '</div>' +
           '<button class="primary" data-decide="approve" data-id="' + esc(m.pendingWorkflowDecision.id) + '">Approve workflow…</button><button data-decide="reject" data-id="' + esc(m.pendingWorkflowDecision.id) + '">Reject…</button><button data-open-decision="' + esc(m.pendingWorkflowDecision.id) + '">Open decision</button>';
@@ -85,29 +95,23 @@
       '<div class="col"><div class="col-title">Step ' + (Number(lv) + 1) + '</div>' + cols[lv].map((s) =>
         '<div class="card st-' + esc(s.status) + (state.selected === s.id ? ' sel' : '') + '" tabindex="0" role="listitem" data-stage="' + esc(s.id) + '" aria-label="' + esc(s.title + ', ' + s.status) + '">' +
         '<div class="t">' + (MARK[s.status] || '') + ' ' + esc(s.title) + (s.origin === 'added' ? '<span class="tag">added</span>' : '') + '</div>' +
-        '<div class="s">' + esc(s.status) + (s.why ? ' — ' + esc(s.why) : '') + '</div></div>').join('') + '</div>').join('') + '</div>';
-    // AutoDE agents (until PA3b): the plan of steps that runs today's agents.
-    const a = state.agents;
-    if (a) {
-      h += '<div class="panel agents"><h2>AutoDE agents</h2><div class="muted">Today the stage work is done by AutoDE\'s agents through a plan of steps (until agents work from the workflow directly).</div>' +
-        '<div class="kv"><div>Plan steps</div><div>' + (a.steps || 'none yet') + '</div><div>Plan approved</div><div>' + (a.planApproved ? 'yes' : 'no') + '</div><div>Stages confirmed</div><div>' + (a.stagesConfirmed ? 'yes' : 'no') + '</div></div>' +
-        (a.running ? '<div class="muted">Running…</div>' : a.next ? '<button class="primary" data-agents="' + esc(a.next.action) + '">' + esc(a.next.label) + '</button>' : '') +
-        (!a.canGeneratePlan && a.blocking && a.blocking.length ? '<div class="muted">Blocked: ' + a.blocking.map(esc).join(' ') + '</div>' : '') + '</div>';
-    }
+        '<div class="s">' + esc(s.status) + '</div><div class="s">' + esc(s.guide) + '</div></div>').join('') + '</div>').join('') + '</div>';
     h += '</div>';
     // Detail of the selected stage.
     const s = m.stages.find((x) => x.id === state.selected) || m.stages[0];
     const d = s && state.details[s.id];
     if (s) {
       h += '<div class="panel" aria-live="polite"><h2>' + (MARK[s.status] || '') + ' ' + esc(s.title) + '</h2><div class="muted">' + esc(s.status) + (s.why ? ' — ' + esc(s.why) : '') + '</div>' +
+        '<div class="guide"><b>Next:</b> ' + esc(s.guide) + '</div>' +
         '<div class="kv"><div>Kind</div><div>' + esc(s.kind) + '</div><div>Inclusion</div><div>' + esc(s.inclusion) + (s.origin === 'added' ? ' (added by the plan)' : '') + '</div>' +
-        '<div>Agent</div><div>' + esc(s.role || '—') + (s.tier ? ' · tier ' + esc(s.tier) : '') + ' (ceiling ' + esc(s.ceiling) + ')</div>' +
+        '<div>Agent</div><div>' + esc(s.role || '—') + (s.tier ? ' · tier ' + esc(s.tier) : '') + ' (ceiling ' + esc(s.ceiling) + ')' + (s.runner ? '<br>runs here: ' + esc(s.runner) : '') + '</div>' +
+        (s.document ? '<div>Document</div><div><a data-file="' + esc(s.document) + '">' + esc(s.document) + '</a></div>' : '') +
         '<div>After</div><div>' + (s.after.length ? s.after.map(esc).join(', ') : 'nothing') + '</div>' +
         (d ? '<div>Consumes</div><div>' + (d.consumes.map(esc).join(', ') || 'nothing') + '</div><div>Produces</div><div>' + d.produces.map(esc).join(', ') + '</div><div>Gates</div><div>' + d.gates.map(esc).join(', ') + '</div><div>Done when</div><div>' + esc(d.doneWhen) + '</div>' : '') +
         (s.approvedBy ? '<div>Approved</div><div>by ' + esc(s.approvedBy) + (s.approvedVia ? ' via ' + esc(s.approvedVia) : '') + (s.approvedAt ? ' on ' + esc(when(s.approvedAt)) : '') + '</div>' : '') +
         (d && d.record && d.record.outputs && d.record.outputs.length ? '<div>Outputs</div><div>' + d.record.outputs.map((f) => '<a data-file="' + esc(f) + '">' + esc(f) + '</a>').join('<br>') + '</div>' : '') +
         (s.tasks.length ? '<div>Tasks</div><div>' + s.tasks.map((t) => esc(t.title)).join('<br>') + '</div>' : '') + '</div>';
-      h += s.actions.map((x) => x === 'approve' && s.decisionId ? '<button class="primary" data-decide="approve" data-id="' + esc(s.decisionId) + '">Approve…</button><button data-decide="reject" data-id="' + esc(s.decisionId) + '">Reject…</button>' : '<button data-act="' + esc(x) + '" data-stage="' + esc(s.id) + '">' + esc(ACTION_LABEL[x] || x) + '</button>').join('');
+      h += s.actions.map((x) => x === 'approve' && s.decisionId ? '<button class="primary" data-decide="approve" data-id="' + esc(s.decisionId) + '">Approve…</button><button data-decide="reject" data-id="' + esc(s.decisionId) + '">Reject…</button>' : '<button' + (x === 'approve-document' || x === 'run' ? ' class="primary"' : '') + ' data-act="' + esc(x) + '" data-stage="' + esc(s.id) + '">' + esc(x === 'produce' ? s.produceLabel : (ACTION_LABEL[x] || x)) + '</button>').join('');
       if (d && d.decision) {
         h += '<h2 style="margin-top:12px;">Decision ' + esc(d.decision.id) + ' — ' + esc(d.decision.status) + '</h2><ul class="hist">' + d.decision.events.map((e) => '<li>' + esc(when(e.at)) + ' ' + esc(e.type) + ' by ' + esc(e.actor) + (e.channel ? ' (' + esc(e.channel) + ')' : '') + (e.note ? ' — ' + esc(e.note) : '') + '</li>').join('') + '</ul><a data-open-decision="' + esc(d.decision.id) + '">Open decision file</a>';
       }
@@ -123,7 +127,6 @@
     root.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => send({ type: b.getAttribute('data-act'), stage: b.getAttribute('data-stage') }); });
     root.querySelectorAll('[data-open-decision]').forEach((b) => { b.onclick = () => send({ type: 'openDecision', decisionId: b.getAttribute('data-open-decision') }); });
     root.querySelectorAll('[data-file]').forEach((b) => { b.onclick = () => send({ type: 'openFile', file: b.getAttribute('data-file') }); });
-    root.querySelectorAll('[data-agents]').forEach((b) => { b.onclick = () => { b.disabled = true; send({ type: 'runAgents', action: b.getAttribute('data-agents') }); }; });
     root.querySelectorAll('[data-history]').forEach((b) => { b.onclick = () => send({ type: 'openHistory' }); });
     const p = root.querySelector('[data-propose]');
     if (p) p.onclick = () => { p.disabled = true; send({ type: 'propose', template: (document.getElementById('tpl') || {}).value }); };
@@ -132,7 +135,7 @@
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
     if (msg.type === 'model') {
-      state.model = msg.model; state.details = msg.details || {}; state.agents = msg.agents || null; state.error = msg.error;
+      state.model = msg.model; state.details = msg.details || {}; state.error = msg.error;
       if (msg.selected && !state.selected) state.selected = msg.selected;
       if (msg.selected) state.selected = msg.selected;
       render();

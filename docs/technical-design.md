@@ -1226,6 +1226,12 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
   - `installPlugin()` writes each host's folders, renders Copilot agents as `*.agent.md` with `tools: ["read", "search", "autode/…"]`, and merges the project's `.mcp.json` for Claude Code. Elsewhere it returns the step to take;
   - `serverEntry()` uses `autode mcp` when it is on PATH, else node on the package's own bundle.
 
+- **One path** (v0.45.1):
+  - `stageRunner()` (`src/core/agentExecutor.ts`) gives the stage's role template, else `LEGACY_AGENTS[kind]` (source-assessment, modelling, build). `runStage()` runs the latter through `AgentHub.runStageSteps()`: a plan of only that stage's steps, the files written collected through `stageRunFiles`, and no `handleFailure` re-plan. They are recorded to the stage and handed in (document stages complete when their document is approved).
+  - **Document approval** (`src/engine/workflows/documentApproval.ts`): `documentApprovalProblems()` checks the document (a specification statement; a context's spec id and version; at least one mapping; a valid Pipeline Spec), and `approveStageDocument()` writes `status: approved`, `approvedAt` and `approvedBy`, then appends an `approved` event. It is called from the Workflow view (after a modal) and from `autode workflow approve <stage>` (interactive terminal); no MCP tool calls it.
+  - **View model:** `StageModel` has `guide` (the Next line), `runner`, `produceLabel`, `document`, `blockers`, and actions `approve-document`, `produce`, `open-document`. `WorkflowModel.proposal` is the pending workflow decision's stages with inclusion and reasons.
+  - **Panel:** the plan messages (`generatePlan`, `generatePlanFromSpec`, `approvePlan`, `confirmStages`, `executePlan`) open the Workflow view.
+
 ### 7.7 Decisions and proposals (v0.40.0; ORC-8, MCP-2)
 
 *Since v0.41.0 facts no longer become decisions: they use the ledger's gate (§5.14); the `assertion` kind remains for decisions recorded before.*
@@ -1784,7 +1790,7 @@ src/engine/transforms/declarative/    # Tier 2 declarative primitives
 src/engine/transforms/primitives/    # Tier 1 primitives
   dedup.ts, incrementalLoad.ts, renameCast.ts
 src/engine/workflows/
-  events.ts, instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
+  documentApproval.ts, events.ts, instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
   catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 src/spokes/    # Snowflake executor (other files unused)

@@ -16,8 +16,6 @@ import { layoutPath } from '../engine/workspaceLayout';
 
 export interface WorkflowViewHost {
   scope(): WorkflowScope | undefined;
-  agentsRunState(): { steps: number; planApproved: boolean; stagesConfirmed: boolean; running: boolean; canGeneratePlan: boolean; blocking: string[]; next: { action: string; label: string } | undefined };
-  runAgentsAction(action: 'generatePlanFromSpec' | 'approvePlan' | 'confirmStages' | 'executePlan'): Promise<void>;
   resolve(id: string, decision: 'approved' | 'rejected', note?: string): Promise<void>;
   workflowAction(action: string, stage?: string, arg?: string): Promise<void>;
   user(): string;
@@ -56,11 +54,13 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<Node> {
     }
     const s = n.stage;
     const t = new vscode.TreeItem(s.title, s.tasks.length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
-    t.description = `${s.status}${s.why ? ` — ${s.why}` : ''}`;
+    t.description = s.status === 'done' || s.status === 'skipped' ? `${s.status}${s.why ? ` — ${s.why}` : ''}` : s.guide;
     t.iconPath = new vscode.ThemeIcon(STATUS_ICON[s.status] ?? 'circle-outline', s.status === 'stale' ? new vscode.ThemeColor('problemsWarningIcon.foreground') : s.status === 'done' ? new vscode.ThemeColor('testing.iconPassed') : undefined);
     t.tooltip = new vscode.MarkdownString([
       `**${s.title}** (${s.kind}, ${s.inclusion}${s.origin === 'added' ? ', added' : ''})`, '',
       `Status: ${s.status}${s.why ? ` — ${s.why}` : ''}`,
+      `Next: ${s.guide}`,
+      s.runner ? `Run agent: ${s.runner}` : '',
       s.role ? `Role: ${s.role}${s.tier ? ` · tier ${s.tier}` : ''} (ceiling ${s.ceiling})` : '',
       s.after.length ? `After: ${s.after.join(', ')}` : '',
       s.approvedBy ? `Approved by ${s.approvedBy}${s.approvedVia ? ` via ${s.approvedVia}` : ''}${s.approvedAt ? ` on ${s.approvedAt.slice(0, 16).replace('T', ' ')}` : ''}` : ''
@@ -116,7 +116,7 @@ export class WorkflowPanel {
       const d = stageDetail(scope, s.id);
       return [s.id, d ? { ...d, history: d.history.map((e) => ({ ...e, who: actorLabel(e.actor) })), decision: d.decision ? { ...d.decision, events: d.decision.events } : undefined } : undefined];
     }));
-    void this.panel.webview.postMessage({ type: 'model', model, details, selected: this.selected ?? model.next?.id ?? model.stages[0]?.id, agents: this.host.agentsRunState() });
+    void this.panel.webview.postMessage({ type: 'model', model, details, selected: this.selected ?? model.next?.id ?? model.stages[0]?.id });
   }
 
   private async onMessage(m: { type: string; stage?: string; decisionId?: string; template?: string; action?: string; file?: string }): Promise<void> {
@@ -133,12 +133,11 @@ export class WorkflowPanel {
           await this.host.resolve(m.decisionId, m.type === 'approve' ? 'approved' : 'rejected');
           break;
         }
-        case 'run': await this.host.workflowAction('run', m.stage); break;
+        case 'run': case 'approve-document': case 'produce': case 'open-document': await this.host.workflowAction(m.type, m.stage); break;
         case 'hand-in': case 'approve-again': await this.host.workflowAction('complete', m.stage); break;
         case 'skip': await this.host.workflowAction('skip', m.stage); break;
         case 'reopen': await this.host.workflowAction('reopen', m.stage); break;
         case 'propose': await this.host.workflowAction('propose', undefined, m.template); break;
-        case 'runAgents': if (m.action) await this.host.runAgentsAction(m.action as 'generatePlanFromSpec'); break;
         case 'openDecision': if (scope && m.decisionId) await vscode.window.showTextDocument(vscode.Uri.file(path.join(layoutPath(scope.workspaceRoot, 'decisions'), `${m.decisionId}.yaml`))); return;
         case 'openFile': if (scope && m.file) await vscode.window.showTextDocument(vscode.Uri.file(path.resolve(scope.workspaceRoot, m.file))); return;
         case 'openHistory': if (scope) await vscode.window.showTextDocument(vscode.Uri.file(path.join(layoutPath(scope.workspaceRoot, 'problems', scope.problemId), 'workflow-events.jsonl'))); return;
@@ -185,6 +184,9 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
     vscode.commands.registerCommand('autoDataEngineeringHub.openWorkflow', (stage?: string) => WorkflowPanel.show(context, host, refresh, typeof stage === 'string' ? stage : undefined)),
     vscode.commands.registerCommand('autoDataEngineeringHub.refreshWorkflow', refreshNow),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowRun', act('run')),
+    vscode.commands.registerCommand('autoDataEngineeringHub.workflowApproveDocument', act('approve-document')),
+    vscode.commands.registerCommand('autoDataEngineeringHub.workflowProduce', act('produce')),
+    vscode.commands.registerCommand('autoDataEngineeringHub.workflowOpenDocument', act('open-document')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowHandIn', act('hand-in')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowApproveAgain', act('approve-again')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowSkip', act('skip')),

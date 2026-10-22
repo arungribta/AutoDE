@@ -639,6 +639,32 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: run a plan saved before v0.45.0 that has an `architectureAgent` step.
   Expect: that step fails with "Documentation moved to the workflow: run the document stage from the Workflow view…"; the other steps run.
 
+## Part 27 — v0.45.1 The workflow is the only path
+
+- [ ] **27.1 The proposal.**
+  Do: draft a workflow from the Workflow tab and don't approve it yet.
+  Expect: a table of every stage with its kind, its inclusion and whether it is in; each left-out stage shows its reason.
+- [ ] **27.2 Next, everywhere.**
+  Do: after approving the workflow, look at the tree, the cards and the stage detail.
+  Expect: every stage says what moves it forward: Run agent, Produce, Approve, Hand in, Skip, or what it waits for.
+- [ ] **27.3 Approve the mapping.**
+  Do: on Mapping, use *Add a mapping…*.
+  Expect:
+  - before any mapping exists, the card says the mapping can't be approved yet and why;
+  - after one is added, **Approve…** appears, asks for confirmation as you, and the stage is done ("approved by <you> (panel)");
+  - `autode workflow approve mapping` in a terminal does the same.
+- [ ] **27.4 Quality rules.**
+  Do: Run agent on Quality rules.
+  Expect:
+  - the quality engineer proposes `quality_expectation` facts (Context Inbox) and records `quality-rules.yaml` and `quality-rules.md` under the stage's folder;
+  - the stage is handed in and waits for your approval.
+- [ ] **27.5 Per-stage agents.**
+  Do: Run agent on Modelling.
+  Expect: only the data modeler runs. Its files are listed as the stage's outputs, and nothing else is generated.
+- [ ] **27.6 No side door.**
+  Do: in the panel, use Generate Plan, Execute, `/plan` and `/execute`.
+  Expect: each opens the Workflow view with "AutoDE now works stage by stage…"; no artifacts are generated.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -796,5 +822,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 26.4 |  |  |
 | 26.5 |  |  |
 | 26.6 |  |  |
+| 27.1 |  |  |
+| 27.2 |  |  |
+| 27.3 |  |  |
+| 27.4 |  |  |
+| 27.5 |  |  |
+| 27.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

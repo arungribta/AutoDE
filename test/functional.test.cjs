@@ -9285,7 +9285,8 @@ async function main() {
       const st = (x) => m.stages.find((s) => s.id === x);
       assert.ok(m.provenance.some((x) => /^Approved by priya/.test(x)));
       assert.deepStrictEqual([st('specify').level, st('plan').level, st('sources').level, st('mapping').level], [0, 1, 2, 3], 'columns follow the dependencies');
-      assert.deepStrictEqual(st('sources').actions, [], 'a mandatory, document-backed stage: no hand-in or skip');
+      assert.deepStrictEqual(st('sources').actions, ['run', 'produce'], 'a mandatory, document-backed stage: its agent or its document, no hand-in or skip (v0.45.1)');
+      assert.ok(/Build the source context/.test(st('sources').guide), st('sources').guide);
       assert.deepStrictEqual(st('quality').actions, ['skip'], 'waits for sources: nothing to hand in yet, but a default stage may be skipped');
       assert.deepStrictEqual(st('platform-setup').status, 'skipped');
       assert.ok(st('deploy').actions.includes('skip') && !st('reconcile').actions.includes('skip'));
@@ -9305,7 +9306,8 @@ async function main() {
     assert.ok(nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8').includes('!media/workflow.html'));
     const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'workflow.html'), 'utf8');
     assert.ok(/Content-Security-Policy/.test(page) && /script-src 'nonce-\{\{nonce\}\}'/.test(page));
-    for (const t of ["type: 'ready'", "'openDecision'", "'runAgents'", 'data-decide', 'History', 'AutoDE agents']) assert.ok(page.includes(t), t);
+    for (const t of ["type: 'ready'", "'openDecision'", "'approve-document'", 'data-decide', 'History', '<b>Next:</b>']) assert.ok(page.includes(t), t);
+    assert.ok(!page.includes('AutoDE agents') && !page.includes('runAgents'), 'v0.45.1: the plan-of-steps box is gone');
     const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
     for (const gone of ['id="palettePhases"', 'id="paletteAgents"', 'id="paletteContinueBtn"']) assert.ok(!html.includes(gone), gone);
     for (const kept of ['id="paletteDecisions"', 'id="paletteArtifacts"', 'id="palettePrimitives"', 'id="paletteContext"']) assert.ok(html.includes(kept), kept);
@@ -9320,7 +9322,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'documentation']);
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'documentation', 'quality-rules']);
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -9486,6 +9488,128 @@ async function main() {
     assert.ok(require('../scripts/pack-cli.cjs').CONTENT.includes('agents'));
     const { SERVER_FILES } = fresh('../dist/core/mcpConfig.js');
     assert.ok(SERVER_FILES.includes('agents'));
+  });
+
+  // ---------- v0.45.1: the workflow is the only path ----------
+
+  // A workspace template with a quality stage, a mapping and a model, each needing only the spec.
+  const tinyFlow = async (ws, cliFn) => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const dir = nodePath.join(ws, '.autode', 'config', 'workflows');
+    nodeFs.mkdirSync(dir, { recursive: true });
+    const st = (id, kind, extra = '') => `  - id: ${id}\n    title: ${id}\n    kind: ${kind}\n    inclusion: default\n    consumes: [spec]\n    after: [plan (approved)]\n${extra}`;
+    nodeFs.writeFileSync(nodePath.join(dir, 'tiny.yaml'), 'id: tiny\nversion: 1\ntitle: Tiny\ndescription: Three stages after the plan.\nstages:\n  - id: specify\n    title: Specification\n    kind: specify\n    inclusion: mandatory\n  - id: plan\n    title: Plan\n    kind: plan\n    inclusion: mandatory\n    after: [specify (approved)]\n' + st('quality', 'quality-rules') + st('mapping', 'mapping') + st('model', 'modelling') + st('bi', 'bi-migration').replace('inclusion: default', 'inclusion: optional'));
+    const W = ['--workspace', ws];
+    const id = (await cliFn(['problems', 'new', 'Daily revenue from the shop orders', ...W, '--json'])).json().id;
+    const prob = nodePath.join(ws, '.autode', 'problems', id);
+    const spec = nodePath.join(prob, 'spec', 'business-problem.yaml');
+    nodeFs.writeFileSync(spec, nodeFs.readFileSync(spec, 'utf8').replace('status: draft', 'status: approved').replace('problemStatementApproved: false', 'problemStatementApproved: true'));
+    assert.strictEqual((await cliFn(['workflow', 'plan', '--template', 'tiny', ...W])).code, 0);
+    return { id, prob, W };
+  };
+
+  await test('v0.45.1: the proposed workflow is shown in full before it is approved — every stage, and why the left-out ones are out', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-prop-'));
+    try {
+      const { id } = await tinyFlow(ws, cli);
+      const m = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id });
+      assert.ok(m.proposal && m.proposal.template === 'tiny v1', JSON.stringify(m.proposal));
+      const bi = m.proposal.stages.find((s) => s.id === 'bi');
+      assert.deepStrictEqual([bi.included, bi.inclusion], [false, 'optional'], 'shown as left out (the page says "optional, not included" when there is no reason)');
+      assert.ok(m.proposal.stages.find((s) => s.id === 'mapping').included);
+      assert.ok(m.stages.every((s) => s.guide), 'every stage says what moves it forward');
+      const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'workflow.html'), 'utf8');
+      assert.ok(page.includes('m.proposal') && page.includes('In the workflow'));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.1: a stage\'s document is approved from the view or the CLI — refused while it can\'t be (no mappings, another spec version), then the stage is done, recorded as the person', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-docapp-'));
+    try {
+      const { id, prob, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      const V = fresh('../dist/core/workflowViewModel.js');
+      const D = fresh('../dist/engine/documents/problemDocuments.js');
+      const A = fresh('../dist/engine/workflows/documentApproval.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id };
+      const spec = D.parseBusinessProblemSpec(D.readProblemDocument(prob, 'spec'));
+      // An empty mapping: awaiting approval, but it can't be approved yet, and the view says why.
+      nodeFs.mkdirSync(nodePath.join(prob, 'context'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(prob, 'context', 'mapping-context.yaml'), D.serializeMappingContext({ specId: spec.id, specVersion: spec.version, status: 'built', mappings: [] }));
+      let st = V.buildWorkflowModel(scope).stages.find((s) => s.id === 'mapping');
+      assert.deepStrictEqual([st.status, st.actions.includes('approve-document'), st.blockers.length > 0, /no entity mappings/.test(st.guide)], ['awaiting-approval', false, true, true], JSON.stringify(st));
+      assert.ok(st.actions.includes('produce') && st.produceLabel === 'Add a mapping…' && st.document.endsWith('mapping-context.yaml'));
+      assert.strictEqual((await cli(['workflow', 'approve', 'mapping', ...W], { interactive: true, answers: ['approve'] })).code, 1);
+      D.writeMappingUpsert(prob, { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: [{ sourceColumn: 'order_id', targetColumn: 'order_id' }] });
+      st = V.buildWorkflowModel(scope).stages.find((s) => s.id === 'mapping');
+      assert.ok(st.actions.includes('approve-document') && /Review the mapping/.test(st.guide), JSON.stringify(st));
+      assert.strictEqual((await cli(['workflow', 'approve', 'mapping', ...W])).code, 4, 'a person, at a terminal');
+      const ok = await cli(['workflow', 'approve', 'mapping', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(ok.code, 0, ok.out + ok.err);
+      st = V.buildWorkflowModel(scope).stages.find((s) => s.id === 'mapping');
+      assert.deepStrictEqual([st.status, st.approvedBy], ['done', 'priya']);
+      const ev = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'mapping' }).find((e) => e.type === 'approved' && e.channel === 'cli');
+      assert.ok(ev && ev.actor.kind === 'person' && ev.actor.name === 'priya');
+      // Agents never approve a document: no MCP tool does it.
+      const client = await mcpSession(ws);
+      try { assert.ok(!(await client.listTools()).tools.some((t) => /approve/.test(t.name))); } finally { await client.close(); }
+      // A context built for another spec version is refused.
+      nodeFs.writeFileSync(nodePath.join(prob, 'context', 'source-context.yaml'), `specId: ${spec.id}\nspecVersion: ${spec.version + 5}\nstatus: built\nsources: []\n`);
+      assert.ok(/another version/.test(A.documentApprovalProblems(prob, 'source-assessment').join()));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.1: every stage has a way forward — quality rules by the quality engineer (even where the plan named another role), modelling by AutoDE\'s not-yet-migrated agent for that stage only, its files recorded and handed in', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-legacy-'));
+    try {
+      const { id, prob, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id };
+      const wf = fresh('../dist/engine/workflows/instance.js').readWorkflow(prob);
+      assert.strictEqual(wf.stages.find((s) => s.id === 'quality').agent.role, 'quality-engineer');
+      // A plan approved before v0.45.1 named source-assessor: the assignment falls back to a defined role the kind allows.
+      wf.stages.find((s) => s.id === 'quality').agent.role = 'source-assessor';
+      fresh('../dist/engine/workflows/instance.js').writeWorkflow(prob, wf);
+      const a = fresh('../dist/engine/agents/assignment.js').assignmentFor(scope, 'quality', []).assignment;
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id)], ['quality-engineer', ['quality-rules']]);
+      const m = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope);
+      const st = (x) => m.stages.find((s) => s.id === x);
+      assert.deepStrictEqual([st('quality').runner, st('quality').actions.includes('run')], ['quality-engineer', true]);
+      assert.deepStrictEqual([st('model').runner, st('model').actions.includes('run')], ['dataModelerAgent', true]);
+      // The legacy run: only the model stage's agent, its files recorded to the stage and handed in.
+      const { runStage } = fresh('../dist/core/agentExecutor.js');
+      const out = nodePath.join(ws, 'autode-output', id, '02-model', 'model.sql');
+      let asked;
+      const host = {
+        createEngine: () => undefined, activeProvider: () => 'claude', log: () => {}, runAgentWithTools: async () => { throw new Error('not used'); },
+        runStageSteps: async (stageId, objective, steps) => { asked = { stageId, objective, agents: steps.map((s) => s.agent) }; nodeFs.mkdirSync(nodePath.dirname(out), { recursive: true }); nodeFs.writeFileSync(out, 'create table fct_orders (order_id int);'); return { ok: true, files: [out], message: '1 step(s) done; 1 file(s) written.' }; }
+      };
+      const r = await runStage(host, scope, 'model');
+      assert.ok(r.ok, r.message);
+      assert.deepStrictEqual([asked.stageId, asked.agents, /Daily revenue/.test(asked.objective)], ['model', ['dataModelerAgent'], true], 'it runs on any model, Claude Code included');
+      assert.deepStrictEqual(r.outputs, [`autode-output/${id}/02-model/model.sql`]);
+      const events = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'model' });
+      assert.ok(events.some((e) => e.type === 'recorded' && e.actor.name === 'dataModelerAgent' && e.actor.host === 'VS Code'));
+      const after = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope).stages.find((s) => s.id === 'model');
+      assert.ok(['awaiting-approval', 'done'].includes(after.status), after.status);
+      // A stage with no agent at all says so, and offers hand-in or skip.
+      const bi = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope).stages.find((s) => s.id === 'bi');
+      assert.ok(!bi || bi.status === 'skipped' || /hand in/.test(bi.guide));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.1: nothing runs outside the workflow — the panel\'s Plan and Execute and /plan and /execute go to the Workflow view; a stage run never re-plans the problem', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const src = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
+    assert.ok(/case 'generatePlan': case 'generatePlanFromSpec': case 'approvePlan': case 'confirmStages': case 'executePlan': \{\s*this\.postLog\('AutoDE now works stage by stage/.test(src));
+    assert.ok(!/this\.hub\.generatePlanFromSpec\(/.test(src) && !/case 'executePlan': \{ await this\.hub\.executePlan/.test(src));
+    const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
+    assert.ok(/if \(firstFailedStep && !this\.stageRunFiles\)/.test(hub));
+    const pkg = require('../package.json');
+    for (const c of ['workflowRun', 'workflowApproveDocument', 'workflowProduce', 'workflowOpenDocument']) assert.ok(pkg.contributes.commands.some((x) => x.command === `autoDataEngineeringHub.${c}`), c);
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

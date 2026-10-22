@@ -1,4 +1,6 @@
-import { assignmentFor } from '../engine/agents/assignment';
+import * as fs from 'node:fs';
+import { stageRunner } from './agentExecutor';
+import { documentApprovalProblems, stageDocumentFile } from '../engine/workflows/documentApproval';
 import { readProblemDocument, parseBusinessProblemSpec } from '../engine/documents/problemDocuments';
 import { DecisionStore } from '../engine/decisions/decisionStore';
 import { readWorkflow, WorkflowInstance } from '../engine/workflows/instance';
@@ -26,10 +28,30 @@ export interface StageModel extends StageView {
   /** How the approval was given: panel, cli, file, elicitation, document. */
   approvedVia?: string;
   /** What a person can do here now. */
-  actions: Array<'approve' | 'run' | 'hand-in' | 'approve-again' | 'skip' | 'reopen'>;
-  /** PA3b: the agent that runs the stage here (its role has a definition). */
+  actions: StageAction[];
+  /** Who runs the stage here: its role template, or AutoDE's not-yet-migrated agents for its kind. */
   runner?: string;
+  /** The label of `produce`: how this stage's document is made (document stages). */
+  produceLabel?: string;
+  /** The stage's document, workspace-relative, when it exists. */
+  document?: string;
+  /** What stops the document from being approved now. */
+  blockers: string[];
+  /** One line: what moves this stage forward. */
+  guide: string;
 }
+
+export type StageAction = 'approve' | 'approve-document' | 'run' | 'produce' | 'open-document' | 'hand-in' | 'approve-again' | 'skip' | 'reopen';
+
+/** How each document stage's document is made in VS Code. */
+export const PRODUCE_LABEL: Record<string, string> = {
+  'specify': 'Open the specification', 'target-context': 'Build the target context', 'source-assessment': 'Build the source context',
+  'mapping': 'Add a mapping…', 'build': 'Generate the Pipeline Spec'
+};
+const DOC_NAME: Record<string, string> = { 'specify': 'specification', 'target-context': 'target context', 'source-assessment': 'source context', 'mapping': 'mapping', 'build': 'Pipeline Spec' };
+
+/** The proposed workflow, for review before it is approved: every stage, and why the left-out ones are out. */
+export interface ProposalModel { id: string; title: string; template: string; stages: Array<{ id: string; title: string; kind: string; inclusion: string; included: boolean; reason?: string; origin?: string; systems?: string[] }>; errors: string[] }
 
 export interface WorkflowModel {
   problemId: string;
@@ -41,6 +63,7 @@ export interface WorkflowModel {
   stages: StageModel[];
   next?: { id: string; title: string; status: string; why?: string };
   pendingWorkflowDecision?: { id: string; title: string };
+  proposal?: ProposalModel;
   templates: Array<{ id: string; title: string }>;
 }
 
@@ -83,31 +106,63 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
   const stages: StageModel[] = status.stages.map((v) => {
     const s = w.stages.find((x) => x.id === v.id)!;
     const documentBacked = DOCUMENT_KINDS.includes(s.kind);
-    const actions: StageModel['actions'] = [];
-    const runner = !documentBacked && s.included ? assignmentFor(scope, s.id, []).assignment?.role : undefined;
+    const actions: StageAction[] = [];
+    const runner = s.included ? stageRunner(scope, s.id, s.kind) : undefined;
+    const docFile = documentBacked ? stageDocumentFile(root, s.kind) : undefined;
+    const hasDoc = !!docFile && fs.existsSync(docFile);
+    const blockers = documentBacked && v.status === 'awaiting-approval' && !s.record.decisionId ? documentApprovalProblems(root, s.kind) : [];
+    const open = v.status === 'ready' || v.status === 'in-progress' || v.status === 'stale';
     if (w.status === 'approved' && s.included && v.status !== 'skipped') {
       if (v.status === 'awaiting-approval' && s.record.decisionId) actions.push('approve');
-      if (runner && (v.status === 'ready' || v.status === 'in-progress' || v.status === 'stale')) actions.push('run');
+      if (documentBacked && v.status === 'awaiting-approval' && !s.record.decisionId && !blockers.length) actions.push('approve-document');
+      if (runner && (open || (documentBacked && v.status === 'awaiting-approval'))) actions.push('run');
+      if (documentBacked && v.status !== 'done') actions.push('produce');
       if (!documentBacked && (v.status === 'ready' || v.status === 'in-progress')) actions.push('hand-in');
       if (v.status === 'stale') actions.push('approve-again');
       if (v.status === 'done') actions.push('reopen');
       if (s.inclusion !== 'mandatory' && v.status !== 'done') actions.push('skip');
     }
+    if (hasDoc) actions.push('open-document');
+    const doc = DOC_NAME[s.kind];
+    const guide = !s.included ? 'Not in this workflow.'
+      : v.status === 'done' ? 'Done.'
+      : v.status === 'skipped' ? `Skipped${v.why ? `: ${v.why}` : '.'}`
+      : w.status !== 'approved' ? 'Waits for the workflow to be approved.'
+      : v.status === 'pending' ? `Waits: ${v.why ?? 'its dependencies are not done'}.`
+      : v.status === 'stale' ? 'Its inputs changed since it was approved: review the output, then approve it again.'
+      : v.status === 'awaiting-approval' && s.record.decisionId ? 'Waits for your approval.'
+      : v.status === 'awaiting-approval' && documentBacked ? (blockers.length ? `The ${doc} can't be approved yet: ${blockers.join(' ')}` : `Review the ${doc} and approve it.`)
+      : documentBacked ? `${PRODUCE_LABEL[s.kind]}${runner ? ` (or Run agent: ${runner})` : ''}, then approve the ${doc}.`
+      : runner ? `Run agent (${runner}), or hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`
+      : `No AutoDE agent does this stage yet: hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`;
     return {
       ...v, level: lv.get(v.id) ?? 0, after: s.after.map((a) => `${a.stage}${a.approved ? ' (approved)' : ''}`), role: s.agent?.role, tier: s.agent?.tier, ceiling: STAGE_KINDS[s.kind].ceiling,
-      documentBacked, approvedBy: s.record.approvedBy, approvedAt: s.record.approvedAt, approvedVia: approvals.get(s.id)?.channel, actions, runner
+      documentBacked, approvedBy: s.record.approvedBy, approvedAt: s.record.approvedAt, approvedVia: approvals.get(s.id)?.channel, actions, runner,
+      produceLabel: documentBacked ? PRODUCE_LABEL[s.kind] : undefined, document: hasDoc ? relTo(scope.workspaceRoot, docFile!) : undefined, blockers, guide
     };
   });
   const included = w.stages.filter((s) => s.included && s.record.status !== 'skipped');
-  const pending = new DecisionStore(scope.workspaceRoot).list({ status: 'pending', kind: 'workflow' }).find((d) => d.problemId === scope.problemId);
+  const store = new DecisionStore(scope.workspaceRoot);
+  const pending = store.list({ status: 'pending', kind: 'workflow' }).find((d) => d.problemId === scope.problemId);
+  let proposal: ProposalModel | undefined;
+  if (pending) {
+    try {
+      const pw = store.proposal<WorkflowInstance>(pending.id);
+      proposal = { id: pending.id, title: pending.title, template: `${pw.template.id} v${pw.template.version}`, errors: pending.validation?.errors ?? [],
+        stages: pw.stages.map((x) => ({ id: x.id, title: x.title, kind: x.kind, inclusion: x.inclusion, included: x.included, reason: x.reason, origin: x.origin, systems: x.systems })) };
+    } catch { /* an unreadable proposal: the decision file still shows it */ }
+  }
   return {
     problemId: scope.problemId, statement, template: status.template, approved: status.approved, provenance: prov,
     progress: { done: included.filter((s) => s.record.status === 'done').length, total: included.length },
     stages, next: status.next ? { id: status.next.id, title: status.next.title, status: status.next.status, why: status.next.why } : undefined,
     pendingWorkflowDecision: pending ? { id: pending.id, title: pending.title } : undefined,
+    proposal,
     templates: templatesFor(scope).templates.map((t) => ({ id: t.id, title: t.title }))
   };
 }
+
+const relTo = (root: string, file: string) => file.slice(root.length + 1).split(/[\\/]/).join('/');
 
 /** The status-bar text: problem, progress, and what needs attention. */
 export function statusBarText(m: WorkflowModel): string {

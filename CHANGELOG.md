@@ -6,6 +6,37 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.1
+
+- **The workflow is the only path** (owner's UI testing, 2026-10-21). Four findings, one cause: two systems were running side by side, the old plan of steps and the workflow.
+  - The plan steps couldn't be seen, and the proposed workflow wasn't shown before approval.
+  - Quality rules had nothing to produce them.
+  - The mapping couldn't be approved from the UI.
+  - Artifacts were generated outside the stages, so progress didn't move.
+- **Every stage now has a way forward,** shown as a **Next:** line on its card, in the tree and in the detail:
+  - **Run agent:** the stage's role template (the documenter, and now the quality engineer); otherwise AutoDE's not-yet-migrated agents for that stage kind only, on any model:
+    - source assessment: the source assessment agent;
+    - modelling: the data modeler;
+    - build: the ingestion and transformation agents.
+
+    What they write is recorded to the stage, with grounding manifests as before, and handed in. A failed run is reported to the stage and never re-plans the problem.
+  - **Produce:** for stages whose output is a document, the panel's own flow (specification, target and source context in the panel; *Add a mapping…*; *Generate the Pipeline Spec*). **Open document** shows it.
+  - **Approve…:** for a stage's document. It is checked first, with the panel's own checks: a mapping needs at least one entity mapping, and a context must match the current specification version. Then it is approved as you (the panel channel) and the stage is done. While it can't be approved, the card says why.
+  - **Hand in** and **Skip** as before. A stage that no AutoDE agent does yet says so.
+- **The same approval in a terminal:** `autode workflow approve <stage>` now also approves a stage's document (specification, target or source context, mapping, Pipeline Spec). It asks for an interactive terminal and a typed confirmation, and records you on the CLI channel. No MCP tool approves a document: that is a person's act.
+- **The proposed workflow is shown in full** in the Workflow tab before you approve it: every stage with its kind and inclusion, which are in, and the reason each left-out stage is out (optional stages left out: "optional, not included"), plus the engine's objections if it refuses the draft.
+- **Quality rules have an agent:**
+  - the `quality-engineer` role with the `quality-rules` skill: rules on critical attributes (not-null, unique, accepted values, ranges, relationships, freshness, reconciliation), each traced to a spec criterion, contract clause or fact;
+  - each rule is proposed as a `quality_expectation` fact for the Context Inbox and recorded as `quality-rules.yaml` and `quality-rules.md`;
+  - `quality-rules` stages now list `quality-engineer` first;
+  - an assignment falls back to the first role its kind allows that has a definition, so workflows approved earlier (which named `source-assessor`) get it too.
+- **Nothing runs outside the workflow.** The panel's Generate Plan, Approve Plan, Confirm Stages and Execute buttons, and `/plan` and `/execute`, now open the Workflow view and explain that AutoDE works stage by stage. The Workflow tab's *AutoDE agents* box is gone.
+- **Deviations / notes:**
+  - **The increments move up by one.** This release is the "one path" fix, so the PA3b migrations shift to v0.45.2 to v0.45.6. In the new order, source assessment and mapping come next: the mapping agent is what gives the mapping stage structured mappings. Today's mapping agent writes a SQL view, not the mapping document, so mappings are added with *Add a mapping…* until then.
+  - **The quality engineer is a new role**, not one of the eight agents being migrated. It was added because the quality stage had nothing that could produce its output.
+  - **The plan-of-steps code stays inside `AgentHub` for now,** because the not-yet-migrated agents run through it one stage at a time. It goes with the last migration.
+- **Measured:** 368 tests (4 new: the proposal view; document approval from the view model and the CLI, refusals included; ways forward, role fallback and legacy per-stage runs; no path outside the workflow). Lint 0 errors. Eval unchanged.
+
 ## 0.45.0
 
 - **Phase PA3b, step 1: agents as definitions, and the first agent moved** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6, ORC-9; technical-design §7.9). Agents are now **role templates** (`agents/<role>.md`), and their method is **standard skills** (`skills/<id>/SKILL.md`). Both are files that every host reads the same way. The engine turns them into **assignments**.

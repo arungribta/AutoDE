@@ -44,7 +44,7 @@ export const STAGE_KINDS: Readonly<Record<StageKind, StageKindSpec>> = {
   'target-context': k('target-context', ['target-architect'], 'propose', ['spec'], ['target-context'], ['check', 'approve'], 'the target context is complete'),
   'source-assessment': k('source-assessment', ['source-assessor'], 'platform-read', ['spec'], ['source-context', 'estate'], ['check', 'approve'], 'the sources are in the estate and the source context is complete'),
   'conformance': k('conformance', ['source-assessor'], 'platform-read', ['contract', 'estate'], ['conformance-report'], ['check'], 'the conformance report exists and its failures are raised'),
-  'quality-rules': k('quality-rules', ['source-assessor', 'data-modeler'], 'propose', ['spec', 'estate'], ['quality-rules'], ['approve'], 'every critical attribute has a rule or a recorded reason'),
+  'quality-rules': k('quality-rules', ['quality-engineer', 'source-assessor', 'data-modeler'], 'propose', ['spec', 'estate'], ['quality-rules'], ['approve'], 'every critical attribute has a rule or a recorded reason'),
   'mapping': k('mapping', ['sttm-mapper'], 'propose', ['source-context', 'target-context'], ['mapping'], ['check', 'approve'], 'the mappings ground against the estate'),
   'entity-resolution': k('entity-resolution', ['sttm-mapper', 'data-modeler'], 'propose', ['source-context', 'mapping'], ['entity-resolution'], ['check', 'approve'], 'every merged entity has match and survivorship rules'),
   'modelling': k('modelling', ['data-modeler'], 'propose', ['spec', 'mapping'], ['model'], ['check', 'approve'], 'the model validates; grain and keys are stated'),

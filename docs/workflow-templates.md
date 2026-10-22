@@ -29,7 +29,7 @@ The kind decides who can do the stage, the most an agent may do there (permissio
 | `target-context` | target-architect | propose | spec | target context | check, approve | the context is complete (all fixed questions answered) |
 | `source-assessment` | source-assessor | platform-read | spec, connections or files | estate entries, source context, profiles | check, approve | the sources' schemas are in the estate; the context is complete |
 | `conformance` | source-assessor | platform-read | pack contracts, estate, samples | conformance report, `needs_review` facts | check | the report exists; failures are raised as facts or decisions |
-| `quality-rules` | source-assessor, data-modeler | propose | spec, contracts, profiles | quality expectations (facts) | approve | every critical attribute has a rule or a recorded reason |
+| `quality-rules` | quality-engineer, source-assessor, data-modeler | propose | spec, contracts, profiles | quality expectations (facts) | approve | every critical attribute has a rule or a recorded reason |
 | `mapping` | sttm-mapper | propose | source context, target context, vocabulary | mapping context | check, approve | the mappings ground against the estate; every target column is mapped or justified |
 | `entity-resolution` | sttm-mapper, data-modeler | propose | source contexts (several), mapping | match keys, survivorship rules, conformed dimensions | check, approve | every merged entity has match and survivorship rules |
 | `modelling` | data-modeler | propose | spec, mapping, keys and grain facts | data model | check, approve | the model validates; grain and keys are stated |

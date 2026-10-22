@@ -70,7 +70,8 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   const kind = STAGE_KINDS[s.kind];
   const roleName = s.agent?.role ?? kind.roles[0];
   const { roles } = loadRoles(scope.resourcesRoot, scope.workspaceRoot);
-  const role: RoleTemplate | undefined = roles.find((r) => r.name === roleName);
+  // The planned role; else the first role the kind allows that has a definition (a role defined after the plan was approved).
+  const role: RoleTemplate | undefined = roles.find((r) => r.name === roleName) ?? kind.roles.map((n) => roles.find((r) => r.name === n)).find(Boolean);
   if (!role) return { reason: `Role ${roleName} has no definition yet; AutoDE's built-in agents still do ${s.kind} stages (AutoDE agents, plan steps).` };
   const tier = (s.agent?.tier && TIERS.includes(s.agent.tier) && tierRank(s.agent.tier) <= tierRank(kind.ceiling)) ? s.agent.tier : kind.ceiling;
   const { skills: pack } = loadSkillPack(scope.resourcesRoot);

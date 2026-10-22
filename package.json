@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.45.0",
+  "version": "0.45.1",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -246,6 +246,9 @@
       { "command": "autoDataEngineeringHub.openWorkflow", "title": "AutoDE: Open Workflow", "icon": "$(checklist)" },
       { "command": "autoDataEngineeringHub.refreshWorkflow", "title": "AutoDE: Refresh Workflow", "icon": "$(refresh)" },
       { "command": "autoDataEngineeringHub.workflowRun", "title": "Run Stage Agent", "icon": "$(play)" },
+      { "command": "autoDataEngineeringHub.workflowApproveDocument", "title": "Approve Stage Document…", "icon": "$(pass)" },
+      { "command": "autoDataEngineeringHub.workflowProduce", "title": "Produce Stage Document", "icon": "$(edit)" },
+      { "command": "autoDataEngineeringHub.workflowOpenDocument", "title": "Open Stage Document", "icon": "$(go-to-file)" },
       { "command": "autoDataEngineeringHub.workflowHandIn", "title": "Hand In Stage…", "icon": "$(check)" },
       { "command": "autoDataEngineeringHub.workflowApproveAgain", "title": "Approve Stage Again…" },
       { "command": "autoDataEngineeringHub.workflowSkip", "title": "Skip Stage…" },
@@ -272,6 +275,9 @@
       "view/item/context": [
         { "command": "autoDataEngineeringHub.workflowApprove", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.workflowRun", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )run( |$)/", "group": "inline" },
+        { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-document( |$)/", "group": "inline" },
+        { "command": "autoDataEngineeringHub.workflowProduce", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )produce( |$)/", "group": "workflow" },
+        { "command": "autoDataEngineeringHub.workflowOpenDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )open-document( |$)/", "group": "workflow" },
         { "command": "autoDataEngineeringHub.workflowHandIn", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )hand-in( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.workflowApproveAgain", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-again( |$)/", "group": "workflow" },
         { "command": "autoDataEngineeringHub.workflowSkip", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )skip( |$)/", "group": "workflow" },
@@ -279,6 +285,9 @@
       ],
       "commandPalette": [
         { "command": "autoDataEngineeringHub.workflowRun", "when": "false" },
+        { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "false" },
+        { "command": "autoDataEngineeringHub.workflowProduce", "when": "false" },
+        { "command": "autoDataEngineeringHub.workflowOpenDocument", "when": "false" },
         { "command": "autoDataEngineeringHub.workflowHandIn", "when": "false" },
         { "command": "autoDataEngineeringHub.workflowApproveAgain", "when": "false" },
         { "command": "autoDataEngineeringHub.workflowSkip", "when": "false" },

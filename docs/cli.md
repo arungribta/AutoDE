@@ -75,6 +75,8 @@ Large estates go into the catalog in full. The working set, the part agents get 
 
 ## Workflow
 
+`autode workflow approve <stage>` approves a stage's gate decision, or, for a stage whose output is a document (the specification, the target or source context, the mapping, the Pipeline Spec), the document itself, after the same checks as the panel. It needs an interactive terminal and a typed confirmation.
+
 Each business problem has a **workflow**: its stages, planned from a template (greenfield, modernization, estate merge, or your workspace's own in `.autode/config/workflows/`). See [workflow-templates.md](workflow-templates.md).
 
 | Command | |

@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { PLUGIN_HOSTS, PluginHost, buildPlugin, installPlugin, serverEntry } from '../engine/agents/plugin';
+import { approveStageDocument, documentApprovalProblems, isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import * as readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { EngineWorkspace } from '../mcp/workspace';
@@ -121,7 +122,8 @@ Workflow (the planned stages of a problem; approving is a person's: interactive 
   workflow next                What to do now, and by which role
   workflow start <stage>       Mark a stage in progress (working ahead of its dependencies is allowed, with a warning)
   workflow complete <stage> --output <file>... --summary <text>   Hand in a stage; its gate decision goes to a person
-  workflow approve [<stage>]   (terminal) Approve the pending workflow, or a stage's gate
+  workflow approve [<stage>]   (terminal) Approve the pending workflow, a stage's gate, or a stage's document
+                               (specification, target or source context, mapping, Pipeline Spec)
   workflow skip <stage> --reason <text>     A default or optional stage only
   workflow reopen <stage> --reason <text>   Everything downstream becomes stale
   workflow history [<stage>]   Who did what, when, through which channel, and why
@@ -811,6 +813,19 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
       const target = args[0]
         ? pending.find((d) => d.kind === 'gate' && d.subject?.document === `workflow:${args[0]}`)
         : pending.find((d) => d.kind === 'workflow') ?? pending.find((d) => d.kind === 'gate');
+      const stage = args[0] ? readWorkflow(rctx.problemRoot)?.stages.find((x) => x.id === args[0]) : undefined;
+      if (!target && stage && isDocumentStage(stage.kind)) {
+        // v0.45.1: a stage whose output is a document with its own approval (spec, contexts, mapping, Pipeline Spec).
+        requirePerson(ctx, 'Approving', 'Approve it in the AutoDE panel or the Workflow view instead.');
+        const problems = documentApprovalProblems(rctx.problemRoot, stage.kind);
+        if (problems.length) throw new CliError(EXIT.FAILED, problems.join(' '));
+        const file = stageDocumentFile(rctx.problemRoot, stage.kind)!;
+        const answer = (await ctx.io.prompt(`Approve ${path.relative(ctx.workspaceRoot, file)} (${stage.title}) as "${by}"? Type approve to confirm: `)).trim().toLowerCase();
+        if (answer !== 'approve') { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+        const r = approveStageDocument(rctx, stage.id, { kind: 'person', name: by }, 'cli');
+        emit(ctx, { ok: true, stage: r.stage, file: path.relative(ctx.workspaceRoot, r.file).split(path.sep).join('/') }, r.message);
+        return EXIT.OK;
+      }
       if (!target) throw new CliError(EXIT.NOT_FOUND, args[0] ? `Nothing of stage ${args[0]} waits for approval.` : 'No workflow or stage approval is pending.');
       return cmdDecisions(ctx, ['approve', target.id]);
     }

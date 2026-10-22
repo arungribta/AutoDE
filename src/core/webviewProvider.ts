@@ -80,6 +80,7 @@ import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/fact
 import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
 import { runStage } from './agentExecutor';
+import { approveStageDocument, stageDocumentFile } from '../engine/workflows/documentApproval';
 import { readWorkflow } from '../engine/workflows/instance';
 /** VS Code's watcher for `.autode/knowledge/` edits, injected into the engine's ContextFileManager (v0.43.2). */
 const watchKnowledge: KnowledgeWatcher = (dir, onChange) => {
@@ -566,25 +567,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
-        case 'generatePlan': {
-          const objective = typeof message.objective === 'string' ? message.objective : '';
-          if (!objective.trim()) { this.postLog('A plan requires a user objective.'); return; }
-          // Same shared source as chat — connection status (both roles) is
-          // included automatically via ContextFileManager's runtime facts.
-          const combinedContext = this.contextPackText('plan', objective, 'Plan generation');
-          const plan = await this.hub.generatePlan(objective, combinedContext);
-          this.postPlan(plan);
-          break;
-        }
-        case 'executePlan': { await this.hub.executePlan(); break; }
-        case 'approvePlan': {
-          this.hub.approvePlan();
-          this.postLog('Plan approved. Confirm the applicable stages, then generate artifacts.');
-          break;
-        }
-        case 'confirmStages': {
-          this.hub.confirmStages();
-          this.postLog('Applicable stages confirmed. Ready to generate artifacts.');
+        // v0.45.1: the workflow is the only path. Stages run from the Workflow view (or a host agent), one at a time,
+        // each through its gate; the plan of steps for the whole problem no longer runs from the panel.
+        case 'generatePlan': case 'generatePlanFromSpec': case 'approvePlan': case 'confirmStages': case 'executePlan': {
+          this.postLog('AutoDE now works stage by stage: open the Workflow view, approve the workflow, and use Run agent (or Produce, Approve, Hand in) on each stage. Nothing runs that its stage did not ask for.');
+          await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow');
           break;
         }
         case 'pausePlan': { await this.hub.pauseExecution(); break; }
@@ -1096,18 +1083,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             break;
           }
           this.hub.setPhaseOverride(phase, required);
-          break;
-        }
-        case 'generatePlanFromSpec': {
-          const spec = this.specManager?.getSpec();
-          if (!spec) { this.postMessage('error', { message: 'No Business Problem Specification exists yet — describe your business problem in the chat first.' }); break; }
-          if (spec.status !== 'approved') { this.postMessage('error', { message: 'Approve the Business Problem Specification before generating the workflow plan.' }); break; }
-          const gate = this.computeContextGateStatus(spec);
-          if (!gate.canGeneratePlan) {
-            this.postMessage('error', { message: `Generate Plan is blocked until context is ready: ${gate.blockingReasons.join(' ')}` });
-            break;
-          }
-          await this.hub.generatePlanFromSpec(spec, this.buildContextSummaryForPlan(spec));
           break;
         }
         case 'submitSpecAnswers': {
@@ -1739,26 +1714,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   // ── For the Workflow view (v0.44.1): it shows the runtime and acts through the panel's own handlers ──
 
-  /** Where today's agents are (until PA3b replaces them): the plan of steps, its gates, and the one next action. */
-  public agentsRunState(): { steps: number; planApproved: boolean; stagesConfirmed: boolean; running: boolean; canGeneratePlan: boolean; blocking: string[]; next: { action: string; label: string } | undefined } {
-    const plan = this.hub.getPlan();
-    const steps = plan.steps?.length ?? 0;
-    const gate = this.computeContextGateStatus(this.specManager?.getSpec());
-    const running = plan.status === 'running';
-    let next: { action: string; label: string } | undefined;
-    if (running) next = undefined;
-    else if (!steps) next = gate.canGeneratePlan ? { action: 'generatePlanFromSpec', label: 'Generate plan steps' } : undefined;
-    else if (!plan.planApproved) next = { action: 'approvePlan', label: 'Approve plan steps' };
-    else if (!plan.stagesConfirmed) next = { action: 'confirmStages', label: 'Confirm applicable stages' };
-    else next = { action: 'executePlan', label: 'Generate artifacts' };
-    return { steps, planApproved: !!plan.planApproved, stagesConfirmed: !!plan.stagesConfirmed, running, canGeneratePlan: gate.canGeneratePlan, blocking: gate.blockingReasons, next };
-  }
-
-  /** Runs one of the agents' plan actions exactly as the panel's buttons do. */
-  public async runAgentsAction(action: 'generatePlanFromSpec' | 'approvePlan' | 'confirmStages' | 'executePlan'): Promise<void> {
-    await this.handleMessage({ type: action } as WebviewMessage);
-  }
-
   /** Approves or rejects a decision as the person at the keyboard (the panel channel). */
   public async resolveFromView(id: string, decision: 'approved' | 'rejected', note?: string): Promise<void> {
     await this.resolveDecisionInPanel(id, decision, note);
@@ -2275,11 +2230,33 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       } else if (action === 'run' && stage) {
         this.postLog(`Running the agent for stage ${stage}…`);
         const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: running ${stage}`, cancellable: false },
-          () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
+          () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), runStageSteps: (id, obj, steps) => this.hub.runStageSteps(id, obj, steps), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
             { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
         this.postLog(r.ok ? `${r.message}${r.outputs.length ? ` Recorded: ${r.outputs.join(', ')}.` : ''}` : r.message);
         if (!r.ok) void vscode.window.showWarningMessage(r.message.split('\n')[0]);
         this.postDecisions();
+      } else if ((action === 'approve-document' || action === 'produce' || action === 'open-document') && stage) {
+        const s = readWorkflow(rctx.problemRoot)?.stages.find((x) => x.id === stage);
+        const file = s ? stageDocumentFile(rctx.problemRoot, s.kind) : undefined;
+        if (!s || !file) { this.postLog(`Stage ${stage} has no document of its own.`); return; }
+        if (action === 'open-document') { await vscode.window.showTextDocument(vscode.Uri.file(file)); return; }
+        if (action === 'approve-document') {
+          const ok = await vscode.window.showWarningMessage(`Approve ${s.title} as ${by}?`, { modal: true, detail: `This approves ${path.relative(scope.workspaceRoot, file)} (the panel channel) and completes the stage. It is recorded with your name in the document and the workflow history.` }, 'Approve');
+          if (ok !== 'Approve') return;
+          const r = approveStageDocument(rctx, stage, { kind: 'person', name: by }, 'panel');
+          await this.reloadContextFile(normalizeFsPath(file));
+          this.postLog(r.message);
+        } else {
+          // How each document is made in VS Code: the panel's own flows.
+          if (s.kind === 'mapping') await vscode.commands.executeCommand('autoDataEngineeringHub.createMapping');
+          else if (s.kind === 'build') await this.generatePipelineSpec();
+          else {
+            await vscode.commands.executeCommand('autoDataEngineeringHubSidebar.focus');
+            this.postLog(s.kind === 'specify' ? 'The specification is in the panel: answer the interview, then approve it there or from the Workflow view.'
+              : s.kind === 'target-context' ? 'Build the target context in the panel (Target Context), then approve it there or from the Workflow view.'
+              : 'Build the source context in the panel (Source Context: connect, or describe the sources), then approve it there or from the Workflow view.');
+          }
+        }
       } else if (action === 'complete' && stage) {
         const files = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Hand in', title: `What did stage ${stage} produce?`, defaultUri: this.workspaceRoot });
         if (!files) return;
@@ -2289,7 +2266,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         this.postDecisions();
       }
     } catch (err) {
-      this.postMessage('error', { message: err instanceof WorkflowError || err instanceof Error ? err.message : String(err) });
+      const message = err instanceof WorkflowError || err instanceof Error ? err.message : String(err);
+      this.postMessage('error', { message });
+      // The Workflow view has no log of its own: say it where the person is looking.
+      void vscode.window.showErrorMessage(message);
     }
     this.postContextGateStatus();
   }
