@@ -79,6 +79,7 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
 import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
+import { runStage } from './agentExecutor';
 import { readWorkflow } from '../engine/workflows/instance';
 /** VS Code's watcher for `.autode/knowledge/` edits, injected into the engine's ContextFileManager (v0.43.2). */
 const watchKnowledge: KnowledgeWatcher = (dir, onChange) => {
@@ -2271,6 +2272,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         if (!reason) return;
         const r = reopenStage(rctx, stage, { kind: 'person', name: by }, reason, 'panel');
         this.postLog(`Stage ${stage} re-opened${r.stale.length ? `; now stale: ${r.stale.join(', ')}` : ''}.`);
+      } else if (action === 'run' && stage) {
+        this.postLog(`Running the agent for stage ${stage}…`);
+        const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: running ${stage}`, cancellable: false },
+          () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
+            { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
+        this.postLog(r.ok ? `${r.message}${r.outputs.length ? ` Recorded: ${r.outputs.join(', ')}.` : ''}` : r.message);
+        if (!r.ok) void vscode.window.showWarningMessage(r.message.split('\n')[0]);
+        this.postDecisions();
       } else if (action === 'complete' && stage) {
         const files = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Hand in', title: `What did stage ${stage} produce?`, defaultUri: this.workspaceRoot });
         if (!files) return;

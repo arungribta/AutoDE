@@ -1,3 +1,4 @@
+import { assignmentFor } from '../engine/agents/assignment';
 import { readProblemDocument, parseBusinessProblemSpec } from '../engine/documents/problemDocuments';
 import { DecisionStore } from '../engine/decisions/decisionStore';
 import { readWorkflow, WorkflowInstance } from '../engine/workflows/instance';
@@ -25,7 +26,9 @@ export interface StageModel extends StageView {
   /** How the approval was given: panel, cli, file, elicitation, document. */
   approvedVia?: string;
   /** What a person can do here now. */
-  actions: Array<'approve' | 'hand-in' | 'approve-again' | 'skip' | 'reopen'>;
+  actions: Array<'approve' | 'run' | 'hand-in' | 'approve-again' | 'skip' | 'reopen'>;
+  /** PA3b: the agent that runs the stage here (its role has a definition). */
+  runner?: string;
 }
 
 export interface WorkflowModel {
@@ -81,8 +84,10 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
     const s = w.stages.find((x) => x.id === v.id)!;
     const documentBacked = DOCUMENT_KINDS.includes(s.kind);
     const actions: StageModel['actions'] = [];
+    const runner = !documentBacked && s.included ? assignmentFor(scope, s.id, []).assignment?.role : undefined;
     if (w.status === 'approved' && s.included && v.status !== 'skipped') {
       if (v.status === 'awaiting-approval' && s.record.decisionId) actions.push('approve');
+      if (runner && (v.status === 'ready' || v.status === 'in-progress' || v.status === 'stale')) actions.push('run');
       if (!documentBacked && (v.status === 'ready' || v.status === 'in-progress')) actions.push('hand-in');
       if (v.status === 'stale') actions.push('approve-again');
       if (v.status === 'done') actions.push('reopen');
@@ -90,7 +95,7 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
     }
     return {
       ...v, level: lv.get(v.id) ?? 0, after: s.after.map((a) => `${a.stage}${a.approved ? ' (approved)' : ''}`), role: s.agent?.role, tier: s.agent?.tier, ceiling: STAGE_KINDS[s.kind].ceiling,
-      documentBacked, approvedBy: s.record.approvedBy, approvedAt: s.record.approvedAt, approvedVia: approvals.get(s.id)?.channel, actions
+      documentBacked, approvedBy: s.record.approvedBy, approvedAt: s.record.approvedAt, approvedVia: approvals.get(s.id)?.channel, actions, runner
     };
   });
   const included = w.stages.filter((s) => s.included && s.record.status !== 'skipped');

@@ -25,6 +25,7 @@ const CONTENT = [
   'skills',
   'primitive-definitions',
   'workflows',
+  'agents',
   'media/autode-icon-64.png',
   'LICENSE'
 ];
@@ -48,10 +49,10 @@ function stage(outDir = path.join(root, 'dist', 'package')) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const rel of CONTENT) {
     const from = path.join(root, rel);
-    // skills/ ships only the interview prompt packs, as in the VSIX; primitive-definitions/ may not exist yet.
+    // skills/ ships the interview prompt packs and the skill folders (SKILL.md, PA3b), as in the VSIX; primitive-definitions/ may not exist yet.
     if (!fs.existsSync(from)) continue;
     if (rel === 'skills') {
-      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json'))) copy(path.join(from, f), path.join(outDir, 'skills', f));
+      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json') || fs.existsSync(path.join(from, x, 'SKILL.md')))) copy(path.join(from, f), path.join(outDir, 'skills', f));
       continue;
     }
     copy(from, path.join(outDir, rel));
@@ -73,7 +74,7 @@ function stage(outDir = path.join(root, 'dist', 'package')) {
     bin: { autode: 'dist/autode.js' },
     main: 'dist/autode.js',
     engines: { node: '>=18' },
-    files: ['dist/', 'skills/', 'primitive-definitions/', 'workflows/', 'media/', 'README.md', 'LICENSE']
+    files: ['dist/', 'skills/', 'primitive-definitions/', 'workflows/', 'agents/', 'media/', 'README.md', 'LICENSE']
   };
   fs.writeFileSync(path.join(outDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
   return outDir;

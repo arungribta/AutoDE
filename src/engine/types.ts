@@ -12,7 +12,7 @@ export interface AuthModeDescriptor {
   mode: string;
   principalTypes: PrincipalType[];
 }
-export type AgentType = 'ingestionAgent' | 'sttmAgent' | 'architectureAgent' | 'snowflakeExecutor' | 'sourceAssessmentAgent' | 'dataModelerAgent' | 'transformScaffoldAgent' | 'toolSkillAgent';
+export type AgentType = 'ingestionAgent' | 'sttmAgent' | 'snowflakeExecutor' | 'sourceAssessmentAgent' | 'dataModelerAgent' | 'transformScaffoldAgent' | 'toolSkillAgent';
 export type PlanStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type SessionStatus = 'idle' | 'planning' | 'ready' | 'running' | 'paused' | 'failed' | 'completed';
 export type EnvironmentProfile = 'development' | 'staging' | 'production';
@@ -549,7 +549,8 @@ export interface GeneratedArtifact {
   description: string;
   content: string;
   language: 'sql' | 'yaml' | 'markdown' | 'python' | 'json';
-  generatedBy: AgentType;
+  /** The agent, or `engine` for what AutoDE derives itself (the grounding report); older artifacts may name a retired agent. */
+  generatedBy: AgentType | 'engine' | string;
   generatedAt: string;
   approved: boolean;
   filePath?: string;
@@ -864,6 +865,10 @@ export interface EngineAccess {
   toolSet(mode: ToolExecutionMode, declared: readonly string[] | undefined): Promise<EngineToolSet>;
   /** Whether `declared` names an engine tool that changes something (a proposal) — such a skill may need `'full'` mode. */
   declaresWrite(declared: readonly string[] | undefined): Promise<boolean>;
+  /** PA3b: the engine's tool list (name, annotations), for choosing an assignment's tools. */
+  listTools?(): Promise<Array<{ name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>>;
+  /** PA3b: exactly the named tools. */
+  toolSetNamed?(names: readonly string[]): Promise<EngineToolSet>;
   dispose(): Promise<void>;
 }
 

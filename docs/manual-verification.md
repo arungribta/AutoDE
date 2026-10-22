@@ -611,6 +611,34 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: in the editor tab, use **AutoDE agents** to generate plan steps, approve them, confirm the stages and generate artifacts.
   Expect: the same behaviour as the palette's old Continue button. The palette no longer shows Phases or Agents; it links to the view.
 
+## Part 26 — v0.45.0 Agents as definitions: the documenter, assignments, the plugin
+
+- [ ] **26.1 Run agent in VS Code.**
+  Do: with a model other than Claude Code, open a problem whose workflow is approved and whose Documentation stage is ready. In the Workflow view, choose **Run agent** on it.
+  Expect:
+  - a progress notification;
+  - files under `autode-output/<problem>/04-validate/document/`, each with a `.grounding.json` beside it;
+  - the stage handed in;
+  - history entries "recorded by agent documenter (VS Code) via MCP" and "handed in by agent documenter via VS Code".
+- [ ] **26.2 Claude Code as the model.**
+  Do: switch AutoDE's model to Claude Code and choose Run agent.
+  Expect: a message pointing to `autode plugin install --host claude`; nothing changes.
+- [ ] **26.3 Claude Code with the plugin.**
+  Do: in a terminal in the project, run `autode plugin install --host claude`, start Claude Code, and ask it to "continue my AutoDE problem".
+  Expect:
+  - it reads the status, takes the assignment from `autode_workflow_next`, and runs the `documenter` sub-agent;
+  - it records files with `autode_record_artifact` and hands the stage in;
+  - it stops at the approval and tells you how to give it. It never approves.
+- [ ] **26.4 Copilot CLI and Cortex Code.**
+  Do: run `autode plugin install --host copilot` and `--host cortex --scope user`.
+  Expect: agents in `.github/agents/documenter.agent.md`, skills in the host's folder, and the printed MCP step (the Copilot CLI's `/mcp add`, or the `~/.snowflake/cortex/mcp.json` entry). Follow the step, then ask the host to continue the problem.
+- [ ] **26.5 No sub-agents.**
+  Do: in another MCP client, get the prompt `autode_agent_documenter` with `stage: document`.
+  Expect: the full assignment text: role, tier, tools and the documentation skill.
+- [ ] **26.6 An old plan.**
+  Do: run a plan saved before v0.45.0 that has an `architectureAgent` step.
+  Expect: that step fails with "Documentation moved to the workflow: run the document stage from the Workflow view…"; the other steps run.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -762,5 +790,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 25.3 |  |  |
 | 25.4 |  |  |
 | 25.5 |  |  |
+| 26.1 |  |  |
+| 26.2 |  |  |
+| 26.3 |  |  |
+| 26.4 |  |  |
+| 26.5 |  |  |
+| 26.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

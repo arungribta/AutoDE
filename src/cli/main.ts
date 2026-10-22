@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { PLUGIN_HOSTS, PluginHost, buildPlugin, installPlugin, serverEntry } from '../engine/agents/plugin';
 import * as readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { EngineWorkspace } from '../mcp/workspace';
@@ -155,6 +156,11 @@ Human (an interactive terminal; refused when CI is set):
   decisions approve <id> [--note <text>] [--by <name>]
   decisions reject <id> [--note <text>] [--by <name>]
 
+Agent hosts (Claude Code, Cortex Code, GitHub Copilot CLI):
+  plugin path [--out <folder>]   Build AutoDE's plugin folder (agents, skills, commands, .mcp.json) and print where it is
+  plugin install --host claude|cortex|copilot [--scope project|user]   Copy AutoDE's agents and skills into the host's folders
+                               and wire its MCP server (or print the step, where the host has no file for it)
+
 Server:
   mcp [--allow-write] [--allow-cli] [--drivers <folder>]   The AutoDE MCP server over stdio
 
@@ -204,6 +210,7 @@ const OPTIONS = {
   output: { type: 'string', multiple: true },
   summary: { type: 'string' },
   reason: { type: 'string' },
+  host: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -268,6 +275,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
       case 'design-doc': return await cmdDesignDoc(ctx, rest);
       case 'query': case 'explain': return await cmdSql(ctx, command, rest);
+      case 'plugin': return cmdPlugin(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -702,6 +710,35 @@ async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
 // ── workflow (PA3a, v0.44.0) ────────────────────────────────────────────────
 
 const STATUS_MARK: Record<string, string> = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
+
+function cmdPlugin(ctx: Ctx, rest: string[]): number {
+  const [sub] = rest;
+  const entry = serverEntry(ctx.resourcesRoot, ctx.io.env);
+  if (sub === 'path') {
+    const out = ctx.values.out ? path.resolve(ctx.io.cwd, ctx.values.out) : path.join(ctx.resourcesRoot, 'dist', 'plugin', 'autode');
+    const r = buildPlugin({ resourcesRoot: ctx.resourcesRoot, outDir: out, version: ctx.version, entry });
+    emit(ctx, { ok: r.errors.length === 0, dir: r.dir, files: r.files.map((f) => path.relative(r.dir, f).split(path.sep).join('/')), errors: r.errors },
+      [r.dir, `Claude Code: claude --plugin-dir "${r.dir}" (or add it to a plugin marketplace). Cortex Code reads the same layout.`, ...r.errors.map((e) => `✗ ${e}`)].join('\n'));
+    return r.errors.length ? EXIT.FAILED : EXIT.OK;
+  }
+  if (sub === 'install') {
+    const host = ctx.values.host as PluginHost | undefined;
+    if (!host || !PLUGIN_HOSTS.includes(host)) throw new CliError(EXIT.USAGE, `plugin install needs --host, one of: ${PLUGIN_HOSTS.join(', ')}.`);
+    const scope = ctx.values.scope ?? 'project';
+    if (scope !== 'project' && scope !== 'user') throw new CliError(EXIT.USAGE, '--scope is project or user.');
+    const r = installPlugin({ host, scope, resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, home: ctx.io.env.AUTODE_HOME ?? os.homedir(), entry });
+    const lines = [
+      `Installed AutoDE for ${host} (${scope}): ${r.written.length} files.`,
+      ...r.written.map((f) => `  ${f}`),
+      r.mcp.file ? (r.mcp.changed ? `MCP server set in ${r.mcp.file}.` : `MCP server already set in ${r.mcp.file}.`) : `Next: ${r.mcp.instruction}`,
+      ...r.notes, ...r.errors.map((e) => `✗ ${e}`),
+      'Then ask the agent to continue your AutoDE problem (the autode-orchestrator skill).'
+    ];
+    emit(ctx, { ok: r.errors.length === 0, host, scope, written: r.written, mcp: r.mcp, notes: r.notes, errors: r.errors }, lines.join('\n'));
+    return r.errors.length ? EXIT.FAILED : EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, 'plugin path | install --host claude|cortex|copilot [--scope project|user]');
+}
 
 async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
   const [sub = 'status', ...args] = rest;

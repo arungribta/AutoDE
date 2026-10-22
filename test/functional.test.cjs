@@ -421,7 +421,7 @@ async function main() {
   await test('generatePlanFromSpec() infers phases and tags plan steps', async () => {
     const plan = JSON.stringify([
       { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'build ingestion pipeline', dependsOn: [], validationRules: [] },
-      { id: 's2', assignedAgent: 'architectureAgent', taskDescription: 'document the data dictionary', dependsOn: ['s1'], validationRules: [] }
+      { id: 's2', assignedAgent: 'transformScaffoldAgent', taskDescription: 'scaffold the dbt marts', dependsOn: ['s1'], validationRules: [] }
     ]);
     const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
       sendRequest: async () => ({ text: textIter(plan) }) };
@@ -442,7 +442,7 @@ async function main() {
     assert.ok(state.inferredPhases.length === 4, 'all four phases present');
     assert.strictEqual(state.inferredPhases.find((p) => p.phase === 'build').required, true);
     assert.strictEqual(state.steps[0].phase, 'build');
-    assert.strictEqual(state.steps[1].phase, 'validate');
+    assert.strictEqual(state.steps[1].phase, 'build');
     assert.strictEqual(state.specVersion, 3);
   });
 
@@ -5569,13 +5569,13 @@ async function main() {
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'revenue', schemaContext: 'GLOBAL DUMP',
         steps: [
-          { id: 's1', assignedAgent: 'architectureAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
-          { id: 's2', assignedAgent: 'architectureAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
+          { id: 's1', assignedAgent: 'sttmAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
+          { id: 's2', assignedAgent: 'sttmAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
         ],
         status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1
       });
       await hub.executePlan();
-      assert.deepStrictEqual(built, ['Plan step s1 (architectureAgent)', 'Plan step s2 (architectureAgent)']);
+      assert.deepStrictEqual(built, ['Plan step s1 (sttmAgent)', 'Plan step s2 (sttmAgent)']);
       const p1 = hub.getStepPack('s1'), p2 = hub.getStepPack('s2');
       assert.ok(p1.text.includes('shop.refunds') && !p1.text.includes('support_tickets'));
       assert.ok(p2.text.includes('support_tickets') && !p2.text.includes('shop.refunds'));
@@ -6181,7 +6181,7 @@ async function main() {
       });
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'x', schemaContext: '',
-        steps: [{ id: 's1', assignedAgent: 'architectureAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
+        steps: [{ id: 's1', assignedAgent: 'sttmAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
         status: 'ready', planApproved: true, stagesConfirmed: true
       });
       await hub.executePlan();
@@ -6716,10 +6716,10 @@ async function main() {
       const tools = (await client.listTools()).tools;
       const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6773,6 +6773,7 @@ async function main() {
       autode_workflow_next: [{}, { x: 1 }],
       autode_workflow_history: [{ stage: 'mapping' }, { stage: '' }],
       autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
+      autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
       autode_workflow_start_stage: [{ stage: 'sources' }, {}],
       autode_workflow_complete_stage: [{ stage: 'quality', summary: 'rules', outputs: ['q.md'] }, { stage: 'quality' }],
       autode_workflow_skip_stage: [{ stage: 'bi', reason: 'no reports in scope' }, { stage: 'bi', reason: 'no' }],
@@ -8181,8 +8182,8 @@ async function main() {
         sources: () => c3.sources(env.ledger, env.project()), supplementary: () => '', specRevision: () => 'sha256:spec'
       });
       hub.loadPersistedPlan({ id: 'p', version: 1, objective: 'tickets', schemaContext: '', steps: [
-        { id: 's1', assignedAgent: 'architectureAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
-        { id: 's2', assignedAgent: 'architectureAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
+        { id: 's1', assignedAgent: 'sttmAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
+        { id: 's2', assignedAgent: 'sttmAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
       ], status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1 });
       await hub.executePlan();
       let st = hub.getPlan();
@@ -9308,6 +9309,183 @@ async function main() {
     const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
     for (const gone of ['id="palettePhases"', 'id="paletteAgents"', 'id="paletteContinueBtn"']) assert.ok(!html.includes(gone), gone);
     for (const kept of ['id="paletteDecisions"', 'id="paletteArtifacts"', 'id="palettePrimitives"', 'id="paletteContext"']) assert.ok(html.includes(kept), kept);
+  });
+
+  // ---------- v0.45.0: PA3b — role templates, skills, assignments, the executor, the plugin ----------
+
+  await test('v0.45.0: the bundled role templates and skills load and pass the format checks; broken ones are refused item by item; a workspace role overrides by name', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const D = fresh('../dist/engine/agents/definitions.js');
+    const roles = D.loadRoles(wfRes());
+    const pack = D.loadSkillPack(wfRes());
+    assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
+    assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('documentation') && r.tools.includes('autode_record_artifact')));
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'documentation']);
+    assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
+    try {
+      const dir = nodePath.join(ws, '.autode', 'config', 'agents');
+      nodeFs.mkdirSync(dir, { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(dir, 'documenter.md'), '---\nname: documenter\ndescription: House-style documenter\ntools: [autode_resolve, autode_record_artifact]\nskills: [documentation]\n---\nWrite in our house style.\n');
+      nodeFs.writeFileSync(nodePath.join(dir, 'wrong.md'), '---\nname: not-the-file-name\ndescription: x\n---\nbody\n');
+      const r = D.loadRoles(wfRes(), ws);
+      const doc = r.roles.find((x) => x.name === 'documenter');
+      assert.deepStrictEqual([doc.origin.includes('.autode'), doc.description], [true, 'House-style documenter']);
+      assert.ok(r.errors.length === 1 && /wrong\.md/.test(r.errors[0]), r.errors.join());
+      assert.strictEqual(D.checkSkillFormat('bad', 'Bad_Name', '', '').length, 4, 'name format, folder, description, body');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.0: an assignment gets the tools its tier and role allow — never a destructive or hub-only tool; recording its deliverable at any tier', () => {
+    const A = fresh('../dist/engine/agents/assignment.js');
+    const t = (name, a) => ({ name, annotations: a });
+    const tools = [
+      t('autode_resolve', { readOnlyHint: true }), t('autode_propose_mapping', { readOnlyHint: false }), t('autode_list_schemas', { readOnlyHint: true, openWorldHint: true }),
+      t('autode_resolve_decision', { destructiveHint: true }), t('autode_workflow_complete_stage', { readOnlyHint: false }), t('autode_record_artifact', { readOnlyHint: false })
+    ];
+    assert.deepStrictEqual(A.toolsForTier(tools, 'read', []), ['autode_record_artifact', 'autode_resolve']);
+    assert.deepStrictEqual(A.toolsForTier(tools, 'propose', []), ['autode_propose_mapping', 'autode_record_artifact', 'autode_resolve']);
+    assert.deepStrictEqual(A.toolsForTier(tools, 'workspace-write', []), ['autode_list_schemas', 'autode_propose_mapping', 'autode_record_artifact', 'autode_resolve']);
+    assert.deepStrictEqual(A.toolsForTier(tools, 'workspace-write', ['autode_resolve', 'autode_resolve_decision', 'autode_workflow_complete_stage']), ['autode_resolve'], 'a role can narrow, never widen');
+  });
+
+  // A workspace template with one documentation stage after the plan, for the end-to-end tests.
+  const docsOnly = async (ws, cliFn) => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const dir = nodePath.join(ws, '.autode', 'config', 'workflows');
+    nodeFs.mkdirSync(dir, { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(dir, 'docs-only.yaml'), 'id: docs-only\nversion: 1\ntitle: Documentation only\ndescription: Document what exists.\nstages:\n  - id: specify\n    title: Specification\n    kind: specify\n    inclusion: mandatory\n  - id: plan\n    title: Plan\n    kind: plan\n    inclusion: mandatory\n    after: [specify (approved)]\n  - id: document\n    title: Documentation\n    kind: document\n    inclusion: mandatory\n    consumes: [spec]\n    after: [plan (approved)]\n');
+    const W = ['--workspace', ws];
+    const id = (await cliFn(['problems', 'new', 'Document the existing revenue marts', ...W, '--json'])).json().id;
+    const prob = nodePath.join(ws, '.autode', 'problems', id);
+    const specFile = nodePath.join(prob, 'spec', 'business-problem.yaml');
+    nodeFs.writeFileSync(specFile, nodeFs.readFileSync(specFile, 'utf8').replace('status: draft', 'status: approved').replace('problemStatementApproved: false', 'problemStatementApproved: true'));
+    const plan = await cliFn(['workflow', 'plan', '--template', 'docs-only', ...W, '--json']);
+    assert.strictEqual(plan.code, 0, plan.out + plan.err);
+    const ap = await cliFn(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+    assert.strictEqual(ap.code, 0, ap.out + ap.err);
+    return { id, prob };
+  };
+
+  await test('v0.45.0: over MCP — autode_workflow_next carries the full assignment, the agent records its deliverable with a grounding manifest, the history says who; agent prompts for hosts without sub-agents', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-asg-'));
+    let client;
+    try {
+      const { prob } = await docsOnly(ws, cli);
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const n = await call('autode_workflow_next', {});
+      assert.strictEqual(n.next.stage.id, 'document');
+      const a = n.assignment;
+      assert.deepStrictEqual([a.role, a.tier, a.skills.map((k) => k.id)], ['documenter', 'workspace-write', ['documentation']]);
+      assert.ok(a.engineTools.includes('autode_record_artifact') && a.engineTools.includes('autode_resolve'));
+      assert.ok(!a.engineTools.some((x) => /resolve_decision|apply_decision|workflow_complete_stage|propose_workflow/.test(x)), a.engineTools.join());
+      assert.ok(/never call another agent/i.test(a.text) && a.text.includes('## Skill: documentation'));
+      const r = await call('autode_record_artifact', { stage: 'document', path: 'design.md', content: '# Design\n\nOrders come from shop.orders.\n' });
+      assert.ok(/03-build|04-validate/.test(r.path) && r.path.endsWith('document/design.md') && r.manifestPath.endsWith('.grounding.json'), JSON.stringify(r));
+      assert.ok(nodeFs.existsSync(nodePath.join(ws, r.path)) && nodeFs.existsSync(nodePath.join(ws, r.manifestPath)));
+      await call('autode_record_artifact', { stage: 'document', path: 'design.md', content: '# Design v2\n' });
+      assert.strictEqual(nodeFs.readdirSync(nodePath.join(ws, nodePath.dirname(r.path), 'history')).length, 1, 'the previous revision is archived');
+      assert.strictEqual((await call('autode_record_artifact', { stage: 'document', path: '../escape.md', content: 'x' })).code, 'VALIDATION_FAILED');
+      assert.strictEqual((await call('autode_record_artifact', { stage: 'nope', path: 'a.md', content: 'x' })).code, 'NOT_FOUND');
+      const ev = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'document' }).filter((e) => e.type === 'recorded');
+      assert.deepStrictEqual([ev.length, ev[0].actor.kind, ev[0].channel], [2, 'agent', 'tool']);
+      const done = await call('autode_workflow_complete_stage', { stage: 'document', summary: 'design.md', outputs: [r.path] });
+      assert.ok(done.stage && ['done', 'awaiting-approval'].includes(done.stage.status), JSON.stringify(done));
+      // Hosts without sub-agents: the role as a prompt, with a stage the full assignment.
+      const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
+      assert.ok(prompts.includes('autode_agent_documenter'), prompts.join());
+      const plain = await client.getPrompt({ name: 'autode_agent_documenter', arguments: {} });
+      assert.ok(/autode_workflow_next/.test(plain.messages[0].content.text));
+      const full = await client.getPrompt({ name: 'autode_agent_documenter', arguments: { stage: 'document' } });
+      assert.ok(full.messages[0].content.text.startsWith('# Assignment: Documentation'), full.messages[0].content.text.slice(0, 80));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.0: the VS Code executor runs the documenter with the assignment\'s exact tools, hands the stage in as the agent, and refuses cleanly (Claude Code, nothing recorded, no definition)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-exec-'));
+    try {
+      const { id, prob } = await docsOnly(ws, cli);
+      const { EngineClient } = fresh('../dist/core/engineClient.js');
+      const { runStage } = fresh('../dist/core/agentExecutor.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id };
+      let seen; let provider = 'claude'; let record = true;
+      const host = {
+        createEngine: (n) => new EngineClient({ workspaceRoot: ws, resourcesRoot: wfRes(), version: 't', log: () => {}, clientName: n }),
+        activeProvider: () => provider,
+        log: () => {},
+        runAgentWithTools: async (prompt, opts) => {
+          seen = { opts, names: opts.engineTools.specs.map((s) => s.name) };
+          seen.blocked = await opts.engineTools.call('autode_workflow_complete_stage', { stage: 'document', summary: 'x' });
+          if (record) await opts.engineTools.call('autode_record_artifact', { stage: 'document', path: 'runbook.md', content: '# Runbook\n' });
+          return { text: 'Recorded runbook.md. Missing: the schedule.', audit: [], provider };
+        }
+      };
+      let r = await runStage(host, scope, 'document');
+      assert.ok(!r.ok && /autode plugin install --host claude/.test(r.message), r.message);
+      provider = 'copilot'; record = false;
+      r = await runStage(host, scope, 'document');
+      assert.ok(!r.ok && /without recording a deliverable/.test(r.message), r.message);
+      assert.ok(seen.blocked.isError && /not available/.test(seen.blocked.text), 'hub-only tools are not offered, whatever the model asks for');
+      assert.strictEqual(seen.opts.systemPrompt.startsWith('# Assignment: Documentation'), true);
+      assert.ok(seen.names.includes('autode_record_artifact') && !seen.names.includes('autode_resolve_decision'));
+      record = true;
+      r = await runStage(host, scope, 'document');
+      assert.ok(r.ok && r.outputs.length === 1 && r.outputs[0].endsWith('document/runbook.md'), JSON.stringify(r));
+      const events = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'document' });
+      const handed = events.find((e) => e.type === 'handed-in' || e.type === 'done');
+      assert.ok(handed && handed.actor.kind === 'agent' && handed.actor.name === 'documenter' && handed.actor.host === 'VS Code', JSON.stringify(events));
+      assert.ok(events.some((e) => e.type === 'recorded' && /documenter/.test(e.actor.name)), 'the record names the role');
+      r = await runStage(host, scope, 'nope');
+      assert.ok(!r.ok);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.0: autode plugin — the plugin folder (Claude Code / Cortex Code layout) and installs for each host, the MCP server wired where the host has a file, other servers kept', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const tmp = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-plug-'));
+    try {
+      const out = nodePath.join(tmp, 'plugin');
+      const p = await cli(['plugin', 'path', '--out', out, '--json']);
+      assert.strictEqual(p.code, 0, p.out + p.err);
+      const files = p.json().files.sort();
+      for (const f of ['.claude-plugin/plugin.json', '.mcp.json', 'agents/documenter.md', 'skills/documentation/SKILL.md', 'skills/autode-orchestrator/SKILL.md', 'commands/autode-next.md']) assert.ok(files.includes(f), f);
+      const manifest = JSON.parse(nodeFs.readFileSync(nodePath.join(out, '.claude-plugin', 'plugin.json'), 'utf8'));
+      assert.deepStrictEqual([manifest.name, manifest.version], ['autode', require('../package.json').version]);
+      assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(out, '.mcp.json'), 'utf8')).mcpServers.autode.args.slice(-3), ['mcp', '--workspace', '.']);
+      const agent = nodeFs.readFileSync(nodePath.join(out, 'agents', 'documenter.md'), 'utf8');
+      assert.ok(/^tools: Read, Grep, Glob, mcp__autode__/m.test(agent) && !/resolve_decision/.test(agent));
+      const ws = nodePath.join(tmp, 'ws'); nodeFs.mkdirSync(ws);
+      nodeFs.writeFileSync(nodePath.join(ws, '.mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'x', args: [] } } }));
+      const env = { AUTODE_HOME: nodePath.join(tmp, 'home') };
+      const c = await cli(['plugin', 'install', '--host', 'claude', '--workspace', ws, '--json'], { env });
+      assert.strictEqual(c.code, 0, c.out + c.err);
+      const mcp = JSON.parse(nodeFs.readFileSync(nodePath.join(ws, '.mcp.json'), 'utf8'));
+      assert.deepStrictEqual(Object.keys(mcp.mcpServers).sort(), ['autode', 'other']);
+      assert.ok(nodeFs.existsSync(nodePath.join(ws, '.claude', 'agents', 'documenter.md')) && nodeFs.existsSync(nodePath.join(ws, '.claude', 'skills', 'documentation', 'SKILL.md')));
+      const g = await cli(['plugin', 'install', '--host', 'copilot', '--workspace', ws, '--json'], { env });
+      assert.ok(nodeFs.existsSync(nodePath.join(ws, '.github', 'agents', 'documenter.agent.md')) && /\/mcp add/.test(g.json().mcp.instruction));
+      assert.ok(/tools: \["read", "search", "autode\//.test(nodeFs.readFileSync(nodePath.join(ws, '.github', 'agents', 'documenter.agent.md'), 'utf8')));
+      const k = await cli(['plugin', 'install', '--host', 'cortex', '--scope', 'user', '--workspace', ws, '--json'], { env });
+      assert.ok(nodeFs.existsSync(nodePath.join(tmp, 'home', '.snowflake', 'cortex', 'skills', 'autode-orchestrator', 'SKILL.md')) && /mcp\.json/.test(k.json().mcp.instruction));
+      const u = await cli(['plugin', 'install', '--host', 'claude', '--scope', 'user', '--workspace', ws, '--json'], { env });
+      assert.ok(/claude mcp add --scope user autode/.test(u.json().mcp.instruction));
+      assert.strictEqual((await cli(['plugin', 'install', '--host', 'emacs', '--workspace', ws])).code, 2);
+    } finally { nodeFs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.0: the documenter replaces the architecture agent — plans can\'t name it, an old plan step that does fails with where it went, and the agents and skills ship everywhere the server does', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const hubSrc = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
+    assert.ok(!/executeArchitectureAgent/.test(hubSrc) && !nodeFs.existsSync(nodePath.join(__dirname, '..', 'src', 'agents', 'validate', 'DocumentationAgent.ts')));
+    assert.ok(/Documentation moved to the workflow/.test(hubSrc));
+    const ignore = nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8');
+    assert.ok(ignore.includes('!agents/*.md') && ignore.includes('!skills/*/**'));
+    assert.ok(require('../scripts/pack-cli.cjs').CONTENT.includes('agents'));
+    const { SERVER_FILES } = fresh('../dist/core/mcpConfig.js');
+    assert.ok(SERVER_FILES.includes('agents'));
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

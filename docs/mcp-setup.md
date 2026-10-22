@@ -57,6 +57,8 @@ claude mcp add autode -- autode mcp --workspace .
 
 Run `/mcp` in Claude Code to check that `autode` is connected. Claude Code asks you to approve a project's servers the first time it starts.
 
+**AutoDE's agents and skills.** `autode plugin install --host claude` copies AutoDE's agents (`.claude/agents/`), skills (`.claude/skills/`) and commands (`/autode-status`, `/autode-next`, `/autode-approve`) into the project and sets the server in `.mcp.json`. Or load the plugin folder: `claude --plugin-dir "$(autode plugin path)"`. Then ask Claude Code to continue your AutoDE problem. For Cortex Code and the Copilot CLI, use `--host cortex` or `--host copilot` ([cli.md](cli.md#agent-hosts)).
+
 ## Codex
 
 Add the server to `~/.codex/config.toml`. Codex starts servers in its own working directory, so give the workspace as an absolute path:
@@ -349,7 +351,8 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 ## Not yet available
 
 The following arrive in later releases:
-- AutoDE's own capabilities as Agent Skills you can copy into your host's skills folder (PA3).
+- AutoDE's other agents as role templates and skills, one per release to v0.45.5 (today: the documenter and the orchestrator).
+- Approvals inside the host, through MCP elicitation (PA3c).
 
 ## Troubleshooting
 

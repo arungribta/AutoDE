@@ -1103,11 +1103,10 @@ All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper
 | `sttmAgent` | `src/agents/model/SttmMapperAgent.ts` | Source-to-target mapping |
 | `ingestionAgent` | `src/agents/build/IngestionPipelineAgent.ts` | Ingestion code |
 | `transformScaffoldAgent` | `src/agents/build/TransformationScaffolderAgent.ts` | dbt project scaffold |
-| `architectureAgent` | `src/agents/validate/DocumentationAgent.ts` | Architecture document, data dictionary, DDL |
 | `snowflakeExecutor` | `src/spokes/snowflakeExecutor.ts` | Executes SQL through `SnowflakeAdapter` |
 | `toolSkillAgent` | `src/agents/build/ToolSkillAgent.ts` | Whatever an imported skill does (§7.6) |
 
-Codegen agents use three tiers (GEN-1, GEN-2): `generateViaPrimitiveOrFallback()` (`src/agents/llmParamSelector.ts`) first asks the LLM to choose and parameterise a primitive (§9), then falls back to a freehand LLM call (`src/agents/llmCodegen.ts#generateWithLlm`), then to a fixed template. Primitive tiers are wired into the ingestion, STTM and transformation agents; the data model and marts are deliberately not forced into single-source primitives. (`src/spokes/{architectureAgent,ingestionAgent,sttmAgent}.ts` are not imported anywhere — leftovers to remove.)
+Codegen agents use three tiers (GEN-1, GEN-2): `generateViaPrimitiveOrFallback()` (`src/agents/llmParamSelector.ts`) first asks the LLM to choose and parameterise a primitive (§9), then falls back to a freehand LLM call (`src/agents/llmCodegen.ts#generateWithLlm`), then to a fixed template. Primitive tiers are wired into the ingestion, STTM and transformation agents; the data model and marts are deliberately not forced into single-source primitives. (`src/spokes/{ingestionAgent,sttmAgent}.ts` are not imported anywhere — leftovers to remove.) Since v0.45.0 documentation is not a plan agent: it is the workflow's document stage, done by the `documenter` role (§7.9).
 
 ### 7.3 Execution context and result
 
@@ -1205,6 +1204,27 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
   - **Today's agents:** an "AutoDE agents" box runs them through `agentsRunState()` and `runAgentsAction()` until PA3b.
   - **Palette:** its Phases, Agents and Continue Workflow sections are replaced by a link to the view.
 - **MCP** (`src/mcp/workflowTools.ts`): `autode_workflow_templates`, `_status`, `_next`, `_start_stage`, `_complete_stage`, `_skip_stage`, `_reopen_stage` and `autode_propose_workflow`. None of them approve.
+
+### 7.9 Roles, skills and assignments (v0.45.0; SKL-6, PA3b)
+
+- **Definitions** (`src/engine/agents/definitions.ts`):
+  - role templates: `agents/<role>.md` (bundled) and `.autode/config/agents/<role>.md` (the workspace's, overriding by name). Frontmatter `name` (must equal the file name), `description`, `tools` (AutoDE tool names), `skills`; the body is the instructions;
+  - skills: `skills/<id>/SKILL.md`, the Agent Skills format. `name` is lowercase words joined by dashes, at most 64 characters, and equals the folder; `description` is at most 1024 characters; the body is required;
+  - `checkDefinitions()` flags a role that names a skill that doesn't exist.
+- **Assignments** (`src/engine/agents/assignment.ts`): `assignmentFor(scope, stage, tools)` takes the stage's role (`agent.role`, else the kind's first role), its tier (`agent.tier` within the kind's ceiling, else the ceiling) and its skills (`agent.skills`, else the role's). It returns the tools, the file mode (read-only below workspace-write) and `text`, the full instructions.
+- **Tools by tier:**
+  - `toolTier()` reads the annotations: read-only → read; open-world → platform-read; anything else → propose; destructive → never;
+  - `HUB_ONLY` excludes starting, handing in, skipping, re-opening and proposing the workflow, resolving and applying decisions, reviewing facts, and starting or selecting problems;
+  - `autode_record_artifact` is allowed at any tier;
+  - the role's tool list narrows the result.
+- **Recording** (`src/engine/agents/artifacts.ts`): `recordArtifact()` writes under `outputDirSegments(problem)/<phase>/<stage>/` (phase from the stage kind), archives the previous revision to `history/`, writes `<file>.grounding.json` with `buildGroundingManifest()`, and appends a `recorded` event.
+- **Surfaces:**
+  - **MCP** (`src/mcp/workflowTools.ts`, `catalogs.ts`): `autode_workflow_next` adds `assignment` (or `noAssignment` with the reason); `autode_record_artifact`; prompts `autode_agent_<role>`;
+  - **VS Code:** `runStage()` in `src/core/agentExecutor.ts`, from the Workflow view's `run` action. It uses `EngineClient` with `clientName` set to the role and `toolSetNamed()` for the exact tools, `AgentHub.runAgentWithTools()` for the model, then `completeStage()` as `{ kind: 'agent', name: role, host: 'VS Code' }`.
+- **Hosts** (`src/engine/agents/plugin.ts`, `autode plugin`):
+  - `buildPlugin()` builds Claude Code's layout, which Cortex Code also reads. Agents get `tools: Read, Grep, Glob, mcp__autode__…`;
+  - `installPlugin()` writes each host's folders, renders Copilot agents as `*.agent.md` with `tools: ["read", "search", "autode/…"]`, and merges the project's `.mcp.json` for Claude Code. Elsewhere it returns the step to take;
+  - `serverEntry()` uses `autode mcp` when it is on PATH, else node on the package's own bundle.
 
 ### 7.7 Decisions and proposals (v0.40.0; ORC-8, MCP-2)
 
@@ -1723,20 +1743,20 @@ src/agents/discover/    # Source Assessment
   SourceAssessmentAgent.ts
 src/agents/model/    # data model and source-to-target mapping
   DataModelerAgent.ts, SttmMapperAgent.ts
-src/agents/validate/    # documentation and Grounding Report
-  DocumentationAgent.ts
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
   ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
   DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SttmEditorProvider.ts
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
+src/engine/agents/
+  artifacts.ts, assignment.ts, definitions.ts, plugin.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
   assertions.ts, assertionSchemas.ts, businessPackManager.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/decisions/
@@ -1768,7 +1788,7 @@ src/engine/workflows/
 src/mcp/    # MCP server (no vscode; §10.6)
   catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 src/spokes/    # Snowflake executor (other files unused)
-  architectureAgent.ts, ingestionAgent.ts, snowflakeExecutor.ts, sttmAgent.ts
+  ingestionAgent.ts, snowflakeExecutor.ts, sttmAgent.ts
 ```
 <!-- /generated:source-tree -->
 

@@ -27,8 +27,3 @@ steps:
     phase: build
     dependsOn: [s4]
     taskDescription: Scaffold the dbt project — stg_orders (dedup on order_id, incremental on updated_at), dim_customer (SCD2), fct_daily_revenue (net revenue excluding cancelled orders, net of refunds).
-  - id: s6
-    assignedAgent: architectureAgent
-    phase: validate
-    dependsOn: [s5]
-    taskDescription: Document the architecture and the data dictionary for the revenue and retention marts.

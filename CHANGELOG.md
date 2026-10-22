@@ -6,6 +6,65 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.0
+
+- **Phase PA3b, step 1: agents as definitions, and the first agent moved** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6, ORC-9; technical-design §7.9). Agents are now **role templates** (`agents/<role>.md`), and their method is **standard skills** (`skills/<id>/SKILL.md`). Both are files that every host reads the same way. The engine turns them into **assignments**.
+- **Assignments.** For a stage, the workflow (the hub) combines:
+  - the role template;
+  - the planner's brief, if any;
+  - the role's skills;
+  - the stage's permission tier.
+
+  From these it derives exactly the AutoDE tools the agent may call: tools above its tier are excluded, destructive tools (resolving or applying decisions) are never granted, and workflow control (start, hand in, skip, re-open, re-plan) stays with the hub. Recording the stage's own deliverable is allowed at any tier. A role can narrow its tool list, never widen it.
+- **The same assignment on every surface:**
+  - **MCP:** `autode_workflow_next` returns it in full, including `assignment.text`, the instructions to follow;
+  - **hosts without sub-agents:** `autode_agent_<role>` prompts carry it (with a `stage` argument, the full assignment);
+  - **VS Code:** the Workflow view's **Run agent** action runs it with the model configured in AutoDE.
+- **`autode_record_artifact`.** The agent doing a stage records each deliverable with this tool:
+  - the file goes to `autode-output/<problem>/<phase>/<stage>/`, and the previous revision is archived to `history/`;
+  - it gets the same grounding manifest the panel writes (unresolved tables and columns are reported);
+  - it is noted in the workflow's history ("recorded by agent …").
+
+  It is a draft: the stage's gate is where a person accepts it.
+- **The VS Code executor** (`src/core/agentExecutor.ts`):
+  - starts the stage as the agent;
+  - runs the assignment with an engine client named after the role, so the history says "documenter (VS Code)";
+  - hands the stage in with the recorded files and the agent's summary.
+
+  It refuses cleanly when nothing was recorded, and when the model is Claude Code, which runs its own tool loop: the plugin is the way there.
+- **The first migration: the documenter.** The documentation stage is done by the `documenter` role with the `documentation` skill:
+  - `design.md`, `data-dictionary.md`, `runbook.md` and `decisions.md`, from the approved spec, the workflow history, the context pack and the Pipeline Spec;
+  - every named table and column is checked with `autode_resolve`, and quoted SQL with `autode_check_grounding`.
+
+  The TypeScript `architectureAgent` (`DocumentationAgent.ts`, and the unused `src/spokes/architectureAgent.ts`) is **deleted**. Plans can no longer name it. A step in a saved plan that does fails with a message saying where documentation went.
+- **The orchestrator skill** (`skills/autode-orchestrator/SKILL.md`) is the hub's loop for agent hosts:
+  1. status;
+  2. next assignment;
+  3. run it as the named sub-agent, or follow it directly;
+  4. hand it in;
+  5. stop at every approval, and tell the user how to give it.
+- **`autode plugin`:**
+  - **`autode plugin path [--out]`** builds the plugin folder: `.claude-plugin/plugin.json`, `.mcp.json` wiring `autode mcp`, `agents/`, `skills/` and `commands/` (`/autode-status`, `/autode-next`, `/autode-approve`, which never approves). Claude Code loads it with `--plugin-dir`, and Cortex Code reads the same layout.
+  - **`autode plugin install --host claude|cortex|copilot [--scope project|user]`** copies the same files into each host's own folders:
+    - Claude Code: `.claude/`; the project's `.mcp.json` is merged, keeping other servers;
+    - Cortex Code: `.cortex/skills` or `~/.snowflake/cortex/skills`;
+    - Copilot CLI: `.github/agents/*.agent.md` and `.github/skills`, or `~/.copilot/…`.
+
+    Where a host has no documented MCP file (Cortex Code projects, Copilot CLI, Claude Code at user scope), the installer prints the exact step instead of guessing a file.
+- **Packaging:** `agents/` and the skill folders ship in the VSIX, the `autode` package and the stable server copy.
+- **Deviations / notes:**
+  - **PA3b is split into increments**, one agent migration per release, because "the old agent is deleted in the same release" can't hold for eight agents at once:
+    - v0.45.1: source assessor and mapping (`autode_match_columns`);
+    - v0.45.2: data modeler (`autode_draft_model`, model proposal);
+    - v0.45.3: pipeline engineer (`autode_primitive_candidates`);
+    - v0.45.4: business analyst (interview state on disk) and the planner's briefs;
+    - v0.45.5: context curator; the plan-of-steps path and the AutoDE agents box are removed.
+  - **Artifacts are drafts approved at the stage gate,** not one decision per artifact: one approval per stage.
+  - **The plugin folder has no Copilot agents.** Claude Code would read `*.agent.md` files as agents too, so each agent would load twice. Copilot's agents come from `autode plugin install --host copilot`.
+  - **Cortex Code** has no documented project MCP file or agents folder (checked 2026-10-21). The installer copies skills and prints the `~/.snowflake/cortex/mcp.json` entry; sub-agents come from the plugin folder.
+  - **Run agent, not Hand in,** is the action for a stage whose role has a definition. Hand in stays for work done by hand.
+- **Measured:** 364 tests (6 new: definitions and format checks; tools by tier; the MCP assignment, recording and prompts; the executor; the plugin and installs; the retired agent and packaging). Updated tests that used `architectureAgent` as a generic agent. Lint 0 errors. Eval: the reference plan no longer has the documentation step (s6). Every other metric is unchanged from the v0.41.0 baseline.
+
 ## 0.44.1
 
 - **The Workflow view, history and provenance** (owner's request, 2026-10-21: progress must be traceable and clearly visible; requirements ORC-9; technical-design §7.8).

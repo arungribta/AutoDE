@@ -5,6 +5,8 @@ import { EngineToolError } from './errors';
 import { buildChatExtractionPrompt } from '../engine/context/chatExtraction';
 import { EngineWorkspace, PROBLEM_DOCUMENTS } from './workspace';
 import { layoutRel } from '../engine/workspaceLayout';
+import { loadRoles, loadSkillPack } from '../engine/agents/definitions';
+import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
 
 /**
  * MCP prompts (§5.4) and resources (§5.5) — read-only views of the
@@ -35,10 +37,17 @@ export function listPrompts(ws: EngineWorkspace): PromptInfo[] {
   }));
   // C4b: the same fact extraction AutoDE runs after each chat turn, for a client's own model (§5.2, D5).
   const extraction = { name: 'autode_extract_assertions', title: 'AutoDE: extract facts from a message', description: 'Turn what the engineer just said into proposed facts (keys, grain, relationships, terms, metrics, rules, decisions); submit each with autode_propose_assertion.', arguments: [{ name: 'message', description: "The engineer's message.", required: true }, { name: 'previous_reply', description: 'Your previous reply, for context.', required: false }] };
-  return [...interview, ...tools, extraction];
+  // PA3b: AutoDE's agents (role templates), for hosts without sub-agents; with a stage, the full assignment.
+  const agents = loadRoles(ws.options.resourcesRoot, ws.options.workspaceRoot).roles.map((r) => ({
+    name: `autode_agent_${r.name}`,
+    title: `AutoDE agent: ${r.name}`,
+    description: r.description,
+    arguments: [{ name: 'stage', description: 'The workflow stage to do (its id); gives the full assignment: brief, tier, tools, skills.', required: false }]
+  }));
+  return [...interview, ...tools, extraction, ...agents];
 }
 
-export function getPrompt(ws: EngineWorkspace, name: string, args: Record<string, string> = {}): { description: string; text: string } {
+export function getPrompt(ws: EngineWorkspace, name: string, args: Record<string, string> = {}, tools: readonly ToolInfo[] = []): { description: string; text: string } {
   if (name === 'autode_extract_assertions') {
     if (!args.message?.trim()) throw new EngineToolError('VALIDATION_FAILED', 'autode_extract_assertions needs the message to extract from.');
     const { system, user } = buildChatExtractionPrompt({ text: args.message, previousReply: args.previous_reply, source: 'chat' }, []);
@@ -72,6 +81,26 @@ export function getPrompt(ws: EngineWorkspace, name: string, args: Record<string
     if (s.skill.resourceFiles.length) parts.push(`Resource files alongside the skill (in ${layoutRel('toolSkills', s.skill.id)}/): ${s.skill.resourceFiles.join(', ')}.`);
     if (args.instruction?.trim()) parts.push('## Task', args.instruction.trim());
     return { description: s.skill.description, text: parts.join('\n\n') };
+  }
+  const roleName = /^autode_agent_(.+)$/.exec(name)?.[1];
+  if (roleName) {
+    const r = loadRoles(ws.options.resourcesRoot, ws.options.workspaceRoot).roles.find((x) => x.name === roleName);
+    if (!r) throw new EngineToolError('NOT_FOUND', `No agent prompt "${name}".`);
+    const problemId = ws.activeProblemId();
+    if (args.stage?.trim()) {
+      if (!problemId) throw new EngineToolError('NOT_FOUND', 'No active business problem: select one first.');
+      const a = assignmentFor({ workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot, problemId }, args.stage.trim(), tools);
+      if (!a.assignment) throw new EngineToolError('NOT_FOUND', a.reason ?? `No assignment for ${args.stage}.`);
+      if (a.assignment.role !== r.name) throw new EngineToolError('VALIDATION_FAILED', `Stage ${args.stage} is assigned to ${a.assignment.role}, not ${r.name}.`);
+      return { description: r.description, text: a.assignment.text };
+    }
+    const pack = loadSkillPack(ws.options.resourcesRoot).skills.filter((k) => r.skills.includes(k.id));
+    const text = [
+      `You are AutoDE's ${r.name}: ${r.description}`, r.instructions,
+      'Take your work from the workflow: autode_workflow_next gives the stage, its brief, your permission tier and the AutoDE tools you may call. Record deliverables with autode_record_artifact. Never call another agent and never approve anything.',
+      ...pack.map((k) => `## Skill: ${k.name}\n${k.description}\n\n${k.instructions}`)
+    ].join('\n\n');
+    return { description: r.description, text };
   }
   throw new EngineToolError('NOT_FOUND', `No prompt "${name}".`);
 }

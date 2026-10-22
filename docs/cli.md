@@ -161,6 +161,17 @@ Secrets never go in these files. A field such as `password` or `token` is refuse
 
 `approve` and `reject` work only in an interactive terminal (stdin and stdout), and they refuse whenever `CI` is set (to anything other than empty, `0` or `false`). They show the decision and ask you to type `approve` or `reject` to confirm. `--by` defaults to your OS user name. This is the *CLI* channel of a decision: it may resolve high-stakes decisions, because it needs a person at the keyboard. A non-interactive run never resolves a decision (requirements P9).
 
+## Agent hosts
+
+AutoDE's agents (role templates) and skills, for Claude Code, Cortex Code and the GitHub Copilot CLI. Your host supplies the model; the AutoDE MCP server supplies the engine, the workflow and the approvals.
+
+| Command | What it does |
+|---|---|
+| `autode plugin path [--out <folder>]` | Builds the plugin folder (agents, skills, `/autode-status`, `/autode-next`, `/autode-approve`, `.mcp.json`) and prints its path. Load it with `claude --plugin-dir <path>`; Cortex Code reads the same layout. |
+| `autode plugin install --host claude\|cortex\|copilot [--scope project\|user]` | Copies the agents and skills into the host's folders: `.claude/` (and the project's `.mcp.json`, other servers kept), `.cortex/skills` or `~/.snowflake/cortex/skills`, `.github/agents` and `.github/skills` or `~/.copilot/…`. Where the host has no file for MCP servers, it prints the step to add `autode`. |
+
+Then ask the agent to continue your AutoDE problem: the `autode-orchestrator` skill takes each assignment from the workflow, has the named agent do it, hands the stage in, and stops at every approval.
+
 ## The MCP server
 
 `autode mcp` is the AutoDE MCP server over stdio. Its flags are `--workspace`, `--resources`, `--allow-cli`, `--drivers` and `--allow-write`. It is the same server as `dist/mcp-server.js` in the extension, at a path that doesn't change with extension updates. Per-host set-up: [mcp-setup.md](mcp-setup.md).

@@ -6,6 +6,8 @@ import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, s
 import { WorkflowInstance, readWorkflow } from '../engine/workflows/instance';
 import { layoutPath } from '../engine/workspaceLayout';
 import { Actor } from '../engine/workflows/events';
+import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
+import { recordArtifact } from '../engine/agents/artifacts';
 
 /**
  * The workflow over MCP (PA3a): the runtime is the hub; an agent asks what to
@@ -35,7 +37,7 @@ function wrap<T>(fn: () => T): T {
   }
 }
 
-export function workflowTools(clientName: () => string | undefined): EngineTool[] {
+export function workflowTools(clientName: () => string | undefined, allTools: () => readonly ToolInfo[] = () => []): EngineTool[] {
   const agent = (): Actor => ({ kind: 'agent', name: clientName() ?? 'MCP client', host: 'MCP' });
   return [
     {
@@ -62,7 +64,16 @@ export function workflowTools(clientName: () => string | undefined): EngineTool[
       description: 'The next assignment from the workflow (the hub): which stage, which role, its tier, what it consumes and produces, and instructions. Do it, then hand it in with autode_workflow_complete_stage. Never run another agent from inside an assignment.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       annotations: read('Next assignment'),
-      handler: async (_args, ws) => wrap(() => { ensureWorkflow(scopeOf(ws)); return { next: nextAssignment(rctx(ws)) ?? null }; })
+      handler: async (_args, ws) => wrap(() => {
+        const scope = scopeOf(ws);
+        ensureWorkflow(scope);
+        const next = nextAssignment(rctx(ws));
+        if (!next) return { next: null };
+        // PA3b: the full assignment when the stage's role has a definition; otherwise why not (its old agent still runs in the panel).
+        if (next.stage.status === 'awaiting-approval') return { next, assignment: null };
+        const a = assignmentFor(scope, next.stage.id, allTools());
+        return { next, assignment: a.assignment ?? null, ...(a.reason ? { noAssignment: a.reason } : {}) };
+      })
     },
     {
       name: 'autode_workflow_history',
@@ -93,6 +104,23 @@ export function workflowTools(clientName: () => string | undefined): EngineTool[
         const t = templatesFor(scope).templates.find((x) => x.id === w.template.id);
         return { decision: { id: d.id, kind: d.kind, stakes: d.stakes, status: d.status, title: d.title, validation: d.validation }, diff: t ? diffWorkflow(w, t) as unknown as Record<string, unknown> : null, next: `A person approves it: the AutoDE panel, \`autode workflow approve\` in a terminal, or .autode/decisions/${d.id}.yaml. Tell the user.` };
       })
+    },
+    {
+      name: 'autode_record_artifact',
+      description: 'Record a deliverable of a stage you were assigned (a document, SQL, YAML): AutoDE writes it to the problem\'s output folder for that stage, archives the previous revision, checks its grounding against the estate (unresolved tables and columns are reported) and notes it in the workflow\'s history. It is a draft: the stage\'s approval is where a person accepts it. List the returned paths as the stage\'s outputs when it is handed in.',
+      inputSchema: { type: 'object', required: ['stage', 'path', 'content'], additionalProperties: false, properties: { stage: { type: 'string', minLength: 1 }, path: { type: 'string', minLength: 1, description: 'File name relative to the stage\'s folder, e.g. design.md or sql/stg_orders.sql.' }, content: { type: 'string' }, language: { type: 'string', description: 'sql, markdown, yaml, python, json; default from the extension.' } } },
+      annotations: records('Record a deliverable'),
+      handler: async (args, ws) => {
+        const r = rctx(ws);
+        const w = readWorkflow(r.problemRoot);
+        const s = w?.stages.find((x) => x.id === args.stage);
+        if (!w || !s || !s.included) throw new EngineToolError('NOT_FOUND', `No stage "${String(args.stage)}" in the active problem's workflow.`);
+        try {
+          return recordArtifact({ workspaceRoot: r.workspaceRoot, problemId: r.problemId, problemRoot: r.problemRoot, stage: { id: s.id, kind: s.kind }, path: String(args.path), content: String(args.content), language: args.language as string | undefined, who: agent(), channel: 'tool', sources: await ws.contextSources() }) as unknown as Record<string, unknown>;
+        } catch (err) {
+          throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
+        }
+      }
     },
     {
       name: 'autode_workflow_start_stage',

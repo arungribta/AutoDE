@@ -16,7 +16,8 @@ export type WorkflowEventType =
   | 'proposed'       // proposed for approval (the plan gate)
   | 'approved'       // a workflow or stage approval
   | 'rejected'
-  | 'started' | 'handed-in' | 'done' | 'stale' | 'skipped' | 'reopened';
+  | 'started' | 'handed-in' | 'done' | 'stale' | 'skipped' | 'reopened'
+  | 'recorded';      // a deliverable recorded by the agent doing the stage (PA3b)
 
 /** Who did it: the engine's deterministic rules, a person, or an agent. */
 export type Actor = { kind: 'engine'; rule?: string } | { kind: 'person'; name: string } | { kind: 'agent'; name: string; host?: string };

@@ -55,7 +55,7 @@
   let state = { model: null, details: {}, selected: null, agents: null };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const MARK = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
-  const ACTION_LABEL = { approve: 'Approve…', 'hand-in': 'Hand in…', 'approve-again': 'Approve again…', skip: 'Skip…', reopen: 'Re-open…' };
+  const ACTION_LABEL = { approve: 'Approve…', run: 'Run agent', 'hand-in': 'Hand in…', 'approve-again': 'Approve again…', skip: 'Skip…', reopen: 'Re-open…' };
   const send = (m) => vscode.postMessage(m);
   const when = (iso) => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
 

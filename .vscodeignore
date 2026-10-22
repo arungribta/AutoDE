@@ -24,6 +24,8 @@
 # Bundled interview skills and Tier-2 primitives; JSON Schemas for yamlValidation.
 !skills/*.json
 !primitive-definitions/**
-# Workflow templates (PA3a).
+# Workflow templates (PA3a); agent role templates and skill folders (PA3b).
 !workflows/*.yaml
+!agents/*.md
+!skills/*/**
 !docs/schemas/*.json

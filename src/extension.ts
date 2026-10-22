@@ -318,9 +318,9 @@ export function activate(context: vscode.ExtensionContext): void {
     user: skillActor
   }));
   // Phase 5: agents reach the engine's MCP tools through an in-process client, started on first use.
-  hub.setEngineFactory(() => {
+  hub.setEngineFactory((clientName?: string) => {
     const root = firstFolder();
-    return root ? new EngineClient({ workspaceRoot: root, resourcesRoot: context.extensionPath, version: extensionVersion, log: (line) => console.log(`[engine] ${line}`), driversRoot: () => configManager.getSettings().driversDirectory, allowCli: () => configManager.getSettings().dataPlatformCliConsent === true }) : undefined;
+    return root ? new EngineClient({ workspaceRoot: root, resourcesRoot: context.extensionPath, version: extensionVersion, log: (line) => console.log(`[engine] ${line}`), driversRoot: () => configManager.getSettings().driversDirectory, allowCli: () => configManager.getSettings().dataPlatformCliConsent === true, clientName }) : undefined;
   });
 
   const asLmProvider = (v: unknown): 'copilot' | 'claude' | undefined =>

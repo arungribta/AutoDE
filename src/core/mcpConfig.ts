@@ -137,7 +137,7 @@ export function hintStaleMcpJson(vscode: VsCode, options: { workspaceRoot: strin
 // ── The stable copy (phase 5, §7.5) ──────────────────────────────────────────
 
 /** What the server needs next to it, relative to the extension root; the same as the `autode` package (scripts/pack-cli.cjs). */
-export const SERVER_FILES: readonly string[] = ['dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'skills', 'primitive-definitions', 'workflows', 'media/autode-icon-64.png', 'LICENSE'];
+export const SERVER_FILES: readonly string[] = ['dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'skills', 'primitive-definitions', 'workflows', 'agents', 'media/autode-icon-64.png', 'LICENSE'];
 
 export function stableServerDir(storagePath: string): string {
   return path.join(storagePath, 'autode-server');
@@ -169,7 +169,7 @@ export function ensureStableServer(extensionPath: string, storagePath: string, v
     const from = path.join(extensionPath, ...rel.split('/'));
     if (!fs.existsSync(from)) continue;
     if (rel === 'skills') {
-      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json'))) copyInto(path.join(from, f), path.join(staging, 'skills', f));
+      for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json') || fs.existsSync(path.join(from, x, 'SKILL.md')))) copyInto(path.join(from, f), path.join(staging, 'skills', f));
       continue;
     }
     copyInto(from, path.join(staging, ...rel.split('/')));

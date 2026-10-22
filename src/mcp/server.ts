@@ -115,7 +115,7 @@ export function createAutodeServer(options: ServerOptions): Server {
   const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: options.allowWrite === true, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   // The decision tools read the client's name (from `initialize`) at call time.
   const ref: { server?: Server } = {};
-  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name })];
+  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name, () => tools), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name })];
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {
@@ -161,7 +161,7 @@ export function createAutodeServer(options: ServerOptions): Server {
 
   server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     try {
-      const p = getPrompt(ws, request.params.name, (request.params.arguments ?? {}) as Record<string, string>);
+      const p = getPrompt(ws, request.params.name, (request.params.arguments ?? {}) as Record<string, string>, tools);
       return { description: p.description, messages: [{ role: 'user' as const, content: { type: 'text' as const, text: p.text } }] };
     } catch (err) {
       throw protocolError(err);

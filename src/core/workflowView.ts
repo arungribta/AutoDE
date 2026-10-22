@@ -133,6 +133,7 @@ export class WorkflowPanel {
           await this.host.resolve(m.decisionId, m.type === 'approve' ? 'approved' : 'rejected');
           break;
         }
+        case 'run': await this.host.workflowAction('run', m.stage); break;
         case 'hand-in': case 'approve-again': await this.host.workflowAction('complete', m.stage); break;
         case 'skip': await this.host.workflowAction('skip', m.stage); break;
         case 'reopen': await this.host.workflowAction('reopen', m.stage); break;
@@ -183,6 +184,7 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
   disposables.push(
     vscode.commands.registerCommand('autoDataEngineeringHub.openWorkflow', (stage?: string) => WorkflowPanel.show(context, host, refresh, typeof stage === 'string' ? stage : undefined)),
     vscode.commands.registerCommand('autoDataEngineeringHub.refreshWorkflow', refreshNow),
+    vscode.commands.registerCommand('autoDataEngineeringHub.workflowRun', act('run')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowHandIn', act('hand-in')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowApproveAgain', act('approve-again')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowSkip', act('skip')),

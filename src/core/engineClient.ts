@@ -24,7 +24,7 @@ export interface EngineToolInfo {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean };
 }
 
 export class EngineError extends Error {
@@ -75,6 +75,8 @@ export interface EngineClientOptions {
   allowCli?: () => boolean;
   /** Tests: a session with fake adapters. */
   platform?: PlatformSession;
+  /** The MCP client name the engine records as the agent (PA3b: the role running a stage). Default `autode-vscode`. */
+  clientName?: string;
 }
 
 export class EngineClient implements EngineAccess {
@@ -93,7 +95,7 @@ export class EngineClient implements EngineAccess {
         const server = createAutodeServer({ workspaceRoot: o.workspaceRoot, resourcesRoot: o.resourcesRoot, version: o.version, platform, log: o.log });
         const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
         await server.connect(serverSide);
-        const client = new Client({ name: 'autode-vscode', version: o.version });
+        const client = new Client({ name: o.clientName ?? 'autode-vscode', version: o.version });
         await client.connect(clientSide);
         return { client, server };
       })();
@@ -120,7 +122,16 @@ export class EngineClient implements EngineAccess {
   }
 
   public async toolSet(mode: ToolExecutionMode, declared: readonly string[] | undefined): Promise<EngineToolSet> {
-    const picked = selectEngineTools(await this.listTools(), mode, declared);
+    return this.setOf(selectEngineTools(await this.listTools(), mode, declared));
+  }
+
+  /** Exactly these tools (PA3b: an assignment's, already chosen by tier and role); never a destructive one. */
+  public async toolSetNamed(names: readonly string[]): Promise<EngineToolSet> {
+    const want = new Set(names);
+    return this.setOf((await this.listTools()).filter((t) => want.has(t.name) && t.annotations?.destructiveHint !== true));
+  }
+
+  private setOf(picked: EngineToolInfo[]): EngineToolSet {
     const names = new Set(picked.map((t) => t.name));
     return {
       specs: picked.map((t) => ({ name: t.name, description: t.description ?? t.name, parameters: t.inputSchema })),

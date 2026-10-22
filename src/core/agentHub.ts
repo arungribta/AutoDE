@@ -5,7 +5,6 @@ import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, Engine
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeIngestionAgent } from '../agents/build/IngestionPipelineAgent';
 import { executeSttmAgent } from '../agents/model/SttmMapperAgent';
-import { executeArchitectureAgent } from '../agents/validate/DocumentationAgent';
 import { executeSnowflakeAgent } from '../spokes/snowflakeExecutor';
 import { executeSourceAssessmentAgent } from '../agents/discover/SourceAssessmentAgent';
 import { executeDataModelerAgent } from '../agents/model/DataModelerAgent';
@@ -80,18 +79,22 @@ import {
 // Skill" action that builds the PlanStep itself with a real skillId — never
 // auto-assigned by generatePlan(). It's still a full AGENT_EXECUTORS entry so
 // that explicit path can execute it like any other step.
-const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'architectureAgent', 'snowflakeExecutor', 'sourceAssessmentAgent', 'dataModelerAgent', 'transformScaffoldAgent'];
+// PA3b v0.45.0: architectureAgent is gone; documentation is the workflow's document stage (agents/documenter.md).
+const VALID_AGENT_TYPES: AgentType[] = ['ingestionAgent', 'sttmAgent', 'snowflakeExecutor', 'sourceAssessmentAgent', 'dataModelerAgent', 'transformScaffoldAgent'];
 
 const AGENT_EXECUTORS: Record<AgentType, (step: PlanStep, context: AgentExecutionContext) => Promise<{ success: boolean; message: string; details?: Record<string, unknown>; error?: string; artifacts?: GeneratedArtifact[] }>> = {
   ingestionAgent: executeIngestionAgent,
   sttmAgent: executeSttmAgent,
-  architectureAgent: executeArchitectureAgent,
   snowflakeExecutor: executeSnowflakeAgent,
   sourceAssessmentAgent: executeSourceAssessmentAgent,
   dataModelerAgent: executeDataModelerAgent,
   transformScaffoldAgent: executeTransformScaffoldAgent,
   toolSkillAgent: executeToolSkillAgent
 };
+
+const MOVED_AGENT = (agent: string): string => agent === 'architectureAgent'
+  ? 'Documentation moved to the workflow: run the document stage from the Workflow view (Run agent), or from a host agent with the AutoDE plugin.'
+  : `No agent "${agent}" in this version of AutoDE.`;
 
 // Agent-to-phase mapping
 const AGENT_PHASE: Partial<Record<AgentType, WorkflowPhase>> = {
@@ -100,7 +103,6 @@ const AGENT_PHASE: Partial<Record<AgentType, WorkflowPhase>> = {
   dataModelerAgent: 'model',
   ingestionAgent: 'build',
   transformScaffoldAgent: 'build',
-  architectureAgent: 'validate',
   snowflakeExecutor: 'build',
   toolSkillAgent: 'build'
 };
@@ -135,9 +137,23 @@ export class DataAgentHubHub {
   public constructor(private readonly configManager: ConfigurationManager) {}
 
   /** Phase 5: makes the engine client each agent context gets (started on first use; the tool-skill runner disposes it). */
-  private engineFactory: (() => EngineAccess | undefined) | undefined;
-  public setEngineFactory(factory: () => EngineAccess | undefined): void {
+  private engineFactory: ((clientName?: string) => EngineAccess | undefined) | undefined;
+  public setEngineFactory(factory: (clientName?: string) => EngineAccess | undefined): void {
     this.engineFactory = factory;
+  }
+
+  /** PA3b: an engine client of its own for one stage run, named after the role so the workflow's history records who did it. */
+  public createEngine(clientName: string): EngineAccess | undefined {
+    return this.engineFactory?.(clientName);
+  }
+
+  /** PA3b: the configured model with tools, for the stage executor. */
+  public runAgentWithTools(prompt: string, opts: AgentToolRunOptions): Promise<{ text: string; audit: ToolCallAuditEntry[]; provider: LlmProvider }> {
+    return this.runConfiguredLlmWithTools(prompt, opts);
+  }
+
+  public activeProvider(): LlmProvider {
+    return this.configManager.getSettings().activeLlmProvider ?? 'copilot';
   }
 
   public setStateListener(listener: (state: PlanState) => void): void {
@@ -1228,8 +1244,9 @@ Message: ${message}`;
           recordGeneration: (use: PrimitiveUse) => { generations.push(use); }
         };
 
-        const executor = AGENT_EXECUTORS[readyStep.assignedAgent];
-        const result = await executor(readyStep, context);
+        const executor = AGENT_EXECUTORS[readyStep.assignedAgent] as typeof AGENT_EXECUTORS[AgentType] | undefined;
+        // A plan saved before an agent moved to the workflow (PA3b) still names it.
+        const result = executor ? await executor(readyStep, context) : { success: false, message: MOVED_AGENT(readyStep.assignedAgent), error: MOVED_AGENT(readyStep.assignedAgent) };
 
         if (!result.success) {
           readyStep.status = 'failed';
@@ -1349,7 +1366,7 @@ Message: ${message}`;
         description: 'Identifier grounding, decision backing, rule compliance and context gaps for every artifact this run produced.',
         content: renderGroundingReport(this.lastRunManifests),
         language: 'markdown',
-        generatedBy: 'architectureAgent',
+        generatedBy: 'engine',
         generatedAt: new Date().toISOString(),
         approved: false,
         phase: 'validate',
@@ -1484,7 +1501,7 @@ Message: ${message}`;
 - Outputs: ${t.outputFormats.join(', ')}`;
     }
 
-    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${phaseBlock}${implementationBlock}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent, snowflakeExecutor, sourceAssessmentAgent, dataModelerAgent, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
+    return `You are an expert data engineering planning assistant. Create a strict execution DAG for the following objective for the ${providerName} provider:${baseContext}${phaseBlock}${implementationBlock}${targetBlock}\n\nObjective: ${objective}\n\nReturn only a valid JSON array of objects. Each object must include: {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...","status":"pending","dependsOn":[],"validationRules":["..."]}. Use only these assignedAgent values: ingestionAgent, sttmAgent, snowflakeExecutor, sourceAssessmentAgent, dataModelerAgent, transformScaffoldAgent. Order the DAG so each step is sequentially dependent. Make sure step ids are unique and use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor as the terminal step. Do not include markdown fences, comments, or extra text. This JSON must be parseable by a strict JSON parser.`;
   }
 
   // ── LLM Calls ──
