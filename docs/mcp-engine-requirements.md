@@ -556,6 +556,60 @@ Any surface resumes it; this closes BPS-7. Answers are the user's statements, so
 - **Other MCP clients:** the same assignments as MCP prompts (`autode_agent_<role>`, filled with the brief), and the workflow as tools.
 - **Background fact extraction:** in VS Code it runs after every turn. In hosts it depends on the agent following the `fact-extraction` skill. This is weaker, and documented.
 
+##### 8a. The runner: runbooks, approved by a person, run by the engine (v0.45.5; owner, 2026-10-22)
+
+Everything that changes a data platform runs through one deterministic runner. Agents only write **runbooks**; a person approves them; the engine runs them. No agent runs a platform command, in AutoDE or (with the plugin's hooks, §8b) in a host. The aim is execution that is as easy as clicking through a wizard, including for people who aren't data engineers, without weakening P9.
+
+- **A runbook** (`.autode/problems/<id>/runbooks/<runbook-id>.yaml`, written by `autode_propose_runbook`) holds:
+  - title, stage, the reason, and the environment and connection it targets;
+  - ordered **steps**, each one of:
+    - `sql`: one statement on the connection;
+    - `cli`: an argv for `snow` or `databricks`, never a shell string;
+    - `bundle`: a Databricks bundle or Snowflake project folder, with its validate and deploy commands;
+  - per step: what it is expected to do, its dry run (`EXPLAIN`, `bundle validate`, `--dry-run`), its rollback (a step or a written procedure), and a timeout;
+  - a plain-language explanation from the agent, labelled as such.
+- **The engine checks it before anyone sees it,** and refuses it item by item:
+  - every `sql` step is classified read, change or destructive by the same guard `autode_execute_query` uses;
+  - every `cli` step must match the platform's command allowlist, with argument rules (no credentials, profiles by name, paths inside the workspace);
+  - the connection and environment must exist;
+  - destructive steps need a rollback or a written reason.
+
+  The classification is the engine's, never the agent's.
+- **Approval is a decision** (kind `runbook`, high stakes), by a person through the panel or the decision file. The rules come from the team's policy in `.autode/config/approvals.yaml` (the file PA3c extends to gates):
+  - who may approve per environment;
+  - whether production needs a second approver;
+  - which step kinds are allowed per environment;
+  - whether unattended runs are allowed: never for production; by default only in dev and sandbox.
+
+  Defaults when the file has none: any person approves in dev, test and sandbox; production needs a person named under `approvers.prod`, and can't run unattended.
+- **The runner** (`src/engine/runner/`) is deterministic code. It runs one step at a time, dry run first where a step has one, through the connector for `sql` and through the user's own CLI profile for `cli` and `bundle` (P5: no secret is ever in a runbook). It stops at the first failure, shows the error, and offers the step's rollback. Every action (dry run, run, skip, rollback, stop) is appended to `.autode/problems/<id>/runs/<run-id>.jsonl` with who, when, the redacted command, the exit status, the duration and a truncated, redacted output. The entries are hash-chained so a change is evident, and noted in the workflow history.
+- **The wizard (VS Code):** a Runbook tab opened from the stage or the decision. It shows:
+  - the environment and approval state;
+  - each step with the engine's classification (read, change or destructive), its expected effect, its dry-run result and its rollback;
+  - the explanation;
+  - buttons: Approve (when you may), Dry run, Run step, Run remaining (when the policy allows), Roll back, and the log.
+
+  A run needs an approved runbook; it is the only place a platform-changing command executes in AutoDE.
+- **Other surfaces:**
+  - MCP: agents propose runbooks and read their status (`autode_runbook_status`), never run them;
+  - CLI: `autode runbook list | show`, and approval with `autode decisions approve`.
+
+  The interactive terminal runner (`autode run <runbook>`) is in the backlog, by the owner's decision of 2026-10-22. Until it exists, runs happen in VS Code. This is a deliberate exception to surface parity.
+- **Stages:** the deploy and platform-setup stages produce runbooks, and are done when their run succeeds. `autode_apply_decision` keeps working for single platform-change decisions.
+
+##### 8b. Platform skills and vendor skills (v0.45.6; owner, 2026-10-22)
+
+- **AutoDE's own platform skills**, written from the vendors' public documentation and AutoDE's tools, not from vendor skill text:
+  - Snowflake: ingestion (stages, file formats, `COPY INTO`, Snowpipe), pipelines (streams and tasks, dynamic tables), governance (roles and grants, masking and row-access policies, tags), performance (warehouse sizing, clustering), deployment (Snowflake CLI projects as runbooks);
+  - Databricks: ingestion (Auto Loader, `COPY INTO`), pipelines (Lakeflow Declarative Pipelines), governance (Unity Catalog grants, column masks, row filters), performance (OPTIMIZE, liquid clustering, VACUUM), deployment (bundles as runbooks);
+  - cross-platform: reconciliation (counts, aggregates and key hashes, read-only), dbt (a project and tests from the quality rules).
+
+  Each ships with a fixture and a test: its SQL or YAML resolves against the estate, uses the platform's dialect, and its runbook passes the engine's checks.
+- **Platform-aware selection:** a skill's frontmatter may carry `platforms: [snowflake]`. An assignment picks the skill for its stage kind and the problem's target platform.
+- **Vendor skills by reference, never copied.** The Databricks agent skills are under the Databricks License (use only with Databricks Services; may be terminated on notice), so they aren't redistributed. When they are installed in the host, AutoDE detects them and names the relevant ones in the assignment ("for bundle deployment, see `databricks-dabs`"). When they aren't installed, AutoDE offers the moderated install (`databricks aitools install`, run in a visible terminal only on click, as for drivers). Cortex Code's built-in skills run only inside Cortex Code; where a user has Cortex Code, AutoDE can hand Snowflake work to it, but it is never required. Community skills with an open licence (for example Apache-2.0 skills in Snowflake-Labs/coco-skills) may be imported through PA4 with their attribution. AutoDE's own skills work with no vendor skill installed.
+- **Hooks in the plugin:** in hosts that support hooks (Claude Code, Cortex Code), the AutoDE plugin blocks platform-changing `snow` and `databricks` commands that don't come from an approved runbook. Where a host has no hooks, this is documented as a convention, not a guarantee.
+- **A compatibility page** (`docs/platform-skills.md`): AutoDE's platform skills, the vendor skills AutoDE works with, at which stage, and their licences.
+
 ##### 9. Tools added
 
 - **Workflow:** `autode_workflow_templates`, `autode_workflow_status`, `autode_workflow_next`, `autode_workflow_start_stage`, `autode_workflow_complete_stage`, `autode_workflow_skip_stage` (default and optional stages only), `autode_workflow_reopen_stage`, `autode_propose_workflow`, `autode_request_approval`.
