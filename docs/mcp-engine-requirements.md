@@ -507,11 +507,12 @@ Today's TypeScript agents (`src/agents/**`) and orchestration prompts in `src/co
 | `business-analyst` | interview, spec synthesis and revision | `business-problem-interview`, `specification-authoring` |
 | `planner` | plan generation, phase inference | `workflow-planning` |
 | `target-architect` | target context questions | `target-context`, `platform-setup` |
-| `source-assessor` | `SourceAssessmentAgent`, source context questions | `source-assessment`, `contract-conformance`, `quality-rules`, `reconciliation` |
-| `sttm-mapper` | `SttmMapperAgent` | `sttm-mapping`, `entity-resolution` |
+| `source-assessor` | `SourceAssessmentAgent`, source context questions | `source-assessment`, `conformance` (shipped v0.45.2); `reconciliation` later |
+| `quality-engineer` | (new in v0.45.1: nothing produced quality rules) | `quality-rules` (shipped) |
+| `sttm-mapper` | `SttmMapperAgent` | `mapping` (shipped v0.45.2); `entity-resolution` later |
 | `data-modeler` | `DataModelerAgent` | `data-modelling` |
 | `pipeline-engineer` | `TransformationScaffolderAgent`, `IngestionPipelineAgent`, Pipeline Spec synthesis | `pipeline-scaffolding`, `code-conversion-import`, `deployment` |
-| `documenter` | `DocumentationAgent` | `documentation`, `bi-migration` |
+| `documenter` | `DocumentationAgent` | `documentation` (shipped v0.45.0); `bi-migration` later |
 | `context-curator` | chat fact extraction, pack free-text reading, profile and vocabulary proposals | `fact-extraction`, `document-reading`, `vocabulary` |
 
 ##### 5. The runtime: stages, gates, staleness

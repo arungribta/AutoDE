@@ -3,24 +3,14 @@
 # without an LLM; replay/record runs can also exercise the real planner.
 objective: Daily net revenue and 90-day retention reporting in Snowflake (dbt, dimensional) from shop and crm.
 steps:
-  - id: s1
-    assignedAgent: sourceAssessmentAgent
-    phase: discover
-    taskDescription: Assess the shop and crm source schemas — tables, keys and relationships relevant to orders, revenue and customers.
   - id: s2
     assignedAgent: dataModelerAgent
     phase: model
-    dependsOn: [s1]
     taskDescription: Design the dimensional model — fct_order_lines (one row per order line), fct_daily_revenue, dim_customer (SCD2 on segment_code and lifecycle_stage), dim_product, dim_date.
-  - id: s3
-    assignedAgent: sttmAgent
-    phase: model
-    dependsOn: [s2]
-    taskDescription: Map shop.orders, shop.order_items, shop.refunds, shop.customers and crm.customers to the target model, masking email and phone.
   - id: s4
     assignedAgent: ingestionAgent
     phase: build
-    dependsOn: [s3]
+    dependsOn: [s2]
     taskDescription: Ingest shop.orders, shop.order_items, shop.refunds, shop.customers and crm.customers into the RAW layer; load orders incrementally on updated_at.
   - id: s5
     assignedAgent: transformScaffoldAgent

@@ -117,7 +117,7 @@ Migration: on first load, existing graph content (`GraphPersistence` snapshot, `
 
 | Source | Module today | Produces | Initial trust / status |
 |--------|--------------|----------|------------------------|
-| Live discovery (schema) | `SourceAssessmentAgent`, `BaseAdapter.extractMetadata()` | `schema_fact`, declared keys / FKs | `verified` / `active` |
+| Live discovery (schema) | the `source-assessor` role through `autode_ingest_metadata` (until v0.45.2 `SourceAssessmentAgent`), `BaseAdapter.extractMetadata()` | `schema_fact`, declared keys / FKs | `verified` / `active` |
 | Profiling | `BaseAdapter.profileColumns()` | `data_fact`, candidate `key` (distinct = rows, no nulls) | `verified` / `active` for facts; `inferred` / `proposed` for candidate keys |
 | File ingestion | `fileIngestion.ts` | `schema_fact` | `documented` / `active` |
 | Business context files | `SynthesisPipeline` (business-context.yaml, verified queries, data definitions) | `business_term`, `business_rule`, `metric` | `documented` / `active` |
@@ -196,7 +196,7 @@ assertionRefs: { net_revenue: [01J...], order.grain: [01J...] }   # traceability
 Requirements:
 - Concepts align with dbt MetricFlow semantic models (entities, dimensions, measures, metrics), so an export maps one-to-one.
 - **Exports are primitives:** dbt `semantic_models` / `metrics` YAML, Snowflake semantic view DDL, and Databricks metric views where the platform supports them. Each is a Tier-2 `PrimitiveDefinition`, so exports are deterministic and versioned. Track the emerging cross-vendor semantic interchange formats as future export targets; do not adopt them as the internal format.
-- **Consumption (principle C3):** `SttmMapperAgent`, `DataModelerAgent`, `TransformationScaffolderAgent` and `llmParamSelector` read grain, keys, join paths and metric definitions from the semantic model. When a step needs one that doesn't exist (e.g. a join between two entities with no `relationship` assertion), the step pauses with a **context gap** (§7.3). It must not invent one.
+- **Consumption (principle C3):** the `sttm-mapper` role (until v0.45.2 `SttmMapperAgent`), `DataModelerAgent`, `TransformationScaffolderAgent` and `llmParamSelector` read grain, keys, join paths and metric definitions from the semantic model. When a step needs one that doesn't exist (e.g. a join between two entities with no `relationship` assertion), the step pauses with a **context gap** (§7.3). It must not invent one.
 - A model element backed only by `inferred` assertions is shown as such and cannot be part of an `approved` model unless the user explicitly confirms it.
 
 ---

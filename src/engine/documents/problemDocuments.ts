@@ -377,7 +377,13 @@ export function writeMappingUpsert(problemRoot: string, mapping: EntityMapping, 
   const file = problemDocumentPath(problemRoot, 'mappingContext');
   const currentText = readProblemDocument(problemRoot, 'mappingContext');
   const previous = currentText === undefined ? undefined : parseMappingContext(currentText);
-  const { toSave, archivePrevious } = nextMappingContextRevision(previous, withMappingUpserted(previous, mapping, now));
+  // Pinned to the current specification, as the panel does: a mapping set from another spec version starts afresh (v0.45.2).
+  const specText = readProblemDocument(problemRoot, 'spec');
+  const spec = specText ? parseBusinessProblemSpec(specText) : undefined;
+  const sameLineage = !!previous && (!spec || (previous.specId === spec.id && previous.specVersion === spec.version));
+  const base: MappingContext | undefined = sameLineage ? previous : spec ? { specId: spec.id, specVersion: spec.version, status: 'built', mappings: [] } : previous;
+  const upserted = withMappingUpserted(base, mapping, now);
+  const { toSave, archivePrevious } = nextMappingContextRevision(previous, { ...upserted, status: upserted.status === 'pending' ? 'built' : upserted.status });
   if (archivePrevious && previous) archive(path.dirname(file), mappingContextHistoryName(previous), serializeMappingContext(previous));
   writeAtomic(file, serializeMappingContext(toSave));
   return toSave;

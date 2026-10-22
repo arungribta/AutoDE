@@ -746,7 +746,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postLog(`Running agent: ${agentType}...`);
           try {
             switch (agentType) {
-              case 'sourceAssessmentAgent': await vscode.commands.executeCommand(`${EXTENSION_ID}.sourceAssessment`); break;
+              case 'sourceAssessmentAgent': await vscode.commands.executeCommand(`${EXTENSION_ID}.sourceAssessment`); break; // the extraction command, not the retired agent
               default: this.postLog(`Agent ${agentType} is available via plan execution. Use /plan to create a workflow.`); break;
             }
           } catch (e) { this.postLog(`Agent execution failed: ${e instanceof Error ? e.message : String(e)}`); }

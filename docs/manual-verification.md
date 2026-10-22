@@ -665,6 +665,31 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: in the panel, use Generate Plan, Execute, `/plan` and `/execute`.
   Expect: each opens the Workflow view with "AutoDE now works stage by stage…"; no artifacts are generated.
 
+## Part 28 — v0.45.2 The source assessor and the mapper
+
+- [ ] **28.1 Source assessment in VS Code.**
+  Do: with a model other than Claude Code and a source connection configured, choose Run agent on Source assessment.
+  Expect:
+  - the sources' schemas are in the estate (`autode estate show`);
+  - aggregate-only queries in the log; key, grain and relationship facts proposed in the Context Inbox;
+  - a `source-context.yaml` draft and `source-assessment.md`;
+  - the stage waits for Approve…, and approving it completes the stage.
+- [ ] **28.2 No access.**
+  Do: run it with a source system that can't be reached.
+  Expect: the system is in the source context as *described*, with the access needed. No tables are invented.
+- [ ] **28.3 Mapping.**
+  Do: Run agent on Mapping.
+  Expect:
+  - structured entity mappings in `mapping-context.yaml`, column by column, with transform expressions where needed;
+  - `mapping-notes.md` listing unmapped target columns and overruled suggestions;
+  - after Approve…, the stage is done.
+- [ ] **28.4 The matcher, in a host.**
+  Do: in Claude Code with the plugin (`autode plugin install --host claude`), ask it to continue the problem through the mapping stage.
+  Expect: it calls `autode_match_columns` and `autode_record_mapping`, and stops for your approval of the mapping.
+- [ ] **28.5 An old plan.**
+  Do: run a plan saved before v0.45.2 that has `sourceAssessmentAgent` or `sttmAgent` steps.
+  Expect: those steps fail with "… moved to the workflow: run its stage from the Workflow view…".
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -828,5 +853,10 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 27.4 |  |  |
 | 27.5 |  |  |
 | 27.6 |  |  |
+| 28.1 |  |  |
+| 28.2 |  |  |
+| 28.3 |  |  |
+| 28.4 |  |  |
+| 28.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

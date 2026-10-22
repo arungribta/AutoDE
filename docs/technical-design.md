@@ -866,8 +866,6 @@ Output: DDL, YAML, Markdown
 | `src/context/TargetConfigManager.ts` | Read/write/validate `target-environment.yaml` with profile inheritance |
 | `src/core/agentHub.ts` | `extractTargetFromMessage()`, `buildTargetFromPartial()`, target-aware prompt assembly |
 | `src/agents/build/IngestionPipelineAgent.ts` | Uses `targetEnvironment` for target-side DDL |
-| `src/agents/model/SttmMapperAgent.ts` | Uses `targetEnvironment` for mapping output |
-| `src/agents/validate/DocumentationAgent.ts` | Uses `targetEnvironment` for architecture docs |
 
 ### 6.8 Platform Onboarding & Credential Architecture (Phase 3a-i and 3a-ii implemented v0.16.0)
 
@@ -1089,7 +1087,7 @@ All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper
 |---|---|
 | Plan generation | `buildPlanPrompt()` → LLM → `validatePlanResponse()` (unknown agents, duplicate ids, dangling or circular dependencies — topological sort — and steps outside the inferred required phases are rejected) |
 | Dispatch | `AGENT_EXECUTORS: Record<AgentType, executor>` — a fixed table; the LLM chooses an agent type, never which function runs |
-| Phase per agent | `AGENT_PHASE`: `sourceAssessmentAgent` → discover; `dataModelerAgent`, `sttmAgent` → model; `ingestionAgent`, `transformScaffoldAgent`, `snowflakeExecutor`, `toolSkillAgent` → build; `architectureAgent` → validate |
+| Phase per agent | `AGENT_PHASE`: `dataModelerAgent` → model; `ingestionAgent`, `transformScaffoldAgent`, `snowflakeExecutor`, `toolSkillAgent` → build. Documentation (v0.45.0), source assessment and mapping (v0.45.2) are workflow stages done by role templates (§7.9); a saved plan step naming their old agents fails with where they went (`MOVED_AGENT`) |
 | Planner allow-list | `VALID_AGENT_TYPES` excludes `toolSkillAgent` (skills run only when invoked, SKL-3) |
 | State | `PlanState` (steps, status, running step, artifacts, inferred phases, gates), persisted by `PlanManager` |
 | Context per call | `ContextPackProvider` set by the webview (§7.4); falls back to the plan-time context string when none is set (tests, headless use) |
@@ -1098,15 +1096,13 @@ All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper
 
 | Agent type | Module | Produces |
 |---|---|---|
-| `sourceAssessmentAgent` | `src/agents/discover/SourceAssessmentAgent.ts` | Discovery report; live extraction + persistence when connected (through `context.host`), otherwise a context-derived assessment |
 | `dataModelerAgent` | `src/agents/model/DataModelerAgent.ts` | Target data model |
-| `sttmAgent` | `src/agents/model/SttmMapperAgent.ts` | Source-to-target mapping |
 | `ingestionAgent` | `src/agents/build/IngestionPipelineAgent.ts` | Ingestion code |
 | `transformScaffoldAgent` | `src/agents/build/TransformationScaffolderAgent.ts` | dbt project scaffold |
 | `snowflakeExecutor` | `src/spokes/snowflakeExecutor.ts` | Executes SQL through `SnowflakeAdapter` |
 | `toolSkillAgent` | `src/agents/build/ToolSkillAgent.ts` | Whatever an imported skill does (§7.6) |
 
-Codegen agents use three tiers (GEN-1, GEN-2): `generateViaPrimitiveOrFallback()` (`src/agents/llmParamSelector.ts`) first asks the LLM to choose and parameterise a primitive (§9), then falls back to a freehand LLM call (`src/agents/llmCodegen.ts#generateWithLlm`), then to a fixed template. Primitive tiers are wired into the ingestion, STTM and transformation agents; the data model and marts are deliberately not forced into single-source primitives. (`src/spokes/{ingestionAgent,sttmAgent}.ts` are not imported anywhere — leftovers to remove.) Since v0.45.0 documentation is not a plan agent: it is the workflow's document stage, done by the `documenter` role (§7.9).
+Codegen agents use three tiers (GEN-1, GEN-2): `generateViaPrimitiveOrFallback()` (`src/agents/llmParamSelector.ts`) first asks the LLM to choose and parameterise a primitive (§9), then falls back to a freehand LLM call (`src/agents/llmCodegen.ts#generateWithLlm`), then to a fixed template. Primitive tiers are wired into the ingestion and transformation agents; the data model and marts are deliberately not forced into single-source primitives. Since v0.45.0 documentation, and since v0.45.2 source assessment and mapping, are not plan agents: they are workflow stages done by the `documenter`, `source-assessor` and `sttm-mapper` roles (§7.9).
 
 ### 7.3 Execution context and result
 
@@ -1226,6 +1222,13 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
   - `installPlugin()` writes each host's folders, renders Copilot agents as `*.agent.md` with `tools: ["read", "search", "autode/…"]`, and merges the project's `.mcp.json` for Claude Code. Elsewhere it returns the step to take;
   - `serverEntry()` uses `autode mcp` when it is on PATH, else node on the package's own bundle.
 
+- **The source assessor and the mapper** (v0.45.2):
+  - `autode_match_columns` (`src/engine/agents/columnMatch.ts`): `scorePair()` scores 1 for the same name, 0.95 for the same name apart from case and separators, 0.85 for the same name without the table prefix, 0.8 for the same vocabulary concepts, and 0.6 × Jaccard for words in common. An approved precedent adds 0.2 (`mappingPrecedents()` reads every problem's approved mapping document); types that don't convert halve the score. `matchColumns()` assigns greedily one-to-one at or above 0.5, with two runners-up per source column.
+  - `autode_record_mapping` (`src/mcp/agentTools.ts`): `validateMappingProposal()` against the schema index, then `writeMappingUpsert()`, which now pins the document to the current spec (a new spec lineage starts afresh) and writes `pending` as `built`.
+  - `autode_record_source_context`: `writeSourceContextDraft()` (`src/engine/agents/sourceContextDraft.ts`) checks each entry, pins to the spec, bumps the version after an approved revision (archived to `context/history/`) and writes `built`.
+  - Both append a `recorded` event to the stage: the named one, else the first included stage of the kind.
+  - **Role and skill choice** in `assignmentFor()`: among the planned role and the others the kind allows that have a definition, the first whose skills include the kind's skill (`KIND_SKILL`, else the kind's id), else the first defined. That role then gets only that skill.
+  - **Executor:** a document stage awaiting approval (no gate decision) can be run again; a role-template run on a document stage is not handed in, because the document's approval completes the stage.
 - **One path** (v0.45.1):
   - `stageRunner()` (`src/core/agentExecutor.ts`) gives the stage's role template, else `LEGACY_AGENTS[kind]` (source-assessment, modelling, build). `runStage()` runs the latter through `AgentHub.runStageSteps()`: a plan of only that stage's steps, the files written collected through `stageRunFiles`, and no `handleFailure` re-plan. They are recorded to the stage and handed in (document stages complete when their document is approved).
   - **Document approval** (`src/engine/workflows/documentApproval.ts`): `documentApprovalProblems()` checks the document (a specification statement; a context's spec id and version; at least one mapping; a valid Pipeline Spec), and `approveStageDocument()` writes `status: approved`, `approvedAt` and `approvedBy`, then appends an `approved` event. It is called from the Workflow view (after a modal) and from `autode workflow approve <stage>` (interactive terminal); no MCP tool calls it.
@@ -1389,8 +1392,8 @@ Return only a valid JSON array of objects. Each object must include:
 {"id":"step-1","assignedAgent":"ingestionAgent","taskDescription":"...",
  "status":"pending","dependsOn":[],"validationRules":["..."]}.
 
-Use only these assignedAgent values: ingestionAgent, sttmAgent, architectureAgent,
-snowflakeExecutor, sourceAssessmentAgent, dataModelerAgent, transformScaffoldAgent.
+Use only these assignedAgent values: ingestionAgent, snowflakeExecutor,
+dataModelerAgent, transformScaffoldAgent.
 Order the DAG so each step is sequentially dependent. Make sure step ids are unique and
 use a dependency list when appropriate. If a step touches Snowflake, use snowflakeExecutor
 as the terminal step. Do not include markdown fences, comments, or extra text. This JSON
@@ -1433,7 +1436,7 @@ interface TransformPrimitive<TParams = Record<string, unknown>> {
 - **Tier 1** (code, reviewed): `rename_cast` (staging casts/renames, plus a `dbt_model` output mode), `dedup` (`ROW_NUMBER()`, dialect-aware `EXCLUDE`/`EXCEPT`), `incremental_load` (keyed `MERGE`). Registered at module load into `TRANSFORM_PRIMITIVES: Record<string, TransformPrimitive<any>>`.
 - **Tier 2** (declarative, `declarative/`): a `PrimitiveDefinition` YAML (`kind`/`version`/`status`/`paramSchema`/`platformTemplates`/`previewParams`/`outputChecks`) whose `compile()` is a rendered template, not code — `templateEngine.ts` is a hand-rolled, deliberately constrained engine (`{{param}}`, `{{join arr ", "}}`, `{{#each}}...{{/each}}`, no `eval`/`Function()`) so a definition author cannot smuggle code execution into the compile path. `loadPrimitiveDefinitionsFromDirectory()` + `mergePrimitiveDefinitions()` mirror `skillRegistry.ts#loadSkillsFromDirectory` exactly — bundled `primitive-definitions/` + `.autode/config/primitives/` override, later wins. `registerPrimitives()` merges Tier 2 into the same `TRANSFORM_PRIMITIVES` map; Tier 1 always wins a `kind` collision.
 
-**Selection (`src/agents/llmParamSelector.ts`):** `selectTransformSpec(context, step, candidateKinds, fixedParams?)` asks the LLM for *only* `{kind, params}` JSON against the candidate primitives' schemas, Ajv-validates, and returns `undefined` (never throws) on any failure — `fixedParams` (object names the caller already computed deterministically) are merged in *after* the LLM's response so they can't be overridden. `generateViaPrimitiveOrFallback()` wraps this as tier 0 ahead of the *unmodified* existing tier 1 (freehand LLM) / tier 2 (hardcoded template) fallback chain in `IngestionPipelineAgent`, `SttmMapperAgent`, and `TransformationScaffolderAgent`'s staging model — the 3 of 5 codegen agents where a single-source primitive is a genuine fit (not `DataModelerAgent`'s multi-table schema design, nor the marts model's multi-source joins).
+**Selection (`src/agents/llmParamSelector.ts`):** `selectTransformSpec(context, step, candidateKinds, fixedParams?)` asks the LLM for *only* `{kind, params}` JSON against the candidate primitives' schemas, Ajv-validates, and returns `undefined` (never throws) on any failure — `fixedParams` (object names the caller already computed deterministically) are merged in *after* the LLM's response so they can't be overridden. `generateViaPrimitiveOrFallback()` wraps this as tier 0 ahead of the *unmodified* existing tier 1 (freehand LLM) / tier 2 (hardcoded template) fallback chain in `IngestionPipelineAgent` and `TransformationScaffolderAgent`'s staging model (and, until v0.45.2, `SttmMapperAgent`) — the codegen agents where a single-source primitive is a genuine fit (not `DataModelerAgent`'s multi-table schema design, nor the marts model's multi-source joins).
 
 ### 9.3 The Pipeline Spec (`src/engine/pipelineSpec/`)
 
@@ -1745,10 +1748,8 @@ src/agents/    # shared codegen paths (primitive selection, freehand, Pipeline S
   llmCodegen.ts, llmParamSelector.ts, pipelineSpecSynthesis.ts
 src/agents/build/    # build-phase agents, including the tool-skill runner
   IngestionPipelineAgent.ts, ToolSkillAgent.ts, TransformationScaffolderAgent.ts
-src/agents/discover/    # Source Assessment
-  SourceAssessmentAgent.ts
 src/agents/model/    # data model and source-to-target mapping
-  DataModelerAgent.ts, SttmMapperAgent.ts
+  DataModelerAgent.ts
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
@@ -1762,7 +1763,7 @@ src/editors/    # custom editors
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/
-  artifacts.ts, assignment.ts, definitions.ts, plugin.ts
+  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, plugin.ts, sourceContextDraft.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
   assertions.ts, assertionSchemas.ts, businessPackManager.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/decisions/
@@ -1792,9 +1793,9 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/
   documentApproval.ts, events.ts, instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 src/spokes/    # Snowflake executor (other files unused)
-  ingestionAgent.ts, snowflakeExecutor.ts, sttmAgent.ts
+  snowflakeExecutor.ts
 ```
 <!-- /generated:source-tree -->
 

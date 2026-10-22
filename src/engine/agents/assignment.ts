@@ -59,6 +59,9 @@ export interface Assignment {
   text: string;
 }
 
+/** The skill that does a stage kind, where its id isn't the kind's own. */
+const KIND_SKILL: Partial<Record<StageKind, string>> = { 'document': 'documentation' };
+
 export interface AssignmentScope { workspaceRoot: string; resourcesRoot: string; problemId: string }
 
 /** The assignment for a stage, or why there is none yet (the role has no definition: its old agent still does the work). */
@@ -70,12 +73,17 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   const kind = STAGE_KINDS[s.kind];
   const roleName = s.agent?.role ?? kind.roles[0];
   const { roles } = loadRoles(scope.resourcesRoot, scope.workspaceRoot);
-  // The planned role; else the first role the kind allows that has a definition (a role defined after the plan was approved).
-  const role: RoleTemplate | undefined = roles.find((r) => r.name === roleName) ?? kind.roles.map((n) => roles.find((r) => r.name === n)).find(Boolean);
+  // The role whose skills include the stage kind's skill: the planned one first, then the others the kind allows; else
+  // the planned role, else the first the kind allows that has a definition (roles defined after the plan was approved).
+  const kindSkill = KIND_SKILL[s.kind] ?? s.kind;
+  const candidates = [roleName, ...kind.roles.filter((n) => n !== roleName)].map((n) => roles.find((r) => r.name === n)).filter((r): r is RoleTemplate => !!r);
+  const role: RoleTemplate | undefined = candidates.find((r) => r.skills.includes(kindSkill)) ?? candidates[0];
   if (!role) return { reason: `Role ${roleName} has no definition yet; AutoDE's built-in agents still do ${s.kind} stages (AutoDE agents, plan steps).` };
   const tier = (s.agent?.tier && TIERS.includes(s.agent.tier) && tierRank(s.agent.tier) <= tierRank(kind.ceiling)) ? s.agent.tier : kind.ceiling;
   const { skills: pack } = loadSkillPack(scope.resourcesRoot);
-  const wanted = s.agent?.skills?.length ? s.agent.skills : role.skills;
+  // A role with several skills (the source assessor: source assessment and conformance) gets the one named after the stage's kind.
+  const ownKind = role.skills.includes(kindSkill) ? [kindSkill] : role.skills;
+  const wanted = s.agent?.skills?.length ? s.agent.skills : ownKind;
   const skills = pack.filter((k) => wanted.includes(k.id)).map((k) => ({ id: k.id, name: k.name, description: k.description, instructions: k.instructions, resources: k.resources }));
   const engineTools = toolsForTier(tools, tier, role.tools);
   const a: Omit<Assignment, 'text'> = {

@@ -193,7 +193,7 @@ The full, generated tree is technical-design §12. The files that matter most, i
 | 12 | `src/mcp/server.ts`, `tools.ts`; `src/cli/main.ts` | The MCP surface, and the CLI that reuses its handlers. |
 | 13 | `test/functional.test.cjs` (search for the feature) | Executable documentation for nearly everything above. |
 
-Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (step executors), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/cli` (the `autode` command line), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview skills), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, `autode` package, docs generator).
+Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (step executors), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/cli` (the `autode` command line), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview prompt packs as JSON, and since v0.45.0 the agents' skills as `skills/<id>/SKILL.md`), `agents/` (role templates, `<role>.md`, v0.45.0), `workflows/` (workflow templates), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, `autode` package, docs generator).
 
 **Safe to ignore at first:** the AutoDE Dashboard panel (`panel.html`, `panelProvider.ts` — parked), `src/spokes/` other than `snowflakeExecutor.ts`, CSS in `sidebar.html`, `mock_activate.js`.
 

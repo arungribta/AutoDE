@@ -23,7 +23,6 @@ import { readWorkflow } from '../engine/workflows/instance';
  * migrates to a role template (PA3b). Nothing else runs them.
  */
 export const LEGACY_AGENTS: Partial<Record<StageKind, Array<{ agent: AgentType; task: string }>>> = {
-  'source-assessment': [{ agent: 'sourceAssessmentAgent', task: 'Assess the source systems in scope for the approved specification: tables, keys, volumes, data quality and gaps.' }],
   'modelling': [{ agent: 'dataModelerAgent', task: 'Design the target data model for the approved specification and mapping: entities, grain, keys and relationships.' }],
   'build': [
     { agent: 'ingestionAgent', task: 'Build the ingestion of the mapped source tables into the raw layer, incremental where the specification says so.' },
@@ -63,7 +62,8 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   const ctx = { workspaceRoot: scope.workspaceRoot, problemRoot, problemId: scope.problemId };
   const stage = readWorkflow(problemRoot)?.stages.find((s) => s.id === stageId);
   if (!stage) return { ok: false, message: `No stage "${stageId}".`, outputs: [] };
-  if (stage.record.status === 'done' || stage.record.status === 'awaiting-approval') return { ok: false, message: `${stageId} is ${stage.record.status === 'done' ? 'done; re-open it to change it' : 'waiting for approval'}.`, outputs: [] };
+  // A document stage awaiting approval may be run again (its draft is redone); a gate decision waits for a person.
+  if (stage.record.status === 'done' || (stage.record.status === 'awaiting-approval' && (stage.record.decisionId || !isDocumentStage(stage.kind)))) return { ok: false, message: `${stageId} is ${stage.record.status === 'done' ? 'done; re-open it to change it' : 'waiting for approval'}.`, outputs: [] };
   if (host.activeProvider() === 'claude' && assignmentFor(scope, stageId, []).assignment) {
     // Claude Code runs its own tool loop and doesn't take AutoDE's in-process tools; it gets the same assignment through the plugin.
     return { ok: false, message: 'With Claude Code as the model, run AutoDE\'s agents in Claude Code itself: `autode plugin install --host claude`, then ask it to continue this problem (the autode-orchestrator skill). Or pick another model in AutoDE\'s settings.', outputs: [] };
@@ -77,7 +77,7 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   const who: Actor = { kind: 'agent', name: role, host: 'VS Code' };
   try {
     const a: Assignment = assignmentFor(scope, stageId, await engine.listTools()).assignment!;
-    if (stage.record.status !== 'in-progress') {
+    if (stage.record.status !== 'in-progress' && stage.record.status !== 'awaiting-approval') {
       const started = startStage(ctx, stageId, who, 'panel');
       if (started.warning) host.log(started.warning);
     }
@@ -91,6 +91,7 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
     const outputs = [...new Set(readEvents(problemRoot, { stage: stageId }).filter((e) => e.type === 'recorded' && e.at >= since).flatMap((e) => e.files ?? []))];
     const summary = text.trim().slice(0, 4000) || `${role} recorded ${outputs.length} file(s).`;
     if (!outputs.length) return { ok: false, message: `${role} finished without recording a deliverable, so ${stageId} wasn't handed in. Its reply:\n${summary}`, outputs, summary };
+    if (isDocumentStage(a.stage.kind)) return { ok: true, message: `${role} drafted ${stageId}'s document. Review it and approve it (Approve… on the stage) to complete the stage.`, outputs, summary };
     const done = completeStage(ctx, stageId, { outputs, summary, who, channel: 'panel' });
     return { ok: true, message: done.message, outputs, decisionId: done.decisionId, summary };
   } catch (err) {

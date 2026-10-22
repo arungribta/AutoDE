@@ -1451,7 +1451,7 @@ async function main() {
   await test('validatePlanResponse() rejects duplicate step IDs', async () => {
     const bad = JSON.stringify([
       { id: 's', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: [] },
-      { id: 's', assignedAgent: 'sttmAgent', taskDescription: 'b', dependsOn: [] }
+      { id: 's', assignedAgent: 'dataModelerAgent', taskDescription: 'b', dependsOn: [] }
     ]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /duplicate step ID/i);
@@ -1472,7 +1472,7 @@ async function main() {
   await test('validatePlanResponse() rejects a multi-step circular dependency', async () => {
     const bad = JSON.stringify([
       { id: 's1', assignedAgent: 'ingestionAgent', taskDescription: 'a', dependsOn: ['s2'] },
-      { id: 's2', assignedAgent: 'sttmAgent', taskDescription: 'b', dependsOn: ['s1'] }
+      { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'b', dependsOn: ['s1'] }
     ]);
     const { hub, mock } = hubForPlanResponse(bad);
     await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /circular dependency/i);
@@ -1487,7 +1487,7 @@ async function main() {
   });
 
   await test('validatePlanResponse() rejects a step outside the required phases', async () => {
-    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'assess sources', dependsOn: [] }]);
+    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'design the model', dependsOn: [] }]);
     const { hub, mock } = hubForPlanResponse(outOfPhase);
     const spec = {
       id: 'bps-1', version: 1, status: 'approved', problemStatementApproved: true,
@@ -1537,9 +1537,8 @@ async function main() {
     assert.strictEqual(noLlm, undefined, 'no callLlm on the context at all falls back the same way');
   });
 
-  await test('sourceAssessmentAgent and snowflakeExecutor degrade gracefully instead of failing when there is no target connection', async () => {
+  await test('snowflakeExecutor degrades gracefully instead of failing when there is no target connection', async () => {
     const plan = JSON.stringify([
-      { id: 'assess', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'Assess the source landscape', dependsOn: [], validationRules: [] },
       { id: 'ingest', assignedAgent: 'ingestionAgent', taskDescription: 'Generate ingestion DDL', dependsOn: [], validationRules: [] },
       { id: 'snowflake-check', assignedAgent: 'snowflakeExecutor', taskDescription: 'Validate against Snowflake', dependsOn: [], validationRules: [] }
     ]);
@@ -1556,20 +1555,15 @@ async function main() {
     await withMock(mock, () => hub.executePlan());
 
     const finalState = hub.getPlan();
-    const assessStep = finalState.steps.find((s) => s.id === 'assess');
     const ingestStep = finalState.steps.find((s) => s.id === 'ingest');
     const snowflakeStep = finalState.steps.find((s) => s.id === 'snowflake-check');
-    assert.strictEqual(assessStep.status, 'completed', 'source assessment degrades to a context-derived report instead of failing with no connection');
     assert.strictEqual(ingestStep.status, 'completed');
     assert.strictEqual(snowflakeStep.status, 'completed', 'snowflake validation is skipped, not failed, when there is no connection');
     assert.strictEqual(finalState.status, 'completed', 'the plan completes even though nothing could actually reach Snowflake');
 
     const artifacts = finalState.artifacts || [];
-    const assessArtifact = artifacts.find((a) => a.generatedBy === 'sourceAssessmentAgent');
     const snowflakeArtifact = artifacts.find((a) => a.generatedBy === 'snowflakeExecutor');
     const ingestArtifact = artifacts.find((a) => a.generatedBy === 'ingestionAgent');
-    assert.ok(assessArtifact, 'a context-derived assessment artifact was produced');
-    assert.ok(/registered data contract/.test(assessArtifact.content), 'the report actually surfaces the known context, not just a generic placeholder');
     assert.ok(snowflakeArtifact, 'the unexecuted validation query was saved as an artifact for manual review');
     assert.ok(/not executed/i.test(snowflakeArtifact.content));
     // The mocked LLM (shared across every call in this test) returns the plan
@@ -5569,13 +5563,13 @@ async function main() {
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'revenue', schemaContext: 'GLOBAL DUMP',
         steps: [
-          { id: 's1', assignedAgent: 'sttmAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
-          { id: 's2', assignedAgent: 'sttmAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
+          { id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
+          { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
         ],
         status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1
       });
       await hub.executePlan();
-      assert.deepStrictEqual(built, ['Plan step s1 (sttmAgent)', 'Plan step s2 (sttmAgent)']);
+      assert.deepStrictEqual(built, ['Plan step s1 (dataModelerAgent)', 'Plan step s2 (dataModelerAgent)']);
       const p1 = hub.getStepPack('s1'), p2 = hub.getStepPack('s2');
       assert.ok(p1.text.includes('shop.refunds') && !p1.text.includes('support_tickets'));
       assert.ok(p2.text.includes('support_tickets') && !p2.text.includes('shop.refunds'));
@@ -6181,7 +6175,7 @@ async function main() {
       });
       hub.loadPersistedPlan({
         id: 'p', version: 1, objective: 'x', schemaContext: '',
-        steps: [{ id: 's1', assignedAgent: 'sttmAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
+        steps: [{ id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
         status: 'ready', planApproved: true, stagesConfirmed: true
       });
       await hub.executePlan();
@@ -6714,12 +6708,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6774,6 +6768,9 @@ async function main() {
       autode_workflow_history: [{ stage: 'mapping' }, { stage: '' }],
       autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
+      autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
+      autode_record_mapping: [{ mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [{ sourceColumn: 'a', targetColumn: 'b' }] } }, { mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [] } }],
+      autode_record_source_context: [{ sources: [{ connectionId: 'shop', method: 'file' }] }, { sources: [{ connectionId: 'shop', method: 'guessed' }] }],
       autode_workflow_start_stage: [{ stage: 'sources' }, {}],
       autode_workflow_complete_stage: [{ stage: 'quality', summary: 'rules', outputs: ['q.md'] }, { stage: 'quality' }],
       autode_workflow_skip_stage: [{ stage: 'bi', reason: 'no reports in scope' }, { stage: 'bi', reason: 'no' }],
@@ -8182,8 +8179,8 @@ async function main() {
         sources: () => c3.sources(env.ledger, env.project()), supplementary: () => '', specRevision: () => 'sha256:spec'
       });
       hub.loadPersistedPlan({ id: 'p', version: 1, objective: 'tickets', schemaContext: '', steps: [
-        { id: 's1', assignedAgent: 'sttmAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
-        { id: 's2', assignedAgent: 'sttmAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
+        { id: 's1', assignedAgent: 'dataModelerAgent', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
+        { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
       ], status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1 });
       await hub.executePlan();
       let st = hub.getPlan();
@@ -9322,7 +9319,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'documentation', 'quality-rules']);
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-orchestrator', 'conformance', 'documentation', 'mapping', 'quality-rules', 'source-assessment']);
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -9482,7 +9479,7 @@ async function main() {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const hubSrc = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
     assert.ok(!/executeArchitectureAgent/.test(hubSrc) && !nodeFs.existsSync(nodePath.join(__dirname, '..', 'src', 'agents', 'validate', 'DocumentationAgent.ts')));
-    assert.ok(/Documentation moved to the workflow/.test(hubSrc));
+    assert.ok(/architectureAgent: 'Documentation'/.test(hubSrc) && /moved to the workflow/.test(hubSrc));
     const ignore = nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8');
     assert.ok(ignore.includes('!agents/*.md') && ignore.includes('!skills/*/**'));
     assert.ok(require('../scripts/pack-cli.cjs').CONTENT.includes('agents'));
@@ -9610,6 +9607,124 @@ async function main() {
     assert.ok(/if \(firstFailedStep && !this\.stageRunFiles\)/.test(hub));
     const pkg = require('../package.json');
     for (const c of ['workflowRun', 'workflowApproveDocument', 'workflowProduce', 'workflowOpenDocument']) assert.ok(pkg.contributes.commands.some((x) => x.command === `autoDataEngineeringHub.${c}`), c);
+  });
+
+  // ---------- v0.45.2: PA3b step 2 — the source assessor and the mapper ----------
+
+  await test('v0.45.2: autode_match_columns is deterministic evidence — same name, prefix, vocabulary, words in common, earlier approved mappings; types that don\'t convert lower the score; one-to-one', () => {
+    const M = fresh('../dist/engine/agents/columnMatch.js');
+    const { buildVocabulary } = fresh('../dist/engine/context/vocabulary.js');
+    const vocab = buildVocabulary();
+    const r = M.matchColumns(
+      { table: 'shop.orders', columns: [{ name: 'ORDER_ID', type: 'NUMBER' }, { name: 'CUST_NO', type: 'VARCHAR' }, { name: 'ord_status', type: 'VARCHAR' }, { name: 'created_at', type: 'TIMESTAMP' }, { name: 'legacy_flag', type: 'CHAR(1)' }] },
+      { table: 'fct_orders', columns: [{ name: 'order_id', type: 'INTEGER' }, { name: 'customer_number', type: 'STRING' }, { name: 'status', type: 'STRING' }, { name: 'created_at', type: 'NUMBER' }, { name: 'net_amount', type: 'NUMBER' }] },
+      { vocab, precedents: [{ source: 'legacy_flag', target: 'net_amount', problemId: 'p0' }] });
+    const by = Object.fromEntries(r.matches.map((m) => [m.sourceColumn, m]));
+    assert.deepStrictEqual([by.ORDER_ID.targetColumn, by.ORDER_ID.score], ['order_id', 1]);
+    assert.ok(by.CUST_NO.targetColumn === 'customer_number' && /vocabulary/.test(by.CUST_NO.reasons.join()), JSON.stringify(by.CUST_NO));
+    assert.ok(by.ord_status.targetColumn === 'status' && /prefix/.test(by.ord_status.reasons.join()), JSON.stringify(by.ord_status));
+    assert.ok(by.created_at.score < 1 && /don't convert/.test(by.created_at.reasons.join()), 'timestamp → number is flagged');
+    assert.ok(!by.legacy_flag, 'a precedent alone (no name evidence) is not a match');
+    assert.ok(r.unmatchedTarget.includes('net_amount'));
+    assert.strictEqual(new Set(r.matches.map((m) => m.targetColumn)).size, r.matches.length, 'one-to-one');
+    const again = M.scorePair({ name: 'cust_no' }, { name: 'customer_number' }, { vocab, precedents: [{ source: 'cust_no', target: 'customer_number', problemId: 'p0' }] });
+    assert.ok(again.score > 0.8 && /mapped this way before \(p0\)/.test(again.reasons.join()));
+  });
+
+  // A workspace template: sources (source assessment), then mapping, plus a conformance stage; a DDL file for the estate.
+  const sourceFlow = async (ws, cliFn) => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const dir = nodePath.join(ws, '.autode', 'config', 'workflows');
+    nodeFs.mkdirSync(dir, { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(dir, 'src.yaml'), 'id: src\nversion: 1\ntitle: Sources and mapping\ndescription: Assess, then map.\nstages:\n  - id: specify\n    title: Specification\n    kind: specify\n    inclusion: mandatory\n  - id: plan\n    title: Plan\n    kind: plan\n    inclusion: mandatory\n    after: [specify (approved)]\n  - id: sources\n    title: Source assessment\n    kind: source-assessment\n    inclusion: mandatory\n    after: [plan (approved)]\n  - id: conformance\n    title: Conformance\n    kind: conformance\n    inclusion: default\n    consumes: [estate]\n    after: [sources]\n  - id: mapping\n    title: Mapping\n    kind: mapping\n    inclusion: mandatory\n    consumes: [source-context]\n    after: [sources (approved)]\n');
+    nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), 'CREATE TABLE shop.orders (\n  order_id INT NOT NULL,\n  cust_no VARCHAR(20),\n  ord_status VARCHAR(10),\n  amount NUMBER(12,2)\n);\n');
+    const W = ['--workspace', ws];
+    const id = (await cliFn(['problems', 'new', 'Daily revenue from the shop orders', ...W, '--json'])).json().id;
+    const prob = nodePath.join(ws, '.autode', 'problems', id);
+    const spec = nodePath.join(prob, 'spec', 'business-problem.yaml');
+    nodeFs.writeFileSync(spec, nodeFs.readFileSync(spec, 'utf8').replace('status: draft', 'status: approved').replace('problemStatementApproved: false', 'problemStatementApproved: true'));
+    assert.strictEqual((await cliFn(['workflow', 'plan', '--template', 'src', ...W])).code, 0);
+    assert.strictEqual((await cliFn(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+    return { id, prob, W };
+  };
+
+  await test('v0.45.2: over MCP — the source assessor brings the estate in and drafts the source context; the mapper matches and drafts mappings; a person approves each document; the right skill per stage', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-srcmap-'));
+    let client;
+    try {
+      const { id, prob, W } = await sourceFlow(ws, cli);
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      let n = await call('autode_workflow_next', {});
+      assert.deepStrictEqual([n.next.stage.id, n.assignment.role, n.assignment.skills.map((k) => k.id), n.assignment.tier], ['sources', 'source-assessor', ['source-assessment'], 'platform-read']);
+      for (const t of ['autode_ingest_file', 'autode_ingest_metadata', 'autode_record_source_context', 'autode_execute_query']) assert.ok(n.assignment.engineTools.includes(t), t);
+      const A = fresh('../dist/engine/agents/assignment.js');
+      assert.deepStrictEqual(A.assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'conformance', []).assignment.skills.map((k) => k.id), ['conformance'], 'the same role, the skill of its stage');
+      assert.strictEqual((await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' })).code, undefined);
+      assert.strictEqual((await call('autode_record_source_context', { sources: [{ connectionId: 'shop', method: 'guessed' }] })).code, 'VALIDATION_FAILED');
+      const sc = await call('autode_record_source_context', { sources: [{ connectionId: 'shop', method: 'file', sourceType: 'database', description: 'The web shop' }] });
+      assert.deepStrictEqual([sc.status, sc.sources], ['built', 1], JSON.stringify(sc));
+      let st = await call('autode_workflow_status', {});
+      assert.strictEqual(st.stages.find((s) => s.id === 'sources').status, 'awaiting-approval');
+      assert.ok(fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'sources' }).some((e) => e.type === 'recorded' && e.files[0].endsWith('source-context.yaml')));
+      assert.strictEqual((await cli(['workflow', 'approve', 'sources', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      n = await call('autode_workflow_next', {});
+      const next = n.next.stage.id === 'mapping' ? n : null;
+      const mapAsg = A.assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'mapping', (await client.listTools()).tools).assignment;
+      assert.deepStrictEqual([mapAsg.role, mapAsg.skills.map((k) => k.id)], ['sttm-mapper', ['mapping']]);
+      assert.ok(mapAsg.engineTools.includes('autode_match_columns') && mapAsg.engineTools.includes('autode_record_mapping') && !mapAsg.engineTools.includes('autode_execute_query'), 'propose tier: no platform reads');
+      void next;
+      const m = await call('autode_match_columns', { source: 'shop.orders', targetColumns: [{ name: 'order_id', type: 'INTEGER' }, { name: 'customer_number', type: 'STRING' }, { name: 'status', type: 'STRING' }] });
+      assert.deepStrictEqual(m.matches.map((x) => `${x.sourceColumn}>${x.targetColumn}`).sort(), ['cust_no>customer_number', 'ord_status>status', 'order_id>order_id'], JSON.stringify(m));
+      const bad = await call('autode_record_mapping', { mapping: { id: 'map-orders', sourceEntityId: 'shop.orders', targetName: 'fct_orders', columns: [{ sourceColumn: 'nope', targetColumn: 'order_id' }] } });
+      assert.ok(bad.code === 'VALIDATION_FAILED' && /does not exist/.test(bad.message), JSON.stringify(bad));
+      const ok = await call('autode_record_mapping', { mapping: { id: 'map-orders', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: m.matches.map((x) => ({ sourceColumn: x.sourceColumn, targetColumn: x.targetColumn })) } });
+      assert.deepStrictEqual([ok.status, ok.mappings], ['built', 1], JSON.stringify(ok));
+      const D = fresh('../dist/engine/documents/problemDocuments.js');
+      const spec = D.parseBusinessProblemSpec(D.readProblemDocument(prob, 'spec'));
+      const doc = D.parseMappingContext(D.readProblemDocument(prob, 'mappingContext'));
+      assert.deepStrictEqual([doc.specId, doc.specVersion], [spec.id, spec.version], 'pinned to the current specification (it was empty before v0.45.2)');
+      st = await call('autode_workflow_status', {});
+      assert.strictEqual(st.stages.find((s) => s.id === 'mapping').status, 'awaiting-approval');
+      const ap = await cli(['workflow', 'approve', 'mapping', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(ap.code, 0, ap.out + ap.err);
+      // The next problem's matcher knows this mapping as a precedent.
+      assert.ok(fresh('../dist/engine/agents/columnMatch.js').mappingPrecedents(ws).some((p) => p.source === 'cust_no' && p.target === 'customer_number' && p.problemId === id));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.2: Run agent on a document stage drafts its document and leaves it for a person to approve; the old agents are gone and a saved plan step naming them says where they went', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-srcrun-'));
+    try {
+      const { id, prob, W } = await sourceFlow(ws, cli);
+      const { EngineClient } = fresh('../dist/core/engineClient.js');
+      const { runStage, stageRunner } = fresh('../dist/core/agentExecutor.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id };
+      assert.strictEqual(stageRunner(scope, 'sources', 'source-assessment'), 'source-assessor');
+      const host = {
+        createEngine: (n) => new EngineClient({ workspaceRoot: ws, resourcesRoot: wfRes(), version: 't', log: () => {}, clientName: n }),
+        activeProvider: () => 'copilot', log: () => {},
+        runAgentWithTools: async (_p, opts) => {
+          await opts.engineTools.call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
+          await opts.engineTools.call('autode_record_source_context', { sources: [{ connectionId: 'shop', method: 'file' }] });
+          return { text: 'One source system, from a DDL file.', audit: [], provider: 'copilot' };
+        }
+      };
+      let r = await runStage(host, scope, 'sources');
+      assert.ok(r.ok && /approve it/.test(r.message), r.message);
+      const st = () => fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope).stages.find((s) => s.id === 'sources');
+      assert.ok(st().status === 'awaiting-approval' && st().actions.includes('approve-document') && st().actions.includes('run'), JSON.stringify(st().actions));
+      r = await runStage(host, scope, 'sources');
+      assert.ok(r.ok, 'a draft can be redone while it waits for approval');
+      assert.strictEqual((await cli(['workflow', 'approve', 'sources', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      assert.strictEqual(st().status, 'done');
+      for (const f of ['src/agents/discover/SourceAssessmentAgent.ts', 'src/agents/model/SttmMapperAgent.ts', 'src/spokes/sttmAgent.ts', 'src/spokes/ingestionAgent.ts']) assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', f)), f);
+      const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
+      assert.ok(/sttmAgent: 'Source-to-target mapping'/.test(hub) && !/executeSttmAgent|executeSourceAssessmentAgent/.test(hub));
+      void prob;
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

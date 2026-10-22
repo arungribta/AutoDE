@@ -306,7 +306,10 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_ingest_file` | Bring a DDL, CSV or JSON file in the workspace into AutoDE's estate (catalog and working set), optionally under an estate system. |
 | `autode_ingest_metadata` | Bring a connection's schemas into the estate (read-only extraction). `autode_extract_metadata` only looks; this records. |
 | `autode_workflow_history` | Who did what to the workflow and its stages: the engine, a person or an agent, when, through which channel, and why. |
-| `autode_workflow_status` / `autode_workflow_next` | The problem's workflow (the hub): each stage's state, and the next assignment (stage, role, tier, what it consumes and produces). |
+| `autode_workflow_status` / `autode_workflow_next` | The problem's workflow (the hub): each stage's state, and the next assignment (stage, role, brief, skills, tier, the AutoDE tools allowed, and the instructions in `assignment.text`). |
+| `autode_record_artifact` | Record a stage's deliverable (a document, SQL, YAML) with its grounding manifest; a draft until the stage is approved. |
+| `autode_record_source_context` / `autode_record_mapping` | Draft the stage's own document: the source context (each source system and how AutoDE knows it), or one entity mapping (validated against the estate). A person approves the document. |
+| `autode_match_columns` | Candidate source → target column matches with a score and reasons (name, prefix, vocabulary, earlier approved mappings, types), deterministic. |
 | `autode_workflow_templates` / `autode_propose_workflow` | The templates, and proposing the problem's workflow (a deterministic draft, or your refinement); a person approves it. |
 | `autode_workflow_start_stage` / `autode_workflow_complete_stage` / `autode_workflow_skip_stage` / `autode_workflow_reopen_stage` | Work on stages: hand one in (its gate goes to a person), skip a non-mandatory one with a reason, re-open one (everything downstream becomes stale). |
 | `autode_pack_list` / `autode_pack_add` / `autode_pack_apply` | See the active problem's documents; add one as a draft (marking it signed is a person's call); read structured documents in through their confirmed profile. |
@@ -351,7 +354,7 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 ## Not yet available
 
 The following arrive in later releases:
-- AutoDE's other agents as role templates and skills, one per release to v0.45.5 (today: the documenter and the orchestrator).
+- AutoDE's other agents as role templates and skills, one per release to v0.45.6 (today: the orchestrator, the documenter, the quality engineer, the source assessor and the mapper).
 - Approvals inside the host, through MCP elicitation (PA3c).
 
 ## Troubleshooting

@@ -6,6 +6,37 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.2
+
+- **Phase PA3b, step 2: the source assessor and the mapper** (`docs/mcp-engine-requirements.md` §9.2 PA3b; requirements SKL-6; technical-design §7.9). Source assessment, conformance and source-to-target mapping are now role templates with skills. They work the same in VS Code (Run agent) and in any host (`autode_workflow_next`, the plugin). The TypeScript `sourceAssessmentAgent` and `sttmAgent` are **deleted**, with the unused `src/spokes/{sttmAgent,ingestionAgent}.ts`.
+- **`source-assessor`**, with the `source-assessment` and `conformance` skills:
+  - brings each source system into the estate (`autode_ingest_metadata` for a connection, `autode_ingest_file` for DDL, CSV or JSON);
+  - profiles keys, nulls, orphans and freshness with read-only aggregate queries;
+  - proposes keys, grain and relationships as facts for the Context Inbox;
+  - drafts the source context with the new **`autode_record_source_context`**: each system as connected, file or described; a system it can't reach is described, never invented;
+  - records `source-assessment.md`;
+  - on a conformance stage, checks the sources against the pack's contracts and records `conformance-report.md`.
+- **`sttm-mapper`**, with the `mapping` skill:
+  - takes evidence from the new **`autode_match_columns`**;
+  - writes each entity mapping, column by column with transform expressions, with the new **`autode_record_mapping`**, so the mapping stage now gets structured mappings (the old agent wrote a SQL view);
+  - records `mapping-notes.md`: target columns with no source, overruled suggestions, open questions.
+- **`autode_match_columns`** (read-only, deterministic): candidate matches from a source table to a target table in the estate, or to a planned table's columns. Each candidate has a score and its reasons:
+  - the same name, or the same name without the table's prefix (`ord_status` → `status`);
+  - the same meaning through the customer's vocabulary (`CUST_NO` → `customer_number`);
+  - words in common;
+  - how the same column was mapped in any approved mapping of the workspace.
+
+  Types that can't convert (timestamp to number) halve the score. The matches are one-to-one, with runners-up for the agent to weigh.
+- **Drafts, approved as the stage's document.** `autode_record_mapping` validates against the estate (errors item by item) and `autode_record_source_context` validates each entry. Both write the document as `built`, pinned to the current specification, and note it in the stage's history. A person approves it from the Workflow view or with `autode workflow approve <stage>`. **Run agent** on a document stage drafts it and leaves it for approval, and it can be run again while the draft waits.
+- **Fixed:** a mapping recorded when the problem had no mapping document yet (through `autode_propose_mapping` and its decision) was written with an empty specification id, so it could never be approved. Mappings are now pinned to the current specification, as the panel pins them.
+- **Assignments pick the right role and skill.** A stage goes to the role, among those its kind allows, whose skills include the stage kind's skill (the planned role first). That role then gets only that skill: the source assessor gets `conformance` on a conformance stage and `source-assessment` on a source-assessment stage. Before this, a quality stage planned for `source-assessor` would have gone to the source assessor once it had a definition; it now goes to the quality engineer.
+- **Deviations / notes:**
+  - The skills are named `conformance` and `mapping`, not the spec's `contract-conformance` and `sttm-mapping`, because skill names now match their stage kind. Quality rules belong to the quality engineer (v0.45.1), not the source assessor. The spec's role table is updated.
+  - **Reconciliation and entity resolution** (the spec lists them under these roles) are not part of this step. Their stages still offer hand-in and skip.
+  - **`autode_record_mapping` drafts without a decision.** `autode_propose_mapping` still exists for a single mapping outside a stage. Inside a stage, the person approves the whole mapping once, the same rule as v0.45.0's artifacts.
+  - **Eval:** the reference plan loses its source-assessment and mapping steps, which are now stages done by host or in-process agents (measured in PA3c). With fewer agent steps, the counts shrink: SQL identifiers 3 → 2, manifests 11 → 9, median step context 529 → 272 tokens. Every other metric is unchanged.
+- **Measured:** 371 tests (3 new: the matcher; the source assessor and mapper over MCP, through to approved documents; Run agent on a document stage and the retired agents). Tests that used the retired agents as generic plan agents now use the data modeler. Lint 0 errors.
+
 ## 0.45.1
 
 - **The workflow is the only path** (owner's UI testing, 2026-10-21). Four findings, one cause: two systems were running side by side, the old plan of steps and the workflow.
