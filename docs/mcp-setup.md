@@ -358,7 +358,7 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 ## Not yet available
 
 The following arrive in later releases:
-- AutoDE's other agents as role templates and skills, one per release to v0.45.6 (today: the orchestrator, the documenter, the quality engineer, the source assessor, the mapper, the data modeler and the pipeline engineer).
+- AutoDE's other agents as role templates and skills, the business analyst and the context curator by v0.45.13 (today: the orchestrator, the documenter, the quality engineer, the source assessor, the mapper, the data modeler and the pipeline engineer).
 - Approvals inside the host, through MCP elicitation (PA3c).
 
 ## Troubleshooting

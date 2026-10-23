@@ -597,7 +597,7 @@ Everything that changes a data platform runs through one deterministic runner. A
   The interactive terminal runner (`autode run <runbook>`) is in the backlog, by the owner's decision of 2026-10-22. Until it exists, runs happen in VS Code. This is a deliberate exception to surface parity.
 - **Stages:** the deploy and platform-setup stages produce runbooks, and are done when their run succeeds. `autode_apply_decision` keeps working for single platform-change decisions.
 
-##### 8b. Platform skills and vendor skills (v0.45.7; owner, 2026-10-22; naming and the catalog shipped in v0.45.5)
+##### 8b. Platform skills and vendor skills (v0.45.11; owner, 2026-10-22; naming and the catalog shipped in v0.45.5)
 
 - **AutoDE's own platform skills**, written from the vendors' public documentation and AutoDE's tools, not from vendor skill text:
   - Snowflake: ingestion (stages, file formats, `COPY INTO`, Snowpipe), pipelines (streams and tasks, dynamic tables), governance (roles and grants, masking and row-access policies, tags), performance (warehouse sizing, clustering), deployment (Snowflake CLI projects as runbooks);
