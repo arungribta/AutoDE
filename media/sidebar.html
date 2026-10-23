@@ -1142,21 +1142,21 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       html += '<div class="ctx-card" id="ctxSourceCard">' +
         '<div class="ctx-card-header"><span class="ctx-card-title">🔌 Source Context</span><span class="ctx-status-badge ' + ss + '">' + ctxStatusLabel(ss) + '</span></div>' +
         '<div class="ctx-card-body">';
-      var srcEntry = (sourceContext && sourceContext.sources && sourceContext.sources.length > 0) ? sourceContext.sources[0] : null;
-      if ((ss === 'built' || ss === 'approved') && srcEntry) {
-        if (srcEntry.method === 'connected' && srcEntry.connectionSummary) {
-          var cs = srcEntry.connectionSummary;
-          html += '<div class="ctx-summary-row"><span>Connected to</span><span>' + escapeHtml(srcEntry.platform || srcEntry.connectionId) + '</span></div>' +
-            '<div class="ctx-summary-row"><span>Discovered</span><span>' + cs.tableCount + ' tables, ' + cs.viewCount + ' views</span></div>';
-        } else {
-          html += '<div style="max-height:80px;overflow-y:auto;">' + escapeHtml((srcEntry.description || '').slice(0, 240)) + ((srcEntry.description || '').length > 240 ? '…' : '') + '</div>';
-        }
+      var srcEntries = (sourceContext && sourceContext.sources) || [];
+      if ((ss === 'built' || ss === 'approved') && srcEntries.length) {
+        srcEntries.forEach(function (e) {
+          if (e.method === 'described') {
+            html += '<div style="max-height:80px;overflow-y:auto;">' + escapeHtml((e.description || '').slice(0, 240)) + ((e.description || '').length > 240 ? '…' : '') + '</div>';
+          } else {
+            html += '<div class="ctx-summary-row"><span>' + escapeHtml(e.system || e.connectionId) + '</span><span>' + escapeHtml(e.method === 'connected' ? 'connected: ' + e.connectionId : 'from ' + e.connectionId) + '</span></div>';
+          }
+        });
       } else {
-        html += 'Brownfield implementation — connect to the source platform, or describe it.';
+        html += 'Brownfield implementation — pick the estate systems this problem draws on, or describe a source with no connection.';
       }
       html += '</div><div class="ctx-card-actions">';
       if (ss === 'none' || ss === 'pending') {
-        html += '<button class="primary" id="ctxSourceConnectBtn">🔌 Connect to Source</button><button id="ctxSourceDescribeBtn">📝 Describe Source</button>';
+        html += '<button class="primary" id="ctxSourceConnectBtn">📚 Pick from the Estate</button><button id="ctxSourceDescribeBtn">📝 Describe Source</button>';
       } else if (ss === 'built') {
         html += '<button class="primary" id="ctxSourceApproveBtn">✓ Approve</button><button id="ctxSourceReviseBtn">✎ Revise</button>';
       } else if (ss === 'approved') {
@@ -1177,7 +1177,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var targetBuildBtn = $('#ctxTargetBuildBtn'); if (targetBuildBtn) targetBuildBtn.onclick = function () { post('startTargetContext'); };
     var targetApproveBtn = $('#ctxTargetApproveBtn'); if (targetApproveBtn) targetApproveBtn.onclick = function () { post('approveTargetContext'); };
     var targetReviseBtn = $('#ctxTargetReviseBtn'); if (targetReviseBtn) targetReviseBtn.onclick = function () { post('reviseTargetContext'); };
-    var sourceConnectBtn = $('#ctxSourceConnectBtn'); if (sourceConnectBtn) sourceConnectBtn.onclick = function () { showToast('Checking source connection…', ''); post('chooseSourceContextMethod', { method: 'connected' }); };
+    var sourceConnectBtn = $('#ctxSourceConnectBtn'); if (sourceConnectBtn) sourceConnectBtn.onclick = function () { post('chooseSourceContextMethod', { method: 'estate' }); };
     var sourceDescribeBtn = $('#ctxSourceDescribeBtn'); if (sourceDescribeBtn) sourceDescribeBtn.onclick = function () { post('chooseSourceContextMethod', { method: 'described' }); };
     var sourceApproveBtn = $('#ctxSourceApproveBtn'); if (sourceApproveBtn) sourceApproveBtn.onclick = function () { post('approveSourceContext'); };
     var sourceReviseBtn = $('#ctxSourceReviseBtn'); if (sourceReviseBtn) sourceReviseBtn.onclick = function () { post('reviseSourceContext'); };
@@ -1193,7 +1193,14 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       var current = answers[q.id] || q.suggestedDefault || '';
       html += '<div class="ctx-q-field" data-qid="' + escapeHtml(q.id) + '"><label>' + escapeHtml(q.prompt) + '</label>';
       if (q.rationale) { html += '<div class="ctx-q-rationale">' + escapeHtml(q.rationale) + '</div>'; }
-      if (q.kind === 'single-select' && q.options) {
+      if (q.kind === 'multi-select' && q.options) {
+        var picked = String(current).split(',');
+        html += '<div class="ctx-q-input" data-multi="1">';
+        for (var m = 0; m < q.options.length; m++) {
+          html += '<label style="display:block;"><input type="checkbox" value="' + escapeHtml(q.options[m]) + '"' + (picked.indexOf(q.options[m]) >= 0 ? ' checked' : '') + ' /> ' + escapeHtml(q.options[m]) + '</label>';
+        }
+        html += '</div>';
+      } else if (q.kind === 'single-select' && q.options) {
         html += '<select class="ctx-q-input">';
         for (var j = 0; j < q.options.length; j++) {
           html += '<option value="' + escapeHtml(q.options[j]) + '"' + (q.options[j] === current ? ' selected' : '') + '>' + escapeHtml(q.options[j]) + '</option>';
@@ -1211,7 +1218,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       var fields = $$('#paletteContext .ctx-q-field');
       fields.forEach(function (field) {
         var input = field.querySelector('.ctx-q-input');
-        if (input && String(input.value).trim()) { out.push({ questionId: field.getAttribute('data-qid'), value: String(input.value).trim() }); }
+        if (input && input.getAttribute('data-multi')) {
+          var vals = []; input.querySelectorAll('input:checked').forEach(function (c) { vals.push(c.value); });
+          if (vals.length) out.push({ questionId: field.getAttribute('data-qid'), value: vals.join(',') });
+        } else if (input && String(input.value).trim()) { out.push({ questionId: field.getAttribute('data-qid'), value: String(input.value).trim() }); }
       });
       post(submitMessageType, { answers: out });
     };
@@ -1767,7 +1777,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         break;
       case 'sourceContextQuestions':
         endPending();
-        renderContextQuestionsForm(msg.questions || [], msg.answers || {}, 'submitSourceContextAnswers', '🔌 Source Context');
+        renderContextQuestionsForm(msg.questions || [], msg.answers || {}, msg.submit || 'submitSourceContextAnswers', '🔌 Source Context');
         break;
       case 'sourceContextBuilt':
         sourceContext = msg.context || null;

@@ -60,7 +60,9 @@ import { sampleDataConsentFromWorkspace } from '../engine/platform/connectionsCo
 import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
 import { applyCspNonce } from './webviewSecurity';
 import { classifyImplementationType } from './implementationType';
-import { buildTargetContextQuestions } from './targetContextQuestions';
+import { NO_CONNECTION, buildTargetContextQuestions } from './targetContextQuestions';
+import { sourceEntryForSystem, sourceSystemChoices, targetConnectionChoices, targetDefaults, writeTargetContextDraft } from '../engine/context/problemContexts';
+import { writeSourceContextDraft } from '../engine/agents/sourceContextDraft';
 import { buildSourceContextQuestions } from './sourceContextQuestions';
 import { LAYOUT, UNSCOPED_PROBLEM, layoutRel } from '../engine/workspaceLayout';
 
@@ -834,25 +836,27 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const existing = this.targetContextManager.getContext();
           const sameVersion = !!existing && existing.specId === spec.id && existing.specVersion === spec.version;
           if (!sameVersion) { await this.targetContextManager.reset(spec.id, spec.version); }
-          const questions = buildTargetContextQuestions(spec);
+          const questions = buildTargetContextQuestions(spec, this.targetQuestionOptions());
           this.postMessage('targetContextQuestions', { questions, answers: sameVersion ? existing!.answers : {} });
           break;
         }
         case 'submitTargetContextAnswers': {
           const spec = this.specManager?.getSpec();
-          if (!spec || !this.targetContextManager) break;
+          const problemRoot = this.currentProblemRoot()?.fsPath;
+          if (!spec || !this.targetContextManager || !problemRoot || !this.workspaceRoot) break;
           const rawAnswers = Array.isArray(message.answers) ? message.answers as Array<{ questionId: string; value: string }> : [];
-          const questions = buildTargetContextQuestions(spec);
-          const answerMap: Record<string, string> = {};
-          const record: Record<string, unknown> = { specId: spec.id, specVersion: spec.version, status: 'built', builtAt: new Date().toISOString() };
-          for (const a of rawAnswers) {
-            const q = questions.find((qq) => qq.id === a.questionId);
-            if (!q || !a.value) continue;
-            answerMap[q.id] = a.value;
-            this.applyAnswerToField(record, q.field, a.value);
-          }
-          record.answers = answerMap;
-          await this.targetContextManager.save(record as unknown as TargetContext);
+          const answers: Record<string, string> = {};
+          for (const a of rawAnswers) { if (a.value) answers[a.questionId] = a.value; }
+          // v0.45.10: the engine writes it (the same as autode_record_target_context and `autode context target`); a chosen connection decides the platform.
+          const connectionId = answers.connectionId && answers.connectionId !== NO_CONNECTION ? answers.connectionId : undefined;
+          try {
+            writeTargetContextDraft(this.workspaceRoot.fsPath, problemRoot, {
+              connectionId, platform: connectionId ? undefined : answers.platform,
+              modelingApproach: answers.modelingApproach, transformationTool: answers.transformationTool, orchestrationTool: answers.orchestrationTool,
+              namingConvention: answers.namingConvention, database: answers.database, schema: answers.schema
+            }, answers);
+          } catch (err) { this.postMessage('error', { message: `Target Context not saved: ${err instanceof Error ? err.message : String(err)}` }); break; }
+          await this.targetContextManager.reload();
           this.postMessage('targetContextBuilt', { context: this.targetContextManager.getContext() });
           this.postLog('Target Context built — review it and approve it.');
           this.postContextGateStatus();
@@ -875,30 +879,46 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const spec = this.specManager?.getSpec();
           if (!spec || !this.targetContextManager) break;
           const existing = this.targetContextManager.getContext();
-          const questions = buildTargetContextQuestions(spec);
+          const questions = buildTargetContextQuestions(spec, this.targetQuestionOptions());
           this.postMessage('targetContextQuestions', { questions, answers: existing?.answers ?? {} });
           break;
         }
         case 'chooseSourceContextMethod': {
           const spec = this.specManager?.getSpec();
-          if (!spec || spec.status !== 'approved' || !this.sourceContextManager) { this.postMessage('error', { message: 'Approve the specification before building Source Context.' }); break; }
-          const method = message.method === 'connected' ? 'connected' : message.method === 'described' ? 'described' : undefined;
+          if (!spec || spec.status !== 'approved' || !this.sourceContextManager || !this.workspaceRoot) { this.postMessage('error', { message: 'Approve the specification before building Source Context.' }); break; }
+          const method = message.method === 'estate' || message.method === 'connected' ? 'estate' : message.method === 'described' ? 'described' : undefined;
           if (!method) break;
+          const existing = this.sourceContextManager.getContext();
+          const sameVersion = !!existing && existing.specId === spec.id && existing.specVersion === spec.version;
           if (method === 'described') {
-            const existing = this.sourceContextManager.getContext();
-            const sameVersion = !!existing && existing.specId === spec.id && existing.specVersion === spec.version;
             if (!sameVersion) { await this.sourceContextManager.reset(spec.id, spec.version); }
             const questions = buildSourceContextQuestions(spec);
             this.postMessage('sourceContextQuestions', { questions, answers: sameVersion ? existing!.answers : {} });
           } else {
-            await this.runSourceConnectionCheck(spec);
+            // v0.45.10: the source context lists estate systems; their tables and bindings stay in the estate.
+            const systems = sourceSystemChoices(this.workspaceRoot.fsPath);
+            if (!systems.length) { this.postMessage('error', { message: 'There are no source systems in the estate yet. Bring them in first (Ingest File, Browse Source Database, or `autode estate ingest` / `autode estate extract`), or choose "Describe source" for a source with no connection.' }); break; }
+            const chosen = sameVersion ? (existing!.sources.map((x) => x.system).filter((x): x is string => !!x)) : [];
+            this.postMessage('sourceContextQuestions', {
+              questions: [{ id: 'systems', field: 'systems', kind: 'multi-select', prompt: 'Which of the estate\'s source systems does this problem draw on?', options: systems.map((x) => x.id), rationale: systems.map((x) => `${x.id}: ${x.bindings.join(', ') || 'no bindings'}`).join(' · ') }],
+              answers: { systems: chosen.length ? chosen.join(',') : systems.map((x) => x.id).join(',') },
+              submit: 'submitSourceSystems'
+            });
           }
           break;
         }
-        case 'runSourceConnectionCheck': {
+        case 'submitSourceSystems': {
           const spec = this.specManager?.getSpec();
-          if (!spec || spec.status !== 'approved') { this.postMessage('error', { message: 'Approve the specification before building Source Context.' }); break; }
-          await this.runSourceConnectionCheck(spec);
+          const problemRoot = this.currentProblemRoot()?.fsPath;
+          if (!spec || !this.sourceContextManager || !problemRoot || !this.workspaceRoot) break;
+          const raw = Array.isArray(message.answers) ? message.answers as Array<{ questionId: string; value: string }> : [];
+          const ids = (raw.find((x) => x.questionId === 'systems')?.value ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+          const entries = ids.map((id) => sourceEntryForSystem(this.workspaceRoot!.fsPath, id)).filter((e): e is NonNullable<typeof e> => !!e);
+          try { writeSourceContextDraft(problemRoot, entries, {}, new Date(), this.workspaceRoot.fsPath); } catch (err) { this.postMessage('error', { message: `Source Context not saved: ${err instanceof Error ? err.message : String(err)}` }); break; }
+          await this.sourceContextManager.reload();
+          this.postMessage('sourceContextBuilt', { context: this.sourceContextManager.getContext() });
+          this.postLog(`Source Context built from ${entries.length} estate system(s) — review it and approve it.`);
+          this.postContextGateStatus();
           break;
         }
         case 'submitSourceContextAnswers': {
@@ -942,7 +962,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const spec = this.specManager?.getSpec();
           if (!spec || !this.sourceContextManager) break;
           const existing = this.sourceContextManager.getContext();
-          if (existing?.sources.some((s) => s.method === 'connected')) { await this.runSourceConnectionCheck(spec); break; }
+          if (existing?.sources.some((s) => s.method !== 'described')) { await this.handleMessage({ type: 'chooseSourceContextMethod', method: 'estate' } as WebviewMessage); break; }
           const questions = buildSourceContextQuestions(spec);
           this.postMessage('sourceContextQuestions', { questions, answers: existing?.answers ?? {} });
           break;
@@ -2255,6 +2275,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (sc && sc.specId === spec.id && sc.specVersion === spec.version && sc.status !== 'not_applicable') {
       const lines = ['## Source Context'];
       for (const entry of sc.sources) {
+        if (entry.system) lines.push(`Estate system ${entry.system} (${entry.method === 'connected' ? `connected: ${entry.connectionId}` : `from ${entry.connectionId}`}).`);
         if (entry.description) lines.push(entry.description);
         if (entry.connectionSummary) {
           lines.push(`Live connection: ${entry.platform ?? entry.connectionId} — ${entry.connectionSummary.database}.${entry.connectionSummary.schema} (${entry.connectionSummary.tableCount} tables, ${entry.connectionSummary.viewCount} views)`);
@@ -2267,7 +2288,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       const pc = tc.platformConfig ?? {};
       parts.push([
         '## Target Context',
-        `Platform: ${tc.platform}. Environment: ${tc.environmentProfile}.`,
+        `Platform: ${tc.platform}${tc.connectionId ? ` (connection ${tc.connectionId})` : ''}.`,
         `Modeling approach: ${tc.modelingApproach}. Naming convention: ${tc.namingConvention}.`,
         `Transformation tool: ${tc.transformationTool}. Orchestration tool: ${tc.orchestrationTool}.`,
         pc.database || pc.schema ? `Target location: ${pc.database ?? ''}${pc.schema ? '.' + pc.schema : ''}` : ''
@@ -2299,14 +2320,19 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
     return {
       platform,
-      environmentProfile: tc.environmentProfile ?? 'development',
       modelingApproach: tc.modelingApproach ?? 'dimensional',
       namingConvention: tc.namingConvention ?? 'snake_case',
       transformationTool: tc.transformationTool ?? 'dbt',
       orchestrationTool: tc.orchestrationTool ?? 'airflow',
-      outputFormats: tc.outputFormats && tc.outputFormats.length > 0 ? tc.outputFormats : ['ddl', 'yaml', 'markdown'],
       platformConfig
     };
+  }
+
+  /** The workspace's target connections and the team's defaults, for the target questions (v0.45.10). */
+  private targetQuestionOptions(): Parameters<typeof buildTargetContextQuestions>[1] {
+    const ws = this.workspaceRoot?.fsPath;
+    if (!ws) return {};
+    return { connections: targetConnectionChoices(ws), defaults: targetDefaults({ assertions: this.contextFileManager?.getPackSources().assertions ?? [], workspaceRoot: ws, problemId: this.activeProblemId }) };
   }
 
   /** Assigns `value` onto a (possibly dotted, e.g. `platformConfig.database`) field path. */
@@ -2319,85 +2345,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       obj = obj[key] as Record<string, unknown>;
     }
     obj[parts[parts.length - 1]] = value;
-  }
-
-  /** Runs a live connection check + lightweight metadata extraction to build Source Context from an actual connection, instead of a guided description. */
-  private async runSourceConnectionCheck(spec: BusinessProblemSpec): Promise<void> {
-    if (!this.sourceContextManager) return;
-    const settings = this.configManager.getSettings();
-    const platform: DataPlatformProvider = settings.defaultProvider ?? 'snowflake';
-    const credentials = ConnectionManager.getCredentialsFromSettings(platform, settings as unknown as Record<string, unknown>);
-    try {
-      if (platform === 'snowflake') {
-        const password = await this.configManager.getSnowflakePassword();
-        if (password) credentials['password'] = password;
-        const passphrase = await this.configManager.getSnowflakePrivateKeyPassphrase();
-        if (passphrase) credentials['privateKeyPassphrase'] = passphrase;
-      } else if (platform === 'databricks') {
-        const token = await this.configManager.getDatabricksToken();
-        if (token) credentials['token'] = token;
-      } else if (platform === 'oracle') {
-        const password = await this.configManager.getOraclePassword();
-        if (password) credentials['password'] = password;
-        const walletPassword = await this.configManager.getOracleWalletPassword();
-        if (walletPassword) credentials['walletPassword'] = walletPassword;
-      }
-    } catch { /* best-effort — connect() will surface a clear error if a required secret is missing */ }
-
-    // Only what every Snowflake execution path genuinely requires up front — see
-    // the matching comment in extension.ts's `testConnection` command for why
-    // Warehouse/Database were dropped from this list.
-    const missing: string[] = [];
-    if (platform === 'snowflake') {
-      if (!credentials['account']) missing.push('Account');
-      if (!credentials['username']) missing.push('Username');
-    } else if (platform === 'databricks') {
-      if (!credentials['workspaceUrl']) missing.push('Workspace URL');
-      if (!credentials['httpPath']) missing.push('SQL Warehouse HTTP Path');
-      if (!credentials['token']) missing.push('Token');
-    } else if (platform === 'oracle') {
-      if (!credentials['connectString']) missing.push('Connect string');
-      if (!credentials['username']) missing.push('Username');
-    }
-    if (missing.length > 0) {
-      this.postMessage('error', { message: `Missing connection settings for ${platform}: ${missing.join(', ')}. Configure them in Settings → Connections, or choose "Describe source" instead.` });
-      return;
-    }
-
-    const connectionManager = new ConnectionManager((msg: string) => this.postLog(msg), {
-      cliConsent: () => this.configManager.getSettings().dataPlatformCliConsent === true,
-      sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
-      driversRoot: () => this.configManager.getSettings().driversDirectory
-    });
-    connectionManager.setEstateResolver((id) => this.resolveConnectionIdentity(id));
-    try {
-      this.postLog(`Connecting to ${platform} to build Source Context…`);
-      const info = await connectionManager.connect(platform, credentials);
-      const snapshot = await connectionManager.extractMetadata({ includeProfiling: false });
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (workspaceRoot) { await connectionManager.persistSchemaContext(snapshot, workspaceRoot.fsPath, createVscodeFileIo(vscode)); }
-      const record: SourceContext = {
-        specId: spec.id, specVersion: spec.version, status: 'built',
-        sources: [{
-          connectionId: snapshot.connectionId ?? platform,
-          platform,
-          method: 'connected',
-          connectionSummary: { database: info.databaseName, schema: info.schemaName, tableCount: snapshot.tables.length, viewCount: snapshot.views.length },
-          extractedAt: snapshot.extractedAt
-        }],
-        answers: {}, builtAt: new Date().toISOString()
-      };
-      await this.sourceContextManager.save(record);
-      this.postMessage('sourceContextBuilt', { context: this.sourceContextManager.getContext() });
-      this.postLog(`Source Context built from a live connection: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`);
-      this.postContextGateStatus();
-      this.notifyConnectionStatus('source', { connected: true, platform, detail: `${info.databaseName}.${info.schemaName} — ${snapshot.tables.length} tables, ${snapshot.views.length} views extracted` });
-    } catch (err) {
-      this.postMessage('error', { message: `Could not connect to build Source Context: ${err instanceof Error ? err.message : String(err)}. You can choose "Describe source" instead.` });
-      this.notifyConnectionStatus('source', { connected: false });
-    } finally {
-      connectionManager.dispose();
-    }
   }
 
   /**

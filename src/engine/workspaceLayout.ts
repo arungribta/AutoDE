@@ -45,7 +45,6 @@ export const LAYOUT = {
   skills: [AUTODE_DIR, 'config', 'skills'],
   toolSkills: [AUTODE_DIR, 'config', 'skills', 'tool-skills'],
   primitives: [AUTODE_DIR, 'config', 'primitives'],
-  targetEnvironment: [AUTODE_DIR, 'config', 'target-environment.yaml'],
   connections: [AUTODE_DIR, 'config', 'connections.yaml'],
   /** Workflow templates for this workspace (PA3a), overriding or adding to the bundled ones by id. */
   workflows: [AUTODE_DIR, 'config', 'workflows'],

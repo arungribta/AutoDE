@@ -17,7 +17,6 @@ import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
 import { PlatformOnboarding } from './core/platformOnboarding';
 import { secretStorageKey } from './core/credentials/VsCodeSecretStorageResolver';
 import { SECRET_KEYS } from './core/extensionIdentity';
-import { TargetConfigManager } from './context/TargetConfigManager';
 import { DataModelEditorProvider } from './editors/DataModelEditorProvider';
 import { SttmEditorProvider } from './editors/SttmEditorProvider';
 import { GraphEditorProvider } from './editors/GraphEditorProvider';
@@ -127,21 +126,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // ConnectionManager instance rather than reusing the source one.
   let targetConnectionManager: ConnectionManager | undefined;
   disposableRegistry.register({ dispose: () => targetConnectionManager?.dispose() });
-
-  // Initialize TargetConfigManager (.autode/config/target-environment.yaml, profile
-  // inheritance) — kept instantiated for future dev/staging/prod profile
-  // switching, but (v0.11.0) its generic default profile is deliberately NOT
-  // seeded into the hub anymore. Doing that previously meant every workspace
-  // silently started with the same Snowflake/dimensional/dbt/Airflow
-  // assumptions regardless of the approved spec, and permanently short-
-  // circuited the one fallback that tried to infer target intent at all
-  // (`extractTargetFromMessage`). The Target Context Q&A (built + approved
-  // after spec approval, see requirements.md §8.10) is now the sole source of
-  // `state.targetEnvironment` — see `webviewProvider.approveTargetContext`.
-  const targetConfigManager = new TargetConfigManager(workspaceRoot, (msg: string) => {
-    console.log(`[AutoDE Target] ${msg}`);
-  });
-  void targetConfigManager.initialize();
 
   // ── Commands ──
 

@@ -287,26 +287,14 @@ export interface BigQueryTargetConfig {
 
 export type PlatformTargetConfig = SnowflakeTargetConfig | DatabricksTargetConfig | BigQueryTargetConfig;
 
+/** The chat's live target, from the problem's approved target context (`target-environment.yaml` profiles were removed in v0.45.10). */
 export interface TargetEnvironment {
   platform: DataPlatformProvider;
-  environmentProfile: EnvironmentProfile;
   modelingApproach: ModelingApproach;
   namingConvention: NamingConvention;
   transformationTool: TransformationTool;
   orchestrationTool: OrchestrationTool;
-  outputFormats: OutputFormat[];
   platformConfig: PlatformTargetConfig;
-}
-
-export interface TargetProfile {
-  name: string;
-  inherits?: string;
-  environment: TargetEnvironment;
-}
-
-export interface TargetConfigFile {
-  profiles: TargetProfile[];
-  activeProfile: string;
 }
 
 // ── Source & Target Context (v0.11.0) ──
@@ -321,7 +309,7 @@ export interface TargetConfigFile {
 /** `not_applicable` only ever applies to Source Context (Greenfield — no source system). Target Context is always required. */
 export type ContextStatus = 'not_applicable' | 'pending' | 'built' | 'approved';
 
-export type ContextQuestionKind = 'text' | 'single-select' | 'boolean';
+export type ContextQuestionKind = 'text' | 'single-select' | 'multi-select' | 'boolean';
 
 /** One deterministic (non-adaptive) question in a Target/Source Context Q&A flow. */
 export interface ContextQuestion {
@@ -356,13 +344,14 @@ export interface TargetContext {
    */
   version?: number;
   status: ContextStatus;
+  /** The workspace's named target connection (v0.45.10): it decides the platform and the default database. */
+  connectionId?: string;
   platform?: DataPlatformProvider;
-  environmentProfile?: EnvironmentProfile;
   modelingApproach?: ModelingApproach;
   namingConvention?: NamingConvention;
   transformationTool?: TransformationTool;
   orchestrationTool?: OrchestrationTool;
-  outputFormats?: OutputFormat[];
+  /** The problem's target database and schema (database defaults to the connection's). */
   platformConfig?: Record<string, string>;
   /**
    * How the platform connection was established via "AutoDE: Connect to Data
@@ -395,19 +384,22 @@ export interface TargetContext {
  * source-catalog item) — different concept, deliberately different name.
  */
 export interface SourceContextEntry {
+  /** The estate system this entry is (v0.45.10): its tables, environments and bindings are in the estate, not repeated here. Absent for a described source. */
+  system?: string;
   connectionId: string;
   platform?: DataPlatformProvider;
   /** `'file'` (v0.22.0, Step 5) — structurally parsed from a CSV/JSON/DDL file, for when live connectivity isn't available. See `src/engine/context/fileIngestion.ts`. */
   method: 'connected' | 'described' | 'file';
   sourceType?: 'database' | 'api' | 'file' | 'stream' | 'saas' | 'other';
   description?: string;
+  /** Written before v0.45.10; still read. The catalog has the live counts. */
   connectionSummary?: {
     database: string;
     schema: string;
     tableCount: number;
     viewCount: number;
   };
-  /** Populated only for `method: 'file'` entries. */
+  /** Written before v0.45.10 for `method: 'file'` entries; still read. */
   fileSummary?: {
     fileName: string;
     format: 'csv' | 'json' | 'ddl';

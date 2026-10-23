@@ -13,7 +13,7 @@ This repository contains the extension source code, a webview-based UI (media/si
 - **Multi-LLM support** (OpenAI, Azure OpenAI, Anthropic, Gemini, Ollama, Copilot)
 - **Agentic sub-agents**: Source Assessment, Data Modeler (dimensional / data-vault / OBT / 3NF), Transformation Scaffolder (dbt), STTM Mapper, Ingestion, Documentation
 - **Workflow phases** (discover → model → build → validate) with deliverables written to a visible, configurable `autode-output/` folder (AutoDE's own working state lives in `.autode/`)
-- **Context Layer** (`src/context/`) — in-memory graph (GraphManager), context file loading/watching, target-environment profiles
+- **Context Layer** (`src/context/`) — in-memory graph (GraphManager), context file loading/watching
 - **Data platform adapter layer** (`src/dqm/`) — Snowflake + Databricks adapters (see status caveats below)
 - **Bottom panel dashboard** (`src/core/panelProvider.ts`) and **5 custom editors** (DataModel, STTM, Graph, Profile, Doc)
 - **Webview CSP nonce injection** (`src/core/webviewSecurity.ts`) so inline scripts run under VS Code's default CSP

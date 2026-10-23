@@ -6,6 +6,22 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.10
+
+- **SIMP-4: the contexts reference the workspace** (owner, 2026-10-22, after asking for a review first; roadmap decision log). The review found:
+  - `target-environment.yaml` was read by nothing;
+  - the estate, catalog and ledger already hold far more about sources than a source context did;
+  - but each problem's contexts carry what the workspace can't: which systems this problem uses, its own target decisions, and someone's approval.
+
+  So both contexts stay, and they now point at the workspace instead of describing it again. Folding them into the ledger was rejected: typed fields keep their readers deterministic, and a fact about the estate is a different thing from one problem's choice.
+- **The target context picks a target connection.** The panel's form starts with the workspace's target connections (or *none yet*). The connection decides the platform and the default database; the context keeps the problem's decisions: modelling approach, transformation and orchestration tools, naming, target database and schema. A named connection that doesn't exist, or a platform that contradicts it, is refused. The environment-profile question is gone: the runbook approval policy uses the connection's estate environment.
+- **Defaults come from the team.** The form suggests the specification's own words first, then the team's facts in the ledger (a project-wide naming convention; decisions on modelling approach, transformation or orchestration tool, target platform), then the last approved target context of another problem, then a built-in default. Each suggestion says where it came from.
+- **The source context lists estate systems.** *Pick from the Estate* lists the estate's source systems to tick; *Describe Source* stays for a source with no connection. A connected or file entry must name an estate system (or the connection or file bound to one); table counts are no longer copied in (the catalog has them live). The old settings-based *Connect to Source* check is gone: sources come into the estate through ingestion or extraction.
+- **Every surface can record both** (parity): `autode_record_target_context` is new (with no arguments it returns the choices: target connections, allowed values, estate systems); `autode_record_source_context` takes `system`; `autode context show|target|sources` in a terminal. All three use the panel's code (`src/engine/context/problemContexts.ts`).
+- **Removed:** `TargetConfigManager`, the profile types, `environmentProfile` and `outputFormats`. An existing `target-environment.yaml` is left alone.
+- **Fixed (from v0.45.9):** Run agent asked for the stage's context gaps through a tool name that doesn't exist (`autode_context_pack`; it is `autode_get_context_pack`), so its assignments had no gaps; the error was swallowed. A test now calls the real tool.
+- **Measured:** 352 tests (1 new, covering both contexts across the engine, MCP and the CLI, and the gap tool; the `TargetConfigManager` test was removed with it). Lint 0 errors. Eval unchanged.
+
 ## 0.45.9
 
 - **SIMP-3: the plan of steps is removed** (owner, 2026-10-22; roadmap decision log). The workflow has been the only path since v0.45.1; the code behind the old path is now gone too.
@@ -18,7 +34,7 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
   `AgentHub` went from 1,751 lines to 746: it now holds the specification, chat and the model with tools.
 - **The sidebar's next step after the specification is Open Workflow.** `/plan`, `/execute` and `/workflow` open the Workflow view; the stop button (it paused plan runs) is gone.
-- **Context gaps are in the stage's assignment.** They used to pause a plan step. A mapping, modelling, build, quality-rules, conformance or validation stage now gets the joins, keys, grain and object structure its context can't back, each with its question, in a *Context gaps* section of its assignment (`Assignment.contextGaps`). The agent is told not to infer them: ask the person, propose the fact, or record the gap as open in its deliverable, which the person approving the stage sees. Nothing pauses. It is the same on every surface: `autode_workflow_next` builds the gaps from the server's context, and Run agent gets them through `autode_context_pack` (`src/engine/agents/stageGaps.ts`).
+- **Context gaps are in the stage's assignment.** They used to pause a plan step. A mapping, modelling, build, quality-rules, conformance or validation stage now gets the joins, keys, grain and object structure its context can't back, each with its question, in a *Context gaps* section of its assignment (`Assignment.contextGaps`). The agent is told not to infer them: ask the person, propose the fact, or record the gap as open in its deliverable, which the person approving the stage sees. Nothing pauses. It is the same on every surface: `autode_workflow_next` builds the gaps from the server's context, and Run agent gets them through `autode_get_context_pack` (`src/engine/agents/stageGaps.ts`).
 - **Run agent checks that a stage can be done before calling the model** (owner's UI test of the sample: Run agent on Mapping "failed"). The mapper had run on an estate with no tables, and could only write notes saying so. Three fixes:
   - **Readiness.** Mapping, quality rules and conformance need tables in the estate. Modelling and the build need mappings in the mapping document. The check is deterministic: it reads the compiled estate graph and the problem's documents, and calls no model. It applies everywhere:
     - **Run agent** refuses with what to do (for mapping: Run agent on Source assessment, Ingest File, or `autode estate ingest` / `autode estate extract`);

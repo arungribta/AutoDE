@@ -134,7 +134,6 @@ AutoDE keeps its working state in `.autode/`, grouped by lifecycle, and writes g
 │   ├── skills/                      #   interview-skill overrides (*.json); tool-skills/<id>/ imports
 │   │                                #   (+ .autode-skill.json, .autode-history/v<N>/; §7.6)
 │   ├── primitives/                  #   Tier-2 primitive overrides (+ history/)
-│   ├── target-environment.yaml      #   tool-preference profiles (TargetConfigManager)
 │   └── connections.yaml             #   platform connections: pointers, settings, sample-data consent; never secrets (§6.12)
 └── local/                           # per engineer, rebuildable — never committed
     ├── active-problem.json          #   pointer: which problem is active (absent = clean slate)
@@ -795,80 +794,26 @@ Uses a `Map<DataPlatformProvider, AdapterFactory>` for adapter registration. Sin
 
 ---
 
-### 6.7 Target Environment Configuration (Phase 3b)
+### 6.7 Target and source contexts reference the workspace (v0.45.10, SIMP-4)
 
-#### 6.7.1 Design Rationale
+A problem's target and source contexts are its approved *choices*; what they point at is described once, in the workspace. (Until v0.45.10 the workspace also had `.autode/config/target-environment.yaml`, profiles with inheritance read by `TargetConfigManager`; nothing read it after v0.11.0, and it was removed. An existing file is left alone.)
 
-Data engineering workflows are inherently source→target. The source is discovered via the adapter layer (Phase 3a), but the target stack — platform, modeling approach, transformation tool, orchestration tool — must be defined by the user and maintained as a stable internal structure that all sub-agents can reference.
+| | Lives in | The problem's context holds |
+|---|---|---|
+| Target platform, account, warehouse, credentials | a named target connection (`connections.yaml`, role `target`) | `connectionId` (it decides `platform` and the default database) |
+| Modelling approach, transformation and orchestration tools, naming, target database and schema | the problem's target context | the values, approved as the target stage's document |
+| Source systems, environments, bindings, tables | the estate and the catalog | `sources[].system`: the estate systems in scope |
+| Keys, grain, joins, quality rules | the ledger | nothing |
+| A source with no connection yet | — | a `described` entry with its description |
 
-#### 6.7.2 TargetEnvironment Type
+`src/engine/context/problemContexts.ts`:
+- `targetConnectionChoices(workspaceRoot)`; `TARGET_OPTIONS` (the allowed values).
+- `targetDefaults({ assertions, workspaceRoot, problemId })`: project-wide, live ledger facts first (`naming_convention`; `decision` facts with predicate `modeling_approach`, `transformation_tool`, `orchestration_tool` or `target_platform`, value a string or `{ value }`), then the most recently approved target context of another problem. The target questions (`src/core/targetContextQuestions.ts`) suggest the specification's own words first, then these, then a built-in default.
+- `targetChoiceErrors()` / `writeTargetContextDraft(workspaceRoot, problemRoot, choices, answers)`: validates (a named connection must exist and decides the platform; without one, the platform is required; every value from `TARGET_OPTIONS`), pins to the current specification, writes `built`, and on revising an approved revision bumps `version` and archives it to `context/history/target-context.spec<N>.v<M>.yaml`.
+- `sourceSystemChoices(workspaceRoot)` (the estate's source systems, not the team's knowledge files, with their bindings) and `sourceEntryForSystem()` (connected when a connection feeds it, else from its file).
+- `src/engine/agents/sourceContextDraft.ts#writeSourceContextDraft(..., workspaceRoot)` resolves every connected or file entry to its estate system (by `system`, its connection or file, or its id) and refuses one that isn't in the estate; it no longer writes `connectionSummary` / `fileSummary` (older files still read).
 
-```typescript
-interface TargetEnvironment {
-  platform: DataPlatformProvider;
-  environmentProfile: 'development' | 'staging' | 'production';
-  modelingApproach: 'dimensional' | 'data-vault' | 'obt' | '3nf' | 'raw-pass-through';
-  namingConvention: 'snake_case' | 'camelCase' | 'PascalCase';
-  transformationTool: 'dbt' | 'sqlmesh' | 'custom-sql' | 'stored-procedures' | 'none';
-  orchestrationTool: 'airflow' | 'dagster' | 'prefect' | 'dbt-cloud' | 'manual' | 'none';
-  outputFormats: ('ddl' | 'yaml' | 'markdown' | 'python' | 'sql')[];
-  platformConfig: SnowflakeTargetConfig | DatabricksTargetConfig | BigQueryTargetConfig;
-}
-```
-
-#### 6.7.3 Profile-Based Configuration
-
-Target environments support multiple profiles (dev/staging/prod) with inheritance:
-
-```yaml
-# .autode/config/target-environment.yaml
-profiles:
-  base:
-    platform: snowflake
-    modelingApproach: dimensional
-    transformationTool: dbt
-    orchestrationTool: airflow
-  development:
-    inherits: base
-    platformConfig:
-      database: DEV_DB
-      schema: DEV_ANALYTICS
-  production:
-    inherits: base
-    platformConfig:
-      database: PROD_DB
-      schema: ANALYTICS
-      warehouse: WH_L
-```
-
-#### 6.7.4 Target Extraction
-
-The orchestrator uses a dedicated LLM call to extract target stack details from user messages. If critical fields are missing, it prompts the user for clarification. Once extracted, the target config is persisted to `.autode/config/target-environment.yaml` and injected into all sub-agent execution contexts.
-
-#### 6.7.5 Target-Aware Prompt Assembly
-
-Plan prompts now separate source and target context:
-
-```
-## Source Environment
-Platform: Snowflake (RAW_DB.PUBLIC)
-Tables: orders, customers, products (15 total)
-
-## Target Environment
-Platform: Snowflake (CURATED_DB.ANALYTICS)
-Transformation: dbt (dimensional modeling)
-Orchestration: Airflow
-Naming: snake_case
-Output: DDL, YAML, Markdown
-```
-
-#### 6.7.6 Files
-
-| File | Purpose |
-|------|---------|
-| `src/engine/types.ts` | `TargetEnvironment`, `TargetProfile`, `TargetConfigFile`, `GeneratedArtifact` types |
-| `src/context/TargetConfigManager.ts` | Read/write/validate `target-environment.yaml` with profile inheritance |
-| `src/core/agentHub.ts` | `extractTargetFromMessage()`, `buildTargetFromPartial()`, target-aware prompt assembly |
+Surfaces: the panel's Target Context form (a connection picker, then the decisions) and Source Context (*Pick from the Estate*, a multi-select of systems, or *Describe Source*); `autode_record_target_context` (no arguments: the choices) and `autode_record_source_context`; `autode context show|target|sources`. The panel's old settings-based "Connect to Source" check (`runSourceConnectionCheck`) is gone: sources come into the estate through ingestion or extraction. `environmentProfile` and `outputFormats` were dropped from `TargetContext` and `TargetEnvironment` (the runbook policy uses the connection's estate environment; nothing used the formats).
 
 ### 6.8 Platform Onboarding & Credential Architecture (Phase 3a-i and 3a-ii implemented v0.16.0)
 
@@ -1130,7 +1075,7 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
 - `stageContextGaps(sources, { problemRoot, kind, title })`: a `step` context pack for that query; its relationship, key, grain and structure gaps, once each, with `describeGap()`'s question.
 - `renderStageGaps()`: the assignment's *Context gaps* section. It tells the agent not to infer them: ask the person, propose the fact (`autode_propose_assertion`), or record the gap as open in the deliverable.
 
-`autode_workflow_next` builds the pack from the server's context sources. Run agent (`agentExecutor.ts#stageGaps`) gets it through `autode_context_pack` and the same `stageGapsFrom()`. `Assignment.contextGaps` carries them; nothing pauses (the plan used to pause a step on them).
+`autode_workflow_next` builds the pack from the server's context sources. Run agent (`agentExecutor.ts#stageGaps`) gets it through `autode_get_context_pack` and the same `stageGapsFrom()`. `Assignment.contextGaps` carries them; nothing pauses (the plan used to pause a step on them).
 
 ### 7.5 Implementation type
 
@@ -1399,7 +1344,6 @@ assume a clean build.")
 
 ## Target Environment
 - Platform: {platform} ({database}.{schema})
-- Profile: {environmentProfile}
 - Modeling: {modelingApproach}
 - Transformation: {transformationTool}
 - Orchestration: {orchestrationTool}
@@ -1763,7 +1707,7 @@ src/agents/build/    # the tool-skill runner
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
-  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
+  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
   agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
@@ -1777,7 +1721,7 @@ src/engine/agents/    # role templates, skills, assignments, the skill catalog, 
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)
   waiting.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
-  assertions.ts, assertionSchemas.ts, businessPackManager.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
+  assertions.ts, assertionSchemas.ts, businessPackManager.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, problemContexts.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/decisions/
   decisionStore.ts, proposals.ts
 src/engine/documents/

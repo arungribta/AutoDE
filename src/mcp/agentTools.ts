@@ -10,6 +10,7 @@ import { matchColumns, mappingPrecedents, MatchColumn } from '../engine/agents/c
 import { validateMappingProposal } from '../engine/decisions/proposals';
 import { writeMappingUpsert, problemDocumentPath } from '../engine/documents/problemDocuments';
 import { writeSourceContextDraft, sourceContextFile } from '../engine/agents/sourceContextDraft';
+import { TARGET_OPTIONS, sourceSystemChoices, targetConnectionChoices, targetContextFile, writeTargetContextDraft } from '../engine/context/problemContexts';
 import { readWorkflow } from '../engine/workflows/instance';
 import { appendEvent, Actor } from '../engine/workflows/events';
 import { EntityMapping, SourceContextEntry } from '../engine/types';
@@ -268,13 +269,37 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
       }
     },
     {
+      name: 'autode_record_target_context',
+      description: 'Draft the active problem\'s target context (v0.45.10): the workspace target connection it builds into (which decides the platform and the default database), and the problem\'s own decisions — modelling approach, transformation and orchestration tools, naming convention, target database and schema. Without a connection, give the platform. With no arguments, returns the choices: the workspace\'s target connections, the allowed values, and the estate\'s source systems. Written as built; a person approves it as the target stage\'s document.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        connectionId: { type: 'string', minLength: 1 }, platform: { type: 'string', enum: [...TARGET_OPTIONS.platform] },
+        modelingApproach: { type: 'string', enum: [...TARGET_OPTIONS.modelingApproach] }, transformationTool: { type: 'string', enum: [...TARGET_OPTIONS.transformationTool] },
+        orchestrationTool: { type: 'string', enum: [...TARGET_OPTIONS.orchestrationTool] }, namingConvention: { type: 'string', enum: [...TARGET_OPTIONS.namingConvention] },
+        database: { type: 'string' }, schema: { type: 'string' },
+        answers: { type: 'object', additionalProperties: { type: 'string' }, description: 'What the stakeholder said (question → answer).' },
+        stage: { type: 'string', minLength: 1 }
+      } },
+      annotations: records('Draft the target context'),
+      handler: async (args, ws) => {
+        const root = ws.options.workspaceRoot;
+        const choices = ['connectionId', 'platform', 'modelingApproach', 'transformationTool', 'orchestrationTool', 'namingConvention', 'database', 'schema'];
+        if (!choices.some((k) => args[k] !== undefined)) return { connections: targetConnectionChoices(root), options: TARGET_OPTIONS, sourceSystems: sourceSystemChoices(root) };
+        const { problemRoot } = problemOf(ws);
+        const stage = stageFor(problemRoot, 'target-context', args.stage);
+        let ctx;
+        try { ctx = writeTargetContextDraft(root, problemRoot, args as Record<string, string>, (args.answers as Record<string, string> | undefined) ?? {}); } catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+        note(ws, problemRoot, stage, targetContextFile(problemRoot));
+        return { platform: ctx.platform, connectionId: ctx.connectionId ?? null, version: ctx.version, status: ctx.status, file: path.relative(root, targetContextFile(problemRoot)).split(path.sep).join('/'), next: 'Tell the user the target context is ready for their approval (the Workflow view, or `autode workflow approve <stage>`).' };
+      }
+    },
+    {
       name: 'autode_record_source_context',
       description: 'Draft the active problem\'s source context: each source system the problem draws on, and how AutoDE knows it — connected (a connection id, with what was extracted), file (DDL, CSV or JSON brought in), or described (no access yet: say what it is). It replaces the previous draft; a person approves it as the source-assessment stage\'s document. Bring the systems\' metadata into the estate first (autode_ingest_metadata, autode_ingest_file).',
       inputSchema: { type: 'object', required: ['sources'], additionalProperties: false, properties: {
         sources: { type: 'array', minItems: 1, items: { type: 'object', required: ['connectionId', 'method'], properties: {
+          system: { type: 'string', description: 'The estate system (from the estate); required for connected and file sources, absent for a described one.' },
           connectionId: { type: 'string', minLength: 1 }, platform: { type: 'string' }, method: { type: 'string', enum: ['connected', 'described', 'file'] },
-          sourceType: { type: 'string', enum: ['database', 'api', 'file', 'stream', 'saas', 'other'] }, description: { type: 'string' },
-          connectionSummary: { type: 'object', properties: { database: { type: 'string' }, schema: { type: 'string' }, tableCount: { type: 'number' }, viewCount: { type: 'number' } } }
+          sourceType: { type: 'string', enum: ['database', 'api', 'file', 'stream', 'saas', 'other'] }, description: { type: 'string' }
         } } },
         answers: { type: 'object', additionalProperties: { type: 'string' }, description: 'Answers the stakeholder gave about the sources (question → answer).' },
         stage: { type: 'string', minLength: 1 }
@@ -284,7 +309,7 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
         const { problemRoot } = problemOf(ws);
         const stage = stageFor(problemRoot, 'source-assessment', args.stage);
         let ctx;
-        try { ctx = writeSourceContextDraft(problemRoot, args.sources as SourceContextEntry[], (args.answers as Record<string, string> | undefined) ?? {}); } catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+        try { ctx = writeSourceContextDraft(problemRoot, args.sources as SourceContextEntry[], (args.answers as Record<string, string> | undefined) ?? {}, new Date(), ws.options.workspaceRoot); } catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
         note(ws, problemRoot, stage, sourceContextFile(problemRoot));
         return { sources: ctx.sources.length, version: ctx.version, status: ctx.status, file: path.relative(ws.options.workspaceRoot, sourceContextFile(problemRoot)).split(path.sep).join('/'), next: 'Tell the user the source context is ready for their approval.' };
       }

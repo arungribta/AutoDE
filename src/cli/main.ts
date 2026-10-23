@@ -38,7 +38,10 @@ import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, s
 import { Actor, actorLabel } from '../engine/workflows/events';
 import { readWorkflow } from '../engine/workflows/instance';
 import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStore';
-import { DataPlatformProvider } from '../engine/types';
+import { DataPlatformProvider, SourceContext, SourceContextEntry } from '../engine/types';
+import { TARGET_OPTIONS, readTargetContext, sourceEntryForSystem, sourceSystemChoices, targetConnectionChoices, targetContextFile, writeTargetContextDraft } from '../engine/context/problemContexts';
+import { sourceContextFile, writeSourceContextDraft } from '../engine/agents/sourceContextDraft';
+import { parseYaml } from '../engine/context/Yaml';
 import { Catalog } from '../engine/context/catalog';
 import { layoutPath } from '../engine/workspaceLayout';
 import { SqlDialect } from '../engine/transforms/types';
@@ -175,6 +178,12 @@ Waiting for you:
   approvals [list]             Everything that waits for a person, in one list: decisions, facts to review, stage
                                documents, runbooks needing a second approver; each with the command that approves it
 
+A problem's target and source context (they reference the workspace: a target connection, estate systems):
+  context show                 The problem's target and source context, the workspace's target connections and estate systems
+  context target --connection <id> --set modelingApproach=… --set transformationTool=… --set orchestrationTool=…
+                 --set namingConvention=… [--set database=…] [--schema <s>]   Draft the target context (or --platform, with no connection)
+  context sources --system <id,…> [--summary <text>]   Draft the source context from estate systems (--summary: a source with no connection)
+
 Runbooks (platform changes, approved by a person; they run in VS Code's Runbook tab):
   runbook list                 The problem's runbooks: environment, approvals, status, steps run
   runbook show <id>            Every step: the engine's classification, what runs, its dry run and rollback, its state; the log
@@ -304,6 +313,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'skills': return await cmdSkills(ctx, rest);
       case 'runbook': return await cmdRunbook(ctx, rest);
       case 'approvals': return await cmdApprovals(ctx, rest);
+      case 'context': return await cmdContext(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -751,6 +761,55 @@ async function cmdApprovals(ctx: Ctx, rest: string[]): Promise<number> {
     ? items.map((i) => `  ${i.stakes === 'high' ? '!' : '·'} ${i.title}${i.problemId ? ` [${i.problemId}]` : ''}\n      ${i.detail}\n      approve: ${i.cli}`).join('\n') + `\n${items.length} item(s) wait for a person.`
     : 'Nothing waits for you.');
   return EXIT.OK;
+}
+
+async function cmdContext(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'show'] = rest;
+  const problemId = singleProblem(ctx);
+  if (!problemId) throw new CliError(EXIT.NOT_FOUND, 'No business problem: start one with `autode problems new`.');
+  const problemRoot = layoutPath(ctx.workspaceRoot, 'problems', problemId);
+  const rel = (f: string) => path.relative(ctx.workspaceRoot, f).split(path.sep).join('/');
+  if (sub === 'show') {
+    const target = readTargetContext(problemRoot);
+    let source: SourceContext | undefined;
+    try { source = parseYaml(fs.readFileSync(sourceContextFile(problemRoot), 'utf8')) as SourceContext; } catch { /* none yet */ }
+    const connections = targetConnectionChoices(ctx.workspaceRoot);
+    const systems = sourceSystemChoices(ctx.workspaceRoot);
+    emit(ctx, { ok: true, problemId, target: target ?? null, source: source ?? null, targetConnections: connections, sourceSystems: systems, options: TARGET_OPTIONS }, [
+      `Target context: ${target ? `${target.status} — ${target.platform ?? '?'}${target.connectionId ? ` via ${target.connectionId}` : ''}, ${target.modelingApproach ?? '?'}, ${target.transformationTool ?? '?'} / ${target.orchestrationTool ?? '?'}, ${target.namingConvention ?? '?'}${target.platformConfig?.schema ? `, ${target.platformConfig.database ?? ''}.${target.platformConfig.schema}` : ''}` : 'none yet'}`,
+      `Source context: ${source ? `${source.status} — ${source.sources.map((e) => e.system ?? `${e.connectionId} (${e.method})`).join(', ') || 'no sources'}` : 'none yet'}`,
+      `Target connections: ${connections.map((c) => `${c.id} (${c.platform})`).join(', ') || 'none — `autode connections add`'}`,
+      `Estate source systems: ${systems.map((s) => s.id).join(', ') || 'none — `autode estate ingest` or `autode estate extract`'}`
+    ].join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'target') {
+    const set = Object.fromEntries((ctx.values.set ?? []).map((kv) => { const i = kv.indexOf('='); return i > 0 ? [kv.slice(0, i), kv.slice(i + 1)] : [kv, '']; }));
+    const unknown = Object.keys(set).filter((k) => !['modelingApproach', 'transformationTool', 'orchestrationTool', 'namingConvention', 'database'].includes(k));
+    if (unknown.length) throw new CliError(EXIT.USAGE, `context target: unknown --set ${unknown.join(', ')} (modelingApproach, transformationTool, orchestrationTool, namingConvention, database).`);
+    let written;
+    try { written = writeTargetContextDraft(ctx.workspaceRoot, problemRoot, { connectionId: ctx.values.connection, platform: ctx.values.platform, ...set, schema: ctx.values.schema?.[0] }); }
+    catch (err) { throw new CliError(EXIT.FAILED, `The target context isn't valid: ${err instanceof Error ? err.message : String(err)}`); }
+    emit(ctx, { ok: true, target: written }, `Drafted ${rel(targetContextFile(problemRoot))} (${written.platform}${written.connectionId ? ` via ${written.connectionId}` : ''}). Approve it as the target stage's document: \`autode workflow approve <stage>\` or the Workflow view.`);
+    return EXIT.OK;
+  }
+  if (sub === 'sources') {
+    const ids = (ctx.values.system ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    const entries: SourceContextEntry[] = [];
+    for (const id of ids) {
+      const e = sourceEntryForSystem(ctx.workspaceRoot, id);
+      if (!e) throw new CliError(EXIT.NOT_FOUND, `No source system "${id}" in the estate (${sourceSystemChoices(ctx.workspaceRoot).map((s) => s.id).join(', ') || 'none yet'}).`);
+      entries.push(e);
+    }
+    if (ctx.values.summary) entries.push({ connectionId: 'described', method: 'described', description: ctx.values.summary });
+    if (!entries.length) throw new CliError(EXIT.USAGE, 'context sources --system <id,…> [--summary <text for a source with no connection>]');
+    let written;
+    try { written = writeSourceContextDraft(problemRoot, entries, {}, new Date(), ctx.workspaceRoot); }
+    catch (err) { throw new CliError(EXIT.FAILED, `The source context isn't valid: ${err instanceof Error ? err.message : String(err)}`); }
+    emit(ctx, { ok: true, source: written }, `Drafted ${rel(sourceContextFile(problemRoot))} (${written.sources.map((e) => e.system ?? 'described').join(', ')}). Approve it as the source stage's document: \`autode workflow approve <stage>\` or the Workflow view.`);
+    return EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, 'context show | target --connection <id> --set modelingApproach=… [--set …] [--schema <s>] | sources --system <id,…> [--summary <text>]');
 }
 
 async function cmdRunbook(ctx: Ctx, rest: string[]): Promise<number> {

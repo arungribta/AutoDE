@@ -167,6 +167,16 @@ Secrets never go in these files. A field such as `password` or `token` is refuse
 
 `autode approvals` lists everything that waits for a person: pending decisions (workflow, stage gates, runbooks, connections, proposals), facts to review, stage documents to approve, and runbooks that need a second approver. High stakes come first, and each item shows the command that approves it (`--json` for scripts). Over MCP, the same list is `autode_approvals_list`; in VS Code, it is the top of the Workflow view.
 
+## A problem's target and source context
+
+Both reference the workspace (since 0.45.10): the target context names a target connection (`autode connections add`) and keeps the problem's own decisions; the source context lists estate systems (`autode estate ingest` / `autode estate extract` bring them in).
+
+- `autode context show` lists the problem's contexts, the workspace's target connections and the estate's source systems (`--json` for scripts).
+- `autode context target --connection <id> --set modelingApproach=dimensional --set transformationTool=dbt --set orchestrationTool=airflow --set namingConvention=snake_case [--set database=<db>] [--schema <s>]` drafts the target context. Without a connection, pass `--platform` instead. The connection decides the platform.
+- `autode context sources --system shop,crm [--summary "<a source with no connection>"]` drafts the source context.
+
+Each is written as a draft; approve it as the stage's document with `autode workflow approve <stage>`.
+
 ## Runbooks
 
 Platform changes (creating objects, grants, loading data, deploying a bundle) run only as runbooks: an agent proposes one, AutoDE checks it, a person approves it, and AutoDE's runner runs it step by step in VS Code's Runbook tab.

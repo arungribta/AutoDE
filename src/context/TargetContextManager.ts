@@ -15,11 +15,11 @@ import { createVscodeFileIo } from './vscodeFileIo';
  * `contextRoot` is a business problem's own folder (v0.12.0) — deliberately
  * distinct from the *shared* `.autode/knowledge/business-context.yaml` /
  * `verified-queries.yaml` (registered-source-derived, global across business
- * problems). Also distinct from `TargetConfigManager`
- * (`.autode/config/target-environment.yaml`), which remains a generic,
- * user-editable dev/staging/prod tool-preference profile. This is the
- * spec-tied, gating record built through the Target Context Q&A and required
- * before a plan can be generated (requirements.md §8.10).
+ * problems). It is the spec-tied record of the problem's target choices,
+ * built through the Target Context Q&A (or `writeTargetContextDraft()` from
+ * MCP and the CLI) and approved as the target stage's document. Since
+ * v0.45.10 it names a workspace target connection instead of re-describing
+ * the platform (`src/engine/context/problemContexts.ts`).
  */
 export class TargetContextManager implements vscode.Disposable {
   private context: TargetContext | undefined;
@@ -133,12 +133,11 @@ export class TargetContextManager implements vscode.Disposable {
       version: typeof doc.version === 'number' ? doc.version : 1,
       status: (str(doc.status) as TargetContext['status']) || 'pending',
       platform: (str(doc.platform) as TargetContext['platform']) || undefined,
-      environmentProfile: (str(doc.environmentProfile) as TargetContext['environmentProfile']) || undefined,
+      connectionId: str(doc.connectionId) || undefined,
       modelingApproach: (str(doc.modelingApproach) as TargetContext['modelingApproach']) || undefined,
       namingConvention: (str(doc.namingConvention) as TargetContext['namingConvention']) || undefined,
       transformationTool: (str(doc.transformationTool) as TargetContext['transformationTool']) || undefined,
       orchestrationTool: (str(doc.orchestrationTool) as TargetContext['orchestrationTool']) || undefined,
-      outputFormats: Array.isArray(doc.outputFormats) ? doc.outputFormats as TargetContext['outputFormats'] : undefined,
       platformConfig: (doc.platformConfig && typeof doc.platformConfig === 'object') ? doc.platformConfig as Record<string, string> : undefined,
       credentialRef: (doc.credentialRef && typeof doc.credentialRef === 'object') ? doc.credentialRef as TargetContext['credentialRef'] : undefined,
       answers: (doc.answers && typeof doc.answers === 'object') ? doc.answers as Record<string, string> : {},

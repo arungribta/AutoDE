@@ -6,7 +6,7 @@ metadata:
   scope: de
   stageKinds: [source-assessment]
   platforms: [any]
-  version: 1
+  version: 2
   owner: AutoDE
   maturity: tested
 ---
@@ -41,13 +41,11 @@ For each key, grain and relationship the profile supports, call `autode_propose_
 
 ## 5. Draft the source context
 
-Call `autode_record_source_context` with one entry per system:
-- `connectionId` (the connection id, or a short name for a described or file-based system);
-- `platform`;
-- `method`: `connected`, `file` or `described`;
-- `sourceType`;
-- `description`;
-- for connected systems, `connectionSummary` (database, schema, table and view counts).
+The source context lists which of the estate's systems this problem draws on; their tables, environments and bindings stay in the estate, so don't repeat them. Call `autode_record_source_context` with one entry per system:
+- `system`: the estate system (for a connected or file-based source; bring it into the estate first);
+- `connectionId`: the connection id or file that feeds it;
+- `method`: `connected` or `file`;
+- for a source with no connection yet, `method: described` with its `description` and `sourceType` instead (no `system`).
 
 ## 6. Report
 

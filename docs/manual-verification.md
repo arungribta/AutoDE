@@ -834,6 +834,21 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: with an estate where two tables have no known join, write a specification that combines them (for example "support tickets per order") and Run agent on its mapping stage, or ask Claude Code to continue the problem.
   Expect: the agent's instructions have a *Context gaps* section with the question about the join; the agent asks you or records it as open; nothing pauses.
 
+## Part 35 — v0.45.10 Contexts reference the workspace
+
+- [ ] **35.1 Target from a connection.**
+  Do: with a target connection saved (a platform card, or `autode connections add`), build the Target Context of an approved problem.
+  Expect: the first question picks the connection; the platform follows it; the database defaults to the connection's; there is no environment question.
+- [ ] **35.2 Team defaults.**
+  Do: confirm a project-wide fact "We name objects in PascalCase" (kind naming convention) or approve another problem's target context first, then build a new problem's Target Context.
+  Expect: the naming question suggests it and says where the suggestion came from; the specification's own words still win.
+- [ ] **35.3 Sources from the estate.**
+  Do: ingest the sample's `sources/*.ddl` (one system each), then Source Context → Pick from the Estate.
+  Expect: the estate's systems to tick (not business-context); the saved context lists them by system, with no table counts.
+- [ ] **35.4 Over MCP and the CLI.**
+  Do: run `autode context show`; ask Claude Code to draft the target context.
+  Expect: the same choices; the agent calls `autode_record_target_context` and asks you to approve.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1033,5 +1048,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 34.4 |  |  |
 | 34.5 |  |  |
 | 34.6 |  |  |
+| 35.1 |  |  |
+| 35.2 |  |  |
+| 35.3 |  |  |
+| 35.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

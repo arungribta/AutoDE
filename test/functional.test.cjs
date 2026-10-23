@@ -885,54 +885,6 @@ async function main() {
     assert.strictEqual(reloaded[0].owner, 'alice');
   });
 
-  await test('TargetConfigManager round-trips profiles through real YAML', async () => {
-    function tcmMock() {
-      const store = new Map();
-      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
-      return {
-        Uri: {
-          file: (p) => ({ fsPath: p }),
-          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
-        },
-        workspace: {
-          fs: {
-            createDirectory: async () => {},
-            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (!v) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
-            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
-            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); },
-            stat: async () => { throw new Error('ENOENT'); }
-          },
-          createFileSystemWatcher: () => ({ onDidChange: () => {}, dispose: () => {} })
-        },
-        RelativePattern: class { constructor(_base, _pattern) {} }
-      };
-    }
-    const mock = tcmMock();
-    delete require.cache[require.resolve('../dist/context/TargetConfigManager.js')];
-    const { TargetConfigManager } = withMock(mock, () => require('../dist/context/TargetConfigManager.js'));
-    const tcm = new TargetConfigManager({ fsPath: '/ws' }, () => {});
-    await withMock(mock, () => tcm.initialize());
-    const active = tcm.getActiveEnvironment();
-    assert.ok(active, 'default active environment present');
-    assert.strictEqual(active.platform, 'snowflake');
-    assert.deepStrictEqual(active.outputFormats, ['ddl', 'yaml', 'markdown']);
-    await withMock(mock, () => tcm.upsertProfile({
-      name: 'staging', inherits: 'base',
-      environment: {
-        platform: 'snowflake', environmentProfile: 'staging', modelingApproach: 'dimensional',
-        namingConvention: 'snake_case', transformationTool: 'dbt', orchestrationTool: 'airflow',
-        outputFormats: ['ddl'], platformConfig: { account: 'acct', database: 'DB', schema: 'S', warehouse: 'W', role: 'R' }
-      }
-    }));
-    const tcm2 = new TargetConfigManager({ fsPath: '/ws' }, () => {});
-    await withMock(mock, () => tcm2.initialize());
-    const profiles = tcm2.getAllProfiles();
-    const staging = profiles.find((p) => p.name === 'staging');
-    assert.ok(staging, 'staging profile persisted');
-    assert.strictEqual(staging.inherits, 'base');
-    assert.strictEqual(staging.environment.platformConfig.database, 'DB');
-  });
-
   await test('ContextFileManager loads authoritative context + persists compiled graph atomically', async () => {
     const os = require('node:os');
     const path = require('node:path');
@@ -6012,10 +5964,10 @@ async function main() {
       const tools = (await client.listTools()).tools;
       const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6079,6 +6031,7 @@ async function main() {
       autode_check_model: [{ model: { entities: [{ name: 'fct_orders', kind: 'fact', columns: [{ name: 'order_id' }] }] } }, { model: { entities: [{ name: 'fct_orders', kind: 'fact' }] } }],
       autode_record_mapping: [{ mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [{ sourceColumn: 'a', targetColumn: 'b' }] } }, { mapping: { id: 'm', sourceEntityId: 'shop.orders', targetName: 't', columns: [] } }],
       autode_record_source_context: [{ sources: [{ connectionId: 'shop', method: 'file' }] }, { sources: [{ connectionId: 'shop', method: 'guessed' }] }],
+      autode_record_target_context: [{}, { namingConvention: 'kebab' }],
       autode_workflow_start_stage: [{ stage: 'sources' }, {}],
       autode_workflow_complete_stage: [{ stage: 'quality', summary: 'rules', outputs: ['q.md'] }, { stage: 'quality' }],
       autode_workflow_skip_stage: [{ stage: 'bi', reason: 'no reports in scope' }, { stage: 'bi', reason: 'no' }],
@@ -9056,7 +9009,7 @@ async function main() {
     // Over MCP, autode_workflow_next carries them; Run agent takes them from autode_context_pack (same function).
     const wt = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'mcp', 'workflowTools.ts'), 'utf8');
     const ex = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentExecutor.ts'), 'utf8');
-    assert.ok(/stageContextGaps\(sources/.test(wt) && /autode_context_pack/.test(ex) && /stageGapsFrom/.test(ex));
+    assert.ok(/stageContextGaps\(sources/.test(wt) && /autode_get_context_pack/.test(ex) && /stageGapsFrom/.test(ex));
     // The plan of steps is gone.
     for (const f of ['src/context/PlanManager.ts', 'src/core/phaseInference.ts', 'src/spokes/snowflakeExecutor.ts', 'src/core/panelProvider.ts', 'media/panel.html']) assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', f)), f);
     const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
@@ -9065,6 +9018,90 @@ async function main() {
     assert.ok(!/interface PlanState|interface PlanStep|interface PersistedPlan|interface InferredPhase/.test(types));
     const pkg = require('../package.json');
     assert.ok(!pkg.contributes.commands.some((c) => /generatePlan|executePlan|resetSession/.test(c.command)) && !pkg.contributes.views.autoDataEngineeringHubPanel && !(pkg.contributes.viewsContainers.panel));
+  });
+
+  await test('v0.45.10: SIMP-4 — the contexts reference the workspace: the target context picks a target connection (which decides the platform) and keeps the problem\'s decisions; the source context lists estate systems; defaults come from team facts, then the last approved target; the same over the panel\'s engine path, MCP and the CLI; target-environment.yaml is gone', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-simp4-'));
+    let client;
+    try {
+      const { id, prob, W } = await sourceFlow(ws, cli);
+      const C = fresh('../dist/engine/context/problemContexts.js');
+      const S = fresh('../dist/engine/agents/sourceContextDraft.js');
+      // No connection yet: the platform is asked for; a named connection that doesn't exist is refused.
+      assert.deepStrictEqual(C.targetConnectionChoices(ws), []);
+      assert.ok(/No target connection "snowflake:nope"/.test(C.targetChoiceErrors(ws, { connectionId: 'snowflake:nope', modelingApproach: 'dimensional', transformationTool: 'dbt', orchestrationTool: 'airflow', namingConvention: 'snake_case' }).join(' ')));
+      assert.ok(C.targetChoiceErrors(ws, { modelingApproach: 'dimensional', transformationTool: 'dbt', orchestrationTool: 'airflow', namingConvention: 'snake_case' }).some((e) => /connectionId/.test(e)));
+      // A team target connection.
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: databricks\n    role: target\n    workspaceUrl: adb-1.azuredatabricks.net\n    httpPath: /sql/1.0/warehouses/w\n    catalog: gold\n    credentials: { resolver: cli, ref: prod }\n');
+      const [conn] = C.targetConnectionChoices(ws);
+      assert.deepStrictEqual([conn.platform, conn.database], ['databricks', 'gold']);
+      assert.ok(/is databricks, not snowflake/.test(C.targetChoiceErrors(ws, { connectionId: conn.id, platform: 'snowflake', modelingApproach: 'dimensional', transformationTool: 'dbt', orchestrationTool: 'airflow', namingConvention: 'snake_case' }).join(' ')));
+      // Defaults: a team fact in the ledger wins over the last approved target context; the specification's words win over both.
+      const facts = [{ kind: 'naming_convention', predicate: 'naming_convention', value: { convention: 'PascalCase' }, statement: 'We use PascalCase', status: 'active' }, { kind: 'decision', predicate: 'orchestration_tool', value: 'dagster', statement: 'Dagster runs our pipelines', status: 'active' }, { kind: 'decision', predicate: 'orchestration_tool', value: 'prefect', statement: 'one problem', status: 'active', specId: 'bps-x' }];
+      const d = C.targetDefaults({ assertions: facts, workspaceRoot: ws, problemId: id });
+      assert.deepStrictEqual([d.values.namingConvention, d.values.orchestrationTool], ['PascalCase', 'dagster'], 'project-wide facts only');
+      const Q = fresh('../dist/core/targetContextQuestions.js');
+      const D = fresh('../dist/engine/documents/problemDocuments.js');
+      const spec = D.parseBusinessProblemSpec(D.readProblemDocument(prob, 'spec'));
+      const qs = Q.buildTargetContextQuestions({ ...spec, problemStatement: 'Daily revenue on Databricks with dbt' }, { connections: [conn], defaults: d });
+      const q = (k) => qs.find((x) => x.id === k);
+      assert.deepStrictEqual([q('connectionId').suggestedDefault, q('connectionId').options.includes('none yet'), q('namingConvention').suggestedDefault, q('orchestrationTool').suggestedDefault, q('transformationTool').suggestedDefault, q('database').suggestedDefault], [conn.id, true, 'PascalCase', 'dagster', 'dbt', 'gold']);
+      assert.ok(!qs.some((x) => x.id === 'environmentProfile'), 'no environment profile: the connection\'s estate environment and the approval policy decide');
+      // The draft: the connection decides the platform and the default database; revising an approved one bumps the version and archives it.
+      let t = C.writeTargetContextDraft(ws, prob, { connectionId: conn.id, modelingApproach: 'dimensional', transformationTool: 'dbt', orchestrationTool: 'dagster', namingConvention: 'PascalCase', schema: 'revenue' });
+      assert.deepStrictEqual([t.platform, t.connectionId, t.platformConfig, t.status, t.version], ['databricks', conn.id, { database: 'gold', schema: 'revenue' }, 'built', 1]);
+      nodeFs.writeFileSync(C.targetContextFile(prob), nodeFs.readFileSync(C.targetContextFile(prob), 'utf8').replace('status: built', 'status: approved'));
+      t = C.writeTargetContextDraft(ws, prob, { connectionId: conn.id, modelingApproach: 'data-vault', transformationTool: 'dbt', orchestrationTool: 'dagster', namingConvention: 'PascalCase' });
+      assert.strictEqual(t.version, 2);
+      assert.ok(nodeFs.existsSync(nodePath.join(prob, 'context', 'history', 'target-context.spec1.v1.yaml')));
+      // Source: estate systems only; a system not in the estate is refused; stored counts are not written.
+      assert.deepStrictEqual(C.sourceSystemChoices(ws), []);
+      assert.throws(() => S.writeSourceContextDraft(prob, [{ system: 'shop', connectionId: 'shop.sql', method: 'file' }], {}, new Date(), ws), /not a source system in the estate/);
+      assert.strictEqual((await cli(['estate', 'ingest', nodePath.join(ws, 'shop.sql'), '--system', 'shop', ...W])).code, 0);
+      const [sys] = C.sourceSystemChoices(ws);
+      assert.deepStrictEqual([sys.id, sys.bindings], ['shop', ['shop.sql']]);
+      const entry = C.sourceEntryForSystem(ws, 'shop');
+      assert.deepStrictEqual([entry.system, entry.method, entry.connectionId], ['shop', 'file', 'shop.sql']);
+      const sc = S.writeSourceContextDraft(prob, [{ ...entry, fileSummary: { fileName: 'shop.sql', format: 'ddl', tableCount: 1, columnCount: 4 } }, { connectionId: 'described', method: 'described', description: 'Partner feed, pushed nightly' }], {}, new Date(), ws);
+      assert.deepStrictEqual([sc.sources.map((e) => e.system), 'fileSummary' in sc.sources[0]], [['shop', undefined], false]);
+      // MCP: the choices, then a draft.
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const choices = await call('autode_record_target_context', {});
+      assert.deepStrictEqual([choices.connections.map((c) => c.id), choices.sourceSystems.map((s) => s.id), choices.options.namingConvention.length], [[conn.id], ['shop'], 3]);
+      const bad = await call('autode_record_target_context', { connectionId: conn.id, platform: 'snowflake', modelingApproach: 'dimensional', transformationTool: 'dbt', orchestrationTool: 'airflow', namingConvention: 'snake_case' });
+      assert.strictEqual(bad.code, 'VALIDATION_FAILED');
+      const ok = await call('autode_record_target_context', { connectionId: conn.id, modelingApproach: 'obt', transformationTool: 'dbt', orchestrationTool: 'airflow', namingConvention: 'snake_case' });
+      assert.deepStrictEqual([ok.platform, ok.status], ['databricks', 'built'], JSON.stringify(ok));
+      const src = await call('autode_record_source_context', { sources: [{ system: 'nope', connectionId: 'x', method: 'file' }] });
+      assert.ok(src.code === 'VALIDATION_FAILED' && /not a source system/.test(src.message), JSON.stringify(src));
+      // CLI.
+      const show = await cli(['context', 'show', ...W, '--json']);
+      assert.strictEqual(show.code, 0, show.err);
+      assert.deepStrictEqual([show.json().target.modelingApproach, show.json().sourceSystems[0].id], ['obt', 'shop']);
+      const tgt = await cli(['context', 'target', '--connection', conn.id, '--set', 'modelingApproach=dimensional', '--set', 'transformationTool=dbt', '--set', 'orchestrationTool=airflow', '--set', 'namingConvention=snake_case', '--schema', 'mart', ...W]);
+      assert.strictEqual(tgt.code, 0, tgt.err);
+      assert.strictEqual((await cli(['context', 'target', '--set', 'colour=blue', ...W])).code, 2);
+      const srcs = await cli(['context', 'sources', '--system', 'shop', ...W]);
+      assert.strictEqual(srcs.code, 0, srcs.err);
+      assert.strictEqual((await cli(['context', 'sources', '--system', 'nope', ...W])).code, 5);
+      // Run agent's context gaps come from the engine's real context-pack tool (v0.45.9 named it wrongly).
+      const { EngineClient } = fresh('../dist/core/engineClient.js');
+      const engine = new EngineClient({ workspaceRoot: ws, resourcesRoot: wfRes(), version: 't', log: () => {}, clientName: 't' });
+      try {
+        const names = (await engine.listTools()).map((x) => x.name);
+        assert.ok(names.includes('autode_get_context_pack'));
+        const raw = await (await engine.toolSetNamed(['autode_get_context_pack'])).call('autode_get_context_pack', { purpose: 'step', query: 'shop orders' });
+        assert.ok(!raw.isError && Array.isArray(JSON.parse(raw.text).manifest.gaps), raw.text.slice(0, 300));
+        const gaps = await fresh('../dist/core/agentExecutor.js').stageGaps(engine, prob, 'mapping', 'Mapping');
+        assert.ok(Array.isArray(gaps));
+      } finally { await engine.dispose(); }
+      // The dead workspace file and its manager are gone.
+      assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', 'src', 'context', 'TargetConfigManager.ts')));
+      assert.ok(!('targetEnvironment' in fresh('../dist/engine/workspaceLayout.js').LAYOUT));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   // ---------- v0.45.3: PA3b step 3 — the data modeler ----------

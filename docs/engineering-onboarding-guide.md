@@ -157,7 +157,7 @@ AutoDE grew some overlapping objects. They are being reduced, one release at a t
 - **one way to change a platform:** runbooks only (the older single-statement platform change goes);
 - **one way to record a mapping:** the mapping document only;
 - **the old plan of steps:** removed in v0.45.9, with the dashboard panel (the workflow replaced it; context gaps are now listed in each stage's assignment);
-- **contexts select from the workspace:** a problem's target and source contexts pick from the workspace's target environments and estate instead of describing them again;
+- **contexts reference the workspace** (v0.45.10): a problem's target context names a target connection and keeps its own decisions; its source context lists estate systems. Both stay as the problem's approved choices; the unused `target-environment.yaml` is gone;
 - **later:** chat attachments into the pack; the interview packs become skills; the older knowledge files (business context, verified queries, semantic-layer snapshots) fold into the facts; one lifecycle for AutoDE's and imported skills.
 
 ### 4.1 Business problem and its specification

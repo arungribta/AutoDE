@@ -390,7 +390,7 @@ export class DataAgentHubHub {
 
   public setTargetEnvironment(env: TargetEnvironment): void {
     this.state.targetEnvironment = env;
-    this.log(`Target environment set: ${env.platform} (${env.environmentProfile}) — ${env.modelingApproach} via ${env.transformationTool}`);
+    this.log(`Target environment set: ${env.platform} —${env.modelingApproach} via ${env.transformationTool}`);
   }
 
   public getTargetEnvironment(): TargetEnvironment | undefined {
@@ -462,12 +462,10 @@ Message: ${message}`;
 
     return {
       platform,
-      environmentProfile: 'development',
       modelingApproach: partial.modelingApproach ?? 'dimensional',
       namingConvention: partial.namingConvention ?? 'snake_case',
       transformationTool: partial.transformationTool ?? 'dbt',
       orchestrationTool: partial.orchestrationTool ?? 'airflow',
-      outputFormats: ['ddl', 'yaml', 'markdown'],
       platformConfig
     };
   }
@@ -612,12 +610,10 @@ Message: ${message}`;
       parts.push(
         `## Target Environment\n` +
         `- Platform: ${t.platform} (${db}.${schema})\n` +
-        `- Profile: ${t.environmentProfile}\n` +
         `- Modeling: ${t.modelingApproach}\n` +
         `- Transformation: ${t.transformationTool}\n` +
         `- Orchestration: ${t.orchestrationTool}\n` +
-        `- Naming: ${t.namingConvention}\n` +
-        `- Outputs: ${t.outputFormats.join(', ')}`
+        `- Naming: ${t.namingConvention}`
       );
     }
 

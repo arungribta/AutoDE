@@ -41,12 +41,12 @@ export function runnableReason(scope: StageRunScope, stageId: string): string | 
   return r.assignment ? undefined : r.reason;
 }
 
-/** The stage's context gaps, from the engine's context pack: the same ones `autode_workflow_next` puts in a host's assignment. */
-async function stageGaps(engine: EngineAccess, problemRoot: string, kind: StageKind, title: string): Promise<StageGap[]> {
+/** The stage's context gaps, from the engine's context pack: the same ones `autode_workflow_next` puts in a host's assignment (exported for its test). */
+export async function stageGaps(engine: EngineAccess, problemRoot: string, kind: StageKind, title: string): Promise<StageGap[]> {
   const query = stageGapQuery(problemRoot, title);
   if (!query || !engine.toolSetNamed) return [];
   try {
-    const r = await (await engine.toolSetNamed(['autode_context_pack'])).call('autode_context_pack', { purpose: 'step', query });
+    const r = await (await engine.toolSetNamed(['autode_get_context_pack'])).call('autode_get_context_pack', { purpose: 'step', query });
     if (r.isError) return [];
     return stageGapsFrom(((JSON.parse(r.text) as { manifest?: { gaps?: ContextGap[] } }).manifest?.gaps) ?? [], kind);
   } catch { return []; }

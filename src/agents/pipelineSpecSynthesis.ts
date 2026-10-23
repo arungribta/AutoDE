@@ -43,7 +43,7 @@ function renderPrimitiveCatalog(): string {
 function renderTargetContext(tc?: TargetContext): string {
   if (!tc) return '(no approved Target Context)';
   const parts: string[] = [];
-  if (tc.platform) parts.push(`Platform: ${tc.platform}`);
+  if (tc.platform) parts.push(`Platform: ${tc.platform}${tc.connectionId ? ` (connection ${tc.connectionId})` : ''}`);
   if (tc.modelingApproach) parts.push(`Modeling approach: ${tc.modelingApproach}`);
   if (tc.namingConvention) parts.push(`Naming convention: ${tc.namingConvention}`);
   if (tc.transformationTool) parts.push(`Transformation tool: ${tc.transformationTool}`);
@@ -55,6 +55,7 @@ function renderSourceContext(sc?: SourceContext): string {
   if (!sc || sc.sources.length === 0) return '(no approved Source Context)';
   const parts: string[] = [];
   for (const entry of sc.sources) {
+    if (entry.system) parts.push(`Estate system: ${entry.system} (${entry.method}${entry.connectionId ? `, ${entry.connectionId}` : ''}) — its tables are in the context layer`);
     if (entry.sourceType) parts.push(`Source type: ${entry.sourceType}`);
     if (entry.description) parts.push(`Description: ${entry.description}`);
     if (entry.connectionSummary) parts.push(`Connection (${entry.platform ?? entry.connectionId}): ${JSON.stringify(entry.connectionSummary)}`);
