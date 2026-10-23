@@ -911,6 +911,19 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 - [ ] **37.7 The planner's briefs.**
   Do: after approving the specification, Run agent on the Plan stage (or ask the planner in Claude Code).
   Expect: it proposes the workflow with a brief per stage; the Workflow view shows each brief; a brief naming a tool is refused with the reason.
+- [ ] **37.8 Questions fit the problem.**
+  Do: start two problems with different statements (for example "daily revenue from shop orders" and "merge two CRMs into one customer master"), and answer the first three questions of each.
+  Expect: the questions name the problem's own entities and systems, not generic wording; each shows its part (Sources, Data flow …) and the progress panel shows the parts addressed, partial or not started. Note any question that ignores an earlier answer.
+- [ ] **37.9 Discovery before asking.**
+  Do: ingest the sample's `sources/*.ddl` into the estate first, then start an interview about the shop orders.
+  Expect: the log shows "Not asking … discovery already answers it" for questions the estate answers (which systems or tables exist), and the interview doesn't ask them.
+- [ ] **37.10 Stopping.**
+  Do: answer every question briefly until the interview ends.
+  Expect: it stops when every field has an answer or after 12 questions, whichever comes first, then drafts the specification; unanswered points appear as assumptions or open questions, not invented facts.
+- [ ] **37.11 Same interview, different model.**
+  Do: in Claude Code, ask the business analyst to run the interview of a new problem.
+  Expect: it asks about the same parts in the same order (requirements, sources, data flow, transformations, quality, constraints), records each question before asking it, and `autode interview show` lists them.
+
 
 ## Results
 
@@ -1134,5 +1147,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 37.5 |  |  |
 | 37.6 |  |  |
 | 37.7 |  |  |
+| 37.8 |  |  |
+| 37.9 |  |  |
+| 37.10 |  |  |
+| 37.11 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.
