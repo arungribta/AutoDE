@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 export const EXTENSION_ID = 'autoDataEngineeringHub';
 export const EXTENSION_VIEW_ID = 'autoDataEngineeringHubSidebar';
 export const EXTENSION_PANEL_ID = 'autoDataEngineeringHubPanel';
-export const EXTENSION_PANEL_VIEW_ID = 'autoDataEngineeringHubPanelView';
 export const EXTENSION_NAME = 'Auto Data Engineering Hub';
 export const EXTENSION_DESCRIPTION = 'Plan and execute AI-powered data engineering workflows with Snowflake and modern data platform orchestration.';
 export const CONFIG_SECTION = 'autoDataEngineeringHub';

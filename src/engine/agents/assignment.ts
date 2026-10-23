@@ -1,4 +1,5 @@
 import * as os from 'node:os';
+import { StageGap, renderStageGaps } from './stageGaps';
 import { externalCatalog, hostSkillDirs } from './skillCatalog';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -62,6 +63,8 @@ export interface Assignment {
   tasks: Array<{ id: string; title: string }>;
   /** Vendor and community skills for this stage kind and platform (v0.45.5): installed ones are named in the text; references only. */
   externalSkills: Array<{ name: string; vendor?: string; summary: string; source?: string; installed: boolean; availability?: string }>;
+  /** Joins, keys, grain and structure the stage's context doesn't back yet, with the question for each (v0.45.9: were plan-step pauses). */
+  contextGaps: StageGap[];
   /** The whole assignment as one text, for a host agent or a prompt. */
   text: string;
 }
@@ -77,7 +80,7 @@ export function targetPlatform(problemRoot: string): string | undefined {
 export interface AssignmentScope { workspaceRoot: string; resourcesRoot: string; problemId: string; /** Where the user's host skills live (default: the OS home). */ home?: string }
 
 /** The assignment for a stage, or why there is none yet (the role has no definition: its old agent still does the work). */
-export function assignmentFor(scope: AssignmentScope, stageId: string, tools: readonly ToolInfo[]): { assignment?: Assignment; reason?: string } {
+export function assignmentFor(scope: AssignmentScope, stageId: string, tools: readonly ToolInfo[], opts: { gaps?: readonly StageGap[] } = {}): { assignment?: Assignment; reason?: string } {
   const w = readWorkflow(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
   const s = w?.stages.find((x) => x.id === stageId);
   if (!w || !s) return { reason: `No stage "${stageId}".` };
@@ -116,7 +119,7 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
     stage: { id: s.id, title: s.title, kind: s.kind, status: s.record.status },
     role: role.name, roleDescription: role.description, roleInstructions: role.instructions, brief: s.agent?.brief,
     skills, tier, engineTools, fileMode: tier === 'workspace-write' ? 'full' : 'read-only',
-    consumes: s.consumes, produces: s.produces, doneWhen: kind.doneWhen, tasks: s.tasks.map((t) => ({ id: t.id, title: t.title })), externalSkills
+    consumes: s.consumes, produces: s.produces, doneWhen: kind.doneWhen, tasks: s.tasks.map((t) => ({ id: t.id, title: t.title })), externalSkills, contextGaps: [...(opts.gaps ?? [])]
   };
   return { assignment: { ...a, text: assignmentText(a) } };
 }
@@ -130,6 +133,7 @@ export function assignmentText(a: Omit<Assignment, 'text'>): string {
     a.tasks.length ? `## Tasks\n${a.tasks.map((t) => `- ${t.title}`).join('\n')}` : '',
     `## What this stage needs and produces\nConsumes: ${a.consumes.join(', ') || 'nothing'}. Produces: ${a.produces.join(', ')}. Done when ${a.doneWhen}.`,
     `## Your limits\nPermission tier: ${a.tier}. AutoDE tools you may call: ${a.engineTools.join(', ') || 'none'}. ${a.fileMode === 'full' ? 'You may write files in the workspace (each write is approved).' : 'You may read workspace files but not write them.'} Record each deliverable with autode_record_artifact. You never call another agent, start or hand in stages, or approve anything: AutoDE's workflow does that, and a person approves.`,
+    renderStageGaps(a.contextGaps),
     ...a.skills.map((k) => `## Skill: ${k.name}\n${k.description}\n\n${k.instructions}`),
     a.externalSkills.some((e) => e.installed)
       ? `## Vendor skills installed in this host\nUse them for the platform's specifics; AutoDE's rules still apply (approvals, runbooks, recording deliverables):\n${a.externalSkills.filter((e) => e.installed).map((e) => `- ${e.name} (${e.vendor ?? 'external'}): ${e.summary}`).join('\n')}`

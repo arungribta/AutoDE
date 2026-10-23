@@ -1,5 +1,5 @@
 import { BusinessProblemSpec, ContextQuestion } from '../engine/types';
-import { matchesAnyKeyword } from './phaseInference';
+import { matchesAnyKeyword } from './keywords';
 
 /**
  * Deterministic Source Context question set for the "describe" method

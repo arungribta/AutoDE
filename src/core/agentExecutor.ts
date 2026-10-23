@@ -3,6 +3,8 @@ import { AgentToolRunOptions, EngineAccess, LlmProvider, ToolCallAuditEntry } fr
 import { StageKind } from '../engine/workflows/stageKinds';
 import { isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import { stageReadiness } from '../engine/workflows/readiness';
+import { StageGap, stageGapQuery, stageGapsFrom } from '../engine/agents/stageGaps';
+import { ContextGap } from '../engine/context/contextGaps';
 import { Assignment, assignmentFor } from '../engine/agents/assignment';
 import { completeStage, startStage, WorkflowError } from '../engine/workflows/runtime';
 import { readEvents, Actor } from '../engine/workflows/events';
@@ -39,6 +41,17 @@ export function runnableReason(scope: StageRunScope, stageId: string): string | 
   return r.assignment ? undefined : r.reason;
 }
 
+/** The stage's context gaps, from the engine's context pack: the same ones `autode_workflow_next` puts in a host's assignment. */
+async function stageGaps(engine: EngineAccess, problemRoot: string, kind: StageKind, title: string): Promise<StageGap[]> {
+  const query = stageGapQuery(problemRoot, title);
+  if (!query || !engine.toolSetNamed) return [];
+  try {
+    const r = await (await engine.toolSetNamed(['autode_context_pack'])).call('autode_context_pack', { purpose: 'step', query });
+    if (r.isError) return [];
+    return stageGapsFrom(((JSON.parse(r.text) as { manifest?: { gaps?: ContextGap[] } }).manifest?.gaps) ?? [], kind);
+  } catch { return []; }
+}
+
 export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId: string, now: () => Date = () => new Date()): Promise<StageRunResult> {
   const problemRoot = layoutPath(scope.workspaceRoot, 'problems', scope.problemId);
   const ctx = { workspaceRoot: scope.workspaceRoot, problemRoot, problemId: scope.problemId };
@@ -60,7 +73,7 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).', outputs: [] };
   const who: Actor = { kind: 'agent', name: role, host: 'VS Code' };
   try {
-    const a: Assignment = assignmentFor(scope, stageId, await engine.listTools()).assignment!;
+    const a: Assignment = assignmentFor(scope, stageId, await engine.listTools(), { gaps: await stageGaps(engine, problemRoot, stage.kind, stage.title) }).assignment!;
     if (stage.record.status !== 'in-progress' && stage.record.status !== 'awaiting-approval') {
       const started = startStage(ctx, stageId, who, 'panel');
       if (started.warning) host.log(started.warning);

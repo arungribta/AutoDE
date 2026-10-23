@@ -6,8 +6,19 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
-## Unreleased (ships with v0.45.9)
+## 0.45.9
 
+- **SIMP-3: the plan of steps is removed** (owner, 2026-10-22; roadmap decision log). The workflow has been the only path since v0.45.1; the code behind the old path is now gone too.
+- **Removed:**
+  - `PlanManager` and the problem's `plan/` folder (no longer written; an existing one is left alone and ignored);
+  - `AgentHub`'s plan generation, validation, execution, pause and re-plan; phase inference (`phaseInference.ts`); the Snowflake check executor (`snowflakeExecutor`), the plan's only remaining agent;
+  - the plan's types (`PlanState`, `PlanStep`, `PersistedPlan`, `InferredPhase` …) and the panel's plan messages;
+  - the commands *Generate Plan*, *Execute Plan* and *Reset Session*;
+  - **the AutoDE Dashboard panel** (owner's choice). Everything it showed came from the plan's phases and steps; the Workflow view shows progress and each stage's outputs.
+
+  `AgentHub` went from 1,751 lines to 746: it now holds the specification, chat and the model with tools.
+- **The sidebar's next step after the specification is Open Workflow.** `/plan`, `/execute` and `/workflow` open the Workflow view; the stop button (it paused plan runs) is gone.
+- **Context gaps are in the stage's assignment.** They used to pause a plan step. A mapping, modelling, build, quality-rules, conformance or validation stage now gets the joins, keys, grain and object structure its context can't back, each with its question, in a *Context gaps* section of its assignment (`Assignment.contextGaps`). The agent is told not to infer them: ask the person, propose the fact, or record the gap as open in its deliverable, which the person approving the stage sees. Nothing pauses. It is the same on every surface: `autode_workflow_next` builds the gaps from the server's context, and Run agent gets them through `autode_context_pack` (`src/engine/agents/stageGaps.ts`).
 - **Run agent checks that a stage can be done before calling the model** (owner's UI test of the sample: Run agent on Mapping "failed"). The mapper had run on an estate with no tables, and could only write notes saying so. Three fixes:
   - **Readiness.** Mapping, quality rules and conformance need tables in the estate. Modelling and the build need mappings in the mapping document. The check is deterministic: it reads the compiled estate graph and the problem's documents, and calls no model. It applies everywhere:
     - **Run agent** refuses with what to do (for mapping: Run agent on Source assessment, Ingest File, or `autode estate ingest` / `autode estate extract`);
@@ -15,7 +26,7 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
     - **`autode_workflow_next`** returns `notReady`, and the orchestrator skill tells the user instead of starting the agent.
   - **A document stage is drafted only when its document is.** A run that recorded only notes used to say "drafted, approve it". It now reports that the document (for example `context/source-context.yaml`) was not drafted, with the agent's reply.
   - **The business-context file is no longer a source system.** Re-keying the terms of `business-context.yaml` registered that file in the estate as a source system. As a result, the workflow planned a source stage for it, and the estate counted it as a source. Knowledge-file origins now never create a system, and a system bound only to `business-context.yaml` or `verified-queries.yaml` (in estates written before this fix) is not counted as a source.
-- **Measured:** 382 tests (1 new: refused before the model, with the fix named; notes-only document runs; the knowledge-file system). The v0.45.1 test now expects no Run agent on a build with no mappings. Lint 0 errors.
+- **Measured:** 352 tests. 31 tests of the plan, phase inference and `PlanManager` were removed with them; 2 are new (the readiness check; the plan's removal and the gaps in assignments), and the hub's reset test was rewritten. Tests that read old agents' names out of `agentHub.ts` now check that they are gone. Lint 0 errors. Eval unchanged (its plan-step context figure measures the pack, which stays).
 
 ## 0.45.8
 

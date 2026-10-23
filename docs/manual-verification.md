@@ -811,7 +811,7 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: read §4 of the engineering onboarding guide.
   Expect: the concepts table, how they fit, what is internal, and what is being simplified.
 
-## Part 34 — Readiness before Run agent
+## Part 34 — v0.45.9 Readiness before Run agent; the plan removed
 
 - [ ] **34.1 Nothing to map.**
   Do: in a workspace with no tables in the estate (only business-context.yaml), open the Workflow view on a problem at its Mapping stage.
@@ -825,6 +825,14 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 - [ ] **34.4 Over MCP.**
   Do: ask Claude Code to continue the problem at its Mapping stage with no tables.
   Expect: it tells you what's missing and doesn't start the mapper.
+- [ ] **34.5 No plan left.**
+  Do: open AutoDE after updating; approve a specification; type `/plan`.
+  Expect:
+  - no AutoDE Dashboard panel, and no Generate Plan, Execute Plan or Reset Session in the Command Palette;
+  - after approval the sidebar offers Open Workflow, and `/plan` opens the Workflow view.
+- [ ] **34.6 Gaps in the assignment.**
+  Do: with an estate where two tables have no known join, write a specification that combines them (for example "support tickets per order") and Run agent on its mapping stage, or ask Claude Code to continue the problem.
+  Expect: the agent's instructions have a *Context gaps* section with the question about the join; the agent asks you or records it as open; nothing pauses.
 
 ## Results
 
@@ -1023,5 +1031,7 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 34.2 |  |  |
 | 34.3 |  |  |
 | 34.4 |  |  |
+| 34.5 |  |  |
+| 34.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

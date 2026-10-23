@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { AgentExecutionContext, AgentExecutionResult, EngineToolSet, PlanStep, ToolExecutionMode, ToolSkillDefinition } from '../../engine/types';
+import { AgentExecutionContext, AgentExecutionResult, EngineToolSet, ToolExecutionMode, ToolSkillDefinition } from '../../engine/types';
 import { resolveAllowedToolNames, toolModeCeiling } from '../../engine/skills/toolAllowList';
 import { TrustTier, isClaudeCliEligible, minMode, notRunnableReason, resolveSkillVersion, tierModeCeiling } from '../../engine/skills/lifecycle';
 import { layoutPath, layoutRel } from '../../engine/workspaceLayout';
@@ -35,7 +35,10 @@ import { layoutPath, layoutRel } from '../../engine/workspaceLayout';
  * loop and is offered none.
  */
 
-export async function executeToolSkillAgent(step: PlanStep, context: AgentExecutionContext): Promise<AgentExecutionResult> {
+/** What to run: the skill (and pinned version) and the instruction; the context's own values are the fallback. */
+export interface ToolSkillRun { skillId?: string; skillVersion?: number; taskDescription?: string }
+
+export async function executeToolSkillAgent(step: ToolSkillRun, context: AgentExecutionContext): Promise<AgentExecutionResult> {
   const skillId = step.skillId ?? context.skillId;
   if (!skillId) {
     return { success: false, message: 'No skill specified for this step.', error: 'toolSkillAgent requires a skillId.' };

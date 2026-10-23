@@ -99,14 +99,8 @@ function clearAdapterCache() {
 }
 function freshAdapter(mock) { clearAdapterCache(); return withMock(mock, () => require('../dist/core/languageModelAdapter.js')); }
 
-/**
- * Builds a fresh, consented DataAgentHubHub whose configured LLM always returns `responseText`.
- * Pre-satisfies the v0.13.0 orchestrator gate (an active spec + approved context) so tests that
- * call the raw `hub.generatePlan()` to exercise plan-generation/validation logic directly don't
- * also have to stand up a full spec-approval/context-approval fixture just to get past the gate —
- * that gate itself is covered separately (see the "generatePlan() orchestrator gate" tests).
- */
-function hubForPlanResponse(responseText) {
+/** Builds a fresh, consented DataAgentHubHub whose configured LLM always returns `responseText`. */
+function hubWithResponse(responseText) {
   const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
     sendRequest: async () => ({ text: textIter(responseText) }) };
   const mock = createMock({ models: [model] });
@@ -115,7 +109,6 @@ function hubForPlanResponse(responseText) {
   const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
   const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
   hub.setSpec('bps-test', 1);
-  hub.setContextGateReady(true);
   return { hub, mock };
 }
 
@@ -312,34 +305,6 @@ async function main() {
     assert.strictEqual(t, '[{"id":"step-1"}]');
   });
 
-  await test('generatePlan() blocks without consent', async () => {
-    const mock = createMock();
-    clearAdapterCache();
-    const { DataAgentHubHub } = withMock(mock, () => fresh('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: false, copilotProgrammaticConsent: false, defaultProvider: 'snowflake' }));
-    hub.setSpec('bps-test', 1);
-    hub.setContextGateReady(true);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')),
-      /programmatic use of a local language model is not enabled/i);
-  });
-
-  await test('generatePlan() with consent', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
-    const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
-      sendRequest: async () => ({ text: textIter(plan) }) };
-    const mock = createMock({ models: [model] });
-    // Clear both agentHub and adapter caches so the new mock is used.
-    delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    clearAdapterCache();
-    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
-    hub.setSpec('bps-test', 1);
-    hub.setContextGateReady(true);
-    const steps = await withMock(mock, () => hub.generatePlan('build'));
-    assert.strictEqual(steps.length, 1);
-    assert.strictEqual(steps[0].id, 's');
-  });
-
   await test('activate() registers subscriptions', () => {
     const mock = createMock();
     withMock(mock, () => {
@@ -351,100 +316,6 @@ async function main() {
   });
 
   // ── Spec-driven phase inference (pure module) ──
-  await test('inferPhases() flags discover/model/build for an ingestion+modeling spec', () => {
-    const { inferPhases } = require('../dist/core/phaseInference.js');
-    const phases = inferPhases({
-      id: 'bps-1', version: 1, status: 'approved',
-      problemStatement: 'Load raw sales events from our source systems into Snowflake and build dbt pipelines.',
-      objectives: ['ingest ordering events', 'build curated marts'],
-      successCriteria: ['pipeline runs daily'],
-      scope: { in: ['source assessment'], out: [] },
-      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    });
-    const required = phases.filter((p) => p.required).map((p) => p.phase);
-    assert.deepStrictEqual(required, ['discover', 'model', 'build']);
-    assert.strictEqual(phases.find((p) => p.phase === 'discover').reason.includes('source'), true);
-  });
-
-  await test('inferPhases() honors scope.out exclusions that veto evidence', () => {
-    const { inferPhases } = require('../dist/core/phaseInference.js');
-    const phases = inferPhases({
-      id: 'bps-2', version: 1, status: 'approved',
-      problemStatement: 'Design a dimensional star schema for the analytics team.',
-      objectives: ['create star schema marts'],
-      successCriteria: ['model approved'],
-      scope: { in: [], out: ['no pipelines', 'no documentation'] },
-      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    });
-    const required = phases.filter((p) => p.required).map((p) => p.phase);
-    assert.deepStrictEqual(required, ['model']);
-  });
-
-  await test('inferPhases() defaults to the full workflow when nothing matches', () => {
-    const { inferPhases } = require('../dist/core/phaseInference.js');
-    const phases = inferPhases({
-      id: 'bps-3', version: 1, status: 'approved',
-      problemStatement: 'We need to understand our data better.',
-      objectives: ['review the landscape'],
-      successCriteria: ['walkthrough complete'],
-      scope: { in: [], out: [] },
-      constraints: [], assumptions: [], domain: 'general', createdAt: '', updatedAt: ''
-    });
-    assert.deepStrictEqual(phases.filter((p) => p.required).map((p) => p.phase), ['discover', 'model', 'build', 'validate']);
-  });
-
-  await test('computePhaseStatuses() tracks live status across the phase chain', () => {
-    const { inferPhases, computePhaseStatuses } = require('../dist/core/phaseInference.js');
-    const base = inferPhases({
-      id: 'bps-4', version: 1, status: 'approved',
-      problemStatement: 'Ingest raw source data, transform it into dimensional marts, build dbt pipelines, and add validation tests and documentation.',
-      objectives: [], successCriteria: [], scope: { in: [], out: [] },
-      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    });
-    const pendingAll = computePhaseStatuses(base, [], 'discover');
-    assert.ok(pendingAll.every((p) => (p.required ? p.status === 'pending' : p.status === 'unrequired')));
-
-    const plan = [
-      { id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'x', status: 'completed', phase: 'discover' },
-      { id: 's2', assignedAgent: 'dataModelerAgent', taskDescription: 'x', status: 'completed', phase: 'model' },
-      { id: 's3', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', status: 'pending', phase: 'build' },
-      { id: 's4', assignedAgent: 'architectureAgent', taskDescription: 'x', status: 'pending', phase: 'validate' }
-    ];
-    const live = computePhaseStatuses(base, plan, 'build');
-    const byPhase = (ph) => live.find((p) => p.phase === ph).status;
-    assert.strictEqual(byPhase('discover'), 'completed');
-    assert.strictEqual(byPhase('model'), 'completed');
-    assert.strictEqual(byPhase('build'), 'pending');
-    assert.strictEqual(byPhase('validate'), 'blocked');
-  });
-
-  await test('generatePlanFromSpec() infers phases and tags plan steps', async () => {
-    const plan = JSON.stringify([
-      { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'build ingestion pipeline', dependsOn: [], validationRules: [] },
-      { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'scaffold the dbt marts', dependsOn: ['s1'], validationRules: [] }
-    ]);
-    const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
-      sendRequest: async () => ({ text: textIter(plan) }) };
-    const mock = createMock({ models: [model] });
-    delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    clearAdapterCache();
-    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
-    const spec = {
-      id: 'bps-it', version: 3, status: 'approved', problemStatementApproved: true,
-      problemStatement: 'Ingest raw sales channel source data and load dbt pipelines, then document the results.',
-      objectives: ['ingest channel data'], successCriteria: ['pipeline runs'],
-      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    };
-    hub.setContextGateReady(true);
-    await withMock(mock, () => hub.generatePlanFromSpec(spec));
-    const state = hub.getPlan();
-    assert.ok(state.inferredPhases.length === 4, 'all four phases present');
-    assert.strictEqual(state.inferredPhases.find((p) => p.phase === 'build').required, true);
-    assert.strictEqual(state.steps[0].phase, 'build');
-    assert.strictEqual(state.steps[1].phase, 'build');
-    assert.strictEqual(state.specVersion, 3);
-  });
 
   // ── Agentic spec generation (Phase A: skills registry + SpecOps engine) ──
   const nodePath = require('node:path');
@@ -1410,166 +1281,6 @@ async function main() {
     assert.ok(/mixed evidence/i.test(mixed.reason));
   });
 
-  await test('inferPhases() forces discover for brownfield unless excluded by scope.out', () => {
-    const { inferPhases } = require('../dist/core/phaseInference.js');
-    const base = { id: 'b', version: 1, status: 'approved', problemStatement: 'Build dbt models and orchestrate them with Airflow.', objectives: ['Transform data into star schema marts.'], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: '' };
-
-    const withoutType = inferPhases(base);
-    assert.strictEqual(withoutType.find((p) => p.phase === 'discover').required, false);
-
-    const brownfield = inferPhases(base, 'brownfield');
-    const discoverPhase = brownfield.find((p) => p.phase === 'discover');
-    assert.strictEqual(discoverPhase.required, true);
-    assert.ok(/brownfield implementation/i.test(discoverPhase.reason));
-
-    const excluded = inferPhases({ ...base, scope: { in: [], out: ['no source assessment'] } }, 'brownfield');
-    assert.strictEqual(excluded.find((p) => p.phase === 'discover').required, false, 'explicit scope.out exclusion still wins over the brownfield default');
-  });
-
-  await test('validatePlanResponse() rejects malformed JSON', async () => {
-    const { hub, mock } = hubForPlanResponse('not json at all');
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /LLM returned invalid JSON/i);
-  });
-
-  await test('validatePlanResponse() rejects a JSON object instead of an array', async () => {
-    const { hub, mock } = hubForPlanResponse(JSON.stringify({ id: 's' }));
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /did not produce a JSON array/i);
-  });
-
-  await test('validatePlanResponse() rejects an invalid assignedAgent', async () => {
-    const bad = JSON.stringify([{ id: 's', assignedAgent: 'notARealAgent', taskDescription: 'x', dependsOn: [] }]);
-    const { hub, mock } = hubForPlanResponse(bad);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /invalid assignedAgent/i);
-  });
-
-  await test('validatePlanResponse() rejects a step with no taskDescription', async () => {
-    const bad = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: '   ', dependsOn: [] }]);
-    const { hub, mock } = hubForPlanResponse(bad);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /does not include a taskDescription/i);
-  });
-
-  await test('validatePlanResponse() rejects duplicate step IDs', async () => {
-    const bad = JSON.stringify([
-      { id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: [] },
-      { id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'b', dependsOn: [] }
-    ]);
-    const { hub, mock } = hubForPlanResponse(bad);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /duplicate step ID/i);
-  });
-
-  await test('validatePlanResponse() rejects a dependency on a missing step ID', async () => {
-    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: ['ghost'] }]);
-    const { hub, mock } = hubForPlanResponse(bad);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /depends on missing step IDs/i);
-  });
-
-  await test('validatePlanResponse() rejects a step that depends on itself', async () => {
-    const bad = JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: ['s1'] }]);
-    const { hub, mock } = hubForPlanResponse(bad);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /cannot depend on itself/i);
-  });
-
-  await test('validatePlanResponse() rejects a multi-step circular dependency', async () => {
-    const bad = JSON.stringify([
-      { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'a', dependsOn: ['s2'] },
-      { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'b', dependsOn: ['s1'] }
-    ]);
-    const { hub, mock } = hubForPlanResponse(bad);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build')), /circular dependency/i);
-  });
-
-  await test('validatePlanResponse() tolerates a markdown-fenced JSON array', async () => {
-    const plan = '```json\n' + JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [] }]) + '\n```';
-    const { hub, mock } = hubForPlanResponse(plan);
-    const steps = await withMock(mock, () => hub.generatePlan('build'));
-    assert.strictEqual(steps.length, 1);
-    assert.strictEqual(steps[0].id, 's1');
-  });
-
-  await test('validatePlanResponse() rejects a step outside the required phases', async () => {
-    const outOfPhase = JSON.stringify([{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'load the tables', dependsOn: [] }]);
-    const { hub, mock } = hubForPlanResponse(outOfPhase);
-    const spec = {
-      id: 'bps-1', version: 1, status: 'approved', problemStatementApproved: true,
-      problemStatement: 'Assess the existing source systems and document what they hold.',
-      objectives: ['An inventory of the source systems.'], successCriteria: [], scope: { in: [], out: [] },
-      constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    };
-    await assert.rejects(() => withMock(mock, () => hub.generatePlanFromSpec(spec)), /not among the required phases/i);
-  });
-
-  await test('computePhaseStatuses() shows pending-review for a freshly generated, not-yet-run plan', () => {
-    const { computePhaseStatuses } = require('../dist/core/phaseInference.js');
-    const phases = [
-      { phase: 'discover', label: 'Discover', required: true, status: 'pending', reason: 'r', dependsOn: [] },
-      { phase: 'build', label: 'Build', required: true, status: 'pending', reason: 'r', dependsOn: ['discover'] },
-      { phase: 'validate', label: 'Validate', required: false, status: 'pending', reason: 'r', dependsOn: [] }
-    ];
-    const steps = [
-      { id: 's1', assignedAgent: 'sourceAssessmentAgent', taskDescription: 'x', status: 'pending', phase: 'discover' },
-      { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'y', status: 'pending', phase: 'build', dependsOn: ['s1'] }
-    ];
-    const readyResult = computePhaseStatuses(phases, steps, undefined, 'ready');
-    assert.strictEqual(readyResult.find((p) => p.phase === 'discover').status, 'pending-review', 'required phase awaits review before anything has run');
-    assert.strictEqual(readyResult.find((p) => p.phase === 'build').status, 'pending-review', 'even a dependency-blocked phase reads as review-pending, not blocked, before execution starts');
-    assert.strictEqual(readyResult.find((p) => p.phase === 'validate').status, 'unrequired');
-
-    const runningResult = computePhaseStatuses(phases, steps, undefined, 'running');
-    assert.strictEqual(runningResult.find((p) => p.phase === 'discover').status, 'pending', 'once execution has started, phases use the normal pending/blocked lifecycle');
-    assert.strictEqual(runningResult.find((p) => p.phase === 'build').status, 'blocked', 'build genuinely is blocked on discover mid-execution');
-  });
-
-  await test('snowflakeExecutor degrades gracefully instead of failing when there is no target connection', async () => {
-    const plan = JSON.stringify([
-      { id: 'snowflake-check', assignedAgent: 'snowflakeExecutor', taskDescription: 'Validate against Snowflake', dependsOn: [], validationRules: [] }
-    ]);
-    const { hub, mock } = hubForPlanResponse(plan);
-    hub.inferPhasesFromSpec({
-      id: 'bps-test', version: 1, status: 'approved', implementationType: 'brownfield',
-      problemStatement: 'Assess the existing source system and build an ingestion pipeline.', objectives: [], successCriteria: [],
-      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    });
-    await withMock(mock, () => hub.generatePlan('build a pipeline', 'Known: three source tables from the registered data contract.'));
-    hub.approvePlan();
-    hub.confirmStages();
-
-    await withMock(mock, () => hub.executePlan());
-
-    const finalState = hub.getPlan();
-    const snowflakeStep = finalState.steps.find((s) => s.id === 'snowflake-check');
-    assert.strictEqual(snowflakeStep.status, 'completed', 'snowflake validation is skipped, not failed, when there is no connection');
-    assert.strictEqual(finalState.status, 'completed', 'the plan completes even though nothing could actually reach Snowflake');
-
-    const artifacts = finalState.artifacts || [];
-    const snowflakeArtifact = artifacts.find((a) => a.generatedBy === 'snowflakeExecutor');
-    assert.ok(snowflakeArtifact, 'the unexecuted validation query was saved as an artifact for manual review');
-    assert.ok(/not executed/i.test(snowflakeArtifact.content));
-  });
-
-  await test('setPhaseOverride() flips a phase and survives a subsequent re-inference', async () => {
-    const mock = createMock();
-    delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
-
-    const spec = {
-      id: 'bps-1', version: 1, status: 'approved',
-      problemStatement: 'Build dbt pipelines and load into the warehouse.',
-      objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [],
-      createdAt: '', updatedAt: ''
-    };
-    hub.inferPhasesFromSpec(spec);
-    assert.strictEqual(hub.getInferredPhases().find((p) => p.phase === 'discover').required, false, 'discover is not inferred as required from this spec');
-
-    const overridden = hub.setPhaseOverride('discover', true);
-    assert.strictEqual(overridden.find((p) => p.phase === 'discover').required, true);
-    assert.strictEqual(overridden.find((p) => p.phase === 'discover').reason, 'Manually set by user.');
-
-    // Re-running inference (e.g. after a spec revision) must not silently drop the override.
-    hub.inferPhasesFromSpec(spec);
-    assert.strictEqual(hub.getInferredPhases().find((p) => p.phase === 'discover').required, true, 'override survives a subsequent re-inference');
-  });
-
   await test('buildTargetContextQuestions() suggests defaults from spec text and flags when nothing matched', () => {
     const { buildTargetContextQuestions } = require('../dist/core/targetContextQuestions.js');
     const base = { id: 'b', version: 1, status: 'approved', problemStatement: '', objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: '' };
@@ -1785,60 +1496,6 @@ async function main() {
     assert.strictEqual(ctx.sources[0].method, 'connected');
     assert.strictEqual(ctx.sources[0].platform, 'snowflake');
     assert.strictEqual(ctx.sources[0].connectionSummary.tableCount, 5);
-  });
-
-  await test('PlanManager persists plans with version history across versions and reloads', async () => {
-    function fsMapMock() {
-      const store = new Map();
-      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
-      const m = {
-        Uri: {
-          file: (p) => ({ fsPath: p }),
-          joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') })
-        },
-        workspace: {
-          fs: {
-            createDirectory: async () => {},
-            readFile: async (uri) => { const v = store.get(keyOf(uri)); if (v === undefined) throw new Error('ENOENT'); return Buffer.from(v, 'utf8'); },
-            writeFile: async (uri, buf) => { store.set(keyOf(uri), buf.toString('utf8')); },
-            rename: async (a, b) => { store.set(keyOf(b), store.get(keyOf(a))); store.delete(keyOf(a)); }
-          }
-        }
-      };
-      m.__store = store;
-      return m;
-    }
-    const mock = fsMapMock();
-    try { delete require.cache[require.resolve('../dist/context/PlanManager.js')]; } catch { /* not loaded */ }
-    const { PlanManager } = withMock(mock, () => require('../dist/context/PlanManager.js'));
-    const ws = { fsPath: '/ws' };
-    const mgr = new PlanManager(ws, () => {});
-    await withMock(mock, () => mgr.initialize());
-    assert.strictEqual(mgr.getPlan(), undefined, 'nothing persisted yet');
-
-    const base = {
-      id: 'plan-1', specId: 'bps-1', specVersion: 1, implementationType: 'greenfield',
-      objective: 'do the thing', schemaContext: '', status: 'ready',
-      steps: [{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 't', status: 'pending', dependsOn: [], validationRules: [] }],
-      inferredPhases: undefined, targetEnvironment: undefined, generationReason: 'initial'
-    };
-    const saved1 = await withMock(mock, () => mgr.savePlan(base));
-    assert.strictEqual(saved1.version, 1);
-
-    const saved2 = await withMock(mock, () => mgr.savePlan(Object.assign({}, base, { status: 'failed', generationReason: 're-plan' })));
-    assert.strictEqual(saved2.version, 2);
-    assert.strictEqual(saved2.createdAt, saved1.createdAt, 'createdAt is preserved across versions of the same lineage');
-
-    const mgr2 = new PlanManager(ws, () => {});
-    await withMock(mock, () => mgr2.initialize());
-    const loaded = mgr2.getPlan();
-    assert.strictEqual(loaded.version, 2);
-    assert.strictEqual(loaded.status, 'failed');
-    assert.strictEqual(loaded.steps[0].id, 's1');
-
-    const historyKeys = Array.from(mock.__store.keys()).filter((k) => k.includes('/plan/history/'));
-    assert.strictEqual(historyKeys.length, 1);
-    assert.ok(historyKeys[0].endsWith('plan.v1.ready.yaml'), historyKeys[0]);
   });
 
   await test('SynthesisPipeline.synthesizeFromSpec() derives graph nodes with spec provenance and re-syncs cleanly', async () => {
@@ -2083,177 +1740,17 @@ async function main() {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  await test('resetForNewProblem() fully clears spec identity and phase/implementation state (not just plan state)', () => {
-    const { hub } = hubForPlanResponse('irrelevant');
+  await test('resetForNewProblem() clears spec identity and the target, so nothing leaks into the next business problem', () => {
+    const { hub } = hubWithResponse('irrelevant');
     hub.setSpec('bps-old', 3);
-    const spec = {
-      id: 'bps-old', version: 3, status: 'approved',
-      problemStatement: 'Build dbt pipelines and load into the warehouse.',
-      objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [],
-      implementationType: 'greenfield',
-      createdAt: '', updatedAt: ''
-    };
-    hub.inferPhasesFromSpec(spec);
-    hub.setTargetEnvironment({ platform: 'snowflake' });
-
-    let plan = hub.getPlan();
-    assert.strictEqual(plan.specId, 'bps-old');
-    assert.ok(plan.inferredPhases && plan.inferredPhases.length > 0);
-    assert.strictEqual(plan.implementationType, 'greenfield');
-
+    hub.setTargetEnvironment({ platform: 'snowflake', environmentProfile: 'development', modelingApproach: 'dimensional', transformationTool: 'dbt', orchestrationTool: 'airflow', outputFormats: [], platformConfig: {} });
+    assert.strictEqual(hub.currentSpecId(), 'bps-old');
     hub.resetForNewProblem();
-    plan = hub.getPlan();
-    assert.strictEqual(plan.specId, undefined, 'spec identity must not leak into the next business problem');
-    assert.strictEqual(plan.specVersion, undefined);
-    assert.strictEqual(plan.inferredPhases, undefined, 'inferred phases must not leak');
-    assert.strictEqual(plan.implementationType, undefined, 'implementation type must not leak');
-    assert.strictEqual(plan.targetEnvironment, undefined, 'target environment must not leak');
-    assert.strictEqual(plan.status, 'idle');
-    assert.deepStrictEqual(plan.steps, []);
+    assert.strictEqual(hub.currentSpecId(), undefined, 'spec identity must not leak into the next business problem');
+    assert.strictEqual(hub.getTargetEnvironment(), undefined, 'target environment must not leak');
   });
 
   // ── Lifecycle Orchestration (v0.13.0) — requirements.md §8.12 ──
-  await test('generatePlan() orchestrator gate blocks a caller with no active, context-ready business problem', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
-    const model = { id: 'copilot-4o', family: 'gpt-4o', vendor: 'copilot', version: '1', name: 'Copilot-4o', maxInputTokens: 128000,
-      sendRequest: async () => ({ text: textIter(plan) }) };
-    const mock = createMock({ models: [model] });
-    delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    clearAdapterCache();
-    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
-
-    // No spec, no context-gate signal — this is the state every one of the legacy
-    // ungated entry points (Command Palette, AutoDE Dashboard panel, /plan with no
-    // spec, re-plan buttons) left the hub in before v0.13.0.
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build a pipeline')),
-      /requires an approved Business Problem Specification/i);
-
-    // Spec identity alone isn't enough — context still has to be ready.
-    hub.setSpec('bps-1', 1);
-    await assert.rejects(() => withMock(mock, () => hub.generatePlan('build a pipeline')),
-      /requires an approved Business Problem Specification/i);
-
-    // Once both are satisfied, the same call succeeds — this is the orchestrator's
-    // one enforcement point, not a per-caller check the UI has to remember to run.
-    hub.setContextGateReady(true);
-    const steps = await withMock(mock, () => hub.generatePlan('build a pipeline'));
-    assert.strictEqual(steps.length, 1);
-  });
-
-  await test('generatePlanFromSpec() enforces spec approval, business-problem confirmation, and context readiness independently', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
-    const { hub, mock } = hubForPlanResponse(plan);
-    const baseSpec = {
-      id: 'bps-1', version: 1, problemStatement: 'Build a dbt pipeline.',
-      objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    };
-
-    hub.setContextGateReady(true);
-    await assert.rejects(
-      () => withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'draft', problemStatementApproved: true })),
-      /Approve the Business Problem Specification/i,
-      'an unapproved spec is rejected even with context ready'
-    );
-    await assert.rejects(
-      () => withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'approved', problemStatementApproved: false })),
-      /Confirm the inferred business problem/i,
-      'an approved spec whose business-problem checkpoint was never confirmed is rejected'
-    );
-
-    hub.setContextGateReady(false);
-    await assert.rejects(
-      () => withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'approved', problemStatementApproved: true })),
-      /blocked until Source\/Target Context/i,
-      'an otherwise-ready spec is still rejected while Source/Target Context is not'
-    );
-
-    hub.setContextGateReady(true);
-    await withMock(mock, () => hub.generatePlanFromSpec({ ...baseSpec, status: 'approved', problemStatementApproved: true }));
-    assert.strictEqual(hub.getPlan().steps.length, 1, 'succeeds once all three preconditions hold');
-  });
-
-  await test('executePlan() requires an explicit Plan Approval and Stage Confirmation, independently of each other', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
-    const { hub, mock } = hubForPlanResponse(plan);
-    hub.inferPhasesFromSpec({
-      id: 'bps-test', version: 1, status: 'approved', implementationType: 'greenfield',
-      problemStatement: 'Build a dbt pipeline.', objectives: [], successCriteria: [],
-      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    });
-    await withMock(mock, () => hub.generatePlan('build a pipeline'));
-
-    await assert.rejects(() => withMock(mock, () => hub.executePlan()), /Approve the plan/i, 'neither gate satisfied yet');
-
-    hub.approvePlan();
-    await assert.rejects(() => withMock(mock, () => hub.executePlan()), /Confirm the applicable stages/i, 'plan approved but stages not confirmed');
-
-    hub.confirmStages();
-    await withMock(mock, () => hub.executePlan());
-    assert.strictEqual(hub.getPlan().status, 'completed', 'runs once both gates are satisfied');
-
-    // Re-planning invalidates both — a regenerated plan needs its own approval/confirmation.
-    await withMock(mock, () => hub.generatePlan('build a different pipeline'));
-    assert.strictEqual(hub.getPlan().planApproved, false, 're-planning resets Plan Approval');
-    assert.strictEqual(hub.getPlan().stagesConfirmed, false, 're-planning resets Stage Confirmation');
-  });
-
-  await test('setPhaseOverride() invalidates a prior Stage Confirmation', async () => {
-    const plan = JSON.stringify([{ id: 's', assignedAgent: 'snowflakeExecutor', taskDescription: 'x', dependsOn: [], validationRules: [] }]);
-    const { hub, mock } = hubForPlanResponse(plan);
-    hub.inferPhasesFromSpec({
-      id: 'bps-test', version: 1, status: 'approved', implementationType: 'greenfield',
-      problemStatement: 'Build a dbt pipeline.', objectives: [], successCriteria: [],
-      scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: '', updatedAt: ''
-    });
-    await withMock(mock, () => hub.generatePlan('build a pipeline'));
-    hub.approvePlan();
-    hub.confirmStages();
-    assert.strictEqual(hub.getPlan().stagesConfirmed, true);
-
-    hub.setPhaseOverride('validate', true);
-    assert.strictEqual(hub.getPlan().stagesConfirmed, false, 'changing phase applicability invalidates the prior confirmation');
-    assert.strictEqual(hub.getPlan().planApproved, true, 'Plan Approval itself is untouched by a phase override');
-  });
-
-  await test('PlanManager.patchGates() persists Plan Approval / Stage Confirmation without bumping the plan version', async () => {
-    const os = require('node:os');
-    const path = require('node:path');
-    const fs = require('node:fs');
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-plan-gates-'));
-    const contextRoot = { fsPath: tmpRoot, toString: () => tmpRoot };
-    const mock = createMock();
-    mock.workspace.fs.createDirectory = async (uri) => { fs.mkdirSync(uri.fsPath, { recursive: true }); };
-    mock.workspace.fs.writeFile = async (uri, buf) => { fs.writeFileSync(uri.fsPath, buf); };
-    mock.workspace.fs.rename = async (a, b) => { fs.renameSync(a.fsPath, b.fsPath); };
-    mock.workspace.fs.readFile = async (uri) => { try { return fs.readFileSync(uri.fsPath); } catch { throw new Error('ENOENT'); } };
-    mock.workspace.fs.stat = async (uri) => { if (fs.existsSync(uri.fsPath)) return {}; throw new Error('ENOENT'); };
-
-    delete require.cache[require.resolve('../dist/context/PlanManager.js')];
-    const { PlanManager } = withMock(mock, () => require('../dist/context/PlanManager.js'));
-    const mgr = new PlanManager(contextRoot, () => {});
-    await withMock(mock, () => mgr.initialize());
-    await withMock(mock, () => mgr.savePlan({
-      id: 'plan-1', objective: 'x', schemaContext: '', status: 'ready', steps: [], generationReason: 'initial'
-    }));
-    await withMock(mock, () => mgr.patchGates({ planApproved: true, planApprovedAt: 't1' }));
-    await withMock(mock, () => mgr.patchGates({ stagesConfirmed: true, stagesConfirmedAt: 't2' }));
-
-    let current = mgr.getPlan();
-    assert.strictEqual(current.version, 1, 'patching gates does not bump the version');
-    assert.strictEqual(current.planApproved, true);
-    assert.strictEqual(current.stagesConfirmed, true);
-
-    const mgr2 = new PlanManager(contextRoot, () => {});
-    await withMock(mock, () => mgr2.initialize());
-    current = mgr2.getPlan();
-    assert.strictEqual(current.planApproved, true, 'gate fields round-trip through reload');
-    assert.strictEqual(current.planApprovedAt, 't1');
-    assert.strictEqual(current.stagesConfirmed, true);
-    assert.strictEqual(current.stagesConfirmedAt, 't2');
-
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
-  });
 
   await test('SpecManager round-trips implementationType and problemStatementApproved', async () => {
     function mockFs() {
@@ -4393,22 +3890,6 @@ async function main() {
     assert.deepStrictEqual(seen.sort(), ['/ws/.autode/problems/p1/context/source-context.yaml', '/ws/.autode/problems/p1/spec/business-problem.yaml']);
   });
 
-  await test('v0.25.0: AgentHub.pauseForExternalChange() only arms a pause while a run is in progress', async () => {
-    const mock = createMock();
-    delete require.cache[require.resolve('../dist/core/agentHub.js')];
-    const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
-    const logs = [];
-    const hub = new DataAgentHubHub(fakeCm({}));
-    hub.setLogListener((m) => logs.push(m));
-    hub.pauseForExternalChange('spec changed');
-    assert.strictEqual(hub.executionPaused, false, 'idle hub: nothing to pause');
-    assert.strictEqual(logs.length, 0);
-    hub.state.status = 'running';
-    hub.pauseForExternalChange('spec changed');
-    assert.strictEqual(hub.executionPaused, true);
-    assert.ok(logs.some((m) => m.includes('spec changed') && m.includes('after the current step')));
-  });
-
   // ── v0.26.0: engine boundary (docs/mcp-engine-requirements.md §4) ──
   await test('v0.26.0: every dist/engine module loads in plain Node with no vscode module available', () => {
     const nodeFs = require('node:fs');
@@ -5425,40 +4906,6 @@ async function main() {
     } finally { env.cleanup(); }
   });
 
-  await test('v0.30.0: executePlan() gives each step its own pack, writes no duplicate artifacts, builds manifests and a Grounding Report', async () => {
-    const { hub } = hubForPlanResponse('# Architecture\n\nOrders flow from shop.orders into the marts.');
-    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
-    const env = await c3.ledgerFor(c3.graph());
-    try {
-      const built = [];
-      hub.setContextProvider({
-        buildPack: (req) => { const p = buildContextPack(req, c3.sources(env.ledger, env.project())); return p; },
-        sources: () => c3.sources(env.ledger, env.project()),
-        supplementary: () => '## Target Context\nPlatform: snowflake.',
-        specRevision: () => 'sha256:spec'
-      }, (title, pack) => built.push(title));
-      hub.loadPersistedPlan({
-        id: 'p', version: 1, objective: 'revenue', schemaContext: 'GLOBAL DUMP',
-        steps: [
-          { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document shop.orders and shop.refunds.', status: 'pending', dependsOn: [] },
-          { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document crm.support_tickets.', status: 'pending', dependsOn: ['s1'] }
-        ],
-        status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1
-      });
-      await hub.executePlan();
-      assert.deepStrictEqual(built, ['Plan step s1 (snowflakeExecutor)', 'Plan step s2 (snowflakeExecutor)']);
-      const p1 = hub.getStepPack('s1'), p2 = hub.getStepPack('s2');
-      assert.ok(p1.text.includes('shop.refunds') && !p1.text.includes('support_tickets'));
-      assert.ok(p2.text.includes('support_tickets') && !p2.text.includes('shop.refunds'));
-      const arts = hub.getPlan().artifacts;
-      assert.strictEqual(new Set(arts.map((a) => a.id)).size, arts.length, 'no duplicate entries');
-      const manifests = hub.getLastRunManifests();
-      assert.ok(manifests.length >= 2);
-      assert.ok(manifests.every((m) => m.specRevision === 'sha256:spec' && (m.planStepId === 's1' || m.planStepId === 's2') && m.packId));
-      assert.ok(arts.some((a) => a.title === 'Grounding Report' && a.phase === 'validate' && a.content.includes('Identifier grounding rate')));
-    } finally { env.cleanup(); }
-  });
-
   await test('v0.30.0: parseDdl() ignores SQL comments (a trailing "-- A, B, C" used to swallow the next column)', () => {
     const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
     const r = parseDdl('CREATE TABLE shop.orders (\n  status VARCHAR(20) NOT NULL, -- PLACED, SHIPPED, RETURNED\n  channel VARCHAR(20), /* web, app */\n  updated_at TIMESTAMP\n);', '/x.sql');
@@ -6036,28 +5483,6 @@ async function main() {
     cm.setEstateResolver(() => ({ identity: { system: 'shop', environment: 'prod', role: 'source' } }));
     const f = cm.catalogFetcher();
     assert.ok(f.covers('shop', 'prod') && !f.covers('crm', 'prod') && typeof f.lastAltered === 'function');
-  });
-
-  await test('v0.32.0: executePlan() refreshes the working set before the run and prepares each step\'s pack before building it', async () => {
-    const { hub } = hubForPlanResponse('# Architecture\n\nOrders.');
-    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
-    const env = await c3.ledgerFor(c3.graph());
-    try {
-      const calls = [];
-      hub.setContextProvider({
-        beforeRun: async () => { calls.push('beforeRun'); },
-        prepare: async (req) => { calls.push(`prepare:${req.stepId}`); },
-        buildPack: (req) => { calls.push(`build:${req.stepId}`); return buildContextPack(req, c3.sources(env.ledger, env.project())); },
-        sources: () => c3.sources(env.ledger, env.project())
-      });
-      hub.loadPersistedPlan({
-        id: 'p', version: 1, objective: 'x', schemaContext: '',
-        steps: [{ id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] }],
-        status: 'ready', planApproved: true, stagesConfirmed: true
-      });
-      await hub.executePlan();
-      assert.deepStrictEqual(calls, ['beforeRun', 'prepare:s1', 'build:s1']);
-    } finally { env.cleanup(); }
   });
 
   // ---------- v0.33.0: Phase C4a — business-problem pack, discover → validate → ask, conformance ----------
@@ -8038,36 +7463,9 @@ async function main() {
     assert.deepStrictEqual(describeActions([{ tool: 'autode_write_file', input: { path: 'a.sql' }, outcome: 'approved' }, { tool: 'autode_read_file', input: { path: 'b' }, outcome: 'ok' }, { tool: 'autode_run_command', input: { command: 'dbt run' }, outcome: 'denied' }]), ['wrote a.sql']);
   });
 
-  await test('v0.41.0: a plan step with a context gap pauses until the gap is answered or the engineer continues without it', async () => {
-    const { hub } = hubForPlanResponse('# Architecture\n\nTickets per order.');
-    const { buildContextPack } = require('../dist/engine/context/contextPack.js');
-    const env = await c3.ledgerFor(c3.graph());
-    try {
-      hub.setContextProvider({
-        buildPack: (req) => {
-          const p = buildContextPack(req, c3.sources(env.ledger, env.project()));
-          if (req.stepId === 's2') p.manifest.gaps = [{ needed: 'relationship', subject: ['crm.support_tickets', 'shop.orders'], text: 'support tickets ↔ orders', reason: 'absent', minTrust: 'confirmed', stepId: 's2' }];
-          return p;
-        },
-        sources: () => c3.sources(env.ledger, env.project()), supplementary: () => '', specRevision: () => 'sha256:spec'
-      });
-      hub.loadPersistedPlan({ id: 'p', version: 1, objective: 'tickets', schemaContext: '', steps: [
-        { id: 's1', assignedAgent: 'snowflakeExecutor', taskDescription: 'Document shop.orders.', status: 'pending', dependsOn: [] },
-        { id: 's2', assignedAgent: 'snowflakeExecutor', taskDescription: 'Tickets per order.', status: 'pending', dependsOn: ['s1'] }
-      ], status: 'ready', planApproved: true, stagesConfirmed: true, specId: 'retail', specVersion: 1 });
-      await hub.executePlan();
-      let st = hub.getPlan();
-      assert.deepStrictEqual([st.status, st.steps.map((x) => x.status), st.waitingForContext.stepId, st.waitingForContext.gaps[0].needed], ['paused', ['completed', 'pending'], 's2', 'relationship']);
-      hub.continueDespiteGaps('s2');
-      await hub.executePlan();
-      st = hub.getPlan();
-      assert.deepStrictEqual([st.steps.map((x) => x.status), st.waitingForContext], [['completed', 'completed'], undefined]);
-    } finally { env.cleanup(); }
-  });
-
   await test('v0.41.0: the panel has the Context Inbox (facts, conflicts, paused steps, changes) and citation chips', () => {
     const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
-    for (const t of ["case 'inboxState'", "post('reviewFact'", "post('verifyFact'", "post('bulkConfirmFacts'", "post('continueDespiteGaps'", 'Context Inbox', 'fact-chip', "case '/define'"]) assert.ok(html.includes(t), t);
+    for (const t of ["case 'inboxState'", "post('reviewFact'", "post('verifyFact'", "post('bulkConfirmFacts'", 'Context Inbox', 'fact-chip', "case '/define'"]) assert.ok(html.includes(t), t);
   });
 
   await test('v0.40.0: the managers and the engine share one serialisation — a document written by either reads back the same', () => {
@@ -9352,7 +8750,7 @@ async function main() {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const hubSrc = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
     assert.ok(!/executeArchitectureAgent/.test(hubSrc) && !nodeFs.existsSync(nodePath.join(__dirname, '..', 'src', 'agents', 'validate', 'DocumentationAgent.ts')));
-    assert.ok(/architectureAgent: 'Documentation'/.test(hubSrc) && /moved to the workflow/.test(hubSrc));
+    assert.ok(!/architectureAgent/.test(hubSrc), 'v0.45.9: there is no plan of steps left to name it');
     const ignore = nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8');
     assert.ok(ignore.includes('!agents/*.md') && ignore.includes('!skills/*/**'));
     assert.ok(require('../scripts/pack-cli.cjs').CONTENT.includes('agents'));
@@ -9459,8 +8857,10 @@ async function main() {
   await test('v0.45.1: nothing runs outside the workflow — the panel\'s Plan and Execute and /plan and /execute go to the Workflow view; a stage run never re-plans the problem', () => {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const src = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
-    assert.ok(/case 'generatePlan': case 'generatePlanFromSpec': case 'approvePlan': case 'confirmStages': case 'executePlan': \{\s*this\.postLog\('AutoDE now works stage by stage/.test(src));
-    assert.ok(!/this\.hub\.generatePlanFromSpec\(/.test(src) && !/case 'executePlan': \{ await this\.hub\.executePlan/.test(src));
+    // v0.45.9 (SIMP-3): the plan's messages are gone; /plan, /execute and the spec's next step open the Workflow view.
+    assert.ok(!/case 'generatePlan'|case 'executePlan'|hub\.executePlan|hub\.generatePlan/.test(src));
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    assert.ok(/case '\/plan': case '\/execute': case '\/workflow': post\('openWorkflowView'\)/.test(html) && !/post\('(generatePlan|generatePlanFromSpec|executePlan|approvePlan|resetPlan|pausePlan)'/.test(html));
     const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
     assert.ok(!/runStageSteps/.test(hub), 'v0.45.4: no per-stage legacy runs remain');
     const pkg = require('../package.json');
@@ -9580,7 +8980,7 @@ async function main() {
       assert.strictEqual(st().status, 'done');
       for (const f of ['src/agents/discover/SourceAssessmentAgent.ts', 'src/agents/model/SttmMapperAgent.ts', 'src/spokes/sttmAgent.ts', 'src/spokes/ingestionAgent.ts']) assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', f)), f);
       const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
-      assert.ok(/sttmAgent: 'Source-to-target mapping'/.test(hub) && !/executeSttmAgent|executeSourceAssessmentAgent/.test(hub));
+      assert.ok(!/sttmAgent|executeSttmAgent|executeSourceAssessmentAgent/.test(hub));
       void prob;
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
@@ -9625,6 +9025,46 @@ async function main() {
       const cfm = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'engine', 'context', 'contextFileManager.ts'), 'utf8');
       assert.ok(/origin\?\.extractor === 'business-context'[^\n]*UNASSIGNED_SYSTEM/.test(cfm), 'knowledge-file origins never create a system');
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.9: SIMP-3 — the plan of steps is gone (hub, executor, panel, types); context gaps are in the stage assignment, the same over MCP and in Run agent, and nothing pauses on them', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const G = fresh('../dist/engine/agents/stageGaps.js');
+    // Gaps from a pack: joins, keys, grain and structure, once each, and only for stages whose work rests on them.
+    const rel = { needed: 'relationship', subject: ['b', 'a'], text: 'tickets ↔ orders', reason: 'absent', minTrust: 'confirmed' };
+    const listed = G.stageGapsFrom([rel, { ...rel, subject: ['a', 'b'] }, { needed: 'decision', subject: ['x'], text: 'x', reason: 'absent', minTrust: 'documented' }], 'mapping');
+    assert.deepStrictEqual(listed.map((g) => g.needed), ['relationship']);
+    assert.ok(/How are they related/.test(listed[0].question));
+    assert.deepStrictEqual(G.stageGapsFrom([rel], 'document'), []);
+    assert.ok(/Don't infer joins, keys or grain/.test(G.renderStageGaps(listed)) && G.renderStageGaps([]) === '');
+    // From the problem's specification and the estate: tickets per order has no known join.
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-gaps-'));
+    const env = await c3.ledgerFor(c3.graph());
+    try {
+      const { id, prob } = await sourceFlow(ws, cli);
+      const D = fresh('../dist/engine/documents/problemDocuments.js');
+      const spec = D.parseBusinessProblemSpec(D.readProblemDocument(prob, 'spec'));
+      D.writeBusinessProblemSpec(prob, { ...spec, problemStatement: 'Report the number of support tickets per order.' });
+      const gaps = G.stageContextGaps(c3.sources(env.ledger, env.project()), { problemRoot: prob, kind: 'mapping', title: 'Mapping' });
+      assert.ok(gaps.some((g) => g.needed === 'relationship'), JSON.stringify(gaps));
+      // In the assignment: a field and a section of its text.
+      const A = fresh('../dist/engine/agents/assignment.js');
+      const a = A.assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'mapping', [], { gaps }).assignment;
+      assert.ok(a.contextGaps.length === gaps.length && /## Context gaps/.test(a.text), a.text.slice(0, 400));
+      assert.deepStrictEqual(A.assignmentFor({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'mapping', []).assignment.contextGaps, []);
+    } finally { env.cleanup(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    // Over MCP, autode_workflow_next carries them; Run agent takes them from autode_context_pack (same function).
+    const wt = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'mcp', 'workflowTools.ts'), 'utf8');
+    const ex = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentExecutor.ts'), 'utf8');
+    assert.ok(/stageContextGaps\(sources/.test(wt) && /autode_context_pack/.test(ex) && /stageGapsFrom/.test(ex));
+    // The plan of steps is gone.
+    for (const f of ['src/context/PlanManager.ts', 'src/core/phaseInference.ts', 'src/spokes/snowflakeExecutor.ts', 'src/core/panelProvider.ts', 'media/panel.html']) assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', f)), f);
+    const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
+    assert.ok(!/executePlan|generatePlan|PlanStep|inferPhases|setContextProvider/.test(hub));
+    const types = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'engine', 'types.ts'), 'utf8');
+    assert.ok(!/interface PlanState|interface PlanStep|interface PersistedPlan|interface InferredPhase/.test(types));
+    const pkg = require('../package.json');
+    assert.ok(!pkg.contributes.commands.some((c) => /generatePlan|executePlan|resetSession/.test(c.command)) && !pkg.contributes.views.autoDataEngineeringHubPanel && !(pkg.contributes.viewsContainers.panel));
   });
 
   // ---------- v0.45.3: PA3b step 3 — the data modeler ----------
@@ -9717,7 +9157,7 @@ async function main() {
       c = await call('autode_check_model', { model: d.model });
       assert.ok(c.ok, c.errors.join('\n'));
       assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', 'src', 'agents', 'model', 'DataModelerAgent.ts')));
-      assert.ok(/dataModelerAgent: 'Data modelling'/.test(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8')));
+      assert.ok(!/dataModelerAgent/.test(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8')));
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
@@ -9785,7 +9225,7 @@ async function main() {
       // The old agents are gone.
       for (const f of ['src/agents/build/IngestionPipelineAgent.ts', 'src/agents/build/TransformationScaffolderAgent.ts', 'src/agents/llmCodegen.ts', 'src/agents/llmParamSelector.ts']) assert.ok(!nodeFs.existsSync(nodePath.join(__dirname, '..', f)), f);
       const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
-      assert.ok(/ingestionAgent: 'The build'/.test(hub) && /VALID_AGENT_TYPES: AgentType\[\] = \['snowflakeExecutor'\]/.test(hub) && !/runStageSteps/.test(hub));
+      assert.ok(!/ingestionAgent|VALID_AGENT_TYPES|runStageSteps/.test(hub));
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

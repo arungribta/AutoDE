@@ -29,7 +29,7 @@ export class ArtifactWriter {
     // A spec-tagged subfolder (not a filename prefix) so multi-file artifacts —
     // e.g. a dbt project's `dbt_project.yml` — keep the exact filenames external
     // tooling expects, while still recording which spec revision produced them
-    // (needed for stale-artifact detection: PlanState.artifacts is in-memory only
+    // (needed for stale-artifact detection: in-memory artifact lists are
     // and doesn't survive a reload, so the filesystem path is the only durable
     // record of specId/specVersion).
     const versionTag = ArtifactWriter.specTag(artifact);

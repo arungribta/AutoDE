@@ -226,6 +226,8 @@ Every `GeneratedArtifact`, context node (`Origin`), and workflow phase carries `
 
 ### 3.5 Phase inference (no manual step selection)
 
+**Removed in v0.45.9 (SIMP-3).** The plan of steps is gone; the workflow's stages replaced it (§7.9). This section records what it was.
+
 From the approved BPS, AutoDE determines which phases (discover / model / build / validate) are required and their dependencies. The user does **not** select workflow steps; the workflow is inferred and continuously adapted.
 
 **Implemented (v0.6.0).** `src/core/phaseInference.ts` is a pure, deterministic module:
@@ -319,7 +321,7 @@ The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspi
 - **`generatePlan`'s prompt now actually reads the Context Layer.** Previously only `chat`, `discoverNextAction`, and `synthesizeComprehensiveSpec` merged in `contextFileManager.buildContextPrompt()`; the `generatePlan` webview case passed the caller's raw (usually empty) `schemaContext` straight through. It now merges `buildContextPrompt()` the same way `chat` does, and `generatePlanFromSpec` does the same before delegating to `generatePlan`.
 - **Implementation type (`src/core/implementationType.ts`).** `classifyImplementationType(spec)` scans the same spec-text corpus `phaseInference.ts` uses for keyword evidence of existing-system language (`existing`, `legacy`, `migrate`, `as-is`, …) vs. new-build language (`greenfield`, `from scratch`, `net new`, …); mixed evidence defaults to `brownfield` (the higher-risk assumption), no evidence defaults to `greenfield`. Computed at every spec draft/revision/synthesis point (`webviewProvider.applyImplementationType`), unless the user has explicitly overridden it (`setImplementationType` message → `implementationTypeOverridden: true`, preserved across later revisions rather than silently reclassified). Surfaced as a badge with a one-click flip in both the chat spec card and the Workflow Palette.
 - **Phase applicability now considers implementation type and context.** `inferPhases(spec, implementationType?, contextSummary?)` — both new parameters are optional so existing callers are unaffected. A `brownfield` classification forces `discover` required by default (existing systems need assessment even absent explicit spec language) unless `scope.out` explicitly excludes it, which still wins. Note the **`unrequired` `PhaseStatus`** (§3.5) already *is* the Non-Applicable state the palette renders (dimmed, "⊘ Non-Applicable", with its `reason` string) — this section only widens what feeds the classification, it does not introduce a new status.
-- **Plan persistence (`src/context/PlanManager.ts`).** Mirrors `SpecManager` exactly: atomic writes to `.autode/problems/<id>/plan/plan.yaml`, every version-on-change archived to `plan/history/plan.v<n>.<status>.yaml`, restored into `AgentHub`'s in-memory `PlanState` on extension activation (`hub.loadPersistedPlan`) so the generated steps, inferred phases, status, and implementation type survive a VS Code reload — previously `PlanState` had no on-disk representation at all. `PlanState.artifacts` (execution-produced `GeneratedArtifact[]`) is **not** part of the persisted shape and remains in-memory-only, per §3.10's existing rationale for the artifact-folder spec-tagging scheme.
+- **Plan persistence (`src/context/PlanManager.ts`; removed in v0.45.9).** Mirrors `SpecManager` exactly: atomic writes to `.autode/problems/<id>/plan/plan.yaml`, every version-on-change archived to `plan/history/plan.v<n>.<status>.yaml`, restored into `AgentHub`'s in-memory `PlanState` on extension activation (`hub.loadPersistedPlan`) so the generated steps, inferred phases, status, and implementation type survive a VS Code reload — previously `PlanState` had no on-disk representation at all. `PlanState.artifacts` (execution-produced `GeneratedArtifact[]`) is **not** part of the persisted shape and remains in-memory-only, per §3.10's existing rationale for the artifact-folder spec-tagging scheme.
 - **Artifact-level version history.** `ArtifactWriter.write()` now archives whatever previously sat at a given path to a `history/` subfolder before overwriting it, so re-running a step within the *same* `<specId>.v<version>` folder no longer silently discards the prior output — only cross-version staleness was tracked before (§3.10).
 
 ### 3.13 Multi-business-problem workspace (WS-2)
@@ -331,6 +333,8 @@ The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspi
 - **Webview actions:** `startNewBusinessProblem` (clears the pointer, full reset, archives the current chat, starts a new one), `switchBusinessProblem`, `listBusinessProblems` → `businessProblemsList` (palette's Business Problem section).
 
 ### 3.14 Lifecycle gates (ORC-3)
+
+**Since v0.45.9 (SIMP-3)** the gates are the workflow's: a workflow decision, then each stage's gate or document approval (§7.9). The plan gates below (plan approval, stage confirmation, `setContextGateReady`) were removed with the plan. The business-problem and specification gates still apply.
 
 `AgentHub` is the single enforcement point; the UI only reflects state.
 - `generatePlan(objective, schemaContext)` — reachable from several entry points — requires `state.specId` and `state.contextGateReady` before anything else; its body is `generatePlanInternal()`, which `generatePlanFromSpec()` calls after checking its own stricter preconditions (spec approved, business problem confirmed, context gate ready).
@@ -662,7 +666,7 @@ Each one is `proposed`, `createdBy: user:capture`, subject `project` where there
 **AgentHub.**
 - `chat()` returns `actions`, the turn's `ToolCallAuditEntry[]` through `auditSink`.
 - `foldActionEntries()` folds transcript `log` entries into the preceding assistant turn for every provider, because history turns are strictly user/assistant.
-- `executePlan()` pauses a step whose pack has a `BLOCKING_GAPS` gap (relationship, key, grain): the step goes back to `pending`, the plan to `paused`, and `PlanState.waitingForContext = { stepId, gaps }`. `continueDespiteGaps(stepId)` records the engineer's explicit override.
+- Context gaps (relationship, key, grain, structure) used to pause a plan step (`waitingForContext`, `continueDespiteGaps`). Since v0.45.9 they are listed in the stage's assignment instead (§7.9, `src/engine/agents/stageGaps.ts`), and nothing pauses on them.
 
 **Extension** (`webviewProvider.ts`).
 - The `chat` case first tries `captureFact()`. After every route (discovery, revision, answer) it schedules `extractFactsFromTurn()` without awaiting it. That uses `hub.completeJson()`, logs dropped items to the console, auto-verifies probeable proposals when `liveProbes` is set and `readOnlyMode` is on (§5.3), re-projects the graph and refreshes the Inbox.
@@ -943,7 +947,7 @@ Each adapter's `connect()` picks the backend once (CLI-derived credential → ti
 
 `ConnectionManager.getSupportedPlatforms()` (new) reads `providerRegistry.ts` intersected with which platforms have a registered adapter factory — `providerRegistry.ts`'s second real consumer after §6.8's `getAuthModesForPrincipal()`.
 
-`src/spokes/snowflakeExecutor.ts` no longer hardcodes `username: 'DATA_AGENT_USER'` or duplicates connection logic against `snowflake-sdk` directly — it builds credentials the same way `testConnection` does and delegates to `SnowflakeAdapter`, so it automatically gets the same tier cascade.
+`src/spokes/snowflakeExecutor.ts` (removed in v0.45.9 with the plan) no longer hardcoded `username: 'DATA_AGENT_USER'` or duplicates connection logic against `snowflake-sdk` directly — it builds credentials the same way `testConnection` does and delegates to `SnowflakeAdapter`, so it automatically gets the same tier cascade.
 
 **Known verification gap, same discipline as §6.8:** no live Snowflake/Databricks account is available in this environment — the REST/CLI backends are implemented against the confirmed, current API/CLI contracts (see the plan file's research citations) and covered by tests using mocked `fetch`/`child_process`, not a real warehouse. A real large-schema extraction to confirm the tier-1-vs-tier-3 performance difference reported during design is flagged as a follow-up, not done here.
 
@@ -1078,27 +1082,21 @@ All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper
 
 ## 7. Agent Orchestration
 
-### 7.1 The orchestrator (`AgentHub`)
+### 7.1 The model services (`AgentHub`)
 
-`src/core/agentHub.ts` (`DataAgentHubHub`) owns plan state, LLM calls and the lifecycle gates (§3.14).
+`src/core/agentHub.ts` (`DataAgentHubHub`) holds the extension's model-facing services. Since v0.45.9 (SIMP-3) it has no plan of steps: the workflow is the only path (§7.9), and stages run from the Workflow view (`src/core/agentExecutor.ts`) or in a host agent.
 
 | Responsibility | Implementation |
 |---|---|
-| Plan generation | `buildPlanPrompt()` → LLM → `validatePlanResponse()` (unknown agents, duplicate ids, dangling or circular dependencies — topological sort — and steps outside the inferred required phases are rejected) |
-| Dispatch | `AGENT_EXECUTORS: Record<AgentType, executor>` — a fixed table; the LLM chooses an agent type, never which function runs |
-| Phase per agent | `AGENT_PHASE`: `snowflakeExecutor`, `toolSkillAgent` → build. Documentation (v0.45.0), source assessment and mapping (v0.45.2), modelling (v0.45.3) and the build (v0.45.4) are workflow stages done by role templates (§7.9); a saved plan step naming their old agents fails with where they went (`MOVED_AGENT`) |
-| Planner allow-list | `VALID_AGENT_TYPES` excludes `toolSkillAgent` (skills run only when invoked, SKL-3) |
-| State | `PlanState` (steps, status, running step, artifacts, inferred phases, gates), persisted by `PlanManager` |
-| Context per call | `ContextPackProvider` set by the webview (§7.4); falls back to the plan-time context string when none is set (tests, headless use) |
+| Specification | `generateSpec()`, `discoverNextAction()`, `synthesizeComprehensiveSpec()`, `extractAttachmentFacts()`, `synthesizePipelineSpec()`, `completeJson()` |
+| Chat | `chat()`, grounded in the active specification and target (`buildChatContextBlock()`), with history windowing and rolling summaries |
+| The model with tools | `runAgentWithTools()` (the stage executor), `runToolSkill()` (imported tool skills, §7.6) |
+| Engine clients | `setEngineFactory()`, `createEngine(clientName)` (one per stage run, named after the role) |
+| State | the active spec id and version, the objective and the target environment; `resetForNewProblem()` clears them |
 
 ### 7.2 Agents
 
-| Agent type | Module | Produces |
-|---|---|---|
-| `snowflakeExecutor` | `src/spokes/snowflakeExecutor.ts` | Executes SQL through `SnowflakeAdapter` |
-| `toolSkillAgent` | `src/agents/build/ToolSkillAgent.ts` | Whatever an imported skill does (§7.6) |
-
-Until v0.45.4, codegen agents used three tiers (GEN-1, GEN-2): `generateViaPrimitiveOrFallback()` (`src/agents/llmParamSelector.ts`) first asks the LLM to choose and parameterise a primitive (§9), then falls back to a freehand LLM call (`src/agents/llmCodegen.ts#generateWithLlm`), then to a fixed template. Primitive tiers are wired into the ingestion and transformation agents; the data model and marts are deliberately not forced into single-source primitives. Since v0.45.0 documentation, and since v0.45.2 source assessment and mapping, are not plan agents: they are workflow stages done by the `documenter`, `source-assessor` and `sttm-mapper` roles (§7.9).
+Every AutoDE agent is a role template run against a stage assignment (§7.9). The one agent module left is `src/agents/build/ToolSkillAgent.ts`, which runs an imported tool skill (§7.6). Until v0.45.9 the plan dispatched `snowflakeExecutor` steps; until v0.45.4, codegen agents used three tiers (GEN-1, GEN-2: primitive, freehand, template).
 
 ### 7.3 Execution context and result
 
@@ -1125,21 +1123,18 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
 
 `AgentHost` (built by `AgentHub.buildAgentHost()`) is how agents reach the host without importing `vscode` (§10.2).
 
-### 7.4 Plan execution
+### 7.4 Context gaps in assignments (v0.45.9)
 
-`executePlan()`:
-1. Checks the gates (§3.14); resets step statuses, step packs and run manifests.
-2. Repeatedly picks a ready step (all dependencies completed). If none is ready but steps remain, marks every blocked step failed and stops. Honours a pause request before each step.
-3. For the step: `contextProvider.buildPack({ purpose: 'step', query: step.taskDescription, stepId })`; records the pack (`getStepPack`, and the webview's recent-packs list); logs its context gaps; sets `schemaContext` = pack text + `contextProvider.supplementary()` (approved Source/Target Context).
-4. Runs `AGENT_EXECUTORS[step.assignedAgent](step, context)`; generation records arrive through `recordGeneration`.
-5. On failure: marks the step failed and continues with independent steps (ORC-5). On success: for each returned artifact — stamps phase and spec; replaces an entry the agent already added through `addArtifact()` instead of duplicating it; writes it with `ArtifactWriter`; builds a grounding manifest (§5.7) against the provider's sources, with the spec revision and model, and writes `<file>.grounding.json`; logs manifest warnings.
-6. At the end — success or failure — writes the per-run Grounding Report (validation phase) when any manifest was produced, then sets the plan status; on failure, `handleFailure()` offers a re-plan.
+A stage whose work rests on joins, keys and grain (mapping, modelling, build, quality rules, conformance, validate) gets the gaps in its context in its assignment. `src/engine/agents/stageGaps.ts`:
+- `stageGapQuery(problemRoot, title)`: the problem's statement, objectives and key entities, and the stage title.
+- `stageContextGaps(sources, { problemRoot, kind, title })`: a `step` context pack for that query; its relationship, key, grain and structure gaps, once each, with `describeGap()`'s question.
+- `renderStageGaps()`: the assignment's *Context gaps* section. It tells the agent not to infer them: ask the person, propose the fact (`autode_propose_assertion`), or record the gap as open in the deliverable.
 
-`ContextPackProvider` (`src/engine/context/contextPack.ts`) = `{ buildPack, sources, supplementary?, specRevision? }`; the webview implements it over `ContextFileManager`, `SpecManager` and the Source/Target context managers (`createContextPackProvider()`), and the eval harness implements it over the same classes.
+`autode_workflow_next` builds the pack from the server's context sources. Run agent (`agentExecutor.ts#stageGaps`) gets it through `autode_context_pack` and the same `stageGapsFrom()`. `Assignment.contextGaps` carries them; nothing pauses (the plan used to pause a step on them).
 
-### 7.5 Phase inference and implementation type
+### 7.5 Implementation type
 
-`src/core/phaseInference.ts` (pure): `inferPhases(spec, implementationType?, contextSummary?)` marks phases required from keyword evidence across the spec's text fields, honours `scope.out` exclusions, and forces discover for brownfield unless excluded; `buildPhaseDependencies()` prunes the discover → model → build → validate chain to the required set; `computePhaseStatuses()` derives live status (`completed`, `in-progress`, `blocked`, `pending`, `pending-review`, `unrequired`). Manual overrides (`setPhaseOverride`) are re-applied after every inference and cleared by `resetPlan()`. `src/core/implementationType.ts#classifyImplementationType()` uses the same evidence technique; a user override survives revisions.
+`src/core/implementationType.ts#classifyImplementationType()` classifies a specification as greenfield or brownfield from keyword evidence (`src/core/keywords.ts#matchesAnyKeyword`); a user override survives revisions. (Phase inference, `src/core/phaseInference.ts`, was removed in v0.45.9.)
 
 ### 7.6 Tool-executing skills (SKL-1 – SKL-5)
 
@@ -1258,7 +1253,7 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
   - `stageRunner()` (`src/core/agentExecutor.ts`) gives the stage's role template, else `LEGACY_AGENTS[kind]` (source-assessment, modelling, build). `runStage()` runs the latter through `AgentHub.runStageSteps()`: a plan of only that stage's steps, the files written collected through `stageRunFiles`, and no `handleFailure` re-plan. They are recorded to the stage and handed in (document stages complete when their document is approved).
   - **Document approval** (`src/engine/workflows/documentApproval.ts`): `documentApprovalProblems()` checks the document (a specification statement; a context's spec id and version; at least one mapping; a valid Pipeline Spec), and `approveStageDocument()` writes `status: approved`, `approvedAt` and `approvedBy`, then appends an `approved` event. It is called from the Workflow view (after a modal) and from `autode workflow approve <stage>` (interactive terminal); no MCP tool calls it.
   - **View model:** `StageModel` has `guide` (the Next line), `runner`, `produceLabel`, `document`, `blockers`, and actions `approve-document`, `produce`, `open-document`. `WorkflowModel.proposal` is the pending workflow decision's stages with inclusion and reasons.
-  - **Panel:** the plan messages (`generatePlan`, `generatePlanFromSpec`, `approvePlan`, `confirmStages`, `executePlan`) open the Workflow view.
+  - **Panel:** the plan messages opened the Workflow view; since v0.45.9 they are gone, and the sidebar's next step after the specification is Open Workflow (and `/plan`, `/execute`, `/workflow` open it).
 
 ### 7.7 Decisions and proposals (v0.40.0; ORC-8, MCP-2)
 
@@ -1375,15 +1370,15 @@ You are AutoDE, an expert data engineering assistant running inside VS Code.
 You help users with data engineering tasks including pipeline design, SQL authoring,
 schema analysis, data modeling, ETL/ELT workflows, and data platform operations.
 
-Respond conversationally and helpfully. If the user asks you to generate a plan,
-suggest they click the "Generate Plan" button or use the /plan command.
+Respond conversationally and helpfully. If the user asks for an execution plan,
+point them to the Workflow view: AutoDE works stage by stage.
 
 {context block}
 
 User message: {message}
 ```
 
-**Plan prompt** (`AgentHub.buildPlanPrompt`, current as of v0.10.0 — every block below is conditional and omitted when its input is empty):
+**Plan prompt** (`AgentHub.buildPlanPrompt`; removed in v0.45.9 with the plan, kept here for history):
 ```
 You are an expert data engineering planning assistant. Create a strict execution DAG
 for the following objective for the {provider} provider:
@@ -1487,7 +1482,7 @@ entities:
 - **`designDocGenerator.ts#generateDesignDoc(spec)`** — a pure function producing Markdown (with a Mermaid `flowchart LR` lineage diagram) from a validated spec; same input always produces the same output, so the YAML and its Markdown projection cannot drift apart.
 - **`context/PipelineSpecManager.ts`** — persistence modeled function-for-function on `SpecManager.ts` (§3): `.autode/problems/<id>/spec/pipeline.yaml` + `spec/history/pipeline.v<version>.<status>.yaml`, atomic temp-then-rename writes, `approve()` doesn't bump version (a draft v1 becomes approved v1), a new revision from an approved predecessor does. A document whose `specVersion` doesn't match `CURRENT_PIPELINE_SPEC_VERSION` loads leniently (a logged warning, not a thrown error) — schema evolution must never brick an already-approved pipeline.
 - **Synthesis (`src/agents/pipelineSpecSynthesis.ts` + `AgentHub.synthesizePipelineSpec()`)** — grounded in the approved BPS, the approved Target Context (platform/naming/tooling feed `targetPlatform` directly — confirmed via test that swapping Target Context's platform changes the generated spec with no BPS change at all), the approved Source Context, the Context Layer graph, and attachment extracts (§9.4). Retries up to 3 times, feeding the previous attempt's Ajv errors back into the next prompt (`buildPipelineSpecSynthesisPrompt(inputs, validationErrors?)`) — the same discipline `selectTransformSpec` (§9.2) already uses for one primitive, now applied to the whole document. Also the first real consumer of `BusinessProblemSpec.provenance` (§3.2): a field tagged `source: 'assumption'` is called out in the prompt for conservative treatment.
-- **New command, "AutoDE: Generate Pipeline Spec"** — additive, not a replacement for §3.3's existing plan flow; gated on the same `computeContextGateStatus()` (§3.12) Generate Plan already requires.
+- **New command, "AutoDE: Generate Pipeline Spec"** — gated on `computeContextGateStatus()` (§3.12): the specification and its contexts approved.
 
 ### 9.4 Attachment structured extraction
 
@@ -1531,11 +1526,10 @@ type PrimitiveLifecycleStatus = 'draft' | 'published' | 'deprecated' | 'retired'
 
 `src/extension.ts#activate`:
 1. Creates `ConfigurationManager` and the orchestrator (`DataAgentHubHub`); registers credential resolvers (`registerDefaultCredentialResolvers(context.secrets)`: environment, CLI configuration, VS Code SecretStorage).
-2. Defines `applyProblemRoot(contextRoot)` — re-points the hub's `PlanManager` and `ArtifactWriter` at a problem folder — and applies `problems/_unscoped` until a problem is activated, so command-palette entry points work before the sidebar resolves.
-3. Creates the sidebar provider (`DataAgentHubWebviewProvider`) and the parked dashboard panel; source and target `ConnectionManager`s are created lazily per role and disposed through the `DisposableRegistry`.
-4. Registers every command (the full list is `contributes.commands` in `package.json`, all prefixed `autoDataEngineeringHub.`): plan and pipeline-spec generation, execution, reset; source/target connect, browse, assess, re-verify, disconnect; file ingestion; mapping and semantic-layer snapshot; ledger compaction; What the Agent Saw; Explain This Artifact; Open Estate; language-model tests and listings; Copilot handoff; tool-skill import/run; chat new/history/discard; Connect to Data Platform; service-account test.
+2. Creates the sidebar provider (`DataAgentHubWebviewProvider`; the dashboard panel and `applyProblemRoot` were removed in v0.45.9 with the plan); source and target `ConnectionManager`s are created lazily per role and disposed through the `DisposableRegistry`.
+3. Registers every command (the full list is `contributes.commands` in `package.json`, all prefixed `autoDataEngineeringHub.`): pipeline-spec generation; source/target connect, browse, assess, re-verify, disconnect; file ingestion; mapping and semantic-layer snapshot; ledger compaction; What the Agent Saw; Explain This Artifact; Open Estate; language-model tests and listings; Copilot handoff; tool-skill import/run; chat new/history/discard; Connect to Data Platform; service-account test.
 
-The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileManager`, `ContextFileWatcher`), registers the hub's `ContextPackProvider`, activates the problem named by `active-problem.json`, and folds a non-empty active chat into history (CHT-2).
+The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileManager`, `ContextFileWatcher`), activates the problem named by `active-problem.json`, and folds a non-empty active chat into history (CHT-2).
 
 `deactivate()` → `disposableRegistry.disposeAll()` (`src/core/disposables.ts`): watchers, connection managers and other resources registered during activation.
 
@@ -1554,10 +1548,6 @@ The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileMa
 | Message (Webview → Extension) | Handler | Description |
 |------------------------------|---------|-------------|
 | `chat` | `hub.chat()` | Conversational message |
-| `generatePlan` | `hub.generatePlan()` | Generate execution plan — orchestrator-gated (ORC-3, v0.13.0): requires an active, context-ready business problem, or throws |
-| `executePlan` | `hub.executePlan()` | Execute current plan — orchestrator-gated (ORC-3, v0.13.0): requires `planApproved` and `stagesConfirmed`, or throws |
-| `pausePlan` | `hub.pauseExecution()` | Pause execution |
-| `resetPlan` | `hub.resetPlan()` | Reset session |
 | `updateSettings` | `configManager.updateSettings()` | Save settings |
 | `testLanguageModel` / `testCopilot` | Command proxy | Test the active local LLM (Copilot model, or Claude Code CLI) |
 | `listLanguageModels` | Command proxy | Enumerate all `vscode.lm` models + report where the Claude Code CLI resolves from |
@@ -1576,13 +1566,11 @@ The sidebar's `resolveWebviewView` then builds the context layer (`ContextFileMa
 | Message (Extension → Webview) | Purpose |
 |------------------------------|---------|
 | `stateUpdate` | Push plan state changes |
-| `planUpdated` | Push new plan |
 | `logEntry` | Push log message |
 | `settingsLoaded` | Push settings + active language model info (`languageModelInfo`, plus `copilotInfo` alias) |
 | `settingsSaved` | Confirm settings saved |
 | `error` | Push error message |
 | `contextUpdate` | Push context stats + entities |
-| `stepUpdate` | Push step status change |
 | `chatResponse` | Push chat response |
 | `agentStatus` | Push agent execution status |
 | `sourceAssessmentComplete` | Push source assessment result |
@@ -1775,9 +1763,9 @@ src/agents/build/    # the tool-skill runner
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
-  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, PlanManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
+  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetConfigManager.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, panelProvider.ts, phaseInference.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
@@ -1785,7 +1773,7 @@ src/editors/    # custom editors
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
-  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, skillCatalog.ts, sourceContextDraft.ts
+  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)
   waiting.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
@@ -1820,8 +1808,6 @@ src/engine/workflows/    # workflow templates, instances, runtime, events, docum
   documentApproval.ts, events.ts, instance.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
   agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, runnerHost.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
-src/spokes/    # Snowflake executor
-  snowflakeExecutor.ts
 ```
 <!-- /generated:source-tree -->
 
@@ -1911,11 +1897,8 @@ Lexical, alias and graph-neighbourhood retrieval is deterministic, provider-inde
 | Message Type | Payload | Handler |
 |-------------|---------|---------|
 | `chat` | `{ message: string, schemaContext?: string }` | `hub.chat()` — merges `contextFileManager.buildContextPrompt()` with `schemaContext` before calling `hub.chat()` |
-| `generatePlan` | `{ objective: string, schemaContext?: string }` | `hub.generatePlan()` — same Context Layer merge as `chat` (v0.10.0; previously passed `schemaContext` through unmerged) |
 | `approveSpec` | `{}` | `specManager.approve()` → automatically runs `syncContextFromApprovedSpec()` (spec → Context Layer sync + durable snapshot, v0.10.0) → `hub.inferPhasesFromSpec(spec, contextSummary)` → responds `specApproved` |
-| `generatePlanFromSpec` | `{}` | Requires an approved spec; `hub.generatePlanFromSpec(spec, contextFileManager.buildContextPrompt())` — the spec-driven counterpart to `generatePlan`, and the primary trigger from the "📋 Generate Plan" UI actions (§3.5) |
 | `setImplementationType` | `{ value: 'greenfield' \| 'brownfield' }` | User override of the deterministic Greenfield/Brownfield classification (§3.12); persists `implementationTypeOverridden: true` on the spec so future revisions don't silently reclassify it |
-| `setPhaseRequired` | `{ phase: WorkflowPhase, required: boolean }` | `hub.setPhaseOverride(phase, required)` (ORC-1) — manual Applicable/Non-Applicable override on the palette, survives a subsequent re-plan, does not retroactively edit an already-generated plan's steps (the palette flags it as possibly stale instead) |
 | `startTargetContext` / `reviseTargetContext` | `{}` | Posts `targetContextQuestions` — the fixed 8-question Target Context form (STC-3) |
 | `submitTargetContextAnswers` | `{ answers: [{questionId, value}] }` | Saves as `TargetContext` (status `built`); posts `targetContextBuilt` |
 | `approveTargetContext` | `{}` | Marks approved, pushes into `hub.setTargetEnvironment()`; posts `targetContextApproved` |
@@ -1923,9 +1906,6 @@ Lexical, alias and graph-neighbourhood retrieval is deterministic, provider-inde
 | `runSourceConnectionCheck` | `{}` | Re-runs the live connection check (retry) |
 | `submitSourceContextAnswers` | `{ answers: [...] }` | Saves as `SourceContext` (status `built`, method `described`); posts `sourceContextBuilt` |
 | `approveSourceContext` / `reviseSourceContext` | `{}` | Approve marks approved and posts `sourceContextApproved`; revise re-opens the form (or re-runs the connection check for `method: 'connected'`) |
-| `executePlan` | `{}` | `hub.executePlan()` |
-| `pausePlan` | `{}` | `hub.pauseExecution()` |
-| `resetPlan` | `{}` | `hub.resetPlan()` |
 | `updateSettings` | `{ settings: Partial<DataAgentHubSettings> }` | `configManager.updateSettings()` |
 | `testCopilot` / `testLanguageModel` | `{}` | Command proxy |
 | `listLanguageModels` | `{}` | Command proxy |
@@ -1934,7 +1914,6 @@ Lexical, alias and graph-neighbourhood retrieval is deterministic, provider-inde
 | `openContextFolder` | `{}` | File system |
 | `testConnection` | `{}` | `ConnectionManager.connect()` |
 | `sourceAssessment` | `{}` | `ConnectionManager.extractMetadata()` |
-| `runAgent` | `{ agent: string }` | Agent routing |
 | `settingsLoaded` | `{}` | Re-send settings |
 | `startRevision` | `{}` | Arms `pendingRevision` (only if the current spec is `approved`); the next `chat` message becomes the change request (§3.9) |
 | `attachSpecFile` | `{}` | Opens a file picker; attaches the picked file to the active `SpecOpsEngine` session as reference material (§3.9) |
@@ -1950,21 +1929,16 @@ Lexical, alias and graph-neighbourhood retrieval is deterministic, provider-inde
 | `listBusinessProblems` | `{}` | `ActiveProblemManager.listProblems()` → responds with `businessProblemsList` (WS-2, v0.12.0) |
 | `switchBusinessProblem` | `{ problemId: string }` | Activates a different existing business problem (same reset sequence as above), archives the current chat and starts a new one → responds with `activeProblemChanged` (WS-2, v0.12.0) |
 | `approveBusinessProblem` | `{}` | Sets `spec.problemStatementApproved = true` (ORC-3, v0.13.0) — required before `approveSpec` will accept the spec |
-| `approvePlan` | `{}` | `hub.approvePlan()` — explicit Plan Approval gate (ORC-3, v0.13.0), required (alongside `confirmStages`) before `executePlan` will run |
-| `confirmStages` | `{}` | `hub.confirmStages()` — explicit "confirm applicable stages" gate (ORC-3, v0.13.0), required (alongside `approvePlan`) before `executePlan` will run |
 
 ### Extension → Webview
 
 | Message Type | Payload | Purpose |
 |-------------|---------|---------|
-| `stateUpdate` | `{ state: PlanState }` | Plan state changes |
-| `planUpdated` | `{ plan: PlanStep[] }` | New plan generated |
 | `logEntry` | `{ message: string }` | Log message |
 | `settingsLoaded` | `{ ...DataAgentHubSettings, languageModelInfo, copilotInfo }` | Initial settings |
 | `settingsSaved` | `{ success: boolean }` | Settings confirmation |
 | `error` | `{ message: string }` | Error notification |
 | `contextUpdate` | `{ stats, dbEntities, bizTerms, queries }` | Context data |
-| `stepUpdate` | `{ stepId, status, details }` | Step status change |
 | `chatResponse` | `{ message: string, error?: boolean }` | Chat response |
 | `agentStatus` | `{ agent, status, result? }` | Agent execution status |
 | `sourceAssessmentComplete` | `{ success: boolean, error? }` | Assessment result |
@@ -1975,7 +1949,7 @@ Lexical, alias and graph-neighbourhood retrieval is deterministic, provider-inde
 | `specQuestions` | `{ questions: Array<SpecIntakeQuestion & { skillLabel?: string }>, progress?: DiscoveryProgress }` | A batch of discovery-turn questions (`'ask_many'`, 2+) — dynamic intake form. Same v0.13.0 additions as `specQuestion` |
 | `specDrafted` | `{ spec: BusinessProblemSpec, revised: boolean }` | A new draft (or revision) was synthesized |
 | `specApproved` | `{ spec: BusinessProblemSpec }` | The spec was approved; Context Layer sync has already completed by the time this is posted (§3.12) |
-| `contextGateStatus` | `{ targetStatus, sourceApplicable, sourceStatus, canGeneratePlan, blockingReasons, targetContext?, sourceContext? }` | The single source of truth for whether Generate Plan is unblocked (STC-3) — posted after every context-affecting action |
+| `contextGateStatus` | `{ targetStatus, sourceApplicable, sourceStatus, canGeneratePlan, blockingReasons, targetContext?, sourceContext? }` | Whether the specification and its contexts are approved (the Pipeline Spec needs them); was the Generate Plan gate unblocked (STC-3) — posted after every context-affecting action |
 | `targetContextQuestions` / `sourceContextQuestions` | `{ questions: ContextQuestion[], answers: Record<string,string> }` | The fixed Q&A form to render, pre-filled with any prior answers |
 | `targetContextBuilt` / `sourceContextBuilt` | `{ context: TargetContext \| SourceContext }` | Answers saved (status `built`) — awaiting `approve*Context` |
 | `targetContextApproved` / `sourceContextApproved` | `{ context: TargetContext \| SourceContext }` | Approved — Target Context is now live in `hub.state.targetEnvironment` |

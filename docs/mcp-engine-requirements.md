@@ -28,7 +28,7 @@ Business problem (interview, skills/*.json)
   → Business Problem Specification (.autode/problems/<id>/spec/business-problem.yaml, approval gate)
   → Source / Target / Mapping context (approval gates)
   → Pipeline Spec (validated, compiled)
-  → Plan (DAG of agent steps) → Plan approval + stage confirmation (enforced in agentHub.executePlan)
+  → Workflow (stages, each with its gate; since v0.45.9 the plan of steps is gone)
   → Deterministic generation (primitives, compiler, templates) → artifacts/
   → Validation & documentation
 ```

@@ -156,7 +156,7 @@ The catalog's per-system files, the working set and graph caches, context packs,
 AutoDE grew some overlapping objects. They are being reduced, one release at a time (roadmap, decision log 2026-10-22):
 - **one way to change a platform:** runbooks only (the older single-statement platform change goes);
 - **one way to record a mapping:** the mapping document only;
-- **the old plan of steps:** removed (the workflow replaced it);
+- **the old plan of steps:** removed in v0.45.9, with the dashboard panel (the workflow replaced it; context gaps are now listed in each stage's assignment);
 - **contexts select from the workspace:** a problem's target and source contexts pick from the workspace's target environments and estate instead of describing them again;
 - **later:** chat attachments into the pack; the interview packs become skills; the older knowledge files (business context, verified queries, semantic-layer snapshots) fold into the facts; one lifecycle for AutoDE's and imported skills.
 
@@ -248,9 +248,9 @@ The full, generated tree is technical-design §12. The files that matter most, i
 | 12 | `src/mcp/server.ts`, `tools.ts`; `src/cli/main.ts` | The MCP surface, and the CLI that reuses its handlers. |
 | 13 | `test/functional.test.cjs` (search for the feature) | Executable documentation for nearly everything above. |
 
-Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (step executors), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/cli` (the `autode` command line), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview prompt packs as JSON, and since v0.45.0 the agents' skills as `skills/<id>/SKILL.md`), `agents/` (role templates, `<role>.md`, v0.45.0), `workflows/` (workflow templates), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, `autode` package, docs generator).
+Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (the tool-skill runner and Pipeline Spec synthesis), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/cli` (the `autode` command line), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview prompt packs as JSON, and since v0.45.0 the agents' skills as `skills/<id>/SKILL.md`), `agents/` (role templates, `<role>.md`, v0.45.0), `workflows/` (workflow templates), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, `autode` package, docs generator).
 
-**Safe to ignore at first:** the AutoDE Dashboard panel (`panel.html`, `panelProvider.ts` — parked), `src/spokes/` other than `snowflakeExecutor.ts`, CSS in `sidebar.html`, `mock_activate.js`.
+**Safe to ignore at first:** CSS in `sidebar.html`, `mock_activate.js`.
 
 ## 7. Working on AutoDE day to day
 
@@ -346,8 +346,6 @@ Open items worth knowing before you change things. The roadmap's backlog is the 
 | R5 | Few primitives exist, so most generation still falls back to the LLM. | transforms | Grow Tier-2 definitions; phase 6 adds a conformance suite. |
 | R6 | Tool skills have no OS-level sandbox; an approved command can act outside the workspace. Claude Code runs are approved once per run, not per call. | `ToolSkillAgent`, `agenticTools.ts` | Trust tiers (v0.34.0) narrow exposure; treat approval as "I trust this skill". |
 | R7 | Chat transcripts grow without limit. | `ChatSessionManager` | Acceptable at current scale; revisit with retention. |
-| R8 | The AutoDE Dashboard panel is stale and parked. | `panel.html`, `panelProvider.ts` | Retire or rewire later (product decision). |
-| R9 | Context gaps don't pause steps yet; extracted chat facts don't reach the ledger. | context layer | C4b (Context Inbox). |
 | R10 | The extension still calls the engine in-process; only external agents use the MCP server. | `src/core`, `src/mcp` | Phase 5. |
 
 ## 11. Your first week
@@ -356,7 +354,7 @@ Open items worth knowing before you change things. The roadmap's backlog is the 
 |---|---|---|
 | 1 | Read §1–§4 of this guide and requirements.md §1–§2. Build, run `npm test`, F5 into a scratch workspace. | What AutoDE is and the rules it lives by. |
 | 2 | Run [manual-verification.md](manual-verification.md) Parts 1, 5 and 6 with Copilot or an API provider; watch `.autode/` fill. | The interview, the ledger, packs. |
-| 3 | Read `types.ts`, `extension.ts`, then `agentHub.ts` (`generatePlanFromSpec`, `executePlan`). Run Part 7. | Orchestration and gates. |
+| 3 | Read `src/engine/workflows/runtime.ts`, `src/engine/agents/assignment.ts`, then `src/core/agentExecutor.ts`. Run Parts 24–26. | The workflow, assignments and gates. |
 | 4 | Read the context-layer core (§6 items 5–8) beside technical-design §5. Run `npm run eval` and read the report. | Grounding, and how AutoDE is measured. |
 | 5 | Read the roadmap and the next phase's spec. Pick a small backlog item or a test gap and ship it through §7.4. | The way the project works. |
 

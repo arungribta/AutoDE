@@ -1,11 +1,11 @@
 import { BusinessProblemSpec, ContextQuestion } from '../engine/types';
-import { matchesAnyKeyword } from './phaseInference';
+import { matchesAnyKeyword } from './keywords';
 
 /**
  * Deterministic Target Context question set — a fixed, structured Q&A
  * (not an adaptive LLM conversation) walking the user through every decision
  * `TargetEnvironment` needs. Each question carries a keyword-evidence
- * `suggestedDefault` (same technique as `phaseInference`/`implementationType`)
+ * `suggestedDefault` (same technique as `implementationType`)
  * so the form isn't blank, but nothing is silently assumed — the user
  * confirms or overrides every field.
  */

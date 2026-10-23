@@ -7,7 +7,7 @@ import { ArtifactWriter } from './ArtifactWriter';
  * produced by a specification revision other than the one currently approved —
  * i.e. artifacts nothing has regenerated since the spec changed underneath them.
  *
- * This is filesystem-driven rather than reading `PlanState.artifacts`, because
+ * This is filesystem-driven rather than reading the hub's in-memory artifacts, because
  * that in-memory list does not survive a VS Code reload; the version-tagged
  * folder name is the only durable record of which spec revision produced a
  * given artifact.

@@ -18,7 +18,6 @@
 !media/autode-activitybar.svg
 # Webviews and custom editors.
 !media/sidebar.html
-!media/panel.html
 !media/workflow.html
 !media/runbook.html
 !media/editors/*.html

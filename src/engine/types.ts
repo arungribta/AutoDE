@@ -12,9 +12,6 @@ export interface AuthModeDescriptor {
   mode: string;
   principalTypes: PrincipalType[];
 }
-export type AgentType = 'snowflakeExecutor' | 'toolSkillAgent';
-export type PlanStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type SessionStatus = 'idle' | 'planning' | 'ready' | 'running' | 'paused' | 'failed' | 'completed';
 export type EnvironmentProfile = 'development' | 'staging' | 'production';
 export type ModelingApproach = 'dimensional' | 'data-vault' | 'obt' | '3nf' | 'raw-pass-through';
 export type NamingConvention = 'snake_case' | 'camelCase' | 'PascalCase';
@@ -33,29 +30,6 @@ export type WorkflowPhase = 'discover' | 'model' | 'build' | 'validate';
  * an explicit user override always available — see `implementationType.ts`.
  */
 export type ImplementationType = 'greenfield' | 'brownfield';
-
-/**
- * Live status of an inferred workflow phase.
- * `unrequired` means the phase is Non-Applicable (excluded by the spec, or by a user override).
- * `pending-review` means a plan exists but hasn't been run yet — the phase is awaiting the
- * user's confirmation on the Workflow Palette before "Generate Artifacts" is clicked.
- */
-export type PhaseStatus = 'pending-review' | 'pending' | 'in-progress' | 'completed' | 'blocked' | 'unrequired';
-
-/**
- * A workflow phase inferred from the approved Business Problem Specification.
- * Carries the deterministic reason, ownership of the generated plan, and live status.
- */
-export interface InferredPhase {
-  phase: WorkflowPhase;
-  label: string;
-  required: boolean;
-  status: PhaseStatus;
-  /** Short, human-readable justification produced by the inference rules. */
-  reason: string;
-  /** Phases that must be completed before this one can start (only required phases appear here). */
-  dependsOn: WorkflowPhase[];
-}
 
 // ── Business Problem Specification ──
 
@@ -550,7 +524,7 @@ export interface GeneratedArtifact {
   content: string;
   language: 'sql' | 'yaml' | 'markdown' | 'python' | 'json';
   /** The agent, or `engine` for what AutoDE derives itself (the grounding report); older artifacts may name a retired agent. */
-  generatedBy: AgentType | 'engine' | string;
+  generatedBy: string;
   generatedAt: string;
   approved: boolean;
   filePath?: string;
@@ -663,20 +637,6 @@ export interface DataAgentHubSettings {
   defaultTargetDatabricksCatalogType?: 'auto' | 'unity' | 'hive_metastore';
 }
 
-export interface PlanStep {
-  id: string;
-  assignedAgent: AgentType;
-  taskDescription: string;
-  status: PlanStatus;
-  dependsOn?: string[];
-  validationRules?: string[];
-  phase?: WorkflowPhase;
-  /** Which imported tool skill to run — required when `assignedAgent === 'toolSkillAgent'`. */
-  skillId?: string;
-  /** Pins a published version of that skill (Phase S2); resolves after deprecation, from its version history. */
-  skillVersion?: number;
-}
-
 // ── Tool-executing Skills (Phase D) ──
 
 /** A Claude Agent Skill (SKILL.md + resources) imported into AutoDE. Distinct from the
@@ -740,91 +700,6 @@ export interface ChatMessage {
   role: 'user' | 'ai' | 'log';
   content: string;
   at: string;
-}
-
-export interface PlanState {
-  objective: string;
-  schemaContext: string;
-  sourceProvider: DataPlatformProvider;
-  targetEnvironment?: TargetEnvironment;
-  steps: PlanStep[];
-  mode: 'plan' | 'execute';
-  status: SessionStatus;
-  runningStepId?: string;
-  lastError?: string;
-  /** C4b: the step paused on context gaps, and what it needs (answered in the Context Inbox). */
-  waitingForContext?: { stepId: string; gaps: Array<{ needed: string; subject: string[]; text: string; reason: string; minTrust: string; foundTrust?: string; stepId?: string }> };
-  artifacts?: GeneratedArtifact[];
-  currentPhase?: WorkflowPhase;
-  specId?: string;
-  specVersion?: number;
-  /** Phases inferred from the approved Business Problem Specification (live status view). */
-  inferredPhases?: InferredPhase[];
-  /** Carried over from the spec that produced this plan — see `BusinessProblemSpec.implementationType`. */
-  implementationType?: ImplementationType;
-  /**
-   * Explicit user overrides of a phase's applicability (Applicable/Non-Applicable),
-   * layered on top of whatever `inferPhases()` computed. Survives a subsequent
-   * re-plan (re-applied after each `inferPhases()` call) and is cleared by
-   * `resetPlan()`. Does not retroactively edit an already-generated plan's
-   * steps — the palette flags the plan as possibly stale instead (see
-   * `requirements.md` §8.8 follow-up).
-   */
-  phaseOverrides?: Partial<Record<WorkflowPhase, boolean>>;
-  /**
-   * Live mirror of `webviewProvider.computeContextGateStatus().canGeneratePlan` (v0.13.0) —
-   * pushed into the hub whenever context/spec state changes so the orchestrator (`AgentHub`)
-   * can enforce the same precondition on plan generation itself, not just at the UI call site.
-   * Not persisted — recomputed and re-pushed on every activation/context change.
-   */
-  contextGateReady?: boolean;
-  /**
-   * Explicit Plan Approval gate (v0.13.0, requirements.md §8.12) — required before
-   * `executePlan()` will run. Set by `AgentHub.approvePlan()`; reset to `false` whenever
-   * a new plan is generated, since a regenerated plan needs its own approval.
-   */
-  planApproved?: boolean;
-  planApprovedAt?: string;
-  /**
-   * Explicit "confirm applicable stages" gate (v0.13.0, requirements.md §8.12) — required
-   * before `executePlan()` will run, alongside `planApproved`. Set by `AgentHub.confirmStages()`;
-   * reset to `false` whenever the inferred/overridden phase set changes (`inferPhasesFromSpec`,
-   * `setPhaseOverride`) or a new plan is generated, since either invalidates a prior confirmation.
-   */
-  stagesConfirmed?: boolean;
-  stagesConfirmedAt?: string;
-}
-
-/**
- * The durable, on-disk record of a generated plan — persisted by `PlanManager` to
- * `.autode/plan/plan.yaml`, with every prior version archived to `plan/history/`
- * (mirrors `SpecManager`'s pattern exactly). Unlike `PlanState`, which is the live,
- * in-memory working copy `AgentHub` mutates step-by-step during execution, this is
- * the governed artifact: one row written per generation or re-plan.
- */
-export interface PersistedPlan {
-  /** Stable across versions of the same plan lineage; a fresh objective/spec starts a new id. */
-  id: string;
-  version: number;
-  specId?: string;
-  specVersion?: number;
-  implementationType?: ImplementationType;
-  objective: string;
-  schemaContext: string;
-  status: SessionStatus;
-  steps: PlanStep[];
-  inferredPhases?: InferredPhase[];
-  targetEnvironment?: TargetEnvironment;
-  phaseOverrides?: Partial<Record<WorkflowPhase, boolean>>;
-  /** Why this version was written — the initial generation, or a failure-triggered re-plan. */
-  generationReason: 'initial' | 're-plan';
-  /** Plan Approval + Stage Confirmation gates (v0.13.0) — see `PlanState`. */
-  planApproved?: boolean;
-  planApprovedAt?: string;
-  stagesConfirmed?: boolean;
-  stagesConfirmedAt?: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 /**

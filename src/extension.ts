@@ -1,10 +1,9 @@
 import { emptyEstate, resolveIdentity, serializeEstate } from './engine/context/estate';
 import * as vscode from 'vscode';
-import { EXTENSION_ID, EXTENSION_VIEW_ID, EXTENSION_PANEL_VIEW_ID } from './core/extensionIdentity';
+import { EXTENSION_ID, EXTENSION_VIEW_ID } from './core/extensionIdentity';
 import { DataAgentHubHub } from './core/agentHub';
 import { ConfigurationManager } from './core/configManager';
 import { DataAgentHubWebviewProvider } from './core/webviewProvider';
-import { DataAgentHubPanelProvider } from './core/panelProvider';
 import { ConnectionManager } from './engine/platform/ConnectionManager';
 import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
 import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, PrerequisiteHost } from './core/platformPrerequisites';
@@ -18,8 +17,6 @@ import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
 import { PlatformOnboarding } from './core/platformOnboarding';
 import { secretStorageKey } from './core/credentials/VsCodeSecretStorageResolver';
 import { SECRET_KEYS } from './core/extensionIdentity';
-import { ArtifactWriter } from './context/ArtifactWriter';
-import { PlanManager } from './context/PlanManager';
 import { TargetConfigManager } from './context/TargetConfigManager';
 import { DataModelEditorProvider } from './editors/DataModelEditorProvider';
 import { SttmEditorProvider } from './editors/SttmEditorProvider';
@@ -96,43 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
-  // PlanManager and ArtifactWriter are scoped to a business problem's own
-  // folder (v0.12.0, `.autode/problems/<id>/` since v0.36.0) — but they're also the two
-  // managers the command-palette entry points (`autoDE.generatePlan`,
-  // `autoDE.executePlan`) can reach *without* the sidebar ever resolving, so
-  // ownership stays here rather than moving into `webviewProvider`. `applyProblemRoot`
-  // (re)points both at a given context root and re-injects them into `hub` —
-  // called once below with a safe fallback, then again by `webviewProvider`
-  // the moment it determines the real active business problem (or the lack
-  // of one). `hub.setPlanManager`/`setArtifactWriter` are plain setters, so a
-  // later call transparently supersedes an earlier one; nothing needs to be
-  // torn down.
-  const applyProblemRoot = async (contextRoot: vscode.Uri): Promise<void> => {
-    const artifactWriter = new ArtifactWriter(contextRoot, (msg: string) => {
-      console.log(`[AutoDE Artifact] ${msg}`);
-    });
-    hub.setArtifactWriter(artifactWriter);
-
-    const planManager = new PlanManager(contextRoot, (msg: string) => {
-      console.log(`[AutoDE Plan] ${msg}`);
-    });
-    hub.setPlanManager(planManager);
-    await planManager.initialize();
-    const persisted = planManager.getPlan();
-    if (persisted) {
-      hub.loadPersistedPlan(persisted);
-    }
-  };
-
-  // Fallback root for objective-only usage (command palette, no spec ever
-  // drafted) that never resolves to a real business problem — kept separate
-  // from any real problem folder so it can't be mistaken for one in the
-  // business-problem picker.
-  const unscopedRoot = vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.problems, UNSCOPED_PROBLEM);
-  void applyProblemRoot(unscopedRoot);
-
-  const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub, applyProblemRoot);
-  const panelProvider = new DataAgentHubPanelProvider(context, hub);
+  const sidebarProvider = new DataAgentHubWebviewProvider(context, configManager, hub);
 
   // Phase DRV2: named connections, onboarded from the settings cards.
   const managerOptions = () => ({
@@ -188,30 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await vscode.commands.executeCommand(`workbench.view.extension.${EXTENSION_ID}`);
   });
 
-  const generatePlan = vscode.commands.registerCommand(`${EXTENSION_ID}.generatePlan`, async () => {
-    const objective = await vscode.window.showInputBox({
-      prompt: 'Describe the data engineering objective to plan.',
-      placeHolder: 'Load daily sales events into a curated model and validate row counts.'
-    });
-    if (!objective || objective.trim().length === 0) { return; }
-    try {
-      await hub.generatePlan(objective.trim());
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to generate a plan.';
-      await vscode.window.showErrorMessage(message);
-    }
-  });
-
-  const executePlan = vscode.commands.registerCommand(`${EXTENSION_ID}.executePlan`, async () => {
-    try {
-      await hub.executePlan();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to execute the plan.';
-      await vscode.window.showErrorMessage(message);
-    }
-  });
-
-  // Phase 2B-i — an additional, opt-in flow alongside Generate Plan/Execute Plan:
+  // Phase 2B-i — an opt-in flow:
   // synthesizes a strictly-validated, machine-compilable Pipeline Spec from the
   // approved specification and its context. Delegates to the sidebar provider,
   // which owns the spec/context managers this needs (see webviewProvider.ts).
@@ -222,10 +160,6 @@ export function activate(context: vscode.ExtensionContext): void {
       const message = error instanceof Error ? error.message : 'Failed to generate the Pipeline Spec.';
       await vscode.window.showErrorMessage(message);
     }
-  });
-
-  const resetSession = vscode.commands.registerCommand(`${EXTENSION_ID}.resetSession`, async () => {
-    await hub.resetPlan();
   });
 
   // Phase 3a-ii — interactive-developer onboarding: detects the platform's own
@@ -1160,13 +1094,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Register all providers and commands ──
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, sidebarProvider, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.window.registerWebviewViewProvider(EXTENSION_PANEL_VIEW_ID, panelProvider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.window.registerCustomEditorProvider(EDITOR_DATA_MODEL, new DataModelEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_STTM, new SttmEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_GRAPH, new GraphEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_PROFILE, new ProfileEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_DOC, new DocEditorProvider(context)),
-    openSidebar, generatePlan, executePlan, generatePipelineSpec, resetSession,
+    openSidebar, generatePipelineSpec,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
     testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,

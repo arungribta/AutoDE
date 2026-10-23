@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.45.8",
+  "version": "0.45.9",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -39,11 +39,7 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:autoDataEngineeringHubSidebar",
-    "onView:autoDataEngineeringHubPanelView",
     "onCommand:autoDataEngineeringHub.openSidebar",
-    "onCommand:autoDataEngineeringHub.generatePlan",
-    "onCommand:autoDataEngineeringHub.executePlan",
-    "onCommand:autoDataEngineeringHub.resetSession",
     "onMcpCollection:autode",
     "onView:autoDataEngineeringHubWorkflow"
   ],
@@ -60,20 +56,8 @@
         "title": "AutoDE: Open Sidebar"
       },
       {
-        "command": "autoDataEngineeringHub.generatePlan",
-        "title": "AutoDE: Generate Plan"
-      },
-      {
-        "command": "autoDataEngineeringHub.executePlan",
-        "title": "AutoDE: Execute Plan"
-      },
-      {
         "command": "autoDataEngineeringHub.generatePipelineSpec",
         "title": "AutoDE: Generate Pipeline Spec"
-      },
-      {
-        "command": "autoDataEngineeringHub.resetSession",
-        "title": "AutoDE: Reset Session"
       },
       {
         "command": "autoDataEngineeringHub.testConnection",
@@ -325,13 +309,6 @@
           "title": "AutoDE",
           "icon": "media/autode-activitybar.svg"
         }
-      ],
-      "panel": [
-        {
-          "id": "autoDataEngineeringHubPanel",
-          "title": "AutoDE Dashboard",
-          "icon": "media/autode-activitybar.svg"
-        }
       ]
     },
     "views": {
@@ -348,13 +325,6 @@
         {
           "id": "autoDataEngineeringHubSkills",
           "name": "Skills"
-        }
-      ],
-      "autoDataEngineeringHubPanel": [
-        {
-          "id": "autoDataEngineeringHubPanelView",
-          "name": "Dashboard",
-          "type": "webview"
         }
       ]
     },

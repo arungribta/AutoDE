@@ -9,6 +9,7 @@ import { Actor } from '../engine/workflows/events';
 import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
 import { recordArtifact } from '../engine/agents/artifacts';
 import { stageReadiness } from '../engine/workflows/readiness';
+import { stageContextGaps } from '../engine/agents/stageGaps';
 
 /**
  * The workflow over MCP (PA3a): the runtime is the hub; an agent asks what to
@@ -65,18 +66,23 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
       description: 'The next assignment from the workflow (the hub): which stage, which role, its tier, what it consumes and produces, and instructions. Do it, then hand it in with autode_workflow_complete_stage. Never run another agent from inside an assignment.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       annotations: read('Next assignment'),
-      handler: async (_args, ws) => wrap(() => {
+      handler: async (_args, ws) => {
+        const sources = await ws.contextSources();
+        return wrap(() => {
         const scope = scopeOf(ws);
         ensureWorkflow(scope);
         const next = nextAssignment(rctx(ws));
         if (!next) return { next: null };
-        // PA3b: the full assignment when the stage's role has a definition; otherwise why not (its old agent still runs in the panel).
+        // PA3b: the full assignment when a skill does the stage's kind; otherwise why not (a person does it).
         if (next.stage.status === 'awaiting-approval') return { next, assignment: null };
-        const a = assignmentFor(scope, next.stage.id, allTools());
+        // The joins, keys and grain the stage's context doesn't back go into its assignment (v0.45.9).
+        const gaps = stageContextGaps(sources, { problemRoot: rctx(ws).problemRoot, kind: next.stage.kind, title: next.stage.title });
+        const a = assignmentFor(scope, next.stage.id, allTools(), { gaps });
         // The same check the panel's Run agent makes (v0.45.8): say what's missing before the agent starts.
         const notReady = stageReadiness({ workspaceRoot: scope.workspaceRoot, problemRoot: rctx(ws).problemRoot, kind: next.stage.kind });
         return { next, assignment: a.assignment ?? null, ...(a.reason ? { noAssignment: a.reason } : {}), ...(notReady.length ? { notReady } : {}) };
-      })
+        });
+      }
     },
     {
       name: 'autode_workflow_history',

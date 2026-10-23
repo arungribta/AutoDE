@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, PlanState, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
+import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
 import { SkillRegistry, loadSkillsFromDirectory } from '../engine/skills/skillRegistry';
@@ -146,11 +146,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   public constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly configManager: ConfigurationManager,
-    private readonly hub: DataAgentHubHub,
-    /** Re-points `hub`'s `PlanManager`/`ArtifactWriter` at a context root — owned by `extension.ts` so command-palette entry points keep working without the sidebar ever resolving. See `extension.ts#applyProblemRoot`. */
-    private readonly applyProblemRoot: (contextRoot: vscode.Uri) => Promise<void>
+    private readonly hub: DataAgentHubHub
   ) {
-    this.hub.setStateListener((state: PlanState) => this.postState(state));
     this.hub.setLogListener((message: string) => this.postLog(message));
     this.graphManager = new GraphManager();
   }
@@ -176,7 +173,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Phase 2B-i — an additional, opt-in flow alongside "Generate Plan": turns
+   * Phase 2B-i — an opt-in flow: turns
    * the approved BPS + approved Target/Source Context + attachment extracts
    * into a strictly-validated, machine-compilable Pipeline Spec (YAML) plus
    * its deterministic Markdown design-doc projection.
@@ -186,7 +183,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!spec || !this.pipelineSpecManager) { this.postLog('No active business problem — approve a specification first.'); return; }
     const gate = this.computeContextGateStatus(spec);
     if (!gate.canGeneratePlan) {
-      this.postMessage('error', { message: `Pipeline Spec generation needs the same readiness as Generate Plan: ${gate.blockingReasons.join(' ')}` });
+      this.postMessage('error', { message: `Pipeline Spec generation needs the specification and its contexts approved first: ${gate.blockingReasons.join(' ')}` });
       return;
     }
     try {
@@ -239,8 +236,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       await this.handleMessage(message);
     });
 
-    this.postState(this.hub.getPlan());
-
     // Initialize context layer
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
     this.workspaceRoot = workspaceRoot;
@@ -267,8 +262,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     } catch (err) {
       this.postLog(`Context initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    // C3 (v0.30.0): plan steps get task-scoped context packs and grounding manifests.
-    this.hub.setContextProvider(this.createContextPackProvider(), (title, pack) => this.contextFileManager?.recordPack(title, pack));
 
     // Initialize source registry + synthesis pipeline
     this.sourceRegistry = new SourceRegistry(workspaceRoot, (msg: string) => this.postLog(msg));
@@ -366,7 +359,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    */
   private async activateProblem(problemId: string | undefined): Promise<void> {
     if (!this.workspaceRoot || !this.activeProblemManager) return;
-    const previousSpecId = this.hub.getPlan().specId;
+    const previousSpecId = this.hub.currentSpecId();
     this.activeProblemId = problemId;
     this.hub.resetForNewProblem();
     if (previousSpecId) {
@@ -392,7 +385,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     const contextRoot = this.activeProblemManager.problemRoot(problemId);
-    await this.applyProblemRoot(contextRoot);
 
     this.specManager = new SpecManager(contextRoot, (msg: string) => this.postLog(msg));
     this.targetContextManager = new TargetContextManager(contextRoot, (msg: string) => this.postLog(msg));
@@ -424,8 +416,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             await this.synthesisPipeline.synthesizeFromSpec(existingSpec);
             await this.contextFileManager?.persistCompiledGraph();
           }
-          this.hub.inferPhasesFromSpec(existingSpec, this.contextPackText('spec', existingSpec.problemStatement, 'Phase inference'));
-          // A previously-approved Target Context becomes the plan's live target
+          // A previously-approved Target Context becomes the chat's live target
           // environment again — closes the gap where a generic
           // TargetConfigManager default silently seeded it instead.
           const tc = this.targetContextManager.getContext();
@@ -565,22 +556,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.postMessage('chatResponse', { message: errMsg, error: true });
-          }
-          break;
-        }
-        // v0.45.1: the workflow is the only path. Stages run from the Workflow view (or a host agent), one at a time,
-        // each through its gate; the plan of steps for the whole problem no longer runs from the panel.
-        case 'generatePlan': case 'generatePlanFromSpec': case 'approvePlan': case 'confirmStages': case 'executePlan': {
-          this.postLog('AutoDE now works stage by stage: open the Workflow view, approve the workflow, and use Run agent (or Produce, Approve, Hand in) on each stage. Nothing runs that its stage did not ask for.');
-          await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow');
-          break;
-        }
-        case 'pausePlan': { await this.hub.pauseExecution(); break; }
-        case 'resetPlan': {
-          await this.hub.resetPlan();
-          const existingSpec = this.specManager?.getSpec();
-          if (existingSpec && existingSpec.status === 'approved') {
-            this.hub.inferPhasesFromSpec(existingSpec);
           }
           break;
         }
@@ -741,18 +716,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
-        case 'runAgent': {
-          const agentType = typeof message.agent === 'string' ? message.agent : '';
-          if (!agentType) { this.postLog('No agent specified for runAgent.'); return; }
-          this.postLog(`Running agent: ${agentType}...`);
-          try {
-            switch (agentType) {
-              case 'sourceAssessmentAgent': await vscode.commands.executeCommand(`${EXTENSION_ID}.sourceAssessment`); break; // the extraction command, not the retired agent
-              default: this.postLog(`Agent ${agentType} is available via plan execution. Use /plan to create a workflow.`); break;
-            }
-          } catch (e) { this.postLog(`Agent execution failed: ${e instanceof Error ? e.message : String(e)}`); }
-          break;
-        }
         case 'updateTargetConfig': {
           const targetConfig = message.targetConfig;
           if (targetConfig && typeof targetConfig === 'object') {
@@ -859,7 +822,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           await this.specManager!.saveSpec(spec);
           this.postSpec();
           if (spec.status === 'approved') {
-            this.hub.inferPhasesFromSpec(spec, this.contextPackText('spec', spec.problemStatement, 'Phase inference'));
             await this.initializeContextForApprovedSpec(spec);
           }
           this.postLog(`Implementation type set to ${value}.`);
@@ -892,7 +854,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           record.answers = answerMap;
           await this.targetContextManager.save(record as unknown as TargetContext);
           this.postMessage('targetContextBuilt', { context: this.targetContextManager.getContext() });
-          this.postLog('Target Context built — review it and approve to unlock Generate Plan.');
+          this.postLog('Target Context built — review it and approve it.');
           this.postContextGateStatus();
           break;
         }
@@ -960,7 +922,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           };
           await this.sourceContextManager.save(record);
           this.postMessage('sourceContextBuilt', { context: this.sourceContextManager.getContext() });
-          this.postLog('Source Context built — review it and approve to unlock Generate Plan.');
+          this.postLog('Source Context built — review it and approve it.');
           this.postContextGateStatus();
           break;
         }
@@ -1005,11 +967,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'verifyFact': { const id = (message as unknown as { id?: unknown }).id; if (typeof id === 'string') await this.verifyFacts([id]); break; }
         case 'bulkConfirmFacts': { const src = (message as unknown as { createdBy?: unknown }).createdBy; if (typeof src === 'string') await this.bulkConfirm(src); break; }
-        case 'continueDespiteGaps': {
-          const stepId = (message as unknown as { stepId?: unknown }).stepId;
-          if (typeof stepId === 'string') { this.hub.continueDespiteGaps(stepId); await this.hub.executePlan(); }
-          break;
-        }
         case 'resolveDecision': {
           const m = message as unknown as { id?: unknown; decision?: unknown; note?: unknown };
           if (typeof m.id === 'string' && (m.decision === 'approved' || m.decision === 'rejected')) await this.resolveDecisionInPanel(m.id, m.decision, typeof m.note === 'string' ? m.note : undefined);
@@ -1074,16 +1031,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           } catch (err) {
             this.postMessage('error', { message: `Deprecate failed for "${kind}": ${err instanceof Error ? err.message : String(err)}` });
           }
-          break;
-        }
-        case 'setPhaseRequired': {
-          const phase = typeof message.phase === 'string' ? message.phase : '';
-          const required = message.required === true;
-          if (phase !== 'discover' && phase !== 'model' && phase !== 'build' && phase !== 'validate') {
-            this.postLog('A valid phase (discover/model/build/validate) is required.');
-            break;
-          }
-          this.hub.setPhaseOverride(phase, required);
           break;
         }
         case 'submitSpecAnswers': {
@@ -1277,7 +1224,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       { uri: this.specManager?.getSpecUri(), reload: () => this.specManager!.reload(), after: () => this.afterSpecReloaded() },
       {
         uri: this.pipelineSpecManager?.getSpecUri(), reload: () => this.pipelineSpecManager!.reload(),
-        after: () => { this.hub.pauseForExternalChange('The Pipeline Spec changed on disk during execution'); this.postContextGateStatus(); }
+        after: () => this.postContextGateStatus()
       },
       { uri: this.sourceContextManager?.getFileUri(), reload: () => this.sourceContextManager!.reload(), after: () => this.postContextGateStatus() },
       { uri: this.targetContextManager?.getFileUri(), reload: () => this.targetContextManager!.reload(), after: () => this.postContextGateStatus() },
@@ -1295,7 +1242,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private async afterSpecReloaded(): Promise<void> {
     const spec = this.specManager?.getSpec();
     if (spec) this.hub.setSpec(spec.id, spec.version);
-    this.hub.pauseForExternalChange('The Business Problem Specification changed on disk during execution');
     this.postSpec();
     this.postContextGateStatus();
     const problemRoot = this.currentProblemRoot();
@@ -1404,14 +1350,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private postState(state: PlanState): void {
-    this.view?.webview.postMessage({ type: 'stateUpdate', state });
-  }
-
-  private postPlan(plan: unknown): void {
-    this.view?.webview.postMessage({ type: 'planUpdated', plan });
-  }
-
   private postLog(message: string): void {
     this.view?.webview.postMessage({ type: 'logEntry', message });
   }
@@ -1425,7 +1363,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private inboxState(): Record<string, unknown> {
     const ledger = this.ledger();
     const { facts, conflicts } = ledger ? inbox(ledger) : { facts: [], conflicts: [] };
-    return { facts, conflicts, waitingForContext: this.hub.getPlan().waitingForContext, live: !!this.liveProbes };
+    return { facts, conflicts, live: !!this.liveProbes };
   }
 
   /** `/define`, `/rule`, `/decide`, `/assume`: returns true when the message was a capture command. */
@@ -1602,13 +1540,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (record) this.decisionStore()?.recordResolved({ kind: 'spec_approval', title: `Approve the Business Problem Specification v${approved.version}`, summary: approved.problemStatement, proposal: { id: approved.id, version: approved.version }, proposedBy: { host: 'vscode' }, problemId: this.activeProblemId, by: this.panelUser(), channel: 'panel' });
     this.hub.setSpec(approved.id, approved.version);
     await this.syncContextFromApprovedSpec(approved);
-    const contextSummary = this.contextPackText('spec', approved.problemStatement, 'Phase inference');
-    this.hub.inferPhasesFromSpec(approved, contextSummary);
     await this.initializeContextForApprovedSpec(approved);
     this.postMessage('specApproved', { spec: approved });
     this.postLog(approved.implementationType === 'brownfield'
-      ? `Business Problem Specification v${approved.version} approved. Build the Target Context and Source Context before generating the workflow plan.`
-      : `Business Problem Specification v${approved.version} approved. Build the Target Context before generating the workflow plan (no source system — Greenfield).`);
+      ? `Business Problem Specification v${approved.version} approved. Build the Target Context and Source Context, then work through the workflow's stages.`
+      : `Business Problem Specification v${approved.version} approved. Build the Target Context (no source system — Greenfield), then work through the workflow's stages.`);
     this.postContextGateStatus();
     return true;
   }
@@ -2161,7 +2097,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** The single source of truth for whether Generate Plan is allowed to run — computed fresh, never cached. */
+  /** Whether the specification and its contexts are approved (the Pipeline Spec needs them) — computed fresh, never cached. */
   private computeContextGateStatus(spec: BusinessProblemSpec | undefined): {
     targetStatus: string; sourceApplicable: boolean; sourceStatus: string; canGeneratePlan: boolean; blockingReasons: string[];
   } {
@@ -2285,10 +2221,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   private postContextGateStatus(): void {
     const status = this.computeContextGateStatus(this.specManager?.getSpec());
-    // Pushes the same readiness signal into the orchestrator (AgentHub) so plan
-    // generation is gated at its actual enforcement point, not just in the UI
-    // that happens to call this method (v0.13.0, requirements.md §8.12/§11).
-    this.hub.setContextGateReady(status.canGeneratePlan);
     this.postMessage('contextGateStatus', {
       ...status,
       targetContext: this.targetContextManager?.getContext(),
@@ -2315,29 +2247,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return this.contextFileManager?.buildContextPack({ purpose, query }, title).text ?? '';
   }
 
-  private createContextPackProvider(): ContextPackProvider {
-    return {
-      buildPack: (request) => this.contextFileManager!.buildContextPack(request),
-      prepare: async (request) => { await this.contextFileManager?.prepareContext(request); },
-      beforeRun: async () => {
-        const r = await this.contextFileManager?.refreshWorkingSet();
-        if (r && r.checked > 0) this.postLog(`Refreshed the working set before the run: ${r.checked} object(s) re-checked, ${r.fetched} re-read.`);
-      },
-      sources: () => this.contextFileManager!.getPackSources(),
-      supplementary: () => {
-        const spec = this.specManager?.getSpec();
-        return spec ? this.buildSupplementaryContext(spec) : '';
-      },
-      specRevision: () => {
-        const spec = this.specManager?.getSpec();
-        return spec ? 'sha256:' + createHash('sha256').update(JSON.stringify(spec)).digest('hex').slice(0, 16) : undefined;
-      },
-      plannedObjects: () => {
-        const ps = this.pipelineSpecManager?.getSpec();
-        return ps && ps.status === 'approved' ? ps.entities.map((e) => e.target.object) : [];
-      }
-    };
-  }
 
   /** Approved Source and Target Context for the given spec revision — the non-graph context every step gets. */
   private buildSupplementaryContext(spec: BusinessProblemSpec): string {

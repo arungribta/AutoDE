@@ -1,10 +1,10 @@
 import { BusinessProblemSpec, ImplementationType } from '../engine/types';
-import { matchesAnyKeyword } from './phaseInference';
+import { matchesAnyKeyword } from './keywords';
 
 /**
  * Deterministic Greenfield/Brownfield classification from an approved (or
  * approved-in-progress) Business Problem Specification. Mirrors the keyword-
- * evidence approach `phaseInference.ts` already uses for phase applicability,
+ * evidence approach `keywords.ts` provides,
  * deliberately dependency-free (no `vscode` import) so it's unit-testable.
  *
  * Always paired with an explicit user override in the UI — this is a
