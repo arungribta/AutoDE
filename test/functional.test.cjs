@@ -5962,7 +5962,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -6014,6 +6014,7 @@ async function main() {
       autode_pack_apply: [{ ids: ['a'] }, { ids: 'a' }],
       autode_check_conformance: [{}, { connectionId: '' }],
       autode_mine_vocabulary: [{}, { x: 1 }],
+      autode_find_source_files: [{}, { x: 1 }],
       autode_workflow_templates: [{}, { x: 1 }],
       autode_workflow_status: [{}, { x: 1 }],
       autode_workflow_next: [{}, { x: 1 }],
@@ -9157,6 +9158,50 @@ async function main() {
       const wv = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
       assert.ok(/targetIncluded: included\('target-context'\)/.test(wv) && /const targetReady = !targetApplicable \|\|/.test(wv));
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.10 (owner\'s test): source files shared in the workspace are found deterministically — DDL with its schemas and suggested system, data files, load scripts — and brought into the estate; the source assessor starts with them; the same over MCP and the CLI', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-files-'));
+    let client;
+    try {
+      const put = (rel, text) => { const f = nodePath.join(ws, ...rel.split('/')); nodeFs.mkdirSync(nodePath.dirname(f), { recursive: true }); nodeFs.writeFileSync(f, text); };
+      put('sources/crm.ddl', 'CREATE TABLE crm.customers (cust_no VARCHAR(20) PRIMARY KEY, email VARCHAR(255));\nCREATE TABLE crm.tickets (ticket_id INT, cust_no VARCHAR(20));\n');
+      put('sources/mixed.sql', 'CREATE OR REPLACE TRANSIENT TABLE IF NOT EXISTS a.t1 (x INT);\nCREATE TABLE b.t2 (y INT);\n');
+      put('loads/load_orders.sql', 'COPY INTO raw.orders FROM @stage/orders/;\n');
+      put('loads/ingest.py', 'import pandas as pd\ndf = pd.read_csv("orders.csv")\n');
+      put('extracts/Orders Export.csv', 'order_id,amount\n1,10\n');
+      put('notes/readme.sql', '-- nothing here\nSELECT 1;\n');
+      put('package.json', '{}');
+      put('node_modules/x/schema.sql', 'CREATE TABLE z.t (a INT);');
+      put('autode-output/p/sql/stg.sql', 'CREATE TABLE stg.t (a INT);');
+      put('.autode/config/x.sql', 'CREATE TABLE q.t (a INT);');
+      const { findSourceFiles } = fresh('../dist/engine/context/sourceFiles.js');
+      const files = findSourceFiles(ws);
+      const by = Object.fromEntries(files.map((f) => [f.path, f]));
+      assert.deepStrictEqual(Object.keys(by).sort(), ['extracts/Orders Export.csv', 'loads/ingest.py', 'loads/load_orders.sql', 'sources/crm.ddl', 'sources/mixed.sql']);
+      assert.deepStrictEqual([by['sources/crm.ddl'].kind, by['sources/crm.ddl'].tables, by['sources/crm.ddl'].schemas, by['sources/crm.ddl'].suggestedSystem], ['ddl', 2, ['crm'], 'crm']);
+      assert.deepStrictEqual([by['sources/mixed.sql'].tables, by['sources/mixed.sql'].suggestedSystem], [2, 'mixed'], 'two schemas: the file names the system');
+      assert.deepStrictEqual([by['loads/load_orders.sql'].kind, by['loads/ingest.py'].kind, by['extracts/Orders Export.csv'].kind, by['extracts/Orders Export.csv'].suggestedSystem], ['load-script', 'load-script', 'data', 'orders-export']);
+      // Over MCP; then ingested, it says so.
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      let found = await call('autode_find_source_files', {});
+      assert.ok(found.files.length === 5 && /Ingest each DDL/.test(found.next), JSON.stringify(found));
+      assert.ok(!(await call('autode_ingest_file', { path: 'sources/crm.ddl', system: 'crm' })).code);
+      found = await call('autode_find_source_files', {});
+      assert.strictEqual(found.files.find((f) => f.path === 'sources/crm.ddl').ingested, 'crm');
+      // The CLI.
+      const r = await cli(['estate', 'files', '--workspace', ws, '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      assert.strictEqual(r.json().files.find((f) => f.path === 'sources/mixed.sql').suggestedSystem, 'mixed');
+      // The source assessor starts with the files; the panel offers to bring them in.
+      const role = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'agents', 'source-assessor.md'), 'utf8');
+      const skill = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'skills', 'autode-de-source-assessment', 'SKILL.md'), 'utf8');
+      assert.ok(/tools: \[autode_find_source_files/.test(role) && /Start with `autode_find_source_files`/.test(skill) && /mcp__autode__autode_find_source_files/.test(skill));
+      const wv = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
+      assert.ok(/case 'ingestSourceFiles'/.test(wv) && /submit: 'ingestSourceFiles'/.test(wv) && !/Source Context: connect, or describe/.test(wv));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   // ---------- v0.45.3: PA3b step 3 — the data modeler ----------

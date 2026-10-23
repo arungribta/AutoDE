@@ -63,6 +63,8 @@ import { classifyImplementationType } from './implementationType';
 import { NO_CONNECTION, buildTargetContextQuestions } from './targetContextQuestions';
 import { sourceEntryForSystem, sourceSystemChoices, targetConnectionChoices, targetDefaults, writeTargetContextDraft } from '../engine/context/problemContexts';
 import { writeSourceContextDraft } from '../engine/agents/sourceContextDraft';
+import { findSourceFiles } from '../engine/context/sourceFiles';
+import { ingestFile } from '../engine/context/estateIngest';
 import { buildSourceContextQuestions } from './sourceContextQuestions';
 import { LAYOUT, UNSCOPED_PROBLEM, layoutRel } from '../engine/workspaceLayout';
 
@@ -886,7 +888,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'chooseSourceContextMethod': {
           const spec = this.specManager?.getSpec();
           if (!spec || spec.status !== 'approved' || !this.sourceContextManager || !this.workspaceRoot) { this.postMessage('error', { message: 'Approve the specification before building Source Context.' }); break; }
-          const method = message.method === 'estate' || message.method === 'connected' ? 'estate' : message.method === 'described' ? 'described' : undefined;
+          const method = message.method === 'estate' || message.method === 'connected' ? 'estate' : message.method === 'estate-systems' ? 'estate-systems' : message.method === 'described' ? 'described' : undefined;
           if (!method) break;
           const existing = this.sourceContextManager.getContext();
           const sameVersion = !!existing && existing.specId === spec.id && existing.specVersion === spec.version;
@@ -895,6 +897,16 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const questions = buildSourceContextQuestions(spec);
             this.postMessage('sourceContextQuestions', { questions, answers: sameVersion ? existing!.answers : {} });
           } else {
+            // Source files shared in the workspace (DDL, CSV, JSON) not yet in the estate: offer to bring them in first.
+            const files = method === 'estate' ? findSourceFiles(this.workspaceRoot.fsPath).filter((f) => f.kind !== 'load-script' && !f.ingested) : [];
+            if (files.length) {
+              this.postMessage('sourceContextQuestions', {
+                questions: [{ id: 'files', field: 'files', kind: 'multi-select', prompt: 'These source files in the workspace are not in the estate yet. Bring the ticked ones in (each as the system shown)?', options: files.map((f) => f.path), rationale: files.map((f) => `${f.path} → ${f.suggestedSystem}${f.tables ? ` (${f.tables} tables)` : ''}`).join(' · ') }],
+                answers: { files: files.map((f) => f.path).join(',') },
+                submit: 'ingestSourceFiles'
+              });
+              break;
+            }
             // v0.45.10: the source context lists estate systems; their tables and bindings stay in the estate.
             const systems = sourceSystemChoices(this.workspaceRoot.fsPath);
             if (!systems.length) { this.postMessage('error', { message: 'There are no source systems in the estate yet. Bring them in first (Ingest File, Browse Source Database, or `autode estate ingest` / `autode estate extract`), or choose "Describe source" for a source with no connection.' }); break; }
@@ -905,6 +917,23 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
               submit: 'submitSourceSystems'
             });
           }
+          break;
+        }
+        case 'ingestSourceFiles': {
+          if (!this.workspaceRoot || !this.contextFileManager) break;
+          const raw = Array.isArray(message.answers) ? message.answers as Array<{ questionId: string; value: string }> : [];
+          const picked = new Set((raw.find((x) => x.questionId === 'files')?.value ?? '').split(',').map((x) => x.trim()).filter(Boolean));
+          const found = findSourceFiles(this.workspaceRoot.fsPath).filter((f) => picked.has(f.path));
+          for (const f of found) {
+            try {
+              const r = await ingestFile(this.contextFileManager, path.join(this.workspaceRoot.fsPath, ...f.path.split('/')), { system: f.suggestedSystem });
+              this.postLog(`Brought ${f.path} into the estate as ${r.system}: ${r.tables} table(s), ${r.columns} column(s).`);
+            } catch (err) { this.postLog(`Could not bring ${f.path} in: ${err instanceof Error ? err.message : String(err)}`); }
+          }
+          await this.contextFileManager.persistCompiledGraph();
+          this.postContextUpdate();
+          // Files not ticked stay out; the systems are offered next.
+          await this.handleMessage({ type: 'chooseSourceContextMethod', method: found.length ? 'estate-systems' : 'estate' } as WebviewMessage);
           break;
         }
         case 'submitSourceSystems': {
@@ -2222,7 +2251,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             await vscode.commands.executeCommand('autoDataEngineeringHubSidebar.focus');
             this.postLog(s.kind === 'specify' ? 'The specification is in the panel: answer the interview, then approve it there or from the Workflow view.'
               : s.kind === 'target-context' ? 'Build the target context in the panel (Target Context), then approve it there or from the Workflow view.'
-              : 'Build the source context in the panel (Source Context: connect, or describe the sources), then approve it there or from the Workflow view.');
+              : 'Build the source context in the panel (Source Context: Pick from the Estate, which also brings in source files found in the workspace, or Describe Source), then approve it there or from the Workflow view.');
           }
         }
       } else if (action === 'complete' && stage) {

@@ -15,7 +15,13 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
   - **"Started, but blocked"** replaces *Not ready yet* on a stage that is already in progress. When Source assessment was approved without any tables, the message says to re-open it rather than to run its agent.
 - **The target is needed only when the workflow has a target stage**, the same rule the source already followed. The panel no longer asks for a target context in a workflow without one, and shows *Not in this workflow*.
 - **The specification card's leftover *Generate Plan* button** (it opened the Workflow view) is now labelled *Open Workflow*.
-- **Measured:** 353 tests (1 new, replaying the sample). Lint 0 errors.
+- **Sources shared as files are found and brought in** (owner's test: the source assessor found "no connected systems" although the sample has DDL files; in real projects, DDLs, extracts and load scripts are often all that is handed over). `findSourceFiles()` (`src/engine/context/sourceFiles.ts`) walks the workspace deterministically and classifies each file:
+  - **DDL**: how many tables it creates and in which schemas; it suggests its one schema as the system, else its file name;
+  - **data**: CSV or JSON extracts;
+  - **load scripts**: SQL with COPY INTO, INSERT or MERGE, and Python or shell that reads or loads data. These are evidence to read, not structure to ingest.
+
+  It skips `.autode/`, `autode-output/`, `node_modules/`, hidden folders and config JSON, and says which files are in the estate already. The source assessor's role and skill now start with it: ingest each DDL and data file as its suggested system, and read the load scripts for what is loaded and from where. In the panel, *Pick from the Estate* first offers to bring in the source files not yet in the estate (ticked by default), then the systems to pick. Over MCP it is `autode_find_source_files`; in a terminal, `autode estate files`. The Workflow view's hint for the source stage no longer mentions the retired *connect* option.
+- **Measured:** 354 tests (2 new: replaying the sample; the source files, over the engine, MCP and the CLI). Lint 0 errors.
 
 ## 0.45.10
 

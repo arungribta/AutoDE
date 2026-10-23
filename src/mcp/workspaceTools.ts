@@ -4,6 +4,7 @@ import { EngineWorkspace } from './workspace';
 import { PlatformSession } from './platform';
 import { listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
 import { ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
+import { findSourceFiles } from '../engine/context/sourceFiles';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { BusinessPackManager } from '../engine/context/businessPackManager';
@@ -141,6 +142,16 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
         if (!listProblems(ws.options.workspaceRoot).some((p) => p.id === id)) throw new EngineToolError('NOT_FOUND', `No business problem "${id}" (see autode_list_problems).`);
         setActiveProblem(ws.options.workspaceRoot, id);
         return { id, active: true };
+      }
+    },
+    {
+      name: 'autode_find_source_files',
+      description: 'The source material shared as files in the workspace: DDL files (with how many tables and which schemas), data files (CSV, JSON) and load scripts (COPY INTO, INSERT, read_csv …), each with the estate system it suggests and whether it is in the estate already. Ingest DDL and data files with autode_ingest_file (system: the suggested one unless the stakeholder says otherwise); read load scripts for what is loaded and from where.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: { title: 'Find source files', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (_args, ws) => {
+        const files = findSourceFiles(ws.options.workspaceRoot);
+        return { files, next: files.some((f) => f.kind !== 'load-script' && !f.ingested) ? 'Ingest each DDL or data file not yet in the estate with autode_ingest_file.' : files.length ? 'Every DDL and data file is in the estate.' : 'No source files in the workspace: ask the stakeholder for them, or for access to the systems.' };
       }
     },
     {

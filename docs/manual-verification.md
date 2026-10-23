@@ -857,6 +857,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 - [ ] **35.7 Per-source tasks.**
   Do: ingest a source after the workflow was planned.
   Expect: the source stage's tasks show that system (not business-context).
+- [ ] **35.8 Sources as files.**
+  Do: in the sample (DDL files in `sources/`, nothing ingested), Run agent on Source assessment; separately, Source Context → Pick from the Estate; and `autode estate files`.
+  Expect: the agent finds and ingests the three DDL files (crm, hr_legacy, shop) and drafts the source context from them; the panel offers the same files to bring in, then the systems; the terminal lists them with their suggested systems.
 
 ## Results
 
@@ -1064,5 +1067,6 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 35.5 |  |  |
 | 35.6 |  |  |
 | 35.7 |  |  |
+| 35.8 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

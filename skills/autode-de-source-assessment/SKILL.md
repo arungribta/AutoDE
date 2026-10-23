@@ -1,12 +1,12 @@
 ---
 name: autode-de-source-assessment
 description: Assess the source systems of an AutoDE business problem - bring their metadata into the estate, profile keys, grain, volumes and freshness with read-only aggregate queries, propose keys, grain and relationships as facts, and draft the source context. Use it for the source-assessment stage of an AutoDE workflow.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_list_connections, mcp__autode__autode_test_connection, mcp__autode__autode_list_databases, mcp__autode__autode_list_schemas, mcp__autode__autode_extract_metadata, mcp__autode__autode_ingest_metadata, mcp__autode__autode_ingest_file, mcp__autode__autode_execute_query, mcp__autode__autode_resolve, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_assertions, mcp__autode__autode_propose_assertion, mcp__autode__autode_pack_list, mcp__autode__autode_mine_vocabulary, mcp__autode__autode_workflow_status, mcp__autode__autode_record_source_context, mcp__autode__autode_record_artifact]
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_find_source_files, mcp__autode__autode_list_connections, mcp__autode__autode_test_connection, mcp__autode__autode_list_databases, mcp__autode__autode_list_schemas, mcp__autode__autode_extract_metadata, mcp__autode__autode_ingest_metadata, mcp__autode__autode_ingest_file, mcp__autode__autode_execute_query, mcp__autode__autode_resolve, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_assertions, mcp__autode__autode_propose_assertion, mcp__autode__autode_pack_list, mcp__autode__autode_mine_vocabulary, mcp__autode__autode_workflow_status, mcp__autode__autode_record_source_context, mcp__autode__autode_record_artifact]
 metadata:
   scope: de
   stageKinds: [source-assessment]
   platforms: [any]
-  version: 2
+  version: 3
   owner: AutoDE
   maturity: tested
 ---
@@ -18,9 +18,11 @@ metadata:
 
 ## 2. Bring each system into the estate
 
+Start with `autode_find_source_files`: sources often come as files (DDL, CSV or JSON extracts, load scripts) rather than connections, and a problem with no connection usually has them.
+
+- **Files:** ingest each DDL or data file not yet in the estate with `autode_ingest_file`, giving `system` (the suggested one: the file's schema, else its name, unless the stakeholder names it otherwise). Read the load scripts for what is loaded, from where and how often; put that in the report and the source context's description, and propose what they establish (a key a MERGE matches on, a load's grain) as facts with the script as evidence.
 - **Connected:** `autode_list_connections`; `autode_test_connection` if its readiness is unknown; `autode_list_databases` and `autode_list_schemas` to find the schemas; then `autode_ingest_metadata` with the schemas in scope (and `profile` when the connection allows it).
-- **Files** in the workspace (DDL, CSV, JSON): `autode_ingest_file`.
-- **No access:** don't guess. Record the system as *described* (step 5) with what it is, who owns it and what access is needed.
+- **No access and no files:** don't guess. Record the system as *described* (step 5) with what it is, who owns it and what access is needed.
 
 Then check with `autode_resolve` that the tables the outcome needs are there.
 

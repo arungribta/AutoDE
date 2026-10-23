@@ -42,6 +42,7 @@ import { DataPlatformProvider, SourceContext, SourceContextEntry } from '../engi
 import { TARGET_OPTIONS, readTargetContext, sourceEntryForSystem, sourceSystemChoices, targetConnectionChoices, targetContextFile, writeTargetContextDraft } from '../engine/context/problemContexts';
 import { sourceContextFile, writeSourceContextDraft } from '../engine/agents/sourceContextDraft';
 import { parseYaml } from '../engine/context/Yaml';
+import { findSourceFiles } from '../engine/context/sourceFiles';
 import { Catalog } from '../engine/context/catalog';
 import { layoutPath } from '../engine/workspaceLayout';
 import { SqlDialect } from '../engine/transforms/types';
@@ -123,6 +124,7 @@ Business problems:
 Estate (observed metadata; recorded without a decision):
   estate show                  Systems, environments, bindings, and what the catalog holds
   estate ingest <file>...      DDL (.sql/.ddl), CSV or JSON into the catalog and working set [--system <s>] [--environment <e>]
+  estate files                 Source files shared in the workspace (DDL, data, load scripts): the system each suggests, and whether it is in the estate
   estate extract --connection <id> --schema <DB.SCHEMA>...   A connection's schemas [--system <s>] [--profile] [--allow-cli]
 
 Workflow (the planned stages of a problem; approving is a person's: interactive terminal):
@@ -711,6 +713,13 @@ async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: true, estate, catalog: [...bySystem.entries()].map(([key, tables]) => ({ key, tables })), stats }, lines.join('\n'));
       return EXIT.OK;
     } finally { cfm.dispose(); }
+  }
+  if (sub === 'files') {
+    const files = findSourceFiles(ctx.workspaceRoot);
+    emit(ctx, { ok: true, files }, files.length
+      ? files.map((f) => `  ${f.ingested ? '✓' : '·'} ${f.path.padEnd(40)} ${f.kind.padEnd(11)} ${f.ingested ? `in the estate as ${f.ingested}` : f.kind === 'load-script' ? 'read it for what is loaded' : `suggested system: ${f.suggestedSystem}${f.tables ? ` (${f.tables} tables)` : ''} — autode estate ingest ${f.path} --system ${f.suggestedSystem}`}`).join('\n')
+      : 'No source files in the workspace.');
+    return EXIT.OK;
   }
   if (sub === 'ingest') {
     if (!args.length) throw new CliError(EXIT.USAGE, 'estate ingest takes one or more files (.sql, .ddl, .csv, .json).');
