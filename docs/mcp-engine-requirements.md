@@ -597,18 +597,11 @@ Everything that changes a data platform runs through one deterministic runner. A
   The interactive terminal runner (`autode run <runbook>`) is in the backlog, by the owner's decision of 2026-10-22. Until it exists, runs happen in VS Code. This is a deliberate exception to surface parity.
 - **Stages:** the deploy and platform-setup stages produce runbooks, and are done when their run succeeds. `autode_apply_decision` keeps working for single platform-change decisions.
 
-##### 8b. Platform skills and vendor skills (v0.45.11; owner, 2026-10-22; naming and the catalog shipped in v0.45.5)
+##### 8b. Platform skills and vendor skills (shipped v0.45.11; owner, 2026-10-22; naming and the catalog shipped in v0.45.5)
 
-- **AutoDE's own platform skills**, written from the vendors' public documentation and AutoDE's tools, not from vendor skill text:
-  - Snowflake: ingestion (stages, file formats, `COPY INTO`, Snowpipe), pipelines (streams and tasks, dynamic tables), governance (roles and grants, masking and row-access policies, tags), performance (warehouse sizing, clustering), deployment (Snowflake CLI projects as runbooks);
-  - Databricks: ingestion (Auto Loader, `COPY INTO`), pipelines (Lakeflow Declarative Pipelines), governance (Unity Catalog grants, column masks, row filters), performance (OPTIMIZE, liquid clustering, VACUUM), deployment (bundles as runbooks);
-  - cross-platform: reconciliation (counts, aggregates and key hashes, read-only), dbt (a project and tests from the quality rules).
+**Status:** ✅ shipped in v0.45.11. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md SKL-8, ORC-10; HOW: technical-design.md §7.9 (Platform skills); usage: [platform-skills.md](platform-skills.md). The full specification text is in git (this file at commit 74fee3c).
 
-  Each ships with a fixture and a test: its SQL or YAML resolves against the estate, uses the platform's dialect, and its runbook passes the engine's checks.
-- **Naming and selection (shipped v0.45.5):** AutoDE's skills are named `autode-<scope>-<capability>` and declare `metadata.stageKinds` and `metadata.platforms`. An assignment picks the skills for its stage kind and the problem's target platform. Platform skills are named `autode-snowflake-*` and `autode-databricks-*`.
-- **Vendor skills by reference, never copied.** The Databricks agent skills are under the Databricks License (use only with Databricks Services; may be terminated on notice), so they aren't redistributed. When they are installed in the host, AutoDE detects them and names the relevant ones in the assignment ("for bundle deployment, see `databricks-dabs`"). When they aren't installed, AutoDE offers the moderated install (`databricks aitools install`, run in a visible terminal only on click, as for drivers). Cortex Code's built-in skills run only inside Cortex Code; where a user has Cortex Code, AutoDE can hand Snowflake work to it, but it is never required. Community skills with an open licence (for example Apache-2.0 skills in Snowflake-Labs/coco-skills) may be imported through PA4 with their attribution. AutoDE's own skills work with no vendor skill installed.
-- **Hooks in the plugin:** in hosts that support hooks (Claude Code, Cortex Code), the AutoDE plugin blocks platform-changing `snow` and `databricks` commands that don't come from an approved runbook. Where a host has no hooks, this is documented as a convention, not a guarantee.
-- **The catalog (shipped v0.45.5)** lists AutoDE's platform skills and the vendor skills AutoDE works with, at which stage, with their licences: the Skills view, `autode skills`, `autode_skills_list`, and `docs/skills.md` (generated).
+In short: twelve AutoDE skills (Snowflake and Databricks ingestion, pipelines, governance, performance, deployment; dbt; reconciliation), each with a worked example on the reference problem that `npm test` checks against the estate, the platform's dialect and the runbook checks. They are chosen by stage kind and target platform (dbt also by the transformation tool). Vendor skills are referenced, never copied: named when installed, listed with a person's install step when not. The plugin's guard hook blocks platform-changing `snow`/`databricks` commands in hosts with hooks; elsewhere it is a convention.
 
 ##### 9. Tools added
 
@@ -617,7 +610,7 @@ Everything that changes a data platform runs through one deterministic runner. A
   - `autode_match_columns`: candidate column matches by name, type, vocabulary and past approved mappings;
   - `autode_draft_model`: a draft model from grain and keys (shipped v0.45.3, with `autode_check_model`, which checks it and renders the DDL);
   - `autode_primitive_candidates` (shipped v0.45.4, with `autode_record_pipeline_spec`);
-  - `autode_reconcile_plan`: reconciliation queries by key, read-only.
+  - `autode_reconcile_plan`: reconciliation queries by key, read-only (shipped v0.45.11).
 - **Proposals:** `autode_propose_model` (not built: since v0.45.0 a stage's deliverables are drafts approved at its gate, v0.45.3), `autode_propose_artifacts` (built as `autode_record_artifact`, v0.45.0) (gives artifacts written in any host grounding manifests), `autode_propose_entity_resolution`, `autode_propose_quality_rules`.
 - **Interview:** `autode_interview_state`, `autode_interview_record_answer`.
 - **CLI:** `autode workflow templates | status | next | approve <stage> | skip <stage> --reason | reopen <stage>`, and `autode plugin install --host claude|cortex|copilot [--scope project|user]`, `autode plugin path`.

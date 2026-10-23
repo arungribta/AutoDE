@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
 import { checkSingleStatement } from '../platform/sqlGuard';
+import { foreignDialect } from '../platform/dialectMarkers';
 import { ConnectionEntry } from '../platform/connectionsConfig';
 import { EnvironmentPolicy, RunbookPolicy, StepClass, approvalsNeeded, approverProblem, environmentOf } from './policy';
 
@@ -65,7 +66,8 @@ export interface CheckedStep {
 
 export interface RunbookCheck { ok: boolean; errors: string[]; warnings: string[]; steps: CheckedStep[]; environment: EnvironmentPolicy; revision: string }
 
-const DESTRUCTIVE = new Set(['DROP', 'TRUNCATE', 'DELETE', 'REVOKE']);
+/** VACUUM deletes the files that time travel and a restore would need (v0.45.11). */
+const DESTRUCTIVE = new Set(['DROP', 'TRUNCATE', 'DELETE', 'REVOKE', 'VACUUM']);
 const PATH_PREFIX = /^(@|dbfs:|s3:|s3a:|gs:|abfss?:|wasbs?:|https?:|volumes?:|\/Volumes\/|\/Workspace\/)/i;
 
 /** AutoDE's CLI allowlist: reviewed like code. A team adds its own commands in its policy. */
@@ -75,6 +77,9 @@ export const CLI_ALLOWLIST: ReadonlyArray<{ argv: string[]; class: StepClass; pl
   { argv: ['snow', 'object', 'describe'], class: 'read', platform: 'snowflake' },
   { argv: ['snow', 'stage', 'list-files'], class: 'read', platform: 'snowflake' },
   { argv: ['snow', 'stage', 'copy'], class: 'change', platform: 'snowflake' },
+  { argv: ['snow', 'dbt', 'list'], class: 'read', platform: 'snowflake' },
+  { argv: ['snow', 'dbt', 'deploy'], class: 'change', platform: 'snowflake' },
+  { argv: ['snow', 'dbt', 'execute'], class: 'change', platform: 'snowflake' },
   { argv: ['databricks', 'current-user', 'me'], class: 'read', platform: 'databricks' },
   { argv: ['databricks', 'catalogs', 'list'], class: 'read', platform: 'databricks' },
   { argv: ['databricks', 'catalogs', 'get'], class: 'read', platform: 'databricks' },
@@ -87,7 +92,11 @@ export const CLI_ALLOWLIST: ReadonlyArray<{ argv: string[]; class: StepClass; pl
   { argv: ['databricks', 'jobs', 'run-now'], class: 'change', platform: 'databricks' },
   { argv: ['databricks', 'fs', 'ls'], class: 'read', platform: 'databricks' },
   { argv: ['databricks', 'fs', 'cp'], class: 'change', platform: 'databricks' },
+  { argv: ['databricks', 'pipelines', 'list-pipelines'], class: 'read', platform: 'databricks' },
+  { argv: ['databricks', 'pipelines', 'get'], class: 'read', platform: 'databricks' },
+  { argv: ['databricks', 'pipelines', 'start-update'], class: 'change', platform: 'databricks' },
   { argv: ['databricks', 'bundle', 'validate'], class: 'read', platform: 'databricks' },
+  { argv: ['databricks', 'bundle', 'summary'], class: 'read', platform: 'databricks' },
   { argv: ['databricks', 'bundle', 'deploy'], class: 'change', platform: 'databricks' },
   { argv: ['databricks', 'bundle', 'run'], class: 'change', platform: 'databricks' },
   { argv: ['databricks', 'bundle', 'destroy'], class: 'destructive', platform: 'databricks' }
@@ -187,6 +196,8 @@ export function checkRunbook(rb: Runbook, ctx: CheckCtx): RunbookCheck {
       const rs = (s.rollback.steps ?? []).map((r) => checkStep(r, entry, ctx, `step ${s.id} rollback`, errors)).filter((x): x is CheckedStep => !!x);
       c.rollback = { steps: rs.length ? rs : undefined, procedure: s.rollback.procedure };
     } else if (c.class === 'destructive' && !s.noRollbackReason?.trim()) errors.push(`step ${s.id} is destructive: give its rollback (steps or a procedure), or noRollbackReason.`);
+    const foreign = s.kind === 'sql' && entry ? foreignDialect(s.sql ?? '', entry.platform) : [];
+    if (foreign.length) warnings.push(`step ${s.id} looks like ${entry!.platform === 'snowflake' ? 'Databricks' : 'Snowflake'} SQL (${foreign.join('; ')}), but ${entry!.id} is a ${entry!.platform} connection: its dry run will likely fail.`);
     if (c.class !== 'read' && !c.dryRun) warnings.push(`step ${s.id} has no dry run: it is reviewed from its description and the command.`);
     steps.push(c);
   }

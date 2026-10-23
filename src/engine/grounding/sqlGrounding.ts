@@ -106,6 +106,9 @@ const NOT_ALIAS = new Set([
   'select', 'from', 'with', 'except', 'intersect', 'pivot', 'unpivot', 'sample', 'tablesample'
 ]);
 
+/** The platforms' own catalog views (account usage, system tables, information schemas): known, though in no estate. */
+const PLATFORM_CATALOG = /^(?:snowflake\.(?:account_usage|organization_usage|information_schema)\.|system\.\w+\.|(?:\w+\.)?information_schema\.)/i;
+
 function lastPart(name: string): string {
   const parts = name.split('.');
   return parts[parts.length - 1];
@@ -127,7 +130,9 @@ function preprocess(sql: string): { text: string; dbtRefs: string[]; dbtSources:
     .replace(/\{#[\s\S]*?#\}/g, ' ')
     .replace(/--[^\n]*/g, ' ')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/'(?:[^']|'')*'/g, "''");
+    .replace(/'(?:[^']|'')*'/g, "''")
+    // REVOKE … FROM <grantee>: a role or group, not a table (v0.45.11).
+    .replace(/\brevoke\b([^;]*?)\bfrom\b/gi, 'revoke$1 __from__');
   return { text, dbtRefs, dbtSources };
 }
 
@@ -150,7 +155,8 @@ export function checkSqlGrounding(artifacts: readonly GroundingArtifact[], index
   for (const { a, text } of pre) {
     const base = a.name.replace(/\\/g, '/').split('/').pop()!.replace(/\.(sql|yml|yaml)$/i, '').toLowerCase();
     if (/\.sql$/i.test(a.name)) internal.add(base);
-    for (const m of text.matchAll(/\bcreate\s+(?:or\s+replace\s+)?(?:(?:transient|temporary|temp|secure|materialized)\s+)*(?:table|view)\s+(?:if\s+not\s+exists\s+)?([\w."$]+)/gi)) {
+    // Platform objects count too (v0.45.11): dynamic, streaming and Iceberg tables, streams.
+    for (const m of text.matchAll(/\bcreate\s+(?:or\s+(?:replace|alter|refresh)\s+)?(?:(?:transient|temporary|temp|secure|materialized|dynamic|streaming|iceberg|external)\s+)*(?:table|view|stream)\s+(?:if\s+not\s+exists\s+)?([\w."$]+)/gi)) {
       internal.add(lastPart(clean(m[1])).toLowerCase());
     }
     for (const m of text.matchAll(/(?:\bwith|,)\s*(\w+)\s+as\s*\(/gi)) internal.add(m[1].toLowerCase());
@@ -161,7 +167,7 @@ export function checkSqlGrounding(artifacts: readonly GroundingArtifact[], index
 
     const resolveTable = (raw: string): SchemaTable | 'internal' | undefined => {
       const name = lastPart(clean(raw)).toLowerCase();
-      if (internal.has(name)) return 'internal';
+      if (internal.has(name) || PLATFORM_CATALOG.test(clean(raw))) return 'internal';
       result.tablesChecked++;
       const matches = index.byName.get(name);
       if (!matches || matches.length === 0) {
@@ -173,6 +179,13 @@ export function checkSqlGrounding(artifacts: readonly GroundingArtifact[], index
       return matches[0];
     };
 
+    // A streaming read of a table (Lakeflow: FROM STREAM(t) alias) reads that table.
+    for (const m of text.matchAll(/\bstream\s*\(\s*([\w."$]+)\s*\)(?:\s+(?:as\s+)?(\w+))?/gi)) {
+      const resolved = resolveTable(m[1]);
+      const al = m[2]?.toLowerCase();
+      if (resolved && al && !NOT_ALIAS.has(al)) alias.set(al, resolved);
+    }
+
     for (const r of dbtRefs) {
       if (!internal.has(lastPart(r))) resolveTable(r);
     }
@@ -181,7 +194,9 @@ export function checkSqlGrounding(artifacts: readonly GroundingArtifact[], index
     for (const m of text.matchAll(/\b(?:from|join)\s+([\w."$@]+)(?:\s+(?:as\s+)?(\w+))?/gi)) {
       const raw = m[1];
       if (raw.startsWith('@') || raw === '__jinja__' || raw.startsWith('(')) continue;
-      if (/^(lateral|table|unnest|flatten|values)$/i.test(raw)) continue;
+      // A table function (read_files(…), STREAM(…), TABLE(…)) reads no named table.
+      if (!m[2] && /^\s*\(/.test(text.slice((m.index ?? 0) + m[0].length))) continue;
+      if (/^(lateral|table|unnest|flatten|values|stream)$/i.test(raw)) continue;
       const resolved = resolveTable(raw);
       const self = lastPart(clean(raw)).toLowerCase();
       if (resolved) {

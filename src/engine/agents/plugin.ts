@@ -40,6 +40,39 @@ export function serverEntry(resourcesRoot: string, env: NodeJS.ProcessEnv = proc
   return { command: 'node', args: [path.join(resourcesRoot, 'dist', 'autode.js'), ...args] };
 }
 
+/** The guard hook's command (v0.45.11): the same program as the server, running `hook guard`. */
+export function guardEntry(entry: ServerEntry): ServerEntry {
+  const i = entry.args.indexOf('mcp');
+  return { command: entry.command, args: [...(i >= 0 ? entry.args.slice(0, i) : entry.args), 'hook', 'guard'] };
+}
+
+/** Shell tools the guard checks, by the hosts' tool names. */
+const GUARDED_TOOLS = 'Bash|PowerShell';
+
+/** Claude Code's hooks for the plugin folder (`hooks/hooks.json`) and settings files. */
+export function guardHooks(entry: ServerEntry): { PreToolUse: Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string; timeout: number }> }> } {
+  return { PreToolUse: [{ matcher: GUARDED_TOOLS, hooks: [{ type: 'command', command: shellLine(guardEntry(entry)), timeout: 15 }] }] };
+}
+
+/**
+ * The settings text with AutoDE's guard set in `hooks.PreToolUse` (replacing an earlier AutoDE entry,
+ * found by its `hook guard` command); other hooks and keys are kept.
+ */
+export function mergeGuardHook(existing: string | undefined, entry: ServerEntry): { text: string; changed: boolean } {
+  let doc: Record<string, unknown> = {};
+  if (existing?.trim()) {
+    const parsed: unknown = JSON.parse(existing);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('the settings file is not a JSON object.');
+    doc = parsed as Record<string, unknown>;
+  }
+  const hooks = (doc.hooks && typeof doc.hooks === 'object' && !Array.isArray(doc.hooks) ? doc.hooks : {}) as Record<string, unknown>;
+  const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse as Array<{ hooks?: Array<{ command?: string }> }> : [];
+  const isOurs = (m: { hooks?: Array<{ command?: string }> }) => (m.hooks ?? []).some((h) => / hook guard$/.test(String(h.command ?? '')));
+  const next = [...pre.filter((m) => !isOurs(m)), guardHooks(entry).PreToolUse[0]];
+  const changed = JSON.stringify(pre) !== JSON.stringify(next);
+  return { text: JSON.stringify({ ...doc, hooks: { ...hooks, PreToolUse: next } }, null, 2) + '\n', changed };
+}
+
 const yamlList = (xs: readonly string[]) => `[${xs.map((x) => JSON.stringify(x)).join(', ')}]`;
 
 function roleBody(r: RoleTemplate, skills: readonly PackSkill[]): string {
@@ -102,6 +135,7 @@ export function buildPlugin(input: { resourcesRoot: string; outDir: string; vers
   for (const r of roles) write(path.join(input.outDir, 'agents', `${r.name}.md`), claudeAgent(r, skills), files);
   for (const k of skills) copyDir(k.dir, path.join(input.outDir, 'skills', k.id), files);
   for (const [name, text] of Object.entries(COMMANDS)) write(path.join(input.outDir, 'commands', `${name}.md`), text, files);
+  write(path.join(input.outDir, 'hooks', 'hooks.json'), JSON.stringify({ hooks: guardHooks(input.entry) }, null, 2) + '\n', files);
   return { dir: input.outDir, files, errors };
 }
 
@@ -166,11 +200,21 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
       if (m.changed) write(file, m.text, written);
       mcp = { file, changed: m.changed };
     } else mcp = { instruction: `claude mcp add --scope user autode -- ${shellLine(input.entry)}` };
+    // The guard hook: platform-changing snow/databricks commands go through runbooks (v0.45.11).
+    const settings = path.join(dir, 'settings.json');
+    try {
+      const h = mergeGuardHook(fs.existsSync(settings) ? fs.readFileSync(settings, 'utf8') : undefined, input.entry);
+      if (h.changed) write(settings, h.text, written);
+      notes.push(`The guard hook is in ${settings}: Claude Code shows new hooks for review (/hooks).`);
+    } catch (err) {
+      errors.push(`${settings}: ${err instanceof Error ? err.message : String(err)} The guard hook was not added; add it under hooks.PreToolUse: ${JSON.stringify(guardHooks(input.entry).PreToolUse[0])}`);
+    }
   } else if (input.host === 'cortex') {
     const dir = input.scope === 'project' ? path.join(base, '.cortex', 'skills') : path.join(input.home, '.snowflake', 'cortex', 'skills');
     pruneSkills(dir, ids, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, k.id), written);
     notes.push('Cortex Code takes sub-agents from plugins: for AutoDE\'s agents as sub-agents, install the plugin folder (`autode plugin path`). Without it, the orchestrator skill follows each assignment itself.');
+    notes.push('The guard hook (platform-changing snow/databricks commands go through runbooks) comes with the plugin folder (hooks/hooks.json). Copied skills alone don\'t bring it: there it is a convention the skills state, not a guarantee.');
     mcp = { instruction: `Add AutoDE's server to ${path.join(input.home, '.snowflake', 'cortex', 'mcp.json')} under "mcpServers": ${JSON.stringify({ autode: input.entry })}` };
   } else {
     const dir = input.scope === 'project' ? path.join(base, '.github') : path.join(input.home, '.copilot');
@@ -178,6 +222,7 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
     pruneSkills(path.join(dir, 'skills'), ids, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, 'skills', k.id), written);
     mcp = { instruction: `In the Copilot CLI: /mcp add — name autode, type local, command: ${shellLine(input.entry)}` };
+    notes.push('The Copilot CLI gets no guard hook from AutoDE: that platform changes go through runbooks is a convention the skills state, not a guarantee.');
   }
   if (removed.length) notes.push(`Removed ${removed.length} AutoDE skill folder(s) from an earlier install (renamed or retired).`);
   return { written, mcp, errors, notes, removed };

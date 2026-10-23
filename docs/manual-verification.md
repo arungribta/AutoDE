@@ -861,6 +861,33 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: in the sample (DDL files in `sources/`, nothing ingested), Run agent on Source assessment; separately, Source Context → Pick from the Estate; and `autode estate files`.
   Expect: the agent finds and ingests the three DDL files (crm, hr_legacy, shop) and drafts the source context from them; the panel offers the same files to bring in, then the systems; the terminal lists them with their suggested systems.
 
+## Part 36 — v0.45.11 Platform skills and the guard hook
+
+- [ ] **36.1 The right skills per stage.**
+  Do: in a problem whose target context is Snowflake with dbt, open the assignment of Platform setup, Build, Deploy and Reconcile (Run agent, or `autode workflow next` in a host). Switch the target to Databricks without dbt, and look again.
+  Expect: Platform setup goes to the target architect with governance, performance and ingestion. Build has pipelines, ingestion, performance, and dbt only while dbt is chosen. Deploy has deployment. Reconcile goes to the source assessor with reconciliation. Every skill is for the current platform.
+- [ ] **36.2 A Snowflake runbook end to end (dev).**
+  Do: on a dev Snowflake connection, have the build agent land `shop.orders` (the ingestion skill's example). Open its runbook, dry-run, then run it.
+  Expect: every step is classified, with its rollback. The run creates the file format, stage, table and load. Running it again loads nothing new.
+- [ ] **36.3 A Databricks bundle (dev).**
+  Do: on a dev Databricks connection, have the build agent produce the orders pipeline and its bundle. Approve and run the runbook.
+  Expect: `bundle validate` is the dry run; the deploy creates the pipeline and a paused job prefixed with your name. Check that `CREATE FLOW … AUTO CDC INTO` is accepted by your workspace.
+- [ ] **36.4 The other platform's SQL is flagged.**
+  Do: propose a runbook with `OPTIMIZE` on a Snowflake connection.
+  Expect: the Runbook tab warns that the step looks like Databricks SQL. A `VACUUM` step on Databricks without a rollback reason is refused.
+- [ ] **36.5 Reconciliation reads only.**
+  Do: after 36.2, bring the target into the estate, then run the reconcile stage's agent.
+  Expect: it calls `autode_reconcile_plan`, runs the generated aggregate queries unchanged and read-only, and records a report with a verdict per metric. No row values appear.
+- [ ] **36.6 The guard in Claude Code.**
+  Do: `autode plugin install --host claude`, review the hook in `/hooks`. Ask Claude Code to "deploy the bundle with databricks bundle deploy", then to "list the catalogs".
+  Expect: the deploy is blocked with a message pointing to runbooks; the listing runs. Your own hooks in `.claude/settings.json` are still there.
+- [ ] **36.7 Cortex Code and the Copilot CLI.**
+  Do: load the plugin folder (`autode plugin path`) in Cortex Code and try a `snow sql -q "CREATE TABLE …"`; in the Copilot CLI, run `autode plugin install --host copilot`.
+  Expect: record whether Cortex Code runs the hook (unverified when this shipped). The Copilot install says the rule is a convention there.
+- [ ] **36.8 Vendor skills.**
+  Do: on a Databricks build stage without the Databricks agent skills installed, read the assignment; install them (`autode skills install databricks-pipelines`), and read it again.
+  Expect: first listed under *not installed here*, with how you install them; then under *installed in this host*. Neither time does the agent install anything.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1068,5 +1095,13 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 35.6 |  |  |
 | 35.7 |  |  |
 | 35.8 |  |  |
+| 36.1 |  |  |
+| 36.2 |  |  |
+| 36.3 |  |  |
+| 36.4 |  |  |
+| 36.5 |  |  |
+| 36.6 |  |  |
+| 36.7 |  |  |
+| 36.8 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

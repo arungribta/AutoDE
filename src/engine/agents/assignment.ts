@@ -69,12 +69,27 @@ export interface Assignment {
   text: string;
 }
 
+function targetField(problemRoot: string, field: 'platform' | 'transformationTool'): string | undefined {
+  try {
+    const t = parseYaml(fs.readFileSync(path.join(problemRoot, 'context', 'target-context.yaml'), 'utf8')) as Record<string, unknown> | null;
+    const v = t?.[field];
+    return typeof v === 'string' ? v.toLowerCase() : undefined;
+  } catch { return undefined; }
+}
+
 /** The problem's target platform, from its target context (snowflake, databricks …). */
 export function targetPlatform(problemRoot: string): string | undefined {
-  try {
-    const t = parseYaml(fs.readFileSync(path.join(problemRoot, 'context', 'target-context.yaml'), 'utf8')) as { platform?: string } | null;
-    return typeof t?.platform === 'string' ? t.platform.toLowerCase() : undefined;
-  } catch { return undefined; }
+  return targetField(problemRoot, 'platform');
+}
+
+/**
+ * Whether a skill fits a stage: its metadata names the stage's kind and the problem's target platform
+ * (or `any`); a `dbt`-scoped skill also needs dbt as the target's transformation tool (v0.45.11).
+ */
+export function skillFits(k: Pick<PackSkill, 'meta'>, kind: string, target: { platform?: string; transformationTool?: string }): boolean {
+  if (!k.meta.stageKinds.includes(kind)) return false;
+  if (k.meta.scope === 'dbt' && target.transformationTool !== 'dbt') return false;
+  return k.meta.platforms.includes('any') || (!!target.platform && k.meta.platforms.includes(target.platform));
 }
 
 export interface AssignmentScope { workspaceRoot: string; resourcesRoot: string; problemId: string; /** Where the user's host skills live (default: the OS home). */ home?: string }
@@ -90,8 +105,10 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   const { roles } = loadRoles(scope.resourcesRoot, scope.workspaceRoot);
   // The skills for this stage: those whose metadata names its kind and fit the problem's target platform (v0.45.5).
   const { skills: pack } = loadSkillPack(scope.resourcesRoot);
-  const platform = targetPlatform(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
-  const fits = (k: PackSkill) => k.meta.stageKinds.includes(s.kind) && (k.meta.platforms.includes('any') || (!!platform && k.meta.platforms.includes(platform)));
+  const problemRoot = layoutPath(scope.workspaceRoot, 'problems', scope.problemId);
+  const platform = targetPlatform(problemRoot);
+  const target = { platform, transformationTool: targetField(problemRoot, 'transformationTool') };
+  const fits = (k: PackSkill) => skillFits(k, s.kind, target);
   const forKind = new Set(pack.filter(fits).map((k) => k.id));
   // The role with a skill for this kind: the planned one first, then the others the kind allows; else the planned
   // role, else the first the kind allows that has a definition (roles defined after the plan was approved).
@@ -105,8 +122,8 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   // A role with several skills gets those for this stage (the source assessor: conformance on a conformance stage),
   // and the platform's skills for the kind even when its own list predates them.
   const own = role.skills.filter((id) => forKind.has(id));
-  const platformSkills = pack.filter((k) => fits(k) && !k.meta.platforms.includes('any')).map((k) => k.id);
-  const ownKind = own.length ? [...new Set([...own, ...platformSkills])] : role.skills;
+  const platformSkills = pack.filter((k) => fits(k) && (!k.meta.platforms.includes('any') || k.meta.scope === 'dbt')).map((k) => k.id);
+  const ownKind = own.length || platformSkills.length ? [...new Set([...own, ...platformSkills])] : role.skills;
   const wanted = s.agent?.skills?.length ? s.agent.skills : ownKind;
   const skills = pack.filter((k) => wanted.includes(k.id)).map((k) => ({ id: k.id, name: k.name, description: k.description, instructions: k.instructions, resources: k.resources }));
   const engineTools = toolsForTier(tools, tier, role.tools);
@@ -137,6 +154,9 @@ export function assignmentText(a: Omit<Assignment, 'text'>): string {
     ...a.skills.map((k) => `## Skill: ${k.name}\n${k.description}\n\n${k.instructions}`),
     a.externalSkills.some((e) => e.installed)
       ? `## Vendor skills installed in this host\nUse them for the platform's specifics; AutoDE's rules still apply (approvals, runbooks, recording deliverables):\n${a.externalSkills.filter((e) => e.installed).map((e) => `- ${e.name} (${e.vendor ?? 'external'}): ${e.summary}`).join('\n')}`
+      : '',
+    a.externalSkills.some((e) => !e.installed && e.availability === 'installable')
+      ? `## Vendor skills that would help, not installed here\nAutoDE's own skills above are enough. If the user wants the vendor's too, they install them themselves (\`autode skills install <name>\` in their terminal, or the Skills view in VS Code); you never install anything:\n${a.externalSkills.filter((e) => !e.installed && e.availability === 'installable').map((e) => `- ${e.name} (${e.vendor ?? 'external'}): ${e.summary}`).join('\n')}`
       : ''
   ].filter(Boolean).join('\n\n');
 }

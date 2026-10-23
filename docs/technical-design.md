@@ -1181,6 +1181,44 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - `src/mcp/runnerHost.ts`: `createRunnerHost()` uses a write-enabled `PlatformSession` for SQL (explain, read, approved change) and `spawn()` with no shell for commands.
   - VS Code: `src/core/runbookView.ts` (`RunbookPanel`, `autoDataEngineeringHub.openRunbook`) over `src/core/runbookViewModel.ts`, with `media/runbook.html`.
   - CLI: `cmdRunbook()`. MCP: `autode_propose_runbook` (`decisions.ts`) and `autode_runbook_status` (`agentTools.ts`).
+- **Platform skills** (v0.45.11; SKL-8, ORC-10; guide: [platform-skills.md](platform-skills.md)):
+  - **Skills:** `skills/autode-{snowflake,databricks}-{ingestion,pipelines,governance,performance,deployment}`, `skills/autode-dbt-project` (scope `dbt`, platforms snowflake and databricks) and `skills/autode-de-reconciliation`. Each ends with a worked example on the reference problem, in fenced blocks labelled by kind:
+    - ` ```sql ` (optionally with a file name);
+    - ` ```yaml runbook `;
+    - ` ```yaml <folder>/databricks.yml `;
+    - ` ```yaml models/….yml ` for dbt.
+  - **Selection:** `skillFits()` (`src/engine/agents/assignment.ts`) adds one rule to v0.45.5's: a `dbt`-scoped skill needs `transformationTool: dbt` in the target context (`targetField()`). The platform's fitting skills join the role's even when the role's own list has none for the kind. Roles: `agents/target-architect.md` (new; platform-setup), and the platform skills listed on `pipeline-engineer` and the reconciliation skill on `source-assessor`.
+  - **Assignment text:** a section for installable vendor skills that aren't installed, with how a person installs them.
+  - **The fixture check** (`test/platformSkillCheck.cjs`, run by `npm test`; `node test/platformSkillCheck.cjs` after a compile):
+    - `skillBlocks()` extracts the blocks;
+    - `referenceEstate()` parses `test/reference/retail-orders/sources/{shop,crm}.ddl` into a schema index;
+    - `createdObjects()` collects every object the examples create, plus the model's planned tables;
+    - `checkSkill()` runs: `checkSqlGrounding()`; `foreignDialect()`; `checkSingleStatement()` per statement (not in Jinja); the `-- lands <table>` column comparison; `checkRunbook()` in a temporary workspace with the example's bundle files, on two CLI-credential test connections; `${var.…}` declarations; and dbt source tables and columns against the estate.
+  - **`autode_reconcile_plan`** (`src/engine/agents/reconcilePlan.ts`, tool in `src/mcp/agentTools.ts`): `reconcilePlan()` builds one `SELECT` per side:
+    - `COUNT(*)`, distinct keys (`COUNT(DISTINCT a, b)` on Snowflake and Databricks, else concatenated with `COALESCE(CAST … AS VARCHAR(4000)), '~')`), and key nulls;
+    - per column by `typeClassOf()`: `SUM` (numeric), `MIN`/`MAX` (temporal), `COUNT(DISTINCT)` (string), and nulls;
+    - `HASH_AGG` or `SUM(CAST(xxhash64(…) AS DECIMAL(38, 0)))` when both sides share a platform, and `LEFT JOIN … IS NULL` counts when `sameConnection`.
+
+    `comparisons` are `within-tolerance` for sums, `zero` for nulls and missing keys, and `equal` otherwise. The tool resolves both tables in the schema index, takes column pairs from the problem's mapping (`problemMappings()`) or same-named columns, maps string keys through the pairs, and defaults the target platform from the target context.
+  - **Dialect markers** (`src/engine/platform/dialectMarkers.ts`): `dialectMarkers()` and `foreignDialect()` match short lists of unambiguous constructs per platform, after stripping comments and string literals (`/Volumes/` and `@stage` paths inside literals stay visible). `checkRunbook()` warns on a `sql` step with the other platform's markers. `DESTRUCTIVE` adds `VACUUM`. `CLI_ALLOWLIST` adds `snow dbt list | deploy | execute`, `databricks pipelines list-pipelines | get | start-update` and `databricks bundle summary`.
+  - **Grounding** (`src/engine/grounding/sqlGrounding.ts`):
+    - created objects include `dynamic`, `streaming`, `iceberg` and `external` tables, streams, and `CREATE OR ALTER` / `OR REFRESH`;
+    - `STREAM(<table>) <alias>` resolves the table and the alias;
+    - `FROM <name>(` (a table function) and `FROM STREAM <fn>(` are skipped;
+    - `PLATFORM_CATALOG` names count as known;
+    - `REVOKE … FROM` is rewritten before scanning.
+  - **The host guard** (`src/engine/runner/hostGuard.ts`):
+    - `shellWords()` tokenises with quotes; `&&`, `||`, `;`, `|`, `&`, `$(`, backticks and parentheses become separators, and a backslash escapes only quotes, spaces, backslashes, `$` and backticks, so Windows paths survive;
+    - `guardShellCommand()` skips assignments and wrappers (`sudo`, `env`, `npx` …), recurses into `bash -c`, `pwsh -Command` and `cmd /c`, and classifies each `snow`/`databricks` call with `classifyCli()`. Value flags are skipped, `LOCAL` groups and `--help` are local, and `snow sql` is classified per statement from `-q` or `-f` (unreadable means blocked). `databricks api` is classified by its method, `bundle init|generate` is local, and `READ_VERBS` in the first three words means read. Everything else is a change;
+    - `guardHookEvent()` takes Claude Code's `PreToolUse` JSON (shell tools only).
+
+    `autode hook guard` (`hookCommand()` in `src/cli/main.ts`, dispatched before argument parsing) reads stdin (`CliIo.readStdin`), and exits 2 with the reason on stderr, or 0.
+  - **Plugin** (`src/engine/agents/plugin.ts`):
+    - `guardEntry()` is `serverEntry()` with `hook guard` in place of `mcp --workspace .`;
+    - `guardHooks()` is the `PreToolUse` entry (matcher `Bash|PowerShell`, timeout 15 s);
+    - `buildPlugin()` writes `hooks/hooks.json`;
+    - for Claude Code, `installPlugin()` merges the entry into `<scope>/.claude/settings.json` with `mergeGuardHook()`. It replaces an earlier entry whose command ends in ` hook guard`, keeps others, and on invalid JSON returns an error with the entry instead of writing;
+    - Cortex Code and Copilot get notes.
 - **Install guidance as data** (v0.45.6): `loadToolGuides()` (`src/engine/platform/prerequisites.ts`) reads `prerequisites.yaml` and `.autode/config/prerequisites.yaml`; `probeOptions()` keeps the options for this OS and probes their package managers; `checkPrerequisites()` puts them in `install.options`. The prerequisites picker offers them and sends their commands to the AutoDE terminal on a click.
 - **Skill catalog and naming** (v0.45.5):
   - `skillMeta()` (`src/engine/agents/definitions.ts`) checks a bundled skill's name against `AUTODE_SKILL_NAME` (`autode-<scope>-<capability>`, scopes in `SKILL_SCOPES`), and reads `metadata`: `scope` equal to the name's, `stageKinds` known, `platforms` from `SKILL_PLATFORMS` (a platform-scoped skill has exactly its platform), a whole-number `version`, and `maturity` `tested` or `preview`. `parseSkillMarkdown()` now returns `metadata` and `license`.
@@ -1719,7 +1757,7 @@ src/editors/    # custom editors
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
-  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
+  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, reconcilePlan.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)
   waiting.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
@@ -1733,7 +1771,7 @@ src/engine/grounding/    # SQL grounding checks, manifests, reports
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters
-  BaseAdapter.ts, ConnectionManager.ts, connectionReadiness.ts, connectionsConfig.ts, connectionSetup.ts, driverStore.ts, prerequisites.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
+  BaseAdapter.ts, ConnectionManager.ts, connectionReadiness.ts, connectionsConfig.ts, connectionSetup.ts, dialectMarkers.ts, driverStore.ts, prerequisites.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
 src/engine/platform/adapters/    # Snowflake and Databricks adapters
   DatabricksAdapter.ts, OracleAdapter.ts, SnowflakeAdapter.ts, snowflakeJwt.ts
 src/engine/platform/credentials/    # credential resolvers and CLI detection
@@ -1741,7 +1779,7 @@ src/engine/platform/credentials/    # credential resolvers and CLI detection
 src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
 src/engine/runner/    # runbooks: checks, policy, the runner and its log
-  policy.ts, run.ts, runbook.ts, runLog.ts
+  hostGuard.ts, policy.ts, run.ts, runbook.ts, runLog.ts
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
   lifecycle.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
 src/engine/transforms/    # primitive registry

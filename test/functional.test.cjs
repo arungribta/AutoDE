@@ -5962,7 +5962,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -6021,6 +6021,7 @@ async function main() {
       autode_workflow_history: [{ stage: 'mapping' }, { stage: '' }],
       autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
+      autode_reconcile_plan: [{ source: 'shop.orders', target: 'raw.orders', keys: ['order_id'] }, { source: 'shop.orders', target: 'raw.orders', keys: [] }],
       autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
       autode_draft_model: [{}, { x: 1 }],
       autode_skills_list: [{ group: 'external' }, { group: 'vendor' }],
@@ -8544,7 +8545,9 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-orchestrator', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-source-assessment']);
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-orchestrator', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
+      'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project',
+      'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -9412,12 +9415,13 @@ async function main() {
       nodeFs.mkdirSync(nodePath.dirname(ctxFile), { recursive: true });
       nodeFs.writeFileSync(ctxFile, 'specId: x\nspecVersion: 1\nstatus: built\nplatform: snowflake\n');
       let a = A.assignmentFor(scope, 'build', []).assignment;
-      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id).sort()], ['pipeline-engineer', ['autode-de-pipeline-build', 'autode-snowflake-loading']]);
+      assert.deepStrictEqual([a.role, a.skills.map((k) => k.id).sort()], ['pipeline-engineer', ['autode-de-pipeline-build', 'autode-snowflake-ingestion', 'autode-snowflake-loading', 'autode-snowflake-performance', 'autode-snowflake-pipelines']]);
       assert.ok(a.text.includes('Load with COPY INTO.'));
       nodeFs.writeFileSync(ctxFile, 'specId: x\nspecVersion: 1\nstatus: built\nplatform: databricks\n');
       a = A.assignmentFor(scope, 'build', []).assignment;
-      assert.deepStrictEqual(a.skills.map((k) => k.id), ['autode-de-pipeline-build']);
-      assert.ok(a.externalSkills.some((e) => e.name === 'databricks-pipelines' && !e.installed) && !/Vendor skills installed/.test(a.text), 'relevant, not installed: in the data, not the text');
+      assert.deepStrictEqual(a.skills.map((k) => k.id).sort(), ['autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-de-pipeline-build']);
+      assert.ok(a.externalSkills.some((e) => e.name === 'databricks-pipelines' && !e.installed) && !/Vendor skills installed/.test(a.text), 'relevant, not installed: not offered as installed');
+      assert.ok(/## Vendor skills that would help, not installed here[\s\S]*- databricks-pipelines[\s\S]*/.test(a.text) && /you never install anything/.test(a.text), 'v0.45.11: named, with how a person installs them');
       nodeFs.mkdirSync(nodePath.join(home, '.claude', 'skills', 'databricks-pipelines'), { recursive: true });
       nodeFs.writeFileSync(nodePath.join(home, '.claude', 'skills', 'databricks-pipelines', 'SKILL.md'), '---\nname: databricks-pipelines\n---\n');
       a = A.assignmentFor(scope, 'build', []).assignment;
@@ -9809,6 +9813,195 @@ async function main() {
       const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'workflow.html'), 'utf8');
       assert.ok(html.includes('manual</span>'));
       assert.ok(require('../package.json').contributes.commands.some((x) => x.command === 'autoDataEngineeringHub.openWaiting'));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.45.11: platform skills, the reconciliation plan, the host guard ──
+
+  await test('v0.45.11: every platform skill\'s worked example is grounded in the reference estate, in its platform\'s dialect, and its runbooks pass the engine\'s checks; a broken example is caught item by item', () => {
+    const P = fresh('./platformSkillCheck.cjs');
+    const results = P.checkPlatformSkills();
+    assert.deepStrictEqual(results.map((r) => r.id).sort(), ['autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-reconciliation',
+      'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines']);
+    for (const r of results) assert.deepStrictEqual(r.errors, [], r.id);
+    assert.ok(results.find((r) => r.id === 'autode-snowflake-pipelines').grounding.columnsResolved >= 20, 'the examples read real estate columns');
+    // The check catches what it is for.
+    const { skills, ctx } = P.platformSkills();
+    const md = (id) => require('node:fs').readFileSync(require('node:path').join(skills.find((k) => k.id === id).dir, 'SKILL.md'), 'utf8');
+    const errs = (id, text) => P.checkSkill(skills.find((k) => k.id === id), ctx, text).errors.join('\n');
+    assert.match(errs('autode-snowflake-ingestion', md('autode-snowflake-ingestion').replace('  channel VARCHAR(20),\n', '  sales_channel VARCHAR(20),\n')), /landing column sales_channel is not in shop\.orders[\s\S]*misses shop\.orders\.channel/);
+    assert.match(errs('autode-snowflake-pipelines', md('autode-snowflake-pipelines').replace('FROM shop.orders o\nQUALIFY', 'FROM shop.order_lines o\nQUALIFY')), /table shop\.order_lines doesn't resolve/);
+    assert.match(errs('autode-snowflake-performance', md('autode-snowflake-performance').replace('ALTER TABLE marts.fct_orders CLUSTER BY (order_date);', 'OPTIMIZE marts.fct_orders;')), /not snowflake SQL \(OPTIMIZE/);
+    assert.match(errs('autode-databricks-performance', md('autode-databricks-performance').replace(/    noRollbackReason: .*\r?\n/, '')), /step vacuum is destructive/);
+    assert.match(errs('autode-snowflake-deployment', md('autode-snowflake-deployment').replace('argv: [snow, dbt, execute, retail_orders, run]', 'argv: [snow, dbt, execute, retail_orders, run, --connection, prod]')), /--connection is not allowed/);
+    assert.match(errs('autode-databricks-deployment', md('autode-databricks-deployment').replace(/  warehouse_id:\r?\n    description: .*\r?\n/, '')), /\$\{var\.warehouse_id\} is not declared/);
+    assert.match(errs('autode-dbt-project', md('autode-dbt-project').replace('          - name: status\n', '          - name: order_state\n')), /dbt source column shop\.orders\.order_state/);
+    // The reconciliation example is exactly what autode_reconcile_plan generates.
+    const R = fresh('../dist/engine/agents/reconcilePlan.js');
+    const cols = [...ctx.estate.columns('shop.orders').entries()].map(([name, type]) => ({ name, type }));
+    const plan = R.reconcilePlan({ source: { table: 'shop.orders', platform: 'postgres', columns: cols }, target: { table: 'raw.shop_orders_raw', platform: 'snowflake', columns: cols },
+      keys: [{ source: 'order_id', target: 'order_id' }], columns: ['order_id', 'status', 'shipping_amount', 'updated_at'].map((c) => ({ source: c, target: c })) }).plan;
+    const example = P.skillBlocks(md('autode-de-reconciliation')).find((b) => b.lang === 'sql').body.trim().replace(/\r\n/g, '\n');
+    assert.strictEqual(example, plan.queries[0].sql);
+  });
+
+  await test('v0.45.11: the reconciliation plan — aggregates by type per side, a key hash only on one platform, missing keys only on one connection, tolerances only for sums; unknown columns and a missing key are refused', () => {
+    const R = fresh('../dist/engine/agents/reconcilePlan.js');
+    const cols = [{ name: 'order_id', type: 'BIGINT' }, { name: 'amount', type: 'DECIMAL(10,2)' }, { name: 'placed_at', type: 'TIMESTAMP' }, { name: 'status', type: 'VARCHAR(20)' }];
+    const side = (table, platform) => ({ table, platform, columns: cols });
+    const pairs = cols.map((c) => ({ source: c.name, target: c.name }));
+    let r = R.reconcilePlan({ source: side('shop.orders', 'snowflake'), target: side('marts.orders', 'snowflake'), keys: [{ source: 'order_id', target: 'order_id' }], columns: pairs, sameConnection: true });
+    const [src] = r.plan.queries;
+    for (const x of ['COUNT(*) AS row_count', 'HASH_AGG(order_id) AS key_hash', 'SUM(amount) AS sum_amount', 'MIN(placed_at) AS min_placed_at', 'COUNT(DISTINCT status) AS distinct_status', 'COUNT(*) - COUNT(status) AS nulls_status']) assert.ok(src.sql.includes(x), x);
+    assert.ok(!/sum_status|sum_placed_at|distinct_amount/.test(src.sql), 'by type');
+    assert.deepStrictEqual(r.plan.queries.map((q) => q.id), ['source-profile', 'target-profile', 'missing-in-target', 'missing-in-source']);
+    assert.ok(/LEFT JOIN[\s\S]*ON s\.order_id = t\.order_id[\s\S]*WHERE t\.order_id IS NULL/.test(r.plan.queries[2].sql));
+    assert.deepStrictEqual(r.plan.comparisons.filter((c) => c.rule === 'within-tolerance').map((c) => c.metric), ['sum_amount']);
+    for (const q of r.plan.queries) assert.strictEqual(fresh('../dist/engine/platform/sqlGuard.js').checkReadOnlySql(q.sql).ok, true, q.id);
+    r = R.reconcilePlan({ source: side('shop.orders', 'oracle'), target: side('main.orders', 'databricks'), keys: [{ source: 'order_id', target: 'order_id' }, { source: 'status', target: 'status' }], columns: pairs });
+    assert.ok(!r.plan.queries[0].sql.includes('key_hash') && !r.plan.queries[1].sql.includes('key_hash') && r.plan.queries.length === 2);
+    assert.ok(/COALESCE\(CAST\(order_id AS VARCHAR\(4000\)\), '~'\) \|\| '\|' \|\|/.test(r.plan.queries[0].sql) && r.plan.queries[1].sql.includes('COUNT(DISTINCT order_id, status)'), 'distinct composite keys per dialect');
+    assert.ok(r.plan.notes.some((n) => /different platforms/.test(n)) && r.plan.notes.some((n) => /different connections/.test(n)));
+    r = R.reconcilePlan({ source: side('a.t', 'databricks'), target: side('b.t', 'databricks'), keys: [{ source: 'order_id', target: 'order_id' }], columns: pairs });
+    assert.ok(r.plan.queries[0].sql.includes('SUM(CAST(xxhash64(order_id) AS DECIMAL(38, 0))) AS key_hash'));
+    assert.deepStrictEqual(R.reconcilePlan({ source: side('a.t'), target: side('b.t'), keys: [], columns: [{ source: 'ghost', target: 'amount' }] }).errors, ['Reconciliation needs the key (columns on both sides): without one, only row counts can be compared. Confirm the key fact first.', 'Column ghost is not in a.t.']);
+  });
+
+  await test('v0.45.11: a stage gets the platform\'s skills — platform setup goes to the target architect, deploy and build to the pipeline engineer, reconcile to the source assessor; dbt skills only when dbt is the transformation tool', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pskills-'));
+    try {
+      const dir = nodePath.join(ws, '.autode', 'config', 'workflows');
+      nodeFs.mkdirSync(dir, { recursive: true });
+      const st = (id, kind) => `  - id: ${id}\n    title: ${id}\n    kind: ${kind}\n    inclusion: default\n    consumes: [spec]\n    after: [plan (approved)]\n`;
+      nodeFs.writeFileSync(nodePath.join(dir, 'plat.yaml'), 'id: plat\nversion: 1\ntitle: Platform\ndescription: Platform stages.\nstages:\n  - id: specify\n    title: Specification\n    kind: specify\n    inclusion: mandatory\n  - id: plan\n    title: Plan\n    kind: plan\n    inclusion: mandatory\n    after: [specify (approved)]\n'
+        + st('setup', 'platform-setup') + st('build', 'build') + st('deploy', 'deploy') + st('reconcile', 'reconcile') + st('target', 'target-context'));
+      const W = ['--workspace', ws];
+      const id = (await cli(['problems', 'new', 'Daily revenue from the shop orders', ...W, '--json'])).json().id;
+      const prob = nodePath.join(ws, '.autode', 'problems', id);
+      const spec = nodePath.join(prob, 'spec', 'business-problem.yaml');
+      nodeFs.writeFileSync(spec, nodeFs.readFileSync(spec, 'utf8').replace('status: draft', 'status: approved').replace('problemStatementApproved: false', 'problemStatementApproved: true'));
+      assert.strictEqual((await cli(['workflow', 'plan', '--template', 'plat', ...W])).code, 0);
+      const A = fresh('../dist/engine/agents/assignment.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id, home: ws };
+      const ctxFile = nodePath.join(prob, 'context', 'target-context.yaml');
+      nodeFs.mkdirSync(nodePath.dirname(ctxFile), { recursive: true });
+      const target = (extra) => nodeFs.writeFileSync(ctxFile, `specId: x\nspecVersion: 1\nstatus: built\nplatform: snowflake\n${extra}`);
+      const got = (stage) => { const a = A.assignmentFor(scope, stage, []).assignment; return a && [a.role, a.skills.map((k) => k.id).sort()]; };
+      target('transformationTool: custom-sql\n');
+      assert.deepStrictEqual(got('setup'), ['target-architect', ['autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance']]);
+      assert.deepStrictEqual(got('deploy'), ['pipeline-engineer', ['autode-snowflake-deployment']]);
+      assert.deepStrictEqual(got('reconcile'), ['source-assessor', ['autode-de-reconciliation']]);
+      assert.ok(!got('build')[1].includes('autode-dbt-project'), 'no dbt skill without dbt');
+      assert.match(A.assignmentFor(scope, 'target', []).reason, /No AutoDE skill does target-context stages yet/, 'the target architect exists, but the target context stays a form');
+      target('transformationTool: dbt\n');
+      assert.ok(got('build')[1].includes('autode-dbt-project') && got('build')[1].includes('autode-snowflake-pipelines'));
+      assert.ok(A.skillFits({ meta: { scope: 'dbt', stageKinds: ['build'], platforms: ['snowflake', 'databricks'] } }, 'build', { platform: 'databricks', transformationTool: 'dbt' }));
+      assert.ok(!A.skillFits({ meta: { scope: 'dbt', stageKinds: ['build'], platforms: ['snowflake', 'databricks'] } }, 'build', { platform: 'oracle', transformationTool: 'dbt' }));
+      nodeFs.writeFileSync(ctxFile, 'specId: x\nspecVersion: 1\nstatus: built\nplatform: databricks\n');
+      assert.deepStrictEqual(got('setup'), ['target-architect', ['autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance']]);
+      const deploy = A.assignmentFor(scope, 'deploy', [{ name: 'autode_propose_runbook', annotations: {} }, { name: 'autode_runbook_status', annotations: { readOnlyHint: true } }, { name: 'autode_execute_query', annotations: { readOnlyHint: true, openWorldHint: true } }]).assignment;
+      assert.deepStrictEqual([deploy.skills.map((k) => k.id), deploy.engineTools], [['autode-databricks-deployment'], ['autode_propose_runbook', 'autode_runbook_status']], 'deploy proposes runbooks; it never queries the platform');
+      assert.ok(deploy.text.includes('databricks bundle validate') && /databricks-dabs/.test(deploy.text), 'the method, and the vendor skill as a pointer');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.11: the host guard blocks platform-changing snow and databricks commands — however they are chained, wrapped or quoted — and lets reads and local setup through; autode hook guard answers the host with exit 2', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const G = fresh('../dist/engine/runner/hostGuard.js');
+    const dirTmp = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-guard-'));
+    try {
+      nodeFs.writeFileSync(nodePath.join(dirTmp, 'read.sql'), 'SELECT 1;\n-- a comment\nSHOW TABLES;\n');
+      nodeFs.writeFileSync(nodePath.join(dirTmp, 'write.sql'), 'SELECT 1;\nDROP TABLE marts.fct_orders;\n');
+      const blocked = (cmd) => G.guardShellCommand(cmd, dirTmp).block;
+      for (const c of ['databricks bundle deploy --target prod', 'cd bundles/x && databricks bundle deploy', 'snow sql -q "CREATE TABLE t (a INT)"', 'snow sql -f write.sql', 'snow sql', 'snow stage copy ./a @s',
+        'databricks jobs run-now 123', 'databricks fs cp a dbfs:/b', 'databricks api post /api/2.1/jobs/run-now --json "{}"', 'FOO=1 sudo /usr/local/bin/databricks bundle destroy', 'bash -c "databricks bundle deploy"',
+        'echo hi; snow object create table x', 'C:\\Tools\\databricks.exe pipelines start-update p1', 'npx snow dbt deploy p --source d', 'databricks --profile prod bundle deploy', 'git status | databricks workspace import x y'])
+        assert.strictEqual(blocked(c), true, c);
+      for (const c of ['databricks bundle validate', 'databricks catalogs list', 'databricks --profile prod schemas get main.raw', 'snow sql -q "SELECT COUNT(*) FROM t"', 'snow sql -f read.sql', 'snow object list table',
+        'snow connection test', 'snow --version', 'databricks auth login --host https://x', 'databricks bundle init', 'databricks jobs run-now --help', 'databricks api get /api/2.1/jobs/list', 'git commit -m "databricks bundle deploy"', 'echo snow', 'npm test'])
+        assert.strictEqual(blocked(c), false, c);
+      const v = G.guardShellCommand('databricks bundle validate && databricks bundle deploy -t dev', dirTmp);
+      assert.deepStrictEqual(v.commands.map((x) => x.class), ['read', 'change']);
+      assert.match(v.reason, /databricks bundle deploy[\s\S]*autode_propose_runbook/);
+      assert.strictEqual(G.guardHookEvent({ tool_name: 'Read', tool_input: { command: 'databricks bundle deploy' } }, dirTmp).block, false, 'shell tools only');
+      assert.strictEqual(G.guardHookEvent({ tool_name: 'PowerShell', tool_input: { command: '& databricks bundle deploy' }, cwd: dirTmp }, '.').block, true);
+      // The CLI: the host's JSON on stdin, exit 2 and the reason on stderr when blocked.
+      const { run } = fresh('../dist/cli/main.js');
+      const hook = async (event) => { const err = []; const code = await run(['hook', 'guard'], { out: () => {}, err: (t) => err.push(t), env: {}, cwd: dirTmp, interactive: false, prompt: async () => '', readStdin: async () => event }); return { code, err: err.join('\n') }; };
+      let r = await hook(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'snow sql -f write.sql' }, cwd: dirTmp }));
+      assert.deepStrictEqual([r.code, /changes the platform/.test(r.err)], [2, true], r.err);
+      r = await hook(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'snow sql -f read.sql' }, cwd: dirTmp }));
+      assert.deepStrictEqual([r.code, r.err], [0, '']);
+      assert.strictEqual((await hook('not json')).code, 0, 'input it can\'t read passes');
+    } finally { nodeFs.rmSync(dirTmp, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.11: the plugin carries the guard hook (hooks/hooks.json); installing for Claude Code merges it into the settings once, keeping the team\'s own hooks; unreadable settings are left alone; other hosts are told it is a convention', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const Pl = fresh('../dist/engine/agents/plugin.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-hookws-'));
+    const home = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-hookhome-'));
+    try {
+      const entry = { command: 'node', args: ['/x/dist/autode.js', 'mcp', '--workspace', '.'] };
+      assert.deepStrictEqual(Pl.guardEntry(entry), { command: 'node', args: ['/x/dist/autode.js', 'hook', 'guard'] });
+      assert.deepStrictEqual(Pl.guardEntry({ command: 'cmd', args: ['/c', 'autode', 'mcp', '--workspace', '.'] }).args, ['/c', 'autode', 'hook', 'guard']);
+      const out = nodePath.join(ws, 'plugin');
+      Pl.buildPlugin({ resourcesRoot: wfRes(), outDir: out, version: '0.0.0', entry });
+      const hooks = JSON.parse(nodeFs.readFileSync(nodePath.join(out, 'hooks', 'hooks.json'), 'utf8'));
+      assert.deepStrictEqual(hooks, { hooks: { PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook guard', timeout: 15 }] }] } });
+      assert.ok(nodeFs.existsSync(nodePath.join(out, 'agents', 'target-architect.md')) && nodeFs.existsSync(nodePath.join(out, 'skills', 'autode-databricks-deployment', 'SKILL.md')));
+      const settings = nodePath.join(ws, '.claude', 'settings.json');
+      nodeFs.mkdirSync(nodePath.dirname(settings), { recursive: true });
+      const theirs = { matcher: 'Write', hooks: [{ type: 'command', command: 'prettier --check' }] };
+      nodeFs.writeFileSync(settings, JSON.stringify({ permissions: { allow: ['Bash(npm test)'] }, hooks: { PreToolUse: [theirs] } }));
+      const install = () => Pl.installPlugin({ host: 'claude', scope: 'project', resourcesRoot: wfRes(), workspaceRoot: ws, home, entry });
+      let r = install();
+      let s = JSON.parse(nodeFs.readFileSync(settings, 'utf8'));
+      assert.deepStrictEqual([s.permissions.allow, s.hooks.PreToolUse.length, s.hooks.PreToolUse[0]], [['Bash(npm test)'], 2, theirs]);
+      assert.ok(r.written.includes(settings) && r.notes.some((n) => /guard hook/.test(n)));
+      r = install();
+      s = JSON.parse(nodeFs.readFileSync(settings, 'utf8'));
+      assert.deepStrictEqual([s.hooks.PreToolUse.length, r.written.includes(settings)], [2, false], 'once, and unchanged on reinstall');
+      nodeFs.writeFileSync(settings, '{ "hooks": // a comment\n }');
+      r = install();
+      assert.ok(r.errors.some((e) => /settings\.json[\s\S]*guard hook was not added/.test(e)) && nodeFs.readFileSync(settings, 'utf8').includes('// a comment'), 'left alone');
+      for (const host of ['cortex', 'copilot']) assert.ok(Pl.installPlugin({ host, scope: 'project', resourcesRoot: wfRes(), workspaceRoot: ws, home, entry }).notes.some((n) => /convention/.test(n)), host);
+    } finally { for (const d of [ws, home]) nodeFs.rmSync(d, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.11: runbook checks know the platforms — the other platform\'s SQL is flagged, VACUUM is destructive, dbt, pipeline and bundle-summary commands are allowlisted; grounding reads Lakeflow streams, table functions, platform catalogs and revokes correctly', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const RB = fresh('../dist/engine/runner/runbook.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-rbplat-'));
+    try {
+      const { CONNECTIONS } = fresh('./platformSkillCheck.cjs');
+      const policy = fresh('../dist/engine/runner/policy.js').loadRunbookPolicy(ws);
+      const step = (id, sql) => ({ id, title: id, kind: 'sql', sql, expect: 'x' });
+      let c = RB.checkRunbook({ id: 'mixed', title: 't', reason: 'r', connectionId: 'snowflake:analytics_dev', steps: [step('opt', 'OPTIMIZE marts.fct_orders'), step('ok', 'CREATE TABLE IF NOT EXISTS marts.x (a INT)')] }, { workspaceRoot: ws, connections: CONNECTIONS, policy });
+      assert.ok(c.ok && c.warnings.some((w) => /step opt looks like Databricks SQL \(OPTIMIZE/.test(w)) && !c.warnings.some((w) => /step ok looks like/.test(w)), c.warnings.join());
+      c = RB.checkRunbook({ id: 'mixed2', title: 't', reason: 'r', connectionId: 'databricks:lakehouse_dev', steps: [step('dt', "CREATE DYNAMIC TABLE IF NOT EXISTS s.t TARGET_LAG = '1 hour' WAREHOUSE = w AS SELECT 1 AS a")] }, { workspaceRoot: ws, connections: CONNECTIONS, policy });
+      assert.ok(c.warnings.some((w) => /looks like Snowflake SQL/.test(w)));
+      assert.deepStrictEqual(RB.classifySql('VACUUM t RETAIN 168 HOURS').class, 'destructive');
+      for (const [argv, cls, conn] of [[['snow', 'dbt', 'deploy', 'p'], 'change', 'snowflake:analytics_dev'], [['snow', 'dbt', 'list'], 'read', 'snowflake:analytics_dev'], [['databricks', 'pipelines', 'start-update', 'p1'], 'change', 'databricks:lakehouse_dev'], [['databricks', 'bundle', 'summary'], 'read', 'databricks:lakehouse_dev']]) {
+        c = RB.checkRunbook({ id: 'cli', title: 't', reason: 'r', connectionId: conn, steps: [{ id: 's', title: 's', kind: 'cli', argv, expect: 'x' }] }, { workspaceRoot: ws, connections: CONNECTIONS, policy });
+        assert.deepStrictEqual([c.ok, c.steps[0]?.class], [true, cls], argv.join(' ') + c.errors.join());
+      }
+      const { buildSchemaIndex, checkSqlGrounding } = fresh('../dist/engine/grounding/sqlGrounding.js');
+      const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
+      const d = parseDdl('CREATE TABLE shop.orders (order_id BIGINT, status VARCHAR(20));', '/s/shop.ddl', { system: 'shop' });
+      const idx = buildSchemaIndex(d.nodes, d.edges);
+      const g = (sql) => checkSqlGrounding([{ name: 'a.sql', content: sql }], idx);
+      let r = g('CREATE OR REFRESH STREAMING TABLE stg AS SELECT o.order_id, o.ghost FROM STREAM(shop.orders) o');
+      assert.deepStrictEqual([r.tablesResolved, r.unresolved.map((u) => u.ref)], [1, ['shop.orders.ghost']], 'a stream read resolves its table and alias');
+      r = g("SELECT * FROM STREAM read_files('/Volumes/c/s/v/', format => 'csv'); SELECT * FROM read_files('/x') ; SELECT q.query_id FROM snowflake.account_usage.query_history q; SELECT 1 FROM system.query.history; REVOKE SELECT ON TABLE shop.orders FROM ROLE analyst; REVOKE USAGE ON SCHEMA s FROM DATABASE ROLE r");
+      assert.deepStrictEqual(r.unresolved, [], JSON.stringify(r.unresolved));
+      r = g("CREATE DYNAMIC TABLE IF NOT EXISTS staging.stg_x TARGET_LAG = '1 hour' WAREHOUSE = w AS SELECT 1 AS a; CREATE STREAM IF NOT EXISTS s.chg ON TABLE shop.orders; SELECT * FROM stg_x JOIN s.chg c ON 1 = 1");
+      assert.deepStrictEqual(r.unresolved, [], 'created platform objects are internal');
+      const DM = fresh('../dist/engine/platform/dialectMarkers.js');
+      assert.deepStrictEqual(DM.dialectMarkers("COPY INTO t FROM @s/x FILE_FORMAT = (TYPE = CSV) -- OPTIMIZE t\nPATTERN = '.*'"), { snowflake: ['a stage reference (@stage)', 'FILE_FORMAT ='], databricks: [] }, 'comments and strings are not markers');
+      assert.deepStrictEqual(DM.foreignDialect("SELECT * FROM read_files('/Volumes/a/b/c/')", 'snowflake'), ['read_files() / cloud_files()', 'a Unity Catalog volume path']);
+      assert.deepStrictEqual(DM.foreignDialect('MERGE INTO t USING s ON t.k = s.k WHEN MATCHED THEN UPDATE SET a = s.a QUALIFY 1 = 1', 'databricks'), [], 'shared SQL is no marker');
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

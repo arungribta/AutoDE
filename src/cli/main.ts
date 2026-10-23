@@ -46,6 +46,7 @@ import { findSourceFiles } from '../engine/context/sourceFiles';
 import { Catalog } from '../engine/context/catalog';
 import { layoutPath } from '../engine/workspaceLayout';
 import { SqlDialect } from '../engine/transforms/types';
+import { guardHookEvent } from '../engine/runner/hostGuard';
 
 /**
  * The `autode` command line (docs/mcp-engine-requirements.md §9.2, PA2;
@@ -89,6 +90,8 @@ export interface CliIo {
   platform?: (options: { workspaceRoot: string; allowCli: boolean; driversRoot?: string }) => PlatformSession;
   /** Tests: runs a vendor command (probes and installs) instead of spawning it. */
   run?: Runner;
+  /** All of stdin (the host's event for `autode hook`). */
+  readStdin?: () => Promise<string>;
 }
 
 export function nodeIo(): CliIo {
@@ -101,8 +104,30 @@ export function nodeIo(): CliIo {
     prompt: (question) => new Promise((resolve) => {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       rl.question(question, (answer) => { rl.close(); resolve(answer); });
+    }),
+    readStdin: () => new Promise((resolve) => {
+      const chunks: Buffer[] = [];
+      process.stdin.on('data', (c: Buffer) => chunks.push(c));
+      process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      process.stdin.on('error', () => resolve(''));
     })
   };
+}
+
+/**
+ * `autode hook guard` (v0.45.11): the plugin's PreToolUse hook. The host sends its event as JSON on stdin;
+ * a platform-changing `snow` or `databricks` command is blocked with exit 2 and the reason on stderr (the
+ * hosts' convention), everything else passes with exit 0. Input it can't read passes: the guard checks
+ * shell commands, nothing else.
+ */
+async function hookCommand(args: readonly string[], io: CliIo): Promise<number> {
+  if (args[0] !== 'guard') { io.err('autode hook guard  (reads the host\'s PreToolUse event on stdin)'); return EXIT.USAGE; }
+  let event: unknown;
+  try { event = JSON.parse((await (io.readStdin ?? (async () => ''))()) || 'null'); } catch { return EXIT.OK; }
+  const v = guardHookEvent(event, io.cwd);
+  if (!v.block) return EXIT.OK;
+  io.err(v.reason ?? 'Blocked by AutoDE.');
+  return 2;
 }
 
 const USAGE = `autode <command> [options]
@@ -195,6 +220,7 @@ Agent hosts (Claude Code, Cortex Code, GitHub Copilot CLI):
   plugin path [--out <folder>]   Build AutoDE's plugin folder (agents, skills, commands, .mcp.json) and print where it is
   plugin install --host claude|cortex|copilot [--scope project|user]   Copy AutoDE's agents and skills into the host's folders
                                and wire its MCP server (or print the step, where the host has no file for it)
+  hook guard                   The plugin's PreToolUse hook: blocks platform-changing snow/databricks commands (host event JSON on stdin; exit 2 = blocked)
 
 Server:
   mcp [--allow-cli] [--drivers <folder>]   The AutoDE MCP server over stdio (platform changes: runbooks)
@@ -278,6 +304,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
     await mcpMain(argv.slice(1));
     return EXIT.OK;
   }
+  if (argv[0] === 'hook') return hookCommand(argv.slice(1), io);
   let parsed: { values: Values; positionals: string[] };
   try {
     parsed = parseArgs({ args: [...argv], options: OPTIONS, allowPositionals: true, strict: true }) as { values: Values; positionals: string[] };

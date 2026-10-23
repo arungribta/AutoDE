@@ -6,7 +6,65 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
-## Unreleased (ships with v0.45.11)
+## 0.45.11
+
+- **Platform skills** (owner, 2026-10-22: platform depth out of the box for the Tiger technical review; mcp-engine §9.2 PA3 §8b). Twelve new skills of AutoDE's own, written from the vendors' public documentation, with no vendor skill text:
+  - Snowflake and Databricks: `ingestion`, `pipelines`, `governance`, `performance`, `deployment`;
+  - `autode-dbt-project`;
+  - `autode-de-reconciliation`.
+
+  They work with no vendor skill installed. See [docs/platform-skills.md](docs/platform-skills.md) (new).
+- **Every skill is tested by its worked example.** Each `SKILL.md` ends with an example on the reference problem (retail orders). `test/platformSkillCheck.cjs` checks it:
+  - its SQL resolves against the reference estate;
+  - it carries no other platform's dialect;
+  - a landing table has exactly the estate table's columns;
+  - its runbooks pass the engine's checks;
+  - its bundles declare their variables;
+  - its dbt sources exist;
+  - the reconciliation example is exactly what the generator produces.
+
+  `npm test` also feeds it broken copies, which it must reject. The example is inside `SKILL.md` because that is all an agent receives in VS Code (files beside a skill aren't passed on).
+- **Who gets them.** A stage gets the skills for its kind and the problem's target platform (as since v0.45.5). Also:
+  - a `dbt`-scoped skill needs dbt as the target context's transformation tool;
+  - a role gets the platform's skills for a kind even when its own list doesn't name them.
+
+  New role template `target-architect` for platform-setup stages (governance, performance, storage access). The target context stays a form: no skill does target-context stages. The pipeline engineer lists the build and deploy platform skills, and the source assessor lists reconciliation.
+- **`autode_reconcile_plan`** (MCP, read-only; mcp-engine §9 named it). For a source table and its target it generates:
+  - one aggregate query per side: row count, distinct keys, key nulls, and per mapped column a sum, min/max, distinct count and null count by type;
+  - a key hash only when both sides are on one platform (`HASH_AGG` on Snowflake, `xxhash64` on Databricks; hash functions differ between platforms);
+  - missing-key anti-joins only when both tables are on one connection;
+  - the comparisons to make, with tolerances only for sums.
+
+  Columns come from the problem's mapping. Nothing runs: the agent runs each query read-only.
+- **Vendor skills not installed are named, with how a person installs them.** An assignment now also lists the installable vendor skills that would help its stage, and says the user installs them (`autode skills install`, or the Skills view). The agent never installs anything. Installed ones are named as before.
+- **The guard hook.** `autode hook guard` reads a host's `PreToolUse` event on stdin. It finds every `snow` and `databricks` invocation in a shell command, however it is chained, wrapped or quoted, and blocks platform changes with exit 2 and a reason that points to runbooks. What passes:
+  - reads (list, get, validate, read-only `snow sql`);
+  - local setup (`snow connection`, `databricks auth`, `bundle init`);
+  - help.
+
+  Anything it can't check (a `snow sql` file it can't open, statements from the terminal) is blocked. Where it is installed:
+  - **The plugin folder** has `hooks/hooks.json`.
+  - **`autode plugin install --host claude`** merges the hook into `.claude/settings.json`. It keeps the team's hooks, adds it once, and leaves unreadable settings alone with the entry to add by hand.
+  - **Cortex Code** reads the plugin layout. Copied skills alone don't bring the hook.
+  - **The Copilot CLI** gets a note that the rule is a convention there.
+- **Runbook checks know the platforms:**
+  - a SQL step carrying the other platform's markers gets a warning (`src/engine/platform/dialectMarkers.ts`: a short list of unambiguous constructs, not a parser);
+  - `VACUUM` is destructive;
+  - the allowlist adds `snow dbt list | deploy | execute`, `databricks pipelines list-pipelines | get | start-update` and `databricks bundle summary`.
+- **Grounding reads platform SQL correctly:**
+  - `FROM STREAM(t) alias` resolves `t` and the alias;
+  - table functions (`read_files(…)`, `STREAM read_files(…)`) are not tables;
+  - dynamic, streaming and Iceberg tables, streams and `CREATE OR REFRESH` count as created objects;
+  - the platforms' catalog views (`snowflake.account_usage.*`, `system.*`, `information_schema`) are known;
+  - `REVOKE … FROM <grantee>` no longer reads the grantee as a table.
+- **Deliberate deviations:**
+  - **`platforms:` selection** (roadmap) is the skills' `metadata.platforms`, chosen by the target platform. It shipped in v0.45.5, and is extended here by the transformation tool for dbt. The primitives' `platforms:` field stays in Phase 6.
+  - **The skills are tested against the reference estate, not a live platform.** The live walk-through is manual-verification.md Part 36.
+  - **The CLI forms are as the vendors document them; the AutoDE CLI didn't run them:** `snow dbt deploy|execute`, `databricks pipelines start-update`, Lakeflow's `CREATE FLOW … AUTO CDC INTO`.
+  - **Cortex Code's hook support is unverified:** it reads the plugin layout. Part 36 checks it.
+- **Measured:** 360 tests (6 new: the skills' examples and broken copies; the reconciliation plan; platform skill selection; the guard and `autode hook guard`; the plugin's hook and settings merge; platform-aware runbook and grounding checks). 4 tests were updated for the new tool, skills and assignment text. Lint 0 errors. Eval unchanged.
+
+**Also in this release** (fixes from the owner's test of the sample, made between v0.45.10 and v0.45.11):
 
 - **From the owner's test of the sample** (mapping said *not ready* and *in progress* at once; re-opening Source assessment approved it again with no tables found):
   - **Re-opening a document stage keeps it open.** The stage's old document was still marked approved, and the workflow read that as a fresh approval, so the stage closed again within the second (by "unknown", via the document). A re-opened stage now records when it was re-opened (`reopenedAt`); a document approved before then is the version being redone. The stage stays in progress until a new draft, then waits for approval as usual.
