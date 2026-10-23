@@ -158,10 +158,32 @@ export function draftWorkflow(template: WorkflowTemplate, problemId: string, fac
 
 export interface PlanCheck { errors: string[]; warnings: string[] }
 
+/** The longest brief a planner may write for a stage (v0.45.12). */
+export const MAX_BRIEF = 1500;
+
 /** The rules every workflow must follow (§9.2 PA3 §2), item by item. */
-export function checkWorkflow(w: WorkflowInstance, template: WorkflowTemplate): PlanCheck {
+export function checkWorkflow(w: WorkflowInstance, template: WorkflowTemplate, opts: { skills?: ReadonlyArray<{ id: string; stageKinds: readonly string[] }> } = {}): PlanCheck {
   const errors: string[] = [];
   const warnings: string[] = [];
+  // The planner's briefs and skill choices (v0.45.12): a brief carries context, never the method or the tools.
+  for (const s of w.stages) {
+    const brief = s.agent?.brief;
+    if (brief !== undefined) {
+      if (typeof brief !== 'string' || !brief.trim()) errors.push(`${s.id}: a brief is text (or left out).`);
+      else {
+        if (brief.length > MAX_BRIEF) errors.push(`${s.id}: the brief is ${brief.length} characters; keep it under ${MAX_BRIEF} (context only: entities, constraints, open questions, what to produce).`);
+        const named = [...new Set([...brief.matchAll(/\bautode_[a-z_]+\b|\bautode-[a-z]+-[a-z0-9-]+\b/g)].map((m) => m[0]))];
+        if (named.length) errors.push(`${s.id}: the brief names ${named.join(', ')}. A brief carries context only; the role's tools and the stage's skills carry the method, within the tier.`);
+      }
+    }
+    if (opts.skills && s.agent?.skills?.length) {
+      for (const id of s.agent.skills) {
+        const k = opts.skills.find((x) => x.id === id);
+        if (!k) errors.push(`${s.id}: skill ${id} doesn't exist (autode skills list).`);
+        else if (k.stageKinds.length && !k.stageKinds.includes(s.kind)) errors.push(`${s.id}: skill ${id} is for ${k.stageKinds.join(', ')} stages, not ${s.kind}.`);
+      }
+    }
+  }
   if (w.template.id !== template.id) errors.push(`The workflow is from template ${w.template.id}, not ${template.id}.`);
   const byId = new Map(w.stages.map((s) => [s.id, s]));
   const ids = new Set<string>();

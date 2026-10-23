@@ -1,12 +1,14 @@
 import { EngineTool, ToolAnnotations } from './tools';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
-import { WorkflowScope, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowScope, computeDraft, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
-import { WorkflowInstance, readWorkflow } from '../engine/workflows/instance';
+import { MAX_BRIEF, WorkflowInstance, readWorkflow } from '../engine/workflows/instance';
+import { STAGE_KINDS } from '../engine/workflows/stageKinds';
+import { loadSkillPack } from '../engine/agents/definitions';
 import { layoutPath } from '../engine/workspaceLayout';
 import { Actor } from '../engine/workflows/events';
-import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
+import { ToolInfo, assignmentFor, skillFits, targetPlatform } from '../engine/agents/assignment';
 import { recordArtifact } from '../engine/agents/artifacts';
 import { stageReadiness } from '../engine/workflows/readiness';
 import { stageContextGaps } from '../engine/agents/stageGaps';
@@ -53,6 +55,24 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         try { suggested = suggestFor(scopeOf(ws)); } catch { /* no problem yet */ }
         return { templates: templates.map((t) => ({ id: t.id, version: t.version, title: t.title, description: t.description, origin: t.origin, stages: t.stages.map((s) => ({ id: s.id, kind: s.kind, inclusion: s.inclusion, when: s.when, after: s.after })) })), suggested, errors };
       }
+    },
+    {
+      name: 'autode_workflow_draft',
+      description: 'The workflow to plan from, without proposing anything: the problem\'s current workflow (if any) and AutoDE\'s deterministic draft for a template (the suggested one by default), with what each stage kind allows: its roles, its permission-tier ceiling, and the skills that do it on this problem\'s platform. The planner refines the draft (stages in or out with reasons; per stage a role, a tier, skills and a brief) and proposes it with autode_propose_workflow. A brief carries context only (entities, constraints, open questions, what to produce): never tool or skill names.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { template: { type: 'string', minLength: 1 } } },
+      annotations: read('Draft the workflow'),
+      handler: async (args, ws) => wrap(() => {
+        const scope = scopeOf(ws);
+        const { workflow, template, suggestion } = computeDraft(scope, args.template as string | undefined);
+        const current = readWorkflow(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
+        const platform = targetPlatform(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
+        const pack = loadSkillPack(scope.resourcesRoot).skills;
+        const kinds = [...new Set(workflow.stages.map((s) => s.kind))].map((k) => ({
+          kind: k, roles: STAGE_KINDS[k].roles, ceiling: STAGE_KINDS[k].ceiling, doneWhen: STAGE_KINDS[k].doneWhen,
+          skills: pack.filter((s) => skillFits(s, k, { platform })).map((s) => s.id)
+        }));
+        return { draft: workflow, template: { id: template.id, version: template.version }, suggestion: suggestion ?? null, current: current ? { status: current.status, template: current.template } : null, stageKinds: kinds, maxBrief: MAX_BRIEF } as unknown as Record<string, unknown>;
+      })
     },
     {
       name: 'autode_workflow_status',

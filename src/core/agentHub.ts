@@ -4,7 +4,7 @@ import { ConfigurationManager } from './configManager';
 import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, EngineAccess } from '../engine/types';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeToolSkillAgent } from '../agents/build/ToolSkillAgent';
-import { SpecOpsEngine } from './specOps';
+import { SpecOpsEngine } from '../engine/interview/specOps';
 import { buildDiscoveryTurnPrompt, buildSynthesisPrompt } from './specOpsPrompts';
 import { parseComprehensiveSpec } from './specSynthesis';
 import { buildAttachmentExtractionPrompt, fallbackAttachmentExtract, parseAttachmentExtract } from './attachmentExtraction';

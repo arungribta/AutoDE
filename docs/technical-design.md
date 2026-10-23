@@ -1181,6 +1181,42 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - `src/mcp/runnerHost.ts`: `createRunnerHost()` uses a write-enabled `PlatformSession` for SQL (explain, read, approved change) and `spawn()` with no shell for commands.
   - VS Code: `src/core/runbookView.ts` (`RunbookPanel`, `autoDataEngineeringHub.openRunbook`) over `src/core/runbookViewModel.ts`, with `media/runbook.html`.
   - CLI: `cmdRunbook()`. MCP: `autode_propose_runbook` (`decisions.ts`) and `autode_runbook_status` (`agentTools.ts`).
+- **The interview on disk, the business analyst, the planner** (v0.45.12; BPS-7, BPS-1, SKL-6, ORC-9):
+  - **Interview engine:** `SpecOpsEngine` and `createIntakeSession()` moved from `src/core/specOps.ts` to `src/engine/interview/specOps.ts`, unchanged, so every surface uses them.
+  - **State** (`src/engine/interview/state.ts`):
+    - `.autode/problems/<id>/interview/state.yaml` holds the `IntakeSession`. `IntakeAnswer` gains `by` and `channel` (`panel`, `mcp`, `cli`); `IntakeAttachment` gains `packDocument`; the session gains `feeds` (the spec id and version it produced).
+    - `writeInterview()` writes atomically and leaves attachment text out; `readInterview()` reads it back from the file, bounded to 200,000 characters.
+    - `isOpenInterview()`: no `feeds`, and state `discovery` or `synthesizing`.
+    - `startInterview()` returns the open interview or starts one with the parts' fields as coverage.
+    - `recordInterview()` validates questions (`SpecOpsEngine.validateQuestion`, field among the coverage keys) and answers (by question id; or by field, answering that field's latest open question, else recording a question from `prompt`), and reports errors item by item.
+    - `summarizeInterview()` gives the parts (by `specFields`), open questions and answers.
+    - `markInterviewFed()` closes the interview.
+    - `attachmentExtracts()` reads the interview's extracts plus the pre-v0.45.12 `<problem>/attachments/*.yaml`.
+  - **Interview parts as skills:**
+    - `skills/autode-de-interview-{requirements,sources,data-flow,transformations,quality,constraints}` and `autode-de-specification-authoring` replace `skills/*.json`, which were converted verbatim.
+    - `skillMeta()` reads `metadata.interview` (the part's old id), `order` and `specFields` into `SkillMeta.interview`. A part must have `stageKinds: [specify]`.
+    - `interviewPartFromSkill()` (`src/engine/skills/skillRegistry.ts`) rebuilds a `SkillDefinition`: the title is the name, the first paragraph is `systemPrompt`, `## What to ask` is `questionGuidance`, and `## Example questions` gives the examples.
+    - `interviewSkills()` merges a workspace's `.autode/config/skills/*.json` by id. It is used by the panel (`ensureSkills()`), `EngineWorkspace.interviewSkills()` (the MCP prompts `autode_interview_<id>`) and the CLI.
+    - In the catalog, the `interview` group now lists only the workspace's JSON parts.
+  - **Panel** (`src/core/webviewProvider.ts`):
+    - `handleSpecDiscovery()` calls `ensureActiveProblem()` before the first question and `startInterview()`;
+    - `saveInterview()` runs after every ask, answer, attachment and the move to synthesis;
+    - `activateProblem()` drops another problem's engine, then `resumeInterview()` restores the open interview and re-posts its open questions (`postPendingSpecQuestions()`, also after a chat is loaded);
+    - `synthesizeFromSession()` marks the interview fed when the spec changed, else reopens it;
+    - `startNewChat()` no longer ends the interview, and `carryOverPartialInterview()` is gone;
+    - `attachSpecFile` copies a file from outside the workspace to `<problem>/pack/files/` and registers it with `packManager.addDocument()` (role `other`, authority `draft`);
+    - `AttachmentStore` is removed, and Pipeline Spec synthesis reads `attachmentExtracts()`.
+  - **MCP:**
+    - `autode_start_problem` starts the interview;
+    - `autode_interview_state` (read) and `autode_interview_record_answer` (records, channel `mcp`) are in `src/mcp/workspaceTools.ts`;
+    - `proposalTool` in `src/mcp/decisions.ts` marks the interview fed when a valid `spec_revision` is proposed.
+  - **CLI:** `cmdInterview()` gives `autode interview show | answer`, and `problems new` starts the interview.
+  - **Planner:**
+    - `computeDraft()` (`src/engine/workflows/service.ts`) is `draftFrom()` without writing. `autode_workflow_draft` (`src/mcp/workflowTools.ts`) returns it with the current workflow and, per stage kind, its roles, ceiling, done-when and the skills that fit the target platform (`skillFits()`).
+    - `checkWorkflow()` takes `{ skills }`. It refuses a brief that is empty, longer than `MAX_BRIEF` (1,500), or names `autode_*` tools or `autode-*-*` skills, and refuses `agent.skills` that are unknown or for other stage kinds. `validateWorkflowProposal()` passes `loadSkillPack()`.
+    - `toolsForTier()` takes the stage kind: on a `plan` stage, `autode_propose_workflow` is exempt from `HUB_ONLY`.
+    - Role templates `agents/business-analyst.md` and `agents/planner.md`, and the skill `skills/autode-core-workflow-planning`.
+    - The Workflow view shows `StageView.brief`.
 - **Platform skills** (v0.45.11; SKL-8, ORC-10; guide: [platform-skills.md](platform-skills.md)):
   - **Skills:** `skills/autode-{snowflake,databricks}-{ingestion,pipelines,governance,performance,deployment}`, `skills/autode-dbt-project` (scope `dbt`, platforms snowflake and databricks) and `skills/autode-de-reconciliation`. Each ends with a worked example on the reference problem, in fenced blocks labelled by kind:
     - ` ```sql ` (optionally with a file name);
@@ -1747,9 +1783,9 @@ src/agents/build/    # the tool-skill runner
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
-  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, AttachmentStore.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
+  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOps.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
@@ -1768,6 +1804,8 @@ src/engine/documents/
   problemDocuments.ts, problems.ts, problemSlug.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
   manifest.ts, sqlGrounding.ts
+src/engine/interview/
+  specOps.ts, state.ts
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters

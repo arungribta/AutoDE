@@ -6,6 +6,47 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.12
+
+- **PA3b step 5: the interview survives, the business analyst, the planner's briefs** (mcp-engine §9.2 PA3 §4 and §7).
+- **The interview is kept with the problem (BPS-7).** `.autode/problems/<id>/interview/state.yaml` holds:
+  - every question;
+  - every answer, with who gave it and through which surface (panel, MCP, CLI);
+  - the coverage of the specification's fields;
+  - the attachments;
+  - the specification it produced.
+
+  Answers are the user's own statements and need no approval; the specification is still approved by a person. An interview that produced a specification is kept as the record and not resumed; the next revision starts a new one.
+- **The panel resumes it.**
+  - The problem now starts with the interview (it used to start only when the specification was drafted).
+  - The interview is saved after every question, answer and attachment.
+  - After a reload, a New Chat or a switch of problem, the open interview resumes and its open questions are asked again.
+  - New Chat no longer ends the interview. Before, it folded the partial answers into context as a note, and a reload always started a new chat, so an interview never survived a reload. The carry-over is gone.
+  - If synthesis produces no specification, the interview stays open.
+- **Every surface continues the same interview:**
+  - MCP: `autode_interview_state` (parts covered, open questions, answers with who and where) and `autode_interview_record_answer` (questions and the user's answers, by question id or field; refused item by item). `autode_start_problem` starts the interview, and proposing a specification with `autode_propose_spec_change` closes it.
+  - CLI: `autode interview show | answer <question-id> "<answer>"`; `autode problems new` starts the interview.
+- **The interview's parts are skills.** The seven `skills/*.json` packs became `autode-de-interview-{requirements,sources,data-flow,transformations,quality,constraints}` and `autode-de-specification-authoring`, converted word for word. Their metadata keeps each part's id, order and specification fields.
+  - The panel, the MCP prompts `autode_interview_<id>` and the CLI all read them.
+  - A team's `.autode/config/skills/*.json` still replaces a part by id.
+  - The catalog lists them as AutoDE skills. Its *interview* group now holds only a workspace's own parts.
+- **The business analyst** (`agents/business-analyst.md`) has these skills. In an agent host it runs the interview over MCP, recording before asking and continuing whatever another surface started. Its assignment is the specify stage's.
+- **Attachments go into the business-problem pack.**
+  - A file attached during the interview is registered as a pack document (role *other*, authority *draft*; change them in the Pack view). A file from outside the workspace is copied to `<problem>/pack/files/`.
+  - Its extract is kept in the interview, and its text stays in its file.
+  - `AttachmentStore` is removed. Pipeline Spec synthesis reads the extracts from the interview, and those of attachments saved before this version.
+- **The planner's briefs.**
+  - The role template `agents/planner.md` and the skill `autode-core-workflow-planning` refine the drafted workflow and write each stage's brief: scope, constraints, open questions, what to produce.
+  - `autode_workflow_draft` (read) gives the deterministic draft without proposing it, with what each stage kind allows (roles, tier ceiling, the skills that fit the platform).
+  - Only the plan stage's agent may call `autode_propose_workflow`.
+  - The plan check refuses a brief that names AutoDE tools or skills (that is method, which the role and skills carry), one longer than 1,500 characters, and a stage's skills that don't exist or aren't for its kind.
+  - The Workflow view shows each stage's brief.
+- **Deliberate deviations:**
+  - In VS Code, the interview still runs on the panel's own loop (the same skills and state), not as a role-template agent; the business analyst runs as a role template in agent hosts. Moving the panel to the executor would change the interview's UI, and it isn't needed for the same outcome.
+  - Briefs can't name tools at all. The spec says a brief asking for a tool above its tier is refused; refusing any tool or skill name is simpler and stricter, and keeps briefs to context.
+  - The panel's resume is covered by manual verification (Part 37); the engine, MCP and CLI paths it uses are covered by tests.
+- **Measured:** 364 tests: 4 new (the interview on disk; MCP → CLI → MCP continuation and closing; the analyst and the planner as assignments, and the draft that writes nothing; the brief checks). 2 replaced: the bundled-packs test by one for the interview parts as skills (with a team override), and the attachment-store test by one for attachments in the interview. 5 tests were updated for the new tools, skills and catalog group. Lint 0 errors. Eval unchanged.
+
 ## 0.45.11
 
 - **Platform skills** (owner, 2026-10-22: platform depth out of the box for the Tiger technical review; mcp-engine §9.2 PA3 §8b). Twelve new skills of AutoDE's own, written from the vendors' public documentation, with no vendor skill text:

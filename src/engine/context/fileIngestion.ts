@@ -31,8 +31,8 @@ function identityFor(filePath: string, identity?: IngestIdentity): ResolvedIdent
  *
  * Deliberately narrower than the full wishlist (Parquet/Avro need a real binary
  * parsing dependency; "sample data"/"metadata exports"/"data dictionaries"/
- * "documentation" are inherently free-text, which is what the existing
- * `AttachmentStore` + LLM extraction already handles reasonably) — this module
+ * "documentation" are inherently free-text, which the business-problem pack
+ * (documents read by LLM extraction) already handles) — this module
  * only covers formats genuinely parseable *structurally*, with zero new
  * dependencies, so a table/column fact it produces is a fact, not a guess.
  */

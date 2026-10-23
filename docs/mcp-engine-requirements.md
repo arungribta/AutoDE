@@ -504,8 +504,8 @@ Today's TypeScript agents (`src/agents/**`) and orchestration prompts in `src/co
 
 | Role | Replaces | Default skills |
 |---|---|---|
-| `business-analyst` | interview, spec synthesis and revision | `business-problem-interview`, `specification-authoring` |
-| `planner` | plan generation, phase inference | `workflow-planning` |
+| `business-analyst` | interview, spec synthesis and revision | the six `autode-de-interview-*` parts and `autode-de-specification-authoring` (shipped v0.45.12) |
+| `planner` | plan generation, phase inference | `autode-core-workflow-planning` (shipped v0.45.12) |
 | `target-architect` | target context questions | `target-context`, `platform-setup` |
 | `source-assessor` | `SourceAssessmentAgent`, source context questions | `source-assessment`, `conformance` (shipped v0.45.2); `reconciliation` later |
 | `quality-engineer` | (new in v0.45.1: nothing produced quality rules) | `quality-rules` (shipped) |
@@ -534,15 +534,11 @@ Today's TypeScript agents (`src/agents/**`) and orchestration prompts in `src/co
 
   A client without elicitation gets the exact CLI command or file to use.
 
-##### 7. Interview and session state on disk
+##### 7. Interview and session state on disk (shipped v0.45.12)
 
-The interview state lives in `.autode/problems/<id>/interview/state.yaml`:
-- the skill packs covered;
-- each question asked and its answer, with who answered and where;
-- what is still open;
-- the draft it feeds.
+**Status:** ✅ shipped in v0.45.12, with the business analyst, the interview parts as skills, attachments in the pack and the planner's briefs (§4). What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md BPS-7, BPS-1, SKL-6, ORC-9; HOW: technical-design.md §7.9. The full text is in git (this file at commit 355574c).
 
-Any surface resumes it; this closes BPS-7. Answers are the user's statements, so recording them needs no decision. The spec they produce remains a proposal and a gate.
+In short: `.autode/problems/<id>/interview/state.yaml` holds the questions, the answers with who and where, the coverage, the attachments and the specification it fed. The panel, MCP (`autode_interview_state`, `autode_interview_record_answer`) and the CLI (`autode interview`) continue the same interview; answers need no decision, and the specification stays a proposal and a gate.
 
 ##### 8. Executors
 
@@ -612,7 +608,7 @@ In short: twelve AutoDE skills (Snowflake and Databricks ingestion, pipelines, g
   - `autode_primitive_candidates` (shipped v0.45.4, with `autode_record_pipeline_spec`);
   - `autode_reconcile_plan`: reconciliation queries by key, read-only (shipped v0.45.11).
 - **Proposals:** `autode_propose_model` (not built: since v0.45.0 a stage's deliverables are drafts approved at its gate, v0.45.3), `autode_propose_artifacts` (built as `autode_record_artifact`, v0.45.0) (gives artifacts written in any host grounding manifests), `autode_propose_entity_resolution`, `autode_propose_quality_rules`.
-- **Interview:** `autode_interview_state`, `autode_interview_record_answer`.
+- **Interview:** `autode_interview_state`, `autode_interview_record_answer` (shipped v0.45.12); also `autode_workflow_draft` for the planner.
 - **CLI:** `autode workflow templates | status | next | approve <stage> | skip <stage> --reason | reopen <stage>`, and `autode plugin install --host claude|cortex|copilot [--scope project|user]`, `autode plugin path`.
 
 ##### 10. The plugin folder

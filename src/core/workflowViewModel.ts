@@ -23,6 +23,8 @@ export interface StageModel extends StageView {
   after: string[];
   role?: string;
   tier?: string;
+  /** The planner's brief for this stage (v0.45.12): context only. */
+  brief?: string;
   ceiling: string;
   documentBacked: boolean;
   approvedBy?: string;
@@ -152,7 +154,7 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
       : runner ? `Run agent (${runner}), or hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`
       : `No AutoDE agent does this stage yet: hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`;
     return {
-      ...v, level: lv.get(v.id) ?? 0, after: s.after.map((a) => `${a.stage}${a.approved ? ' (approved)' : ''}`), role: s.agent?.role, tier: s.agent?.tier, ceiling: STAGE_KINDS[s.kind].ceiling,
+      ...v, level: lv.get(v.id) ?? 0, after: s.after.map((a) => `${a.stage}${a.approved ? ' (approved)' : ''}`), role: s.agent?.role, tier: s.agent?.tier, brief: s.agent?.brief, ceiling: STAGE_KINDS[s.kind].ceiling,
       documentBacked, approvedBy: s.record.approvedBy, approvedAt: s.record.approvedAt, approvedVia: approvals.get(s.id)?.channel, actions, runner,
       produceLabel: documentBacked ? PRODUCE_LABEL[s.kind] : undefined, document: hasDoc ? relTo(scope.workspaceRoot, docFile!) : undefined, blockers,
       guide: stageRunbooks.get(s.id)?.some((r) => r.status !== 'ran') && v.status !== 'done' ? `Its runbook ${stageRunbooks.get(s.id)!.find((r) => r.status !== 'ran')!.id} is ${stageRunbooks.get(s.id)!.find((r) => r.status !== 'ran')!.status}: open it to approve and run it.` : guide,

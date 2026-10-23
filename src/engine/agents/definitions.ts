@@ -49,6 +49,8 @@ export interface SkillMeta {
   owner: string;
   /** `tested` skills have a fixture test in `npm test`; `preview` ones don't yet. */
   maturity: 'tested' | 'preview';
+  /** A part of the requirements interview (v0.45.12: were `skills/*.json`): its id, order and the specification fields it fills. */
+  interview?: { id: string; order: number; specFields: string[] };
 }
 
 /** The naming convention of AutoDE's own skills (owner, 2026-10-22): `autode-<scope>-<capability>`. */
@@ -75,7 +77,16 @@ export function skillMeta(name: string, metadata: Record<string, unknown> | unde
   if (!Number.isInteger(version) || version < 1) errors.push('metadata.version must be a whole number, 1 or more.');
   const maturity = m.maturity === 'preview' ? 'preview' : m.maturity === 'tested' ? 'tested' : undefined;
   if (!maturity) errors.push('metadata.maturity is tested or preview.');
-  return { meta: { scope, stageKinds: kinds, platforms, version, owner: String(m.owner ?? 'AutoDE'), maturity: maturity ?? 'preview' }, errors };
+  let interview: SkillMeta['interview'];
+  if (m.interview !== undefined) {
+    const id = String(m.interview);
+    const order = Number(m.order ?? 0);
+    if (!/^[a-z0-9-]+$/.test(id)) errors.push('metadata.interview is the id of the interview part (lowercase words joined by dashes).');
+    if (!Number.isInteger(order) || order < 1) errors.push('metadata.order must be a whole number, 1 or more, for an interview part.');
+    if (!kinds.includes('specify')) errors.push('an interview part has stageKinds: [specify].');
+    interview = { id, order, specFields: listOf(m.specFields) };
+  }
+  return { meta: { scope, stageKinds: kinds, platforms, version, owner: String(m.owner ?? 'AutoDE'), maturity: maturity ?? 'preview', ...(interview ? { interview } : {}) }, errors };
 }
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;

@@ -1,3 +1,4 @@
+import { loadSkillPack } from '../agents/definitions';
 import { BusinessProblemSpec, EntityMapping } from '../types';
 import { PipelineSpec } from '../pipelineSpec/types';
 import { validatePipelineSpec } from '../pipelineSpec/validator';
@@ -188,7 +189,7 @@ export function validateVocabularyProposal(p: VocabularyProposalPayload): Valida
 /** A workflow (PA3a): the template's rules, item by item; the diff against the template is the reviewer's summary. */
 export function validateWorkflowProposal(w: WorkflowInstance, ctx: ProposalContext): ValidationReport {
   const r = report();
-  r.checks.push('mandatory stages and gates kept', 'reasons for stages left out or added', 'roles and tiers allowed by each stage kind', 'dependencies known and acyclic', 'every consumed artifact has a producer');
+  r.checks.push('mandatory stages and gates kept', 'reasons for stages left out or added', 'roles and tiers allowed by each stage kind', 'briefs carry context only, and skills fit their stage', 'dependencies known and acyclic', 'every consumed artifact has a producer');
   needProblem(ctx, r);
   if (!w || typeof w !== 'object' || !Array.isArray(w.stages)) { r.errors.push('workflow must be a workflow instance with stages.'); return finish(r); }
   if (ctx.problemId && w.problemId !== ctx.problemId) r.errors.push(`The workflow is for problem ${w.problemId}, not the active ${ctx.problemId}.`);
@@ -196,7 +197,8 @@ export function validateWorkflowProposal(w: WorkflowInstance, ctx: ProposalConte
   r.warnings.push(...errors);
   const template = templates.find((t) => t.id === w.template?.id);
   if (!template) { r.errors.push(`No workflow template "${w.template?.id}" (known: ${templates.map((t) => t.id).join(', ') || 'none'}).`); return finish(r); }
-  const c = checkWorkflow(w, template);
+  const skills = ctx.resourcesRoot ? loadSkillPack(ctx.resourcesRoot).skills.map((k) => ({ id: k.id, stageKinds: k.meta.stageKinds })) : undefined;
+  const c = checkWorkflow(w, template, { skills });
   r.errors.push(...c.errors);
   r.warnings.push(...c.warnings);
   const d = diffWorkflow(w, template);

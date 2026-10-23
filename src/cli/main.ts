@@ -38,7 +38,7 @@ import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, s
 import { Actor, actorLabel } from '../engine/workflows/events';
 import { readWorkflow } from '../engine/workflows/instance';
 import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStore';
-import { DataPlatformProvider, SourceContext, SourceContextEntry } from '../engine/types';
+import { DataPlatformProvider, SkillDefinition, SourceContext, SourceContextEntry } from '../engine/types';
 import { TARGET_OPTIONS, readTargetContext, sourceEntryForSystem, sourceSystemChoices, targetConnectionChoices, targetContextFile, writeTargetContextDraft } from '../engine/context/problemContexts';
 import { sourceContextFile, writeSourceContextDraft } from '../engine/agents/sourceContextDraft';
 import { parseYaml } from '../engine/context/Yaml';
@@ -47,6 +47,9 @@ import { Catalog } from '../engine/context/catalog';
 import { layoutPath } from '../engine/workspaceLayout';
 import { SqlDialect } from '../engine/transforms/types';
 import { guardHookEvent } from '../engine/runner/hostGuard';
+import { isOpenInterview, readInterview, recordInterview, startInterview, summarizeInterview, writeInterview } from '../engine/interview/state';
+import { interviewSkills } from '../engine/skills/skillRegistry';
+import { loadSkillPack } from '../engine/agents/definitions';
 
 /**
  * The `autode` command line (docs/mcp-engine-requirements.md §9.2, PA2;
@@ -145,6 +148,8 @@ Business problems:
   problems list                Every business problem; * marks the active one
   problems new "<statement>"   Start one: a first draft specification, made active
   problems use <id>            Make another one active (the AutoDE panel follows)
+  interview show               The requirements interview: parts covered, open questions, answers and who gave them
+  interview answer <question-id> "<answer>"   Answer an open question (the panel and agent hosts continue from it)
 
 Estate (observed metadata; recorded without a decision):
   estate show                  Systems, environments, bindings, and what the catalog holds
@@ -343,6 +348,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'runbook': return await cmdRunbook(ctx, rest);
       case 'approvals': return await cmdApprovals(ctx, rest);
       case 'context': return await cmdContext(ctx, rest);
+      case 'interview': return cmdInterview(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -703,7 +709,8 @@ async function cmdProblems(ctx: Ctx, rest: string[]): Promise<number> {
     const statement = args.join(' ').trim();
     if (!statement) throw new CliError(EXIT.USAGE, 'problems new takes the problem statement, in quotes.');
     const { id, spec } = startProblem(ctx.workspaceRoot, statement);
-    emit(ctx, { ok: true, id, specId: spec.id, active: true }, `Started ${id} (active). Its first draft specification holds the statement; the interview and approval follow (AutoDE panel, or an AutoDE skill in your agent).`);
+    startInterview(layoutPath(ctx.workspaceRoot, 'problems', id), spec.problemStatement, interviewParts(ctx));
+    emit(ctx, { ok: true, id, specId: spec.id, active: true }, `Started ${id} (active). Its first draft specification holds the statement; the interview follows (AutoDE panel, an AutoDE skill in your agent, or \`autode interview\`), then approval.`);
     return EXIT.OK;
   }
   if (sub === 'use') {
@@ -797,6 +804,46 @@ async function cmdApprovals(ctx: Ctx, rest: string[]): Promise<number> {
     ? items.map((i) => `  ${i.stakes === 'high' ? '!' : '·'} ${i.title}${i.problemId ? ` [${i.problemId}]` : ''}\n      ${i.detail}\n      approve: ${i.cli}`).join('\n') + `\n${items.length} item(s) wait for a person.`
     : 'Nothing waits for you.');
   return EXIT.OK;
+}
+
+/** The interview's parts: AutoDE's interview skills, and the workspace's own JSON parts by id. */
+function interviewParts(ctx: Ctx): SkillDefinition[] {
+  const overrides = layoutPath(ctx.workspaceRoot, 'skills');
+  return interviewSkills(loadSkillPack(ctx.resourcesRoot).skills, fs.existsSync(overrides) ? overrides : undefined);
+}
+
+/** `autode interview show | answer` (v0.45.12): the requirements interview on disk, continued from a terminal. */
+function cmdInterview(ctx: Ctx, rest: string[]): number {
+  const [sub = 'show', questionId, ...words] = rest;
+  const problemId = singleProblem(ctx);
+  if (!problemId) throw new CliError(EXIT.NOT_FOUND, 'No business problem: start one with `autode problems new`.');
+  const problemRoot = layoutPath(ctx.workspaceRoot, 'problems', problemId);
+  const parts = interviewParts(ctx);
+  let s = readInterview(problemRoot, ctx.workspaceRoot);
+  if (sub === 'show') {
+    if (!s) { emit(ctx, { ok: true, problemId, interview: null }, `${problemId} has no interview yet: it starts in the AutoDE panel, in an agent host, or with \`autode problems new\`.`); return EXIT.OK; }
+    const v = summarizeInterview(s, parts);
+    emit(ctx, { ok: true, problemId, interview: v }, [
+      `${problemId}: interview ${v.status}${v.feeds ? ` (fed specification v${v.feeds.version})` : ''}, ${v.answered.length} answer(s), ${v.open.length} open question(s)`,
+      ...v.parts.map((p) => `  ${p.status === 'addressed' ? '✓' : p.status === 'partial' ? '◐' : '·'} ${p.name}`),
+      ...(v.open.length ? ['Open:', ...v.open.map((q) => `  ${q.id} [${q.field}] ${q.prompt}${q.options?.length ? ` (${q.options.join(' / ')})` : ''}`)] : []),
+      ...(v.answered.length ? ['Answered:', ...v.answered.map((a) => `  ${a.questionId} [${a.field}] ${a.value}${a.by ? ` — ${a.by}${a.channel ? `, ${a.channel}` : ''}` : ''}`)] : [])
+    ].join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'answer') {
+    const value = words.join(' ').trim();
+    if (!questionId || !value) throw new CliError(EXIT.USAGE, 'interview answer <question-id> "<answer>"');
+    if (!s || !isOpenInterview(s)) throw new CliError(EXIT.NOT_FOUND, s ? 'The interview already fed a specification; change the specification instead.' : 'No interview yet.');
+    const r = recordInterview(s, { answers: [{ questionId, value }] }, { by: safeUsername(), channel: 'cli' });
+    if (!r.answered.length) throw new CliError(EXIT.NOT_FOUND, r.errors.join(' '));
+    s = r.session;
+    writeInterview(problemRoot, s);
+    const open = summarizeInterview(s, parts).open;
+    emit(ctx, { ok: true, problemId, answered: r.answered, open }, `Recorded. ${open.length ? `${open.length} question(s) still open.` : 'No open questions: continue the interview in the panel or an agent host.'}`);
+    return EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, 'interview show | answer <question-id> "<answer>"');
 }
 
 async function cmdContext(ctx: Ctx, rest: string[]): Promise<number> {

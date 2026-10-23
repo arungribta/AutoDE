@@ -13,7 +13,8 @@ import { loadPrimitiveDefinitionsFromDirectory, mergePrimitiveDefinitions } from
 import { createDeclarativePrimitive } from '../engine/transforms/declarative/adapter';
 import { PrimitiveDefinition } from '../engine/transforms/declarative/types';
 import { registerPrimitiveVersion, registerPrimitives, resetDeclarativePrimitives, resetVersionedPrimitives } from '../engine/transforms/registry';
-import { loadSkillsFromDirectory } from '../engine/skills/skillRegistry';
+import { interviewSkills } from '../engine/skills/skillRegistry';
+import { loadSkillPack } from '../engine/agents/definitions';
 import { ToolSkillState, loadToolSkillStates } from '../engine/skills/lifecycle';
 import { SkillDefinition } from '../engine/types';
 import { LayoutKey, layoutPath } from '../engine/workspaceLayout';
@@ -173,13 +174,10 @@ export class EngineWorkspace {
 
   // ── Skills ───────────────────────────────────────────────────────────────
 
-  /** Interview skills: bundled, overridden by the workspace's `.autode/config/skills/*.json` by id. */
+  /** The interview's parts (v0.45.12): AutoDE's interview skills, replaced by id by the workspace's `.autode/config/skills/*.json`. */
   public interviewSkills(): SkillDefinition[] {
-    const byId = new Map<string, SkillDefinition>();
-    for (const s of loadSkillsFromDirectory(path.join(this.options.resourcesRoot, 'skills'))) byId.set(s.id, s);
     const overrideDir = this.at('skills');
-    if (fs.existsSync(overrideDir)) for (const s of loadSkillsFromDirectory(overrideDir)) byId.set(s.id, s);
-    return [...byId.values()].sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1));
+    return interviewSkills(loadSkillPack(this.options.resourcesRoot).skills, fs.existsSync(overrideDir) ? overrideDir : undefined);
   }
 
   /** Imported tool skills with their S2 state — never migrated here (the server does not write). */

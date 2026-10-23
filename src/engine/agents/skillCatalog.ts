@@ -12,7 +12,7 @@ import { loadToolSkillStates } from '../skills/lifecycle';
  * AutoDE has or works with —
  * - **autode**: AutoDE's own skills (`skills/autode-*`), from their frontmatter;
  * - **workspace**: skills the team imported (`.autode/config/skills/tool-skills/`), with their review state;
- * - **interview**: the requirements-interview packs (`skills/*.json`), until they become skills;
+ * - **interview**: a team's own interview parts (`.autode/config/skills/*.json`); AutoDE's are skills since v0.45.12;
  * - **external**: vendor and community skills, as references only (`skills/external.yaml`, a team's
  *   `.autode/config/external-skills.yaml` merged over it by id). No vendor skill text is copied.
  *
@@ -120,7 +120,8 @@ export function skillCatalog(input: CatalogInput): { entries: CatalogEntry[]; er
     status: `${t.sidecar.status ?? 'published'}, ${t.effectiveTier}${t.changedSinceReview ? ' (changed since review)' : ''}`, owner: (t.sidecar.provenance as { source?: string } | undefined)?.source ?? 'imported'
   }));
   let interview: CatalogEntry[] = [];
-  try { interview = loadSkillsFromDirectory(path.join(input.resourcesRoot, 'skills')).map((s) => ({ name: s.id, group: 'interview', summary: s.description ?? s.name, stageKinds: ['specify'], platforms: ['any'], owner: 'AutoDE' })); } catch { /* none */ }
+  // v0.45.12: AutoDE's interview parts are skills (listed above); this group is a team's own JSON parts.
+  try { interview = loadSkillsFromDirectory(layoutPath(input.workspaceRoot, 'skills')).map((s) => ({ name: s.id, group: 'interview', summary: s.description ?? s.name, stageKinds: ['specify'], platforms: ['any'], owner: 'workspace' })); } catch { /* none */ }
   const ext = externalCatalog(input.resourcesRoot, input.workspaceRoot);
   errors.push(...ext.errors);
   const dirs = hostSkillDirs(input.workspaceRoot, input.home);
@@ -175,7 +176,7 @@ export function renderCatalogMarkdown(entries: readonly CatalogEntry[]): string 
     '| Skill | Scope | Stage kinds | Platforms | Version | Maturity | Used by | What it does |', '|---|---|---|---|---|---|---|---|',
     ...own.map((e) => `| \`${e.name}\` | ${e.scope} | ${e.stageKinds.join(', ') || '—'} | ${e.platforms.join(', ')} | ${e.version} | ${e.maturity} | ${(e.roles ?? []).join(', ') || '—'} | ${esc(e.summary)} |`));
   const iv = entries.filter((e) => e.group === 'interview');
-  if (iv.length) lines.push('', '## Interview packs', '', 'The requirements interview\'s parts (`skills/*.json`), offered over MCP as `autode_interview_<id>` prompts. They become `autode-de-*` skills when the business analyst moves to a role template.', '', '| Pack | What it covers |', '|---|---|', ...iv.map((e) => `| \`${e.name}\` | ${esc(e.summary)} |`));
+  if (iv.length) lines.push('', '## Interview parts of this workspace', '', 'A team\'s own interview parts (`.autode/config/skills/*.json`), which replace AutoDE\'s part with the same id.', '', '| Part | What it covers |', '|---|---|', ...iv.map((e) => `| \`${e.name}\` | ${esc(e.summary)} |`));
   const ext = entries.filter((e) => e.group === 'external');
   lines.push('', '## External skills (references only)', '', 'Skills from vendors and the community that AutoDE works with. AutoDE does not copy or ship them: their licences are below. When one is installed in a host, AutoDE names it in the assignments of the stages it helps with. When it isn\'t, AutoDE can offer the vendor\'s own install command (probed first, run only on a click). Correct or add entries in `.autode/config/external-skills.yaml`.', '',
     '| Skill | Vendor | Availability | Stage kinds | Platforms | Licence | Redistributable | What it does |', '|---|---|---|---|---|---|---|---|',

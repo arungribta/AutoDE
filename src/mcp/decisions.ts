@@ -1,3 +1,4 @@
+import { markInterviewFed } from '../engine/interview/state';
 import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
 import { Decision, DecisionError, DecisionStore } from '../engine/decisions/decisionStore';
 import { ProposalContext, ProposalKind, ProposalValidationError, applyDecision, processResolved, propose } from '../engine/decisions/proposals';
@@ -85,6 +86,10 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
           proposedBy: { host: 'mcp', client: options.clientName(), skill: args.skill as string | undefined, model: args.model as string | undefined },
           evidence: args.evidence as Decision['evidence'] | undefined
         });
+        // v0.45.12: a specification proposed from the interview closes it; the panel then doesn't resume it.
+        const root = ws.problemRoot();
+        const spec = args[payloadKey] as { id?: string; version?: number } | undefined;
+        if (kind === 'spec_revision' && d.validation.ok && root && spec) markInterviewFed(root, { id: String(spec.id ?? d.id), version: Number(spec.version ?? 0) }, 'mcp');
         return { decision: view(d), next: d.stakes === 'low' ? 'Ask the user, then resolve it with autode_resolve_decision, or leave it for the AutoDE panel.' : `A person must approve it: in the AutoDE panel (Decisions), or by editing ${`.autode/decisions/${d.id}.yaml`} and committing. Tell the user.` };
       } catch (err) { return toToolError(err); }
     }

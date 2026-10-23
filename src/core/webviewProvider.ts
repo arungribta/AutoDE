@@ -4,10 +4,11 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeSession, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
+import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
 import { EXTENSION_ID } from './extensionIdentity';
-import { SpecOpsEngine, createIntakeSession } from './specOps';
-import { SkillRegistry, loadSkillsFromDirectory } from '../engine/skills/skillRegistry';
+import { SpecOpsEngine, createIntakeSession } from '../engine/interview/specOps';
+import { SkillRegistry, interviewSkills } from '../engine/skills/skillRegistry';
+import { loadSkillPack } from '../engine/agents/definitions';
 import { composeSynthesisPrompt } from './specOpsPrompts';
 import { buildDiscoveryProgress as buildDiscoveryProgressPure, skillNameForField, DiscoveryProgress } from './discoveryProgress';
 import { GraphManager } from '../context/GraphManager';
@@ -26,7 +27,7 @@ import { SourceContextManager } from '../context/SourceContextManager';
 import { MappingContextManager } from '../context/MappingContextManager';
 import { SemanticLayerManager } from '../context/SemanticLayerManager';
 import { ActiveProblemManager } from '../context/ActiveProblemManager';
-import { AttachmentStore } from '../context/AttachmentStore';
+import { attachmentExtracts, isOpenInterview, markInterviewFed, openQuestions, readInterview, startInterview, writeInterview } from '../engine/interview/state';
 import { BusinessPackManager } from '../context/BusinessPackManager';
 import { DOCUMENT_ROLES, DocumentRole } from '../engine/context/pack';
 import type { ProbeExecutor } from '../engine/context/probes';
@@ -94,6 +95,11 @@ const watchKnowledge: KnowledgeWatcher = (dir, onChange) => {
   return w;
 };
 
+/** Who answered in the panel, for the interview's record. */
+function safeUser(): string {
+  try { return os.userInfo().username; } catch { return 'unknown'; }
+}
+
 export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoDataEngineeringHubSidebar';
 
@@ -134,7 +140,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     target: { connected: false }
   };
   private pipelineSpecManager?: PipelineSpecManager;
-  private attachmentStore?: AttachmentStore;
   /** Phase C4a: the active problem's business-problem pack. */
   private packManager?: BusinessPackManager;
   private problemRoot?: vscode.Uri;
@@ -192,13 +197,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
     try {
       this.postLog('Synthesizing Pipeline Spec…');
-      const attachments = (await this.attachmentStore?.list()) ?? [];
       const draft = await this.hub.synthesizePipelineSpec({
         bps: spec,
         targetContext: this.targetContextManager?.getContext(),
         sourceContext: this.sourceContextManager?.getContext(),
         contextLayerText: this.contextPackText('spec', [spec.problemStatement, ...(spec.objectives ?? [])].join('\n'), 'Pipeline Spec synthesis'),
-        attachmentExtracts: attachments.map((a) => a.extract).filter((e): e is NonNullable<typeof e> => !!e),
+        attachmentExtracts: this.problemRoot ? attachmentExtracts(this.problemRoot.fsPath) : [],
         previous: this.pipelineSpecManager.getSpec()
       });
       await this.pipelineSpecManager.saveSpec(draft);
@@ -307,6 +311,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         await this.startNewChat();
       } else {
         this.postMessage('chatSessionLoaded', { meta: active, transcript });
+        this.postPendingSpecQuestions();
       }
     } catch (err) {
       this.postLog(`Chat session initialization failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -378,8 +383,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.mappingContextManager = undefined;
       this.semanticLayerManager = undefined;
       this.pipelineSpecManager = undefined;
-      this.attachmentStore = undefined;
       this.packManager = undefined;
+      this.specOpsEngine = undefined;
+      this.pendingSpecQuestions = [];
       this.problemRoot = undefined;
       this.postSpec();
       this.postContextGateStatus();
@@ -396,8 +402,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.mappingContextManager = new MappingContextManager(contextRoot, (msg: string) => this.postLog(msg));
     this.semanticLayerManager = new SemanticLayerManager(contextRoot, this.graphManager, (msg: string) => this.postLog(msg));
     this.pipelineSpecManager = new PipelineSpecManager(contextRoot, (msg: string) => this.postLog(msg));
-    this.attachmentStore = new AttachmentStore(contextRoot);
     this.problemRoot = contextRoot;
+    // Another problem's interview isn't this one's; this problem's open interview is resumed below.
+    this.specOpsEngine = undefined;
+    this.pendingSpecQuestions = [];
     this.packManager = this.contextFileManager ? this.createPackManager(contextRoot) : undefined;
     try {
       await this.packManager?.load();
@@ -433,6 +441,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postContextGateStatus();
       this.postContextUpdate();
       this.postMessage('activeProblemChanged', { problemId, spec: existingSpec });
+      this.resumeInterview();
     } catch (err) {
       this.postLog(`Spec manager initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -1094,11 +1103,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             if (!questionId || !value) { continue; }
             const question = session.questions.find((candidate) => candidate.id === questionId);
             const field = question?.field ?? 'scope';
-            this.specOpsEngine.answer({ questionId, field, value, answeredAt: new Date().toISOString() });
+            this.specOpsEngine.answer({ questionId, field, value, answeredAt: new Date().toISOString(), by: safeUser(), channel: 'panel' });
             if (this.chatSessionManager && this.activeChatId) {
               this.chatSessionManager.appendMessage(this.activeChatId, { role: 'user', content: `[Answer: ${field}] ${value}`, at: new Date().toISOString() }).catch(() => { /* best-effort */ });
             }
           }
+          this.saveInterview();
           this.pendingSpecQuestions = [];
           await this.runDiscoveryTurn();
           break;
@@ -1189,18 +1199,30 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const MAX_ATTACHMENT_BYTES = 200_000; // keep prompts bounded
             const content = Buffer.from(bytes).toString('utf8').slice(0, MAX_ATTACHMENT_BYTES);
             const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-            const displayPath = workspaceRoot ? path.relative(workspaceRoot.fsPath, fileUri.fsPath) : fileUri.fsPath;
+            // v0.45.12: an attachment is a document of the business-problem pack, so every surface and teammate
+            // sees it. A file from outside the workspace is copied into the pack first.
+            let fileFsPath = fileUri.fsPath;
+            const inside = workspaceRoot && !path.relative(workspaceRoot.fsPath, fileFsPath).startsWith('..') && !path.isAbsolute(path.relative(workspaceRoot.fsPath, fileFsPath));
+            if (!inside && this.problemRoot) {
+              const copy = vscode.Uri.joinPath(this.problemRoot, 'pack', 'files', path.basename(fileFsPath));
+              await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(this.problemRoot, 'pack', 'files'));
+              await vscode.workspace.fs.writeFile(copy, bytes);
+              fileFsPath = copy.fsPath;
+            }
+            const displayPath = workspaceRoot ? path.relative(workspaceRoot.fsPath, fileFsPath).split(path.sep).join('/') : fileFsPath;
+            const doc = this.packManager ? await this.packManager.addDocument({ path: fileFsPath, role: 'other', authority: 'draft', version: '1' }) : undefined;
             const attachment: IntakeAttachment = {
               id: `att-${Date.now().toString(36)}`,
               path: displayPath,
               content,
-              attachedAt: new Date().toISOString()
+              attachedAt: new Date().toISOString(),
+              packDocument: doc?.id
             };
-            this.postLog(`Attached ${displayPath} as reference material — extracting structured facts…`);
+            this.postLog(`Attached ${displayPath}${doc ? ` (pack document ${doc.id}; set its role and authority in the Pack view)` : ''} — extracting structured facts…`);
             attachment.extract = await this.hub.extractAttachmentFacts(attachment);
             this.specOpsEngine.addAttachment(attachment);
-            if (this.attachmentStore) { await this.attachmentStore.save(attachment); }
-            this.postLog(`Attached ${displayPath} as reference material for this conversation (confidence: ${attachment.extract.confidence}).`);
+            this.saveInterview();
+            this.postLog(`Attached ${displayPath} as reference material for this interview (confidence: ${attachment.extract.confidence}).`);
           } catch (err) {
             this.postLog(`Failed to attach file: ${err instanceof Error ? err.message : String(err)}`);
           }
@@ -2035,19 +2057,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /**
    * "New Chat" (Phase F). Archives the current chat session (never discards —
    * only an explicit `discardChat` action deletes anything) and starts a fresh
-   * one. Any in-progress discovery/revision interview is not resumed as a live
-   * Q&A later — its partial answers are folded into context instead, so the
-   * information isn't lost even though the specific conversation is done.
+   * one. Since v0.45.12 the requirements interview belongs to the problem, not
+   * the chat: it is saved with the problem and its open questions are asked
+   * again in the new chat.
    */
   private async startNewChat(): Promise<void> {
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!this.chatSessionManager || !workspaceRoot) { this.postLog('Chat sessions are not initialized.'); return; }
-
-    if (this.specOpsEngine) {
-      await this.carryOverPartialInterview(this.specOpsEngine.getSession(), workspaceRoot);
-      this.specOpsEngine = undefined;
-      this.pendingSpecQuestions = [];
-    }
+    if (!this.chatSessionManager) { this.postLog('Chat sessions are not initialized.'); return; }
     this.pendingRevision = false;
 
     if (this.activeChatId) {
@@ -2062,38 +2077,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.activeChatId = newSession.id;
     this.postMessage('chatSessionLoaded', { meta: newSession, transcript: [] });
     this.postLog('Started a new chat.');
-  }
-
-  /**
-   * Deterministic (no LLM call) — the answers are already validated Q&A pairs,
-   * not freeform text needing judgment to extract — so this runs unconditionally
-   * on New Chat rather than being gated behind the user-initiated "distill this
-   * chat" action (requirements.md §9b), which is for freeform chat content.
-   * Reuses the existing SourceRegistry/SynthesisPipeline machinery (registers a
-   * `business_context`-shaped note) instead of a parallel extraction path.
-   */
-  private async carryOverPartialInterview(session: IntakeSession, workspaceRoot: vscode.Uri): Promise<void> {
-    if (!this.sourceRegistry || !this.synthesisPipeline) { return; }
-    if (session.answers.length === 0 && session.insights.length === 0) { return; }
-
-    const lines: string[] = [
-      `# Partial answers carried over from an abandoned specification conversation (${session.id})`,
-      `# ${session.changeRequest ? 'Change request' : 'Business problem'}: ${session.changeRequest || session.problemStatement}`
-    ];
-    for (const answer of session.answers) { lines.push(`- ${answer.field}: ${answer.value}`); }
-    for (const insight of session.insights) { lines.push(`- note: ${insight}`); }
-
-    const relativePath = layoutRel('carryover', `${session.id}.md`);
-    try {
-      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.carryover));
-      await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(workspaceRoot, relativePath), Buffer.from(lines.join('\n') + '\n', 'utf8'));
-      await this.sourceRegistry.addSource(relativePath, 'business_context', 'autode');
-      const result = await this.synthesisPipeline.synthesize(this.sourceRegistry.getSources());
-      this.postContextUpdate();
-      this.postLog(`Carried forward ${session.answers.length} partial answer(s) into context (${result.nodes} node(s)).`);
-    } catch (err) {
-      this.postLog(`Failed to carry over partial interview data: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    this.postPendingSpecQuestions();
   }
 
   /**
@@ -2612,12 +2596,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (this.skillRegistry) {
       return this.skillRegistry.list();
     }
-    const bundledDir = vscode.Uri.joinPath(this.context.extensionUri, 'skills').fsPath;
+    // v0.45.12: the interview's parts are AutoDE's interview skills; a team's JSON parts replace them by id.
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
     const overrideDir = vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.skills).fsPath;
-    const bundled = loadSkillsFromDirectory(bundledDir);
-    const overrides = loadSkillsFromDirectory(overrideDir);
-    this.skillRegistry = new SkillRegistry([...bundled, ...overrides]);
+    this.skillRegistry = new SkillRegistry(interviewSkills(loadSkillPack(this.context.extensionUri.fsPath).skills, overrideDir));
     return this.skillRegistry.list();
   }
 
@@ -2693,14 +2675,20 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!trimmed) { return; }
 
     if (!this.specOpsEngine) {
-      const fields = new SkillRegistry(this.ensureSkills()).allSpecFields();
-      this.specOpsEngine = new SpecOpsEngine(createIntakeSession(trimmed, { fields, previousSpec }));
+      // v0.45.12: the interview belongs to the problem and lives on disk, so the problem starts with it.
+      if (!previousSpec) await this.ensureActiveProblem(trimmed);
+      const root = this.problemRoot?.fsPath;
+      const session = root
+        ? startInterview(root, trimmed, this.ensureSkills(), { previousSpec })
+        : createIntakeSession(trimmed, { fields: new SkillRegistry(this.ensureSkills()).allSpecFields(), previousSpec });
+      this.specOpsEngine = new SpecOpsEngine(session);
       this.postLog(previousSpec
         ? `Starting a revision of specification v${previousSpec.version} — answer the questions to refine the change.`
-        : 'Starting agentic requirements discovery — answer the questions to refine the specification.');
+        : 'Starting agentic requirements discovery — answer the questions to refine the specification. You can stop at any time; the interview is saved with the problem.');
     } else if (this.pendingSpecQuestions.length > 0) {
       const current = this.pendingSpecQuestions[0];
-      this.specOpsEngine.answer({ questionId: current.id, field: current.field, value: trimmed, answeredAt: new Date().toISOString() });
+      this.specOpsEngine.answer({ questionId: current.id, field: current.field, value: trimmed, answeredAt: new Date().toISOString(), by: safeUser(), channel: 'panel' });
+      this.saveInterview();
       this.pendingSpecQuestions.shift();
       if (this.pendingSpecQuestions.length > 0) {
         this.postSpecQuestion(this.pendingSpecQuestions[0]);
@@ -2736,6 +2724,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       }
       if (action.action === 'ask' || action.action === 'ask_many') {
         const ids = engine.applyAction(action);
+        this.saveInterview();
         this.pendingSpecQuestions = engine.getSession().questions.filter((question) => ids.includes(question.id));
         if (this.pendingSpecQuestions.length > 1) {
           this.postMessage('specQuestions', {
@@ -2760,6 +2749,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!engine) { return; }
     const isRevision = !!engine.getSession().previousSpec;
     engine.setState('synthesizing');
+    this.saveInterview();
+    const before = this.specManager?.getSpec()?.updatedAt;
     this.postLog(isRevision
       ? 'Change clarified. Synthesizing the revised Business Problem Specification...'
       : 'Requirements collected. Synthesizing the comprehensive Business Problem Specification...');
@@ -2790,8 +2781,42 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       // only the primary path above (parseComprehensiveSpec) guarantees that.
       await this.draftSpec(composeSynthesisPrompt(engine.getSession()), engine.getSession().previousSpec);
     } finally {
+      // The interview fed this specification version: it is kept as the record and no longer resumed.
+      // If no specification came out, it stays open and resumes.
+      const saved = this.specManager?.getSpec();
+      const root = this.problemRoot?.fsPath;
+      if (root && saved && saved.updatedAt !== before) markInterviewFed(root, saved, 'panel');
+      else { engine.setState('discovery'); this.saveInterview(); }
       this.specOpsEngine = undefined;
       this.pendingSpecQuestions = [];
+    }
+  }
+
+  /** Saves the interview with the problem (v0.45.12): any surface, or this panel after a reload, continues it. */
+  private saveInterview(): void {
+    const root = this.problemRoot?.fsPath;
+    if (!root || !this.specOpsEngine) return;
+    try { writeInterview(root, this.specOpsEngine.getSession()); } catch (err) { this.postLog(`The interview could not be saved: ${err instanceof Error ? err.message : String(err)}`); }
+  }
+
+  /** Continues the problem's open interview, wherever it was left: its open questions are asked again. */
+  private resumeInterview(): void {
+    const root = this.problemRoot?.fsPath;
+    const session = root ? readInterview(root, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath) : undefined;
+    if (!session || !isOpenInterview(session)) return;
+    if (session.state === 'synthesizing') session.state = 'discovery';
+    this.specOpsEngine = new SpecOpsEngine(session);
+    this.pendingSpecQuestions = openQuestions(session);
+    const last = session.answers[session.answers.length - 1];
+    this.postLog(`Resumed the requirements interview: ${session.answers.length} answer(s) so far${last?.channel ? `, the last through ${last.channel === 'panel' ? 'this panel' : last.channel === 'mcp' ? 'an agent host' : 'the terminal'}` : ''}; ${this.pendingSpecQuestions.length} question(s) open.`);
+    this.postPendingSpecQuestions();
+  }
+
+  private postPendingSpecQuestions(): void {
+    if (this.pendingSpecQuestions.length > 1) {
+      this.postMessage('specQuestions', { questions: this.pendingSpecQuestions.map((q) => ({ ...q, skillLabel: skillNameForField(q.field, this.ensureSkills()) })), progress: this.buildDiscoveryProgress() });
+    } else if (this.pendingSpecQuestions.length === 1) {
+      this.postSpecQuestion(this.pendingSpecQuestions[0]);
     }
   }
 

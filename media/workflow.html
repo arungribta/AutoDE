@@ -105,6 +105,7 @@
         '<div class="guide"><b>Next:</b> ' + esc(s.guide) + '</div>' +
         '<div class="kv"><div>Kind</div><div>' + esc(s.kind) + '</div><div>Inclusion</div><div>' + esc(s.inclusion) + (s.origin === 'added' ? ' (added by the plan)' : '') + '</div>' +
         '<div>Agent</div><div>' + esc(s.role || '—') + (s.tier ? ' · tier ' + esc(s.tier) : '') + ' (ceiling ' + esc(s.ceiling) + ')' + (s.runner ? '<br>runs here: ' + esc(s.runner) : '') + '</div>' +
+        (s.brief ? '<div>Brief</div><div>' + esc(s.brief) + '</div>' : '') +
         (s.document ? '<div>Document</div><div><a data-file="' + esc(s.document) + '">' + esc(s.document) + '</a></div>' : '') +
         (s.runbooks && s.runbooks.length ? '<div>Runbooks</div><div>' + s.runbooks.map((r) => '<a data-runbook="' + esc(r.id) + '">' + esc(r.id) + '</a> (' + esc(r.status) + ')').join('<br>') + '</div>' : '') +
         '<div>After</div><div>' + (s.after.length ? s.after.map(esc).join(', ') : 'nothing') + '</div>' +

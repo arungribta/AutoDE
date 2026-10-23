@@ -34,10 +34,12 @@ const HUB_ONLY = /^autode_(workflow_(start_stage|complete_stage|skip_stage|reope
 /** Every stage records its own deliverables (drafts in its own folder, approved at its gate), whatever its tier. */
 const ANY_TIER = new Set(['autode_record_artifact']);
 
-export function toolsForTier(tools: readonly ToolInfo[], tier: Tier, roleTools: readonly string[]): string[] {
+export function toolsForTier(tools: readonly ToolInfo[], tier: Tier, roleTools: readonly string[], kind?: StageKind): string[] {
   const allow = roleTools.length ? new Set(roleTools) : undefined;
   return tools.filter((t) => {
-    if (HUB_ONLY.test(t.name)) return false;
+    // The plan stage's output is the workflow itself: its planner proposes it (v0.45.12); a person approves it.
+    const planning = kind === 'plan' && t.name === 'autode_propose_workflow';
+    if (HUB_ONLY.test(t.name) && !planning) return false;
     const need = ANY_TIER.has(t.name) ? 'read' : toolTier(t);
     if (need === 'never' || tierRank(need) > tierRank(tier)) return false;
     return !allow || allow.has(t.name);
@@ -126,7 +128,7 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   const ownKind = own.length || platformSkills.length ? [...new Set([...own, ...platformSkills])] : role.skills;
   const wanted = s.agent?.skills?.length ? s.agent.skills : ownKind;
   const skills = pack.filter((k) => wanted.includes(k.id)).map((k) => ({ id: k.id, name: k.name, description: k.description, instructions: k.instructions, resources: k.resources }));
-  const engineTools = toolsForTier(tools, tier, role.tools);
+  const engineTools = toolsForTier(tools, tier, role.tools, s.kind);
   const dirs = hostSkillDirs(scope.workspaceRoot, scope.home ?? os.homedir());
   const externalSkills = externalCatalog(scope.resourcesRoot, scope.workspaceRoot).entries
     .filter((e) => e.stageKinds.includes(s.kind) && (!e.platforms.length || e.platforms.includes('any') || (!!platform && e.platforms.includes(platform))))

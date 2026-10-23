@@ -164,6 +164,9 @@ export interface IntakeAnswer {
   field: string;
   value: string;
   answeredAt: string;
+  /** Who gave the answer, and through which surface (v0.45.12: the interview is on disk and any surface continues it). */
+  by?: string;
+  channel?: 'panel' | 'mcp' | 'cli';
 }
 
 export type SpecEngineState = 'discovery' | 'synthesizing' | 'draft' | 'refining' | 'approved';
@@ -203,8 +206,11 @@ export interface AttachmentExtract {
 export interface IntakeAttachment {
   id: string;
   path: string;
+  /** The file's text, bounded. Not stored in the interview state: read again from `path` when it is resumed. */
   content: string;
   attachedAt: string;
+  /** The business-problem pack document it was registered as (v0.45.12). */
+  packDocument?: string;
   /** Populated once the structured-extraction pass has run (Phase 2B-i) — absent for an attachment made before this existed, or if extraction itself is still pending. */
   extract?: AttachmentExtract;
 }
@@ -236,6 +242,8 @@ export interface IntakeSession {
   changeRequest?: string;
   /** Ad-hoc reference files the user attached during the conversation. */
   attachments?: IntakeAttachment[];
+  /** The specification the interview produced (v0.45.12), once it has been synthesized or proposed. */
+  feeds?: { specId: string; version: number; at: string; channel: 'panel' | 'mcp' | 'cli' };
 }
 
 /**

@@ -888,6 +888,30 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: on a Databricks build stage without the Databricks agent skills installed, read the assignment; install them (`autode skills install databricks-pipelines`), and read it again.
   Expect: first listed under *not installed here*, with how you install them; then under *installed in this host*. Neither time does the agent install anything.
 
+## Part 37 — v0.45.12 The interview survives; the analyst and the planner
+
+- [ ] **37.1 Reload mid-interview.**
+  Do: start a new problem in the panel, answer two questions, then reload VS Code (Developer: Reload Window).
+  Expect: the panel says it resumed the interview (2 answers, n open) and asks the open question again. Nothing is asked twice.
+- [ ] **37.2 New Chat and switching problems.**
+  Do: mid-interview, click New Chat; then switch to another problem and back.
+  Expect: the interview continues after New Chat; switching away shows nothing of it in the other problem, and switching back resumes it.
+- [ ] **37.3 Continue in another surface.**
+  Do: run `autode interview show` and answer an open question with `autode interview answer`; then, in Claude Code with the plugin, ask the business analyst to continue the interview.
+  Expect: the panel (after a reload) and the agent see the terminal's answer with channel cli; the agent records its questions before asking and doesn't ask what was answered.
+- [ ] **37.4 The specification closes it.**
+  Do: let the panel synthesize the specification (or the agent propose it).
+  Expect: `interview/state.yaml` records the version it fed; a reload doesn't resume it; a revision starts a new interview.
+- [ ] **37.5 Attachments into the pack.**
+  Do: mid-interview, attach a file from outside the workspace.
+  Expect: it is copied to `<problem>/pack/files/` and listed in the Pack view (role other, draft); the interview's next question can use it; after a reload it is still attached.
+- [ ] **37.6 The interview's parts.**
+  Do: open the Skills view and `autode skills list`.
+  Expect: the seven interview skills are AutoDE skills (stage specify, used by business-analyst); the interview group appears only with a workspace's own JSON parts.
+- [ ] **37.7 The planner's briefs.**
+  Do: after approving the specification, Run agent on the Plan stage (or ask the planner in Claude Code).
+  Expect: it proposes the workflow with a brief per stage; the Workflow view shows each brief; a brief naming a tool is refused with the reason.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1103,5 +1127,12 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 36.6 |  |  |
 | 36.7 |  |  |
 | 36.8 |  |  |
+| 37.1 |  |  |
+| 37.2 |  |  |
+| 37.3 |  |  |
+| 37.4 |  |  |
+| 37.5 |  |  |
+| 37.6 |  |  |
+| 37.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

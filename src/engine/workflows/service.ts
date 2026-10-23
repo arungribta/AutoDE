@@ -65,14 +65,20 @@ export function redraft(scope: WorkflowScope, templateId?: string, who?: Actor):
  * (its rule), the person who chose a template, the engine as drafter. Recorded
  * in the workflow's history. Doesn't check whether a workflow is approved.
  */
-export function draftFrom(scope: WorkflowScope, templateId?: string, who?: Actor): WorkflowInstance {
+/** The deterministic draft for a template (the suggested one by default), written nowhere: what the planner refines (v0.45.12). */
+export function computeDraft(scope: WorkflowScope, templateId?: string): { workflow: WorkflowInstance; template: WorkflowTemplate; suggestion?: { id: string; reason: string } } {
   const root = problemRootOf(scope);
   const { templates, errors } = templatesFor(scope);
   const suggestion = suggestFor(scope);
   const id = templateId ?? suggestion?.id ?? 'greenfield';
   const template = templates.find((t) => t.id === id);
   if (!template) throw new Error(`No workflow template "${id}" (known: ${templates.map((t) => t.id).join(', ') || 'none'})${errors.length ? `; template errors: ${errors.join('; ')}` : ''}.`);
-  const w = draftWorkflow(template, scope.problemId, workflowFacts(scope.workspaceRoot, root), sourceSystems(scope.workspaceRoot));
+  return { workflow: draftWorkflow(template, scope.problemId, workflowFacts(scope.workspaceRoot, root), sourceSystems(scope.workspaceRoot)), template, suggestion };
+}
+
+export function draftFrom(scope: WorkflowScope, templateId?: string, who?: Actor): WorkflowInstance {
+  const root = problemRootOf(scope);
+  const { workflow: w, template, suggestion } = computeDraft(scope, templateId);
   const at = new Date().toISOString();
   w.provenance = {
     suggested: suggestion ? { template: suggestion.id, rule: suggestion.reason } : undefined,

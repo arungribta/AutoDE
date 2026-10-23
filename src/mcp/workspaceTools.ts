@@ -13,6 +13,7 @@ import { buildVocabulary, mineAbbreviations, parseVocabularyFile } from '../engi
 import { conformanceFailures, packConformance, readPackDocument } from '../engine/context/packChecks';
 import { ProbeDialect, ProbeExecutor, combineProbeExecutors, createSqlProbeExecutor } from '../engine/context/probes';
 import { layoutPath } from '../engine/workspaceLayout';
+import { AnswerInput, QuestionInput, isOpenInterview, readInterview, recordInterview, startInterview, summarizeInterview, writeInterview } from '../engine/interview/state';
 
 /**
  * Business problems and the estate over MCP (parity step 1a, v0.43.2): what an
@@ -129,7 +130,53 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
       annotations: recordsOnly('Start a business problem', false),
       handler: async (args, ws) => {
         const { id, spec } = startProblem(ws.options.workspaceRoot, String(args.problemStatement));
-        return { id, specId: spec.id, status: spec.status, active: true, next: 'Interview the user (prompts autode_interview_*), then propose the specification with autode_propose_spec_change.' };
+        // v0.45.12: the interview starts with the problem, on disk, so any surface continues it.
+        startInterview(layoutPath(ws.options.workspaceRoot, 'problems', id), spec.problemStatement, ws.interviewSkills());
+        return { id, specId: spec.id, status: spec.status, active: true, next: 'Interview the user: autode_interview_state shows what is open; record each question and answer with autode_interview_record_answer (the interview skills, or prompts autode_interview_*, say what to ask). Then propose the specification with autode_propose_spec_change.' };
+      }
+    },
+    {
+      name: 'autode_interview_state',
+      description: 'The active problem\'s requirements interview, as any surface left it (the AutoDE panel, a terminal, another host): the parts covered and not, the open questions, every answer with who gave it and where, the attachments, and the specification it fed. Continue it; don\'t ask again what is answered.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: { title: 'Show the interview', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (_args, ws) => {
+        const root = ws.problemRoot();
+        if (!root) throw new EngineToolError('NOT_FOUND', 'No active business problem: start or select one (autode_start_problem, autode_select_problem).');
+        const s = readInterview(root, ws.options.workspaceRoot);
+        if (!s) return { status: 'none', next: 'No interview yet: autode_interview_record_answer starts one from the problem statement.' };
+        const summary = summarizeInterview(s, ws.interviewSkills());
+        const next = summary.status === 'done' ? `It fed specification ${s.feeds?.specId} v${s.feeds?.version}; a new interview starts with a revision.`
+          : summary.open.length ? 'Ask the open questions (or answer them from what the user already said), and record the answers.'
+            : summary.parts.some((p) => p.status !== 'addressed') ? 'Ask about the parts not yet addressed, recording each question before you ask it.'
+              : 'The parts are covered: write the specification (autode-de-specification-authoring) and propose it.';
+        return { ...summary, next } as unknown as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_interview_record_answer',
+      description: 'Record questions you ask and the user\'s answers in the active problem\'s requirements interview, so the AutoDE panel, a terminal or another host continues from here. A question names the specification field it fills; an answer names its question (id) or field and holds the user\'s own words (your reading of them goes in the question\'s rationale). Answers are the user\'s statements: no approval is needed. Starts the interview from the problem statement if there is none.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        questions: { type: 'array', items: { type: 'object', required: ['field', 'prompt'], additionalProperties: false, properties: { field: { type: 'string', minLength: 1 }, prompt: { type: 'string', minLength: 1 }, kind: { type: 'string', enum: ['text', 'single-select', 'multi-select', 'boolean'] }, options: { type: 'array', items: { type: 'string' } }, rationale: { type: 'string' }, skill: { type: 'string' } } } },
+        answers: { type: 'array', items: { type: 'object', required: ['value'], additionalProperties: false, properties: { questionId: { type: 'string' }, field: { type: 'string' }, prompt: { type: 'string', description: 'The question, when it wasn\'t recorded before.' }, value: { type: 'string', minLength: 1 } } } }
+      } },
+      annotations: recordsOnly('Record interview answers', false),
+      handler: async (args, ws) => {
+        const root = ws.problemRoot();
+        const id = ws.activeProblemId();
+        if (!root || !id) throw new EngineToolError('NOT_FOUND', 'No active business problem: start or select one (autode_start_problem, autode_select_problem).');
+        const questions = (args.questions ?? []) as QuestionInput[];
+        const answers = (args.answers ?? []) as AnswerInput[];
+        if (!questions.length && !answers.length) throw new EngineToolError('VALIDATION_FAILED', 'Give questions, answers or both.');
+        const skills = ws.interviewSkills();
+        let s = readInterview(root, ws.options.workspaceRoot);
+        if (s && !isOpenInterview(s)) throw new EngineToolError('VALIDATION_FAILED', `The interview already fed specification ${s.feeds?.specId ?? ''} v${s.feeds?.version ?? ''}. Change the specification with autode_propose_spec_change.`);
+        if (!s) s = startInterview(root, listProblems(ws.options.workspaceRoot).find((p) => p.id === id)?.problemStatement ?? id, skills);
+        const r = recordInterview(s, { questions, answers }, { by: 'user (via MCP)', channel: 'mcp' });
+        if (!r.asked.length && !r.answered.length) throw new EngineToolError('VALIDATION_FAILED', r.errors.join(' '));
+        writeInterview(root, r.session);
+        const summary = summarizeInterview(r.session, skills);
+        return { asked: r.asked, answered: r.answered, errors: r.errors, open: summary.open, parts: summary.parts };
       }
     },
     {

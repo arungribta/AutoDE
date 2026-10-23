@@ -105,3 +105,34 @@ export class SkillRegistry {
     return [...new Set(this.list().flatMap((skill) => skill.specFields))];
   }
 }
+
+/** A section of a skill's Markdown body: the text under `## <heading>`, up to the next heading. */
+function section(body: string, heading: string): string {
+  const lines = body.split('\n');
+  const start = lines.findIndex((l) => l.trim() === `## ${heading}`);
+  if (start < 0) return '';
+  const end = lines.findIndex((l, i) => i > start && /^#{1,2} /.test(l));
+  return lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim();
+}
+
+/** An interview part as the interview engine reads it, from an `autode-de-*` skill (v0.45.12). */
+export function interviewPartFromSkill(k: { description: string; instructions: string; meta: { interview?: { id: string; order: number; specFields: string[] } } }): SkillDefinition | undefined {
+  const part = k.meta.interview;
+  if (!part) return undefined;
+  const body = k.instructions.replace(/\r\n/g, '\n');
+  const name = /^# (.+)$/m.exec(body)?.[1].trim() ?? part.id;
+  const systemPrompt = (/^# .+$\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body)?.[1] ?? '').trim();
+  const exampleQuestions = section(body, 'Example questions').split('\n').map((l) => /^-\s+(.+)$/.exec(l.trim())?.[1]).filter((x): x is string => !!x);
+  return { id: part.id, name, order: part.order, description: k.description, systemPrompt, questionGuidance: section(body, 'What to ask'), specFields: [...part.specFields], exampleQuestions: exampleQuestions.length ? exampleQuestions : undefined };
+}
+
+/**
+ * The requirements interview's parts (v0.45.12): AutoDE's interview skills, then a team's own parts
+ * (`.autode/config/skills/*.json`, the pre-v0.45.12 format), which replace a part with the same id.
+ */
+export function interviewSkills(packSkills: ReadonlyArray<Parameters<typeof interviewPartFromSkill>[0]>, overrideDir?: string): SkillDefinition[] {
+  const byId = new Map<string, SkillDefinition>();
+  for (const k of packSkills) { const d = interviewPartFromSkill(k); if (d) byId.set(d.id, d); }
+  if (overrideDir) for (const s of loadSkillsFromDirectory(overrideDir)) byId.set(s.id, s);
+  return [...byId.values()].sort((a, b) => a.order - b.order);
+}

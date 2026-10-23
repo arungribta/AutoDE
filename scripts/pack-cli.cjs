@@ -50,7 +50,7 @@ function stage(outDir = path.join(root, 'dist', 'package')) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const rel of CONTENT) {
     const from = path.join(root, rel);
-    // skills/ ships the interview prompt packs and the skill folders (SKILL.md, PA3b), as in the VSIX; primitive-definitions/ may not exist yet.
+    // skills/ ships the skill folders (SKILL.md; the interview's parts too, since v0.45.12) and external.yaml, as in the VSIX; primitive-definitions/ may not exist yet.
     if (!fs.existsSync(from)) continue;
     if (rel === 'skills') {
       for (const f of fs.readdirSync(from).filter((x) => x.endsWith('.json') || x === 'external.yaml' || fs.existsSync(path.join(from, x, 'SKILL.md')))) copy(path.join(from, f), path.join(outDir, 'skills', f));

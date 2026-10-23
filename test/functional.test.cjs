@@ -342,16 +342,26 @@ async function main() {
     assert.strictEqual(reg.questionSkills().length, 2);
   });
 
-  await test('loadSkillsFromDirectory() loads bundled skills', () => {
-    const { loadSkillsFromDirectory } = require('../dist/engine/skills/skillRegistry.js');
-    const skills = loadSkillsFromDirectory(nodePath.join(__dirname, '..', 'skills'));
-    assert.ok(skills.length >= 6, `expected >=6 bundled skills, got ${skills.length}`);
-    assert.ok(skills.some((s) => s.id === 'synthesis'));
-    assert.ok(skills.every((s) => s.id && s.systemPrompt));
+  await test('v0.45.12: the interview\'s parts are AutoDE skills (autode-de-interview-*, the specification authoring skill), read back as the interview engine uses them; a team\'s JSON part replaces one by id', () => {
+    const { interviewSkills } = require('../dist/engine/skills/skillRegistry.js');
+    const { loadSkillPack } = require('../dist/engine/agents/definitions.js');
+    const skills = interviewSkills(loadSkillPack(nodePath.join(__dirname, '..')).skills);
+    assert.deepStrictEqual(skills.map((s) => s.id), ['requirements-discovery', 'source-catalog', 'data-flow', 'transformations', 'quality-acceptance', 'constraints-assumptions', 'synthesis']);
+    assert.ok(skills.every((s) => s.id && s.systemPrompt && s.questionGuidance));
+    const src = skills.find((s) => s.id === 'source-catalog');
+    assert.deepStrictEqual([src.name, src.order, src.specFields, src.exampleQuestions.length], ['Source Catalog', 2, ['sourceCatalog', 'dataFlows'], 2]);
+    assert.deepStrictEqual(skills.find((s) => s.id === 'synthesis').specFields, [], 'authoring asks nothing');
+    const nodeFs = require('node:fs');
+    const dir = nodeFs.mkdtempSync(nodePath.join(require('node:os').tmpdir(), 'autode-parts-'));
+    try {
+      nodeFs.writeFileSync(nodePath.join(dir, 'source-catalog.json'), JSON.stringify({ id: 'source-catalog', name: 'Our sources', order: 2, description: 'd', systemPrompt: 'Ask about our mainframe feeds.', questionGuidance: 'g', specFields: ['sourceCatalog'] }));
+      const merged = interviewSkills(loadSkillPack(nodePath.join(__dirname, '..')).skills, dir);
+      assert.deepStrictEqual([merged.length, merged.find((s) => s.id === 'source-catalog').name], [7, 'Our sources']);
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   await test('createIntakeSession() seeds coverage and budget', () => {
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const session = createIntakeSession('Build a marts pipeline', { fields: ['dataFlows', 'objectives'], turnBudget: 5, now: '2026-01-01T00:00:00.000Z' });
     assert.strictEqual(session.state, 'discovery');
     assert.strictEqual(session.turnBudget, 5);
@@ -360,7 +370,7 @@ async function main() {
   });
 
   await test('createIntakeSession() seeds a revision from a previous approved spec', () => {
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const previousSpec = {
       id: 'bps-1', version: 2, status: 'approved', problemStatement: 'Original problem',
       objectives: ['grow revenue'], successCriteria: [], scope: { in: ['orders'], out: [] },
@@ -375,7 +385,7 @@ async function main() {
   });
 
   await test('SpecOpsEngine tracks coverage and stop condition', () => {
-    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/engine/interview/specOps.js');
     const engine = new SpecOpsEngine(createIntakeSession('x', { fields: ['objectives', 'dataFlows'], turnBudget: 2, now: '2026-01-01T00:00:00.000Z' }));
     assert.strictEqual(engine.shouldSynthesize(), false);
     engine.ask([{ id: 'q1', field: 'objectives', prompt: 'What objective?', kind: 'text', askedAt: 't' }]);
@@ -387,14 +397,14 @@ async function main() {
   });
 
   await test('SpecOpsEngine budget alone triggers synthesis', () => {
-    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/engine/interview/specOps.js');
     const engine = new SpecOpsEngine(createIntakeSession('x', { fields: ['objectives'], turnBudget: 1 }));
     engine.ask([{ id: 'q1', field: 'objectives', prompt: 'p?', kind: 'text', askedAt: 't' }]);
     assert.strictEqual(engine.shouldSynthesize(), true);
   });
 
   await test('validateAction() accepts valid actions and rejects invalid ones', () => {
-    const { SpecOpsEngine } = require('../dist/core/specOps.js');
+    const { SpecOpsEngine } = require('../dist/engine/interview/specOps.js');
     const a = SpecOpsEngine.validateAction({ action: 'ask', question: { field: 'objectives', prompt: 'What?', kind: 'text' } });
     assert.strictEqual(a.action, 'ask');
     assert.strictEqual(a.question.field, 'objectives');
@@ -412,7 +422,7 @@ async function main() {
 
 
   await test('applyAction() asks questions, assigns ids, and transitions state', () => {
-    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/engine/interview/specOps.js');
     const engine = new SpecOpsEngine(createIntakeSession('x', { fields: ['objectives'], now: '2026-01-01T00:00:00.000Z' }));
     const ids = engine.applyAction({ action: 'ask', question: { field: 'objectives', prompt: 'What?', kind: 'text' } }, '2026-01-01T00:00:01.000Z');
     assert.deepStrictEqual(ids, ['q-1']);
@@ -428,7 +438,7 @@ async function main() {
   });
 
   await test('buildDiscoveryTurnPrompt() includes problem, gaps, and skills', () => {
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const { buildDiscoveryTurnPrompt } = require('../dist/core/specOpsPrompts.js');
     const session = createIntakeSession('Load sales into a mart', { fields: ['dataFlows', 'objectives'] });
     const skills = [{ id: 'data-flow', name: 'Data Flow', order: 1, description: '', systemPrompt: 'p', questionGuidance: 'map flows', specFields: ['dataFlows'], exampleQuestions: ['Which flow?'] }];
@@ -440,7 +450,7 @@ async function main() {
   });
 
   await test('buildDiscoveryTurnPrompt() renders the previous spec + change request for a revision, plus registered context and attachments', () => {
-    const { createIntakeSession, SpecOpsEngine } = require('../dist/core/specOps.js');
+    const { createIntakeSession, SpecOpsEngine } = require('../dist/engine/interview/specOps.js');
     const { buildDiscoveryTurnPrompt } = require('../dist/core/specOpsPrompts.js');
     const previousSpec = {
       id: 'bps-1', version: 3, status: 'approved', problemStatement: 'Original problem',
@@ -462,7 +472,7 @@ async function main() {
 
   await test('parseComprehensiveSpec() produces v2 fields and provenance', () => {
     const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const session = createIntakeSession('Load sales into a mart', { fields: ['dataFlows'], now: '2026-01-01T00:00:00.000Z' });
     session.questions.push({ id: 'q1', field: 'dataFlows', prompt: 'Which flow?', kind: 'text', askedAt: 't' });
     session.answers.push({ questionId: 'q1', field: 'dataFlows', value: 'orders to facts', answeredAt: 't' });
@@ -493,7 +503,7 @@ async function main() {
 
   await test('parseComprehensiveSpec() revision: carries forward untouched fields, bumps version, preserves provenance', () => {
     const { parseComprehensiveSpec } = require('../dist/core/specSynthesis.js');
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const previous = {
       id: 'bps-1', version: 2, status: 'approved', problemStatement: 'Original problem',
       objectives: ['grow revenue'], successCriteria: ['NPS up'], scope: { in: ['orders'], out: ['returns'] },
@@ -539,7 +549,7 @@ async function main() {
   });
 
   await test('buildSynthesisPrompt() includes the previous spec + change request for a revision', () => {
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const { buildSynthesisPrompt } = require('../dist/core/specOpsPrompts.js');
     const previousSpec = {
       id: 'bps-1', version: 4, status: 'approved', problemStatement: 'Original problem',
@@ -578,7 +588,7 @@ async function main() {
     clearAdapterCache();
     const { DataAgentHubHub } = withMock(mock, () => require('../dist/core/agentHub.js'));
     const hub = new DataAgentHubHub(fakeCm({ activeLlmProvider: 'copilot', activeLlmModel: 'x', languageModelProgrammaticConsent: true, defaultProvider: 'snowflake' }));
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const spec = await withMock(mock, () => hub.synthesizeComprehensiveSpec(createIntakeSession('Load sales', { fields: [] })));
     assert.strictEqual(spec.status, 'draft');
     assert.strictEqual(spec.dataFlows[0].target, 'fact_sales');
@@ -2238,61 +2248,23 @@ async function main() {
     assert.strictEqual(sourceCatalogProvenance.attachmentId, 'att-1');
   });
 
-  await test('AttachmentStore persists an attachment beyond the discovery session and lists it back, tolerating a corrupt sibling file', async () => {
-    function fsDirMock() {
-      const files = new Map(); // dirPath -> Map(filename -> content)
-      const keyOf = (uri) => (uri && uri.fsPath) ? uri.fsPath : String(uri);
-      return {
-        FileType: { File: 1, Directory: 2 },
-        Uri: { joinPath: (...parts) => ({ fsPath: parts.map((p) => (p && p.fsPath) ? p.fsPath : String(p)).join('/') }) },
-        workspace: { fs: {
-          createDirectory: async () => {},
-          writeFile: async (uri, buf) => {
-            const p = keyOf(uri);
-            const dir = p.slice(0, p.lastIndexOf('/'));
-            const name = p.slice(p.lastIndexOf('/') + 1);
-            if (!files.has(dir)) files.set(dir, new Map());
-            files.get(dir).set(name, buf.toString('utf8'));
-          },
-          rename: async (a, b) => {
-            const ap = keyOf(a), bp = keyOf(b);
-            const adir = ap.slice(0, ap.lastIndexOf('/')), aname = ap.slice(ap.lastIndexOf('/') + 1);
-            const bdir = bp.slice(0, bp.lastIndexOf('/')), bname = bp.slice(bp.lastIndexOf('/') + 1);
-            const content = files.get(adir)?.get(aname);
-            files.get(adir)?.delete(aname);
-            if (!files.has(bdir)) files.set(bdir, new Map());
-            files.get(bdir).set(bname, content);
-          },
-          readFile: async (uri) => {
-            const p = keyOf(uri);
-            const dir = p.slice(0, p.lastIndexOf('/'));
-            const name = p.slice(p.lastIndexOf('/') + 1);
-            const content = files.get(dir)?.get(name);
-            if (content === undefined) throw new Error('ENOENT');
-            return Buffer.from(content, 'utf8');
-          },
-          readDirectory: async (uri) => {
-            const dir = keyOf(uri);
-            const entries = files.get(dir);
-            if (!entries) throw new Error('ENOENT');
-            return [...entries.keys()].map((name) => [name, 1]);
-          }
-        } }
-      };
-    }
-    const mock = fsDirMock();
-    try { delete require.cache[require.resolve('../dist/context/AttachmentStore.js')]; } catch { /* not loaded */ }
-    const { AttachmentStore } = withMock(mock, () => require('../dist/context/AttachmentStore.js'));
-    const store = new AttachmentStore({ fsPath: '/ws' });
-
-    await withMock(mock, () => store.save({ id: 'att-1', path: 'a.txt', content: 'hello', attachedAt: 'c', extract: { attachmentId: 'att-1', extractedAt: 'c', rawSummary: 'hi', confidence: 'low' } }));
-    // A corrupt/unreadable sibling file must not prevent listing the good one.
-    await mock.workspace.fs.writeFile({ fsPath: '/ws/attachments/broken.yaml' }, Buffer.from('foo: [1, 2', 'utf8'));
-
-    const listed = await withMock(mock, () => store.list());
-    assert.strictEqual(listed.length, 1);
-    assert.strictEqual(listed[0].id, 'att-1');
-    assert.strictEqual(listed[0].extract.rawSummary, 'hi');
+  await test('v0.45.12: attachments live in the interview (extracts kept, text left in its file) and still reach Pipeline Spec synthesis; attachments saved before v0.45.12 are read too, a corrupt one skipped', () => {
+    const nodeFs = require('node:fs'); const os = require('node:os');
+    const S = require('../dist/engine/interview/state.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-att-'));
+    try {
+      const root = nodePath.join(ws, '.autode', 'problems', 'p1');
+      nodeFs.writeFileSync(nodePath.join(ws, 'brd.md'), '# Orders BRD\nOrders ship within 2 days.');
+      const s = S.startInterview(root, 'Daily revenue from orders', [{ id: 'x', name: 'X', order: 1, description: '', systemPrompt: '', questionGuidance: '', specFields: ['scope'] }]);
+      s.attachments = [{ id: 'att-1', path: 'brd.md', content: '# Orders BRD\nOrders ship within 2 days.', attachedAt: 'c', packDocument: 'brd', extract: { attachmentId: 'att-1', extractedAt: 'c', rawSummary: 'shipping rule', confidence: 'medium' } }];
+      S.writeInterview(root, s);
+      assert.ok(!nodeFs.readFileSync(S.interviewFile(root), 'utf8').includes('ship within'), 'the text stays in its file');
+      assert.strictEqual(S.readInterview(root, ws).attachments[0].content, '# Orders BRD\nOrders ship within 2 days.', 'read back from the file');
+      nodeFs.mkdirSync(nodePath.join(root, 'attachments'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(root, 'attachments', 'att-0.yaml'), 'id: att-0\npath: old.txt\ncontent: x\nattachedAt: b\nextract:\n  attachmentId: att-0\n  extractedAt: b\n  rawSummary: legacy\n  confidence: low\n');
+      nodeFs.writeFileSync(nodePath.join(root, 'attachments', 'broken.yaml'), 'foo: [1, 2');
+      assert.deepStrictEqual(S.attachmentExtracts(root).map((e) => e.rawSummary).sort(), ['legacy', 'shipping rule']);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   // ── Phase 2B-iii: primitive lifecycle management & UI-facing catalog ──
@@ -4192,7 +4164,7 @@ async function main() {
   });
 
   await test('v0.28.0: the discovery prompt now carries each interview skill\'s systemPrompt', () => {
-    const { createIntakeSession } = require('../dist/core/specOps.js');
+    const { createIntakeSession } = require('../dist/engine/interview/specOps.js');
     const { buildDiscoveryTurnPrompt } = require('../dist/core/specOpsPrompts.js');
     const skill = { id: 'data-flow', name: 'Data Flow', order: 1, description: '', systemPrompt: 'Ask one flow at a time.', questionGuidance: 'Target dataFlows.', specFields: ['dataFlows'], exampleQuestions: [] };
     const { user } = buildDiscoveryTurnPrompt(createIntakeSession('move orders to snowflake'), [skill]);
@@ -5962,12 +5934,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -6021,6 +5993,9 @@ async function main() {
       autode_workflow_history: [{ stage: 'mapping' }, { stage: '' }],
       autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
+      autode_interview_state: [{}, { extra: 1 }],
+      autode_interview_record_answer: [{ answers: [{ field: 'scope', value: 'EU only' }] }, { answers: [{ field: 'scope' }] }],
+      autode_workflow_draft: [{ template: 'greenfield' }, { template: '' }],
       autode_reconcile_plan: [{ source: 'shop.orders', target: 'raw.orders', keys: ['order_id'] }, { source: 'shop.orders', target: 'raw.orders', keys: [] }],
       autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
       autode_draft_model: [{}, { x: 1 }],
@@ -7630,7 +7605,7 @@ async function main() {
       assert.ok(nodeFs.existsSync(packed.tarball));
       assert.ok(packed.size < 600 * 1024, `tarball ${Math.round(packed.size / 1024)} KB (budget 600 KB)`);
       assert.ok(packed.unpackedSize < 2 * 1024 * 1024, `unpacked ${Math.round(packed.unpackedSize / 1024)} KB (budget 2 MB)`);
-      for (const want of ['package.json', 'README.md', 'LICENSE', 'dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'media/autode-icon-64.png', 'skills/requirements-discovery.json']) assert.ok(packed.files.includes(want), `missing ${want}`);
+      for (const want of ['package.json', 'README.md', 'LICENSE', 'dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'media/autode-icon-64.png', 'skills/autode-de-interview-requirements/SKILL.md']) assert.ok(packed.files.includes(want), `missing ${want}`);
       for (const rel of packed.files) {
         const text = nodeFs.readFileSync(nodePath.join(dir, rel), 'utf8');
         assert.ok(!/require\(["']vscode["']\)|from ["']vscode["']/.test(text), `${rel} references vscode`);
@@ -8545,7 +8520,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-orchestrator', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-orchestrator', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
       'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project',
       'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
@@ -9438,7 +9413,7 @@ async function main() {
       let r = C.skillCatalog({ resourcesRoot: wfRes(), workspaceRoot: ws, home: ws, env: { PATH: '' } });
       assert.deepStrictEqual(r.errors, []);
       const groups = new Set(r.entries.map((e) => e.group));
-      assert.ok(groups.has('autode') && groups.has('interview') && groups.has('external'));
+      assert.ok(groups.has('autode') && !groups.has('interview') && groups.has('external'), 'v0.45.12: AutoDE interview parts are skills; the interview group holds a team JSON parts');
       const dabs = r.entries.find((e) => e.name === 'databricks-dabs');
       assert.deepStrictEqual([dabs.availability, dabs.licence.redistribution, dabs.installer.command, dabs.installed], ['installable', false, ['databricks', 'aitools', 'install'], []]);
       assert.ok(r.entries.find((e) => e.name === 'autode-de-mapping').roles.includes('sttm-mapper'));
@@ -9827,7 +9802,7 @@ async function main() {
     assert.ok(results.find((r) => r.id === 'autode-snowflake-pipelines').grounding.columnsResolved >= 20, 'the examples read real estate columns');
     // The check catches what it is for.
     const { skills, ctx } = P.platformSkills();
-    const md = (id) => require('node:fs').readFileSync(require('node:path').join(skills.find((k) => k.id === id).dir, 'SKILL.md'), 'utf8');
+    const md = (id) => require('node:fs').readFileSync(require('node:path').join(skills.find((k) => k.id === id).dir, 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
     const errs = (id, text) => P.checkSkill(skills.find((k) => k.id === id), ctx, text).errors.join('\n');
     assert.match(errs('autode-snowflake-ingestion', md('autode-snowflake-ingestion').replace('  channel VARCHAR(20),\n', '  sales_channel VARCHAR(20),\n')), /landing column sales_channel is not in shop\.orders[\s\S]*misses shop\.orders\.channel/);
     assert.match(errs('autode-snowflake-pipelines', md('autode-snowflake-pipelines').replace('FROM shop.orders o\nQUALIFY', 'FROM shop.order_lines o\nQUALIFY')), /table shop\.order_lines doesn't resolve/);
@@ -10003,6 +9978,113 @@ async function main() {
       assert.deepStrictEqual(DM.foreignDialect("SELECT * FROM read_files('/Volumes/a/b/c/')", 'snowflake'), ['read_files() / cloud_files()', 'a Unity Catalog volume path']);
       assert.deepStrictEqual(DM.foreignDialect('MERGE INTO t USING s ON t.k = s.k WHEN MATCHED THEN UPDATE SET a = s.a QUALIFY 1 = 1', 'databricks'), [], 'shared SQL is no marker');
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.45.12: the interview on disk, the business analyst, the planner's briefs ──
+
+  await test('v0.45.12: the interview on disk — questions and answers with who and where, by question id or by field, refused item by item when wrong; parts covered; open until it feeds a specification (mid-synthesis counts as open)', () => {
+    const nodeFs = require('node:fs'); const os = require('node:os');
+    const S = fresh('../dist/engine/interview/state.js');
+    const { interviewSkills } = fresh('../dist/engine/skills/skillRegistry.js');
+    const parts = interviewSkills(fresh('../dist/engine/agents/definitions.js').loadSkillPack(wfRes()).skills);
+    const root = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-iv-'));
+    try {
+      let s = S.startInterview(root, 'Daily revenue from the shop orders', parts, { now: '2026-10-23T10:00:00.000Z' });
+      assert.ok(nodeFs.existsSync(nodePath.join(root, 'interview', 'state.yaml')));
+      assert.strictEqual(S.startInterview(root, 'ignored', parts).id, s.id, 'the open interview is continued, not restarted');
+      let r = S.recordInterview(s, { questions: [{ field: 'sourceCatalog', prompt: 'Which systems hold the orders?' }, { field: 'colour', prompt: 'x' }] }, { by: 'user (via MCP)', channel: 'mcp' });
+      assert.deepStrictEqual([r.asked, r.errors.length], [['q-1'], 1]);
+      assert.match(r.errors[0], /"colour" is not a field this interview covers/);
+      r = S.recordInterview(r.session, { answers: [{ questionId: 'q-1', value: 'The shop OLTP and the CRM' }, { field: 'scope', prompt: 'What is out of scope?', value: 'Returns' }, { questionId: 'q-9', value: 'x' }, { field: 'scope', value: '  ' }] }, { by: 'priya', channel: 'cli' });
+      assert.deepStrictEqual(r.answered, ['q-1', 'q-2']);
+      assert.strictEqual(r.errors.length, 2);
+      S.writeInterview(root, r.session);
+      s = S.readInterview(root);
+      assert.deepStrictEqual(s.answers.map((a) => [a.questionId, a.by, a.channel]), [['q-1', 'priya', 'cli'], ['q-2', 'priya', 'cli']]);
+      const v = S.summarizeInterview(s, parts);
+      assert.deepStrictEqual([v.status, v.open.length, v.parts.find((p) => p.skill === 'source-catalog').status, v.parts.find((p) => p.skill === 'requirements-discovery').status, v.parts.find((p) => p.skill === 'transformations').status], ['open', 0, 'partial', 'partial', 'not-started']);
+      assert.strictEqual(v.answered[1].prompt, 'What is out of scope?');
+      S.writeInterview(root, { ...s, state: 'synthesizing' });
+      assert.ok(S.isOpenInterview(S.readInterview(root)), 'a reload during synthesis resumes it');
+      assert.strictEqual(S.markInterviewFed(root, { id: 'spec-1', version: 2 }, 'panel'), true);
+      s = S.readInterview(root);
+      assert.deepStrictEqual([S.isOpenInterview(s), s.feeds.version, S.summarizeInterview(s, parts).status, S.markInterviewFed(root, { id: 'spec-1', version: 3 }, 'mcp')], [false, 2, 'done', false]);
+      assert.notStrictEqual(S.startInterview(root, 'A revision', parts).id, s.id, 'a closed interview is kept as the record; the next one is new');
+    } finally { nodeFs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.12: an interview started over MCP is continued in a terminal and over MCP again, each answer recorded with its surface; proposing the specification closes it (BPS-7 across surfaces)', async () => {
+    const nodeFs = require('node:fs'); const os = require('node:os');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-ivx-'));
+    const client = await mcpSession(ws);
+    try {
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const started = await call('autode_start_problem', { problemStatement: 'Daily revenue from the shop orders, by channel' });
+      let st = await call('autode_interview_state');
+      assert.deepStrictEqual([st.status, st.parts.length, st.open.length], ['open', 6, 0]);
+      const rec = await call('autode_interview_record_answer', { questions: [{ field: 'sourceCatalog', prompt: 'Which systems hold the orders?' }, { field: 'scope', prompt: 'Which channels are in scope?' }], answers: [{ field: 'objectives', prompt: 'What must the report show?', value: 'Revenue by day and channel' }] });
+      assert.deepStrictEqual([rec.asked.length, rec.answered.length, rec.open.length], [2, 1, 2]);
+      // A terminal continues it.
+      let r = await cli(['interview', 'show', '--workspace', ws]);
+      assert.ok(r.code === 0 && /2 open question/.test(r.out) && /Which systems hold the orders\?/.test(r.out) && /Revenue by day and channel — user \(via MCP\), mcp/.test(r.out), r.out);
+      const qid = st = (await call('autode_interview_state')).open[0].id;
+      r = await cli(['interview', 'answer', qid, 'Shop OLTP and the CRM', '--workspace', ws]);
+      assert.ok(r.code === 0 && /1 question\(s\) still open/.test(r.out), r.out + r.err);
+      assert.strictEqual((await cli(['interview', 'answer', 'q-99', 'x', '--workspace', ws])).code, 5);
+      st = await call('autode_interview_state');
+      assert.deepStrictEqual(st.answered.map((a) => a.channel), ['mcp', 'cli']);
+      // Proposing the specification closes the interview: no surface resumes it.
+      const spec = fresh('../dist/engine/context/Yaml.js').parseYaml(nodeFs.readFileSync(nodePath.join(ws, '.autode', 'problems', started.id, 'spec', 'business-problem.yaml'), 'utf8'));
+      const prop = await call('autode_propose_spec_change', { spec: { ...spec, objectives: ['Revenue by day and channel'], scope: { in: ['Shop and CRM orders'], out: ['Returns'] } } });
+      assert.ok(prop.decision && prop.decision.validation.ok, JSON.stringify(prop));
+      st = await call('autode_interview_state');
+      assert.strictEqual(st.status, 'done');
+      const late = await client.callTool({ name: 'autode_interview_record_answer', arguments: { answers: [{ field: 'scope', value: 'x' }] } });
+      assert.ok(late.isError && /already fed specification/.test(JSON.stringify(late.content)));
+    } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.12: the business analyst does the specify stage with the interview skills; the planner does the plan stage and alone may propose the workflow; the draft is read without proposing anything', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-plan-'));
+    try {
+      const { id, W } = await tinyFlow(ws, cli);
+      const A = fresh('../dist/engine/agents/assignment.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id, home: ws };
+      const tools = [{ name: 'autode_propose_workflow', annotations: {} }, { name: 'autode_workflow_draft', annotations: { readOnlyHint: true } }, { name: 'autode_interview_state', annotations: { readOnlyHint: true } }, { name: 'autode_interview_record_answer', annotations: {} }, { name: 'autode_propose_spec_change', annotations: {} }];
+      const plan = A.assignmentFor(scope, 'plan', tools).assignment;
+      assert.deepStrictEqual([plan.role, plan.skills.map((k) => k.id), plan.engineTools], ['planner', ['autode-core-workflow-planning'], ['autode_propose_workflow', 'autode_workflow_draft']]);
+      const spec = A.assignmentFor(scope, 'specify', tools).assignment;
+      assert.deepStrictEqual([spec.role, spec.skills.length, spec.engineTools], ['business-analyst', 7, ['autode_interview_record_answer', 'autode_interview_state', 'autode_propose_spec_change']]);
+      assert.ok(!A.toolsForTier(tools, 'propose', ['autode_propose_workflow'], 'build').includes('autode_propose_workflow'), 'no other stage re-plans');
+      const Sv = fresh('../dist/engine/workflows/service.js');
+      const before = nodeFs.readFileSync(nodePath.join(ws, '.autode', 'problems', id, 'workflow.yaml'), 'utf8');
+      const d = Sv.computeDraft({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id }, 'tiny');
+      assert.ok(d.workflow.stages.some((s) => s.id === 'mapping') && d.template.id === 'tiny');
+      assert.strictEqual(nodeFs.readFileSync(nodePath.join(ws, '.autode', 'problems', id, 'workflow.yaml'), 'utf8'), before, 'nothing written');
+      assert.ok(W.length);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.12: the plan check refuses briefs that carry method (tool or skill names) or are too long, and skills that don\'t exist or don\'t fit the stage; the planning skill\'s example brief passes', () => {
+    const I = fresh('../dist/engine/workflows/instance.js');
+    const T = fresh('../dist/engine/workflows/templates.js');
+    const { templates } = T.loadTemplates(wfRes(), undefined);
+    const template = templates.find((t) => t.id === 'modernization');
+    const w = I.draftWorkflow(template, 'p1', {}, []);
+    const mapping = w.stages.find((s) => s.kind === 'mapping');
+    const skills = fresh('../dist/engine/agents/definitions.js').loadSkillPack(wfRes()).skills.map((k) => ({ id: k.id, stageKinds: k.meta.stageKinds }));
+    const md = require('node:fs').readFileSync(nodePath.join(wfRes(), 'skills', 'autode-core-workflow-planning', 'SKILL.md'), 'utf8');
+    const example = /^> (.+)$/m.exec(md)[1];
+    mapping.agent = { role: 'sttm-mapper', brief: example, skills: ['autode-de-mapping'] };
+    assert.deepStrictEqual(I.checkWorkflow(w, template, { skills }).errors, []);
+    mapping.agent = { role: 'sttm-mapper', brief: 'Use autode_match_columns and the autode-de-mapping skill on shop.orders.', skills: ['autode-de-modelling', 'autode-de-ghost'] };
+    const errs = I.checkWorkflow(w, template, { skills }).errors.join('\n');
+    assert.match(errs, /the brief names autode_match_columns, autode-de-mapping\. A brief carries context only/);
+    assert.match(errs, /skill autode-de-modelling is for modelling stages, not mapping/);
+    assert.match(errs, /skill autode-de-ghost doesn't exist/);
+    mapping.agent = { role: 'sttm-mapper', brief: 'x'.repeat(I.MAX_BRIEF + 1) };
+    assert.match(I.checkWorkflow(w, template).errors.join('\n'), /keep it under 1500/);
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {
