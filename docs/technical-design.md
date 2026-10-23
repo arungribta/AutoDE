@@ -1181,6 +1181,16 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - `src/mcp/runnerHost.ts`: `createRunnerHost()` uses a write-enabled `PlatformSession` for SQL (explain, read, approved change) and `spawn()` with no shell for commands.
   - VS Code: `src/core/runbookView.ts` (`RunbookPanel`, `autoDataEngineeringHub.openRunbook`) over `src/core/runbookViewModel.ts`, with `media/runbook.html`.
   - CLI: `cmdRunbook()`. MCP: `autode_propose_runbook` (`decisions.ts`) and `autode_runbook_status` (`agentTools.ts`).
+- **The context curator** (v0.45.13; SKL-6, BPS-1):
+  - `BusinessPackManager` (`src/engine/context/businessPackManager.ts`) splits reading into deterministic halves around the model call:
+    - `readingFor(id)` returns a `ReadingRequest`: `facts` (the sha, the section ids and headings from `splitSections()`, and `buildDocumentExtractionPrompt()`), `profile` (`buildProfileProposalPrompt()` for a structured document no confirmed profile reads), or `none` with the reason (sample, confirmed profile, a proposed profile waiting, unreadable);
+    - `recordFacts(id, raw, sha?)` refuses structured documents and a changed sha, then runs `parseDocumentExtraction()` (sections, kinds, validation, subject resolution) and `recordExtraction()` (duplicates skipped);
+    - `recordProfile(id, raw)` runs `parseProfileProposal()` (always `proposed`), refuses overwriting a confirmed profile, and writes it to `.autode/knowledge/profiles/`.
+
+    `applyDocument()` calls them with the panel's `complete`, so both paths share the checks.
+  - **MCP** (`src/mcp/workspaceTools.ts`): `autode_pack_reading` (read) and `autode_pack_record_reading` (records; `facts` with `sha`, or `profile`). The `needs_llm` and `needs_profile` reasons point to them.
+  - **Role and skills:** `agents/context-curator.md`; `skills/autode-core-fact-extraction` (the chat-extraction kinds and values, as the `autode_extract_assertions` prompt), `autode-core-document-reading` and `autode-core-vocabulary` (`autode_mine_vocabulary`, then `autode_propose_vocabulary`). They have no stage kinds: AutoDE's own, like the orchestrator.
+  - VS Code is unchanged: background extraction after each chat turn, and pack reading with the panel's LLM.
 - **The interview on disk, the business analyst, the planner** (v0.45.12; BPS-7, BPS-1, SKL-6, ORC-9):
   - **Interview engine:** `SpecOpsEngine` and `createIntakeSession()` moved from `src/core/specOps.ts` to `src/engine/interview/specOps.ts`, unchanged, so every surface uses them.
   - **State** (`src/engine/interview/state.ts`):

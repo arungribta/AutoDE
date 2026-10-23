@@ -925,6 +925,24 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Expect: it asks about the same parts in the same order (requirements, sources, data flow, transformations, quality, constraints), records each question before asking it, and `autode interview show` lists them.
 
 
+## Part 38 — v0.45.13 The context curator
+
+- [ ] **38.1 A BRD read in an agent host.**
+  Do: in Claude Code with the plugin, add the sample's `documents/pack/brd.md` to the pack and ask the context curator to read it.
+  Expect: it calls `autode_pack_reading`, then `autode_pack_record_reading`; the facts appear in the Context Inbox as proposed, each citing its section; dropped ones are reported with the reason.
+- [ ] **38.2 Same document, same checks in the panel.**
+  Do: apply the same BRD from the panel's Pack view.
+  Expect: no duplicate facts for what was already proposed; new ones cite their sections.
+- [ ] **38.3 A new contract format.**
+  Do: in a host, add a house-format YAML contract no profile reads and ask the curator to read it.
+  Expect: a profile is proposed under `.autode/knowledge/profiles/` with status proposed; after you set it to confirmed, `autode_pack_apply` reads the contract with no model.
+- [ ] **38.4 Facts from conversation in a host.**
+  Do: tell Claude Code "orders are unique on order_id".
+  Expect: it proposes a key fact for shop.orders and says it waits for your confirmation.
+- [ ] **38.5 Vocabulary.**
+  Do: ask the curator to propose vocabulary for the CRM source.
+  Expect: entries with evidence (column names, comments, the dictionary); nothing merely plausible; a low-stakes decision you can approve.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1151,5 +1169,10 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 37.9 |  |  |
 | 37.10 |  |  |
 | 37.11 |  |  |
+| 38.1 |  |  |
+| 38.2 |  |  |
+| 38.3 |  |  |
+| 38.4 |  |  |
+| 38.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

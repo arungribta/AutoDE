@@ -25,6 +25,12 @@ export type ApplyOutcome =
   | { status: 'registered' }
   | { status: 'error'; reason: string };
 
+/** What reading a document needs from a model (v0.45.13). */
+export type ReadingRequest =
+  | { kind: 'facts'; document: string; sha: string; sections: Array<{ id: string; heading: string }>; prompt: { system: string; user: string } }
+  | { kind: 'profile'; document: string; prompt: { system: string; user: string } }
+  | { kind: 'none'; document: string; reason: string };
+
 const STRUCTURED = STRUCTURED_DOCUMENT;
 
 /**
@@ -106,15 +112,10 @@ export class BusinessPackManager {
       if (!profile) {
         const proposedAlready = this.profiles.find((p) => p.status === 'proposed' && profileMatches(parsed, p));
         if (proposedAlready) return { status: 'needs_profile', reason: `profile "${proposedAlready.id}" is waiting for review: set its status to confirmed once it reads the document correctly` };
-        if (!this.complete) return { status: 'needs_profile', reason: 'no confirmed profile fits this document, and proposing one needs the LLM' };
+        if (!this.complete) return { status: 'needs_profile', reason: 'no confirmed profile fits this document, and proposing one needs a model (in an agent host: autode_pack_reading, then autode_pack_record_reading)' };
         const { system, user } = buildProfileProposalPrompt(parsed, doc.path);
-        const { profile: proposal, errors } = parseProfileProposal(await this.complete(system, user, `Propose a reading profile for ${doc.path}`));
-        if (!proposal) return { status: 'needs_profile', reason: `the proposed profile was not valid: ${errors.join('; ')}` };
-        fs.mkdirSync(this.profilesDir, { recursive: true });
-        const file = path.join(this.profilesDir, `${proposal.id}.yaml`);
-        await writeFileAtomic(nodeFileIo, file, serializeProfile(proposal));
-        this.profiles.push(proposal);
-        return { status: 'profile_proposed', profilePath: file };
+        const r = await this.recordProfile(id, await this.complete(system, user, `Propose a reading profile for ${doc.path}`));
+        return r.status === 'error' ? { status: 'needs_profile', reason: r.reason } : r;
       }
       const model = applyProfile(parsed, profile);
       const reconcile = await reconcileContract(ledger, doc, model, sha);
@@ -123,16 +124,70 @@ export class BusinessPackManager {
       await this.cfm.persistCompiledGraph();
       return { status: 'applied', reconcile, warnings: model.warnings, profileId: profile.id };
     }
-    if (!this.complete) return { status: 'needs_llm', reason: 'extracting facts from free text needs the LLM' };
+    if (!this.complete) return { status: 'needs_llm', reason: 'extracting facts from free text needs a model (in an agent host: autode_pack_reading, then autode_pack_record_reading)' };
+    const reading = this.readingFor(id);
+    if (reading.kind !== 'facts') return { status: 'error', reason: reading.kind === 'none' ? reading.reason : 'unexpected reading' };
+    return this.recordFacts(id, await this.complete(reading.prompt.system, reading.prompt.user, `Extract facts from ${doc.path}`), reading.sha);
+  }
+
+  /**
+   * What reading a document needs from a model (v0.45.13): the facts prompt with its sections for free
+   * text, a profile proposal for a structured document no confirmed profile reads, or nothing. The panel
+   * sends it to its LLM; an agent host's model answers it, and either way the answer comes back through
+   * `recordFacts` or `recordProfile`, checked the same way.
+   */
+  public readingFor(id: string): ReadingRequest {
+    const doc = this.pack.documents.find((d) => d.id === id);
+    if (!doc) return { kind: 'none', document: id, reason: `no document "${id}" in the pack` };
+    if (doc.role === 'sample') return { kind: 'none', document: id, reason: 'a sample is not read: probes use it' };
+    let content: string;
+    try { content = this.read(doc); } catch (err) { return { kind: 'none', document: id, reason: `cannot read ${doc.path}: ${err instanceof Error ? err.message : String(err)}` }; }
+    if (STRUCTURED.test(doc.path)) {
+      let parsed: unknown;
+      try { parsed = parseStructured(content); } catch (err) { return { kind: 'none', document: id, reason: `${doc.path} is not valid YAML/JSON: ${err instanceof Error ? err.message : String(err)}` }; }
+      if (this.profileFor(doc, parsed)) return { kind: 'none', document: id, reason: 'a confirmed profile reads it: apply it (autode_pack_apply), no model needed' };
+      const waiting = this.profiles.find((p) => p.status === 'proposed' && profileMatches(parsed, p));
+      if (waiting) return { kind: 'none', document: id, reason: `profile "${waiting.id}" is waiting for a person's review` };
+      return { kind: 'profile', document: id, prompt: buildProfileProposalPrompt(parsed, doc.path) };
+    }
     const sections = splitSections(content);
-    const { system, user } = buildDocumentExtractionPrompt(doc, sections);
-    const snap = this.cfm.getPackSources().graph;
-    const outcome = parseDocumentExtraction(await this.complete(system, user, `Extract facts from ${doc.path}`), doc, sections, sha, createSubjectResolver(snap));
-    const proposed = await recordExtraction(ledger, outcome);
-    this.pack = upsertDocument(this.pack, { ...doc, sha });
+    return { kind: 'facts', document: id, sha: contentSha(content), sections: sections.map((s) => ({ id: s.path, heading: s.heading })), prompt: buildDocumentExtractionPrompt(doc, sections) };
+  }
+
+  /**
+   * Records facts a model read from a free-text document: each must name a section the document has, be
+   * of an extractable kind and valid; subjects are resolved against the estate. Recorded as proposed facts
+   * citing their section, for a person to confirm; one already proposed or live is skipped. Refused when
+   * the document changed since it was read (`sha`).
+   */
+  public async recordFacts(id: string, raw: unknown, sha?: string): Promise<ApplyOutcome> {
+    const doc = this.pack.documents.find((d) => d.id === id);
+    if (!doc) return { status: 'error', reason: `no document "${id}" in the pack` };
+    if (STRUCTURED.test(doc.path) || doc.role === 'sample') return { status: 'error', reason: `${doc.path} is not free text: its facts come from its profile` };
+    let content: string;
+    try { content = this.read(doc); } catch (err) { return { status: 'error', reason: `cannot read ${doc.path}: ${err instanceof Error ? err.message : String(err)}` }; }
+    const now = contentSha(content);
+    if (sha && sha !== now) return { status: 'error', reason: `${doc.path} changed since it was read: read it again` };
+    const outcome = parseDocumentExtraction(raw, doc, splitSections(content), now, createSubjectResolver(this.cfm.getPackSources().graph));
+    const proposed = await recordExtraction(this.cfm.getLedger(), outcome);
+    this.pack = upsertDocument(this.pack, { ...doc, sha: now });
     await this.savePack();
     await this.cfm.persistCompiledGraph();
     return { status: 'extracted', proposed, dropped: outcome.dropped };
+  }
+
+  /** Records a proposed interpretation profile (a person confirms it by setting `status: confirmed`). */
+  public async recordProfile(id: string, raw: unknown): Promise<ApplyOutcome> {
+    const doc = this.pack.documents.find((d) => d.id === id);
+    if (!doc) return { status: 'error', reason: `no document "${id}" in the pack` };
+    const { profile: proposal, errors } = parseProfileProposal(raw);
+    if (!proposal) return { status: 'error', reason: `the proposed profile was not valid: ${errors.join('; ')}` };
+    if (this.profiles.some((p) => p.id === proposal.id && p.status === 'confirmed')) return { status: 'error', reason: `profile "${proposal.id}" is already confirmed: propose it under another id` };
+    fs.mkdirSync(this.profilesDir, { recursive: true });
+    const file = path.join(this.profilesDir, `${proposal.id}.yaml`);
+    await writeFileAtomic(nodeFileIo, file, serializeProfile(proposal));
+    this.profiles = [...this.profiles.filter((p) => p.id !== proposal.id), proposal];
+    return { status: 'profile_proposed', profilePath: file };
   }
 
   /** Probes over the pack's sample documents, keyed by the table each is a sample of. */

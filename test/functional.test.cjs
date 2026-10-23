@@ -5934,12 +5934,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5994,6 +5994,8 @@ async function main() {
       autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
       autode_interview_state: [{}, { extra: 1 }],
+      autode_pack_reading: [{ id: 'brd' }, {}],
+      autode_pack_record_reading: [{ id: 'brd', facts: [] }, { facts: [] }],
       autode_interview_record_answer: [{ answers: [{ field: 'scope', value: 'EU only' }] }, { answers: [{ field: 'scope' }] }],
       autode_workflow_draft: [{ template: 'greenfield' }, { template: '' }],
       autode_reconcile_plan: [{ source: 'shop.orders', target: 'raw.orders', keys: ['order_id'] }, { source: 'shop.orders', target: 'raw.orders', keys: [] }],
@@ -8520,7 +8522,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-orchestrator', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-orchestrator', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
       'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project',
       'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
@@ -10085,6 +10087,81 @@ async function main() {
     assert.match(errs, /skill autode-de-ghost doesn't exist/);
     mapping.agent = { role: 'sttm-mapper', brief: 'x'.repeat(I.MAX_BRIEF + 1) };
     assert.match(I.checkWorkflow(w, template).errors.join('\n'), /keep it under 1500/);
+  });
+
+  // ── v0.45.13: the context curator ──
+
+  await test('v0.45.13: a host\'s model reads pack documents through the same steps as the panel\'s LLM — facts cite real sections and are checked (dropped with reasons, duplicates skipped, a changed document refused); a new format gets a profile proposed for review, then applied', async () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const env = await k2.cfm();
+    try {
+      fs.mkdirSync(p.join(env.dir, 'docs'), { recursive: true });
+      fs.writeFileSync(p.join(env.dir, 'docs', 'contract.yaml'), c4a.read('documents/pack/customer-contract.v1.yaml'));
+      fs.writeFileSync(p.join(env.dir, 'docs', 'brd.md'), c4a.read('documents/pack/brd.md'));
+      const { BusinessPackManager } = require('../dist/context/BusinessPackManager.js');
+      const pm = new BusinessPackManager(p.join(env.dir, '.autode', 'problems', 'x', 'pack'), env.dir, () => env.cfm, () => {});
+      await pm.load();
+      await pm.addDocument({ path: 'docs/contract.yaml', role: 'contract', authority: 'signed', version: '1' });
+      await pm.addDocument({ path: 'docs/brd.md', role: 'brd', authority: 'draft', version: '1' });
+      // A structured document in a new format: a profile, proposed, reviewed, then applied deterministically.
+      let r = pm.readingFor('contract');
+      assert.strictEqual(r.kind, 'profile');
+      assert.match(r.prompt.system, /never extract the data itself/);
+      const prof = await pm.recordProfile('contract', { ...c4a.profile(), id: 'house-contract', status: 'confirmed' });
+      assert.ok(prof.status === 'profile_proposed' && /status: proposed/.test(fs.readFileSync(prof.profilePath, 'utf8')), 'a model cannot confirm its own profile');
+      assert.match(pm.readingFor('contract').reason, /waiting for a person's review/);
+      fs.writeFileSync(prof.profilePath, fs.readFileSync(prof.profilePath, 'utf8').replace('status: proposed', 'status: confirmed'));
+      await pm.load();
+      assert.match(pm.readingFor('contract').reason, /no model needed/);
+      assert.strictEqual((await pm.applyDocument('contract')).status, 'applied');
+      assert.strictEqual((await pm.recordProfile('contract', { ...c4a.profile(), id: 'house-contract' })).status, 'error', 'a confirmed profile is not overwritten');
+      // Free text: facts that cite their section.
+      r = pm.readingFor('brd');
+      assert.ok(r.kind === 'facts' && r.sections.length > 1 && /^[0-9a-f]{64}$/.test(r.sha), JSON.stringify(r).slice(0, 300));
+      const section = r.sections[1].id;
+      const facts = [
+        { section, kind: 'business_term', subject: ['customer'], predicate: 'defined_as', value: { term: 'customer', definition: 'A person with at least one order' }, statement: 'A customer is a person with at least one order.' },
+        { section: 'no-such-section', kind: 'decision', subject: ['x'], predicate: 'is', value: { text: 'x' }, statement: 'x' },
+        { section, kind: 'opinion', subject: ['x'], predicate: 'is', value: {}, statement: 'x' }
+      ];
+      assert.strictEqual((await pm.recordFacts('brd', { facts }, 'stale')).status, 'error', 'a document changed since it was read is read again');
+      const out = await pm.recordFacts('brd', { facts }, r.sha);
+      assert.deepStrictEqual([out.status, out.proposed, out.dropped.length], ['extracted', 1, 2]);
+      assert.ok(out.dropped.some((d) => /unknown section/.test(d)) && out.dropped.some((d) => /not extractable/.test(d)));
+      const fact = env.cfm.getLedger().assertions().find((a) => a.kind === 'business_term' && a.status === 'proposed' && a.subject.join() === 'customer');
+      assert.ok(fact && fact.evidence[0].ref.includes(section), 'cites its section');
+      assert.strictEqual((await pm.recordFacts('brd', { facts }, r.sha)).proposed, 0, 'duplicates skipped');
+      assert.strictEqual((await pm.recordFacts('contract', { facts })).status, 'error', 'structured documents are read by their profile');
+      // The panel's LLM goes through the same steps: it is asked the same prompt.
+      const asked = [];
+      const panel = new BusinessPackManager(p.join(env.dir, '.autode', 'problems', 'x', 'pack'), env.dir, () => env.cfm, () => {}, async (system, user) => { asked.push(user); return { facts: [facts[0]] }; });
+      await panel.load();
+      const viaPanel = await panel.applyDocument('brd');
+      assert.deepStrictEqual([viaPanel.status, viaPanel.proposed, asked[0] === r.prompt.user], ['extracted', 0, true]);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.45.13: the context curator — role template with the fact-extraction, document-reading and vocabulary skills; the reading tools over MCP; the skills are AutoDE\'s own (no stage), listed in the catalog and the plugin', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs');
+    const D = fresh('../dist/engine/agents/definitions.js');
+    const curator = D.loadRoles(wfRes()).roles.find((r) => r.name === 'context-curator');
+    assert.deepStrictEqual(curator.skills, ['autode-core-fact-extraction', 'autode-core-document-reading', 'autode-core-vocabulary']);
+    const pack = D.loadSkillPack(wfRes()).skills;
+    for (const id of curator.skills) assert.deepStrictEqual(pack.find((k) => k.id === id).meta.stageKinds, [], id);
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cur-'));
+    const client = await mcpSession(ws);
+    try {
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      await call('autode_start_problem', { problemStatement: 'Daily revenue from the shop orders, by channel' });
+      nodeFs.writeFileSync(nodePath.join(ws, 'brd.md'), c4a.read('documents/pack/brd.md'));
+      const doc = (await call('autode_pack_add', { path: 'brd.md', role: 'brd', version: '1' })).document;
+      const reading = await call('autode_pack_reading', { id: doc.id });
+      assert.ok(reading.kind === 'facts' && reading.prompt.system && /autode_pack_record_reading/.test(reading.next));
+      const rec = await call('autode_pack_record_reading', { id: doc.id, sha: reading.sha, facts: [{ section: reading.sections[0].id, kind: 'assumption', subject: ['orders'], predicate: 'assumes', value: { text: 'Orders arrive daily' }, statement: 'Orders arrive daily.' }] });
+      assert.deepStrictEqual([rec.status, rec.proposed], ['extracted', 1]);
+      const both = await client.callTool({ name: 'autode_pack_record_reading', arguments: { id: doc.id } });
+      assert.ok(both.isError && /facts \(free text\) or profile/.test(JSON.stringify(both.content)));
+    } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

@@ -6,6 +6,30 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.13
+
+- **PA3b step 6: the context curator** (mcp-engine §9.2 PA3 §4). The last of PA3b's role templates.
+- **A host's model reads pack documents the way the panel's LLM does.** Before, `autode_pack_apply` in an agent host stopped at free text ("needs the LLM") and at structured documents in a new format ("needs a profile"), with no way for the host's model to do that work. Now:
+  - `autode_pack_reading` returns what reading a document needs: for free text, its sections (by id), the extraction prompt and the document's sha; for a new structured format, the profile prompt; otherwise why nothing is needed.
+  - `autode_pack_record_reading` records the answer with the panel's checks:
+    - every fact must cite a section the document has, be of an extractable kind and be valid;
+    - subjects are resolved against the estate;
+    - facts are recorded as proposed, citing their section, and duplicates are skipped;
+    - what is dropped is reported with the reason;
+    - a document changed since it was read is refused;
+    - a proposed profile is always *proposed*, and a confirmed one is never overwritten.
+  - The pack manager's `applyDocument()` now runs the panel's LLM through the same three steps (`readingFor`, `recordFacts`, `recordProfile`), so the two paths can't drift.
+- **The context curator** (`agents/context-curator.md`) and three skills of AutoDE's own:
+  - `autode-core-fact-extraction`: facts the user states in conversation, proposed with the message as evidence. It is the panel's after-every-turn extraction, for hosts where the agent must follow it.
+  - `autode-core-document-reading`: the pack's documents, through the two new tools.
+  - `autode-core-vocabulary`: abbreviations and synonyms from names, comments, documents and the user, with evidence, then `autode_propose_vocabulary`.
+
+  They have no stage kinds: like the orchestrator, they serve the whole problem.
+- **Deliberate deviations:**
+  - In VS Code nothing changes: extraction after each chat turn and pack reading stay with the panel's LLM. The curator role is for agent hosts.
+  - In hosts, extraction still depends on the agent following the skill, as the spec says; there is no hook for it.
+- **Measured:** 366 tests (2 new: the reading steps with their checks, shared by the panel's LLM and a host's model; the curator, its skills and the reading tools over MCP). 3 tests were updated for the new tools and skills. Lint 0 errors. Eval unchanged.
+
 ## 0.45.12
 
 - **PA3b step 5: the interview survives, the business analyst, the planner's briefs** (mcp-engine §9.2 PA3 §4 and §7).

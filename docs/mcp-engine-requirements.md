@@ -513,7 +513,7 @@ Today's TypeScript agents (`src/agents/**`) and orchestration prompts in `src/co
 | `data-modeler` | `DataModelerAgent` | `modelling` (shipped v0.45.3) |
 | `pipeline-engineer` | `TransformationScaffolderAgent`, `IngestionPipelineAgent`, Pipeline Spec synthesis | `pipeline-build` (shipped v0.45.4; replaces `pipeline-scaffolding`); later `code-conversion-import`, `deployment` |
 | `documenter` | `DocumentationAgent` | `documentation` (shipped v0.45.0); `bi-migration` later |
-| `context-curator` | chat fact extraction, pack free-text reading, profile and vocabulary proposals | `fact-extraction`, `document-reading`, `vocabulary` |
+| `context-curator` | chat fact extraction, pack free-text reading, profile and vocabulary proposals | `autode-core-fact-extraction`, `autode-core-document-reading`, `autode-core-vocabulary` (shipped v0.45.13; documents through `autode_pack_reading` and `autode_pack_record_reading`) |
 
 ##### 5. The runtime: stages, gates, staleness
 

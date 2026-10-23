@@ -67,7 +67,7 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
     },
     {
       name: 'autode_pack_apply',
-      description: "Read pack documents into AutoDE's knowledge: structured ones (YAML/JSON) through their confirmed interpretation profile, deterministically. A document with no confirmed profile, or free text, is reported back: free text is read with your model through the autode_extract_assertions prompt and proposed with autode_propose_assertion.",
+      description: "Read pack documents into AutoDE's knowledge: structured ones (YAML/JSON) through their confirmed interpretation profile, deterministically. A document with no confirmed profile, or free text, is reported back: free text, and structured documents with no confirmed profile, are read with your model through autode_pack_reading and autode_pack_record_reading.",
       inputSchema: { type: 'object', additionalProperties: false, properties: { ids: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Document ids (default: all).' } } },
       annotations: recordsOnly('Apply pack documents', true),
       handler: async (args, ws) => {
@@ -78,6 +78,42 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
           const results: Array<Record<string, unknown>> = [];
           for (const d of docs) results.push({ id: d.id, path: d.path, ...(await pm.applyDocument(d.id)) as unknown as Record<string, unknown> });
           return { results };
+        } finally { cfm.dispose(); }
+      }
+    },
+    {
+      name: 'autode_pack_reading',
+      description: "What reading a pack document needs from your model (the same prompts the AutoDE panel sends its LLM): for free text, its sections (cite them by id) and the extraction prompt; for a structured document no confirmed profile reads, the prompt to propose a reading profile; otherwise why nothing is needed. Answer it with your model and record the answer with autode_pack_record_reading.",
+      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1, description: 'The pack document id (autode_pack_list).' } } },
+      annotations: { title: 'What reading a document needs', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (args, ws) => {
+        const { pm, cfm } = await pack(ws);
+        try {
+          const r = pm.readingFor(String(args.id));
+          const next = r.kind === 'facts' ? 'Read the document with this prompt and record the JSON { "facts": [...] } with autode_pack_record_reading (facts, sha).'
+            : r.kind === 'profile' ? 'Propose a profile with this prompt and record the JSON with autode_pack_record_reading (profile). A person confirms it; then autode_pack_apply reads the document.'
+              : r.reason;
+          return { ...r, next } as unknown as Record<string, unknown>;
+        } finally { cfm.dispose(); }
+      }
+    },
+    {
+      name: 'autode_pack_record_reading',
+      description: "Record what your model read from a pack document (as autode_pack_reading asked): facts from free text (each citing a section id the document has; recorded as proposed facts for a person to confirm, duplicates skipped, invalid ones reported as dropped), or a proposed reading profile for a structured document (written for review: a person sets status: confirmed). Pass the sha you were given, so a document changed since is read again.",
+      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: {
+        id: { type: 'string', minLength: 1 },
+        facts: { type: 'array', items: { type: 'object' }, description: 'The facts, as the extraction prompt specifies.' },
+        sha: { type: 'string', description: 'The document version autode_pack_reading returned.' },
+        profile: { type: 'object', description: 'The proposed profile, as the profile prompt specifies.' }
+      } },
+      annotations: recordsOnly('Record a document reading', true),
+      handler: async (args, ws) => {
+        if (!!args.facts === !!args.profile) throw new EngineToolError('VALIDATION_FAILED', 'Give facts (free text) or profile (structured), not both.');
+        const { pm, cfm } = await pack(ws);
+        try {
+          const r = args.facts ? await pm.recordFacts(String(args.id), { facts: args.facts }, args.sha as string | undefined) : await pm.recordProfile(String(args.id), args.profile);
+          if (r.status === 'error') throw new EngineToolError('VALIDATION_FAILED', r.reason);
+          return { ...r, next: r.status === 'extracted' ? 'A person confirms the facts in the AutoDE Context Inbox (or autode facts). Tell the user.' : 'A person reviews the profile and sets status: confirmed; then autode_pack_apply reads the document.' } as unknown as Record<string, unknown>;
         } finally { cfm.dispose(); }
       }
     },
