@@ -9104,6 +9104,61 @@ async function main() {
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
+  await test('v0.45.10: the owner\'s sample — a re-opened document stage stays open until a new draft (its old approval is the version being redone); a workflow that maps sources can\'t approve a source context with none; per-source tasks follow the estate; the target is needed only when the workflow has a target stage', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-reopen-'));
+    try {
+      const { id, prob, W } = await sourceFlow(ws, cli);
+      const R = fresh('../dist/engine/workflows/runtime.js');
+      const DA = fresh('../dist/engine/workflows/documentApproval.js');
+      const S = fresh('../dist/engine/agents/sourceContextDraft.js');
+      const D = fresh('../dist/engine/documents/problemDocuments.js');
+      const ctx = { workspaceRoot: ws, problemRoot: prob, problemId: id };
+      const st = (x) => R.syncWorkflow(ctx).stages.find((s) => s.id === x);
+      const spec = D.parseBusinessProblemSpec(D.readProblemDocument(prob, 'spec'));
+      const scFile = nodePath.join(prob, 'context', 'source-context.yaml');
+      nodeFs.mkdirSync(nodePath.dirname(scFile), { recursive: true });
+      // The sample: a source context approved as not applicable, in a workflow with a mapping stage.
+      nodeFs.writeFileSync(scFile, `specId: ${spec.id}\nspecVersion: ${spec.version}\nstatus: not_applicable\nsources: []\nanswers: {}\napprovedAt: 2026-10-15T16:21:58.490Z\nversion: 1\n`);
+      assert.strictEqual(R.workflowNeedsSources(fresh('../dist/engine/workflows/instance.js').readWorkflow(prob)), true);
+      assert.notStrictEqual(st('sources').status, 'done', 'not applicable is not an approval when the workflow maps sources');
+      assert.ok(DA.documentApprovalProblems(prob, 'source-assessment').some((p) => /needs at least one source/.test(p)));
+      // Per-source tasks follow the estate until the stage is done (planned with a knowledge-file "system", as in the sample).
+      const I = fresh('../dist/engine/workflows/instance.js');
+      const planned = I.readWorkflow(prob);
+      Object.assign(planned.stages.find((s) => s.id === 'sources'), { repeat: 'per-source-system', systems: ['business-context'], tasks: [{ id: 'sources:business-context', title: 'Source assessment: business-context' }] });
+      I.writeWorkflow(prob, planned);
+      assert.strictEqual((await cli(['estate', 'ingest', nodePath.join(ws, 'shop.sql'), '--system', 'shop', ...W])).code, 0);
+      R.syncWorkflow(ctx);
+      const wf = () => fresh('../dist/engine/workflows/instance.js').readWorkflow(prob).stages.find((s) => s.id === 'sources');
+      assert.deepStrictEqual([wf().systems, wf().tasks.map((t) => t.id)], [['shop'], ['sources:shop']]);
+      // A real source context, approved; then re-opened: it stays open (it used to be approved again within the same second).
+      S.writeSourceContextDraft(prob, [{ system: 'shop', connectionId: 'shop.sql', method: 'file' }], {}, new Date(), ws);
+      assert.strictEqual(st('sources').status, 'awaiting-approval');
+      assert.strictEqual((await cli(['workflow', 'approve', 'sources', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      assert.strictEqual(st('sources').status, 'done');
+      await new Promise((r) => setTimeout(r, 5));
+      R.reopenStage(ctx, 'sources', { kind: 'person', name: 'priya' }, 'no source tables', 'panel');
+      assert.strictEqual(st('sources').status, 'in-progress', 'the earlier approval is the version being redone');
+      assert.strictEqual(st('sources').status, 'in-progress', 'and stays so on the next sync');
+      S.writeSourceContextDraft(prob, [{ system: 'shop', connectionId: 'shop.sql', method: 'file' }], {}, new Date(), ws);
+      assert.strictEqual(st('sources').status, 'awaiting-approval');
+      assert.strictEqual((await cli(['workflow', 'approve', 'sources', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      assert.strictEqual(st('sources').status, 'done');
+      // Mapping with no tables, after an approved source stage: what to do, not "run the source assessor".
+      const graph = nodePath.join(ws, '.autode', 'local', 'derived', 'graph.json');
+      nodeFs.mkdirSync(nodePath.dirname(graph), { recursive: true });
+      nodeFs.writeFileSync(graph, JSON.stringify({ nodes: [], edges: [] }));
+      const ready = fresh('../dist/engine/workflows/readiness.js').stageReadiness({ workspaceRoot: ws, problemRoot: prob, kind: 'mapping' });
+      assert.ok(ready.some((p) => /approved without any source tables: re-open it/.test(p)), ready.join(' | '));
+      // The panel: no Generate Plan; the target is needed only with a target stage (this template has none).
+      const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+      assert.ok(!/Generate Plan/.test(html) && /targetApplicable !== false/.test(html));
+      const wv = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
+      assert.ok(/targetIncluded: included\('target-context'\)/.test(wv) && /const targetReady = !targetApplicable \|\|/.test(wv));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
   // ---------- v0.45.3: PA3b step 3 — the data modeler ----------
 
   const modelFixture = () => {

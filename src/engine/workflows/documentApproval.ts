@@ -6,7 +6,7 @@ import { validatePipelineSpec } from '../pipelineSpec/validator';
 import { StageKind } from './stageKinds';
 import { readWorkflow } from './instance';
 import { Actor, appendEvent } from './events';
-import { RuntimeContext, WorkflowError } from './runtime';
+import { RuntimeContext, WorkflowError, workflowNeedsSources } from './runtime';
 
 /**
  * Approving a stage whose output is a document with its own approval
@@ -55,7 +55,12 @@ export function documentApprovalProblems(problemRoot: string, kind: StageKind): 
     }
     case 'target-context': case 'source-assessment': {
       const d = parseYaml(text) as Record<string, unknown>;
-      return sameSpec(d) ? [] : [`The ${name} was built for another version of the specification: rebuild it first.`];
+      const errors = sameSpec(d) ? [] : [`The ${name} was built for another version of the specification: rebuild it first.`];
+      const w = readWorkflow(problemRoot);
+      if (kind === 'source-assessment' && w && workflowNeedsSources(w) && (d.status === 'not_applicable' || !Array.isArray(d.sources) || !d.sources.length)) {
+        errors.push('This workflow maps sources, so the source context needs at least one source: bring the source into the estate (Ingest File, `autode estate ingest`), then pick it (Pick from the Estate, `autode context sources --system <id>`).');
+      }
+      return errors;
     }
     case 'mapping': {
       const m = parseMappingContext(text);

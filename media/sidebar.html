@@ -846,7 +846,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     html += '<button data-spec-action="revise">↻ Revise</button>';
     html += '<button data-spec-action="open">📄 Open file</button>';
     html += '<button data-spec-action="history">🕓 History</button>';
-    if (spec.status === 'approved') { html += '<button class="primary" data-spec-action="plan">📋 Generate Plan</button>'; }
+    if (spec.status === 'approved') { html += '<button class="primary" data-spec-action="plan">Open Workflow</button>'; }
     return html + '</div>';
   }
 
@@ -1114,7 +1114,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     }
     var html = '<div class="section-title">Source &amp; Target Context <span style="opacity:0.6;font-weight:400;font-size:11px;">(the target and source stages of the workflow)</span></div>';
 
-    // Target Context — always required.
+    // Target Context — when the workflow has a target stage (v0.45.10).
+    if (contextGateStatus.targetApplicable !== false) {
     var ts = contextGateStatus.targetStatus;
     html += '<div class="ctx-card" id="ctxTargetCard">' +
       '<div class="ctx-card-header"><span class="ctx-card-title">🎯 Target Context</span><span class="ctx-status-badge ' + ts + '">' + ctxStatusLabel(ts) + '</span></div>' +
@@ -1135,8 +1136,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       html += '<button id="ctxTargetReviseBtn">✎ Revise</button>';
     }
     html += '</div></div>';
+    } else {
+      html += '<div class="ctx-card"><div class="ctx-card-header"><span class="ctx-card-title">🎯 Target Context</span><span class="ctx-status-badge not_applicable">⊘ Not in this workflow</span></div></div>';
+    }
 
-    // Source Context — only for Brownfield.
+    // Source Context — when the workflow has a source stage.
     if (contextGateStatus.sourceApplicable) {
       var ss = contextGateStatus.sourceStatus;
       html += '<div class="ctx-card" id="ctxSourceCard">' +
@@ -1165,7 +1169,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       html += '</div></div>';
     } else {
       html += '<div class="ctx-card"><div class="ctx-card-header"><span class="ctx-card-title">🔌 Source Context</span><span class="ctx-status-badge not_applicable">⊘ Not Applicable</span></div>' +
-        '<div class="ctx-card-body">Greenfield implementation — no existing source platform to establish context for.</div></div>';
+        '<div class="ctx-card-body">This workflow has no source stage, so there is no source context to build.</div></div>';
     }
 
     if (!contextGateStatus.canGeneratePlan && contextGateStatus.blockingReasons.length > 0) {

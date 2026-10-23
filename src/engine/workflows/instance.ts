@@ -42,6 +42,8 @@ export interface StageRecord {
   outputs?: string[];
   reason?: string;
   by?: string;
+  /** When it was last re-opened: its document approved before then is the version being redone, not an approval (v0.45.10 fix). */
+  reopenedAt?: string;
 }
 
 export interface WorkflowStage {

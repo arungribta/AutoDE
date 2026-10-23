@@ -4,7 +4,7 @@ import { parseYaml } from '../context/Yaml';
 import { computeRevision } from '../context/contextStore';
 import { DecisionStore } from '../decisions/decisionStore';
 import { STAGE_KINDS, StageKind } from './stageKinds';
-import { StageStatus, WorkflowInstance, WorkflowStage, readWorkflow, writeWorkflow } from './instance';
+import { StageStatus, WorkflowInstance, WorkflowStage, readWorkflow, sourceSystems, writeWorkflow } from './instance';
 import { Actor, actorFrom, actorLabel, appendEvent } from './events';
 
 /**
@@ -50,14 +50,30 @@ function readDoc(problemRoot: string, rel: string[]): { text: string; doc: Recor
 }
 
 /** The document-backed stage's own state: missing, drafted, or approved. */
-function documentState(problemRoot: string, kind: StageKind): 'missing' | 'drafted' | 'approved' {
+/**
+ * A stage document's state. `superseded`: approved before the stage was
+ * re-opened, so it is the version being redone (the stage stays in progress
+ * until a new draft). A source context with no source, or *not applicable*,
+ * isn't approved in a workflow that maps sources (`needsSources`): it is a
+ * draft that needs its sources.
+ */
+function documentState(problemRoot: string, kind: StageKind, opts: { reopenedAt?: string; needsSources?: boolean } = {}): 'missing' | 'drafted' | 'approved' | 'superseded' {
   const rel = DOCUMENT_STAGES[kind];
   if (!rel) return 'missing';
   const d = readDoc(problemRoot, rel);
   if (!d) return 'missing';
   const status = String(d.doc.status ?? '');
-  if (kind === 'specify') return status === 'approved' && d.doc.problemStatementApproved === true ? 'approved' : 'drafted';
-  return status === 'approved' || status === 'not_applicable' ? 'approved' : 'drafted';
+  const approved = kind === 'specify' ? status === 'approved' && d.doc.problemStatementApproved === true : status === 'approved' || status === 'not_applicable';
+  if (!approved) return 'drafted';
+  const at = typeof d.doc.approvedAt === 'string' ? d.doc.approvedAt : '';
+  if (opts.reopenedAt && at <= opts.reopenedAt) return 'superseded';
+  if (kind === 'source-assessment' && opts.needsSources && (status === 'not_applicable' || !Array.isArray(d.doc.sources) || !d.doc.sources.length)) return 'drafted';
+  return 'approved';
+}
+
+/** Whether an included stage maps or reconciles sources, so the problem must have at least one (owner, 2026-10-23). */
+export function workflowNeedsSources(w: WorkflowInstance): boolean {
+  return w.stages.some((s) => s.included && s.record.status !== 'skipped' && s.consumes.includes('source-context'));
 }
 
 /** The current revision of an artifact a stage consumed: a document's content, or the gate decision that approved its producer. */
@@ -131,6 +147,16 @@ export function syncWorkflow(ctx: RuntimeContext): WorkflowStatus | undefined {
   const byId = new Map(w.stages.map((s) => [s.id, s]));
   const approvedPlan = w.status === 'approved';
   const log = (e: Omit<Parameters<typeof appendEvent>[1], 'at'>) => appendEvent(ctx.problemRoot, { at: now, ...e });
+  // A repeated stage's tasks follow the estate until it is done (they were fixed when the workflow was planned).
+  let systemsChanged = false;
+  const current = sourceSystems(ctx.workspaceRoot);
+  for (const s of w.stages) {
+    if (s.repeat !== 'per-source-system' || s.record.status === 'done' || !current.length) continue;
+    if (JSON.stringify(s.systems ?? []) === JSON.stringify(current)) continue;
+    s.systems = current;
+    s.tasks = current.map((id) => s.tasks.find((t) => t.id === `${s.id}:${id}`) ?? { id: `${s.id}:${id}`, title: `${s.title}: ${id}` });
+    systemsChanged = true;
+  }
   for (const s of w.stages) {
     if (!s.included || s.record.status === 'skipped') continue;
     const r = s.record;
@@ -140,7 +166,7 @@ export function syncWorkflow(ctx: RuntimeContext): WorkflowStatus | undefined {
     let approvedChannel = 'document';
     if (s.kind === 'plan') approved = approvedPlan;
     else if (DOCUMENT_STAGES[s.kind] && r.status !== 'stale') {
-      const st = documentState(ctx.problemRoot, s.kind);
+      const st = documentState(ctx.problemRoot, s.kind, { reopenedAt: r.reopenedAt, needsSources: workflowNeedsSources(w) });
       approved = st === 'approved';
       if (!approved && st === 'drafted' && r.status !== 'done') r.status = 'awaiting-approval';
       if (st === 'missing' && r.status === 'awaiting-approval') r.status = 'pending';
@@ -178,7 +204,7 @@ export function syncWorkflow(ctx: RuntimeContext): WorkflowStatus | undefined {
     r.status = unmet.length || needsPlan ? 'pending' : 'ready';
     r.reason = needsPlan ? 'the workflow is not approved yet' : unmet.length ? `waits for ${unmet.map((d) => `${d.stage}${d.approved ? ' (approved)' : ''}`).join(', ')}` : undefined;
   }
-  if (JSON.stringify(w.stages.map((s) => s.record)) !== before) writeWorkflow(ctx.problemRoot, w);
+  if (systemsChanged || JSON.stringify(w.stages.map((s) => s.record)) !== before) writeWorkflow(ctx.problemRoot, w);
   return statusOf(w, warnings);
 }
 
@@ -286,7 +312,7 @@ export function reopenStage(ctx: RuntimeContext, id: string, who: Actor, reason:
   const s = stageOf(w, id);
   if (s.record.status !== 'done' && s.record.status !== 'stale') throw new WorkflowError('NOT_ALLOWED', `${id} is ${s.record.status}, not done.`);
   const at = (ctx.now ?? (() => new Date()))().toISOString();
-  s.record = { status: 'in-progress', startedAt: at, by: actorLabel(who), reason: `re-opened: ${reason}` };
+  s.record = { status: 'in-progress', startedAt: at, by: actorLabel(who), reason: `re-opened: ${reason}`, reopenedAt: at };
   appendEvent(ctx.problemRoot, { at, type: 'reopened', stage: id, actor: who, channel, reason });
   const stale: string[] = [];
   const queue = [id];

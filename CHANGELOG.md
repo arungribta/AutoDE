@@ -6,6 +6,17 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## Unreleased (ships with v0.45.11)
+
+- **From the owner's test of the sample** (mapping said *not ready* and *in progress* at once; re-opening Source assessment approved it again with no tables found):
+  - **Re-opening a document stage keeps it open.** The stage's old document was still marked approved, and the workflow read that as a fresh approval, so the stage closed again within the second (by "unknown", via the document). A re-opened stage now records when it was re-opened (`reopenedAt`); a document approved before then is the version being redone. The stage stays in progress until a new draft, then waits for approval as usual.
+  - **A workflow that maps sources needs a source.** A source context that is *not applicable* or lists no source is no longer approved (by the sync or by Approve) when an included stage consumes the source context (mapping, conformance …). The stage shows what to do instead: bring the source into the estate, then pick it.
+  - **Per-source tasks follow the estate.** A per-source-system stage's systems and tasks were fixed when the workflow was planned (the sample's was the business-context file). Until the stage is done, they now follow the estate's source systems. Several sources work the same way; one is the usual case.
+  - **"Started, but blocked"** replaces *Not ready yet* on a stage that is already in progress. When Source assessment was approved without any tables, the message says to re-open it rather than to run its agent.
+- **The target is needed only when the workflow has a target stage**, the same rule the source already followed. The panel no longer asks for a target context in a workflow without one, and shows *Not in this workflow*.
+- **The specification card's leftover *Generate Plan* button** (it opened the Workflow view) is now labelled *Open Workflow*.
+- **Measured:** 353 tests (1 new, replaying the sample). Lint 0 errors.
+
 ## 0.45.10
 
 - **SIMP-4: the contexts reference the workspace** (owner, 2026-10-22, after asking for a review first; roadmap decision log). The review found:

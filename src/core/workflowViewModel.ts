@@ -146,7 +146,7 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
       : v.status === 'pending' ? `Waits: ${v.why ?? 'its dependencies are not done'}.`
       : v.status === 'stale' ? 'Its inputs changed since it was approved: review the output, then approve it again.'
       : v.status === 'awaiting-approval' && s.record.decisionId ? 'Waits for your approval.'
-      : notReady.length ? `Not ready yet: ${notReady.join(' ')}`
+      : notReady.length ? `${v.status === 'in-progress' ? 'Started, but blocked' : 'Not ready yet'}: ${notReady.join(' ')}`
       : v.status === 'awaiting-approval' && documentBacked ? (blockers.length ? `The ${doc} can't be approved yet: ${blockers.join(' ')}` : `Review the ${doc} and approve it.`)
       : documentBacked ? `${PRODUCE_LABEL[s.kind]}${runner ? ` (or Run agent: ${runner})` : ''}, then approve the ${doc}.`
       : runner ? `Run agent (${runner}), or hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`

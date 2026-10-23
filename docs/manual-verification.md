@@ -848,6 +848,15 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 - [ ] **35.4 Over MCP and the CLI.**
   Do: run `autode context show`; ask Claude Code to draft the target context.
   Expect: the same choices; the agent calls `autode_record_target_context` and asks you to approve.
+- [ ] **35.5 Re-open stays open.**
+  Do: re-open an approved Source assessment.
+  Expect: it stays *in progress* (not approved again); after a new draft it waits for your approval.
+- [ ] **35.6 Mapping needs a source.**
+  Do: in a greenfield workflow, try to approve a source context that is not applicable or empty.
+  Expect: refused, with what to do; mapping says *Started, but blocked* or *Not ready yet* with the steps.
+- [ ] **35.7 Per-source tasks.**
+  Do: ingest a source after the workflow was planned.
+  Expect: the source stage's tasks show that system (not business-context).
 
 ## Results
 
@@ -1052,5 +1061,8 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 35.2 |  |  |
 | 35.3 |  |  |
 | 35.4 |  |  |
+| 35.5 |  |  |
+| 35.6 |  |  |
+| 35.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

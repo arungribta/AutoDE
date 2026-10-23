@@ -2119,16 +2119,18 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   /** Whether the specification and its contexts are approved (the Pipeline Spec needs them) — computed fresh, never cached. */
   private computeContextGateStatus(spec: BusinessProblemSpec | undefined): {
-    targetStatus: string; sourceApplicable: boolean; sourceStatus: string; canGeneratePlan: boolean; blockingReasons: string[];
+    targetStatus: string; targetApplicable: boolean; sourceApplicable: boolean; sourceStatus: string; canGeneratePlan: boolean; blockingReasons: string[];
   } {
     if (!spec || spec.status !== 'approved') {
-      return { targetStatus: 'none', sourceApplicable: false, sourceStatus: 'none', canGeneratePlan: false, blockingReasons: ['Approve the specification first.'] };
+      return { targetStatus: 'none', targetApplicable: true, sourceApplicable: false, sourceStatus: 'none', canGeneratePlan: false, blockingReasons: ['Approve the specification first.'] };
     }
     const tc = this.targetContextManager?.getContext();
     const targetForThisVersion = !!tc && tc.specId === spec.id && tc.specVersion === spec.version;
-    const targetReady = !!this.targetContextManager?.isApprovedFor(spec.id, spec.version);
     // PA3a: the workflow decides whether there is a source stage (it used to be the brownfield flag), and the plan gate comes first.
+    // Since v0.45.10 it decides the target the same way: a workflow with no target stage needs no target context.
     const wf = this.workflowGate();
+    const targetApplicable = wf ? wf.targetIncluded : true;
+    const targetReady = !targetApplicable || !!this.targetContextManager?.isApprovedFor(spec.id, spec.version);
     const sourceApplicable = wf ? wf.sourcesIncluded : spec.implementationType === 'brownfield';
     const sc = this.sourceContextManager?.getContext();
     const sourceForThisVersion = !!sc && sc.specId === spec.id && sc.specVersion === spec.version;
@@ -2144,6 +2146,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (sourceApplicable && !sourceReady) reasons.push('Source Context needs to be built and approved (or marked Not Applicable).');
     return {
       targetStatus: targetForThisVersion ? tc!.status : 'none',
+      targetApplicable,
       sourceApplicable,
       sourceStatus: sourceForThisVersion ? sc!.status : 'none',
       canGeneratePlan: !!spec.problemStatementApproved && targetReady && sourceReady && (!wf || wf.approved),
@@ -2159,13 +2162,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /** The plan gate as the runtime sees it, once the specification exists. */
-  private workflowGate(): { approved: boolean; sourcesIncluded: boolean } | undefined {
+  private workflowGate(): { approved: boolean; sourcesIncluded: boolean; targetIncluded: boolean } | undefined {
     const scope = this.workflowScope();
     if (!scope) return undefined;
     try {
       const w = ensureWorkflow(scope);
-      const sources = w.stages.find((x) => x.kind === 'source-assessment');
-      return { approved: w.status === 'approved', sourcesIncluded: !!sources && sources.included && sources.record.status !== 'skipped' };
+      const included = (kind: string) => w.stages.some((x) => x.kind === kind && x.included && x.record.status !== 'skipped');
+      return { approved: w.status === 'approved', sourcesIncluded: included('source-assessment'), targetIncluded: included('target-context') };
     } catch { return undefined; }
   }
 

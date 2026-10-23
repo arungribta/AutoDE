@@ -2,6 +2,7 @@ import { StageKind } from './stageKinds';
 import { readProblemDocument, parseMappingContext } from '../documents/problemDocuments';
 import { parseYaml } from '../context/Yaml';
 import { layoutPath } from '../workspaceLayout';
+import { readWorkflow } from './instance';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -29,8 +30,10 @@ export function stageReadiness(input: ReadinessInput): string[] {
   const sourceContext = (() => { try { return parseYaml(fs.readFileSync(path.join(input.problemRoot, 'context', 'source-context.yaml'), 'utf8')) as { status?: string; sources?: unknown[] } | null; } catch { return null; } })();
   if (input.kind === 'mapping' || input.kind === 'quality-rules' || input.kind === 'conformance') {
     if (estateTableCount(input.workspaceRoot) === 0) {
-      problems.push(`There are no tables in the estate yet, so there is nothing to ${input.kind === 'mapping' ? 'map' : 'check'}. Bring the sources in first: Run agent on Source assessment, Ingest File in the AutoDE panel, or \`autode estate ingest <file>\` / \`autode estate extract --connection <id>\` in a terminal.`);
-      if (sourceContext?.status === 'not_applicable') problems.push('This problem\'s source context is marked not applicable: re-open the source-assessment stage if the problem does have sources.');
+      const sourceDone = readWorkflow(input.problemRoot)?.stages.some((s) => s.kind === 'source-assessment' && s.record.status === 'done');
+      problems.push(`There are no tables in the estate yet, so there is nothing to ${input.kind === 'mapping' ? 'map' : 'check'}. Bring the sources in: Ingest File in the AutoDE panel, or \`autode estate ingest <file>\` / \`autode estate extract --connection <id>\` in a terminal${sourceDone ? '' : ', or Run agent on Source assessment'}.`);
+      if (sourceDone) problems.push('Source assessment was approved without any source tables: re-open it, bring the sources in, pick them in its source context, and approve it again.');
+      else if (sourceContext?.status === 'not_applicable') problems.push('This problem\'s source context is marked not applicable: re-open the source-assessment stage if the problem does have sources.');
     }
   }
   if ((input.kind === 'modelling' || input.kind === 'build') && mappings === 0) {
