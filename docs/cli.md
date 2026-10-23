@@ -203,7 +203,7 @@ Then ask the agent to continue your AutoDE problem: the `autode-core-orchestrato
 
 ## The MCP server
 
-`autode mcp` is the AutoDE MCP server over stdio. Its flags are `--workspace`, `--resources`, `--allow-cli`, `--drivers` and `--allow-write`. It is the same server as `dist/mcp-server.js` in the extension, at a path that doesn't change with extension updates. Per-host set-up: [mcp-setup.md](mcp-setup.md).
+`autode mcp` is the AutoDE MCP server over stdio. Its flags are `--workspace`, `--resources`, `--allow-cli` and `--drivers`. It never writes to a platform: changes are runbooks (since 0.45.8). It is the same server as `dist/mcp-server.js` in the extension, at a path that doesn't change with extension updates. Per-host set-up: [mcp-setup.md](mcp-setup.md).
 
 ## Exit codes
 

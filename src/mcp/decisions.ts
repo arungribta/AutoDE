@@ -61,7 +61,6 @@ function toToolError(err: unknown): never {
 
 export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
   const { session } = options;
-  const allowWrite = session.options.allowWrite;
   const store = (ws: EngineWorkspace) => new DecisionStore(ws.options.workspaceRoot);
   const context = async (ws: EngineWorkspace, withSchema = false): Promise<ProposalContext> => ({
     workspaceRoot: ws.options.workspaceRoot,
@@ -70,7 +69,7 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
     connections: session.config().connections,
     schemaIndex: withSchema ? await ws.contextSources().then((src) => buildSchemaIndex(src.graph.nodes, src.graph.edges)) : undefined
   });
-  const deps = () => (allowWrite ? { executePlatformChange: (id: string, sql: string) => session.executeApprovedChange(id, sql) } : {});
+  const deps = () => ({});
   // Decisions resolved in their files (or in the panel) are applied before any answer.
   const sync = async (ws: EngineWorkspace) => processResolved(store(ws), await context(ws), deps());
 
@@ -131,12 +130,6 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
     proposalTool('autode_propose_pipeline_spec', 'pipeline_spec', 'Propose a Pipeline Spec',
       'Propose a Pipeline Spec for the active problem (validate it first with autode_validate_pipeline_spec). Approved, it becomes the new draft.',
       'pipelineSpec', { type: 'object' }),
-    proposalTool('autode_propose_mapping', 'mapping', 'Propose a source-to-target mapping',
-      'Propose one entity mapping (source table → target, column by column) for the active problem\'s Mapping Context. Source columns are checked against the estate AutoDE knows.',
-      'mapping', { type: 'object', required: ['id', 'sourceEntityId', 'targetName', 'columns'] }, true),
-    proposalTool('autode_propose_platform_change', 'platform_change', 'Propose a platform change',
-      'Propose one statement that changes data or objects on a connection (DDL, DML, GRANT …), with the reason. autode_execute_query never runs writes; an approved change runs through autode_apply_decision on a server started with --allow-write.',
-      'change', { type: 'object', required: ['connectionId', 'sql', 'reason'], additionalProperties: false, properties: { connectionId: { type: 'string', minLength: 1 }, sql: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 1 } } }),
     proposalTool('autode_propose_runbook', 'runbook', 'Propose a runbook',
       'Propose a runbook: the steps that change a data platform for the active problem (deploy a model, set up roles, load data), in order. Each step is one SQL statement on the connection, a Snowflake or Databricks CLI command as an argument list (no shell, no profile or credential flags: AutoDE adds the connection\'s profile), or a Databricks bundle folder; with what it is expected to do and, for anything destructive, its rollback. AutoDE classifies every step itself (read, change, destructive), checks commands against its allowlist and paths against the workspace, and applies the team\'s policy for the connection\'s environment. Once a person approves it, AutoDE\'s runner runs it step by step in VS Code; you never run it.',
       'runbook', { type: 'object', required: ['id', 'title', 'reason', 'connectionId', 'steps'], properties: { id: { type: 'string', minLength: 2 }, title: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 1 }, connectionId: { type: 'string', minLength: 1 }, stage: { type: 'string' }, explanation: { type: 'string' }, steps: { type: 'array', minItems: 1, items: { type: 'object', required: ['id', 'title', 'kind', 'expect'], properties: { id: { type: 'string', minLength: 1 }, title: { type: 'string', minLength: 1 }, kind: { type: 'string', enum: ['sql', 'cli', 'bundle'] }, sql: { type: 'string' }, argv: { type: 'array', items: { type: 'string' } }, folder: { type: 'string' }, target: { type: 'string' }, expect: { type: 'string', minLength: 1 }, noRollbackReason: { type: 'string' }, timeoutSec: { type: 'integer', minimum: 1, maximum: 3600 }, rollback: { type: 'object', properties: { procedure: { type: 'string' }, steps: { type: 'array', items: { type: 'object' } } } } } } } } }),
@@ -232,25 +225,6 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
           if (d.status !== 'approved') return { decision: view(d) };
           const applied = await applyDecision(s, d.id, await context(ws), deps());
           return { decision: view(applied.decision), applied: applied.applied, message: applied.message };
-        } catch (err) { return toToolError(err); }
-      }
-    },
-    {
-      name: 'autode_apply_decision',
-      description: allowWrite
-        ? 'Run an APPROVED platform change on its connection. Only decisions a person approved can run; anything else is refused.'
-        : 'Run an approved platform change — unavailable: this server was not started with --allow-write.',
-      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1 } } },
-      annotations: { title: 'Apply an approved platform change', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-      handler: async (args, ws) => {
-        try {
-          if (!allowWrite) throw new EngineToolError('WRITE_NOT_ALLOWED', 'This server was not started with --allow-write, so it applies no platform change.');
-          const s = store(ws);
-          s.syncFileResolutions();
-          const d = s.get(String(args.id));
-          if (d.kind !== 'platform_change') throw new EngineToolError('VALIDATION_FAILED', `Decision ${d.id} is a ${d.kind}; AutoDE applies it when it is approved.`);
-          const result = await applyDecision(s, d.id, await context(ws), deps());
-          return { decision: view(result.decision), applied: result.applied, message: result.message };
         } catch (err) { return toToolError(err); }
       }
     }

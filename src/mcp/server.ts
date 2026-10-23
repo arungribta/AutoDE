@@ -25,9 +25,9 @@ import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, rea
  * a new problem's first draft and the active-problem pointer, and observed
  * metadata ingested from files or connections (v0.43.2) — never anything an
  * agent infers. Previously: it never wrote to the workspace
- * (§8). Platform statements are read-only unless started with --allow-write.
+ * (§8). Platform statements are read-only; changes run as approved runbooks in AutoDE's runner.
  *
- *   autode mcp --workspace <root> [--resources <extension root>] [--allow-write] [--allow-cli] [--drivers <folder>]
+ *   autode mcp --workspace <root> [--resources <extension root>] [--allow-cli] [--drivers <folder>]
  *   (node dist/mcp-server.js … starts the same server)
  *
  * The entry point is src/cli/main.ts. In a bundle every inlined module sees
@@ -66,8 +66,6 @@ export interface ServerOptions {
   resourcesRoot: string;
   version: string;
   log?: (line: string) => void;
-  /** `--allow-write`: platform statements other than SELECT / WITH / SHOW / DESCRIBE / EXPLAIN may run. */
-  allowWrite?: boolean;
   /** `--allow-cli`: consent to run the platform CLI for connections that need it. */
   allowCli?: boolean;
   /** `--drivers <folder>`: user-installed drivers (phase DRV1). */
@@ -113,7 +111,7 @@ function protocolError(err: unknown): McpError {
 export function createAutodeServer(options: ServerOptions): Server {
   const ws = new EngineWorkspace({ workspaceRoot: options.workspaceRoot, resourcesRoot: options.resourcesRoot });
   const log = (line: string) => (options.log ?? ((l: string) => process.stderr.write(l + '\n')))(redact(line));
-  const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: options.allowWrite === true, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
+  const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: false, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   // The decision tools read the client's name (from `initialize`) at call time.
   const ref: { server?: Server } = {};
   const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name, () => tools), ...agentTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name })];
@@ -121,7 +119,7 @@ export function createAutodeServer(options: ServerOptions): Server {
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {
       capabilities: { tools: {}, prompts: {}, resources: {} },
-      instructions: `AutoDE data-engineering engine. Work happens in a business problem: autode_list_problems, autode_start_problem, autode_select_problem. Its workflow is the hub: autode_workflow_status and autode_workflow_next say what to do next; hand stages in with autode_workflow_complete_stage; a person approves gates. Bring the estate in with autode_ingest_file (DDL/CSV/JSON) or autode_ingest_metadata (a connection's schemas). Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms (if one is missing, propose it with autode_propose_connection); autode_explain_sql dry-runs SQL without executing it. Nothing you do changes AutoDE's state or a data platform directly: propose changes with the autode_propose_* tools; each becomes a decision a person approves (high stakes: only in the AutoDE panel, the CLI or the decision file; low stakes: ask the user, then autode_resolve_decision). autode_execute_query runs reads only.${platform.options.allowWrite ? ' This server was started with --allow-write: approved platform changes run with autode_apply_decision.' : ''}`
+      instructions: `AutoDE data-engineering engine. Work happens in a business problem: autode_list_problems, autode_start_problem, autode_select_problem. Its workflow is the hub: autode_workflow_status and autode_workflow_next say what to do next; hand stages in with autode_workflow_complete_stage; a person approves gates. Bring the estate in with autode_ingest_file (DDL/CSV/JSON) or autode_ingest_metadata (a connection's schemas). Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms (if one is missing, propose it with autode_propose_connection); autode_explain_sql dry-runs SQL without executing it. Nothing you do changes AutoDE's state or a data platform directly: propose changes with the autode_propose_* tools; each becomes a decision a person approves (high stakes: only in the AutoDE panel, the CLI or the decision file; low stakes: ask the user, then autode_resolve_decision). autode_execute_query runs reads only; platform changes are runbooks (autode_propose_runbook), approved by a person and run by AutoDE's runner. autode_approvals_list says what waits for a person.`
     }
   );
   ref.server = server;
@@ -191,12 +189,12 @@ export function createAutodeServer(options: ServerOptions): Server {
   return server;
 }
 
-export function parseArgs(argv: readonly string[]): { workspaceRoot: string; resourcesRoot?: string; allowWrite: boolean; allowCli: boolean; driversRoot?: string } {
+export function parseArgs(argv: readonly string[]): { workspaceRoot: string; resourcesRoot?: string; allowCli: boolean; driversRoot?: string } {
   const get = (flag: string) => {
     const i = argv.indexOf(flag);
     return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
   };
-  return { workspaceRoot: path.resolve(get('--workspace') ?? process.cwd()), resourcesRoot: get('--resources'), allowWrite: argv.includes('--allow-write'), allowCli: argv.includes('--allow-cli'), driversRoot: get('--drivers') };
+  return { workspaceRoot: path.resolve(get('--workspace') ?? process.cwd()), resourcesRoot: get('--resources'), allowCli: argv.includes('--allow-cli'), driversRoot: get('--drivers') };
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -204,7 +202,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const resourcesRoot = args.resourcesRoot ? path.resolve(args.resourcesRoot) : findResourcesRoot();
   if (!resourcesRoot) process.stderr.write('autode: extension resources not found (pass --resources <extension root>); bundled interview prompts and primitives are unavailable.\n');
   const version = readVersion(resourcesRoot);
-  const server = createAutodeServer({ workspaceRoot: args.workspaceRoot, resourcesRoot: resourcesRoot ?? args.workspaceRoot, version, allowWrite: args.allowWrite, allowCli: args.allowCli, driversRoot: args.driversRoot });
+  const server = createAutodeServer({ workspaceRoot: args.workspaceRoot, resourcesRoot: resourcesRoot ?? args.workspaceRoot, version, allowCli: args.allowCli, driversRoot: args.driversRoot });
   await server.connect(new StdioServerTransport());
-  process.stderr.write(`autode MCP server ${version} — workspace ${args.workspaceRoot}${args.allowWrite ? ' — platform writes allowed (--allow-write)' : ''}\n`);
+  process.stderr.write(`autode MCP server ${version} — workspace ${args.workspaceRoot}\n`);
 }

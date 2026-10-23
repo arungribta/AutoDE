@@ -6,6 +6,23 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.8
+
+- **SIMP-2: one way for each change** (owner, 2026-10-22; roadmap decision log). Two duplicate paths are gone.
+- **Platform changes are runbooks, only.** Retired:
+  - the single-statement `platform_change` decision;
+  - `autode_propose_platform_change` and `autode_apply_decision`;
+  - the MCP server's `--allow-write` flag.
+
+  The server's platform session now never writes. Only AutoDE's runner creates one that may, for an approved runbook's change steps. `autode_execute_query` and the server's instructions point to `autode_propose_runbook`. A platform-change decision approved before this release is not run: applying it fails, saying "propose it as a runbook".
+- **Mappings live in the mapping document, only.** Retired:
+  - `autode_propose_mapping` (drafting goes through `autode_record_mapping`, which validates the same way and writes the draft that the mapping stage approves);
+  - the `mapping` fact kind. Nothing produced it, and proposing one now says to record the mapping instead.
+
+  A mapping decision approved before this release still lands, as a draft in the mapping document. Old decision files and ledgers keep reading.
+- **Why it's safe now:** the `autode` package is unpublished, so no outside client depends on the retired tools or the flag.
+- **Measured:** 381 tests. The two v0.40.0 tests of the retired paths were rewritten as retirement tests: a direct write is refused and points to runbooks; an old approved platform change fails with where to go; the flag is gone; there is no proposal tool or fact kind for mappings; an old approved mapping decision still lands. The decision mechanics they also covered (stakes recomputed, never read from the file; a file resolution needs a name) now use a connection proposal. The engine-client tests use the vocabulary proposal as their sample. Lint 0 errors. Eval unchanged.
+
 ## 0.45.7
 
 - **SIMP-1: one approvals list, and the concept map** (owner, 2026-10-22: simplify before adding capability; roadmap decision log). The first of four simplification releases.

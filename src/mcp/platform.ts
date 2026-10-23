@@ -18,14 +18,14 @@ import { EngineTool, ToolAnnotations } from './tools';
  * extension starts the server (phase 5) it passes SecretStorage values as the
  * same environment variables.
  *
- * Queries are read-only unless the server was started with `--allow-write`,
+ * Queries are read-only; platform changes run only as approved runbooks (AutoDE's runner),
  * and row values are withheld unless the connection allows sample data in
  * prompts: whatever a tool returns goes into the calling agent's prompt.
  */
 
 export interface PlatformOptions {
   workspaceRoot: string;
-  /** `--allow-write`: statements other than SELECT / WITH / SHOW / DESCRIBE / EXPLAIN may run. */
+  /** Only AutoDE's runner creates a session that writes (an approved runbook's change steps); the MCP server's never does (v0.45.8). */
   allowWrite: boolean;
   /** `--allow-cli`: consent to run the platform's CLI (Snowflake named connections, username/password). */
   allowCli: boolean;
@@ -140,9 +140,9 @@ export class PlatformSession {
     }
   }
 
-  /** Runs an approved platform change (Phase PA1) — the only path for a write; needs --allow-write. */
+  /** Runs one change statement of an approved runbook (v0.45.8: only the runner's session may write). */
   public async executeApprovedChange(connectionId: string, sql: string): Promise<string> {
-    if (!this.options.allowWrite) throw new EngineToolError('WRITE_NOT_ALLOWED', 'This server was not started with --allow-write, so it applies no platform change.');
+    if (!this.options.allowWrite) throw new EngineToolError('WRITE_NOT_ALLOWED', 'This session applies no platform change: changes run as approved runbooks, in AutoDE\'s runner.');
     const entry = this.entry(connectionId);
     const manager = await this.connect(entry);
     try {
@@ -286,7 +286,7 @@ export function platformTools(session: PlatformSession): EngineTool[] {
     },
     {
       name: 'autode_execute_query',
-      description: 'Run one read-only statement (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN); anything else is refused — propose a change with autode_propose_platform_change instead. Row values are returned only if the connection allows sample data (otherwise just columns and the row count); personal-data columns are masked.',
+      description: 'Run one read-only statement (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN); anything else is refused — propose a change as a runbook (autode_propose_runbook) instead. Row values are returned only if the connection allows sample data (otherwise just columns and the row count); personal-data columns are masked.',
       inputSchema: {
         type: 'object', required: ['connectionId', 'sql'], additionalProperties: false,
         properties: {
@@ -301,9 +301,9 @@ export function platformTools(session: PlatformSession): EngineTool[] {
         const sql = String(args.sql);
         const single = checkSingleStatement(sql);
         if (!single.ok) throw new EngineToolError('VALIDATION_FAILED', single.reason ?? 'Not a single statement.');
-        // Phase PA1: a write is never run directly, with or without --allow-write; it is proposed and approved by a person.
+        // A write is never run directly: it is a runbook step, approved by a person and run by AutoDE's runner.
         const check = checkReadOnlySql(sql);
-        if (!check.ok) throw new EngineToolError('WRITE_NOT_ALLOWED', `${check.reason} Propose it with autode_propose_platform_change: a person approves it, then ${allowWrite ? 'autode_apply_decision runs it on this server' : 'a server started with --allow-write runs it (autode_apply_decision)'}.`, { statement: check.firstKeyword });
+        if (!check.ok) throw new EngineToolError('WRITE_NOT_ALLOWED', `${check.reason} Propose it as a runbook with autode_propose_runbook: a person approves it, then AutoDE's runner runs it.`, { statement: check.firstKeyword });
         const entry = session.entry(String(args.connectionId));
         const maxRows = Math.min(MAX_ROWS_CAP, (args.maxRows as number | undefined) ?? DEFAULT_MAX_ROWS);
         const timeoutSeconds = (args.timeoutSeconds as number | undefined) ?? DEFAULT_TIMEOUT_S;

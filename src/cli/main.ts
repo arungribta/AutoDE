@@ -186,7 +186,7 @@ Agent hosts (Claude Code, Cortex Code, GitHub Copilot CLI):
                                and wire its MCP server (or print the step, where the host has no file for it)
 
 Server:
-  mcp [--allow-write] [--allow-cli] [--drivers <folder>]   The AutoDE MCP server over stdio
+  mcp [--allow-cli] [--drivers <folder>]   The AutoDE MCP server over stdio (platform changes: runbooks)
 
 Common options:
   --workspace <folder>   The project holding .autode/ (default: the current folder)

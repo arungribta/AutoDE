@@ -6,7 +6,6 @@ import { validateAssertion } from '../context/assertionSchemas';
 import { Evidence } from '../context/assertions';
 import { computeRevision } from '../context/contextStore';
 import { SchemaIndex } from '../grounding/sqlGrounding';
-import { checkSingleStatement } from '../platform/sqlGuard';
 import { Runbook, RunbookRecord, approveRunbook, checkRunbook } from '../runner/runbook';
 import { loadRunbookPolicy } from '../runner/policy';
 import { loadConnectionsConfig } from '../platform/connectionsConfig';
@@ -35,11 +34,12 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  * proposal tools, the extension and (PA2) the CLI.
  */
 
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'mapping' | 'platform_change' | 'connection' | 'vocabulary' | 'workflow' | 'runbook'>;
+/** What can be proposed. `mapping` and `platform_change` decisions were retired in v0.45.8 (SIMP-2): mappings are drafted into the mapping document, platform changes are runbooks; their old decision files still read. */
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook'>;
 
 export interface ProposalContext {
   workspaceRoot: string;
-  /** The active business problem's folder; needed by every kind but `assertion` and `platform_change`. */
+  /** The active business problem's folder; needed by every kind but `assertion`. */
   problemRoot?: string;
   problemId?: string;
   /** The estate AutoDE knows, for grounding mapping proposals. */
@@ -50,7 +50,6 @@ export interface ProposalContext {
   resourcesRoot?: string;
 }
 
-export interface PlatformChangeProposal { connectionId: string; sql: string; reason: string }
 export type AssertionProposal = Pick<NewAssertion, 'kind' | 'subject' | 'predicate' | 'value' | 'statement' | 'evidence'> & { specId?: string };
 
 export class ProposalValidationError extends Error {
@@ -63,7 +62,7 @@ export class ProposalValidationError extends Error {
 function report(): ValidationReport { return { ok: true, errors: [], warnings: [], checks: [] }; }
 function finish(r: ValidationReport): ValidationReport { r.ok = r.errors.length === 0; return r; }
 
-const DOCUMENT_OF: Partial<Record<ProposalKind, ProblemDocumentKind>> = { spec_revision: 'spec', pipeline_spec: 'pipelineSpec', mapping: 'mappingContext' };
+const DOCUMENT_OF: Partial<Record<DecisionKind, ProblemDocumentKind>> = { spec_revision: 'spec', pipeline_spec: 'pipelineSpec', mapping: 'mappingContext' };
 
 function needProblem(ctx: ProposalContext, r: ValidationReport): string | undefined {
   if (!ctx.problemRoot) r.errors.push('There is no active business problem in this workspace; open or start one in AutoDE first.');
@@ -152,17 +151,6 @@ export function validateMappingProposal(m: EntityMapping, ctx: ProposalContext):
   return finish(r);
 }
 
-export function validatePlatformChange(p: PlatformChangeProposal, ctx: ProposalContext): ValidationReport {
-  const r = report();
-  r.checks.push('the connection exists', 'exactly one statement', 'the statement changes something (reads go through autode_execute_query)');
-  if (!p.reason || !String(p.reason).trim()) r.errors.push('reason is required: say why the change is needed.');
-  if (!(ctx.connections ?? []).some((c) => c.id === p.connectionId)) r.errors.push(`No connection "${p.connectionId}" (see autode_list_connections).`);
-  const single = checkSingleStatement(p.sql);
-  if (!single.ok) r.errors.push(single.reason ?? 'Give exactly one statement.');
-  else if (single.kind !== 'write') r.errors.push(`This ${single.firstKeyword ?? ''} statement changes nothing; run it with autode_execute_query.`);
-  return finish(r);
-}
-
 /**
  * A connection (v0.43.1): the same checks as saving one from a settings card or
  * `autode connections add`. Which platforms agents may reach is a person's call,
@@ -227,7 +215,6 @@ function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown):
     const text = readProblemDocument(ctx.problemRoot, doc);
     return { document: doc, revision: text === undefined ? 'none' : computeRevision(text) };
   }
-  if (kind === 'platform_change') return { connectionId: (payload as PlatformChangeProposal).connectionId };
   if (kind === 'connection') return { connectionId: draftEntry({ ...(payload as ConnectionDraft), fields: (payload as ConnectionDraft).fields ?? {} }).id };
   return undefined;
 }
@@ -237,8 +224,6 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'assertion': { const a = payload as AssertionProposal; return { title: `Fact (${a.kind}): ${a.statement}`.slice(0, 160), summary: a.statement }; }
     case 'spec_revision': { const s = payload as BusinessProblemSpec; return { title: 'Revise the Business Problem Specification', summary: s.problemStatement }; }
     case 'pipeline_spec': { const s = payload as PipelineSpec; return { title: `Pipeline Spec: ${s.entities?.length ?? 0} entities`, summary: `Pipeline Spec derived from ${s.derivedFromBpsId ?? 'the active problem'} v${s.derivedFromBpsVersion ?? '?'}` }; }
-    case 'mapping': { const m = payload as EntityMapping; return { title: `Map ${m.sourceFqn || m.sourceEntityId} → ${m.targetName} (${m.columns?.length ?? 0} columns)`, summary: m.notes ?? '' }; }
-    case 'platform_change': { const p = payload as PlatformChangeProposal; return { title: `Run on ${p.connectionId}: ${p.sql.trim().split(/\s+/).slice(0, 6).join(' ')}…`, summary: p.reason }; }
     case 'workflow': { const w = payload as WorkflowInstance; const n = (w.stages ?? []).filter((s) => s.included).length; return { title: `Workflow: ${w.template?.id} with ${n} stages`, summary: (w.stages ?? []).filter((s) => s.included).map((s) => s.id).join(' → ') }; }
     case 'vocabulary': { const v = payload as VocabularyProposalPayload; return { title: `Vocabulary: ${v.entries.map((e) => e.kind === 'abbreviation' ? `${e.from.toUpperCase()}=${e.to}` : `${e.from}~${e.to}`).join(', ')}`.slice(0, 160), summary: `${v.entries.length} retrieval vocabulary entr${v.entries.length === 1 ? 'y' : 'ies'}.` }; }
     case 'runbook': { const r = payload as Runbook; return { title: `Runbook ${r.id}: ${r.title} (${r.steps?.length ?? 0} steps on ${r.connectionId})`.slice(0, 160), summary: r.reason ?? '' }; }
@@ -262,8 +247,6 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'assertion': return validateAssertionProposal(payload as AssertionProposal);
     case 'spec_revision': return validateSpecRevision(payload as BusinessProblemSpec, ctx);
     case 'pipeline_spec': return validatePipelineSpecProposal(payload as PipelineSpec, ctx);
-    case 'mapping': return validateMappingProposal(payload as EntityMapping, ctx);
-    case 'platform_change': return validatePlatformChange(payload as PlatformChangeProposal, ctx);
     case 'connection': return validateConnectionProposal(payload as ConnectionDraft, ctx);
     case 'vocabulary': return validateVocabularyProposal(payload as VocabularyProposalPayload);
     case 'workflow': return validateWorkflowProposal(payload as WorkflowInstance, ctx);
@@ -282,8 +265,6 @@ export function propose(store: DecisionStore, ctx: ProposalContext, kind: Propos
 // ── Applying ─────────────────────────────────────────────────────────────────
 
 export interface ApplyDeps {
-  /** Runs an approved platform change; absent where writes aren't allowed (only an `--allow-write` server applies them). */
-  executePlatformChange?: (connectionId: string, sql: string) => Promise<string>;
   now?: () => Date;
 }
 
@@ -292,12 +273,12 @@ export interface ApplyResult { decision: Decision; applied: boolean; message: st
 /**
  * Applies an approved decision. A decision whose document changed since it
  * was proposed is superseded instead — never applied to state its reviewer
- * didn't see. Platform changes need `deps.executePlatformChange`.
+ * didn't see.
  */
 export async function applyDecision(store: DecisionStore, id: string, ctx: ProposalContext, deps: ApplyDeps = {}): Promise<ApplyResult> {
   const d = store.get(id);
   if (d.status !== 'approved') throw new DecisionError('NOT_APPROVED', `Decision ${id} is ${d.status}; only an approved decision is applied.`, { status: d.status });
-  const kind = d.kind as ProposalKind;
+  const kind = d.kind;
   // A stage gate (PA3a): the workflow runtime reads the decision itself; nothing else to write.
   if (d.kind === 'gate') { const done = store.markApplied(id, `Approved by ${d.resolution.by || 'unknown'}.`); return { decision: done, applied: true, message: `Approved: ${d.title}.` }; }
   const doc = DOCUMENT_OF[kind];
@@ -313,6 +294,11 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
   const now = (deps.now ?? (() => new Date()))();
   const approver = d.resolution.by || 'unknown';
   try {
+    if (kind === 'platform_change') {
+      // Retired in v0.45.8 (SIMP-2): platform changes are runbooks, run by AutoDE's runner.
+      const failed = store.markFailed(id, 'Single-statement platform changes were retired in v0.45.8: propose it as a runbook (autode_propose_runbook); the runner runs it once a person approves.');
+      return { decision: failed, applied: false, message: failed.events[failed.events.length - 1].note ?? '' };
+    }
     switch (kind) {
       case 'assertion': {
         const p = store.proposal<AssertionProposal>(id);
@@ -357,15 +343,9 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         break;
       }
       case 'mapping':
+        // Retired as a proposal kind (v0.45.8); a decision approved earlier still lands, as a draft in the mapping document.
         writeMappingUpsert(ctx.problemRoot!, store.proposal<EntityMapping>(id), now);
         break;
-      case 'platform_change': {
-        if (!deps.executePlatformChange) return { decision: d, applied: false, message: `Approved. It runs when an AutoDE MCP server started with --allow-write applies it (autode_apply_decision ${id}).` };
-        const p = store.proposal<PlatformChangeProposal>(id);
-        const outcome = await deps.executePlatformChange(p.connectionId, p.sql);
-        const done = store.markApplied(id, `Ran on ${p.connectionId}: ${outcome}`);
-        return { decision: done, applied: true, message: `Applied ${id} (approved by ${approver}): ${outcome}` };
-      }
       case 'workflow': {
         const p = store.proposal<WorkflowInstance>(id);
         const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', p.problemId);
@@ -419,14 +399,13 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
 
 /**
  * Picks up decisions resolved in their files and applies every approved one
- * this process can apply (platform changes only with `executePlatformChange`).
+ * this process can apply.
  * Call it before answering about decisions, and when decision files change.
  */
 export async function processResolved(store: DecisionStore, ctx: ProposalContext, deps: ApplyDeps = {}): Promise<{ applied: ApplyResult[]; incomplete: string[] }> {
   const { incomplete } = store.syncFileResolutions();
   const applied: ApplyResult[] = [];
   for (const d of store.list({ status: 'approved' })) {
-    if (d.kind === 'platform_change' && !deps.executePlatformChange) continue;
     if (d.problemId && ctx.problemId && d.problemId !== ctx.problemId) continue;
     applied.push(await applyDecision(store, d.id, ctx, deps));
   }

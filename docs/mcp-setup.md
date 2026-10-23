@@ -28,7 +28,6 @@ The server takes these arguments:
 | `--resources <folder>` | The folder that holds the bundled interview prompts and primitives. It is found automatically next to the server file, so pass it only if you copied `autode.js` somewhere else. |
 | `--allow-cli` | Lets the server run the Snowflake CLI (`snow`). Needed for connections from `connections.toml` and for username/password sign-in; key-pair and Databricks connections don't need it. |
 | `--drivers <folder>` | Where drivers you installed with AutoDE's guidance live (the Oracle driver). Defaults to `AUTODE_DRIVERS_DIR`, else `~/.autode/drivers`, which is the same folder the extension uses. |
-| `--allow-write` | Lets the server run platform changes that a person approved (`autode_apply_decision`). Leave it off unless you need it; see [Read-only by default](#read-only-by-default). |
 
 In the examples below, `autode mcp` is the installed command. Without the package, replace `"command": "autode", "args": ["mcp", …]` with `"command": "node", "args": ["/path/to/dist/autode.js", "mcp", …]`.
 
@@ -244,7 +243,7 @@ connections:
 
 `autode_execute_query` runs exactly one statement per call, and only `SELECT`, `WITH`, `SHOW`, `DESCRIBE` and `EXPLAIN`. Comments and quoted text are taken into account, so a write hidden behind a comment or inside a second statement is refused.
 
-**Changes to a platform are proposed, approved by a person, then applied** (since 0.40.0). An agent proposes the statement with `autode_propose_platform_change`. A person approves the resulting decision (see [Proposing changes](#proposing-changes)). Then `autode_apply_decision` runs it, on a server started with `--allow-write`. Until 0.39.0, `--allow-write` let `autode_execute_query` run writes directly; it no longer does.
+**Changes to a platform are runbooks** (since 0.45.8). An agent proposes the steps with `autode_propose_runbook`; AutoDE classifies and checks each one; a person approves under the team's policy; AutoDE's runner runs it, step by step, in VS Code's Runbook tab. The MCP server itself never writes to a platform. (Until 0.45.7, single statements could be proposed with `autode_propose_platform_change` and run by a server started with `--allow-write`; both are gone.)
 
 This check reads the SQL text; it can't see what a function or a view does when it runs. **The real protection is the platform role:** give the connection a role that can only read.
 
@@ -280,8 +279,7 @@ Validation errors come back item by item, so the agent can fix the proposal and 
 |---|---|---|
 | `autode_propose_spec_change` | A revised Business Problem Specification; approved, it becomes the new draft | High |
 | `autode_propose_pipeline_spec` | A Pipeline Spec; approved, it becomes the new draft | High |
-| `autode_propose_mapping` | One source-to-target mapping; source columns are checked against the estate | High |
-| `autode_propose_platform_change` | One statement that changes data or objects, with the reason | High |
+| `autode_propose_runbook` | The steps of a platform change, checked and classified by AutoDE, run by its runner once approved | High |
 
 **Who may resolve a decision:**
 - **Low stakes:** the agent, with `autode_resolve_decision`, after asking you. The tool is marked destructive, so your client confirms first.
@@ -339,10 +337,9 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_execute_query` | Run one read-only statement, with at most 10 000 rows (100 by default). |
 | `autode_propose_assertion` | Propose a fact; a person confirms it in the Context Inbox, or you confirm a low-stakes one with `autode_review_assertion` after asking ([Proposing changes](#proposing-changes)). |
 | `autode_review_assertion` / `autode_verify_assertion` | Confirm or reject a low-stakes fact; verify a fact against data. |
-| `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_mapping`, `autode_propose_platform_change`, `autode_propose_connection`, `autode_propose_vocabulary` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
+| `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_connection`, `autode_propose_vocabulary` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
 | `autode_list_decisions` / `autode_get_decision` | See decisions, their proposals, validation and history. |
 | `autode_resolve_decision` | Approve or reject a low-stakes decision after asking the user. |
-| `autode_apply_decision` | Run an approved platform change (server started with `--allow-write`). |
 
 **Prompts**
 - `autode_interview_<part>`: AutoDE's requirements interview, one prompt per part.

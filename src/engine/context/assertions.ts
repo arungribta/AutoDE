@@ -17,7 +17,6 @@ export type AssertionKind =
   | 'business_term'        // glossary definition, bound to physical columns where possible
   | 'metric'               // measure/metric definition: expression, aggregation, grain, filters
   | 'business_rule'        // STRICT | RECOMMENDED rule
-  | 'mapping'              // source column(s) → target column, with transform
   | 'quality_expectation'  // expected data property (not-null, accepted values, freshness SLA)
   | 'decision'             // a design choice made in chat ("SCD2 for customer")
   | 'assumption'           // something taken as true without evidence; must be visible
@@ -27,7 +26,7 @@ export type AssertionKind =
 
 export const ASSERTION_KINDS: readonly AssertionKind[] = [
   'schema_fact', 'data_fact', 'key', 'grain', 'relationship', 'business_term', 'metric', 'business_rule',
-  'mapping', 'quality_expectation', 'decision', 'assumption', 'constraint', 'naming_convention', 'verified_query'
+  'quality_expectation', 'decision', 'assumption', 'constraint', 'naming_convention', 'verified_query'
 ];
 
 export type AssertionStatus = 'proposed' | 'active' | 'rejected' | 'superseded' | 'needs_review';

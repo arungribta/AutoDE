@@ -6586,8 +6586,8 @@ async function main() {
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
       const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
-      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
+      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
         const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
@@ -6630,8 +6630,6 @@ async function main() {
       autode_propose_assertion: [{ assertion: { kind: 'business_term', subject: ['x'], predicate: 'p', statement: 's', evidence: [{ type: 'file', ref: 'r' }] } }, { assertion: { kind: 'business_term' } }],
       autode_propose_spec_change: [{ spec: { problemStatement: 'p', objectives: ['o'], scope: { in: [], out: [] } } }, { spec: { problemStatement: 'p' } }],
       autode_propose_pipeline_spec: [{ pipelineSpec: {} }, { pipelineSpec: 'yaml' }],
-      autode_propose_mapping: [{ mapping: { id: 'm', sourceEntityId: 's', targetName: 't', columns: [] } }, { mapping: { id: 'm' } }],
-      autode_propose_platform_change: [{ change: { connectionId: 'c', sql: 'DELETE FROM t', reason: 'r' } }, { change: { connectionId: 'c', sql: 'DELETE FROM t' } }],
       autode_propose_connection: [{ connection: { platform: 'databricks', role: 'source', fields: { httpPath: '/sql/1.0/warehouses/w' }, credentials: { resolver: 'cli', ref: 'DEFAULT' } } }, { connection: { platform: 'databricks', role: 'source', credentials: { resolver: 'vscode' } } }],
       autode_list_problems: [{}, { x: 1 }],
       autode_pack_list: [{}, { x: 1 }],
@@ -6668,7 +6666,6 @@ async function main() {
       autode_list_decisions: [{ status: 'pending' }, { status: 'maybe' }],
       autode_get_decision: [{ id: 'dec-x' }, {}],
       autode_resolve_decision: [{ id: 'dec-x', decision: 'approved', by: 'me' }, { id: 'dec-x', decision: 'perhaps', by: 'me' }],
-      autode_apply_decision: [{ id: 'dec-x' }, { id: '' }],
       autode_review_assertion: [{ id: 'x', action: 'confirm', by: 'me' }, { id: 'x', action: 'approve', by: 'me' }],
       autode_verify_assertion: [{ id: 'x', connectionId: 'snowflake:prod' }, { id: 'x' }]
     };
@@ -7186,38 +7183,28 @@ async function main() {
     } finally { await h.done(); }
   });
 
-  await test('v0.40.0: a platform write is proposed, approved by a person, then applied — never run directly, even with --allow-write; connect failures map to the error contract', async () => {
+  await test('v0.40.0 (v0.45.8): a platform write never runs directly — it is a runbook; the single-statement platform change and --allow-write are retired, an old approved one fails with where to go; connect failures map to the error contract', async () => {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
-    const h = await platformHarness({ allowWrite: true });
+    const h = await platformHarness();
     try {
       const exec = (await h.client.listTools()).tools.find((t) => t.name === 'autode_execute_query');
       assert.deepStrictEqual([exec.annotations.readOnlyHint, exec.annotations.destructiveHint], [true, false]);
       const direct = (await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1)' })).structuredContent;
-      assert.ok(direct.code === 'WRITE_NOT_ALLOWED' && /autode_propose_platform_change/.test(direct.message), JSON.stringify(direct));
-      assert.strictEqual((await h.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'SELECT 1', reason: 'x' } })).structuredContent.code, 'VALIDATION_FAILED', 'a read is not a change');
-      assert.strictEqual((await h.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1); DROP TABLE t', reason: 'x' } })).structuredContent.code, 'VALIDATION_FAILED', 'one statement');
-      const proposed = (await h.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1)', reason: 'Seed the lookup row.' } })).structuredContent;
-      const id = proposed.decision.id;
-      assert.deepStrictEqual([proposed.decision.stakes, proposed.decision.status], ['high', 'pending']);
-      assert.ok(!h.executed.some((e) => /INSERT/.test(e.sql || '')), 'nothing ran yet');
-      assert.strictEqual((await h.call('autode_apply_decision', { id })).structuredContent.code, 'VALIDATION_FAILED', 'not approved yet');
-      assert.strictEqual((await h.call('autode_resolve_decision', { id, decision: 'approved', by: 'agent' })).structuredContent.code, 'PERMISSION_DENIED', 'an agent cannot approve a high-stakes decision');
-      // The file channel: a person edits the decision file and commits it.
-      const file = nodePath.join(h.ws, '.autode', 'decisions', `${id}.yaml`);
-      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('decision: ""', 'decision: approved').replace('by: ""', 'by: priya'));
-      const applied = (await h.call('autode_apply_decision', { id })).structuredContent;
-      assert.ok(applied.applied === true && applied.decision.status === 'applied', JSON.stringify(applied));
-      assert.ok(h.executed.some((e) => e.sql === 'INSERT INTO t VALUES (1)'));
-      const full = (await h.call('autode_get_decision', { id })).structuredContent.decision;
-      assert.deepStrictEqual(full.events.map((e) => [e.type, e.channel || null]), [['proposed', null], ['approved', 'file'], ['applied', null]]);
-      assert.strictEqual(full.resolution.by, 'priya');
+      assert.ok(direct.code === 'WRITE_NOT_ALLOWED' && /autode_propose_runbook/.test(direct.message), JSON.stringify(direct));
+      const names = (await h.client.listTools()).tools.map((t) => t.name);
+      assert.ok(!names.includes('autode_propose_platform_change') && !names.includes('autode_apply_decision'), 'retired');
+      // A platform change approved before v0.45.8 is not run: it says where to go.
+      const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+      const P = fresh('../dist/engine/decisions/proposals.js');
+      const store = new DecisionStore(h.ws);
+      const old = store.create({ kind: 'platform_change', title: 'Run on snowflake:ACME: INSERT', summary: 'seed', proposal: { connectionId: 'snowflake:ACME', sql: 'INSERT INTO t VALUES (1)', reason: 'seed' }, proposedBy: { host: 'mcp', client: 'test' }, validation: { ok: true, errors: [], warnings: [], checks: [] } });
+      store.resolve(old.id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      const r = await P.applyDecision(store, old.id, { workspaceRoot: h.ws });
+      assert.ok(!r.applied && r.decision.status === 'failed' && /propose it as a runbook/.test(r.message), r.message);
+      assert.ok(!h.executed.some((e) => /INSERT/.test(e.sql || '')), 'nothing ran');
+      assert.strictEqual(fresh('../dist/mcp/server.js').parseArgs(['--allow-write']).allowWrite, undefined, 'the flag is gone');
+      void nodeFs; void nodePath;
     } finally { await h.done(); }
-    const ro = await platformHarness();
-    try {
-      const p = (await ro.call('autode_propose_platform_change', { change: { connectionId: 'snowflake:ACME', sql: 'DELETE FROM t', reason: 'cleanup' } })).structuredContent;
-      assert.strictEqual(p.decision.status, 'pending', 'a read-only server may still record the proposal');
-      assert.strictEqual((await ro.call('autode_apply_decision', { id: p.decision.id })).structuredContent.code, 'WRITE_NOT_ALLOWED');
-    } finally { await ro.done(); }
     for (const [error, code] of [['Snowflake SQL API error (401): JWT token is invalid', 'AUTH_FAILED'], ['Insufficient privileges to operate on warehouse', 'PERMISSION_DENIED'], ['fetch failed: ECONNREFUSED', 'CONNECTION_FAILED'], ['Executing queries via the Snowflake CLI requires CLI-execution consent', 'PERMISSION_DENIED']]) {
       const f = await platformHarness({ connectError: error });
       try {
@@ -7227,7 +7214,6 @@ async function main() {
       } finally { await f.done(); }
     }
   });
-
   await test('v0.37.0: redaction — no tool response or server log line carries a credential from the environment (bundled server over stdio)', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
@@ -7861,42 +7847,43 @@ async function main() {
 
   // ── v0.40.0: PA1 — decision store and proposal tools ──
 
-  await test('v0.40.0: a mapping proposal is grounded before anyone sees it; a valid one waits for a person, and an approved one is applied by the engine', async () => {
+  await test('v0.40.0 (v0.45.8): a high-stakes proposal waits for a person — stakes are recomputed, never read from its file; a file resolution needs a name; mappings are no longer decisions or facts, and an old approved mapping decision still lands in the mapping document', async () => {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const f = await mcpWorkspace();
     const client = await mcpSession(f.ws);
     const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
-    const mappingFile = nodePath.join(f.ws, '.autode', 'problems', 'retail-ab12', 'context', 'mapping-context.yaml');
     const decisionsDir = nodePath.join(f.ws, '.autode', 'decisions');
     try {
-      const bad = await call('autode_propose_mapping', { mapping: { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'FACT_SALES', columns: [{ sourceColumn: 'order_id', targetColumn: 'ORDER_ID' }, { sourceColumn: 'discount', targetColumn: 'DISCOUNT' }] } });
-      assert.strictEqual(bad.code, 'VALIDATION_FAILED');
-      assert.ok(bad.details.errors.some((e) => /shop\.orders\.discount does not exist/.test(e)), JSON.stringify(bad.details));
-      assert.ok(!nodeFs.existsSync(decisionsDir) && !nodeFs.existsSync(mappingFile), 'nothing written for an invalid proposal');
-      const ok = await call('autode_propose_mapping', { mapping: { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'FACT_SALES', columns: [{ sourceColumn: 'order_id', targetColumn: 'ORDER_ID' }, { sourceColumn: 'amount', targetColumn: 'NET_AMOUNT' }] }, skill: 'sttm-mapping', evidence: [{ ref: 'docs/brd.md#sales', quote: 'net amount per order' }] });
+      const ok = await call('autode_propose_connection', { connection: { platform: 'databricks', role: 'source', fields: { httpPath: '/sql/1.0/warehouses/w', catalog: 'main' }, credentials: { resolver: 'cli', ref: 'prod' } }, skill: 'onboarding' });
       const id = ok.decision.id;
-      assert.deepStrictEqual([ok.decision.kind, ok.decision.stakes, ok.decision.status, ok.decision.proposedBy.client, ok.decision.proposedBy.skill], ['mapping', 'high', 'pending', 'autode-tests', 'sttm-mapping']);
-      assert.ok(ok.decision.validation.warnings.some((w) => /FACT_SALES is not in the estate/.test(w)));
-      assert.ok(!nodeFs.existsSync(mappingFile), 'the mapping is not written while the decision is pending');
+      assert.deepStrictEqual([ok.decision.kind, ok.decision.stakes, ok.decision.status, ok.decision.proposedBy.client], ['connection', 'high', 'pending', 'autode-tests']);
       assert.deepStrictEqual(nodeFs.readdirSync(decisionsDir).sort(), [`${id}.proposal.json`, `${id}.yaml`], 'a proposal writes only its decision');
       assert.strictEqual((await call('autode_resolve_decision', { id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED');
-      // Someone (or something) flips the file's stakes to low: the tool channel stays closed.
       const file = nodePath.join(decisionsDir, `${id}.yaml`);
       nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('stakes: high', 'stakes: low').replace(/allowedChannels:\n(  - \w+\n)+/, 'allowedChannels:\n  - tool\n'));
       assert.strictEqual((await call('autode_resolve_decision', { id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED', 'stakes are recomputed, never read from the file');
-      // A resolution without "by" is not taken.
       nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('decision: ""', 'decision: approved'));
       let listed = await call('autode_list_decisions', {});
       assert.deepStrictEqual(listed.incompleteFileResolutions, [id]);
       nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('by: ""', 'by: priya'));
       listed = await call('autode_list_decisions', {});
       assert.ok(listed.appliedNow.some((m) => /Applied/.test(m)), JSON.stringify(listed));
-      assert.strictEqual(listed.decisions[0].status, 'applied');
-      const mc = nodeFs.readFileSync(mappingFile, 'utf8');
-      assert.ok(/FACT_SALES/.test(mc) && /NET_AMOUNT/.test(mc));
+      // Mappings: no proposal tool, no fact kind.
+      assert.ok(!(await client.listTools()).tools.some((t) => t.name === 'autode_propose_mapping'));
+      const fact = await call('autode_propose_assertion', { assertion: { kind: 'mapping', subject: ['shop.orders'], predicate: 'maps_to', value: { from: ['a'], to: 'b' }, statement: 'a maps to b', evidence: [{ type: 'file', ref: 'x' }] } });
+      assert.ok(fact.code === 'VALIDATION_FAILED' && /mapping facts were retired/.test(JSON.stringify(fact)), JSON.stringify(fact));
+      // A mapping decision approved before v0.45.8 still lands, as a draft in the mapping document.
+      const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+      const P = fresh('../dist/engine/decisions/proposals.js');
+      const store = new DecisionStore(f.ws);
+      const problemRoot = nodePath.join(f.ws, '.autode', 'problems', 'retail-ab12');
+      const old = store.create({ kind: 'mapping', title: 'Map shop.orders → FACT_SALES', summary: '', proposal: { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'FACT_SALES', columns: [{ sourceColumn: 'amount', targetColumn: 'NET_AMOUNT' }] }, proposedBy: { host: 'mcp', client: 'test' }, validation: { ok: true, errors: [], warnings: [], checks: [] }, problemId: 'retail-ab12' });
+      store.resolve(old.id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      const r = await P.applyDecision(store, old.id, { workspaceRoot: f.ws, problemRoot, problemId: 'retail-ab12' });
+      assert.ok(r.applied, r.message);
+      assert.ok(/NET_AMOUNT/.test(nodeFs.readFileSync(nodePath.join(problemRoot, 'context', 'mapping-context.yaml'), 'utf8')));
     } finally { await client.close(); f.done(); }
   });
-
   await test('v0.40.0: a decision whose document changed after it was proposed is superseded, not applied; an approved spec revision becomes the next draft', async () => {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
@@ -8375,12 +8362,12 @@ async function main() {
       const ro = selectEngineTools(tools, 'read-only', undefined).map((t) => t.name);
       const full = selectEngineTools(tools, 'full', undefined).map((t) => t.name);
       assert.ok(ro.includes('autode_compile_transform') && ro.includes('autode_check_grounding') && !ro.some((n) => /^autode_propose_/.test(n)), ro.join());
-      assert.ok(full.includes('autode_propose_mapping') && !full.includes('autode_resolve_decision') && !full.includes('autode_apply_decision'), 'proposals in full mode; resolving or applying a decision never');
+      assert.ok(full.includes('autode_propose_vocabulary') && !full.includes('autode_resolve_decision') && !full.includes('autode_apply_decision'), 'proposals in full mode; resolving or applying a decision never');
       assert.deepStrictEqual(selectEngineTools(tools, 'none', undefined), []);
       assert.deepStrictEqual([...declaredEngineTools(['Read', 'autode_resolve', 'mcp__autode__autode_compile_transform', 'mcp__other__x'], tools.map((t) => t.name))].sort(), ['autode_compile_transform', 'autode_resolve']);
       assert.strictEqual(declaredEngineTools(['mcp__autode__*'], tools.map((t) => t.name)).size, tools.length);
       assert.strictEqual(await engine.declaresWrite(['Read', 'mcp__autode__autode_compile_transform']), false);
-      assert.strictEqual(await engine.declaresWrite(['mcp__autode__autode_propose_mapping']), true);
+      assert.strictEqual(await engine.declaresWrite(['mcp__autode__autode_propose_vocabulary']), true);
       assert.strictEqual(await engine.declaresWrite(['mcp__autode__autode_resolve_decision']), false, 'a destructive tool is never granted, so it raises nothing');
       // A run's tool set: the model sees the tool's JSON; anything outside the selection is refused.
       const set = await engine.toolSet('read-only', ['mcp__autode__autode_search_primitives', 'mcp__autode__autode_compile_pipeline_spec']);
@@ -8389,7 +8376,7 @@ async function main() {
       assert.ok(!ok.isError && JSON.parse(ok.text).entities.length > 0, ok.text);
       const bad = await set.call('autode_compile_pipeline_spec', { dialect: 'cobol' });
       assert.ok(bad.isError && /VALIDATION_FAILED/.test(bad.text));
-      assert.ok((await set.call('autode_propose_mapping', { mapping: {} })).isError, 'not in this run');
+      assert.ok((await set.call('autode_propose_vocabulary', { mapping: {} })).isError, 'not in this run');
       await assert.rejects(engine.call('autode_describe_primitive', { kind: 'nope' }), (e) => e instanceof EngineError && e.code === 'UNKNOWN_PRIMITIVE');
       // Disposed (or gone), the next call starts it again.
       await engine.dispose();
@@ -8412,7 +8399,7 @@ async function main() {
     assert.strictEqual(out, '{"matches":[]}');
     assert.deepStrictEqual(calls, [['autode_resolve', { text: 'orders' }]]);
     assert.deepStrictEqual(audit.map((a) => [a.tool, a.outcome]), [['autode_resolve', 'ok']]);
-    const denied = await withMock(mock, () => T.executeAgenticTool({ id: '2', name: 'autode_propose_mapping', input: {} }, '/ws', audit, offered, engine));
+    const denied = await withMock(mock, () => T.executeAgenticTool({ id: '2', name: 'autode_propose_vocabulary', input: {} }, '/ws', audit, offered, engine));
     assert.ok(/not available/.test(denied) && audit[1].outcome === 'denied');
     // Gemini takes an OpenAPI subset of JSON Schema.
     assert.deepStrictEqual(T.geminiSchema(engine.specs[0].parameters), { type: 'object', properties: { text: { type: 'string' }, limit: { type: 'integer' } }, required: ['text'] });
@@ -8423,14 +8410,14 @@ async function main() {
     const L = fresh('../dist/engine/skills/lifecycle.js');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-skill-eng-'));
     const mk = (id, md, tier) => { const d = nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', id); nodeFs.mkdirSync(d, { recursive: true }); nodeFs.writeFileSync(nodePath.join(d, 'SKILL.md'), md); L.recordImport(d, { source: 'local' }, 't'); L.setTrustTier(d, tier, 't'); };
-    mk('mapper', '---\nname: mapper\nallowed-tools: [Read, mcp__autode__autode_resolve, mcp__autode__autode_propose_mapping]\n---\nPropose a mapping.\n', 'trusted');
-    mk('peek', '---\nname: peek\nallowed-tools: [Read, mcp__autode__autode_resolve, mcp__autode__autode_propose_mapping]\n---\nLook.\n', 'reviewed');
+    mk('mapper', '---\nname: mapper\nallowed-tools: [Read, mcp__autode__autode_resolve, mcp__autode__autode_propose_vocabulary]\n---\nPropose a mapping.\n', 'trusted');
+    mk('peek', '---\nname: peek\nallowed-tools: [Read, mcp__autode__autode_resolve, mcp__autode__autode_propose_vocabulary]\n---\nLook.\n', 'reviewed');
     try {
       const { executeToolSkillAgent } = withMock(createMock(), () => fresh('../dist/agents/build/ToolSkillAgent.js'));
       const asked = []; let disposed = 0;
       const engine = {
         declaresWrite: async (d) => d.some((x) => /propose/.test(x)),
-        toolSet: async (mode, d) => { asked.push([mode, d]); return { specs: [{ name: 'autode_resolve', description: '', parameters: {} }, ...(mode === 'full' ? [{ name: 'autode_propose_mapping', description: '', parameters: {} }] : [])], call: async () => ({ text: '{}', isError: false }) }; },
+        toolSet: async (mode, d) => { asked.push([mode, d]); return { specs: [{ name: 'autode_resolve', description: '', parameters: {} }, ...(mode === 'full' ? [{ name: 'autode_propose_vocabulary', description: '', parameters: {} }] : [])], call: async () => ({ text: '{}', isError: false }) }; },
         dispose: async () => { disposed++; }
       };
       const run = async (skillId, provider) => {
@@ -8444,8 +8431,8 @@ async function main() {
       };
       let r = await run('mapper', 'openai');
       assert.strictEqual(r.result.success, true, r.result.message);
-      assert.deepStrictEqual([r.seen.toolExecutionMode, r.seen.allowedToolNames, r.seen.engineTools.specs.map((s) => s.name)], ['full', ['autode_read_file'], ['autode_resolve', 'autode_propose_mapping']], 'a declared proposal needs full mode; file tools stay Read only');
-      assert.deepStrictEqual(r.result.details.engineTools, ['autode_resolve', 'autode_propose_mapping']);
+      assert.deepStrictEqual([r.seen.toolExecutionMode, r.seen.allowedToolNames, r.seen.engineTools.specs.map((s) => s.name)], ['full', ['autode_read_file'], ['autode_resolve', 'autode_propose_vocabulary']], 'a declared proposal needs full mode; file tools stay Read only');
+      assert.deepStrictEqual(r.result.details.engineTools, ['autode_resolve', 'autode_propose_vocabulary']);
       r = await run('peek', 'openai');
       assert.deepStrictEqual([r.seen.toolExecutionMode, r.seen.engineTools.specs.map((s) => s.name)], ['read-only', ['autode_resolve']], 'a reviewed skill never gets a write-capable engine tool');
       assert.deepStrictEqual(asked.map((a) => a[0]), ['full', 'read-only']);

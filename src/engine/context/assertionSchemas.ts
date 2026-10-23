@@ -63,11 +63,6 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
     type: 'object',
     properties: { text: { type: 'string' }, level: { enum: ['STRICT', 'RECOMMENDED'] }, strategy: { type: 'string' } }
   },
-  mapping: {
-    type: 'object',
-    required: ['from', 'to'],
-    properties: { from: { type: 'array', items: { type: 'string' }, minItems: 1 }, to: { type: 'string' }, transform: { type: 'string' } }
-  },
   quality_expectation: {
     type: 'object',
     required: ['check'],
@@ -111,6 +106,7 @@ export function isMirrorPredicate(predicate: string): boolean {
 /** Validates an assertion's envelope and its kind-specific `value`. Returns error messages (empty = valid). */
 export function validateAssertion(a: Pick<Assertion, 'kind' | 'subject' | 'predicate' | 'value' | 'statement' | 'evidence'>): string[] {
   const errors: string[] = [];
+  if (String(a.kind) === 'mapping') return ['mapping facts were retired in v0.45.8: record the mapping in the mapping document (autode_record_mapping).'];
   if (!ASSERTION_KINDS.includes(a.kind)) return [`unknown kind "${String(a.kind)}"`];
   if (!Array.isArray(a.subject) || a.subject.length === 0 || a.subject.some((s) => typeof s !== 'string' || !s)) errors.push('subject must be a non-empty list of ids');
   if (typeof a.predicate !== 'string' || !a.predicate) errors.push('predicate is required');

@@ -405,8 +405,8 @@ Use the scratch workspace from Part 16 with an active business problem and a sou
   Do: ask Claude Code to add a glossary term and accept it.
   Expect: Claude Code asks you first (destructive tool); after you agree, the term is in the ledger as confirmed (`autode_list_assertions`).
 - [ ] **17.7 Platform writes need approval.**
-  Do: with the server started with `--allow-write`, ask Claude Code to insert a row into a scratch table.
-  Expect: `autode_execute_query` refuses and the agent proposes the change instead; after you approve it in the panel, the agent's `autode_apply_decision` runs it once. Without `--allow-write`, apply is refused.
+  Do: ask Claude Code to insert a row into a scratch table.
+  Expect: `autode_execute_query` refuses and the agent proposes a runbook instead (since 0.45.8; Part 32 runs it).
 - [ ] **17.8 Panel approvals are recorded.**
   Do: approve a specification in the panel the usual way.
   Expect: a `spec_approval` decision appears under Recent with your name.

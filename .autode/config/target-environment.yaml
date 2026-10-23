@@ -1,0 +1,55 @@
+# AutoDE Target Environment Configuration
+# Edit this file to define your target data platform and toolchain.
+# Profiles support inheritance via the "inherits" field.
+profiles:
+  - name: base
+    environment:
+      platform: snowflake
+      environmentProfile: development
+      modelingApproach: dimensional
+      namingConvention: snake_case
+      transformationTool: dbt
+      orchestrationTool: airflow
+      outputFormats:
+        - ddl
+        - yaml
+        - markdown
+      platformConfig:
+        account: ""
+        database: CURATED_DB
+        schema: ANALYTICS
+        warehouse: WH_XS
+        role: SYSADMIN
+  - name: development
+    inherits: base
+    environment:
+      platform: snowflake
+      environmentProfile: development
+      modelingApproach: dimensional
+      namingConvention: snake_case
+      transformationTool: dbt
+      orchestrationTool: airflow
+      outputFormats: []
+      platformConfig:
+        account: ""
+        database: DEV_DB
+        schema: DEV_ANALYTICS
+        warehouse: WH_XS
+        role: SYSADMIN
+  - name: production
+    inherits: base
+    environment:
+      platform: snowflake
+      environmentProfile: production
+      modelingApproach: dimensional
+      namingConvention: snake_case
+      transformationTool: dbt
+      orchestrationTool: airflow
+      outputFormats: []
+      platformConfig:
+        account: ""
+        database: PROD_DB
+        schema: ANALYTICS
+        warehouse: WH_L
+        role: SYSADMIN
+activeProfile: development
