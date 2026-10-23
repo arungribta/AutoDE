@@ -1,3 +1,0 @@
-# Written by AutoDE. local/ holds per-engineer state and rebuildable caches
-# (chat transcripts, the active problem, derived graph, catalog): never commit it.
-local/

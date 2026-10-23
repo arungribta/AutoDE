@@ -7,9 +7,9 @@ npm-debug.log*
 tmp_*.js
 mock_*.js
 
-# AutoDE working state (v0.36.0): .autode/local/ is per engineer and rebuildable.
-# AutoDE also writes .autode/.gitignore itself; this line covers this repo's own use.
-.autode/local/
+# AutoDE working state: this is AutoDE's own source repository, so an .autode/ folder here is
+# local test state (the extension creates one when it is opened on this folder). Never commit it.
+/.autode/
 
 # Enterprise Context Layer (pre-v0.36.0 .ai-context/) — ignore derived/transient only
 # (context/, spec/, sources.yaml, target-environment.yaml are committed)
