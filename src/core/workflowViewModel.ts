@@ -42,6 +42,8 @@ export interface StageModel extends StageView {
   guide: string;
   /** Runbooks proposed or approved for this stage (v0.45.6). */
   runbooks: Array<{ id: string; status: string }>;
+  /** No AutoDE agent does this stage yet: a person does it and hands it in (SIMP-1). */
+  manual: boolean;
 }
 
 export type StageAction = 'approve' | 'approve-document' | 'run' | 'produce' | 'open-document' | 'hand-in' | 'approve-again' | 'skip' | 'reopen';
@@ -150,7 +152,8 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
       documentBacked, approvedBy: s.record.approvedBy, approvedAt: s.record.approvedAt, approvedVia: approvals.get(s.id)?.channel, actions, runner,
       produceLabel: documentBacked ? PRODUCE_LABEL[s.kind] : undefined, document: hasDoc ? relTo(scope.workspaceRoot, docFile!) : undefined, blockers,
       guide: stageRunbooks.get(s.id)?.some((r) => r.status !== 'ran') && v.status !== 'done' ? `Its runbook ${stageRunbooks.get(s.id)!.find((r) => r.status !== 'ran')!.id} is ${stageRunbooks.get(s.id)!.find((r) => r.status !== 'ran')!.status}: open it to approve and run it.` : guide,
-      runbooks: stageRunbooks.get(s.id) ?? []
+      runbooks: stageRunbooks.get(s.id) ?? [],
+      manual: s.included && !runner && !documentBacked && v.status !== 'done' && v.status !== 'skipped'
     };
   });
   const included = w.stages.filter((s) => s.included && s.record.status !== 'skipped');

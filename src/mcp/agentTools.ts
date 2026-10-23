@@ -17,6 +17,9 @@ import { StageKind } from '../engine/workflows/stageKinds';
 import { DataModel, checkModel, draftModel, problemMappings, renderModelDdl, targetSettings } from '../engine/agents/modelDraft';
 import { primitiveCandidates, CandidateColumn } from '../engine/agents/primitiveCandidates';
 import { skillCatalog } from '../engine/agents/skillCatalog';
+import { waitingForYou } from '../engine/approvals/waiting';
+import { factView } from '../engine/context/factReview';
+import { isMirror } from '../engine/context/projection';
 import { listRunbooks, runLogFile, runnableProblem } from '../engine/runner/runbook';
 import { loadRunbookPolicy } from '../engine/runner/policy';
 import { verifyRunLog, readRunLog } from '../engine/runner/runLog';
@@ -81,6 +84,18 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
     } } }
   } };
   return [
+    {
+      name: 'autode_approvals_list',
+      description: "Everything that waits for a person, in one list: pending decisions (workflow, stage gates, runbooks, connections, proposals), facts to review in the Context Inbox, stage documents to approve, runbooks that need a second approver. Each item says how a person approves it (the AutoDE panel, or the terminal command shown). You can't approve high-stakes items: tell the user what waits and how.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: read('Waiting for you'),
+      handler: async (_args, ws) => {
+        const src = await ws.contextSources();
+        const byId = new Map(src.assertions.map((a) => [a.id, a] as const));
+        const facts = src.assertions.filter((a) => !isMirror(a) && (a.status === 'proposed' || a.status === 'needs_review')).map((a) => factView(a, byId));
+        return { items: waitingForYou({ workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot, problemId: ws.activeProblemId(), facts }) } as unknown as Record<string, unknown>;
+      }
+    },
     {
       name: 'autode_runbook_status',
       description: "The active problem's approved runbooks and how far they have run: each step's engine classification and state, the approvals, whether it may run now (and why not), and whether its run log is intact. Runbooks run only in AutoDE's runner, started by a person; propose new ones with autode_propose_runbook.",

@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { PLUGIN_HOSTS, PluginHost, buildPlugin, installPlugin, serverEntry } from '../engine/agents/plugin';
 import { spawnSync } from 'node:child_process';
+import { waitingForYou } from '../engine/approvals/waiting';
 import { Runbook, approveRunbook, checkRunbook, listRunbooks } from '../engine/runner/runbook';
 import { loadRunbookPolicy } from '../engine/runner/policy';
 import { CatalogEntry, CatalogGroup, Runner, probeInstaller, skillCatalog, spawnRunner } from '../engine/agents/skillCatalog';
@@ -170,6 +171,10 @@ Skills (AutoDE's own, this workspace's imported ones, interview packs, and the v
   skills check <name>          Probe an external skill's install command on this machine (nothing is installed)
   skills install <name>        (terminal) Run the vendor's own install command after you confirm, then check it worked
 
+Waiting for you:
+  approvals [list]             Everything that waits for a person, in one list: decisions, facts to review, stage
+                               documents, runbooks needing a second approver; each with the command that approves it
+
 Runbooks (platform changes, approved by a person; they run in VS Code's Runbook tab):
   runbook list                 The problem's runbooks: environment, approvals, status, steps run
   runbook show <id>            Every step: the engine's classification, what runs, its dry run and rollback, its state; the log
@@ -298,6 +303,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'plugin': return cmdPlugin(ctx, rest);
       case 'skills': return await cmdSkills(ctx, rest);
       case 'runbook': return await cmdRunbook(ctx, rest);
+      case 'approvals': return await cmdApprovals(ctx, rest);
       default:
         io.err(`autode: unknown command "${command}".\n\n${USAGE}`);
         return EXIT.USAGE;
@@ -732,6 +738,20 @@ async function cmdEstate(ctx: Ctx, rest: string[]): Promise<number> {
 // ── workflow (PA3a, v0.44.0) ────────────────────────────────────────────────
 
 const STATUS_MARK: Record<string, string> = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
+
+async function cmdApprovals(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list'] = rest;
+  if (sub !== 'list') throw new CliError(EXIT.USAGE, 'approvals list (approve each item with the command it shows).');
+  const ws = workspace(ctx);
+  const cfm = await openContext(ctx.workspaceRoot, () => undefined);
+  let facts: FactView[] = [];
+  try { facts = inbox(cfm.getLedger()).facts; } finally { cfm.dispose?.(); }
+  const items = waitingForYou({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId: ctx.values.problem ?? ws.activeProblemId(), facts });
+  emit(ctx, { ok: true, items }, items.length
+    ? items.map((i) => `  ${i.stakes === 'high' ? '!' : '·'} ${i.title}${i.problemId ? ` [${i.problemId}]` : ''}\n      ${i.detail}\n      approve: ${i.cli}`).join('\n') + `\n${items.length} item(s) wait for a person.`
+    : 'Nothing waits for you.');
+  return EXIT.OK;
+}
 
 async function cmdRunbook(ctx: Ctx, rest: string[]): Promise<number> {
   const [sub = 'list', id] = rest;

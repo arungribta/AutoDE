@@ -28,7 +28,7 @@ AutoDE is a **VS Code extension** that takes a data-engineering business problem
 
 **The problem it solves.** General coding agents write plausible data-engineering code that is not grounded in the customer's real schemas, business definitions or approvals. AutoDE makes every artifact trace back to an **approved specification** and to **facts about the data** that are recorded, trusted to a known degree and checkable — and keeps the engineer in control at every gate.
 
-**The mental model in one sentence.** *A governed, spec-driven workflow (interview → specification → plan → generated artifacts), grounded in a ledger of facts about the customer's estate and business, with a deterministic engine underneath that other coding agents can use too.*
+**The mental model in one sentence.** *A governed, spec-driven workflow (interview → specification → planned workflow of stages → generated artifacts), grounded in a ledger of facts about the customer's estate and business, with a deterministic engine underneath that other coding agents can use too.*
 
 Things that surprise newcomers:
 
@@ -108,14 +108,66 @@ Bundling: `tsc` compiles every module to `dist/**` (used by tests); esbuild then
 
 ## 4. Concepts you need
 
+The ideas a data engineer works with in AutoDE, how they fit together, and the guarantee each one carries. The rest of this section (4.1–4.12) goes one level deeper, into how each is built. Everything else in AutoDE is internal: it supports these concepts.
+
+
+| Concept | What it is | Where it lives | Guarantee it carries |
+|---|---|---|---|
+| **Business problem** | One piece of work: its specification, its pack of documents, its workflow and everything it produces. | `.autode/problems/<id>/` | Work is scoped and traceable to a problem. |
+| **Specification** | What the business needs, in its own words: problem statement, objectives, scope, success criteria. Approved by a person. | `spec/business-problem.yaml` | Nothing is built against an unapproved intent. |
+| **Pack** | The documents behind a problem: contracts, BRDs, KPI definitions, data dictionaries, samples. | `pack/` | Requirements come from documents a person supplied, with their authority (signed or draft). |
+| **Estate and facts** | What exists (the source and target systems and their tables and columns, from connections or files) and what is known about it (keys, grain, relationships, terms, rules), each fact with its evidence, trust and status. | `.autode/knowledge/` | Everything AutoDE produces is checked against what really exists, and every important fact is confirmed by a person. |
+| **Workflow** | The problem's stages, from a template (greenfield, modernization, estate merge), proposed by the engine and approved by a person: what each stage needs and produces, and what is ready, waiting, done or stale. | `workflow.yaml`, `workflow-events.jsonl` | The process is planned, gated and recorded; no stage is skipped silently. |
+| **Approvals** | Everything that waits for a person, in one list: *Waiting for you*. Workflow and stage gates, facts to review, stage documents, runbooks, connections. | The Workflow view, `autode approvals`, `autode_approvals_list` | Only a person decides; consequential decisions can't be made by an agent. |
+| **Mapping** | How each source table and column becomes each target column, with transformations. | `context/mapping-context.yaml` | The build follows an approved, grounded mapping. |
+| **Model** | The target data model: entities, grain, keys, relationships, history, rendered as DDL by AutoDE. | the modelling stage's artifacts | The model is checked (grain, keys, references) before it is built. |
+| **Pipeline Spec** | The pipelines as data: per entity, its source, its transform steps (AutoDE's primitives with parameters) and its target. Compiled to code by AutoDE. | `spec/pipeline.yaml` | Code is generated deterministically from an approved spec, not written freehand. |
+| **Artifacts** | What stages produce: SQL, YAML, documents. Each has a grounding manifest: what it references and which facts back its decisions. | `autode-output/<problem>/` | Every deliverable is traceable to the estate and the facts. |
+| **Runbook** | A platform change (create objects, grant, load, deploy): steps an agent proposes, AutoDE classifies (read, change, destructive) and checks, a person approves under the team's policy, and AutoDE's runner runs one step at a time with a tamper-evident log. | `runbooks/`, `runs/` | Nothing changes a data platform without a person, and every change is logged. |
+| **Agents and skills** | An agent is a role (what it may do: its tools and permission tier). A skill is a method (how to do one kind of stage). AutoDE's workflow hands each stage to its agent; agents never call each other or approve anything. | `agents/`, `skills/` (and `.autode/config/agents/` for a team's own) | AI works inside bounded roles, from reviewed instructions, on the stages the workflow assigns. |
+
+#### How they fit together
+
+1. A **business problem** starts from a statement; the interview turns it, and the **pack**, into a **specification** that a person approves.
+2. The engine proposes a **workflow** from a template and what it knows; a person approves it.
+3. Stage by stage, **agents** with their **skills** bring the **estate** in, propose **facts**, and draft the stage's output: the source and target contexts, the **mapping**, the **model**, the **Pipeline Spec**, the **artifacts**, the documentation.
+4. Every draft waits in **approvals** until a person accepts it. A changed input makes the stages that used it stale, and they need approving again.
+5. Platform changes go through **runbooks**; AutoDE's runner runs them once a person approves.
+
+The same process holds in VS Code, in a terminal (`autode`), and in any agent host over MCP (Claude Code, Cortex Code, the Copilot CLI): the host brings the model, AutoDE brings the process, the checks and the approvals.
+
+#### Definitions AutoDE ships, and a team adapts
+
+| Definition | What it decides | A team's own |
+|---|---|---|
+| Workflow templates | The stages of an engagement | `.autode/config/workflows/` |
+| Role templates (agents) | What each agent may do | `.autode/config/agents/` |
+| Skills | How a stage is done | imported through the Skills view (reviewed, then trusted) |
+| Primitives | The vetted transforms the compiler uses | `.autode/config/primitives/` |
+| Policy | Who approves runbooks per environment | `.autode/config/approvals.yaml` |
+| Connections | Which platforms, and how to reach them (never secrets) | `.autode/config/connections.yaml` |
+
+#### Internal (you don't need these to use AutoDE)
+
+The catalog's per-system files, the working set and graph caches, context packs, the decision files' event history, readiness records, chat sessions, the derived semantic-layer snapshot, and the interview's prompt packs. They support the concepts above.
+
+#### Being simplified
+
+AutoDE grew some overlapping objects. They are being reduced, one release at a time (roadmap, decision log 2026-10-22):
+- **one way to change a platform:** runbooks only (the older single-statement platform change goes);
+- **one way to record a mapping:** the mapping document only;
+- **the old plan of steps:** removed (the workflow replaced it);
+- **contexts select from the workspace:** a problem's target and source contexts pick from the workspace's target environments and estate instead of describing them again;
+- **later:** chat attachments into the pack; the interview packs become skills; the older knowledge files (business context, verified queries, semantic-layer snapshots) fold into the facts; one lifecycle for AutoDE's and imported skills.
+
 ### 4.1 Business problem and its specification
 A workspace holds several **business problems** under `.autode/problems/<id>/`; `.autode/local/active-problem.json` says which is current for this engineer. Each has a **Business Problem Specification** (`spec/business-problem.yaml`), versioned and approved by the engineer. Everything downstream keys off the spec's id and version. *Design: technical-design §3.*
 
-### 4.2 Lifecycle gates
-Business problem confirmed → spec approved → source/target context approved → plan approved → stage confirmed → execute. The gates are enforced in `AgentHub` itself, not only in the UI — a command that skips a gate throws. *Requirements: ORC-3; design §3.14.*
+### 4.2 Workflow, stages and approvals
+Each problem's **workflow** (`workflow.yaml`) is drafted by the engine from a template (`workflows/*.yaml`: greenfield, modernization, estate merge), refined by the planner, checked against the template's rules and approved by a person. Its stages run by dependency; each produces an artifact, a document with its own approval (spec, contexts, mapping, Pipeline Spec) or a gate decision. A changed input makes everything downstream stale. The runtime (`src/engine/workflows/`) keeps the gates, for every surface; `workflow-events.jsonl` records who did what. **Waiting for you** (`src/engine/approvals/waiting.ts`) gathers every pending approval, whatever mechanism holds it. *Requirements ORC-9; design §7.8.*
 
-### 4.3 Phases, plan and agents
-Phases (discover, model, build, validate) are inferred **deterministically** from the spec (`src/core/phaseInference.ts`, no LLM). The plan is a DAG of steps, each assigned to an agent (`AGENT_EXECUTORS` in `agentHub.ts`). The planner may only assign known agents; tool skills are never auto-planned. *Design §7.*
+### 4.3 Agents, skills and assignments
+An **agent** is a role template (`agents/<role>.md`: its AutoDE tools, permission tier and skills); a **skill** (`skills/autode-<scope>-<capability>/SKILL.md`, standard Agent Skills) is the method for a kind of stage, chosen by the stage kind and the problem's target platform. For each stage the hub builds an **assignment** (`src/engine/agents/assignment.ts`) with exactly the tools the tier and role allow; it runs in VS Code (Run agent, `src/core/agentExecutor.ts`) or in a host through `autode_workflow_next` and the plugin. Agents record drafts (`autode_record_artifact` and the stage's own document tools) and never approve, start stages or call each other. A stage no skill does is manual. The old plan of steps (`AgentHub.executePlan`) is being removed (SIMP-3). *Requirements SKL-6, SKL-9; design §7.9.*
 
 ### 4.4 Assertions, ledger, trust
 An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `business_term`, `metric`, `quality_expectation`, `decision`, …) about subjects (object ids), with a **status** (`proposed`, `active`, `needs_review`, `superseded`, `rejected`), a **trust** tier (`verified` > `confirmed` > `documented` > `inferred`) and evidence. The **ledger** (`.autode/knowledge/ledger/*.jsonl`) appends events; folding them gives the current assertions. Graph nodes are **mirrors** of schema assertions. Nothing an LLM proposes becomes trusted without a person (or, for `verified`, a probe). *Requirements CTX-*; design §5.3–5.4.*
@@ -145,6 +197,9 @@ The **`autode` CLI** (since v0.42.0) runs the same checks without VS Code: `vali
 ### 4.11 Where AutoDE keeps things
 `.autode/` holds AutoDE's working state, grouped by lifecycle: `problems/<id>/` (spec, plan, context documents, pack — committed), `knowledge/` (ledger, estate, sources, profiles, business context, vocabulary — committed), `config/` (skills, primitives, target environment, connections — committed) and `local/` (active problem, chats, derived graph, catalog — never committed; AutoDE writes `.autode/.gitignore` for it). Generated deliverables go to the visible `autode-output/<problem-id>/` (setting `artifactDirectory`). Every path comes from `src/engine/workspaceLayout.ts`; never build one by hand. A workspace from before v0.36.0 (`.ai-context/`) is moved over on activation (`workspaceMigration.ts`). *Design §2.1–2.2.*
 
+### 4.12 Runbooks and the runner
+Everything that changes a data platform is a **runbook** (`src/engine/runner/`): steps an agent proposes, the engine classifies (read, change, destructive) and checks (CLI allowlist, arguments, rollback), a person approves under `.autode/config/approvals.yaml`, and deterministic code runs in order with dry runs and a hash-chained log, from VS Code's Runbook tab. *Requirements ORC-10; design §7.9.*
+
 ## 5. The main flows
 
 Each flow names its entry point; follow it in the code with the design section beside you.
@@ -158,8 +213,8 @@ Each flow names its entry point; follow it in the code with the design section b
 ### 5.3 Interview → specification
 `AgentHub.discoverNextAction()` runs the SpecOps interview over the bundled skills (`skills/*.json`, overridable in `.autode/config/skills/`), with an `interview` pack and what discovery already established (questions discovery answers are dropped). Synthesis drafts the spec (`specSynthesis.ts`); `SpecManager` persists and versions it. *Design §3.8–3.9.*
 
-### 5.4 Spec → plan → execution
-Approve the spec and contexts → `generatePlanFromSpec()` (phase inference, planner LLM call, validation of the plan) → approve the plan → `executePlan()`: per step, refresh the working set, build a `step` pack, run the agent, write artifacts through `ArtifactWriter` under `autode-output/<problem-id>/<phase>/<specId>.v<n>/`, run grounding checks, write the manifest. A changed approved spec mid-run pauses the plan. *Design §7.4, §5.7.*
+### 5.4 Spec → workflow → stages
+Approve the spec → the engine drafts the workflow (`draftWorkflow()`), a person approves it → stage by stage, `nextAssignment()` and `assignmentFor()` give the agent its assignment; the agent records drafts (artifacts with grounding manifests, or the stage's document), the stage is handed in, and a person approves its gate or document → platform changes run as runbooks. *Design §7.8–7.9.*
 
 ### 5.5 Getting the estate in
 Two routes, same destination: a live connection (`ConnectionManager` → adapter → REST or CLI backend → `extractMetadata`) or a file (`Ingest File as Source Context`: DDL, CSV/JSON, legacy column dictionaries). Both go through `ContextFileManager`: into the catalog whole, into the working set as far as it fits, mirrored into the ledger, projected into the graph. *Design §5.9, §5.11–5.12, §6.*

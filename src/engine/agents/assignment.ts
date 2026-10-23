@@ -94,6 +94,9 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   // role, else the first the kind allows that has a definition (roles defined after the plan was approved).
   const candidates = [roleName, ...kind.roles.filter((n) => n !== roleName)].map((n) => roles.find((r) => r.name === n)).filter((r): r is RoleTemplate => !!r);
   const role: RoleTemplate | undefined = candidates.find((r) => r.skills.some((id) => forKind.has(id))) ?? candidates[0];
+  // No skill does this kind of stage (unless the plan named one): it is a person's to do, not an agent's with the wrong method (SIMP-1).
+  const planned = (s.agent?.skills ?? []).filter((id) => pack.some((k) => k.id === id));
+  if (role && !forKind.size && !planned.length) return { reason: `No AutoDE skill does ${s.kind} stages yet: a person does it and hands it in.` };
   if (!role) return { reason: `Role ${roleName} has no definition yet; AutoDE's built-in agents still do ${s.kind} stages (AutoDE agents, plan steps).` };
   const tier = (s.agent?.tier && TIERS.includes(s.agent.tier) && tierRank(s.agent.tier) <= tierRank(kind.ceiling)) ? s.agent.tier : kind.ceiling;
   // A role with several skills gets those for this stage (the source assessor: conformance on a conformance stage),

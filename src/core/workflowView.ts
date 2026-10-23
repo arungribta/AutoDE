@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { WorkflowModel, StageModel, STATUS_ICON, buildWorkflowModel, statusBarText } from './workflowViewModel';
+import { WaitingItem } from '../engine/approvals/waiting';
 import { stageDetail, WorkflowScope } from '../engine/workflows/service';
 import { actorLabel } from '../engine/workflows/events';
 import { layoutPath } from '../engine/workspaceLayout';
@@ -19,15 +20,20 @@ export interface WorkflowViewHost {
   resolve(id: string, decision: 'approved' | 'rejected', note?: string): Promise<void>;
   workflowAction(action: string, stage?: string, arg?: string): Promise<void>;
   user(): string;
+  /** SIMP-1: everything that waits for a person. */
+  waiting?(): WaitingItem[];
 }
 
-type Node = { kind: 'problem'; model: WorkflowModel } | { kind: 'stage'; stage: StageModel; model: WorkflowModel } | { kind: 'task'; label: string; done?: boolean } | { kind: 'empty'; label: string };
+type Node = { kind: 'waiting'; items: WaitingItem[] } | { kind: 'waitingItem'; item: WaitingItem } | { kind: 'problem'; model: WorkflowModel } | { kind: 'stage'; stage: StageModel; model: WorkflowModel } | { kind: 'task'; label: string; done?: boolean } | { kind: 'empty'; label: string };
 
 export class WorkflowTreeProvider implements vscode.TreeDataProvider<Node> {
   private readonly changed = new vscode.EventEmitter<Node | undefined>();
   public readonly onDidChangeTreeData = this.changed.event;
   private model: WorkflowModel | undefined;
   private error: string | undefined;
+  private waiting: WaitingItem[] = [];
+
+  public waitingCount(): number { return this.waiting.length; }
 
   public constructor(private readonly host: WorkflowViewHost) {}
 
@@ -35,12 +41,29 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<Node> {
     const scope = this.host.scope();
     this.error = undefined;
     try { this.model = scope ? buildWorkflowModel(scope) : undefined; } catch (err) { this.model = undefined; this.error = err instanceof Error ? err.message : String(err); }
+    try { this.waiting = this.host.waiting?.() ?? []; } catch { this.waiting = []; }
     this.changed.fire(undefined);
     return this.model;
   }
 
   public getTreeItem(n: Node): vscode.TreeItem {
     if (n.kind === 'empty') { const t = new vscode.TreeItem(n.label); t.iconPath = new vscode.ThemeIcon('info'); return t; }
+    if (n.kind === 'waiting') {
+      const t = new vscode.TreeItem('Waiting for you', vscode.TreeItemCollapsibleState.Expanded);
+      t.description = String(n.items.length);
+      t.iconPath = new vscode.ThemeIcon('bell-dot');
+      t.tooltip = 'Everything that waits for a person: decisions, facts to review, stage documents, runbooks.';
+      return t;
+    }
+    if (n.kind === 'waitingItem') {
+      const i = n.item;
+      const t = new vscode.TreeItem(i.title);
+      t.description = `${i.kind === 'decision' ? i.detail.split(' ')[0] : i.kind}${i.problemId ? ` · ${i.problemId}` : ''}`;
+      t.iconPath = new vscode.ThemeIcon(i.stakes === 'high' ? 'circle-filled' : 'circle-outline', i.stakes === 'high' ? new vscode.ThemeColor('problemsWarningIcon.foreground') : undefined);
+      t.tooltip = new vscode.MarkdownString(`**${i.title}**\n\n${i.detail}\n\nIn a terminal: \`${i.cli}\``);
+      t.command = { command: 'autoDataEngineeringHub.openWaiting', title: 'Open', arguments: [i] };
+      return t;
+    }
     if (n.kind === 'task') { const t = new vscode.TreeItem(n.label); t.iconPath = new vscode.ThemeIcon(n.done ? 'check' : 'circle-small'); return t; }
     if (n.kind === 'problem') {
       const m = n.model;
@@ -54,7 +77,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<Node> {
     }
     const s = n.stage;
     const t = new vscode.TreeItem(s.title, s.tasks.length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
-    t.description = s.status === 'done' || s.status === 'skipped' ? `${s.status}${s.why ? ` — ${s.why}` : ''}` : s.guide;
+    t.description = `${s.manual ? 'manual · ' : ''}${s.status === 'done' || s.status === 'skipped' ? `${s.status}${s.why ? ` — ${s.why}` : ''}` : s.guide}`;
     t.iconPath = new vscode.ThemeIcon(STATUS_ICON[s.status] ?? 'circle-outline', s.status === 'stale' ? new vscode.ThemeColor('problemsWarningIcon.foreground') : s.status === 'done' ? new vscode.ThemeColor('testing.iconPassed') : undefined);
     t.tooltip = new vscode.MarkdownString([
       `**${s.title}** (${s.kind}, ${s.inclusion}${s.origin === 'added' ? ', added' : ''})`, '',
@@ -73,9 +96,11 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<Node> {
   public getChildren(n?: Node): Node[] {
     if (!n) {
       if (this.error) return [{ kind: 'empty', label: this.error }];
-      if (!this.model) return [{ kind: 'empty', label: 'Start or open a business problem to see its workflow.' }];
-      return [{ kind: 'problem', model: this.model }];
+      const top: Node[] = this.waiting.length ? [{ kind: 'waiting', items: this.waiting }] : [];
+      if (!this.model) return [...top, { kind: 'empty', label: 'Start or open a business problem to see its workflow.' }];
+      return [...top, { kind: 'problem', model: this.model }];
     }
+    if (n.kind === 'waiting') return n.items.map((item) => ({ kind: 'waitingItem', item }));
     if (n.kind === 'problem') return n.model.stages.map((s) => ({ kind: 'stage', stage: s, model: n.model }));
     if (n.kind === 'stage') return n.stage.tasks.map((t) => ({ kind: 'task', label: t.title, done: t.done }));
     return [];
@@ -160,7 +185,7 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
     // Never throws: this runs from timers and file watchers.
     try {
       const m = tree.refresh();
-      if (m) { bar.text = `$(checklist) ${statusBarText(m)}`; bar.tooltip = m.provenance.join('\n') || 'AutoDE workflow'; bar.show(); } else bar.hide();
+      if (m) { bar.text = `$(checklist) ${statusBarText(m)}${tree.waitingCount() ? ` · $(bell-dot) ${tree.waitingCount()} waiting` : ''}`; bar.tooltip = m.provenance.join('\n') || 'AutoDE workflow'; bar.show(); } else bar.hide();
       WorkflowPanel.refresh();
     } catch (err) { console.warn('AutoDE: workflow view refresh failed', err); }
   };
@@ -184,6 +209,14 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
   disposables.push(
     vscode.commands.registerCommand('autoDataEngineeringHub.openWorkflow', (stage?: string) => WorkflowPanel.show(context, host, refresh, typeof stage === 'string' ? stage : undefined)),
     vscode.commands.registerCommand('autoDataEngineeringHub.refreshWorkflow', refreshNow),
+    vscode.commands.registerCommand('autoDataEngineeringHub.openWaiting', async (i?: WaitingItem) => {
+      if (!i) return;
+      const scope = host.scope();
+      if (i.opens.view === 'runbook' && i.opens.ref) await vscode.commands.executeCommand('autoDataEngineeringHub.openRunbook', i.opens.ref);
+      else if (i.opens.view === 'workflow' || i.opens.view === 'workflow-stage') WorkflowPanel.show(context, host, refresh, i.opens.ref);
+      else if (i.opens.view === 'inbox') { await vscode.commands.executeCommand('autoDataEngineeringHubSidebar.focus'); void vscode.window.showInformationMessage('The facts wait in the Context Inbox, in the AutoDE panel.'); }
+      else if (i.opens.view === 'decision' && i.opens.ref && scope) await vscode.window.showTextDocument(vscode.Uri.file(path.join(layoutPath(scope.workspaceRoot, 'decisions'), `${i.opens.ref}.yaml`)));
+    }),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowRun', act('run')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowApproveDocument', act('approve-document')),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowProduce', act('produce')),

@@ -80,6 +80,7 @@ import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/fact
 import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
 import { runStage } from './agentExecutor';
+import { WaitingItem, waitingForYou } from '../engine/approvals/waiting';
 import { approveStageDocument, stageDocumentFile } from '../engine/workflows/documentApproval';
 import { readWorkflow } from '../engine/workflows/instance';
 /** VS Code's watcher for `.autode/knowledge/` edits, injected into the engine's ContextFileManager (v0.43.2). */
@@ -1722,6 +1723,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** Workflow actions from the Workflow view: the same code as the palette used. */
   public async workflowActionFromView(action: string, stage?: string, arg?: string): Promise<void> {
     await this.workflowAction(action, stage, arg);
+  }
+
+  /** SIMP-1: everything that waits for a person, from the panel's own ledger and the workspace. */
+  public waitingForYou(): WaitingItem[] {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root) return [];
+    const ledger = this.ledger();
+    return waitingForYou({ workspaceRoot: root, resourcesRoot: this.context.extensionPath, problemId: this.workflowScope()?.problemId, facts: ledger ? inbox(ledger).facts : [] });
   }
 
   public currentWorkflowScope(): WorkflowScope | undefined {

@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.45.6",
+  "version": "0.45.7",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -247,6 +247,7 @@
       { "command": "autoDataEngineeringHub.refreshWorkflow", "title": "AutoDE: Refresh Workflow", "icon": "$(refresh)" },
       { "command": "autoDataEngineeringHub.workflowRun", "title": "Run Stage Agent", "icon": "$(play)" },
       { "command": "autoDataEngineeringHub.refreshSkills", "title": "Refresh Skills", "icon": "$(refresh)" },
+      { "command": "autoDataEngineeringHub.openWaiting", "title": "Open What Waits for You" },
       { "command": "autoDataEngineeringHub.openRunbook", "title": "AutoDE: Open Runbook…", "icon": "$(run-all)" },
       { "command": "autoDataEngineeringHub.installSkill", "title": "Install Skill…", "icon": "$(cloud-download)" },
       { "command": "autoDataEngineeringHub.openSkillSource", "title": "Open Skill Source", "icon": "$(link-external)" },
@@ -292,6 +293,7 @@
       ],
       "commandPalette": [
         { "command": "autoDataEngineeringHub.workflowRun", "when": "false" },
+        { "command": "autoDataEngineeringHub.openWaiting", "when": "false" },
         { "command": "autoDataEngineeringHub.installSkill", "when": "false" },
         { "command": "autoDataEngineeringHub.openSkillSource", "when": "false" },
         { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "false" },

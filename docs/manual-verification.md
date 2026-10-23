@@ -794,6 +794,23 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   - choosing one shows the exact commands and runs them in the AutoDE terminal only on your click;
   - `autode doctor` lists the same options.
 
+## Part 33 — v0.45.7 Waiting for you; manual stages
+
+- [ ] **33.1 One list.**
+  Do: with a pending workflow or stage decision, a few proposed facts, a drafted mapping, and a prod runbook with one approval, open the Workflow view.
+  Expect:
+  - **Waiting for you** at the top: high stakes first, each item opening where it is approved (the Workflow tab, the Runbook tab, the Context Inbox, or the decision file);
+  - a count in the status bar.
+- [ ] **33.2 The same in a terminal and an agent.**
+  Do: run `autode approvals`; ask Claude Code "what waits for me in AutoDE?".
+  Expect: the same items. The terminal shows the command for each; the agent reports them and doesn't approve.
+- [ ] **33.3 Manual stages.**
+  Do: include a BI migration or deploy stage in a workflow.
+  Expect: it is labelled *manual*, offers hand-in and skip, and has no Run agent.
+- [ ] **33.4 The concept map.**
+  Do: read §4 of the engineering onboarding guide.
+  Expect: the concepts table, how they fit, what is internal, and what is being simplified.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -983,5 +1000,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 32.5 |  |  |
 | 32.6 |  |  |
 | 32.7 |  |  |
+| 33.1 |  |  |
+| 33.2 |  |  |
+| 33.3 |  |  |
+| 33.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

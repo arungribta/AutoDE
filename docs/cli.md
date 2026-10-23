@@ -163,6 +163,10 @@ Secrets never go in these files. A field such as `password` or `token` is refuse
 
 `approve` and `reject` work only in an interactive terminal (stdin and stdout), and they refuse whenever `CI` is set (to anything other than empty, `0` or `false`). They show the decision and ask you to type `approve` or `reject` to confirm. `--by` defaults to your OS user name. This is the *CLI* channel of a decision: it may resolve high-stakes decisions, because it needs a person at the keyboard. A non-interactive run never resolves a decision (requirements P9).
 
+## Waiting for you
+
+`autode approvals` lists everything that waits for a person: pending decisions (workflow, stage gates, runbooks, connections, proposals), facts to review, stage documents to approve, and runbooks that need a second approver. High stakes come first, and each item shows the command that approves it (`--json` for scripts). Over MCP, the same list is `autode_approvals_list`; in VS Code, it is the top of the Workflow view.
+
 ## Runbooks
 
 Platform changes (creating objects, grants, loading data, deploying a bundle) run only as runbooks: an agent proposes one, AutoDE checks it, a person approves it, and AutoDE's runner runs it step by step in VS Code's Runbook tab.

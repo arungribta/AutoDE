@@ -25,6 +25,8 @@ const FOLDER_NOTES = {
   'src/core/credentials': 'VS Code SecretStorage credential resolver',
   'src/editors': 'custom editors',
   'src/engine': 'shared types (everything under src/engine/ is free of vscode)',
+  'src/engine/approvals': 'what waits for a person, gathered from every mechanism (SIMP-1)',
+  'src/engine/runner': 'runbooks: checks, policy, the runner and its log',
   'src/engine/agents': 'role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on',
   'src/engine/workflows': 'workflow templates, instances, runtime, events, document approval',
   'src/engine/context': 'assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion',

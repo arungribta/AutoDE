@@ -6585,7 +6585,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status'];
+      const readTools = ['autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_mapping', 'autode_propose_platform_change', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_apply_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -6649,6 +6649,7 @@ async function main() {
       autode_draft_model: [{}, { x: 1 }],
       autode_skills_list: [{ group: 'external' }, { group: 'vendor' }],
       autode_runbook_status: [{}, { id: '' }],
+      autode_approvals_list: [{}, { x: 1 }],
       autode_propose_runbook: [{ runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'sql', sql: 'select 1', expect: 'one row' }] } }, { runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'shell', expect: 'x' }] } }],
       autode_primitive_candidates: [{ source: 'shop.orders' }, { source: 'shop.orders', columns: [{ source: 'a' }] }],
       autode_record_pipeline_spec: [{ entities: [{ name: 'e', source: { object: 'a', type: 'table' }, transforms: [], target: { object: 'b', materialization: 'table' } }] }, { entities: [] }],
@@ -10133,6 +10134,74 @@ async function main() {
       const src = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'engine', 'platform', 'driverStore.ts'), 'utf8');
       assert.ok(/range: '\^6\.0\.0'/.test(src), 'the driver range is a reviewed contract in code');
       for (const f of ['prerequisites.yaml']) assert.ok(nodeFs.readFileSync(nodePath.join(__dirname, '..', '.vscodeignore'), 'utf8').includes(`!${f}`) && require('../scripts/pack-cli.cjs').CONTENT.includes(f), f);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ---------- v0.45.7: SIMP-1 — one approvals list, the concept map ----------
+
+  await test('v0.45.7: Waiting for you gathers everything that waits for a person — decisions of every kind, facts to review, stage documents, runbooks needing a second approver — high stakes first, each with where and how it is approved', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = runbookWs(POLICY);
+    let client;
+    try {
+      const { id, prob, W } = await tinyFlow(ws, cli);
+      const Wt = fresh('../dist/engine/approvals/waiting.js');
+      const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+      const Pr = fresh('../dist/engine/decisions/proposals.js');
+      let items = Wt.waitingForYou({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id });
+      const wf = items.find((i) => i.opens.view === 'workflow');
+      assert.ok(wf && wf.cli === 'autode workflow approve' && wf.stakes === 'high', JSON.stringify(items));
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      // A drafted mapping document, a runbook decision, a prod runbook after its first approval, a low-stakes vocabulary decision, facts.
+      const D = fresh('../dist/engine/documents/problemDocuments.js');
+      D.writeMappingUpsert(prob, { id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct', columns: [{ sourceColumn: 'a', targetColumn: 'a' }] });
+      const store = new DecisionStore(ws);
+      const ctx = { workspaceRoot: ws, problemRoot: prob, problemId: id };
+      Pr.propose(store, ctx, 'runbook', deployRunbook({ steps: deployRunbook().steps.slice(0, 1) }), { proposedBy: { host: 'mcp', client: 'Claude Code' } });
+      const prodD = Pr.propose(store, ctx, 'runbook', deployRunbook({ id: 'deploy-prod', connectionId: 'snowflake:prod', steps: deployRunbook().steps.slice(0, 1) }), { proposedBy: { host: 'mcp', client: 'Claude Code' } });
+      store.resolve(prodD.id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      await Pr.applyDecision(store, prodD.id, ctx);
+      Pr.propose(store, ctx, 'vocabulary', { entries: [{ kind: 'abbreviation', from: 'cust', to: 'customer' }] }, { proposedBy: { host: 'mcp', client: 'Claude Code' } });
+      const facts = [{ id: 'f1', kind: 'key', stakes: 'high' }, { id: 'f2', kind: 'business_term', stakes: 'low' }];
+      items = Wt.waitingForYou({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id, facts });
+      const by = (k) => items.filter((i) => i.kind === k);
+      assert.deepStrictEqual(by('stage-document').map((i) => [i.opens.ref, i.cli]), [['mapping', 'autode workflow approve mapping']]);
+      assert.ok(by('runbook').some((i) => i.cli === 'autode runbook approve deploy-prod' && /second approver/.test(i.detail)));
+      assert.ok(by('decision').some((i) => i.opens.view === 'runbook' && i.opens.ref === 'deploy-orders'));
+      assert.ok(by('facts')[0].title === '2 fact(s) to review' && by('facts')[0].stakes === 'high');
+      const firstLow = items.findIndex((i) => i.stakes === 'low');
+      assert.ok(firstLow > 0 && items.slice(firstLow).every((i) => i.stakes === 'low'), 'high stakes first');
+      // The CLI and MCP show the same list.
+      const c = await cli(['approvals', ...W, '--json']);
+      assert.strictEqual(c.code, 0, c.err);
+      assert.ok(c.json().items.some((i) => i.kind === 'runbook') && c.json().items.some((i) => i.kind === 'stage-document'));
+      assert.ok(/approve: autode runbook approve deploy-prod/.test((await cli(['approvals', ...W])).out));
+      client = await mcpSession(ws);
+      const m = (await client.callTool({ name: 'autode_approvals_list', arguments: {} })).structuredContent;
+      assert.deepStrictEqual(m.items.map((i) => i.key).filter((k) => !k.startsWith('facts')).sort(), c.json().items.map((i) => i.key).filter((k) => !k.startsWith('facts')).sort());
+      void nodeFs;
+    } finally { if (client) await client.close(); require('node:fs').rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.7: a stage no AutoDE skill does is manual — no agent with the wrong method; it says so on every surface; the concept map in the onboarding guide lists the concepts and what is internal', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-manual-'));
+    try {
+      const { id, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'plan', '--template', 'tiny', ...W])).code, 0);
+      const A = fresh('../dist/engine/agents/assignment.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id };
+      const wf = fresh('../dist/engine/workflows/instance.js').readWorkflow(nodePath.join(ws, '.autode', 'problems', id));
+      wf.stages.find((s) => s.id === 'bi').included = true;
+      fresh('../dist/engine/workflows/instance.js').writeWorkflow(nodePath.join(ws, '.autode', 'problems', id), wf);
+      const r = A.assignmentFor(scope, 'bi', []);
+      assert.ok(!r.assignment && /No AutoDE skill does bi-migration stages yet/.test(r.reason), JSON.stringify(r));
+      assert.ok(A.assignmentFor(scope, 'quality', []).assignment, 'a stage with a skill still gets its agent');
+      const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'docs', 'engineering-onboarding-guide.md'), 'utf8');
+      for (const c of ['**Business problem**', '**Specification**', '**Pack**', '**Estate and facts**', '**Workflow**', '**Approvals**', '**Mapping**', '**Model**', '**Pipeline Spec**', '**Artifacts**', '**Runbook**', '**Agents and skills**', '#### Internal', '#### Being simplified', '### 4.12 Runbooks and the runner']) assert.ok(page.includes(c), c);
+      const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'workflow.html'), 'utf8');
+      assert.ok(html.includes('manual</span>'));
+      assert.ok(require('../package.json').contributes.commands.some((x) => x.command === 'autoDataEngineeringHub.openWaiting'));
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

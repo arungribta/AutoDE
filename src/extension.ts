@@ -329,7 +329,8 @@ export function activate(context: vscode.ExtensionContext): void {
     scope: () => sidebarProvider.currentWorkflowScope(),
     resolve: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note),
     workflowAction: (action, stage, arg) => sidebarProvider.workflowActionFromView(action, stage, arg),
-    user: skillActor
+    user: skillActor,
+    waiting: () => sidebarProvider.waitingForYou()
   }));
   // Phase 5: agents reach the engine's MCP tools through an in-process client, started on first use.
   hub.setEngineFactory((clientName?: string) => {

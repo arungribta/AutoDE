@@ -6,6 +6,24 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.45.7
+
+- **SIMP-1: one approvals list, and the concept map** (owner, 2026-10-22: simplify before adding capability; roadmap decision log). The first of four simplification releases.
+- **Waiting for you.** Everything that waits for a person is now in one list, whatever mechanism records it:
+  - pending decisions of every kind (workflow, stage gates, runbooks, connections, proposals);
+  - the Context Inbox's facts, grouped, with how many are high stakes;
+  - stage documents drafted and waiting for approval;
+  - runbooks that need their second approver.
+
+  It is sorted high stakes first, then oldest. It appears at the top of the Workflow tree (opening each item where it is approved: the Workflow tab, the Runbook tab, the Context Inbox or the decision file), with a count in the status bar, and as `autode approvals` in a terminal and `autode_approvals_list` over MCP. Approving still goes through each mechanism's own code: the list adds no second rulebook, and each item shows the terminal command that approves it.
+- **The concept map** is now the start of the engineering onboarding guide's §4 (owner: no separate document). It covers the twelve concepts a data engineer works with, the guarantee each carries, how they fit, the definitions a team adapts, what is internal, and what is being simplified. The stale parts of the guide were rewritten:
+  - "Lifecycle gates" (in `AgentHub`) is now the workflow, stages and approvals;
+  - "Phases, plan and agents" is now agents, skills and assignments;
+  - the spec → plan → execution flow is now spec → workflow → stages;
+  - runbooks are new (§4.12).
+- **A stage no AutoDE skill does is manual.** It is labelled so on the board and in the tree, and gets no agent. **Fixed:** such a stage used to get an agent with the wrong method. For example, a BI migration stage got the documenter with its documentation skill, because the documenter is allowed on BI migration stages. An assignment now needs a skill for the stage's kind (or one the plan named). **As a result, deploy stages are manual until the platform skills (v0.45.11)**; agents in hosts can still propose runbooks for them.
+- **Measured:** 381 tests (2 new: the gathered list across mechanisms, the CLI and MCP; manual stages and the concept map). Lint 0 errors. Eval unchanged.
+
 ## 0.45.6
 
 - **The runner: runbooks approved by a person, run by deterministic code** (owner, 2026-10-22; requirements ORC-10; `docs/mcp-engine-requirements.md` §9.2 PA3 §8a; technical-design §7.9). Everything that changes a data platform now goes through one controlled path. No agent runs a platform command.

@@ -1195,6 +1195,7 @@ interface AgentExecutionResult { success: boolean; message: string; details?: Re
   - **Refresh:** file watchers on `.autode/problems/**`, `decisions`, the active-problem pointer and the estate (debounced 300 ms; a refresh never throws).
   - **Today's agents:** an "AutoDE agents" box runs them through `agentsRunState()` and `runAgentsAction()` until PA3b.
   - **Palette:** its Phases, Agents and Continue Workflow sections are replaced by a link to the view.
+- **Waiting for you** (v0.45.7, `src/engine/approvals/waiting.ts`): `waitingForYou()` lists pending decisions (each with where it opens and its terminal command: workflow, gate, runbook, or the decision file), the caller's Context Inbox facts as one item, the problem's document stages awaiting approval with no gate decision, and runbooks awaiting a second approver, sorted high stakes first. Surfaces: the Workflow tree's first group (`autoDataEngineeringHub.openWaiting`) and the status bar, `autode approvals`, `autode_approvals_list`. It approves nothing itself.
 - **MCP** (`src/mcp/workflowTools.ts`): `autode_workflow_templates`, `_status`, `_next`, `_start_stage`, `_complete_stage`, `_skip_stage`, `_reopen_stage` and `autode_propose_workflow`. None of them approve.
 
 ### 7.9 Roles, skills and assignments (v0.45.0; SKL-6, PA3b)
@@ -1785,6 +1786,8 @@ src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
   artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, skillCatalog.ts, sourceContextDraft.ts
+src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)
+  waiting.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
   assertions.ts, assertionSchemas.ts, businessPackManager.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, profiles.ts, projection.ts, retrieval.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/decisions/
@@ -1803,7 +1806,7 @@ src/engine/platform/credentials/    # credential resolvers and CLI detection
   CliConfigResolver.ts, cliDetection.ts, cliRegistry.ts, databricksCfg.ts, DatabricksCli.ts, EnvVarCredentialResolver.ts, index.ts, PlatformCliDescriptor.ts, registry.ts, SnowflakeCli.ts, tnsnames.ts, types.ts
 src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
-src/engine/runner/
+src/engine/runner/    # runbooks: checks, policy, the runner and its log
   policy.ts, run.ts, runbook.ts, runLog.ts
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
   lifecycle.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
