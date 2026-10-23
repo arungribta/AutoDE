@@ -811,6 +811,21 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: read §4 of the engineering onboarding guide.
   Expect: the concepts table, how they fit, what is internal, and what is being simplified.
 
+## Part 34 — Readiness before Run agent
+
+- [ ] **34.1 Nothing to map.**
+  Do: in a workspace with no tables in the estate (only business-context.yaml), open the Workflow view on a problem at its Mapping stage.
+  Expect: Mapping says *Not ready yet: there are no tables in the estate…* with the ways to bring sources in, and has no Run agent.
+- [ ] **34.2 Bring the sources in.**
+  Do: ingest the DDL files (Ingest File, or `autode estate ingest sources/shop.ddl --system shop`), then re-open Source assessment and Run agent on it.
+  Expect: the source context lists the systems. After you approve it, Mapping offers Run agent.
+- [ ] **34.3 Notes are not a document.**
+  Do: Run agent on a document stage where the agent can't produce the document.
+  Expect: the run reports that the document wasn't drafted, with the agent's reply. It doesn't say "approve it".
+- [ ] **34.4 Over MCP.**
+  Do: ask Claude Code to continue the problem at its Mapping stage with no tables.
+  Expect: it tells you what's missing and doesn't start the mapper.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1004,5 +1019,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 33.2 |  |  |
 | 33.3 |  |  |
 | 33.4 |  |  |
+| 34.1 |  |  |
+| 34.2 |  |  |
+| 34.3 |  |  |
+| 34.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

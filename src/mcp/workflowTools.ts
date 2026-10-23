@@ -8,6 +8,7 @@ import { layoutPath } from '../engine/workspaceLayout';
 import { Actor } from '../engine/workflows/events';
 import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
 import { recordArtifact } from '../engine/agents/artifacts';
+import { stageReadiness } from '../engine/workflows/readiness';
 
 /**
  * The workflow over MCP (PA3a): the runtime is the hub; an agent asks what to
@@ -72,7 +73,9 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         // PA3b: the full assignment when the stage's role has a definition; otherwise why not (its old agent still runs in the panel).
         if (next.stage.status === 'awaiting-approval') return { next, assignment: null };
         const a = assignmentFor(scope, next.stage.id, allTools());
-        return { next, assignment: a.assignment ?? null, ...(a.reason ? { noAssignment: a.reason } : {}) };
+        // The same check the panel's Run agent makes (v0.45.8): say what's missing before the agent starts.
+        const notReady = stageReadiness({ workspaceRoot: scope.workspaceRoot, problemRoot: rctx(ws).problemRoot, kind: next.stage.kind });
+        return { next, assignment: a.assignment ?? null, ...(a.reason ? { noAssignment: a.reason } : {}), ...(notReady.length ? { notReady } : {}) };
       })
     },
     {

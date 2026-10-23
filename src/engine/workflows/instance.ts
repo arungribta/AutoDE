@@ -105,7 +105,7 @@ export function workflowFacts(workspaceRoot: string, problemRoot: string | undef
   let hasContract = false;
   if (problemRoot) { try { hasContract = readPackFile(path.join(problemRoot, 'pack')).documents.some((d) => d.role === 'contract'); } catch { /* no pack */ } }
   return {
-    'estate.sources': systems.filter((s) => s.role === 'source' || s.role === 'both').length,
+    'estate.sources': sourceSystems(workspaceRoot).length,
     'estate.systems': systems.length,
     'pack.has_contract': hasContract,
     'estate.has_legacy_code': false,
@@ -113,8 +113,15 @@ export function workflowFacts(workspaceRoot: string, problemRoot: string | undef
   };
 }
 
+/** Files that hold the team's own knowledge; a system bound only to them (registered by mistake before v0.45.8) is not a source. */
+const KNOWLEDGE_FILES = ['business-context.yaml', 'verified-queries.yaml'];
+
 export function sourceSystems(workspaceRoot: string): string[] {
-  try { return parseEstate(fs.readFileSync(layoutPath(workspaceRoot, 'estate'), 'utf8')).systems.filter((s) => s.role === 'source' || s.role === 'both').map((s) => s.id); } catch { return []; }
+  try {
+    const estate = parseEstate(fs.readFileSync(layoutPath(workspaceRoot, 'estate'), 'utf8'));
+    const knowledgeOnly = (id: string) => { const b = estate.bindings.filter((x) => x.system === id); return b.length > 0 && b.every((x) => x.file && KNOWLEDGE_FILES.includes(x.file.toLowerCase())); };
+    return estate.systems.filter((s) => (s.role === 'source' || s.role === 'both') && !knowledgeOnly(s.id)).map((s) => s.id);
+  } catch { return []; }
 }
 
 function stageFrom(t: TemplateStage, included: boolean, reason: string | undefined, systems: string[]): WorkflowStage {

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import { stageRunner } from './agentExecutor';
 import { documentApprovalProblems, stageDocumentFile } from '../engine/workflows/documentApproval';
+import { stageReadiness } from '../engine/workflows/readiness';
 import { Runbook, listRunbooks } from '../engine/runner/runbook';
 import { readProblemDocument, parseBusinessProblemSpec } from '../engine/documents/problemDocuments';
 import { DecisionStore } from '../engine/decisions/decisionStore';
@@ -122,12 +123,14 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
     const runner = s.included ? stageRunner(scope, s.id, s.kind) : undefined;
     const docFile = documentBacked ? stageDocumentFile(root, s.kind) : undefined;
     const hasDoc = !!docFile && fs.existsSync(docFile);
-    const blockers = documentBacked && v.status === 'awaiting-approval' && !s.record.decisionId ? documentApprovalProblems(root, s.kind) : [];
     const open = v.status === 'ready' || v.status === 'in-progress' || v.status === 'stale';
+    // What the stage's work needs and doesn't have yet (no tables to map, no mappings to model): shown before Run agent, which refuses the same.
+    const notReady = w.status === 'approved' && s.included && (v.status === 'ready' || v.status === 'in-progress') ? stageReadiness({ workspaceRoot: scope.workspaceRoot, problemRoot: root, kind: s.kind }) : [];
+    const blockers = documentBacked && v.status === 'awaiting-approval' && !s.record.decisionId ? documentApprovalProblems(root, s.kind) : notReady;
     if (w.status === 'approved' && s.included && v.status !== 'skipped') {
       if (v.status === 'awaiting-approval' && s.record.decisionId) actions.push('approve');
       if (documentBacked && v.status === 'awaiting-approval' && !s.record.decisionId && !blockers.length) actions.push('approve-document');
-      if (runner && (open || (documentBacked && v.status === 'awaiting-approval'))) actions.push('run');
+      if (runner && !notReady.length && (open || (documentBacked && v.status === 'awaiting-approval'))) actions.push('run');
       if (documentBacked && v.status !== 'done') actions.push('produce');
       if (!documentBacked && (v.status === 'ready' || v.status === 'in-progress')) actions.push('hand-in');
       if (v.status === 'stale') actions.push('approve-again');
@@ -143,6 +146,7 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
       : v.status === 'pending' ? `Waits: ${v.why ?? 'its dependencies are not done'}.`
       : v.status === 'stale' ? 'Its inputs changed since it was approved: review the output, then approve it again.'
       : v.status === 'awaiting-approval' && s.record.decisionId ? 'Waits for your approval.'
+      : notReady.length ? `Not ready yet: ${notReady.join(' ')}`
       : v.status === 'awaiting-approval' && documentBacked ? (blockers.length ? `The ${doc} can't be approved yet: ${blockers.join(' ')}` : `Review the ${doc} and approve it.`)
       : documentBacked ? `${PRODUCE_LABEL[s.kind]}${runner ? ` (or Run agent: ${runner})` : ''}, then approve the ${doc}.`
       : runner ? `Run agent (${runner}), or hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`

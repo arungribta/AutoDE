@@ -9448,7 +9448,8 @@ async function main() {
       const m = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope);
       const st = (x) => m.stages.find((s) => s.id === x);
       assert.deepStrictEqual([st('quality').runner, st('quality').actions.includes('run')], ['quality-engineer', true]);
-      assert.deepStrictEqual([st('model').runner, st('build').runner, st('build').actions.includes('run')], ['data-modeler', 'pipeline-engineer', true], 'since v0.45.4 every stage with an agent has a role template');
+      assert.deepStrictEqual([st('model').runner, st('build').runner], ['data-modeler', 'pipeline-engineer'], 'since v0.45.4 every stage with an agent has a role template');
+      if (st('build').status === 'ready') assert.ok(!st('build').actions.includes('run') && st('build').blockers.some((b) => /no mappings/.test(b)), 'v0.45.8: no Run agent while there is nothing to build from');
       // A stage with no agent at all says so, and offers hand-in or skip.
       const bi = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel(scope).stages.find((s) => s.id === 'bi');
       assert.ok(!bi || bi.status === 'skipped' || /hand in/.test(bi.guide));
@@ -9581,6 +9582,48 @@ async function main() {
       const hub = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agentHub.ts'), 'utf8');
       assert.ok(/sttmAgent: 'Source-to-target mapping'/.test(hub) && !/executeSttmAgent|executeSourceAssessmentAgent/.test(hub));
       void prob;
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.8: Run agent refuses a stage that has nothing to work on, before calling the model, and says what to do; a document stage that recorded only notes is not reported as drafted; the business-context file is not a source system', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-ready-'));
+    try {
+      const { id, prob } = await sourceFlow(ws, cli);
+      const { EngineClient } = fresh('../dist/core/engineClient.js');
+      const { runStage } = fresh('../dist/core/agentExecutor.js');
+      const R = fresh('../dist/engine/workflows/readiness.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id };
+      // The owner's sample: an estate graph with business terms and no tables.
+      const graph = nodePath.join(ws, '.autode', 'local', 'derived', 'graph.json');
+      nodeFs.mkdirSync(nodePath.dirname(graph), { recursive: true });
+      nodeFs.writeFileSync(graph, JSON.stringify({ nodes: [{ id: 't1', type: 'business_term' }], edges: [] }));
+      assert.strictEqual(R.estateTableCount(ws), 0);
+      let called = 0;
+      const host = (agent) => ({
+        createEngine: (n) => new EngineClient({ workspaceRoot: ws, resourcesRoot: wfRes(), version: 't', log: () => {}, clientName: n }),
+        activeProvider: () => 'copilot', log: () => {},
+        runAgentWithTools: async (_p, opts) => { called++; return agent(opts); }
+      });
+      const mapping = await runStage(host(() => ({ text: '', audit: [], provider: 'copilot' })), scope, 'mapping');
+      assert.ok(!mapping.ok && /no tables in the estate/.test(mapping.message) && /autode estate ingest/.test(mapping.message), mapping.message);
+      assert.strictEqual(called, 0, 'the model is not called');
+      assert.ok(R.stageReadiness({ workspaceRoot: ws, problemRoot: prob, kind: 'modelling' }).some((p) => /no mappings/.test(p)));
+      // A document stage whose agent records notes but not the document is not "drafted".
+      const notes = await runStage(host(async (opts) => {
+        await opts.engineTools.call('autode_record_artifact', { stage: 'sources', path: 'notes.md', content: '# No sources found' });
+        return { text: 'I found no sources.', audit: [], provider: 'copilot' };
+      }), scope, 'sources');
+      assert.ok(!notes.ok && /without drafting sources's document/.test(notes.message) && /context\/source-context\.yaml/.test(notes.message), notes.message);
+      // The view shows the same before anyone clicks: no Run agent, and why.
+      nodeFs.writeFileSync(graph, JSON.stringify({ nodes: [{ id: 'shop.orders', type: 'table' }], edges: [] }));
+      assert.deepStrictEqual(R.stageReadiness({ workspaceRoot: ws, problemRoot: prob, kind: 'mapping' }), []);
+      // The business-context file was registered as a source system by the re-keying of its terms (fixed); an estate that has it doesn't count it.
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'knowledge'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'knowledge', 'estate.yaml'), 'systems:\n  - id: business-context\n    name: business-context\n    role: source\n  - id: shop\n    name: shop\n    role: source\nbindings:\n  - file: business-context.yaml\n    system: business-context\n  - file: shop.sql\n    system: shop\n');
+      assert.deepStrictEqual(fresh('../dist/engine/workflows/instance.js').sourceSystems(ws), ['shop']);
+      const cfm = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'engine', 'context', 'contextFileManager.ts'), 'utf8');
+      assert.ok(/origin\?\.extractor === 'business-context'[^\n]*UNASSIGNED_SYSTEM/.test(cfm), 'knowledge-file origins never create a system');
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

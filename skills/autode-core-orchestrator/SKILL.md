@@ -18,7 +18,7 @@ AutoDE's workflow is the hub: it decides what comes next. You dispatch the work 
 
 1. `autode_workflow_status`. If there is no approved workflow, propose one with `autode_propose_workflow` and tell the user how to approve it (the AutoDE panel, `autode workflow approve` in a terminal, or the decision file). Stop until it is approved.
 2. `autode_workflow_next`. It returns the next stage and, when AutoDE has a definition for its role, an **assignment**: role, brief, skills, permission tier, the AutoDE tools allowed, and the full instructions in `assignment.text`.
-3. If the stage is **waiting for approval**, tell the user what to approve and how. Stop.
+3. If the stage is **waiting for approval**, tell the user what to approve and how. Stop. If the reply has **`notReady`**, the stage lacks what its work needs (for example, no tables in the estate to map): tell the user each item and what to do, and don't start the agent. Stop.
 4. If there is an assignment, run it:
    - with sub-agents: start the AutoDE agent named by `assignment.role` and give it `assignment.text` as its task;
    - without sub-agents: follow `assignment.text` yourself, using only the tools it allows.

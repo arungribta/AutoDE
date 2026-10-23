@@ -6,6 +6,17 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## Unreleased (ships with v0.45.9)
+
+- **Run agent checks that a stage can be done before calling the model** (owner's UI test of the sample: Run agent on Mapping "failed"). The mapper had run on an estate with no tables, and could only write notes saying so. Three fixes:
+  - **Readiness.** Mapping, quality rules and conformance need tables in the estate. Modelling and the build need mappings in the mapping document. The check is deterministic: it reads the compiled estate graph and the problem's documents, and calls no model. It applies everywhere:
+    - **Run agent** refuses with what to do (for mapping: Run agent on Source assessment, Ingest File, or `autode estate ingest` / `autode estate extract`);
+    - **the Workflow view** shows the same before anyone clicks: no Run agent, and *Not ready yet: …*;
+    - **`autode_workflow_next`** returns `notReady`, and the orchestrator skill tells the user instead of starting the agent.
+  - **A document stage is drafted only when its document is.** A run that recorded only notes used to say "drafted, approve it". It now reports that the document (for example `context/source-context.yaml`) was not drafted, with the agent's reply.
+  - **The business-context file is no longer a source system.** Re-keying the terms of `business-context.yaml` registered that file in the estate as a source system. As a result, the workflow planned a source stage for it, and the estate counted it as a source. Knowledge-file origins now never create a system, and a system bound only to `business-context.yaml` or `verified-queries.yaml` (in estates written before this fix) is not counted as a source.
+- **Measured:** 382 tests (1 new: refused before the model, with the fix named; notes-only document runs; the knowledge-file system). The v0.45.1 test now expects no Run agent on a build with no mappings. Lint 0 errors.
+
 ## 0.45.8
 
 - **SIMP-2: one way for each change** (owner, 2026-10-22; roadmap decision log). Two duplicate paths are gone.

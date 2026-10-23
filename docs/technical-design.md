@@ -1817,7 +1817,7 @@ src/engine/transforms/declarative/    # Tier 2 declarative primitives
 src/engine/transforms/primitives/    # Tier 1 primitives
   dedup.ts, incrementalLoad.ts, renameCast.ts
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
-  documentApproval.ts, events.ts, instance.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
+  documentApproval.ts, events.ts, instance.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
   agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, runnerHost.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 src/spokes/    # Snowflake executor

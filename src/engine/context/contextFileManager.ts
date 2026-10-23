@@ -409,6 +409,8 @@ export class ContextFileManager {
   /** Identity for re-keying a legacy node from its provenance. */
   private identityOfOrigin(origin: Origin | undefined): { system: string; environment: string } {
     if (origin?.system) return { system: origin.system, environment: origin.systemEnvironment ?? DEFAULT_ENVIRONMENT };
+    // The team's own knowledge files describe the business, not a system: they never become a source (v0.45.8 fix).
+    if (origin?.extractor === 'business-context' || origin?.extractor === 'verified-queries') return { system: UNASSIGNED_SYSTEM, environment: DEFAULT_ENVIRONMENT };
     const looksLikeFile = (ref: string) => /[\\/]|\.(csv|json|sql|ddl)$/i.test(ref);
     let r: ReturnType<typeof resolveIdentity> | undefined;
     if (origin?.connectionId) r = resolveIdentity(this.estate, { connection: origin.connectionId });

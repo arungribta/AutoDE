@@ -1,6 +1,8 @@
+import * as path from 'node:path';
 import { AgentToolRunOptions, EngineAccess, LlmProvider, ToolCallAuditEntry } from '../engine/types';
 import { StageKind } from '../engine/workflows/stageKinds';
-import { isDocumentStage } from '../engine/workflows/documentApproval';
+import { isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
+import { stageReadiness } from '../engine/workflows/readiness';
 import { Assignment, assignmentFor } from '../engine/agents/assignment';
 import { completeStage, startStage, WorkflowError } from '../engine/workflows/runtime';
 import { readEvents, Actor } from '../engine/workflows/events';
@@ -50,6 +52,9 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   }
   const probe = assignmentFor(scope, stageId, []);
   if (!probe.assignment) return { ok: false, message: probe.reason ?? `No assignment for ${stageId}.`, outputs: [] };
+  // Checked before the model is called: an agent given nothing to work on can only write open questions.
+  const notReady = stageReadiness({ workspaceRoot: scope.workspaceRoot, problemRoot, kind: stage.kind });
+  if (notReady.length) return { ok: false, message: `${stageId} isn't ready for an agent:\n- ${notReady.join('\n- ')}`, outputs: [] };
   const role = probe.assignment.role;
   const engine = host.createEngine(`${role} (VS Code)`);
   if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).', outputs: [] };
@@ -70,7 +75,13 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
     const outputs = [...new Set(readEvents(problemRoot, { stage: stageId }).filter((e) => e.type === 'recorded' && e.at >= since).flatMap((e) => e.files ?? []))];
     const summary = text.trim().slice(0, 4000) || `${role} recorded ${outputs.length} file(s).`;
     if (!outputs.length) return { ok: false, message: `${role} finished without recording a deliverable, so ${stageId} wasn't handed in. Its reply:\n${summary}`, outputs, summary };
-    if (isDocumentStage(a.stage.kind)) return { ok: true, message: `${role} drafted ${stageId}'s document. Review it and approve it (Approve… on the stage) to complete the stage.`, outputs, summary };
+    if (isDocumentStage(a.stage.kind)) {
+      // Notes alone are not the document: the stage succeeds only if its document was recorded.
+      const file = stageDocumentFile(problemRoot, a.stage.kind);
+      const doc = file && path.relative(scope.workspaceRoot, file).split(path.sep).join('/');
+      if (doc && !outputs.includes(doc)) return { ok: false, message: `${role} finished without drafting ${stageId}'s document (${doc}); it recorded ${outputs.join(', ')}. Its reply:\n${summary}`, outputs, summary };
+      return { ok: true, message: `${role} drafted ${stageId}'s document. Review it and approve it (Approve… on the stage) to complete the stage.`, outputs, summary };
+    }
     const done = completeStage(ctx, stageId, { outputs, summary, who, channel: 'panel' });
     return { ok: true, message: done.message, outputs, decisionId: done.decisionId, summary };
   } catch (err) {
