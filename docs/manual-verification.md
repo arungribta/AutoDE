@@ -943,6 +943,24 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: ask the curator to propose vocabulary for the CRM source.
   Expect: entries with evidence (column names, comments, the dictionary); nothing merely plausible; a low-stakes decision you can approve.
 
+## Part 39 — v0.45.14 Code audit follow-ups
+
+- [ ] **39.1 The build stage has one way.**
+  Do: open the Workflow view on a problem whose mapping is approved.
+  Expect: the build stage offers Run agent, not "Generate the Pipeline Spec"; the palette has no *AutoDE: Generate Pipeline Spec*. The mapping stage still offers "Add a mapping…".
+- [ ] **39.2 Source assessment through a named connection.**
+  Do: with a named source connection saved, click *Run Source Assessment* on its platform card; pick the database and two schemas.
+  Expect: the tables arrive in the estate (Estate view) as that connection's system, with profiles; the chat logs the count; *Re-verify source schema* then reports no drift.
+- [ ] **39.3 No named connection.**
+  Do: in a workspace without `.autode/config/connections.yaml`, click *Run Source Assessment*.
+  Expect: a message to save a named connection first; nothing else happens.
+- [ ] **39.4 Refresh before Run agent.**
+  Do: set `autoDataEngineeringHub.context.schemaTtlDays` to 0 (every loaded table counts as stale), then Run agent on a mapping stage.
+  Expect: the log says how many tables were refreshed before the run (or nothing, when none were stale); a failed refresh doesn't stop the run.
+- [ ] **39.5 Refresh in a host.**
+  Do: in Claude Code, ask for the next stage.
+  Expect: the orchestrator calls `autode_refresh_working_set` before running the assignment; an unreachable source is reported and the stage still runs.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1174,5 +1192,10 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 38.3 |  |  |
 | 38.4 |  |  |
 | 38.5 |  |  |
+| 39.1 |  |  |
+| 39.2 |  |  |
+| 39.3 |  |  |
+| 39.4 |  |  |
+| 39.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

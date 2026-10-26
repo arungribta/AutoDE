@@ -51,10 +51,6 @@ export class PipelineSpecManager implements vscode.Disposable {
     return this.spec ? this.clone(this.spec) : undefined;
   }
 
-  public hasApprovedSpec(): boolean {
-    return this.spec?.status === 'approved';
-  }
-
   public async saveSpec(spec: PipelineSpec): Promise<void> {
     const { valid, errors } = validatePipelineSpec(spec);
     if (!valid) {
@@ -69,8 +65,8 @@ export class PipelineSpecManager implements vscode.Disposable {
   /**
    * Approval does NOT bump the version — a draft v1 becomes an approved v1,
    * mirroring `SpecManager.approve()` exactly. The version is bumped only
-   * when a new revision is synthesized from an already-approved predecessor
-   * (see `pipelineSpecSynthesis.ts`'s `parsePipelineSpecResponse`).
+   * when a new revision is drafted from an already-approved predecessor
+   * (`autode_record_pipeline_spec`).
    */
   public async approve(): Promise<PipelineSpec | undefined> {
     if (!this.spec) return undefined;
@@ -89,11 +85,6 @@ export class PipelineSpecManager implements vscode.Disposable {
 
   public getSpecUri(): vscode.Uri {
     return this.specUri;
-  }
-
-  /** The `spec/` directory this manager persists into — used to place sibling artifacts like the design doc. */
-  public getSpecDir(): vscode.Uri {
-    return this.specDir;
   }
 
   private async archive(previous: PipelineSpec | undefined, incoming: PipelineSpec): Promise<void> {

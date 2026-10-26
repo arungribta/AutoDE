@@ -8,8 +8,6 @@ import { SpecOpsEngine } from '../engine/interview/specOps';
 import { buildDiscoveryTurnPrompt, buildSynthesisPrompt } from './specOpsPrompts';
 import { parseComprehensiveSpec } from './specSynthesis';
 import { buildAttachmentExtractionPrompt, fallbackAttachmentExtract, parseAttachmentExtract } from './attachmentExtraction';
-import { buildPipelineSpecSynthesisPrompt, parsePipelineSpecResponse, PipelineSpecSynthesisInputs } from '../agents/pipelineSpecSynthesis';
-import { PipelineSpec } from '../engine/pipelineSpec/types';
 import { CITATION_INSTRUCTION } from '../engine/context/chatExtraction';
 
 /**
@@ -264,35 +262,6 @@ export class DataAgentHubHub {
       this.log(`Attachment extraction failed for ${attachment.path} (${err instanceof Error ? err.message : String(err)}) — falling back to a plain summary.`);
       return fallbackAttachmentExtract(attachment);
     }
-  }
-
-  /**
-   * Synthesizes the Pipeline Spec (Phase 2B-i) — the strictly-validated,
-   * machine-compilable YAML generated from an approved Business Problem
-   * Specification plus its full surrounding context (Target/Source Context,
-   * Context Layer, attachment extracts). Retries up to `maxAttempts` times,
-   * feeding the previous attempt's Ajv validation errors back into the next
-   * prompt — the same "validate immediately, re-prompt with the specific
-   * errors" discipline `selectTransformSpec` already uses for a single
-   * primitive, now applied to the whole document.
-   */
-  public async synthesizePipelineSpec(inputs: PipelineSpecSynthesisInputs, maxAttempts = 3): Promise<PipelineSpec> {
-    let lastErrors: string[] | undefined;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const { system, user } = buildPipelineSpecSynthesisPrompt(inputs, lastErrors);
-      const raw = await this.callConfiguredLlm(
-        user,
-        system,
-        'Synthesize a machine-executable Pipeline Spec from the approved Business Problem Specification and its context.'
-      );
-      try {
-        return parsePipelineSpecResponse(this.parseJsonObject(extractJsonText(raw)), inputs);
-      } catch (err) {
-        lastErrors = [err instanceof Error ? err.message : String(err)];
-        this.log(`Pipeline Spec synthesis attempt ${attempt} failed: ${lastErrors[0]}`);
-      }
-    }
-    throw new Error(`Pipeline Spec synthesis failed after ${maxAttempts} attempts: ${lastErrors?.join('; ') ?? 'unknown error'}`);
   }
 
   /**

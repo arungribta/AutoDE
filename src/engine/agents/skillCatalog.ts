@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseYaml } from '../context/Yaml';
 import { layoutPath } from '../workspaceLayout';
-import { loadRoles, loadSkillPack } from './definitions';
+import { checkDefinitions, loadRoles, loadSkillPack } from './definitions';
 import { loadSkillsFromDirectory } from '../skills/skillRegistry';
 import { loadToolSkillStates } from '../skills/lifecycle';
 
@@ -114,7 +114,7 @@ export function skillCatalog(input: CatalogInput): { entries: CatalogEntry[]; er
     name: k.id, group: 'autode', summary: k.description, stageKinds: k.meta.stageKinds, platforms: k.meta.platforms, scope: k.meta.scope,
     version: k.meta.version, maturity: k.meta.maturity, owner: k.meta.owner, roles: roles.filter((r) => r.skills.includes(k.id)).map((r) => r.name)
   }));
-  for (const r of roles) for (const s of r.skills) if (!pack.skills.some((k) => k.id === s)) errors.push(`role ${r.name} names skill ${s}, which AutoDE doesn't have.`);
+  errors.push(...checkDefinitions(roles, pack.skills));
   const workspace: CatalogEntry[] = loadToolSkillStates(layoutPath(input.workspaceRoot, 'toolSkills'), 'catalog', { migrate: false }).map((t) => ({
     name: t.skill.id, group: 'workspace', summary: t.skill.description ?? '', stageKinds: [], platforms: [], version: t.sidecar.version,
     status: `${t.sidecar.status ?? 'published'}, ${t.effectiveTier}${t.changedSinceReview ? ' (changed since review)' : ''}`, owner: (t.sidecar.provenance as { source?: string } | undefined)?.source ?? 'imported'

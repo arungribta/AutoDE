@@ -742,6 +742,8 @@ export interface EngineAccess {
   listTools?(): Promise<Array<{ name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>>;
   /** PA3b: exactly the named tools. */
   toolSetNamed?(names: readonly string[]): Promise<EngineToolSet>;
+  /** One tool call, for the panel's own flows that go through the same tools as agents (code audit 2026-10). */
+  call?(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>>;
   dispose(): Promise<void>;
 }
 

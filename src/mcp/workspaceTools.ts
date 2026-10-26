@@ -13,6 +13,10 @@ import { buildVocabulary, mineAbbreviations, parseVocabularyFile } from '../engi
 import { conformanceFailures, packConformance, readPackDocument } from '../engine/context/packChecks';
 import { ProbeDialect, ProbeExecutor, combineProbeExecutors, createSqlProbeExecutor } from '../engine/context/probes';
 import { layoutPath } from '../engine/workspaceLayout';
+import { CatalogEntry, CatalogFetcher } from '../engine/context/catalog';
+import { ContextFileManager } from '../engine/context/contextFileManager';
+import { BaseNode, GraphEdge } from '../engine/context/types';
+import { loadConnectionsConfig } from '../engine/platform/connectionsConfig';
 import { AnswerInput, QuestionInput, isOpenInterview, readInterview, recordInterview, startInterview, summarizeInterview, writeInterview } from '../engine/interview/state';
 
 /**
@@ -172,6 +176,21 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
       }
     },
     {
+      name: 'autode_refresh_working_set',
+      description: "Before you start a stage: refresh the tables AutoDE is working with that are past their refresh age, from the named connections their estate systems are bound to (read-only metadata; a table no longer visible is marked so, never deleted). The AutoDE panel does this itself before Run agent. Returns how many were checked and fetched; a source that can't be reached is reported, and the stage can still go ahead.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: recordsOnly('Refresh the working set', true, true),
+      handler: async (_args, ws) => {
+        const cfm = await openContext(ws.options.workspaceRoot);
+        try {
+          const { fetcher, unreachable } = estateFetcher(session, cfm, ws.options.workspaceRoot);
+          cfm.setCatalogFetcher(fetcher);
+          const r = await cfm.refreshWorkingSet();
+          return { ...r, unreachable, next: r.fetched ? 'Refreshed: start the stage.' : 'Nothing was out of date (or no bound connection could answer): start the stage.' };
+        } finally { cfm.dispose(); }
+      }
+    },
+    {
       name: 'autode_interview_state',
       description: 'The active problem\'s requirements interview, as any surface left it (the AutoDE panel, a terminal, another host): the parts covered and not, the open questions, every answer with who gave it and where, the attachments, and the specification it fed. Continue it; don\'t ask again what is answered.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
@@ -268,4 +287,63 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
       }
     }
   ];
+}
+
+/**
+ * A catalog fetcher over the workspace's named connections (code audit 2026-10: refresh on use before a
+ * stage, now that the plan run that did it is gone). Only connections already bound to an estate system
+ * count; each is connected lazily, when a stale table of its system is actually fetched. A connection
+ * that fails is reported in `unreachable` and its tables are left as they are.
+ */
+function estateFetcher(session: PlatformSession, cfm: ContextFileManager, workspaceRoot: string): { fetcher: CatalogFetcher | undefined; unreachable: string[] } {
+  const unreachable: string[] = [];
+  const configured = new Set(loadConnectionsConfig(workspaceRoot).connections.map((c) => c.id));
+  const bound = cfm.getEstate().bindings.filter((b) => b.connection && configured.has(b.connection))
+    .map((b) => ({ connection: b.connection!, identity: cfm.resolveConnection(b.connection!).identity }));
+  if (!bound.length) return { fetcher: undefined, unreachable };
+  const ownerOf = (e: CatalogEntry) => bound.find((b) => b.identity.system === e.system && (b.identity.environment ?? '') === (e.environment ?? ''));
+  const fetchers = new Map<string, CatalogFetcher | undefined>();
+  const fetcherFor = async (connection: string): Promise<CatalogFetcher | undefined> => {
+    if (!fetchers.has(connection)) {
+      try {
+        const manager = await session.connect(session.entry(connection));
+        manager.setEstateResolver((id) => cfm.resolveConnection(id));
+        fetchers.set(connection, manager.catalogFetcher());
+      } catch (err) {
+        unreachable.push(`${connection}: ${err instanceof Error ? err.message : String(err)}`);
+        fetchers.set(connection, undefined);
+      }
+    }
+    return fetchers.get(connection);
+  };
+  const byConnection = (entries: readonly CatalogEntry[]) => {
+    const m = new Map<string, CatalogEntry[]>();
+    for (const e of entries) { const o = ownerOf(e); if (o) m.set(o.connection, [...(m.get(o.connection) ?? []), e]); }
+    return m;
+  };
+  return {
+    unreachable,
+    fetcher: {
+      covers: (system, environment) => bound.some((b) => b.identity.system === system && (b.identity.environment ?? '') === (environment ?? '')),
+      fetchStructure: async (entries) => {
+        const nodes: BaseNode[] = [];
+        const edges: GraphEdge[] = [];
+        for (const [connection, group] of byConnection(entries)) {
+          const f = await fetcherFor(connection);
+          if (!f) continue;
+          const g = await f.fetchStructure(group);
+          nodes.push(...g.nodes); edges.push(...g.edges);
+        }
+        return { nodes, edges };
+      },
+      lastAltered: async (entries) => {
+        const out = new Map<string, string>();
+        for (const [connection, group] of byConnection(entries)) {
+          const f = await fetcherFor(connection);
+          if (f?.lastAltered) for (const [k, v] of await f.lastAltered(group)) out.set(k, v);
+        }
+        return out;
+      }
+    }
+  };
 }

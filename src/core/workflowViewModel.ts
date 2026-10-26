@@ -54,8 +54,9 @@ export type StageAction = 'approve' | 'approve-document' | 'run' | 'produce' | '
 /** How each document stage's document is made in VS Code. */
 export const PRODUCE_LABEL: Record<string, string> = {
   'specify': 'Open the specification', 'target-context': 'Build the target context', 'source-assessment': 'Build the source context',
-  'mapping': 'Add a mapping…', 'build': 'Generate the Pipeline Spec'
+  'mapping': 'Add a mapping…'
 };
+// The build stage's Pipeline Spec is made by its agent only (code audit 2026-10: one path, the same as agent hosts).
 const DOC_NAME: Record<string, string> = { 'specify': 'specification', 'target-context': 'target context', 'source-assessment': 'source context', 'mapping': 'mapping', 'build': 'Pipeline Spec' };
 
 /** The proposed workflow, for review before it is approved: every stage, and why the left-out ones are out. */
@@ -133,7 +134,7 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
       if (v.status === 'awaiting-approval' && s.record.decisionId) actions.push('approve');
       if (documentBacked && v.status === 'awaiting-approval' && !s.record.decisionId && !blockers.length) actions.push('approve-document');
       if (runner && !notReady.length && (open || (documentBacked && v.status === 'awaiting-approval'))) actions.push('run');
-      if (documentBacked && v.status !== 'done') actions.push('produce');
+      if (documentBacked && PRODUCE_LABEL[s.kind] && v.status !== 'done') actions.push('produce');
       if (!documentBacked && (v.status === 'ready' || v.status === 'in-progress')) actions.push('hand-in');
       if (v.status === 'stale') actions.push('approve-again');
       if (v.status === 'done') actions.push('reopen');
@@ -150,7 +151,8 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
       : v.status === 'awaiting-approval' && s.record.decisionId ? 'Waits for your approval.'
       : notReady.length ? `${v.status === 'in-progress' ? 'Started, but blocked' : 'Not ready yet'}: ${notReady.join(' ')}`
       : v.status === 'awaiting-approval' && documentBacked ? (blockers.length ? `The ${doc} can't be approved yet: ${blockers.join(' ')}` : `Review the ${doc} and approve it.`)
-      : documentBacked ? `${PRODUCE_LABEL[s.kind]}${runner ? ` (or Run agent: ${runner})` : ''}, then approve the ${doc}.`
+      : documentBacked && PRODUCE_LABEL[s.kind] ? `${PRODUCE_LABEL[s.kind]}${runner ? ` (or Run agent: ${runner})` : ''}, then approve the ${doc}.`
+      : documentBacked && runner ? `Run agent (${runner}), then approve the ${doc}.`
       : runner ? `Run agent (${runner}), or hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`
       : `No AutoDE agent does this stage yet: hand in what you produced${s.inclusion !== 'mandatory' ? ', or skip it with a reason' : ''}.`;
     return {

@@ -1,7 +1,7 @@
 # Code audit, October 2026: dead and stranded code
 
 **For:** the owner, deciding what to remove after the direction changes and simplifications (SIMP-1 to SIMP-4, PA3).
-**Date:** 2026-10-26, at v0.45.13.
+**Date:** 2026-10-26, at v0.45.13. **Decisions:** all taken on 2026-10-26 (the owner accepted every recommendation); items 1 to 5 shipped in v0.45.14.
 
 AutoDE changed direction several times: the plan of steps became the workflow; TypeScript agents became role templates and skills; settings-based connections became named connections and the estate. This audit sorts what those changes left behind into three groups:
 - **dead:** nothing reaches it, and no roadmap phase names it. **Removed.**
@@ -47,6 +47,8 @@ The two can disagree, and only the first is what agent hosts do. That goes again
 
 **Recommendation:** make Produce on a build stage run the stage's agent. Then remove the one-shot synthesis, `src/agents/pipelineSpecSynthesis.ts` and the palette command. About 300 lines.
 
+**Done (v0.45.14):** a build stage offers Run agent only, and the one-shot synthesis and its command are gone.
+
 The mapping stage's Produce is different and should stay. It lets a person author a mapping by hand (pick the source and target, then edit), which is the manual path next to the agent.
 
 ### 2. Two ways to bring a source's metadata in
@@ -58,11 +60,15 @@ v0.45.10 removed the settings-based *Connect to Source* check from the source co
 
 **Recommendation:** have the button run the estate extraction on a named connection, so there is one way in.
 
+**Done (v0.45.14):** the button picks a named connection, a database and its schemas, and ingests through `autode_ingest_metadata`.
+
 ### 3. Refresh on use has lost its caller
 
 `ContextFileManager.refreshWorkingSet()` (K2) refreshes stale working-set objects "before a plan runs". The plan run went in SIMP-3, so today only tests call it, and stale tables are no longer refreshed before an agent works on them.
 
 **Recommendation:** call it before a stage's agent runs (Run agent, and `autode_workflow_next`). This restores what K2 intended.
+
+**Done (v0.45.14):** the panel's Run agent calls it. In hosts, `autode_refresh_working_set` calls it, and the orchestrator skill calls that before an assignment. `autode_workflow_next` stays read-only.
 
 ### 4. Back-compat and debug commands in the palette
 
@@ -73,11 +79,15 @@ All three show in the command palette. `copilotHandoff` is used by a prompt, so 
 
 **Recommendation:** drop the two aliases and the debug command from `package.json` at the next UI release. A keybinding someone made to them would stop working, which is why this is your call.
 
+**Done (v0.45.14):** the three commands are gone.
+
 ### 5. Engine helpers only tests use
 
 `approveWorkflow`, `roleFor`, `resolveSubjects`, `renderGroundingReport`, `getAuthModesForPrincipal`, `unregisterCredentialResolver`, `problemFromRoot` and `checkDefinitions` are exercised by tests, but no product path calls them.
 
 **Recommendation:** keep them; they are small, tested operations. One exception is worth a look: `checkDefinitions` (a role naming a skill that doesn't exist). The catalog already reports this its own way, so either use `checkDefinitions` there or drop it.
+
+**Done (v0.45.14):** the helpers are kept, and the catalog now uses `checkDefinitions`.
 
 ### 6. A decision that changed: the interview after New Chat
 

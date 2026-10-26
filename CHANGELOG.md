@@ -6,8 +6,22 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
-## Unreleased
+## 0.45.14
 
+- **Code audit follow-ups** (owner, 2026-10-26: all five recommendations accepted; the sixth item, the interview decision note, stands). Details: [docs/code-audit-2026-10.md](docs/code-audit-2026-10.md).
+  - **One way to make the build stage's Pipeline Spec.** In VS Code the build stage offers Run agent (the pipeline engineer, AutoDE's compiler, grounding manifests), the same as agent hosts, and no separate Produce.
+    - **Removed:** the one-shot LLM synthesis behind Produce (`AgentHub.synthesizePipelineSpec`, `src/agents/pipelineSpecSynthesis.ts`), its command *AutoDE: Generate Pipeline Spec*, and its two tests.
+    - **Attachments:** they reach the build through the business-problem pack (v0.45.12), so nothing is lost.
+    - **Mapping:** the mapping stage keeps Produce, which is a person's own mapping.
+  - **One way to bring a source's metadata in.** *Run Source Assessment* on a platform card now picks a named connection, a database and its schemas. It brings them into the estate with profiling, through the same engine tools agents and the CLI use (`autode_list_databases`, `autode_list_schemas`, `autode_ingest_metadata`), instead of the single connection in the settings. *Re-verify source schema* uses it too, and sees the new tables.
+  - **Refresh on use is back.** Tables past their refresh age are refreshed before a stage's agent runs:
+    - **In VS Code:** by Run agent.
+    - **In hosts:** by the new `autode_refresh_working_set`, which the orchestrator skill (v2) calls before an assignment. It uses the named connections already bound to an estate system, connects only when a table needs fetching, reports a source it can't reach, and never creates estate systems.
+  - **Palette:** the commands `testCopilot`, `listCopilotInfo` (aliases) and `debugListExtensions` are gone.
+  - **Catalog:** it checks roles naming unknown skills with `checkDefinitions`, one implementation instead of two.
+  - **Deliberate deviation:** the audit suggested refreshing inside `autode_workflow_next`. That tool is read-only, and MCP's context is read-only by design, so the refresh is a separate records tool the orchestrator calls first.
+  - **Third pass:** two more methods orphaned by the removal (`PipelineSpecManager.hasApprovedSpec`, `getSpecDir`) and four unused imports went too.
+  - **Measured:** 366 tests: 2 new (one path for the build stage, with the mapping stage's Produce kept; the refresh tool, the orchestrator step and the catalog check); 2 removed with the synthesis; 1 trimmed. Lint 0 errors, 22 warnings. Eval unchanged.
 - **Code audit: dead code removed, stranded code listed for decision** ([docs/code-audit-2026-10.md](docs/code-audit-2026-10.md)). Every module was checked for reachability from the extension, the CLI and the MCP server, and every export for references, with the TypeScript language service; panel messages, commands, settings and layout entries were checked against their uses.
   - **Removed:**
     - three dead modules: the `copilotAdapter` and `GraphPersistence` re-export shims, and `platformDialect`;

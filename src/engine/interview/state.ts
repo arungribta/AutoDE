@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
-import { AttachmentExtract, BusinessProblemSpec, IntakeAnswer, IntakeAttachment, IntakeSession, SkillDefinition, SpecIntakeQuestion } from '../types';
+import { BusinessProblemSpec, IntakeAnswer, IntakeSession, SkillDefinition, SpecIntakeQuestion } from '../types';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
 
 /**
@@ -51,25 +51,6 @@ export function writeInterview(problemRoot: string, session: IntakeSession): voi
 /** Still being asked: not yet turned into a specification (one caught mid-synthesis, by a reload say, is resumed too). */
 export function isOpenInterview(s: IntakeSession | undefined): boolean {
   return !!s && !s.feeds && (s.state === 'discovery' || s.state === 'synthesizing');
-}
-
-/**
- * What the attachments contributed, for later stages (Pipeline Spec synthesis): the extracts kept in the
- * interview, and those of attachments saved before v0.45.12 (`<problem>/attachments/*.yaml`).
- */
-export function attachmentExtracts(problemRoot: string): AttachmentExtract[] {
-  const out: AttachmentExtract[] = [];
-  for (const a of readInterview(problemRoot)?.attachments ?? []) if (a.extract) out.push(a.extract);
-  const legacy = path.join(problemRoot, 'attachments');
-  let files: string[] = [];
-  try { files = fs.readdirSync(legacy).filter((f) => f.endsWith('.yaml')); } catch { /* none */ }
-  for (const f of files) {
-    try {
-      const a = parseYaml(fs.readFileSync(path.join(legacy, f), 'utf8')) as IntakeAttachment | null;
-      if (a?.extract && !out.some((e) => e.attachmentId === a.extract!.attachmentId)) out.push(a.extract);
-    } catch { /* an unreadable file doesn't block the rest */ }
-  }
-  return out;
 }
 
 export function openQuestions(s: IntakeSession): SpecIntakeQuestion[] {

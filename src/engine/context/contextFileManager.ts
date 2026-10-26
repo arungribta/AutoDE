@@ -282,7 +282,7 @@ export class ContextFileManager {
     await this.promote(entries.map((e) => e.id));
   }
 
-  /** Refresh on use: the working set's stale objects. Its caller (the plan run) went in v0.45.9; see docs/code-audit-2026-10.md. */
+  /** Refresh on use, before a stage's agent runs (the panel's Run agent; `autode_refresh_working_set` in hosts): the working set's stale objects. */
   public async refreshWorkingSet(): Promise<{ checked: number; fetched: number }> {
     const now = new Date();
     const stale = [...this.workingSetTableIds()].map((id) => this.catalog.get(id)).filter((e): e is CatalogEntry => !!e && isStale(e, this.policy, now));

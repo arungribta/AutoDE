@@ -1034,7 +1034,7 @@ All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper
 
 | Responsibility | Implementation |
 |---|---|
-| Specification | `generateSpec()`, `discoverNextAction()`, `synthesizeComprehensiveSpec()`, `extractAttachmentFacts()`, `synthesizePipelineSpec()`, `completeJson()` |
+| Specification | `generateSpec()`, `discoverNextAction()`, `synthesizeComprehensiveSpec()`, `extractAttachmentFacts()`, `completeJson()` |
 | Chat | `chat()`, grounded in the active specification and target (`buildChatContextBlock()`), with history windowing and rolling summaries |
 | The model with tools | `runAgentWithTools()` (the stage executor), `runToolSkill()` (imported tool skills, §7.6) |
 | Engine clients | `setEngineFactory()`, `createEngine(clientName)` (one per stage run, named after the role) |
@@ -1180,6 +1180,23 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - `src/mcp/runnerHost.ts`: `createRunnerHost()` uses a write-enabled `PlatformSession` for SQL (explain, read, approved change) and `spawn()` with no shell for commands.
   - VS Code: `src/core/runbookView.ts` (`RunbookPanel`, `autoDataEngineeringHub.openRunbook`) over `src/core/runbookViewModel.ts`, with `media/runbook.html`.
   - CLI: `cmdRunbook()`. MCP: `autode_propose_runbook` (`decisions.ts`) and `autode_runbook_status` (`agentTools.ts`).
+- **Code audit follow-ups** (v0.45.14; [code-audit-2026-10.md](code-audit-2026-10.md)):
+  - **One path for the build stage:** `PRODUCE_LABEL` (`src/core/workflowViewModel.ts`) has no `build` entry, so a build stage offers Run agent, not Produce; its guide reads "Run agent (pipeline-engineer), then approve the Pipeline Spec". A stale `produce` message for a build stage runs the agent. Removed: `AgentHub.synthesizePipelineSpec()`, `src/agents/pipelineSpecSynthesis.ts`, the panel's `generatePipelineSpec()` and the command *AutoDE: Generate Pipeline Spec*.
+  - **Source assessment from the platform card** (`autoDataEngineeringHub.sourceAssessment`, `src/extension.ts`):
+    1. picks a named connection (source role first, from `loadConnectionsConfig()`);
+    2. gets an `EngineAccess` from `hub.createEngine('autode-panel')`, through the new optional `EngineAccess.call()`;
+    3. asks `autode_list_databases` and `autode_list_schemas`;
+    4. runs `autode_ingest_metadata` with `profile: true`;
+    5. calls `reloadContextLayer()`, the panel's context reload moved out of its message case, so `reVerifySourceSchema`, which calls the command, sees the new tables.
+
+    It returns the same `{ success, tableCount }`.
+  - **Refresh on use before a stage:**
+    - the panel's Run agent calls `ContextFileManager.refreshWorkingSet()` first (logging what it fetched; a failure doesn't stop the run);
+    - in hosts, `autode_refresh_working_set` (`src/mcp/workspaceTools.ts`, records) sets `estateFetcher()`, a `CatalogFetcher` over the named connections already bound to an estate system. It connects lazily per connection, reports unreachable ones, and never creates estate systems. Then it calls `refreshWorkingSet()`;
+    - the orchestrator skill (v2) calls it before running an assignment;
+    - `autode_workflow_next` stays read-only.
+  - **Palette:** `testCopilot`, `listCopilotInfo` and `debugListExtensions` are no longer commands. The sidebar's `testCopilot` message still routes to `testLanguageModel`.
+  - **Catalog:** `skillCatalog()` reports roles naming unknown skills through `checkDefinitions()`.
 - **The context curator** (v0.45.13; SKL-6, BPS-1):
   - `BusinessPackManager` (`src/engine/context/businessPackManager.ts`) splits reading into deterministic halves around the model call:
     - `readingFor(id)` returns a `ReadingRequest`: `facts` (the sha, the section ids and headings from `splitSections()`, and `buildDocumentExtractionPrompt()`), `profile` (`buildProfileProposalPrompt()` for a structured document no confirmed profile reads), or `none` with the reason (sample, confirmed profile, a proposed profile waiting, unreadable);
@@ -1200,7 +1217,7 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
     - `recordInterview()` validates questions (`SpecOpsEngine.validateQuestion`, field among the coverage keys) and answers (by question id; or by field, answering that field's latest open question, else recording a question from `prompt`), and reports errors item by item.
     - `summarizeInterview()` gives the parts (by `specFields`), open questions and answers.
     - `markInterviewFed()` closes the interview.
-    - `attachmentExtracts()` reads the interview's extracts plus the pre-v0.45.12 `<problem>/attachments/*.yaml`.
+    - Attachment extracts stay in the interview; since v0.45.14 nothing else reads them (the documents reach later stages through the pack).
   - **Interview parts as skills:**
     - `skills/autode-de-interview-{requirements,sources,data-flow,transformations,quality,constraints}` and `autode-de-specification-authoring` replace `skills/*.json`, which were converted verbatim.
     - `skillMeta()` reads `metadata.interview` (the part's old id), `order` and `specFields` into `SkillMeta.interview`. A part must have `stageKinds: [specify]`.
@@ -1214,7 +1231,7 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
     - `synthesizeFromSession()` marks the interview fed when the spec changed, else reopens it;
     - `startNewChat()` no longer ends the interview, and `carryOverPartialInterview()` is gone;
     - `attachSpecFile` copies a file from outside the workspace to `<problem>/pack/files/` and registers it with `packManager.addDocument()` (role `other`, authority `draft`);
-    - `AttachmentStore` is removed, and Pipeline Spec synthesis reads `attachmentExtracts()`.
+    - `AttachmentStore` is removed.
   - **MCP:**
     - `autode_start_problem` starts the interview;
     - `autode_interview_state` (read) and `autode_interview_record_answer` (records, channel `mcp`) are in `src/mcp/workspaceTools.ts`;
@@ -1510,8 +1527,6 @@ entities:
 - **`compiler.ts#compilePipelineSpec(spec, dialect)`** — the AutoDE analogue of the sibling framework's `interpreter.py`: runs each entity's `transforms[]` through the existing `compileTransformSpec()` (§9.2) in order, zero LLM calls. Deliberately **no freehand fallback** here (unlike §9.2's tiered chain) — a compile failure is a bug in an already-approved, already-Ajv-validated spec, not a coverage gap.
 - **`designDocGenerator.ts#generateDesignDoc(spec)`** — a pure function producing Markdown (with a Mermaid `flowchart LR` lineage diagram) from a validated spec; same input always produces the same output, so the YAML and its Markdown projection cannot drift apart.
 - **`context/PipelineSpecManager.ts`** — persistence modeled function-for-function on `SpecManager.ts` (§3): `.autode/problems/<id>/spec/pipeline.yaml` + `spec/history/pipeline.v<version>.<status>.yaml`, atomic temp-then-rename writes, `approve()` doesn't bump version (a draft v1 becomes approved v1), a new revision from an approved predecessor does. A document whose `specVersion` doesn't match `CURRENT_PIPELINE_SPEC_VERSION` loads leniently (a logged warning, not a thrown error) — schema evolution must never brick an already-approved pipeline.
-- **Synthesis (`src/agents/pipelineSpecSynthesis.ts` + `AgentHub.synthesizePipelineSpec()`)** — grounded in the approved BPS, the approved Target Context (platform/naming/tooling feed `targetPlatform` directly — confirmed via test that swapping Target Context's platform changes the generated spec with no BPS change at all), the approved Source Context, the Context Layer graph, and attachment extracts (§9.4). Retries up to 3 times, feeding the previous attempt's Ajv errors back into the next prompt (`buildPipelineSpecSynthesisPrompt(inputs, validationErrors?)`) — the same discipline `selectTransformSpec` (§9.2) already uses for one primitive, now applied to the whole document. Also the first real consumer of `BusinessProblemSpec.provenance` (§3.2): a field tagged `source: 'assumption'` is called out in the prompt for conservative treatment.
-- **New command, "AutoDE: Generate Pipeline Spec"** — gated on `computeContextGateStatus()` (§3.12): the specification and its contexts approved.
 
 ### 9.4 Attachment structured extraction
 
@@ -1542,7 +1557,6 @@ type PrimitiveLifecycleStatus = 'draft' | 'published' | 'deprecated' | 'retired'
 | `src/engine/agents/primitiveCandidates.ts` | `primitiveCandidates()`: primitives with parameters from facts (v0.45.4; replaced `llmParamSelector.ts`) |
 | `src/engine/pipelineSpec/*.ts` | `types.ts`, `schema.ts`, `validator.ts`, `compiler.ts`, `designDocGenerator.ts` |
 | `src/context/PipelineSpecManager.ts` | Pipeline Spec persistence/versioning |
-| `src/agents/pipelineSpecSynthesis.ts` | Prompt-building + response-parsing for Pipeline Spec synthesis |
 | `src/core/attachmentExtraction.ts`, `src/context/AttachmentStore.ts` | Attachment structured extraction + persistence |
 | `src/core/disposables.ts` | `DisposableRegistry` — real `deactivate()` (§8) |
 | `docs/schemas/primitive-definition.schema.json` | `yamlValidation` contribution target for live-editing Tier-2 definitions |
@@ -1671,7 +1685,7 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 | `llmEndpoint` | string | `""` | Custom LLM endpoint. |
 | `context.workingSetMaxTables` | number | `200` | Tables AutoDE keeps in its working set (the context graph and ledger). |
 | `context.evictAfterDays` | number | `30` | While the working set is over its size, tables no task has used for this many days (and no confirmed fact is about) go back to the catalog. |
-| `context.schemaTtlDays` | number | `7` | Schema facts older than this are re-checked against a connected source when a task uses them and before a plan runs. |
+| `context.schemaTtlDays` | number | `7` | Schema facts older than this are re-checked against a connected source when a task uses them and before a stage's agent runs. |
 | `discovery.profileQueryBudget` | number | `50` | Most profiling queries one Source Assessment may run (one sampled query per table). |
 | `discovery.profileConcurrency` | number | `4` | Profiling queries run in parallel during Source Assessment. |
 | `artifactDirectory` | string | `"autode-output"` | Workspace-relative folder where AutoDE writes generated deliverables, one subfolder per business problem (autode-output/<problem-id>/<phase>/...). |
@@ -1785,8 +1799,6 @@ Generated from `src/` (`npm run docs:generate`; `npm test` fails when it is stal
 ```
 src/    # activation and command registration
   extension.ts
-src/agents/    # Pipeline Spec synthesis (the panel)
-  pipelineSpecSynthesis.ts
 src/agents/build/    # the tool-skill runner
   ToolSkillAgent.ts
 src/cli/    # the autode command line (no vscode; §10.8)

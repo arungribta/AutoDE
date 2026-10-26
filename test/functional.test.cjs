@@ -2172,31 +2172,6 @@ async function main() {
     assert.ok(logs.some((l) => l.includes('specVersion 99') && l.includes('loading leniently')));
   });
 
-  await test('parsePipelineSpecResponse() takes targetPlatform from the approved Target Context, not an LLM re-guess, when the LLM omits it', () => {
-    const { parsePipelineSpecResponse } = require('../dist/agents/pipelineSpecSynthesis.js');
-    const bps = { id: 'bps-1', version: 1, status: 'approved', problemStatement: 'p', objectives: ['o'], successCriteria: [], scope: { in: ['x'], out: [] }, constraints: [], assumptions: [], createdAt: 'c', updatedAt: 'u' };
-    const inputs = { bps, targetContext: { specId: 'bps-1', specVersion: 1, status: 'approved', platform: 'databricks', answers: {} } };
-    const llmResponse = { entities: [{ name: 'e1', source: { object: 's', type: 'table' }, transforms: [], target: { object: 't', materialization: 'view' } }] };
-    const result = parsePipelineSpecResponse(llmResponse, inputs);
-    assert.strictEqual(result.targetPlatform, 'databricks', 'targetPlatform came from Target Context, not a guess, since the LLM response omitted it');
-  });
-
-  await test('parsePipelineSpecResponse() bumps version only when revising an approved predecessor, and rejects an invalid entities shape', () => {
-    const { parsePipelineSpecResponse } = require('../dist/agents/pipelineSpecSynthesis.js');
-    const bps = { id: 'bps-1', version: 1, status: 'approved', problemStatement: 'p', objectives: ['o'], successCriteria: [], scope: { in: ['x'], out: [] }, constraints: [], assumptions: [], createdAt: 'c', updatedAt: 'u' };
-    const validEntities = { entities: [{ name: 'e1', source: { object: 's', type: 'table' }, transforms: [], target: { object: 't', materialization: 'view' } }] };
-
-    const first = parsePipelineSpecResponse(validEntities, { bps });
-    assert.strictEqual(first.version, 1);
-
-    const approvedPrevious = { ...first, status: 'approved' };
-    const revision = parsePipelineSpecResponse(validEntities, { bps, previous: approvedPrevious });
-    assert.strictEqual(revision.version, 2, 'revising an approved predecessor bumps the version');
-    assert.strictEqual(revision.id, approvedPrevious.id, 'the id is carried forward, not regenerated');
-
-    assert.throws(() => parsePipelineSpecResponse({ entities: [{ name: 'e1' }] }, { bps }), /source|target|transforms/i, 'an entity missing required blocks fails Ajv validation');
-  });
-
   await test('fallbackAttachmentExtract()/parseAttachmentExtract() degrade gracefully instead of throwing on a malformed extraction response', () => {
     const { fallbackAttachmentExtract, parseAttachmentExtract } = require('../dist/core/attachmentExtraction.js');
     const attachment = { id: 'att-1', path: 'schema.sql', content: 'CREATE TABLE orders (order_id INT, status STRING);', attachedAt: 'c' };
@@ -2213,9 +2188,8 @@ async function main() {
     assert.strictEqual(fromMalformedConfidence.confidence, 'low', 'an invalid confidence value falls back to low rather than propagating garbage');
   });
 
-  await test('parseAttachmentExtract() extracts entities/columns from a well-formed response, which then flow into the Pipeline Spec synthesis prompt', () => {
+  await test('parseAttachmentExtract() extracts entities/columns from a well-formed response', () => {
     const { parseAttachmentExtract } = require('../dist/core/attachmentExtraction.js');
-    const { buildPipelineSpecSynthesisPrompt } = require('../dist/agents/pipelineSpecSynthesis.js');
     const attachment = { id: 'att-1', path: 'schema.sql', content: 'CREATE TABLE orders (order_id INT, status STRING);', attachedAt: 'c' };
     const extract = parseAttachmentExtract({
       entities: [{ name: 'orders', columns: [{ name: 'order_id', type: 'INT' }, { name: 'status', type: 'STRING' }] }],
@@ -2224,10 +2198,6 @@ async function main() {
     }, attachment);
     assert.strictEqual(extract.entities[0].name, 'orders');
     assert.strictEqual(extract.entities[0].columns.length, 2);
-
-    const bps = { id: 'bps-1', version: 1, status: 'approved', problemStatement: 'p', objectives: ['o'], successCriteria: [], scope: { in: ['x'], out: [] }, constraints: [], assumptions: [], createdAt: 'c', updatedAt: 'u' };
-    const { user } = buildPipelineSpecSynthesisPrompt({ bps, attachmentExtracts: [extract] });
-    assert.ok(user.includes('orders(order_id, status)'), 'the extracted entity/columns are visible to the LLM in the synthesis prompt, not just the raw attachment text');
   });
 
   await test('buildProvenance() (via parseComprehensiveSpec) tags sourceCatalog/dataFlows as source:"attachment" when an entity-extracting attachment informed them and no direct question did', () => {
@@ -2244,7 +2214,7 @@ async function main() {
     assert.strictEqual(sourceCatalogProvenance.attachmentId, 'att-1');
   });
 
-  await test('v0.45.12: attachments live in the interview (extracts kept, text left in its file) and still reach Pipeline Spec synthesis; attachments saved before v0.45.12 are read too, a corrupt one skipped', () => {
+  await test('v0.45.12: attachments live in the interview, extracts kept and text left in its file, read back from the file on resume (the pack is how their content reaches later stages)', () => {
     const nodeFs = require('node:fs'); const os = require('node:os');
     const S = require('../dist/engine/interview/state.js');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-att-'));
@@ -2256,10 +2226,7 @@ async function main() {
       S.writeInterview(root, s);
       assert.ok(!nodeFs.readFileSync(S.interviewFile(root), 'utf8').includes('ship within'), 'the text stays in its file');
       assert.strictEqual(S.readInterview(root, ws).attachments[0].content, '# Orders BRD\nOrders ship within 2 days.', 'read back from the file');
-      nodeFs.mkdirSync(nodePath.join(root, 'attachments'), { recursive: true });
-      nodeFs.writeFileSync(nodePath.join(root, 'attachments', 'att-0.yaml'), 'id: att-0\npath: old.txt\ncontent: x\nattachedAt: b\nextract:\n  attachmentId: att-0\n  extractedAt: b\n  rawSummary: legacy\n  confidence: low\n');
-      nodeFs.writeFileSync(nodePath.join(root, 'attachments', 'broken.yaml'), 'foo: [1, 2');
-      assert.deepStrictEqual(S.attachmentExtracts(root).map((e) => e.rawSummary).sort(), ['legacy', 'shipping rule']);
+      assert.strictEqual(S.readInterview(root, ws).attachments[0].extract.rawSummary, 'shipping rule', 'the extract is kept with the interview');
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
@@ -5932,10 +5899,10 @@ async function main() {
       const tools = (await client.listTools()).tools;
       const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5991,6 +5958,7 @@ async function main() {
       autode_record_artifact: [{ stage: 'docs', path: 'design.md', content: '# Design' }, { stage: 'docs', path: 'design.md' }],
       autode_interview_state: [{}, { extra: 1 }],
       autode_pack_reading: [{ id: 'brd' }, {}],
+      autode_refresh_working_set: [{}, { connection: 'x' }],
       autode_pack_record_reading: [{ id: 'brd', facts: [] }, { facts: [] }],
       autode_interview_record_answer: [{ answers: [{ field: 'scope', value: 'EU only' }] }, { answers: [{ field: 'scope' }] }],
       autode_workflow_draft: [{ template: 'greenfield' }, { template: '' }],
@@ -10157,6 +10125,42 @@ async function main() {
       assert.deepStrictEqual([rec.status, rec.proposed], ['extracted', 1]);
       const both = await client.callTool({ name: 'autode_pack_record_reading', arguments: { id: doc.id } });
       assert.ok(both.isError && /facts \(free text\) or profile/.test(JSON.stringify(both.content)));
+    } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.45.14: the code audit's follow-ups ──
+
+  await test('v0.45.14: one way per stage — the build stage\'s Pipeline Spec comes from its agent only (no separate Produce); the mapping stage keeps Produce for a person\'s own mapping', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-onepath-'));
+    try {
+      const { id, W } = await tinyFlow(ws, cli);
+      assert.strictEqual((await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] })).code, 0);
+      const m = fresh('../dist/core/workflowViewModel.js').buildWorkflowModel({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id });
+      const build = m.stages.find((s) => s.id === 'build');
+      const mapping = m.stages.find((s) => s.id === 'mapping');
+      assert.ok(!build.actions.includes('produce') && build.produceLabel === undefined, JSON.stringify(build.actions));
+      assert.ok(!/Generate the Pipeline Spec/.test(build.guide), build.guide);
+      assert.ok(mapping.actions.includes('produce') && mapping.produceLabel === 'Add a mapping…');
+      assert.ok(!require('node:fs').existsSync(nodePath.join(__dirname, '..', 'dist', 'agents', 'pipelineSpecSynthesis.js')), 'the one-shot synthesis is gone');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.45.14: refresh on use before a stage — autode_refresh_working_set over MCP (nothing bound: nothing fetched, nothing created in the estate); the orchestrator calls it before an assignment; the catalog reports roles naming unknown skills through checkDefinitions', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-refresh-'));
+    const client = await mcpSession(ws);
+    try {
+      const r = (await client.callTool({ name: 'autode_refresh_working_set', arguments: {} })).structuredContent;
+      assert.deepStrictEqual([r.checked, r.fetched, r.unreachable], [0, 0, []]);
+      assert.ok(!nodeFs.existsSync(nodePath.join(ws, '.autode', 'knowledge', 'estate.yaml')) || !/system:/.test(nodeFs.readFileSync(nodePath.join(ws, '.autode', 'knowledge', 'estate.yaml'), 'utf8')), 'no estate system created');
+      const orch = nodeFs.readFileSync(nodePath.join(wfRes(), 'skills', 'autode-core-orchestrator', 'SKILL.md'), 'utf8');
+      assert.match(orch, /If there is an assignment, first call `autode_refresh_working_set`/);
+      const dir = nodePath.join(ws, '.autode', 'config', 'agents');
+      nodeFs.mkdirSync(dir, { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(dir, 'ghost-writer.md'), '---\nname: ghost-writer\ndescription: Writes ghosts\ntools: [autode_resolve]\nskills: [autode-de-ghost]\n---\nBoo.\n');
+      const cat = fresh('../dist/engine/agents/skillCatalog.js').skillCatalog({ resourcesRoot: wfRes(), workspaceRoot: ws, home: ws, env: { PATH: '' } });
+      assert.ok(cat.errors.includes('role ghost-writer: unknown skill "autode-de-ghost".'), cat.errors.join('\n'));
     } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

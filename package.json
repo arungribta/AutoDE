@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.45.13",
+  "version": "0.45.14",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -54,10 +54,6 @@
       {
         "command": "autoDataEngineeringHub.openSidebar",
         "title": "AutoDE: Open Sidebar"
-      },
-      {
-        "command": "autoDataEngineeringHub.generatePipelineSpec",
-        "title": "AutoDE: Generate Pipeline Spec"
       },
       {
         "command": "autoDataEngineeringHub.testConnection",
@@ -158,18 +154,6 @@
       {
         "command": "autoDataEngineeringHub.listLanguageModels",
         "title": "AutoDE: List Language Models"
-      },
-      {
-        "command": "autoDataEngineeringHub.testCopilot",
-        "title": "AutoDE: Test Copilot"
-      },
-      {
-        "command": "autoDataEngineeringHub.listCopilotInfo",
-        "title": "AutoDE: List Copilot Info"
-      },
-      {
-        "command": "autoDataEngineeringHub.debugListExtensions",
-        "title": "AutoDE: Debug List Extensions"
       },
       {
         "command": "autoDataEngineeringHub.copilotHandoff",
@@ -660,7 +644,7 @@
           "type": "number",
           "default": 7,
           "minimum": 0,
-          "description": "Schema facts older than this are re-checked against a connected source when a task uses them and before a plan runs."
+          "description": "Schema facts older than this are re-checked against a connected source when a task uses them and before a stage's agent runs."
         },
         "autoDataEngineeringHub.discovery.profileQueryBudget": {
           "type": "number",

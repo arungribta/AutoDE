@@ -5,7 +5,7 @@ import { DataAgentHubHub } from './core/agentHub';
 import { ConfigurationManager } from './core/configManager';
 import { DataAgentHubWebviewProvider } from './core/webviewProvider';
 import { ConnectionManager } from './engine/platform/ConnectionManager';
-import { sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
+import { loadConnectionsConfig, sampleDataConsentFromWorkspace } from './engine/platform/connectionsConfig';
 import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, PrerequisiteHost } from './core/platformPrerequisites';
 import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, registerMcpProvider, vscodeSecretEnv } from './core/mcpConfig';
 import { EngineClient } from './core/engineClient';
@@ -137,14 +137,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // synthesizes a strictly-validated, machine-compilable Pipeline Spec from the
   // approved specification and its context. Delegates to the sidebar provider,
   // which owns the spec/context managers this needs (see webviewProvider.ts).
-  const generatePipelineSpec = vscode.commands.registerCommand(`${EXTENSION_ID}.generatePipelineSpec`, async () => {
-    try {
-      await sidebarProvider.triggerGeneratePipelineSpec();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to generate the Pipeline Spec.';
-      await vscode.window.showErrorMessage(message);
-    }
-  });
 
   // Phase 3a-ii — interactive-developer onboarding: detects the platform's own
   // CLI, offers its configured connections, and resolves the chosen one down to a
@@ -346,20 +338,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const testLanguageModel = vscode.commands.registerCommand(`${EXTENSION_ID}.testLanguageModel`, testLanguageModelHandler);
   const listLanguageModelInfo = vscode.commands.registerCommand(`${EXTENSION_ID}.listLanguageModelInfo`, listLanguageModelInfoHandler);
-  // Back-compat command ids — now generalized to the active LM provider.
-  const testCopilot = vscode.commands.registerCommand(`${EXTENSION_ID}.testCopilot`, testLanguageModelHandler);
-  const listCopilotInfo = vscode.commands.registerCommand(`${EXTENSION_ID}.listCopilotInfo`, listLanguageModelInfoHandler);
-
-  const debugListExtensions = vscode.commands.registerCommand(`${EXTENSION_ID}.debugListExtensions`, async () => {
-    const out = vscode.window.createOutputChannel('autoDE:extensions-debug');
-    out.show(true);
-    out.appendLine('Enumerating installed extensions:');
-    try {
-      for (const ext of (vscode.extensions.all || [])) {
-        try { out.appendLine(`- ${ext.id} :: ${ext.packageJSON?.displayName || ext.packageJSON?.name || '<no-name>'} :: active=${String(ext.isActive)}`); } catch { out.appendLine(`- ${ext.id} :: <error>`); }
-      }
-    } catch (err) { out.appendLine('Error: ' + (err instanceof Error ? err.message : String(err))); }
-  });
 
   const copilotHandoff = vscode.commands.registerCommand(`${EXTENSION_ID}.copilotHandoff`, async (seedPrompt?: string) => {
     const prompt = typeof seedPrompt === 'string' && seedPrompt.trim().length > 0 ? seedPrompt : '/* Copilot interactive handoff */\n';
@@ -477,47 +455,47 @@ export function activate(context: vscode.ExtensionContext): void {
   const testConnection = vscode.commands.registerCommand(`${EXTENSION_ID}.testConnection`, () => runConnectionTest('source'));
   const testTargetConnection = vscode.commands.registerCommand(`${EXTENSION_ID}.testTargetConnection`, () => runConnectionTest('target'));
 
-  // Returns its real outcome (not just void) so webviewProvider.ts's webview handler
-  // can react to what actually happened instead of duplicating this logic itself or
-  // guessing — the exact bug class this command previously fell into with a second,
-  // parallel "sourceAssessment" webview case that only reloaded already-on-disk
-  // context and unconditionally reported success without ever touching a live
-  // connection at all.
+  // Source assessment from the platform card (code audit 2026-10: one way in). It brings a named
+  // connection's schemas into the estate through the same engine tools agents and the CLI use
+  // (autode_list_databases, autode_list_schemas, autode_ingest_metadata), instead of the single
+  // connection in the settings. Returns its outcome so the panel can react to what happened.
   const sourceAssessment = vscode.commands.registerCommand(
     `${EXTENSION_ID}.sourceAssessment`,
     async (): Promise<{ success: boolean; tableCount?: number; viewCount?: number; error?: string }> => {
+      const fail = (msg: string) => { vscode.window.showErrorMessage(msg); sidebarProvider.logToChat(msg); return { success: false, error: msg }; };
+      const root = firstFolder();
+      if (!root) return fail('Open a workspace folder first.');
+      const connections = loadConnectionsConfig(root).connections;
+      const sources = connections.filter((c) => c.role === 'source');
+      const candidates = sources.length ? sources : connections;
+      if (!candidates.length) return fail('No named connection yet: save one from a platform card (Save as named connection) or run `autode connections add`.');
+      const picked = candidates.length === 1 ? candidates[0] : (await vscode.window.showQuickPick(
+        candidates.map((c) => ({ label: c.id, description: `${c.platform} · ${c.role}`, entry: c })),
+        { title: 'Source assessment: which connection?' }))?.entry;
+      if (!picked) return { success: false, error: 'Cancelled.' };
+      const engine = hub.createEngine('autode-panel');
+      if (!engine?.call) return fail('The AutoDE engine is not available.');
       try {
-        if (!connectionManager || !connectionManager.isConnected()) {
-          await vscode.commands.executeCommand(`${EXTENSION_ID}.testConnection`);
-          if (!connectionManager || !connectionManager.isConnected()) {
-            const msg = 'Not connected to a data platform.';
-            vscode.window.showErrorMessage(msg);
-            sidebarProvider.logToChat(msg);
-            return { success: false, error: msg };
-          }
-        }
-        vscode.window.showInformationMessage('Running source assessment...');
-        sidebarProvider.logToChat('Running source assessment…');
-        // Phase K2: profiling is sampled and bounded by a per-run query budget.
-        const discoveryCfg = vscode.workspace.getConfiguration('autoDataEngineeringHub');
-        const snapshot = await connectionManager.extractMetadata({
-          includeProfiling: true,
-          profile: { queryBudget: discoveryCfg.get<number>('discovery.profileQueryBudget'), concurrency: discoveryCfg.get<number>('discovery.profileConcurrency') }
-        });
-        if (snapshot.profiling && snapshot.profiling.skippedTables > 0) sidebarProvider.logToChat(`Profiling used its budget of ${snapshot.profiling.budget} queries; ${snapshot.profiling.skippedTables} table(s) were not profiled (setting: discovery.profileQueryBudget).`);
-        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-        if (wsRoot) { await connectionManager.persistSchemaContext(snapshot, wsRoot.fsPath, createVscodeFileIo(vscode)); }
-        const doneMsg = `Source assessment complete: ${snapshot.tables.length} tables, ${snapshot.views.length} views.`;
+        const dbs = ((await engine.call('autode_list_databases', { connectionId: picked.id })).databases ?? []) as string[];
+        const database = dbs.length === 1 ? dbs[0] : await vscode.window.showQuickPick(dbs, { title: `Source assessment: which ${picked.platform === 'databricks' ? 'catalog' : 'database'} of ${picked.id}?` });
+        if (!database) return { success: false, error: 'Cancelled.' };
+        const all = ((await engine.call('autode_list_schemas', { connectionId: picked.id, database })).schemas ?? []) as string[];
+        const schemas = await vscode.window.showQuickPick(all, { title: `Source assessment: which schemas of ${database}?`, canPickMany: true });
+        if (!schemas?.length) return { success: false, error: 'Cancelled.' };
+        sidebarProvider.logToChat(`Running source assessment on ${picked.id} (${schemas.length} schema(s))…`);
+        const out = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'AutoDE: source assessment' },
+          () => engine.call!('autode_ingest_metadata', { connectionId: picked.id, schemas: schemas.map((x) => `${database}.${x}`), profile: true }));
+        const r = (out.result ?? {}) as { tables?: number; system?: string; source?: string };
+        const doneMsg = `Source assessment complete: ${r.tables ?? 0} tables and views from ${r.source ?? picked.id}${r.system ? `, in the estate as system ${r.system}` : ''}.`;
         vscode.window.showInformationMessage(doneMsg);
         sidebarProvider.logToChat(doneMsg);
-        const platform = configManager.getSettings().defaultProvider ?? 'snowflake';
-        sidebarProvider.notifyConnectionStatus('source', { connected: true, platform, detail: `${snapshot.tables.length} tables, ${snapshot.views.length} views extracted` });
-        return { success: true, tableCount: snapshot.tables.length, viewCount: snapshot.views.length };
+        sidebarProvider.notifyConnectionStatus('source', { connected: true, platform: picked.platform, detail: `${r.tables ?? 0} tables and views in the estate` });
+        await sidebarProvider.reloadContextLayer();
+        return { success: true, tableCount: r.tables ?? 0 };
       } catch (err) {
-        const failMsg = `Source assessment failed: ${err instanceof Error ? err.message : String(err)}`;
-        vscode.window.showErrorMessage(failMsg);
-        sidebarProvider.logToChat(failMsg);
-        return { success: false, error: failMsg };
+        return fail(`Source assessment failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        await engine.dispose();
       }
     }
   );
@@ -1083,9 +1061,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(EDITOR_GRAPH, new GraphEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_PROFILE, new ProfileEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_DOC, new DocEditorProvider(context)),
-    openSidebar, generatePipelineSpec,
+    openSidebar,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
-    testCopilot, listCopilotInfo, debugListExtensions, copilotHandoff,
+    copilotHandoff,
     testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,

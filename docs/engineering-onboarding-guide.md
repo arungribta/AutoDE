@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining AutoDE who needs to find their way around, run it, change it safely and ship a phase.
-> **Describes:** v0.45.13 (2026-10-23). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.45.14 (2026-10-26). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -248,7 +248,7 @@ The full, generated tree is technical-design §12. The files that matter most, i
 | 12 | `src/mcp/server.ts`, `tools.ts`; `src/cli/main.ts` | The MCP surface, and the CLI that reuses its handlers. |
 | 13 | `test/functional.test.cjs` (search for the feature) | Executable documentation for nearly everything above. |
 
-Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (the tool-skill runner and Pipeline Spec synthesis), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/cli` (the `autode` command line), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview prompt packs as JSON, and since v0.45.0 the agents' skills as `skills/<id>/SKILL.md`), `agents/` (role templates, `<role>.md`, v0.45.0), `workflows/` (workflow templates), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, `autode` package, docs generator).
+Folders at a glance: `src/core` (orchestration, LLMs, settings, spec engine), `src/context` (host-side managers), `src/agents` (the tool-skill runner), `src/editors` (custom editors for data model, STTM, graph, profile, docs), `src/engine/*` (host-agnostic logic), `src/mcp` (MCP server), `src/cli` (the `autode` command line), `src/spokes` (only `snowflakeExecutor.ts` is live), `media/` (webviews, icons), `skills/` (interview prompt packs as JSON, and since v0.45.0 the agents' skills as `skills/<id>/SKILL.md`), `agents/` (role templates, `<role>.md`, v0.45.0), `workflows/` (workflow templates), `test/` (tests, eval, reference problem, golden snapshots), `scripts/` (bundler, `autode` package, docs generator).
 
 **Safe to ignore at first:** CSS in `sidebar.html`, `mock_activate.js`.
 

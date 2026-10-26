@@ -27,7 +27,7 @@ import { SourceContextManager } from '../context/SourceContextManager';
 import { MappingContextManager } from '../context/MappingContextManager';
 import { SemanticLayerManager } from '../context/SemanticLayerManager';
 import { ActiveProblemManager } from '../context/ActiveProblemManager';
-import { attachmentExtracts, isOpenInterview, markInterviewFed, openQuestions, readInterview, startInterview, writeInterview } from '../engine/interview/state';
+import { isOpenInterview, markInterviewFed, openQuestions, readInterview, startInterview, writeInterview } from '../engine/interview/state';
 import { BusinessPackManager } from '../context/BusinessPackManager';
 import { DOCUMENT_ROLES, DocumentRole } from '../engine/context/pack';
 import type { ProbeExecutor } from '../engine/context/probes';
@@ -37,7 +37,6 @@ import { ContextFileWatcher, normalizeFsPath } from '../context/ContextFileWatch
 import { RevisionConflictError, setRevisionConflictHandler } from '../engine/context/contextStore';
 import { ContextPack, PackPurpose, renderPackManifest } from '../engine/context/contextPack';
 import { explainManifest, GroundingManifest, manifestStaleReasons } from '../engine/grounding/manifest';
-import { generateDesignDoc } from '../engine/pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
 import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, registerPrimitiveVersion, resetVersionedPrimitives, compileTransformSpec } from '../engine/transforms/registry';
 import { loadPrimitiveDefinitionsFromDirectory, mergePrimitiveDefinitions } from '../engine/transforms/declarative/loader';
@@ -168,48 +167,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     await this.startNewChat();
   }
 
-  /** "AutoDE: Generate Pipeline Spec" command proxy (Phase 2B-i). */
-  public async triggerGeneratePipelineSpec(): Promise<void> {
-    await this.generatePipelineSpec();
-  }
-
   /** "AutoDE: Connect to Data Platform" command proxy (Phase 3a-ii). */
   public async triggerConnectToDataPlatform(): Promise<void> {
     await this.connectToDataPlatform();
-  }
-
-  /**
-   * Phase 2B-i — an opt-in flow: turns
-   * the approved BPS + approved Target/Source Context + attachment extracts
-   * into a strictly-validated, machine-compilable Pipeline Spec (YAML) plus
-   * its deterministic Markdown design-doc projection.
-   */
-  private async generatePipelineSpec(): Promise<void> {
-    const spec = this.specManager?.getSpec();
-    if (!spec || !this.pipelineSpecManager) { this.postLog('No active business problem — approve a specification first.'); return; }
-    const gate = this.computeContextGateStatus(spec);
-    if (!gate.canGeneratePlan) {
-      this.postMessage('error', { message: `Pipeline Spec generation needs the specification and its contexts approved first: ${gate.blockingReasons.join(' ')}` });
-      return;
-    }
-    try {
-      this.postLog('Synthesizing Pipeline Spec…');
-      const draft = await this.hub.synthesizePipelineSpec({
-        bps: spec,
-        targetContext: this.targetContextManager?.getContext(),
-        sourceContext: this.sourceContextManager?.getContext(),
-        contextLayerText: this.contextPackText('spec', [spec.problemStatement, ...(spec.objectives ?? [])].join('\n'), 'Pipeline Spec synthesis'),
-        attachmentExtracts: this.problemRoot ? attachmentExtracts(this.problemRoot.fsPath) : [],
-        previous: this.pipelineSpecManager.getSpec()
-      });
-      await this.pipelineSpecManager.saveSpec(draft);
-      const designDoc = generateDesignDoc(draft);
-      const designDocUri = vscode.Uri.joinPath(this.pipelineSpecManager.getSpecDir(), 'design.md');
-      await vscode.workspace.fs.writeFile(designDocUri, Buffer.from(designDoc, 'utf8'));
-      this.postLog(`Pipeline Spec v${draft.version} drafted with ${draft.entities.length} entit${draft.entities.length === 1 ? 'y' : 'ies'} — review and approve it.`);
-    } catch (err) {
-      this.postMessage('error', { message: `Pipeline Spec generation failed: ${err instanceof Error ? err.message : String(err)}` });
-    }
   }
 
   /** Builds an AJV envelope validator from the bundled context-envelope JSON Schema. */
@@ -684,28 +644,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'browseTargetDatabase': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.browseTargetDatabase`); } catch { this.postLog('Browse target database command not yet registered.'); } break; }
         case 'ingestFileAsSourceContext': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.ingestFileAsSourceContext`); } catch { this.postLog('File ingestion command not yet registered.'); } break; }
         case 'sourceAssessment': {
-          // Previously a second, parallel implementation that only reloaded
-          // whatever was already on disk and unconditionally reported success —
-          // it never connected to anything or extracted anything live, which is
-          // exactly why "Source Assessment" could report "complete" while chat
-          // still had zero real schema. Delegate to the one real command instead
-          // (same pattern `testConnection`'s case already uses), then force an
-          // immediate reindex so the freshly-written schema-graph.json is picked
-          // up now rather than waiting on the debounced file watcher.
+          // The command brings a named connection's schemas into the estate and reloads the context layer (reloadContextLayer).
           this.postLog('Running source assessment...');
-          const result = await vscode.commands.executeCommand<{ success: boolean; tableCount?: number; viewCount?: number; error?: string }>(
-            `${EXTENSION_ID}.sourceAssessment`
-          );
-          if (result?.success && this.contextFileManager) {
-            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
-            const activeSpecId = this.contextFileManager.getActiveSpecId();
-            this.contextFileManager.dispose();
-            this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator(), watchKnowledge);
-            this.configureContextFileManager(this.contextFileManager);
-            this.contextFileManager.setActiveSpecId(activeSpecId);
-            await this.contextFileManager.initialize();
-            this.postContextUpdate();
-          }
+          await vscode.commands.executeCommand(`${EXTENSION_ID}.sourceAssessment`);
           break;
         }
         case 'syncMetadata': { this.postLog('Syncing database metadata...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.syncMetadata`); } catch { this.postLog('Sync metadata command not yet registered.'); } break; }
@@ -2178,6 +2119,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         this.postLog(`Stage ${stage} re-opened${r.stale.length ? `; now stale: ${r.stale.join(', ')}` : ''}.`);
       } else if (action === 'run' && stage) {
         this.postLog(`Running the agent for stage ${stage}…`);
+        // Refresh on use (K2): tables the agent will work with that are past their refresh age, before it starts.
+        try {
+          const fr = await this.contextFileManager?.refreshWorkingSet();
+          if (fr?.fetched) this.postLog(`Refreshed ${fr.fetched} table(s) past their refresh age before the run.`);
+        } catch (err) { this.postLog(`The refresh before the run failed; the agent works with what AutoDE has: ${err instanceof Error ? err.message : String(err)}`); }
         const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: running ${stage}`, cancellable: false },
           () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
             { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
@@ -2198,7 +2144,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         } else {
           // How each document is made in VS Code: the panel's own flows.
           if (s.kind === 'mapping') await vscode.commands.executeCommand('autoDataEngineeringHub.createMapping');
-          else if (s.kind === 'build') await this.generatePipelineSpec();
+          else if (s.kind === 'build') await this.workflowAction('run', stage, undefined);
           else {
             await vscode.commands.executeCommand('autoDataEngineeringHubSidebar.focus');
             this.postLog(s.kind === 'specify' ? 'The specification is in the panel: answer the interview, then approve it there or from the Workflow view.'
@@ -2758,6 +2704,19 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.specOpsEngine = undefined;
       this.pendingSpecQuestions = [];
     }
+  }
+
+  /** Re-reads the context layer from disk (after the engine wrote to the estate from outside this panel, e.g. source assessment). */
+  public async reloadContextLayer(): Promise<void> {
+    if (!this.contextFileManager) return;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
+    const activeSpecId = this.contextFileManager.getActiveSpecId();
+    this.contextFileManager.dispose();
+    this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator(), watchKnowledge);
+    this.configureContextFileManager(this.contextFileManager);
+    this.contextFileManager.setActiveSpecId(activeSpecId);
+    await this.contextFileManager.initialize();
+    this.postContextUpdate();
   }
 
   /** Saves the interview with the problem (v0.45.12): any surface, or this panel after a reload, continues it. */
