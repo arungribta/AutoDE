@@ -56,7 +56,6 @@ export const LAYOUT = {
   connectionReadiness: [AUTODE_DIR, 'local', 'connection-readiness.json'],
   activeProblem: [AUTODE_DIR, 'local', 'active-problem.json'],
   chats: [AUTODE_DIR, 'local', 'chats'],
-  carryover: [AUTODE_DIR, 'local', 'chats', 'carryover'],
   derived: [AUTODE_DIR, 'local', 'derived'],
   graph: [AUTODE_DIR, 'local', 'derived', 'graph.json'],
   catalog: [AUTODE_DIR, 'local', 'catalog'],
@@ -73,10 +72,6 @@ export function layoutPath(workspaceRoot: string, key: LayoutKey, ...more: strin
 /** Workspace-relative POSIX path of a layout entry, for messages and documents. */
 export function layoutRel(key: LayoutKey, ...more: string[]): string {
   return [...LAYOUT[key], ...more].join('/');
-}
-
-export function problemRootPath(workspaceRoot: string, problemId: string): string {
-  return layoutPath(workspaceRoot, 'problems', problemId);
 }
 
 /** The workspace root and problem id a problem folder (`<root>/.autode/problems/<id>`) belongs to. */

@@ -73,31 +73,6 @@ const HOPS: Record<PackPurpose, number> = { interview: 1, spec: 1, plan: 1, step
 const BUDGET: Record<PackPurpose, number> = { interview: 1500, spec: 2000, plan: 2500, step: 3000, chat: 2000, qa: 2500 };
 const TRUST_WEIGHT: Record<TrustTier, number> = { verified: 1.0, confirmed: 0.95, documented: 0.7, inferred: 0.4 };
 
-/**
- * What the orchestrator asks for context (implemented by the extension's
- * `ContextFileManager`, and by anything else hosting the engine).
- */
-export interface ContextPackProvider {
-  buildPack(request: ContextPackRequest): ContextPack;
-  /** The graph and ledger the packs are built from — for manifests and grounding checks. */
-  sources(): ContextPackSources;
-  /** Non-graph context that always applies (approved Source/Target Context). */
-  supplementary?(): string;
-  /** Revision of the active Business Problem Specification. */
-  specRevision?(): string | undefined;
-  /** Objects the approved Pipeline Spec plans to create (Phase K1: grounding treats them as known). */
-  plannedObjects?(): string[];
-  /**
-   * Phase K2: loads what a request will need before its pack is built —
-   * query-through for catalog objects whose structure isn't loaded, and a
-   * refresh of in-scope objects past their TTL. Optional; without it a pack
-   * reports such objects as context gaps.
-   */
-  prepare?(request: ContextPackRequest): Promise<void>;
-  /** Phase K2: refresh-on-use for the working set before a plan runs. */
-  beforeRun?(): Promise<void>;
-}
-
 /** char/4, the same heuristic as `core/tokenBudget.ts`. */
 export function estimatePackTokens(text: string): number {
   return Math.ceil((text || '').length / 4);

@@ -147,16 +147,6 @@ function edgeMirror(edge: GraphEdge, nodeKinds: Map<string, AssertionKind>, orig
   };
 }
 
-/** Graph content as mirror assertions — the migration's input (exported for tests). */
-export function graphToMirrorAssertions(graph: GraphSnapshotLike): NewAssertion[] {
-  const nodeKinds = new Map(graph.nodes.map((n) => [n.id, NODE_KIND[n.type] ?? 'schema_fact'] as const));
-  const origins = new Map(graph.nodes.map((n) => [n.id, n.origin] as const));
-  return [
-    ...graph.nodes.map(nodeMirror),
-    ...graph.edges.map((e) => edgeMirror(e, nodeKinds, origins))
-  ];
-}
-
 /**
  * Spec scoping: an assertion recorded for one business problem (`specId`) is
  * in scope only while that problem is active. Out-of-scope assertions stay

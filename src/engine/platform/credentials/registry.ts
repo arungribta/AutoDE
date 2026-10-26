@@ -19,10 +19,6 @@ export function getCredentialResolver(id: string): CredentialResolver | undefine
   return resolvers.get(id);
 }
 
-export function listCredentialResolvers(): CredentialResolver[] {
-  return Array.from(resolvers.values());
-}
-
 /**
  * Resolves a `CredentialReference` to an actual credential set via whichever
  * resolver it names. Returns `undefined` (never throws) if that resolver isn't

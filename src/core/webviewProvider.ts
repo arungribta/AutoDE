@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, ContextQuestion, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
+import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from '../engine/interview/specOps';
 import { SkillRegistry, interviewSkills } from '../engine/skills/skillRegistry';
@@ -34,11 +34,9 @@ import type { ProbeExecutor } from '../engine/context/probes';
 import { filterInterviewQuestions, knownFacts, knownFactsBlock } from '../engine/context/discoveryGaps';
 import { PipelineSpecManager } from '../context/PipelineSpecManager';
 import { ContextFileWatcher, normalizeFsPath } from '../context/ContextFileWatcher';
-import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { RevisionConflictError, setRevisionConflictHandler } from '../engine/context/contextStore';
-import { ContextPack, ContextPackProvider, PackPurpose, renderPackManifest } from '../engine/context/contextPack';
+import { ContextPack, PackPurpose, renderPackManifest } from '../engine/context/contextPack';
 import { explainManifest, GroundingManifest, manifestStaleReasons } from '../engine/grounding/manifest';
-import { createHash } from 'node:crypto';
 import { generateDesignDoc } from '../engine/pipelineSpec/designDocGenerator';
 import { generateProblemSlug } from './problemSlug';
 import { listPrimitives, isSelectable, registerPrimitives, resetDeclarativePrimitives, registerPrimitiveVersion, resetVersionedPrimitives, compileTransformSpec } from '../engine/transforms/registry';
@@ -57,7 +55,6 @@ import { createSubjectResolver } from '../engine/context/projection';
 import { createProbeResolver, verifyAssertions } from '../engine/context/probes';
 import { Assertion } from '../engine/context/assertions';
 import { backendFor } from './platformOnboarding';
-import { sampleDataConsentFromWorkspace } from '../engine/platform/connectionsConfig';
 import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
 import { applyCspNonce } from './webviewSecurity';
 import { classifyImplementationType } from './implementationType';
@@ -209,7 +206,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       const designDoc = generateDesignDoc(draft);
       const designDocUri = vscode.Uri.joinPath(this.pipelineSpecManager.getSpecDir(), 'design.md');
       await vscode.workspace.fs.writeFile(designDocUri, Buffer.from(designDoc, 'utf8'));
-      this.postMessage('pipelineSpecGenerated', { spec: draft, designDoc });
       this.postLog(`Pipeline Spec v${draft.version} drafted with ${draft.entities.length} entit${draft.entities.length === 1 ? 'y' : 'ies'} — review and approve it.`);
     } catch (err) {
       this.postMessage('error', { message: `Pipeline Spec generation failed: ${err instanceof Error ? err.message : String(err)}` });
@@ -710,7 +706,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             await this.contextFileManager.initialize();
             this.postContextUpdate();
           }
-          this.postMessage('sourceAssessmentComplete', result ?? { success: false, error: 'Source Assessment command is not available.' });
           break;
         }
         case 'syncMetadata': { this.postLog('Syncing database metadata...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.syncMetadata`); } catch { this.postLog('Sync metadata command not yet registered.'); } break; }
@@ -729,18 +724,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
-        case 'updateTargetConfig': {
-          const targetConfig = message.targetConfig;
-          if (targetConfig && typeof targetConfig === 'object') {
-            this.postLog('Updating target environment configuration...');
-            try {
-              this.hub.setTargetEnvironment(targetConfig as import('../engine/types').TargetEnvironment);
-              this.postLog('Target environment updated.');
-              this.postMessage('targetConfigUpdated', { success: true });
-            } catch (err) { this.postLog(`Failed to update target config: ${err instanceof Error ? err.message : String(err)}`); }
-          }
-          break;
-        }
         case 'settingsLoaded': {
           this.postMessage('settingsLoaded', await this.buildSettingsMessagePayload());
           break;
@@ -755,7 +738,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postLog(`Registered source: ${path} (${kind})`);
           break;
         }
-        case 'listSources': { this.postSourcesList(); break; }
         case 'removeSource': {
           const path = typeof message.path === 'string' ? message.path : '';
           if (!path) break;
@@ -1005,13 +987,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postMessage('sourceContextQuestions', { questions, answers: existing?.answers ?? {} });
           break;
         }
-        case 'generatePipelineSpec': {
-          await this.generatePipelineSpec();
-          break;
-        }
-        case 'approvePipelineSpec': { await this.approveCurrentPipelineSpec(); break; }
         case 'listDecisions':
-        case 'listInbox': { this.postDecisions(); break; }
         case 'openWorkflowView': { await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow'); break; }
         case 'workflowAction': {
           const m = message as unknown as { action?: unknown; stage?: unknown; arg?: unknown };
@@ -1228,11 +1204,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
-        case 'openArtifactFolder': {
-          const artifactUri = this.artifactRootForProblem() ?? vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri, ...LAYOUT.root);
-          try { await vscode.commands.executeCommand('revealFileInOS', artifactUri); } catch { await vscode.commands.executeCommand('workbench.files.action.showActiveFileInExplorer'); }
-          break;
-        }
         case 'checkArtifactStaleness': {
           const problemRoot = this.currentProblemRoot();
           if (!problemRoot) { break; }
@@ -1341,7 +1312,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       } catch { /* unreadable manifest — skipped */ }
     }
     for (const s of stale) this.postLog(`${s.artifact} is stale: ${s.reasons.join('; ')}`);
-    if (stale.length) this.postMessage('artifactFactStaleness', { stale });
     return stale;
   }
 
@@ -1559,7 +1529,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       else this.postLog('The specification draft was updated; review and approve it in the panel.');
     } else if (kind === 'pipeline_spec' && this.pipelineSpecManager) {
       await this.reloadContextFile(normalizeFsPath(this.pipelineSpecManager.getSpecUri().fsPath));
-      if (fromPanel) await this.approveCurrentPipelineSpec(false);
+      if (fromPanel) await this.approveCurrentPipelineSpec();
     } else if (kind === 'mapping' && this.mappingContextManager) {
       await this.reloadContextFile(normalizeFsPath(this.mappingContextManager.getFileUri().fsPath));
     } else if (kind === 'assertion' && this.contextFileManager) {
@@ -1620,12 +1590,10 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  private async approveCurrentPipelineSpec(record = true): Promise<boolean> {
+  private async approveCurrentPipelineSpec(): Promise<boolean> {
     if (!this.pipelineSpecManager) return false;
     const approved = await this.pipelineSpecManager.approve();
     if (!approved) return false;
-    if (record) this.decisionStore()?.recordResolved({ kind: 'pipeline_spec_approval', title: `Approve the Pipeline Spec v${approved.version}`, summary: `${approved.entities.length} entities`, proposal: { id: approved.id, version: approved.version }, proposedBy: { host: 'vscode' }, problemId: this.activeProblemId, by: this.panelUser(), channel: 'panel' });
-    this.postMessage('pipelineSpecApproved', { spec: approved });
     this.postLog(`Pipeline Spec v${approved.version} approved.`);
     return true;
   }

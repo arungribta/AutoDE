@@ -35,12 +35,6 @@ export interface StageRunScope { workspaceRoot: string; resourcesRoot: string; p
 
 export interface StageRunResult { ok: boolean; message: string; outputs: string[]; decisionId?: string; summary?: string }
 
-/** Whether the stage can be run here: its role has a definition (the reason otherwise). */
-export function runnableReason(scope: StageRunScope, stageId: string): string | undefined {
-  const r = assignmentFor(scope, stageId, []);
-  return r.assignment ? undefined : r.reason;
-}
-
 /** The stage's context gaps, from the engine's context pack: the same ones `autode_workflow_next` puts in a host's assignment (exported for its test). */
 export async function stageGaps(engine: EngineAccess, problemRoot: string, kind: StageKind, title: string): Promise<StageGap[]> {
   const query = stageGapQuery(problemRoot, title);

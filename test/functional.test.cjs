@@ -93,7 +93,7 @@ function fresh(modulePath) { delete require.cache[require.resolve(modulePath)]; 
 // The language model adapter captures the `vscode` mock at load time, so its
 // cache must be cleared whenever a test swaps in a new mock.
 function clearAdapterCache() {
-  for (const p of ['../dist/core/languageModelAdapter.js', '../dist/core/copilotAdapter.js', '../dist/core/claudeCodeAdapter.js']) {
+  for (const p of ['../dist/core/languageModelAdapter.js', '../dist/core/claudeCodeAdapter.js']) {
     try { delete require.cache[require.resolve(p)]; } catch { /* not loaded yet */ }
   }
 }
@@ -171,10 +171,6 @@ async function main() {
   await test('languageModelAdapter loads and exports classes', () => {
     const lib = freshAdapter(createMock());
     assert.strictEqual(typeof lib.LanguageModelAdapter, 'function');
-    assert.strictEqual(typeof lib.CopilotAdapter, 'function');
-    // Back-compat shim re-exports the same class.
-    const shim = withMock(createMock(), () => fresh('../dist/core/copilotAdapter.js'));
-    assert.strictEqual(shim.CopilotAdapter, lib.LanguageModelAdapter);
   });
 
   await test('detect() finds Copilot Chat', async () => {
@@ -674,7 +670,7 @@ async function main() {
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
-    const { writeGraphSnapshot, readGraphSnapshot } = require('../dist/context/GraphPersistence.js');
+    const { writeGraphSnapshot, readGraphSnapshot } = require('../dist/engine/context/graphPersistence.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-graph-'));
     const file = path.join(dir, 'derived', 'graph.json');
     const snapshot = { nodes: [{ id: 'term:x', type: 'business_term', label: 'x' }], edges: [], compiledAt: '2026-01-01T00:00:00.000Z' };

@@ -58,8 +58,6 @@ export const STAGE_KINDS: Readonly<Record<StageKind, StageKindSpec>> = {
   'bi-migration': k('bi-migration', ['documenter', 'data-modeler'], 'read', ['estate'], ['bi-migration-plan'], ['approve'], 'every report in scope is mapped or listed as a gap')
 };
 
-export const STAGE_KIND_NAMES = Object.keys(STAGE_KINDS) as StageKind[];
-
 export function tierRank(t: Tier): number {
   return TIERS.indexOf(t);
 }

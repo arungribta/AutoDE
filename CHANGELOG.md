@@ -6,6 +6,24 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## Unreleased
+
+- **Code audit: dead code removed, stranded code listed for decision** ([docs/code-audit-2026-10.md](docs/code-audit-2026-10.md)). Every module was checked for reachability from the extension, the CLI and the MCP server, and every export for references, with the TypeScript language service; panel messages, commands, settings and layout entries were checked against their uses.
+  - **Removed:**
+    - three dead modules: the `copilotAdapter` and `GraphPersistence` re-export shims, and `platformDialect`;
+    - 18 unused exports, among them the types SIMP-4 left behind and the `ContextPackProvider` interface of the removed plan run;
+    - six panel handlers no page sends, and five messages no page listens for;
+    - the `carryover` layout entry;
+    - 12 unused imports. Lint warnings fell from 33 to 22.
+  - **No behaviour changed:** 366 tests, eval unchanged.
+  - **For the owner's decision:**
+    - two AI paths make the build stage's Pipeline Spec;
+    - two ways bring a source's metadata in;
+    - K2's refresh before a run lost its caller;
+    - back-compat palette commands;
+    - engine helpers only tests use;
+    - a note that v0.45.12 reversed an earlier interview decision under the later PA3 §7.
+
 ## 0.45.13
 
 - **PA3b step 6: the context curator** (mcp-engine §9.2 PA3 §4). The last of PA3b's role templates.

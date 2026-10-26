@@ -12,12 +12,10 @@ export interface AuthModeDescriptor {
   mode: string;
   principalTypes: PrincipalType[];
 }
-export type EnvironmentProfile = 'development' | 'staging' | 'production';
 export type ModelingApproach = 'dimensional' | 'data-vault' | 'obt' | '3nf' | 'raw-pass-through';
 export type NamingConvention = 'snake_case' | 'camelCase' | 'PascalCase';
 export type TransformationTool = 'dbt' | 'sqlmesh' | 'custom-sql' | 'stored-procedures' | 'none';
 export type OrchestrationTool = 'airflow' | 'dagster' | 'prefect' | 'dbt-cloud' | 'manual' | 'none';
-export type OutputFormat = 'ddl' | 'yaml' | 'markdown' | 'python' | 'sql';
 
 // ── Project & Workflow Types ──
 
@@ -819,30 +817,6 @@ export interface AgentExecutionResult {
   details?: Record<string, unknown>;
   error?: string;
   artifacts?: GeneratedArtifact[];
-}
-
-export interface WebviewSettingsMessage {
-  defaultProvider?: DataPlatformProvider;
-  defaultSnowflakeAccount?: string;
-  defaultSnowflakeUsername?: string;
-  defaultSnowflakeWarehouse?: string;
-  defaultSnowflakeDatabase?: string;
-  defaultSnowflakeSchema?: string;
-  defaultSnowflakeRole?: string;
-  defaultSnowflakeAuthMode?: SnowflakeAuthMode;
-  snowflakePrivateKeyPath?: string;
-  metadataCachingDurationMinutes?: number;
-  queryTimeoutSeconds?: number;
-  readOnlyMode?: boolean;
-  enableSessionReuse?: boolean;
-  autoDocumentationEnabled?: boolean;
-  telemetryEnabled?: boolean;
-  activeLlmProvider?: LlmProvider;
-  activeLlmModel?: string;
-  llmEndpoint?: string;
-  llmApiKey?: string;
-  snowflakePassword?: string;
-  snowflakePrivateKeyPassphrase?: string;
 }
 
 export interface WebviewMessage {

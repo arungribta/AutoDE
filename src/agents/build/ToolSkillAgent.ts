@@ -1,4 +1,3 @@
-import * as path from 'node:path';
 import { AgentExecutionContext, AgentExecutionResult, EngineToolSet, ToolExecutionMode, ToolSkillDefinition } from '../../engine/types';
 import { resolveAllowedToolNames, toolModeCeiling } from '../../engine/skills/toolAllowList';
 import { TrustTier, isClaudeCliEligible, minMode, notRunnableReason, resolveSkillVersion, tierModeCeiling } from '../../engine/skills/lifecycle';

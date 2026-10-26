@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { PipelineSpec } from '../engine/pipelineSpec/types';
-import { CURRENT_PIPELINE_SPEC_VERSION } from '../engine/pipelineSpec/types';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { parsePipelineSpecDocument, pipelineSpecHistoryName, serializePipelineSpec } from '../engine/documents/problemDocuments';
 import { ContextStore, RevisionedFile, applyReload } from '../engine/context/contextStore';

@@ -137,7 +137,7 @@ AutoDE keeps its working state in `.autode/`, grouped by lifecycle, and writes g
 │   └── connections.yaml             #   platform connections: pointers, settings, sample-data consent; never secrets (§6.12)
 └── local/                           # per engineer, rebuildable — never committed
     ├── active-problem.json          #   pointer: which problem is active (absent = clean slate)
-    ├── chats/                       #   chat sessions + carryover/
+    ├── chats/                       #   chat sessions
     ├── derived/graph.json           #   projection cache
     ├── catalog/<system>/<environment>/catalog.json   # estate catalog, tiers 0–2 (§5.12)
     └── schema-graph.json            #   last live extraction (input to the next reindex)
@@ -299,8 +299,7 @@ The BPS draft is produced by an **agentic, DE-tailored requirements flow** inspi
 - On `resolveWebviewView()`, after the spec manager initializes: construct `ChatSessionManager`, `initialize()`, `getActiveSession()` or `createSession()` if none exists, load its transcript. **Changed in v0.13.0:** if that transcript is non-empty, the session is folded (`startNewChat()` — archived, never discarded, and a fresh empty one takes its place) rather than posted as-is; only an empty session is posted directly via `chatSessionLoaded` (`{ meta, transcript }`). A reload/restart therefore never silently resumes a prior conversation into view — see CHT-2.
 - `postMessage()` now also calls `recordAssistantMessage(type, payload)`, which maps the handful of assistant-facing message types (`chatResponse`, `specDrafted`, `specApproved`, `specQuestion`, `specQuestions`) to a `ChatMessage` and appends it to the active session — chat persistence is a side effect of the existing post path, not a parallel code path callers have to remember to invoke. User messages are appended directly at the `case 'chat'` / `case 'submitSpecAnswers'` handlers.
 - New message cases: `newChat` → `startNewChat()`; `listChatSessions` → posts `chatSessionsList`; `openChatSession` → **(v0.13.0, changed from a read-only viewer)** archives whatever's currently active, reactivates the chosen session (`ChatSessionManager.updateMeta(chatId, {status:'active'})`), and posts `chatSessionLoaded` with its transcript — a real resume, not a preview; `discardChat` → `ChatSessionManager.discardSession` after the caller's own confirmation.
-- `startNewChat()`: if a `SpecOpsEngine` interview is in flight, calls `carryOverPartialInterview()` first, then tears down the engine; archives the current session (`archiveSession`, never a delete); creates a new one seeded with the current spec's id/version and the active LLM provider; posts `chatSessionLoaded` with an empty transcript. Now also called from the startup-fold path above, not just the "🗨 New Chat" action.
-- `carryOverPartialInterview(session, workspaceRoot)`: implements the exact behavior specified by the user in response to a clarifying question that rejected three alternative designs (resume as live Q&A / block New Chat / silently discard). Renders the session's collected `answers`/`insights` as Markdown, writes it to `.autode/local/chats/carryover/<sessionId>.md`, registers it via `SourceRegistry.addSource(..., 'business_context', 'autode')`, and runs `SynthesisPipeline.synthesize()` so the partial answers become graph nodes *before* the interview state is discarded. A no-op if the session collected nothing.
+- `startNewChat()`: archives the current session (`archiveSession`, never a delete); creates a new one seeded with the current spec's id/version and the active LLM provider; posts `chatSessionLoaded` with an empty transcript, then re-asks the open interview's questions. Also called from the startup-fold path above. Until v0.45.12 it ended an in-flight interview and folded its answers into context as a note (`carryOverPartialInterview()`, the owner's earlier choice over resuming); since v0.45.12 the interview is kept with the problem and resumes (PA3 §7, approved 2026-10-21), so the carry-over is gone.
 
 **Sidebar (`media/sidebar.html`).**
 - "🗨 New Chat" topbar icon → `post('newChat')` (after `endPending()`, so an in-flight pending bubble doesn't leak into the new session's rendering).
@@ -1361,7 +1360,7 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
 
 ### 8.3 LanguageModelAdapter (provider `copilot`)
 
-**File:** `src/core/languageModelAdapter.ts` (`src/core/copilotAdapter.ts` = re-export shim; `CopilotAdapter` is a back-compat alias)
+**File:** `src/core/languageModelAdapter.ts` (`CopilotAdapter` is a back-compat alias; the `copilotAdapter.ts` re-export shim was removed in the 2026-10 code audit)
 
 | Feature | Implementation |
 |---------|---------------|
@@ -1793,9 +1792,9 @@ src/agents/build/    # the tool-skill runner
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
-  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, GraphPersistence.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
+  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, copilotAdapter.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
@@ -1831,7 +1830,7 @@ src/engine/runner/    # runbooks: checks, policy, the runner and its log
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
   lifecycle.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
 src/engine/transforms/    # primitive registry
-  platformDialect.ts, registry.ts, types.ts
+  registry.ts, types.ts
 src/engine/transforms/declarative/    # Tier 2 declarative primitives
   adapter.ts, lifecycle.ts, loader.ts, schema.ts, templateEngine.ts, types.ts
 src/engine/transforms/primitives/    # Tier 1 primitives

@@ -1,5 +1,4 @@
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { parseYaml } from '../context/Yaml';
 import { layoutPath } from '../workspaceLayout';
 
@@ -50,7 +49,7 @@ const DEFAULTS: Record<string, Omit<EnvironmentPolicy, 'name' | 'connections'>> 
 };
 
 export function policyFile(workspaceRoot: string): string {
-  return path.join(layoutPath(workspaceRoot, 'config'), 'approvals.yaml');
+  return layoutPath(workspaceRoot, 'approvals');
 }
 
 export function loadRunbookPolicy(workspaceRoot: string): RunbookPolicy {

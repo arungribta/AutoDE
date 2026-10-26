@@ -44,11 +44,6 @@ export interface LanguageModelDescriptor {
   maxInputTokens: number;
 }
 
-/** Back-compat alias — earlier code and tests referenced `CopilotModelInfo`. */
-export type CopilotModelInfo = LanguageModelDescriptor;
-/** Back-compat alias — earlier code and tests referenced `CopilotInfo`. */
-export type CopilotInfo = LanguageModelInfo;
-
 /**
  * Thin wrapper over the VS Code Language Model API (`vscode.lm`) that lets AutoDE
  * route LLM calls to GitHub Copilot without an API key.
@@ -350,11 +345,3 @@ function pickPreferred(
   }
   return models[0];
 }
-
-/**
- * Back-compat alias. Earlier code (and `test/functional.test.cjs`) imported
- * `CopilotAdapter` from `./copilotAdapter`. The alias keeps those call sites
- * working.
- */
-export const CopilotAdapter = LanguageModelAdapter;
-export type CopilotAdapter = LanguageModelAdapter;

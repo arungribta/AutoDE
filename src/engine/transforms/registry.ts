@@ -56,10 +56,6 @@ function getValidator(kind: string, version: number | undefined, primitive: Tran
   return validate;
 }
 
-export function getPrimitive(kind: string): TransformPrimitive<any> | undefined {
-  return TRANSFORM_PRIMITIVES[kind];
-}
-
 /**
  * Registers one historical revision of a Tier-2 primitive for version
  * pinning (Phase 2B-iv) — distinct from `registerPrimitives`, which governs

@@ -32,7 +32,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as lifecycle from './engine/skills/lifecycle';
-import { LAYOUT, UNSCOPED_PROBLEM, layoutRel } from './engine/workspaceLayout';
+import { LAYOUT, layoutRel } from './engine/workspaceLayout';
 import { describeMigration, migrateWorkspace } from './engine/workspaceMigration';
 import { resolveAllowedToolNames } from './engine/skills/toolAllowList';
 

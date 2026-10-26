@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ContextFileManager } from './contextFileManager';
-import { BusinessPack, DocumentAuthority, DocumentRole, PackDocument, contentSha, emptyPack, parsePack, serializePack, upsertDocument } from './pack';
+import { BusinessPack, DocumentAuthority, DocumentRole, PackDocument, contentSha, emptyPack, serializePack, upsertDocument } from './pack';
 import { InterpretationProfile, applyProfile, buildProfileProposalPrompt, parseProfileProposal, parseStructured, profileMatches, serializeProfile } from './profiles';
 import { ReconcileResult, documentClauses, reconcileContract } from './contracts';
 import { ConformanceReport } from './conformance';
