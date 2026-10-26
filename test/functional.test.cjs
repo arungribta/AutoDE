@@ -10164,6 +10164,25 @@ async function main() {
     } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
+  await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs');
+    const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));
+    try {
+      const run = (args) => require('node:child_process').spawnSync(process.execPath, [nodePath.join(__dirname, '..', 'scripts', 'manual-kit.cjs'), ...args], { encoding: 'utf8', timeout: 240000 });
+      nodeFs.writeFileSync(nodePath.join(out, 'mine.txt'), 'not a kit');
+      const refused = run(['--out', out]);
+      assert.ok(refused.status === 2 && /not a kit folder/.test(refused.stderr) && nodeFs.existsSync(nodePath.join(out, 'mine.txt')), refused.stderr);
+      nodeFs.rmSync(out, { recursive: true, force: true });
+      const r = run(['--out', out]);
+      assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+      for (const f of ['sources/shop.ddl', 'documents/brd.md', 'documents/customer-contract.v1.yaml', '.autode/config/connections.example.yaml', '.claude/settings.json', '.mcp.json', 'MANUAL-KIT.md']) assert.ok(nodeFs.existsSync(nodePath.join(out, f)), f);
+      const md = nodeFs.readFileSync(nodePath.join(out, 'MANUAL-KIT.md'), 'utf8');
+      assert.ok(!/\*\*FAIL\*\*/.test(md) && /\| 36\.6 \|[^\n]*\| PASS \|/.test(md) && /\| 39\.5 \|/.test(md), md.slice(0, 1500));
+      assert.ok(!nodeFs.existsSync(nodePath.join(out, '.autode', 'problems')), 'the pre-checks ran in a throwaway copy');
+      assert.strictEqual(run(['--out', out]).status, 2, 'an existing kit folder needs --force');
+    } finally { nodeFs.rmSync(out, { recursive: true, force: true }); }
+  });
+
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {
     const { spawnSync } = require('node:child_process');
     const nodePath = require('node:path');

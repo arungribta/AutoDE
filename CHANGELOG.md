@@ -6,6 +6,27 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## Unreleased
+
+- **The manual-verification kit** (`npm run manual:kit`, `scripts/manual-kit.cjs`). It builds a ready workspace from the reference problem, next to the repo:
+  - the sources and the pack's documents (a BRD, a glossary, and a house-format contract with no profile yet);
+  - a connection template;
+  - the AutoDE plugin installed for Claude Code, with its guard hook.
+
+  In a throwaway copy it then runs every step of Parts 36 on that needs no person, no VS Code and no live platform:
+  - platform skills per stage;
+  - the runbook checks;
+  - the guard hook;
+  - the catalog;
+  - the interview from a terminal;
+  - pack reading;
+  - the build stage's single path;
+  - the MCP server's tools.
+
+  It writes `MANUAL-KIT.md`, which lists what passed and, per check, what is left for you and whether this machine can run it. It detects VS Code, Claude Code (CLI or VS Code extension), and the Snowflake, Databricks and Cortex Code CLIs. It replaces only a folder it made, and only with `--force`.
+- **Found by the kit:** *Environment and security* (platform-setup) is optional in every template, so a drafted workflow leaves it out and its stage gets no assignment. That is correct behaviour, but check 36.1 assumed the stage was there. 36.1 now says to include it.
+- **Measured:** 367 tests (1 new: the kit end to end, including refusing a folder it didn't make).
+
 ## 0.45.14
 
 - **Code audit follow-ups** (owner, 2026-10-26: all five recommendations accepted; the sixth item, the interview decision note, stands). Details: [docs/code-audit-2026-10.md](docs/code-audit-2026-10.md).

@@ -8,7 +8,9 @@ Time: about 90 minutes for Parts 1–8, of which Part 7 (a full plan run) takes 
 
 ---
 
-## Part 0 — Setup (once)
+## Part 0 — Setup (once)
+
+> **The kit (since v0.45.14).** `npm run compile && npm run manual:kit` does this setup for Parts 36 on and more. It builds a workspace next to the repo (`../autode-manual-test`; `--out <folder>` to choose, `--force` to make it again) from the reference problem: the sources, the pack's documents, a connection template, and the AutoDE plugin installed for Claude Code with its guard hook. It then runs, in a throwaway copy, every step that needs no person, no VS Code and no live platform, and writes `MANUAL-KIT.md` in the workspace. That file lists what passed or failed, and for each check what is left for you and whether this machine can run it (VS Code, Claude Code, the Snowflake and Databricks CLIs). Start from that file; the steps below are the manual equivalent.
 
 1. **Build.** In the AutoDE repo: `rm -rf dist && npm run compile`.
 2. **Make a scratch workspace** outside the repo, e.g. `D:\autode-manual-test\`, and copy into it:
@@ -864,7 +866,7 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 ## Part 36 — v0.45.11 Platform skills and the guard hook
 
 - [ ] **36.1 The right skills per stage.**
-  Do: in a problem whose target context is Snowflake with dbt, open the assignment of Platform setup, Build, Deploy and Reconcile (Run agent, or `autode workflow next` in a host). Switch the target to Databricks without dbt, and look again.
+  Do: in a problem whose target context is Snowflake with dbt, propose the workflow with the optional *Environment and security* stage included (it is left out by default in every template). Open the assignment of Environment and security, Build, Deploy and Reconcile (Run agent, or `autode workflow next` in a host). Switch the target to Databricks without dbt, and look again.
   Expect: Platform setup goes to the target architect with governance, performance and ingestion. Build has pipelines, ingestion, performance, and dbt only while dbt is chosen. Deploy has deployment. Reconcile goes to the source assessor with reconciliation. Every skill is for the current platform.
 - [ ] **36.2 A Snowflake runbook end to end (dev).**
   Do: on a dev Snowflake connection, have the build agent land `shop.orders` (the ingestion skill's example). Open its runbook, dry-run, then run it.
