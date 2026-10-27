@@ -1180,6 +1180,16 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - `src/mcp/runnerHost.ts`: `createRunnerHost()` uses a write-enabled `PlatformSession` for SQL (explain, read, approved change) and `spawn()` with no shell for commands.
   - VS Code: `src/core/runbookView.ts` (`RunbookPanel`, `autoDataEngineeringHub.openRunbook`) over `src/core/runbookViewModel.ts`, with `media/runbook.html`.
   - CLI: `cmdRunbook()`. MCP: `autode_propose_runbook` (`decisions.ts`) and `autode_runbook_status` (`agentTools.ts`).
+- **Governance as code** (v0.47.0, GOV; SEC-4, SEC-5; `src/engine/governance/governance.ts`, no vscode):
+  - **Facts:** `business_rule`, predicate `classification` (`CLASSIFICATION_PREDICATE`), value `{ classification, strategy?, level, text }` (the value schema now lists `classification`). `governanceFacts()` reads live ones, the latest per column with active before proposed; `splitColumnSubject()` reads `obj:<system>/<env>/<db.schema.table>.<column>` (or a plain `table.column`); `sameTable()` matches qualified and unqualified names. `classifyColumn()` (CLI and panel) asserts a confirmed fact, superseding the column's earlier one; `columnSubject()` finds the column's object id among the graph's nodes.
+  - **Candidates** `governanceCandidates()`: `isPiiColumnName()` (from `sampleData.ts`), `SENSITIVE` for the sensitive suggestion, `defaultStrategy()` (redact for credentials, else hash). `personalDataInPlay()` (facts, column names, the statement's words).
+  - **Primitive** `src/engine/transforms/primitives/mask.ts` (`maskPrimitive`, registered in `TRANSFORM_PRIMITIVES`): `maskExpression()` wraps each masked column in `CASE WHEN c IS NULL THEN NULL ELSE … END`; `sha256()` per dialect (`SHA2`, `sha2`, `TO_HEX(SHA256())`, `encode(sha256(convert_to()))`, `HASHBYTES('SHA2_256')` lowered); `SALT_EXPRESSION` validates the salt in the param schema.
+  - **Checks:** `unmaskedSensitive()` runs inside `validatePipelineSpec()` once the schema passes. `governanceGaps()` maps fact columns through the entity's `rename_cast` (a column it doesn't project is ignored) and returns errors and warnings. It is called by `autode_record_pipeline_spec` (warnings returned) and by `documentApprovalProblems()` for `build`, which reads the ledger with the new `AssertionLedger.loadSync()`.
+  - **Candidates for the build:** `primitiveCandidates()` adds a `mask` step after `rename_cast` (source = staging, target `<staging>_masked`, passthrough the other plain columns) and the entity's `governance` block; `dedup` and `incremental_load` read the masked view.
+  - **Interview:** `SkillDefinition.askWhen`, `SkillMeta.interview.askWhen` (validated by `skillMeta()`), carried by `interviewPartFromSkill()`. `startInterview()` (optional `columns`) leaves out conditional parts' fields unless `personalDataInPlay()`; `summarizeInterview()` lists a conditional part only when its fields are covered.
+  - **Specification:** `BusinessProblemSpec.governance` (`SpecGovernance`), `SourceEntry.sensitivity`, `DataFlow.sensitivity`; `parseSpecGovernance()` and `parseSensitivity()` in `problemDocuments.ts` and `specSynthesis.ts`; serialised, cloned by `SpecManager`, in the synthesis prompt (`specOpsPrompts.ts`).
+  - **Sample rows:** `gateQueryResult()` takes `classified` column names; `autode_execute_query` passes the personal ones from the facts.
+  - **Surfaces:** CLI `cmdGovernance()` (`governance show | classify`; options `--as`, `--strategy`). MCP `autode_governance_candidates` (`agentTools.ts`). VS Code `autoDataEngineeringHub.classifyPersonalData` (`extension.ts`) over `governanceCandidates()` and `classifyColumn()` on the panel provider.
 - **Port a skill** (v0.46.0, PA4; SKL-5, SKL-7; `src/engine/skills/port.ts`, no vscode):
   - **Staging** `stageSource()`: a local or dbt folder is walked in place (`SOURCE_CAPS`: 2,000 files, 30 MB, 5 MB per file; symlinks refused). A Git source is `git clone --depth 1 --no-checkout` into `os.tmpdir()`, then `git ls-tree -r -l -z HEAD` is checked (paths with `..`, absolute or drive paths, mode `120000` links, `160000` submodules, the caps) before `git checkout`. `resolvedCommit` comes from `git rev-parse HEAD`. The `GitRunner` is injectable (tests use a fake hostile tree).
   - **Discovery** `discoverSkills()`: every folder with `SKILL.md`, six levels deep, `dbt_packages/*` included. **Analysis** `analyzeSkill()` reads `parseSkillMarkdown()` (now with `license`), maps `allowed-tools` through `resolveAllowedToolNames()`, collects `mcp__<server>__…` names, the CLIs in code blocks and inline code (`KNOWN_CLIS` → DRV1 guide ids), scripts (`SCRIPT_EXT` or `scripts/`), the licence (`detectLicence()`: frontmatter, then `LICENSE*` in the skill or the repository), overlaps (same id, or word overlap of at least 30% with an AutoDE skill's description), `metadata.stageKinds`, and the heuristic class (scripts, shell or write tools, CLIs or proposal tools make a procedure).
@@ -1832,6 +1842,8 @@ src/engine/decisions/
   decisionStore.ts, proposals.ts
 src/engine/documents/
   problemDocuments.ts, problems.ts, problemSlug.ts
+src/engine/governance/
+  governance.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
   manifest.ts, sqlGrounding.ts
 src/engine/interview/
@@ -1855,7 +1867,7 @@ src/engine/transforms/    # primitive registry
 src/engine/transforms/declarative/    # Tier 2 declarative primitives
   adapter.ts, lifecycle.ts, loader.ts, schema.ts, templateEngine.ts, types.ts
 src/engine/transforms/primitives/    # Tier 1 primitives
-  dedup.ts, incrementalLoad.ts, renameCast.ts
+  dedup.ts, incrementalLoad.ts, mask.ts, renameCast.ts
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   documentApproval.ts, events.ts, instance.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)

@@ -9,6 +9,9 @@ import { loadRunbookPolicy } from '../engine/runner/policy';
 import { CatalogEntry, CatalogGroup, Runner, probeInstaller, skillCatalog, spawnRunner } from '../engine/agents/skillCatalog';
 import * as port from '../engine/skills/port';
 import * as lifecycle from '../engine/skills/lifecycle';
+import * as gov from '../engine/governance/governance';
+import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
+import { problemMappings } from '../engine/agents/modelDraft';
 import { approveStageDocument, documentApprovalProblems, isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import * as readline from 'node:readline';
 import { parseArgs } from 'node:util';
@@ -179,6 +182,10 @@ Knowledge (confirming, rejecting, editing and adding are a person's: interactive
   facts reject <id> [--note <text>]
   facts edit <id> [--statement <text>] [--value <json>]   Correct it, confirmed
   facts conflicts              Contradicting facts
+
+Governance (personal data):
+  governance show [--table <t>]   Columns that look like personal data, and how each is classified
+  governance classify <table.column> --as pii|sensitive-pii|confidential|none [--strategy hash|redact]   (terminal) Record it, confirmed
   pack list                    The active problem's documents (contracts, BRDs, samples …)
   pack add <file> --role <r> --authority signed|draft --doc-version <v> [--table <obj id>]   (terminal)
   pack apply [<doc id>...]     Read structured documents through their confirmed profiles into facts
@@ -288,6 +295,8 @@ const OPTIONS = {
   skill: { type: 'string' },
   replace: { type: 'boolean' },
   tier: { type: 'string' },
+  as: { type: 'string' },
+  strategy: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -348,6 +357,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'problems': return await cmdProblems(ctx, rest);
       case 'estate': return await cmdEstate(ctx, rest);
       case 'facts': return await cmdFacts(ctx, rest);
+      case 'governance': return await cmdGovernance(ctx, rest);
       case 'workflow': return await cmdWorkflow(ctx, rest);
       case 'pack': return await cmdPack(ctx, rest);
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
@@ -1270,6 +1280,45 @@ async function cmdFacts(ctx: Ctx, rest: string[]): Promise<number> {
     }
     await cfm.persistCompiledGraph();
     emit(ctx, { ok: true, results: lines }, lines.join('\n'));
+    return EXIT.OK;
+  } finally { cfm.dispose(); }
+}
+
+/** GOV: personal data in the problem's sources, and a person's classification of a column. */
+async function cmdGovernance(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'show', target] = rest;
+  const cfm = await openContext(ctx.workspaceRoot, () => undefined);
+  try {
+    const sources = cfm.getPackSources();
+    const facts = gov.governanceFacts(sources.assertions);
+    if (sub === 'show') {
+      const index = buildSchemaIndex(sources.graph.nodes, sources.graph.edges);
+      const id = singleProblem(ctx);
+      const mapped = id ? problemMappings(layoutPath(ctx.workspaceRoot, 'problems', id)).map((m) => m.sourceFqn.toLowerCase()) : [];
+      const wanted = ctx.values.table ? [ctx.values.table.toLowerCase()] : mapped;
+      const tables = index.tables.filter((t) => !wanted.length || wanted.some((w) => gov.sameTable(t.fqn, w)));
+      const candidates = gov.governanceCandidates(tables.map((t) => ({ fqn: t.fqn, columns: [...t.columns.keys()] })), facts);
+      const text = candidates.length
+        ? candidates.map((c) => `  ${`${c.table}.${c.column}`.padEnd(44)} ${c.fact ? `${c.fact.classification}${c.fact.strategy ? ` (${c.fact.strategy})` : ''} · ${c.fact.status}` : `suggested ${c.suggested}${c.strategy ? ` (${c.strategy})` : ''} · not classified`}`).join('\n')
+        : `No personal data found by name in ${tables.length} table(s).`;
+      emit(ctx, { ok: true, candidates, tables: tables.length }, `${text}\n\nClassify a column: autode governance classify <table.column> --as pii|sensitive-pii|confidential|none [--strategy hash|redact]`);
+      return EXIT.OK;
+    }
+    if (sub !== 'classify') throw new CliError(EXIT.USAGE, 'governance show [--table <t>] | classify <table.column> --as <classification> [--strategy hash|redact] [--note <text>]');
+    const dot = target?.lastIndexOf('.') ?? -1;
+    if (!target || dot <= 0) throw new CliError(EXIT.USAGE, 'governance classify takes <table.column>.');
+    const classification = ctx.values.as as gov.Classification | undefined;
+    if (!classification || !gov.CLASSIFICATIONS.includes(classification)) throw new CliError(EXIT.USAGE, `--as is one of ${gov.CLASSIFICATIONS.join(', ')}.`);
+    const strategy = ctx.values.strategy as 'hash' | 'redact' | undefined;
+    if (strategy && strategy !== 'hash' && strategy !== 'redact') throw new CliError(EXIT.USAGE, '--strategy is hash or redact.');
+    requirePerson(ctx, 'Classifying personal data', 'Classify it in the AutoDE panel (AutoDE: Classify Personal Data…), or in a terminal; an agent proposes the fact for you to confirm.');
+    const table = target.slice(0, dot), column = target.slice(dot + 1);
+    if ((await ctx.io.prompt(`${table}.${column} is ${classification}${strategy ? `, masked by ${strategy}` : ''}. Type classify to record it: `)).trim().toLowerCase() !== 'classify') { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+    let a: Awaited<ReturnType<typeof gov.classifyColumn>>;
+    try { a = await gov.classifyColumn(cfm.getLedger(), sources.graph.nodes.map((n) => n.id), { table, column, classification, strategy, by: actorOf(ctx), channel: 'cli', note: ctx.values.note }); }
+    catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+    await cfm.persistCompiledGraph();
+    emit(ctx, { ok: true, fact: a.id, statement: a.statement }, `✓ ${a.statement} (fact ${a.id}, confirmed)`);
     return EXIT.OK;
   } finally { cfm.dispose(); }
 }

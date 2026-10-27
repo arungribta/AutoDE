@@ -2,7 +2,8 @@ import { Assertion } from '../context/assertions';
 import { BaseNode } from '../context/types';
 import { SchemaIndex, typeClassOf } from '../grounding/sqlGrounding';
 import { listPrimitives, validateTransformSpec } from '../transforms/registry';
-import { PipelineEntity, PipelineTransformStep } from '../pipelineSpec/types';
+import { PipelineEntity, PipelineGovernanceColumn, PipelineTransformStep } from '../pipelineSpec/types';
+import { defaultStrategy, governanceFacts, governanceFor } from '../governance/governance';
 
 /**
  * `autode_primitive_candidates` (PA3b, v0.45.4): the transform steps a
@@ -66,6 +67,24 @@ export function primitiveCandidates(input: {
   const cast = plain.filter((c) => c.type && table.columns.get(c.source.toLowerCase()) && typeClassOf(c.type) !== typeClassOf(table.columns.get(c.source.toLowerCase())!)).length;
   if (plain.length) add('rename_cast', { sourceObject: table.fqn, targetObject: staging, objectKind: 'view', columns: plain.map((c) => ({ source: c.source, target: c.target, ...(c.type ? { type: c.type } : {}) })) },
     [`projects the ${plain.length} mapped column(s) of ${table.fqn}`, ...(renamed ? [`renames ${renamed}`] : []), ...(cast ? [`casts ${cast}`] : [])]);
+  let current = plain.length ? staging : table.fqn;
+  // GOV: personal data classified by a fact is masked right after staging, so nothing downstream sees it.
+  const governance: PipelineGovernanceColumn[] = [];
+  const toMask: Array<{ name: string; strategy: 'hash' | 'redact' }> = [];
+  for (const f of governanceFor(table.fqn, governanceFacts(input.assertions))) {
+    const name = toTarget.get(f.column);
+    if (!name || f.classification === 'none') continue;
+    governance.push({ column: name, classification: f.classification });
+    const strategy = f.strategy ?? defaultStrategy(name, f.classification);
+    if (strategy && (f.classification === 'pii' || f.classification === 'sensitive-pii')) toMask.push({ name, strategy });
+    if (f.status !== 'active') notes.push(`${table.fqn}.${f.column} is classified ${f.classification} by a fact not confirmed yet (${f.assertionId}): confirm it before approving the build.`);
+  }
+  if (toMask.length) {
+    const maskedNames = new Set(toMask.map((m) => m.name.toLowerCase()));
+    add('mask', { sourceObject: current, targetObject: `${staging}_masked`, objectKind: 'view', passthrough: columns.filter((c) => !c.transform).map((c) => c.target).filter((c) => !maskedNames.has(c.toLowerCase())), columns: toMask },
+      [`masks ${toMask.map((m) => `${m.name} (${m.strategy})`).join(', ')}, classified as personal data`, 'hashing keeps equal values equal, so keys still join; add saltExpression with a platform secret for low-entropy values']);
+    current = `${staging}_masked`;
+  }
   if (exprs.length) notes.push(`${exprs.length} column(s) need an expression no primitive covers yet: ${exprs.map((c) => `${c.target} = ${c.transform}`).join('; ')}. Add them as a reviewed SQL step and check its grounding.`);
   // 2. The key and the change column, from facts and the source's columns.
   // The fact is about this table: its fully qualified name, or a bare name only when it is unqualified.
@@ -74,7 +93,6 @@ export function primitiveCandidates(input: {
   const keyCols = key ? (key.value as string[]).map((c) => toTarget.get(c.toLowerCase())) : undefined;
   const change = [...table.columns.entries()].find(([n, t]) => CHANGE_COLUMN.test(n) && typeClassOf(t) === 'temporal' && toTarget.has(n));
   const changeCol = change ? toTarget.get(change[0])! : undefined;
-  let current = plain.length ? staging : table.fqn;
   if (!key) notes.push(`No key is known for ${table.fqn}: deduplication and incremental loads need one (propose the key as a fact).`);
   else if (!keyCols!.every(Boolean)) notes.push(`The key of ${table.fqn} (${(key.value as string[]).join(', ')}) isn't fully mapped.`);
   else {
@@ -90,7 +108,7 @@ export function primitiveCandidates(input: {
   }
   const used = new Set(steps.map((s) => s.kind));
   return {
-    entity: { name: targetObject, source: { object: table.fqn, type: 'table' }, target: { object: targetObject, materialization: 'table' }, transforms: steps },
+    entity: { name: targetObject, source: { object: table.fqn, type: 'table' }, target: { object: targetObject, materialization: 'table' }, transforms: steps, ...(governance.length ? { governance: { columns: governance } } : {}) },
     notes,
     available: listPrimitives().filter((p) => !used.has(p.kind)).map((p) => ({ kind: p.kind, description: p.description }))
   };

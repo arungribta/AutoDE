@@ -142,6 +142,7 @@ export class SpecManager implements vscode.Disposable {
         ? spec.dataFlows.map((flow) => ({ ...flow, transformations: flow.transformations ? [...flow.transformations] : undefined }))
         : undefined,
       sourceCatalog: spec.sourceCatalog ? spec.sourceCatalog.map((entry) => ({ ...entry })) : undefined,
+      governance: spec.governance ? { ...spec.governance, regulations: spec.governance.regulations ? [...spec.governance.regulations] : undefined, notes: spec.governance.notes ? [...spec.governance.notes] : undefined } : undefined,
       provenance: spec.provenance ? spec.provenance.map((entry) => ({ ...entry })) : undefined
     };
   }

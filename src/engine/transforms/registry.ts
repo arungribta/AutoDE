@@ -1,6 +1,7 @@
 import Ajv, { ValidateFunction } from 'ajv';
 import { TransformPrimitive, TransformSpec, CompiledArtifact, TargetEnvironmentSummary, SqlDialect } from './types';
 import { renameCastPrimitive } from './primitives/renameCast';
+import { maskPrimitive } from './primitives/mask';
 import { dedupPrimitive } from './primitives/dedup';
 import { incrementalLoadPrimitive } from './primitives/incrementalLoad';
 
@@ -23,7 +24,8 @@ import { incrementalLoadPrimitive } from './primitives/incrementalLoad';
 export const TRANSFORM_PRIMITIVES: Record<string, TransformPrimitive<any>> = {
   rename_cast: renameCastPrimitive,
   dedup: dedupPrimitive,
-  incremental_load: incrementalLoadPrimitive
+  incremental_load: incrementalLoadPrimitive,
+  mask: maskPrimitive
 };
 
 /** The Tier-1 kinds present at module load — used by `resetDeclarativePrimitives()` to know what NOT to remove. */

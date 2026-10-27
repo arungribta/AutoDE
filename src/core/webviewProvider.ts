@@ -1,4 +1,6 @@
 import * as path from 'node:path';
+import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
+import { Classification, GovernanceCandidate, classifyColumn, governanceCandidates, governanceFacts, sameTable } from '../engine/governance/governance';
 import * as fs from 'node:fs';
 import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
@@ -1888,6 +1890,25 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return tables
       .filter((t) => t.origin?.environment === 'source')
       .map((t) => (t as unknown as { fqn?: string }).fqn ?? t.label);
+  }
+
+  /** GOV: personal-data candidates in the working set (the mapped sources first), for *Classify Personal Data…*. */
+  public governanceCandidates(): GovernanceCandidate[] {
+    if (!this.contextFileManager) return [];
+    const sources = this.contextFileManager.getPackSources();
+    const index = buildSchemaIndex(sources.graph.nodes, sources.graph.edges);
+    const mapped = (this.getMappingContext()?.mappings ?? []).map((m) => m.sourceFqn.toLowerCase());
+    const tables = index.tables.filter((t) => !mapped.length || mapped.some((w) => sameTable(t.fqn, w)));
+    return governanceCandidates(tables.map((t) => ({ fqn: t.fqn, columns: [...t.columns.keys()] })), governanceFacts(sources.assertions));
+  }
+
+  /** GOV: the person in the panel classifies a column (a confirmed fact). */
+  public async classifyColumn(input: { table: string; column: string; classification: Classification; strategy?: 'hash' | 'redact'; by: string }): Promise<string> {
+    if (!this.contextFileManager) throw new Error('The context layer is not initialized yet: open the AutoDE panel first.');
+    const sources = this.contextFileManager.getPackSources();
+    const a = await classifyColumn(this.contextFileManager.getLedger(), sources.graph.nodes.map((n) => n.id), { ...input, channel: 'panel' });
+    await this.contextFileManager.persistCompiledGraph();
+    return a.statement;
   }
 
   /**

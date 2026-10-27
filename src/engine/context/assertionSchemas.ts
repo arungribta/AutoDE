@@ -61,7 +61,8 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
   },
   business_rule: {
     type: 'object',
-    properties: { text: { type: 'string' }, level: { enum: ['STRICT', 'RECOMMENDED'] }, strategy: { type: 'string' } }
+    // GOV: predicate `classification` on a column carries its classification and, for personal data, the mask strategy.
+    properties: { text: { type: 'string' }, level: { enum: ['STRICT', 'RECOMMENDED'] }, strategy: { type: 'string' }, classification: { enum: ['none', 'pii', 'sensitive-pii', 'confidential'] } }
   },
   quality_expectation: {
     type: 'object',

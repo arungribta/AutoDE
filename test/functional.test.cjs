@@ -342,7 +342,7 @@ async function main() {
     const { interviewSkills } = require('../dist/engine/skills/skillRegistry.js');
     const { loadSkillPack } = require('../dist/engine/agents/definitions.js');
     const skills = interviewSkills(loadSkillPack(nodePath.join(__dirname, '..')).skills);
-    assert.deepStrictEqual(skills.map((s) => s.id), ['requirements-discovery', 'source-catalog', 'data-flow', 'transformations', 'quality-acceptance', 'constraints-assumptions', 'synthesis']);
+    assert.deepStrictEqual(skills.map((s) => s.id), ['requirements-discovery', 'source-catalog', 'data-flow', 'transformations', 'quality-acceptance', 'constraints-assumptions', 'governance', 'synthesis']);
     assert.ok(skills.every((s) => s.id && s.systemPrompt && s.questionGuidance));
     const src = skills.find((s) => s.id === 'source-catalog');
     assert.deepStrictEqual([src.name, src.order, src.specFields, src.exampleQuestions.length], ['Source Catalog', 2, ['sourceCatalog', 'dataFlows'], 2]);
@@ -352,7 +352,7 @@ async function main() {
     try {
       nodeFs.writeFileSync(nodePath.join(dir, 'source-catalog.json'), JSON.stringify({ id: 'source-catalog', name: 'Our sources', order: 2, description: 'd', systemPrompt: 'Ask about our mainframe feeds.', questionGuidance: 'g', specFields: ['sourceCatalog'] }));
       const merged = interviewSkills(loadSkillPack(nodePath.join(__dirname, '..')).skills, dir);
-      assert.deepStrictEqual([merged.length, merged.find((s) => s.id === 'source-catalog').name], [7, 'Our sources']);
+      assert.deepStrictEqual([merged.length, merged.find((s) => s.id === 'source-catalog').name], [8, 'Our sources']);
     } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
   });
 
@@ -5897,7 +5897,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_runbook_status', 'autode_approvals_list'];
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -5967,6 +5967,7 @@ async function main() {
       autode_draft_model: [{}, { x: 1 }],
       autode_skills_list: [{ group: 'external' }, { group: 'vendor' }],
       autode_skills_analyze: [{ source: 'incoming' }, { source: '' }],
+      autode_governance_candidates: [{ tables: ['shop.customers'] }, { tables: [''] }],
       autode_runbook_status: [{}, { id: '' }],
       autode_approvals_list: [{}, { x: 1 }],
       autode_propose_runbook: [{ runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'sql', sql: 'select 1', expect: 'one row' }] } }, { runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'shell', expect: 'x' }] } }],
@@ -6017,7 +6018,8 @@ async function main() {
     const params = {
       dedup: { sourceObject: 'RAW.PUBLIC.ORDERS', targetObject: 'CURATED.STAGING.ORDERS_DEDUP', partitionByColumns: ['ORDER_ID'], orderByColumn: 'UPDATED_AT', orderDirection: 'DESC', objectKind: 'view' },
       incremental_load: { sourceObject: 'RAW.PUBLIC.ORDERS', targetObject: 'CURATED.STAGING.ORDERS', keyColumns: ['ORDER_ID'], updateColumns: ['STATUS', 'AMOUNT'] },
-      rename_cast: { sourceObject: 'RAW.PUBLIC.CUSTOMERS', targetObject: 'CURATED.STAGING.STG_CUSTOMERS', objectKind: 'view', columns: [{ source: 'CUST_ID', target: 'customer_id', type: 'INTEGER' }, { source: 'EMAIL_ADDR', target: 'email' }] }
+      rename_cast: { sourceObject: 'RAW.PUBLIC.CUSTOMERS', targetObject: 'CURATED.STAGING.STG_CUSTOMERS', objectKind: 'view', columns: [{ source: 'CUST_ID', target: 'customer_id', type: 'INTEGER' }, { source: 'EMAIL_ADDR', target: 'email' }] },
+      mask: { sourceObject: 'CURATED.STAGING.STG_CUSTOMERS', targetObject: 'CURATED.STAGING.STG_CUSTOMERS_MASKED', passthrough: ['customer_id'], columns: [{ name: 'email', strategy: 'hash' }, { name: 'password', strategy: 'redact' }], saltExpression: "secret('pii', 'salt')" }
     };
     const os = require('node:os');
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-mcp-g-'));
@@ -6029,6 +6031,8 @@ async function main() {
       for (const kind of kinds) {
         for (const dialect of ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'ansi']) {
           const r = await client.callTool({ name: 'autode_compile_transform', arguments: { transform: { kind, params: params[kind] }, target: { platform: 'snowflake', database: 'CURATED', schema: 'STAGING' }, dialect } });
+          // GOV: ANSI SQL has no hash function, so a hashing mask is refused there rather than guessed.
+          if (kind === 'mask' && dialect === 'ansi') { assert.ok(r.isError && /ANSI SQL has no hash function/.test(JSON.stringify(r.content)), JSON.stringify(r.content)); continue; }
           assert.ok(!r.isError, JSON.stringify(r.structuredContent));
           const file = nodePath.join(dir, `${kind}.${dialect}.${r.structuredContent.language}`);
           if (update) nodeFs.writeFileSync(file, r.structuredContent.content);
@@ -6037,7 +6041,7 @@ async function main() {
           n++;
         }
       }
-      assert.strictEqual(n, 18);
+      assert.strictEqual(n, 23);
     } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
@@ -8487,7 +8491,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-orchestrator', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-orchestrator', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
       'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project',
       'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
@@ -10033,7 +10037,7 @@ async function main() {
       const plan = A.assignmentFor(scope, 'plan', tools).assignment;
       assert.deepStrictEqual([plan.role, plan.skills.map((k) => k.id), plan.engineTools], ['planner', ['autode-core-workflow-planning'], ['autode_propose_workflow', 'autode_workflow_draft']]);
       const spec = A.assignmentFor(scope, 'specify', tools).assignment;
-      assert.deepStrictEqual([spec.role, spec.skills.length, spec.engineTools], ['business-analyst', 7, ['autode_interview_record_answer', 'autode_interview_state', 'autode_propose_spec_change']]);
+      assert.deepStrictEqual([spec.role, spec.skills.length, spec.engineTools], ['business-analyst', 8, ['autode_interview_record_answer', 'autode_interview_state', 'autode_propose_spec_change']]);
       assert.ok(!A.toolsForTier(tools, 'propose', ['autode_propose_workflow'], 'build').includes('autode_propose_workflow'), 'no other stage re-plans');
       const Sv = fresh('../dist/engine/workflows/service.js');
       const before = nodeFs.readFileSync(nodePath.join(ws, '.autode', 'problems', id, 'workflow.yaml'), 'utf8');
@@ -10393,6 +10397,118 @@ async function main() {
       assert.strictEqual(require('../dist/engine/skills/port.js').readAnalysis(nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', 'team-sql-conventions')).classification.by, 'model');
       await s.onMessage({ type: 'reset' });
       assert.strictEqual(last().step, 'source');
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.47.0: governance as code — the mask primitive (hash with an optional salt, redact; NULL stays NULL; no guessing in ANSI), classifications as facts, candidates by name, masking after staging, and a Pipeline Spec that leaves sensitive data unmasked is invalid', () => {
+    const R = require('../dist/engine/transforms/registry.js');
+    const G = require('../dist/engine/governance/governance.js');
+    const C = fresh('../dist/engine/agents/primitiveCandidates.js');
+    const { validatePipelineSpec } = require('../dist/engine/pipelineSpec/validator.js');
+    const target = { platform: 'snowflake', database: '', schema: '' };
+    const mask = (params, dialect = 'snowflake') => R.compileTransformSpec({ kind: 'mask', params: { sourceObject: 's', targetObject: 't', passthrough: ['id'], ...params } }, target, dialect);
+    assert.match(mask({ columns: [{ name: 'email', strategy: 'hash' }] }).content, /CASE WHEN email IS NULL THEN NULL ELSE SHA2\(CAST\(email AS VARCHAR\), 256\) END AS email/);
+    assert.match(mask({ columns: [{ name: 'email', strategy: 'hash' }] }, 'spark_sql').content, /sha2\(CAST\(email AS STRING\), 256\)/);
+    assert.match(mask({ columns: [{ name: 'email', strategy: 'hash' }], saltExpression: '$PII_SALT' }).content, /SHA2\(CONCAT\(CAST\(\$PII_SALT AS VARCHAR\), CAST\(email AS VARCHAR\)\), 256\)/);
+    assert.match(mask({ columns: [{ name: 'pwd', strategy: 'redact', redactValue: 'X' }] }).content, /CASE WHEN pwd IS NULL THEN NULL ELSE 'X' END AS pwd/);
+    assert.throws(() => mask({ columns: [{ name: 'email', strategy: 'hash' }] }, 'ansi'), /ANSI SQL has no hash function/);
+    assert.throws(() => mask({ columns: [{ name: 'id', strategy: 'hash' }] }), /both passed through and masked: id/);
+    for (const bad of ["'literal-secret'", 'x; DROP TABLE t', "f(a)"]) assert.ok(!R.validateTransformSpec({ kind: 'mask', params: { sourceObject: 's', targetObject: 't', passthrough: [], columns: [{ name: 'e', strategy: 'hash' }], saltExpression: bad } }).valid, bad);
+    assert.ok(R.validateTransformSpec({ kind: 'mask', params: { sourceObject: 's', targetObject: 't', passthrough: [], columns: [{ name: 'e', strategy: 'hash' }], saltExpression: "secret('pii', 'salt')" } }).valid);
+    assert.ok(!R.validateTransformSpec({ kind: 'mask', params: { sourceObject: 's', targetObject: 't', passthrough: [], columns: [{ name: 'e', strategy: 'tokenize' }] } }).valid, 'reversible strategies are out of scope');
+
+    // Classifications are facts; the latest live one per column, confirmed before proposed.
+    const fact = (id, subject, value, status = 'active') => ({ id, kind: 'business_rule', subject: [subject], predicate: 'classification', value, statement: id, status, trust: status === 'active' ? 'confirmed' : 'inferred', evidence: [], validFrom: '', createdBy: 'user:t', createdAt: '' });
+    const facts = G.governanceFacts([fact('g1', 'obj:shop/prod/shop.customers.email', { classification: 'pii', strategy: 'hash' }), fact('g2', 'obj:shop/prod/shop.customers.ssn', { classification: 'sensitive-pii' }), fact('g3', 'obj:shop/prod/shop.customers.email', { classification: 'none' }, 'proposed'), fact('g4', 'obj:shop/prod/shop.customers.ssn', { classification: 'bogus' })]);
+    assert.deepStrictEqual(facts.map((f) => [f.column, f.classification, f.assertionId]), [['email', 'pii', 'g1'], ['ssn', 'sensitive-pii', 'g2']]);
+    const cands = G.governanceCandidates([{ fqn: 'shop.customers', columns: ['customer_id', 'email', 'ssn', 'phone_number', 'password_hash', 'updated_at'] }], facts);
+    assert.deepStrictEqual(cands.map((c) => [c.column, c.suggested, c.strategy, !!c.fact]), [['email', 'pii', 'hash', true], ['ssn', 'sensitive-pii', 'hash', true], ['phone_number', 'pii', 'hash', false], ['password_hash', 'sensitive-pii', 'redact', false]]);
+    // Sample rows: a classified column is masked though its name says nothing (SEC-5).
+    const { gateQueryResult } = require('../dist/engine/platform/sampleData.js');
+    const rows = { columns: ['cust_ref', 'amount'], rows: [{ cust_ref: 'A-991', amount: 3 }], rowCount: 1 };
+    assert.deepStrictEqual(gateQueryResult(rows, { allowSampleData: true, metadata: false, connectionId: 'c' }).maskedColumns, []);
+    assert.deepStrictEqual(gateQueryResult(rows, { allowSampleData: true, metadata: false, connectionId: 'c', classified: ['CUST_REF'] }).maskedColumns, ['cust_ref']);
+    assert.ok(G.personalDataInPlay({ text: 'Customer lifetime value by e-mail domain' }) && G.personalDataInPlay({ text: 'Daily revenue', columns: ['email'] }) && !G.personalDataInPlay({ text: 'Daily revenue from the shop orders, by channel', columns: ['order_id'] }));
+
+    // Candidates mask right after staging, under the staged names, and fill the governance block.
+    const table = { fqn: 'shop.customers', name: 'customers', columns: new Map(Object.entries({ customer_id: 'INT', email: 'VARCHAR', ssn: 'VARCHAR', updated_at: 'TIMESTAMP' })) };
+    const key = { ...fact('k1', 'shop.customers', ['customer_id']), kind: 'key', predicate: 'primary' };
+    const r = C.primitiveCandidates({ source: 'shop.customers', target: 'dim_customer', columns: [{ source: 'customer_id', target: 'customer_id' }, { source: 'email', target: 'email_address' }, { source: 'ssn', target: 'ssn' }, { source: 'updated_at', target: 'updated_at' }], schemaIndex: { tables: [table], byName: new Map([['customers', [table]]]) }, nodes: [], assertions: [key, fact('g1', 'obj:shop/prod/shop.customers.email', { classification: 'pii', strategy: 'hash' }), fact('g2', 'obj:shop/prod/shop.customers.ssn', { classification: 'sensitive-pii' })] });
+    assert.deepStrictEqual(r.entity.transforms.map((t) => [t.kind, t.valid]), [['rename_cast', true], ['mask', true], ['dedup', true], ['incremental_load', true]]);
+    const m = r.entity.transforms[1];
+    assert.deepStrictEqual([m.params.sourceObject, m.params.targetObject, m.params.passthrough, m.params.columns], ['stg_shop_customers', 'stg_shop_customers_masked', ['customer_id', 'updated_at'], [{ name: 'email_address', strategy: 'hash' }, { name: 'ssn', strategy: 'hash' }]]);
+    assert.strictEqual(r.entity.transforms[2].params.sourceObject, 'stg_shop_customers_masked', 'nothing downstream reads unmasked data');
+    assert.deepStrictEqual(r.entity.governance.columns, [{ column: 'email_address', classification: 'pii' }, { column: 'ssn', classification: 'sensitive-pii' }]);
+
+    // The spec: structurally, a sensitive-pii column must be masked; against the ledger, a confirmed one must be declared.
+    const entity = { name: r.entity.name, source: r.entity.source, target: r.entity.target, governance: r.entity.governance, transforms: r.entity.transforms.map((t) => ({ kind: t.kind, params: t.params })) };
+    const spec = (entities) => ({ specVersion: 1, id: 'ps', version: 1, status: 'draft', derivedFromBpsId: 'b', derivedFromBpsVersion: 1, targetPlatform: 'snowflake', entities, createdAt: 'x', updatedAt: 'x' });
+    assert.deepStrictEqual(validatePipelineSpec(spec([entity])).errors, []);
+    const unmasked = { ...entity, transforms: entity.transforms.filter((t) => t.kind !== 'mask') };
+    assert.match(validatePipelineSpec(spec([unmasked])).errors.join(' '), /column ssn is sensitive-pii but no mask step masks it/);
+    assert.deepStrictEqual(G.governanceGaps(spec([entity]), facts), { errors: [], warnings: [] });
+    const undeclared = { ...unmasked, governance: undefined };
+    const gaps = G.governanceGaps(spec([undeclared]), facts);
+    assert.match(gaps.errors.join(' '), /shop\.customers\.ssn is sensitive-pii \(fact g2\); add ssn/);
+    assert.match(gaps.warnings.join(' '), /shop\.customers\.email is personal data and passes through unmasked; mask email_address/);
+    assert.deepStrictEqual(validatePipelineSpec(spec([{ ...entity, governance: undefined, transforms: [entity.transforms[0]] }])).errors, [], 'a spec without governance still validates');
+  });
+
+  await test('v0.47.0: governance on every surface — the interview asks its governance part only when personal data is in play; autode governance show and classify (a person, confirmed); autode_governance_candidates over MCP; the build stage\'s Pipeline Spec can\'t be approved while a confirmed sensitive column it reads is undeclared', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const S = require('../dist/engine/interview/state.js');
+    const { interviewSkills } = require('../dist/engine/skills/skillRegistry.js');
+    const { loadSkillPack } = require('../dist/engine/agents/definitions.js');
+    const parts = interviewSkills(loadSkillPack(wfRes()).skills);
+    assert.strictEqual(parts.find((p) => p.id === 'governance').askWhen, 'personal-data');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-gov-'));
+    let client;
+    try {
+      const p1 = nodePath.join(ws, 'p1'), p2 = nodePath.join(ws, 'p2');
+      nodeFs.mkdirSync(p1); nodeFs.mkdirSync(p2);
+      assert.ok('governance' in S.startInterview(p1, 'Customer churn by e-mail domain, under GDPR', parts).coverage);
+      const plain = S.startInterview(p2, 'Daily revenue from the shop orders, by channel', parts);
+      assert.ok(!('governance' in plain.coverage));
+      assert.ok(!S.summarizeInterview(plain, parts).parts.some((p) => p.skill === 'governance'), 'not listed when not asked');
+
+      // The spec carries what the interview found.
+      const D = require('../dist/engine/documents/problemDocuments.js');
+      const bps = { id: 'b', version: 1, status: 'draft', problemStatement: 'p', objectives: ['o'], successCriteria: [], scope: { in: ['x'], out: [] }, constraints: [], assumptions: [], createdAt: 'x', updatedAt: 'x', governance: { personalData: 'sensitive', regulations: ['GDPR'] }, sourceCatalog: [{ name: 'crm', type: 'database', sensitivity: 'personal' }] };
+      const back = D.parseBusinessProblemSpec(D.serializeBusinessProblemSpec(bps));
+      assert.deepStrictEqual([back.governance, back.sourceCatalog[0].sensitivity], [{ personalData: 'sensitive', regulations: ['GDPR'] }, 'personal']);
+      assert.strictEqual(D.parseBusinessProblemSpec(D.serializeBusinessProblemSpec({ ...bps, governance: undefined })).governance, undefined);
+
+      // Over MCP: the estate, then the candidates.
+      nodeFs.writeFileSync(nodePath.join(ws, 'crm.sql'), 'CREATE TABLE crm.customers (\n  customer_id INT NOT NULL,\n  email VARCHAR(200),\n  ssn VARCHAR(11),\n  updated_at TIMESTAMP\n);\n');
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      await call('autode_ingest_file', { path: 'crm.sql', system: 'crm' });
+      const c = await call('autode_governance_candidates', { tables: ['crm.customers'] });
+      assert.deepStrictEqual(c.candidates.map((x) => [x.column, x.suggested, x.strategy]), [['email', 'pii', 'hash'], ['ssn', 'sensitive-pii', 'hash']]);
+      await client.close(); client = undefined;
+
+      // The CLI: a person classifies.
+      const W = ['--workspace', ws];
+      assert.strictEqual((await cli(['governance', 'classify', 'crm.customers.ssn', '--as', 'sensitive-pii', ...W])).code, 4, 'a person at a terminal');
+      assert.strictEqual((await cli(['governance', 'classify', 'crm.customers.ssn', '--as', 'secret', ...W])).code, 2);
+      const cl = await cli(['governance', 'classify', 'crm.customers.ssn', '--as', 'sensitive-pii', ...W], { interactive: true, answers: ['classify'] });
+      assert.strictEqual(cl.code, 0, cl.out + cl.err);
+      assert.match(cl.out, /crm\.customers\.ssn is sensitive-pii, masked by hash\. \(fact .+, confirmed\)/);
+      const again = await cli(['governance', 'classify', 'crm.customers.ssn', '--as', 'sensitive-pii', '--strategy', 'redact', ...W], { interactive: true, answers: ['classify'] });
+      assert.strictEqual(again.code, 0, again.out + again.err);
+      const shown = (await cli(['governance', 'show', '--table', 'crm.customers', ...W, '--json'])).json().candidates;
+      assert.deepStrictEqual(shown.map((x) => [x.column, x.fact ? `${x.fact.classification}/${x.fact.strategy}/${x.fact.status}` : 'none']), [['email', 'none'], ['ssn', 'sensitive-pii/redact/active']], 'the second classification replaced the first');
+
+      // The approval check reads the ledger: a build spec reading crm.customers without declaring ssn is refused.
+      const { documentApprovalProblems } = require('../dist/engine/workflows/documentApproval.js');
+      const prob = nodePath.join(ws, '.autode', 'problems', 'gov');
+      nodeFs.mkdirSync(prob, { recursive: true });
+      const entity = { name: 'dim_customer', source: { object: 'crm.customers', type: 'table' }, target: { object: 'dim_customer', materialization: 'table' }, transforms: [{ kind: 'rename_cast', params: { sourceObject: 'crm.customers', targetObject: 'stg', objectKind: 'view', columns: [{ source: 'customer_id', target: 'customer_id' }, { source: 'ssn', target: 'ssn' }] } }] };
+      const ps = { specVersion: 1, id: 'ps', version: 1, status: 'draft', derivedFromBpsId: 'b', derivedFromBpsVersion: 1, targetPlatform: 'snowflake', entities: [entity], createdAt: 'x', updatedAt: 'x' };
+      D.writePipelineSpec(prob, ps);
+      assert.match(documentApprovalProblems(prob, 'build').join(' '), /crm\.customers\.ssn is sensitive-pii \(fact .+\); add ssn to the entity's governance block and mask it/);
+      D.writePipelineSpec(prob, { ...ps, entities: [{ ...entity, governance: { columns: [{ column: 'ssn', classification: 'sensitive-pii' }] }, transforms: [...entity.transforms, { kind: 'mask', params: { sourceObject: 'stg', targetObject: 'stg_masked', passthrough: ['customer_id'], columns: [{ name: 'ssn', strategy: 'redact' }] } }] }] });
+      assert.deepStrictEqual(documentApprovalProblems(prob, 'build'), []);
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

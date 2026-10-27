@@ -987,6 +987,27 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: `autode skills analyze <repo URL> --skill <path>`; `autode skills import …`; `autode skills review <id>` and `publish <id>`; in Claude Code ask it to analyse a skill repository.
   Expect: the CLI prints the same report; review and publish ask you to type the word; the host calls `autode_skills_analyze` and says a person imports it.
 
+## Part 41 — v0.47.0 Governance as code
+
+- [ ] **41.1 The interview asks about personal data only when it matters.**
+  Do: start a problem "Customer churn by e-mail domain, under GDPR"; then another "Daily revenue from the shop orders, by channel".
+  Expect: the first interview has a *Governance & Personal Data* part and asks about regulations and personal data; the second has no such part. After synthesis, the first specification has a `governance` block with GDPR.
+- [ ] **41.2 Classify a column in the panel.**
+  Do: with a source table that has `email` and `ssn` in the estate, run *AutoDE: Classify Personal Data…*; choose `ssn`, *sensitive-pii*, *hash*; confirm.
+  Expect: the pick list suggests `ssn` as sensitive-pii and `email` as pii; after *Record*, the chat says what was recorded; `autode facts list --all` shows the fact as confirmed (it never waits in the Context Inbox, because you recorded it).
+- [ ] **41.3 The build masks it.**
+  Do: Run agent on the build stage of a problem whose mapping reads that table.
+  Expect: the Pipeline Spec has a `mask` step right after staging (ssn hashed), the dedup reads the masked view, and the entity's governance block lists ssn as sensitive-pii. The compiled SQL hashes ssn with `SHA2(…, 256)` on Snowflake or `sha2(…)` on Databricks.
+- [ ] **41.4 An unmasked build can't be approved.**
+  Do: remove the `mask` step and the governance block from the Pipeline Spec by hand, then try to approve the build stage.
+  Expect: approval is refused, naming `ssn` and its fact.
+- [ ] **41.5 In a terminal and in a host.**
+  Do: `autode governance show --table <the table>`; `autode governance classify <table>.email --as pii --strategy hash`; in Claude Code ask which columns hold personal data.
+  Expect: the CLI lists suggestions and what is classified, and asks you to type `classify`; the host calls `autode_governance_candidates` and proposes facts for you to confirm instead of recording them.
+- [ ] **41.6 Sample rows.**
+  Do: with `allowSampleDataInPrompts: true` on a connection, classify a column whose name says nothing (e.g. `cust_ref`) as pii, then ask an agent to query a few rows.
+  Expect: `cust_ref` comes back masked.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1230,5 +1251,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 40.5 |  |  |
 | 40.6 |  |  |
 | 40.7 |  |  |
+| 41.1 |  |  |
+| 41.2 |  |  |
+| 41.3 |  |  |
+| 41.4 |  |  |
+| 41.5 |  |  |
+| 41.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

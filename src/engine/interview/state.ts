@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
 import { BusinessProblemSpec, IntakeAnswer, IntakeSession, SkillDefinition, SpecIntakeQuestion } from '../types';
 import { SpecOpsEngine, createIntakeSession } from './specOps';
+import { personalDataInPlay } from '../governance/governance';
 
 /**
  * The requirements interview on disk (v0.45.12, mcp-engine §9.2 PA3 §7; BPS-7):
@@ -59,10 +60,12 @@ export function openQuestions(s: IntakeSession): SpecIntakeQuestion[] {
 }
 
 /** Starts the problem's interview (or returns the open one). */
-export function startInterview(problemRoot: string, statement: string, skills: readonly SkillDefinition[], opts: { previousSpec?: BusinessProblemSpec; now?: string } = {}): IntakeSession {
+export function startInterview(problemRoot: string, statement: string, skills: readonly SkillDefinition[], opts: { previousSpec?: BusinessProblemSpec; now?: string; columns?: readonly string[] } = {}): IntakeSession {
   const existing = readInterview(problemRoot);
   if (existing && isOpenInterview(existing)) return existing;
-  const fields = [...new Set(skills.flatMap((k) => k.specFields))];
+  // GOV: a part asked only when personal data is in play (the statement's words, or columns already known).
+  const personal = personalDataInPlay({ text: statement, columns: opts.columns });
+  const fields = [...new Set(skills.filter((k) => !k.askWhen || personal).flatMap((k) => k.specFields))];
   const session = createIntakeSession(statement, { fields, previousSpec: opts.previousSpec, now: opts.now });
   writeInterview(problemRoot, session);
   return session;
@@ -128,7 +131,8 @@ export interface InterviewSummary {
 
 /** What any surface shows: the parts covered, what is still open, what was answered by whom. */
 export function summarizeInterview(s: IntakeSession, skills: readonly SkillDefinition[]): InterviewSummary {
-  const parts = skills.filter((k) => k.specFields.length).map((k) => {
+  // A conditional part (GOV) is listed only when the interview took it on.
+  const parts = skills.filter((k) => k.specFields.length && (!k.askWhen || k.specFields.some((f) => f in s.coverage))).map((k) => {
     const covered = k.specFields.filter((f) => s.coverage[f] !== undefined && s.coverage[f] !== 'missing').length;
     return { skill: k.id, name: k.name, specFields: k.specFields, status: (covered === 0 ? 'not-started' : covered === k.specFields.length ? 'addressed' : 'partial') as InterviewSummary['parts'][number]['status'] };
   });

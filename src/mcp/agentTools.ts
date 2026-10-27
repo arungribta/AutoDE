@@ -21,6 +21,7 @@ import { reconcilePlan } from '../engine/agents/reconcilePlan';
 import { targetPlatform } from '../engine/agents/assignment';
 import { skillCatalog } from '../engine/agents/skillCatalog';
 import * as port from '../engine/skills/port';
+import { governanceCandidates, governanceFacts, governanceGaps } from '../engine/governance/governance';
 import { waitingForYou } from '../engine/approvals/waiting';
 import { factView } from '../engine/context/factReview';
 import { isMirror } from '../engine/context/projection';
@@ -153,6 +154,21 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
       }
     },
     {
+      name: 'autode_governance_candidates',
+      description: "Personal data in the problem's sources (GOV): each column whose name suggests personal data, or that a fact already classifies, with a suggested classification (pii, sensitive-pii) and mask strategy (hash keeps equal values equal for joins; redact for secrets), and what the ledger says. Suggestions only: propose a classification as a fact (autode_propose_assertion, kind business_rule, predicate classification, subject the column, value { classification, strategy }) for a person to confirm. Defaults to the tables the problem's mapping reads, else every table in the working set.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: { tables: { type: 'array', items: { type: 'string', minLength: 1 } } } },
+      annotations: read('Personal data candidates'),
+      handler: async (args, ws) => {
+        const src = await ws.contextSources();
+        const index = buildSchemaIndex(src.graph.nodes, src.graph.edges);
+        let wanted = (args.tables as string[] | undefined)?.map((t) => t.toLowerCase());
+        if (!wanted?.length) { try { wanted = problemMappings(problemOf(ws).problemRoot).map((m) => m.sourceFqn.toLowerCase()); } catch { wanted = []; } }
+        const tables = index.tables.filter((t) => !wanted!.length || wanted!.some((w) => t.fqn.toLowerCase() === w || t.fqn.toLowerCase().endsWith(`.${w}`)));
+        const facts = governanceFacts(src.assertions);
+        return { candidates: governanceCandidates(tables.map((t) => ({ fqn: t.fqn, columns: [...t.columns.keys()] })), facts), tables: tables.length } as unknown as Record<string, unknown>;
+      }
+    },
+    {
       name: 'autode_primitive_candidates',
       description: "The transform steps a source table needs on its way to a target, as AutoDE primitives with their parameters filled in from what AutoDE knows: a staging projection that renames and casts the mapped columns (rename_cast), deduplication on the key fact keeping the latest row by the change column (dedup), and an incremental MERGE on the key (incremental_load). Each step has its reasons and is validated against the primitive's schema; what no primitive covers (column expressions, a missing key or change column) comes back as notes. Columns default to the problem's mapping for that source, else every source column as is.",
       inputSchema: { type: 'object', required: ['source'], additionalProperties: false, properties: {
@@ -206,11 +222,14 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
         };
         const errors = [...validatePipelineSpec(spec).errors];
         for (const e of entities) for (const [i, t] of e.transforms.entries()) { const v = validateTransformSpec({ kind: t.kind, params: t.params, primitiveVersion: t.primitiveVersion }); if (!v.valid) errors.push(...v.errors.map((x) => `${e.name} step ${i + 1} (${t.kind}): ${x}`)); }
+        // GOV: confirmed sensitive-pii facts about the columns it reads must be declared (and so masked).
+        const gov = governanceGaps(spec, governanceFacts((await ws.contextSources()).assertions));
+        errors.push(...gov.errors);
         if (errors.length) throw new EngineToolError('VALIDATION_FAILED', `The Pipeline Spec isn't valid: ${errors.join(' ')}`, { errors });
         writePipelineSpec(problemRoot, spec);
         const file = problemDocumentPath(problemRoot, 'pipelineSpec');
         note(ws, problemRoot, stageFor(problemRoot, 'build', args.stage), file);
-        return { id: spec.id, version: spec.version, status: spec.status, entities: entities.length, file: path.relative(ws.options.workspaceRoot, file).split(path.sep).join('/'), next: 'Compile it with autode_compile_pipeline_spec and record the files with autode_record_artifact; then tell the user the Pipeline Spec is ready for their approval.' };
+        return { id: spec.id, version: spec.version, status: spec.status, entities: entities.length, file: path.relative(ws.options.workspaceRoot, file).split(path.sep).join('/'), ...(gov.warnings.length ? { warnings: gov.warnings } : {}), next: 'Compile it with autode_compile_pipeline_spec and record the files with autode_record_artifact; then tell the user the Pipeline Spec is ready for their approval.' };
       }
     },
     {

@@ -1,12 +1,12 @@
 ---
 name: autode-de-pipeline-build
 description: Build an AutoDE business problem's pipelines - a Pipeline Spec of transform primitives (staging, deduplication, incremental loads) drafted from the approved mapping, model and facts, compiled by AutoDE into code with grounding manifests. Use it for the build stage of an AutoDE workflow.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_primitive_candidates, mcp__autode__autode_search_primitives, mcp__autode__autode_describe_primitive, mcp__autode__autode_validate_transform, mcp__autode__autode_compile_transform, mcp__autode__autode_validate_pipeline_spec, mcp__autode__autode_compile_pipeline_spec, mcp__autode__autode_record_pipeline_spec, mcp__autode__autode_check_grounding, mcp__autode__autode_explain_sql, mcp__autode__autode_list_connections, mcp__autode__autode_workflow_status, mcp__autode__autode_record_artifact]
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_primitive_candidates, mcp__autode__autode_governance_candidates, mcp__autode__autode_search_primitives, mcp__autode__autode_describe_primitive, mcp__autode__autode_validate_transform, mcp__autode__autode_compile_transform, mcp__autode__autode_validate_pipeline_spec, mcp__autode__autode_compile_pipeline_spec, mcp__autode__autode_record_pipeline_spec, mcp__autode__autode_check_grounding, mcp__autode__autode_explain_sql, mcp__autode__autode_list_connections, mcp__autode__autode_workflow_status, mcp__autode__autode_record_artifact]
 metadata:
   scope: de
   stageKinds: [build]
   platforms: [any]
-  version: 1
+  version: 2
   owner: AutoDE
   maturity: tested
 ---
@@ -26,6 +26,7 @@ metadata:
 
 For each mapped source table, call `autode_primitive_candidates` with the source and its target. It returns:
 - `rename_cast`: staging that projects, renames and casts the mapped columns;
+- `mask`: right after staging, for columns a fact classifies as personal data (`hash` keeps equal values equal, so keys still join; `redact` for secrets). The entity's `governance` block comes with it;
 - `dedup`: one row per key, the latest by the change column;
 - `incremental_load`: a MERGE on the key;
 - **notes:** expressions no primitive covers, a missing key or change column.
@@ -33,6 +34,7 @@ For each mapped source table, call `autode_primitive_candidates` with the source
 Each step has its reasons and is validated. Decide:
 - **Accept** a step when its reasons hold for this problem. For example, deduplicate when the key fact is confirmed or a profile shows duplicates.
 - **Full refresh** when there is no change column: leave out `incremental_load` and say so.
+- **Personal data:** never drop a `mask` step. A `sensitive-pii` column must be masked, or the Pipeline Spec is invalid and can't be approved. When a column looks personal but isn't classified (`autode_governance_candidates`), tell the user; for low-entropy values (phone numbers, birth dates) suggest a salt (`saltExpression`, a platform secret such as `secret('pii', 'salt')` on Databricks).
 - **Other primitives:** `available` lists the workspace's own; check their parameters with `autode_describe_primitive` and `autode_validate_transform`.
 
 ## 3. Draft the Pipeline Spec
@@ -40,7 +42,7 @@ Each step has its reasons and is validated. Decide:
 Call `autode_record_pipeline_spec` with:
 - one entity per target: `name`, `source` (object, type), `transforms` (the accepted steps, as `kind` and `params`), `target` (object, `table` or `view`);
 - `quality.rules`: descriptions of the quality rules that apply to the entity;
-- `governance.columns`: the classification of personal data columns;
+- `governance.columns`: the classification of personal data columns, as the candidates return it (named as after staging);
 - `targetPlatform` from the target context.
 
 Validation errors come back step by step: fix them and record again.

@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import { FileIo, nodeFileIo, writeFileAtomic } from './contextStore';
 import { Assertion, Evidence, TrustTier, Verification, createUlidFactory, strongerTrust } from './assertions';
 import { validateAssertion } from './assertionSchemas';
@@ -211,6 +212,30 @@ export class AssertionLedger {
     if (ownBytes) this.ownLines = Buffer.from(ownBytes).toString('utf8').split(/\r?\n/).filter((l) => l.trim());
     this.loaded = true;
     return { files: names.length, events: this.events.length, skippedLines };
+  }
+
+  /**
+   * `load()` from the local disk, synchronously, for checks that can't wait (GOV: a stage document's approval
+   * check reads the governance facts). Read-only callers only: it ignores the injected `FileIo`.
+   */
+  public loadSync(): void {
+    this.events = [];
+    this.snapshot = undefined;
+    this.folded = undefined;
+    this.foldedAliases = undefined;
+    const read = (name: string) => { try { return fs.readFileSync(joinPath(this.ledgerDir, name), 'utf8'); } catch { return undefined; } };
+    const snap = read('snapshot.json');
+    if (snap) { try { this.snapshot = JSON.parse(snap) as LedgerSnapshot; } catch { /* skipped, as in load() */ } }
+    let names: string[] = [];
+    try { names = fs.readdirSync(this.ledgerDir).filter((n) => SESSION_FILE_RE.test(n)).sort(); } catch { /* no ledger yet */ }
+    for (const name of names) {
+      for (const line of (read(name) ?? '').split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        try { this.events.push(JSON.parse(line) as LedgerEvent); } catch { /* skipped, as in load() */ }
+      }
+    }
+    this.ownLines = [];
+    this.loaded = true;
   }
 
   /** True when nothing has been recorded yet — no events and no snapshot. */

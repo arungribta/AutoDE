@@ -3,6 +3,9 @@ import * as path from 'node:path';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
 import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocument, readProblemDocument, serializeMappingContext, writeBusinessProblemSpec, writePipelineSpec } from '../documents/problemDocuments';
 import { validatePipelineSpec } from '../pipelineSpec/validator';
+import { AssertionLedger } from '../context/ledger';
+import { layoutPath } from '../workspaceLayout';
+import { governanceFacts, governanceGaps } from '../governance/governance';
 import { StageKind } from './stageKinds';
 import { readWorkflow } from './instance';
 import { Actor, appendEvent } from './events';
@@ -72,7 +75,11 @@ export function documentApprovalProblems(problemRoot: string, kind: StageKind): 
     case 'build': {
       const p = parsePipelineSpecDocument(text);
       const v = validatePipelineSpec(p);
-      return v.valid ? [] : v.errors.map((e) => `Pipeline Spec: ${e}`);
+      // GOV: confirmed sensitive-pii facts about the columns it reads must be in its governance blocks.
+      const ledger = new AssertionLedger(layoutPath(path.resolve(problemRoot, '..', '..', '..'), 'ledger'));
+      ledger.loadSync();
+      const gaps = governanceGaps(p, governanceFacts(ledger.assertions())).errors;
+      return [...(v.valid ? [] : v.errors), ...gaps].map((e) => `Pipeline Spec: ${e}`);
     }
     default: return [];
   }

@@ -4,6 +4,7 @@ import { BusinessProblemSpec, ColumnMapping, ContextStatus, DataFlow, EntityMapp
 import { PipelineSpec, CURRENT_PIPELINE_SPEC_VERSION } from '../pipelineSpec/types';
 import { validatePipelineSpec } from '../pipelineSpec/validator';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
+import { parseSensitivity, parseSpecGovernance } from '../governance/governance';
 
 /**
  * The per-problem documents a decision can change (docs/mcp-engine-
@@ -51,6 +52,7 @@ export function serializeBusinessProblemSpec(spec: BusinessProblemSpec): string 
     acceptanceCriteria: spec.acceptanceCriteria,
     implementationConsiderations: spec.implementationConsiderations,
     sourceCatalog: spec.sourceCatalog,
+    governance: spec.governance,
     provenance: spec.provenance,
     createdAt: spec.createdAt,
     updatedAt: spec.updatedAt,
@@ -126,6 +128,8 @@ export function parseBusinessProblemSpec(content: string): BusinessProblemSpec {
   if (flows) spec.dataFlows = flows;
   const catalog = parseSourceCatalog(v2.sourceCatalog ?? doc.sourceCatalog);
   if (catalog) spec.sourceCatalog = catalog;
+  const governance = parseSpecGovernance(v2.governance ?? doc.governance);
+  if (governance) spec.governance = governance;
   const provenance = parseProvenance(v2.provenance ?? doc.provenance);
   if (provenance) spec.provenance = provenance;
 
@@ -160,7 +164,8 @@ function parseDataFlows(v: unknown): DataFlow[] | undefined {
       target: str(f.target),
       description: str(f.description),
       transformations: (Array.isArray(f.transformations) ? f.transformations.filter((x) => typeof x === 'string') : undefined) as string[] | undefined,
-      frequency: str(f.frequency) || undefined
+      frequency: str(f.frequency) || undefined,
+      ...(parseSensitivity(f.sensitivity) ? { sensitivity: parseSensitivity(f.sensitivity) } : {})
     });
   }
   return flows.length > 0 ? flows : undefined;
@@ -177,7 +182,8 @@ function parseSourceCatalog(v: unknown): SourceEntry[] | undefined {
       name: str(s.name),
       type: (str(s.type) as SourceEntry['type']) || 'other',
       description: str(s.description) || undefined,
-      availability: str(s.availability) || undefined
+      availability: str(s.availability) || undefined,
+      ...(parseSensitivity(s.sensitivity) ? { sensitivity: parseSensitivity(s.sensitivity) } : {})
     });
   }
   return catalog.length > 0 ? catalog : undefined;

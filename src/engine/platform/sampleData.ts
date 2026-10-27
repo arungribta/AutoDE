@@ -109,7 +109,7 @@ export function maskRows(columns: readonly string[], rows: ReadonlyArray<Record<
  * Applies the consent setting to a query result. `metadata` results (SHOW,
  * DESCRIBE, EXPLAIN) describe objects rather than data and pass unchanged.
  */
-export function gateQueryResult(result: QueryResult, options: { allowSampleData: boolean; metadata: boolean; connectionId: string }): GatedRows {
+export function gateQueryResult(result: QueryResult, options: { allowSampleData: boolean; metadata: boolean; connectionId: string; /** GOV: column names classified as personal data, masked as well as those the names suggest. */ classified?: readonly string[] }): GatedRows {
   const base = { columns: [...result.columns], rowCount: result.rowCount };
   if (options.metadata) return { ...base, rows: [...result.rows], maskedColumns: [], maskedValues: 0 };
   if (!options.allowSampleData) {
@@ -120,7 +120,9 @@ export function gateQueryResult(result: QueryResult, options: { allowSampleData:
       withheld: `Row values are withheld: sample data is not allowed in prompts for connection "${options.connectionId}". Only the columns and the row count are returned. To allow it, set allowSampleDataInPrompts: true for this connection in .autode/config/connections.yaml (values in personal-data columns stay masked).`
     };
   }
-  return { ...base, ...maskRows(result.columns, result.rows) };
+  // A result carries no table, so a classified name is masked wherever it appears; the name heuristic still applies.
+  const classified = new Set((options.classified ?? []).map((c) => c.toLowerCase()));
+  return { ...base, ...maskRows(result.columns, result.rows, (c) => classified.has(c.toLowerCase()) || isPiiColumnName(c)) };
 }
 
 /**

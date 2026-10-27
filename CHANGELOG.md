@@ -6,6 +6,32 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.47.0
+
+- **GOV: governance as code** (mcp-engine §9.1; SEC-4, SEC-5).
+  - **Classifications are facts.** A column is `pii`, `sensitive-pii`, `confidential` or `none`: a `business_rule` fact with predicate `classification` on the column, whose value also names how personal data is masked (`hash` or `redact`). A person records it confirmed (*AutoDE: Classify Personal Data…* in VS Code, `autode governance classify` in a terminal), or an agent proposes it for a person to confirm. A new classification of the same column replaces the old one. As ledger facts they reach context packs, manifests and grounding like any other.
+  - **Candidates, never automatic.** The personal-data name heuristic (the one that already masks sample rows) suggests columns and a classification: identity numbers, card and bank data, health, salary and credentials suggest `sensitive-pii`, the rest `pii`. Secrets are redacted, everything else hashed. Nothing is classified until a person says so. Surfaces: `autode governance show`, `autode_governance_candidates` over MCP, and the panel command's pick list.
+  - **The `mask` primitive** (Tier 1). It masks columns in a view or table over the source; the others pass through.
+    - `hash` is SHA-256 as lowercase hex, the same on Snowflake, Databricks (Spark SQL), BigQuery, PostgreSQL and SQL Server. Equal values stay equal, so keys still join and deduplicate. An optional `saltExpression` names a platform secret or variable (an identifier, a variable or one function call with quoted arguments, never a literal).
+    - `redact` writes a constant.
+    - NULL stays NULL. Masking is non-reversible; tokenisation is out of scope.
+    - ANSI SQL has no hash function, so a hashing mask is refused for `ansi` rather than guessed.
+    - Golden snapshots cover every dialect.
+  - **Masking follows from the facts.** `autode_primitive_candidates` adds a `mask` step right after staging for columns classified as personal data. Masked columns keep their staged names, and nothing downstream reads unmasked data. It also fills the entity's `governance` block, and notes classifications that aren't confirmed yet.
+  - **Checks.**
+    - **Structural:** a Pipeline Spec is invalid while a `sensitive-pii` column in an entity's governance block isn't masked by one of its `mask` steps. This is enforced everywhere the spec is validated.
+    - **Against the ledger:** recording a Pipeline Spec over MCP, and approving the build stage's document, are refused while a confirmed `sensitive-pii` fact about a column the entity reads is missing from its governance block. An unmasked `pii` column is a warning: the platform's own masking policy may cover it. A spec without governance still validates.
+  - **The governance interview** is a new part, `autode-de-interview-governance` (order 7; synthesis moves to 8). It covers personal data, regulations and policies, then column by column classification and masking, starting from the candidates. It is asked only when personal data is in play: the problem's words (customers, patients, e-mail, GDPR …) or columns already known. This is decided deterministically when the interview starts (`metadata.askWhen: personal-data`), and an interview without it doesn't list it. The business analyst has the part and the tools to propose classifications.
+  - **The specification** gains `governance` (personal data none, present or sensitive; regulations; notes), and sources and data flows gain a `sensitivity` hint. All are optional, filled by synthesis only from what the user said, and kept through save, parse and revision.
+  - **Sample rows (SEC-5):** with sample data allowed, columns classified as personal data are masked as well as those the name heuristic catches.
+  - **The pipeline-build skill** (v2) keeps `mask` steps, explains hash and redact, and suggests a salt for guessable values. The pipeline engineer has `autode_governance_candidates`.
+  - **Deviations:**
+    - `mask` is Tier 1 (code), not a Tier-2 definition: the template engine has no conditionals by design, and a per-column strategy and an optional salt need them.
+    - Governance discovery questions are a skill, not `skills/*.json` (interview parts became skills in v0.45.12).
+    - No `governanceContent` in `context-envelope.schema.json`: governance facts live in the ledger, and the envelope's knowledge files fold into the ledger in C5.
+    - Masking a classified column in sample rows adds to the name heuristic rather than replacing it, because a query result carries no table.
+  - **Measured:** 372 tests (2 new: the primitive, facts, candidates, masking after staging and both checks; the interview, CLI, MCP and the approval check end to end). Golden snapshots: 23 (5 new for `mask`, `ansi` refused). Lint: 0 errors, 21 warnings.
+
 ## 0.46.0
 
 - **PA4: port a skill** (mcp-engine §9.2; SKL-5, SKL-7). A data engineer brings a skill written for any agent into AutoDE without code, from a Git repository, a folder or a dbt package. Guide: [docs/skills-authoring.md](docs/skills-authoring.md).

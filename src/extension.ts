@@ -13,6 +13,7 @@ import { registerWorkflowView } from './core/workflowView';
 import { registerSkillsView } from './core/skillsView';
 import { PortSkillPanel } from './core/portSkillView';
 import * as port from './engine/skills/port';
+import type { Classification } from './engine/governance/governance';
 import { registerRunbookView, RunbookPanel } from './core/runbookView';
 import { getCredentialResolver } from './engine/platform/credentials';
 import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
@@ -880,6 +881,40 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   });
 
+  // GOV: the person classifies personal data (a confirmed fact); masking follows from it in the build.
+  const classifyPersonalData = vscode.commands.registerCommand(`${EXTENSION_ID}.classifyPersonalData`, async () => {
+    const candidates = sidebarProvider.governanceCandidates();
+    if (!candidates.length) { vscode.window.showInformationMessage('No column in the working set looks like personal data by name. Bring the sources into the estate first, or classify a column with `autode governance classify`.'); return; }
+    const picked = await vscode.window.showQuickPick(
+      candidates.map((c) => ({ label: `${c.table}.${c.column}`, description: c.fact ? `${c.fact.classification}${c.fact.strategy ? ` (${c.fact.strategy})` : ''} · ${c.fact.status}` : `suggested ${c.suggested}${c.strategy ? ` (${c.strategy})` : ''}`, detail: c.why, c })),
+      { title: 'Classify personal data', placeHolder: 'Choose a column' }
+    );
+    if (!picked) return;
+    const cls = await vscode.window.showQuickPick([
+      { label: 'sensitive-pii', detail: 'Must be masked: the build is refused until it is.' },
+      { label: 'pii', detail: 'Personal data: mask it, or rely on the platform\'s masking policy (a warning otherwise).' },
+      { label: 'confidential', detail: 'Business-confidential, not personal: recorded, not masked.' },
+      { label: 'none', detail: 'Not personal data after all.' }
+    ].map((x) => ({ ...x, picked: x.label === picked.c.suggested })), { title: `${picked.label}: classification` });
+    if (!cls) return;
+    let strategy: 'hash' | 'redact' | undefined;
+    if (cls.label === 'pii' || cls.label === 'sensitive-pii') {
+      const s = await vscode.window.showQuickPick([
+        { label: 'hash', detail: 'SHA-256: equal values stay equal, so keys still join. Salt low-entropy values (phone numbers, dates).' },
+        { label: 'redact', detail: 'A constant instead of the value (passwords, card security codes).' }
+      ], { title: `${picked.label}: how to mask it`, placeHolder: picked.c.strategy });
+      if (!s) return;
+      strategy = s.label as 'hash' | 'redact';
+    }
+    const ok = await vscode.window.showWarningMessage(`Record ${picked.label} as ${cls.label}${strategy ? `, masked by ${strategy}` : ''}?`, { modal: true, detail: 'A confirmed fact. Primitive candidates mask it after staging, and a Pipeline Spec that reads it unmasked can\'t be approved when it is sensitive-pii.' }, 'Record');
+    if (ok !== 'Record') return;
+    try {
+      const statement = await sidebarProvider.classifyColumn({ table: picked.c.table, column: picked.c.column, classification: cls.label as Classification, strategy, by: skillActor() });
+      sidebarProvider.logToChat(`Recorded: ${statement}`);
+      vscode.window.showInformationMessage(`Recorded: ${statement}`);
+    } catch (err) { vscode.window.showErrorMessage(`Could not record it: ${err instanceof Error ? err.message : String(err)}`); }
+  });
+
   // Update Skill (PA4): re-fetch an imported skill from its source, show what changed, apply after the person
   // confirms; the new content is unreviewed (S2 binds trust to content).
   const updateToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.updateToolSkill`, async (skillId?: unknown) => {
@@ -1051,7 +1086,7 @@ export function activate(context: vscode.ExtensionContext): void {
     copilotHandoff,
     testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
-    importToolSkill, updateToolSkill, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
+    importToolSkill, updateToolSkill, classifyPersonalData, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential,
     checkPlatformPrerequisites, installOracleDriver, verifyOracleDriver, setOraclePassword, configureMcp

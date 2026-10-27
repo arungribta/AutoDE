@@ -50,7 +50,7 @@ export interface SkillMeta {
   /** `tested` skills have a fixture test in `npm test`; `preview` ones don't yet. */
   maturity: 'tested' | 'preview';
   /** A part of the requirements interview (v0.45.12: were `skills/*.json`): its id, order and the specification fields it fills. */
-  interview?: { id: string; order: number; specFields: string[] };
+  interview?: { id: string; order: number; specFields: string[]; askWhen?: 'personal-data' };
 }
 
 /** The naming convention of AutoDE's own skills (owner, 2026-10-22): `autode-<scope>-<capability>`. */
@@ -84,7 +84,8 @@ export function skillMeta(name: string, metadata: Record<string, unknown> | unde
     if (!/^[a-z0-9-]+$/.test(id)) errors.push('metadata.interview is the id of the interview part (lowercase words joined by dashes).');
     if (!Number.isInteger(order) || order < 1) errors.push('metadata.order must be a whole number, 1 or more, for an interview part.');
     if (!kinds.includes('specify')) errors.push('an interview part has stageKinds: [specify].');
-    interview = { id, order, specFields: listOf(m.specFields) };
+    if (m.askWhen !== undefined && m.askWhen !== 'personal-data') errors.push('metadata.askWhen is personal-data (or absent: always asked).');
+    interview = { id, order, specFields: listOf(m.specFields), ...(m.askWhen === 'personal-data' ? { askWhen: 'personal-data' as const } : {}) };
   }
   return { meta: { scope, stageKinds: kinds, platforms, version, owner: String(m.owner ?? 'AutoDE'), maturity: maturity ?? 'preview', ...(interview ? { interview } : {}) }, errors };
 }

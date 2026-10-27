@@ -17,7 +17,7 @@
  * kind at all.
  */
 // eslint-disable-next-line @typescript-eslint/ban-types -- deliberate "open union" idiom, not an accidental empty-object type
-export type PrimitiveKind = 'rename_cast' | 'dedup' | 'incremental_load' | (string & {});
+export type PrimitiveKind = 'rename_cast' | 'dedup' | 'incremental_load' | 'mask' | (string & {});
 
 /** Mirrors platform/types.ts's `SqlDialect` — duplicated rather than imported to keep this module dependency-free. */
 export type SqlDialect = 'snowflake' | 'spark_sql' | 'google_sql' | 'postgres' | 'tsql' | 'ansi';

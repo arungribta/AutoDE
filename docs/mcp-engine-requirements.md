@@ -341,20 +341,8 @@ In short: no separate "Data Platforms" tab (decided with the owner, 2026-10-18).
 **Not planned:** `snowflake-sdk` and `@databricks/sql` as a backend tier. Reconsider them as moderated installs if an engagement is blocked because the Snowflake SQL API is restricted and no CLI is allowed.
 
 #### Phase GOV: Governance-as-code
-Built in the §3.1 style (scheduled after PA4): the governance interview is an AutoDE skill, and sensitivity flags reach specs and Pipeline Specs through proposal tools and decisions.
 
-Scope (from the earlier Phase 6 plan):
-- `src/engine/governance/types.ts` (`PiiClassification`, `ColumnGovernance`). Fill in the `governance` block already reserved on each Pipeline Spec entity.
-- A `mask` primitive as a Tier-2 `PrimitiveDefinition`, with **non-reversible strategies only** (`hash`, `redact`). `tokenize` is out of scope because it needs an external vault.
-- Optional `sensitivityHint` / `governance` fields on `BusinessProblemSpec`, `SourceEntry` and `DataFlow`.
-- Governance discovery questions in `skills/*.json`, and a `governanceContent` definition in `context-envelope.schema.json`.
-- Governance facts are stored as `business_rule` / `quality_expectation` assertions in the ledger (context spec §4), so they flow into context packs, manifests and grounding checks.
-
-Acceptance:
-- A `sensitive-pii` / `hash` entry compiles to deterministic masking SQL for each dialect, covered by the conformance suite.
-- Generated artifacts for a flagged entity contain the masking expression.
-- A spec without governance still validates.
-- The interview raises a governance question when governance guidance is active.
+*Shipped v0.47.0.* What was built, and the deviations (`mask` is a Tier-1 primitive; the governance questions are an interview skill, asked when personal data is in play; no `governanceContent` in the envelope schema, because governance facts live in the ledger): CHANGELOG 0.47.0. Requirements SEC-4 and SEC-5; design: technical-design.md, *Governance as code*. The specification as approved is in git (this file before v0.47.0).
 
 #### Phase S3: Git-URL skill import, docs and starter library
 **Absorbed into Phase PA4** (2026-10-18): Git and vendor import, format importers, Update Skill with diffs, the starter library and authoring docs are part of the Port-a-skill step (§9.2). The previous text is in git (this file at v0.39.0).

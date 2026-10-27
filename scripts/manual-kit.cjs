@@ -160,7 +160,7 @@ async function preChecks(kitDir) {
       const skills = JSON.parse(r.out).skills;
       const parts = skills.filter((s) => s.group === 'autode' && /^autode-de-interview-/.test(s.name));
       const vendor = skills.find((s) => s.name === 'databricks-pipelines');
-      return { ok: parts.length === 6 && !skills.some((s) => s.group === 'interview') && !!vendor, seen: `${parts.length} interview parts as AutoDE skills; databricks-pipelines ${vendor && vendor.installed && vendor.installed.length ? 'installed' : 'not installed here'}` };
+      return { ok: parts.length === 7 && !skills.some((s) => s.group === 'interview') && !!vendor, seen: `${parts.length} interview parts as AutoDE skills; databricks-pipelines ${vendor && vendor.installed && vendor.installed.length ? 'installed' : 'not installed here'}` };
     });
     await check('37.3', 'The interview from a terminal: show, then answer an open question', async () => {
       const S = DIST('engine/interview/state.js');

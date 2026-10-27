@@ -1,4 +1,5 @@
 import type { PrimitiveUse } from './grounding/manifest';
+import type { SpecGovernance } from './governance/governance';
 import { TransformSpec } from './transforms/types';
 import { FileIo } from './context/contextStore';
 
@@ -82,6 +83,8 @@ export interface BusinessProblemSpec {
   acceptanceCriteria?: string[];
   implementationConsiderations?: string[];
   sourceCatalog?: SourceEntry[];
+  /** GOV: personal data and the regulations that apply, from the interview's governance part. */
+  governance?: SpecGovernance;
   /**
    * Phase C4a: ledger ids of the business-problem pack's contract clauses this
    * specification rests on — referenced, not copied, so the spec and the
@@ -122,6 +125,8 @@ export interface DataFlow {
   description: string;
   transformations?: string[];
   frequency?: string;
+  /** GOV: what this flow carries. */
+  sensitivity?: 'none' | 'personal' | 'sensitive';
 }
 
 /** A candidate source system/entity surfaced during requirements discovery. */
@@ -130,6 +135,8 @@ export interface SourceEntry {
   type: 'database' | 'api' | 'file' | 'stream' | 'saas' | 'other';
   description?: string;
   availability?: string;
+  /** GOV: whether this source holds personal data. */
+  sensitivity?: 'none' | 'personal' | 'sensitive';
 }
 
 /** Links a spec field to the question/skill/assumption/attachment that produced it. */
@@ -267,6 +274,8 @@ export interface SkillDefinition {
   /** Spec fields this skill is responsible for filling (empty = non-question skill, e.g. synthesis). */
   specFields: string[];
   exampleQuestions?: string[];
+  /** GOV: asked only when this holds for the problem (`personal-data`: personal data is in play). */
+  askWhen?: 'personal-data';
 }
 
 // ── Target Environment ──

@@ -5,6 +5,7 @@ import { gateQueryResult, sanitizeSnapshot } from '../engine/platform/sampleData
 import { checkReadOnlySql, checkSingleStatement, stripTrailingSemicolon } from '../engine/platform/sqlGuard';
 import { EngineToolError } from './errors';
 import { EngineTool, ToolAnnotations } from './tools';
+import { governanceFacts } from '../engine/governance/governance';
 
 /**
  * The data-platform tools (docs/mcp-engine-requirements.md §5.3, §6; phase 4).
@@ -297,7 +298,7 @@ export function platformTools(session: PlatformSession): EngineTool[] {
         }
       },
       annotations: annotations('Execute a query', { readOnly: true }),
-      handler: async (args) => {
+      handler: async (args, ws) => {
         const sql = String(args.sql);
         const single = checkSingleStatement(sql);
         if (!single.ok) throw new EngineToolError('VALIDATION_FAILED', single.reason ?? 'Not a single statement.');
@@ -308,7 +309,8 @@ export function platformTools(session: PlatformSession): EngineTool[] {
         const maxRows = Math.min(MAX_ROWS_CAP, (args.maxRows as number | undefined) ?? DEFAULT_MAX_ROWS);
         const timeoutSeconds = (args.timeoutSeconds as number | undefined) ?? DEFAULT_TIMEOUT_S;
         const result = await run(entry.id, (m) => m.executeQuery(stripTrailingSemicolon(sql), { maxRows, timeoutMs: timeoutSeconds * 1000 }), timeoutSeconds);
-        const gated = gateQueryResult(result, { allowSampleData: entry.allowSampleDataInPrompts, metadata: single.kind === 'metadata', connectionId: entry.id });
+        const classified = entry.allowSampleDataInPrompts ? governanceFacts((await ws.contextSources()).assertions).filter((f) => f.classification === 'pii' || f.classification === 'sensitive-pii').map((f) => f.column) : [];
+        const gated = gateQueryResult(result, { allowSampleData: entry.allowSampleDataInPrompts, metadata: single.kind === 'metadata', connectionId: entry.id, classified });
         return { connectionId: entry.id, statement: single.firstKeyword, ...gated, maxRows, executionTimeMs: result.executionTimeMs };
       }
     }

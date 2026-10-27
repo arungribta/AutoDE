@@ -1,4 +1,5 @@
 import { BusinessProblemSpec, DataFlow, IntakeSession, SourceEntry, SpecProvenance } from '../engine/types';
+import { parseSensitivity, parseSpecGovernance } from '../engine/governance/governance';
 
 /**
  * Parses and validates the LLM's comprehensive Business Problem Specification
@@ -51,7 +52,8 @@ function parseDataFlows(raw: unknown): DataFlow[] {
       target,
       description,
       transformations: asStringArray(record.transformations).length > 0 ? asStringArray(record.transformations) : undefined,
-      frequency: str(record.frequency) || undefined
+      frequency: str(record.frequency) || undefined,
+      ...(parseSensitivity(record.sensitivity) ? { sensitivity: parseSensitivity(record.sensitivity) } : {})
     });
   });
   return flows;
@@ -70,7 +72,8 @@ function parseSourceCatalog(raw: unknown): SourceEntry[] {
       name,
       type: SOURCE_TYPES.has(rawType) ? (rawType as SourceEntry['type']) : 'other',
       description: str(record.description) || undefined,
-      availability: str(record.availability) || undefined
+      availability: str(record.availability) || undefined,
+      ...(parseSensitivity(record.sensitivity) ? { sensitivity: parseSensitivity(record.sensitivity) } : {})
     });
   });
   return entries;
@@ -168,6 +171,7 @@ export function parseComprehensiveSpec(raw: unknown, opts: ComprehensiveSpecOpti
     acceptanceCriteria: orFallback(asStringArray(record.acceptanceCriteria), previous?.acceptanceCriteria),
     implementationConsiderations: orFallback(asStringArray(record.implementationConsiderations), previous?.implementationConsiderations),
     sourceCatalog: orFallback(parseSourceCatalog(record.sourceCatalog), previous?.sourceCatalog),
+    governance: parseSpecGovernance(record.governance) ?? previous?.governance,
     provenance: buildProvenance(opts.session, previous),
     createdAt: previous?.createdAt ?? now,
     updatedAt: now

@@ -116,14 +116,14 @@ function section(body: string, heading: string): string {
 }
 
 /** An interview part as the interview engine reads it, from an `autode-de-*` skill (v0.45.12). */
-export function interviewPartFromSkill(k: { description: string; instructions: string; meta: { interview?: { id: string; order: number; specFields: string[] } } }): SkillDefinition | undefined {
+export function interviewPartFromSkill(k: { description: string; instructions: string; meta: { interview?: { id: string; order: number; specFields: string[]; askWhen?: 'personal-data' } } }): SkillDefinition | undefined {
   const part = k.meta.interview;
   if (!part) return undefined;
   const body = k.instructions.replace(/\r\n/g, '\n');
   const name = /^# (.+)$/m.exec(body)?.[1].trim() ?? part.id;
   const systemPrompt = (/^# .+$\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body)?.[1] ?? '').trim();
   const exampleQuestions = section(body, 'Example questions').split('\n').map((l) => /^-\s+(.+)$/.exec(l.trim())?.[1]).filter((x): x is string => !!x);
-  return { id: part.id, name, order: part.order, description: k.description, systemPrompt, questionGuidance: section(body, 'What to ask'), specFields: [...part.specFields], exampleQuestions: exampleQuestions.length ? exampleQuestions : undefined };
+  return { id: part.id, name, order: part.order, description: k.description, systemPrompt, questionGuidance: section(body, 'What to ask'), specFields: [...part.specFields], exampleQuestions: exampleQuestions.length ? exampleQuestions : undefined, ...(part.askWhen ? { askWhen: part.askWhen } : {}) };
 }
 
 /**
