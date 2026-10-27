@@ -104,7 +104,7 @@ Each `kind` has an Ajv schema for `value` in `src/engine/context/assertionSchema
 ### 4.3 Projections (derived, rebuildable, never hand-edited)
 
 1. **Context graph.** `GraphManager` is rebuilt from active assertions. Existing node and edge types stay. Nodes gain `supportedBy: string[]` (assertion ids), and edges gain the same. The existing `Origin` remains for compatibility and is filled from the strongest supporting assertion.
-2. **Semantic model** (§6), `.autode/semantic/model.yaml`.
+2. **The semantic layer is not a projection** (decided 2026-10-27): it is an authored, versioned artifact (§6) that the knowledge layer drafts from and checks against.
 3. **Governed containers.** The Business Problem Spec, Source/Target/Mapping context and Pipeline Spec stay the human-approval units and keep their files and versioning. Approving a container sets every `proposed` assertion it contains to `active` with trust ≥ `confirmed`. Editing an approved container emits `superseded` events rather than rewriting.
 
 Migration: on first load, existing graph content (`GraphPersistence` snapshot, `business-context.yaml`, verified queries, data definitions, file ingestion, live discovery) is converted into assertions. Trust is `verified` for `reliability: 'live-verified'` origins, `documented` for file-derived ones, `inferred` for `OriginSource 'llm'`, and `confirmed` for content inside already-approved containers. The migration MUST be idempotent and MUST produce the same graph as before (test: node and edge sets equal pre/post).
@@ -160,44 +160,112 @@ A new panel section listing `proposed`, `needs_review` and conflicting assertion
 
 ---
 
-## 6. Semantic model
+### 5.5 Capture coverage and verification (C4c; owner, 2026-10-27)
 
-`SemanticLayerManager` changes from a graph snapshot to a **semantic model** projected from active assertions and stored at `.autode/semantic/model.yaml`. It keeps the existing approve / version / archive pattern (`context/history/...`) and spec pinning.
+Facts come from the connected databases, the user's prompts and documents. Models differ in how well they read, so capture must not depend on the model to **find** facts, to decide **what should be known**, or to be **believed** unchecked.
 
-```yaml
-version: 3
-specId: retail-orders
-status: approved            # draft | approved (approval gate, same pattern as other containers)
-entities:
-  - name: order
-    table: SALES.PUBLIC.ORDERS
-    grain: [order_id]               # from a 'grain' assertion
-    keys: { primary: [order_id] }
-    dimensions:
-      - { name: order_date, column: ORDER_TS, type: time, granularity: day }
-      - { name: channel, column: CHANNEL, type: categorical }
-    measures:
-      - { name: gross_amount, expression: AMOUNT, aggregation: sum }
-relationships:
-  - { from: order, to: customer, on: [[customer_id, customer_id]], cardinality: N:1 }
-metrics:
-  - name: net_revenue
-    expression: gross_amount - refund_amount
-    filters: ["status <> 'CANCELLED'"]
-    grain: [order]
-    owner: finance
-glossary:
-  - { term: Active customer, definition: "...", binds_to: [customer.last_order_date] }
-rules:
-  - { id: R1, level: STRICT, text: "PII columns are masked in all target layers" }
-assertionRefs: { net_revenue: [01J...], order.grain: [01J...] }   # traceability back to the ledger
+1. **What must be known — a deterministic checklist.** From the approved specification and the estate, AutoDE lists what a complete picture needs:
+   - for every table in scope: key, grain, change column, load pattern, personal-data classification (GOV), relationships to the other in-scope tables, and a business description;
+   - for every metric the specification names: definition, grain and filters.
+
+   Completeness is scored per table and per metric. Every missing item becomes a targeted action: a probe, a question for the curator or the interview, or a context gap. The model can be shallow; it can't silently skip.
+2. **The data before any model.** Deterministic candidates, verified by probes:
+   - candidate keys (non-null and unique);
+   - foreign keys (name match plus a value-inclusion probe);
+   - grain from the candidate keys;
+   - change columns;
+   - personal data by name and value shape.
+
+   Probes make them `verified`. The model's job narrows to business meaning.
+3. **Documents.**
+   - **Quote check:** each fact carries a verbatim quote, and AutoDE checks that it appears in the cited section; a fact whose quote isn't there is dropped as unsupported.
+   - **Section accounting:** the model reports on every section (its facts, or "nothing factual"); a section with no report is read again in a smaller batch.
+   - **Deterministic first:** tables (a data dictionary) and pattern phrases ("must be unique", "one row per", "never null") are parsed without a model; the model reads the prose.
+   - **Agreement:** the same fact from two sources raises its confidence; disagreement is a conflict (§8.1).
+4. **Conversation.** The raw message stays as evidence. At the end of a session, AutoDE lists what the user said that may be a fact but wasn't recorded, for the user to record or dismiss.
+5. **Model provenance.** Every fact extracted by a model records the model. Optionally, high-stakes facts (keys, classifications) are extracted twice and kept only where the runs agree.
+
+The model benchmark (recall and precision per source type for the configured model, on the reference problem, run on demand) and corrections counted as misses are part of C6.
+
+## 6. Semantic layer
+
+*Decided with the owner, 2026-10-27; replaces the earlier "semantic model projected from assertions". Built in phases C5a–C5d (§11).*
+
+### 6.1 Two layers
+
+- **The semantic layer** holds the governed business definitions as YAML files: what a metric means, which dimensions can slice it, how tables join for analysis, the questions it answers. They are authored (by people and agents), versioned in git, approved by a person, and deployed to the platform. It is a deliverable: what a BI tool or Cortex Analyst uses.
+- **The context layer** holds what AutoDE knows about the data, with evidence and trust: the knowledge (the facts in the ledger, the estate and its catalogs, the vocabulary, the pack's documents) and the **graph**, which links physical objects, facts and the semantic layer's elements. The context layer **uses** the semantic layer: packs and grounding read its approved definitions, so an agent can't invent a join or metric the semantic layer lacks.
+
+**Authority.** Facts about the data — keys, grain, observed relationships, classifications — belong to the knowledge layer. Business definitions — metrics, dimensions, filters, synonyms, verified queries — belong to the semantic layer once approved. A metric stated in chat is recorded as a fact (a proposal with evidence); approving it into a semantic model makes the model the authority. Verified queries move from the knowledge files into the semantic layer's `verified_queries`. The glossary stays in the knowledge layer as vocabulary; a term bound to a column appears as a synonym in the semantic layer.
+
+### 6.2 Files
+
+```
+<artifactDirectory>/                    deliverables (setting artifactDirectory, default autode-output)
+  semantic/<subject>.yaml               shared semantic models, one per subject area (sales, customer, finance)
+  <problem-id>/semantic/<name>.yaml     the use case's composite (AutoDE format, §6.4)
+  <problem-id>/semantic/<name>.resolved.yaml   generated: self-contained Snowflake YAML, what is deployed
+.autode/semantic/                       AutoDE's metadata only: backing facts per element, review state,
+                                        approvals, the shared revisions a composite was resolved from
 ```
 
-Requirements:
-- Concepts align with dbt MetricFlow semantic models (entities, dimensions, measures, metrics), so an export maps one-to-one.
-- **Exports are primitives:** dbt `semantic_models` / `metrics` YAML, Snowflake semantic view DDL, and Databricks metric views where the platform supports them. Each is a Tier-2 `PrimitiveDefinition`, so exports are deterministic and versioned. Track the emerging cross-vendor semantic interchange formats as future export targets; do not adopt them as the internal format.
-- **Consumption (principle C3):** the `sttm-mapper` role (until v0.45.2 `SttmMapperAgent`), the `data-modeler` role through `autode_draft_model` (until v0.45.3 `DataModelerAgent`), and the `pipeline-engineer` role through `autode_primitive_candidates` (until v0.45.4 `TransformationScaffolderAgent` and `llmParamSelector`) read grain, keys, join paths and metric definitions from the semantic model. When a step needs one that doesn't exist (e.g. a join between two entities with no `relationship` assertion), the step pauses with a **context gap** (§7.3). It must not invent one.
-- A model element backed only by `inferred` assertions is shown as such and cannot be part of an `approved` model unless the user explicitly confirms it.
+A problem records which shared models and composites it uses or produces.
+
+### 6.3 Shared semantic models
+
+The native format is **Snowflake's semantic model YAML** (the format of `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` and Cortex Analyst): `name`, `description`, `tables` (each with `base_table`, `primary_key`, `dimensions`, `time_dimensions`, `facts`, `metrics`, `filters`, synonyms and descriptions), `relationships` (`left_table`, `right_table`, `relationship_columns`, `join_type`, `relationship_type`), `verified_queries` and `custom_instructions`. A shared model stays deployable as is: AutoDE's metadata never goes into it (Snowflake's validator may reject unknown keys), only into `.autode/semantic/`. Shared models carry the conformed dimensions (customer, date, product) once.
+
+### 6.4 Composites (AtScale-style) and resolution
+
+A use case composes shared models in a small AutoDE file:
+
+```yaml
+autode: semantic-composite/1
+name: revenue_by_channel
+description: Daily net revenue by sales channel for the retail-orders problem.
+uses:
+  - model: sales                       # autode-output/semantic/sales.yaml
+    tables: [orders, channels]         # optional subset; default all
+    metrics: [net_revenue]
+  - model: customer
+    tables: [customers]
+add:                                   # the use case's own definitions
+  metrics:
+    - { table: orders, name: revenue_per_order, expr: "net_revenue / COUNT(order_id)" }
+  filters:
+    - { table: orders, name: web_only, expr: "channel = 'WEB'" }
+  verified_queries: [ ... ]
+describe:                              # descriptions and synonyms only
+  orders.net_revenue: { synonyms: [net sales] }
+```
+
+Rules (checked deterministically; a violation refuses the composite):
+- **No redefinition.** A composite may add metrics, filters and verified queries, narrow what it includes, and change descriptions and synonyms. It never changes a shared element's expression, key or join. A different calculation is a new metric with its own name.
+- **No collisions.** Two shared models used together that both define a table must define it identically (base table, key, columns); otherwise the check names the difference.
+- **Resolution** produces `<name>.resolved.yaml`: one self-contained Snowflake semantic model, deterministic (same inputs, byte-identical output). It records the revision (checksum) of every shared model it used.
+- **Staleness.** When a shared model changes, composites resolved from its earlier revision are stale (the workflow's stale state) until resolved again, which shows the diff.
+
+### 6.5 Between the layers
+
+- **Draft from knowledge.** AutoDE drafts semantic elements deterministically from confirmed facts: tables and primary keys from key facts, relationships from relationship facts (direction and type from cardinality), time dimensions and dimensions from column types, facts and metrics from metric facts, synonyms from bound glossary terms, personal-data notes from GOV classifications. A model may propose descriptions and synonyms; the person edits and approves.
+- **Checks.** Against the estate: every base table and column exists, expressions use known columns, types fit. Against the knowledge: a relationship that contradicts a known key or grain, a primary key no fact supports, a metric whose fact says otherwise. Results are shown in the editor; nothing is synchronised silently.
+- **Graph and packs.** Approved semantic elements become graph nodes linked to their physical columns and backing facts. Context packs include the definitions relevant to the task; the grounding check refuses a join or metric absent from the semantic layer.
+- **Approval and stakes.** A change to a shared model is a workspace-level decision for a person (it affects every problem that uses it; it appears in *Waiting for you*). A composite is approved within its problem's workflow. Exploration mode (§7.4) relaxes the checks, not the authority.
+
+### 6.6 Deployment and exports (C5c)
+
+- **Snowflake:** a resolved model becomes a semantic view through `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`, as a runbook step under the team's approval policy.
+- **Databricks:** a metric view (YAML) through a runbook.
+- **dbt:** MetricFlow `semantic_models` and `metrics` YAML, written as deliverables.
+
+Translations are deterministic and tested like primitives. Emerging cross-vendor interchange formats are tracked as further export targets, not adopted internally.
+
+### 6.7 Interfaces
+
+- **Semantic Model editor:** a custom text editor on the YAML files (the file is the source of truth; undo, diffs and git come with it). It has a form view (tables, dimensions, metrics, relationships), a relationship diagram and the raw YAML. Check results are shown inline. Actions: draft from knowledge, resolve (composites), approve, deploy.
+- **Knowledge Graph window** (a webview panel like the Workflow tab): **Graph** (explore physical objects, facts and semantic elements a hop at a time; trust shown on every element; gaps shown, not hidden), **Facts** (filterable, with evidence and history; the Context Inbox stays in the sidebar as the to-do list), **Estate** (systems, environments, catalog). A semantic element opens in the Semantic Model editor.
+- **The sidebar's context drawer** becomes one status line linking both; its controls for the older knowledge files go.
+- **CLI:** `autode semantic show | check | draft | resolve | approve`. **MCP:** read tools and a file resource; changes from agents are proposals.
 
 ---
 
@@ -228,6 +296,18 @@ For chat questions about the data (*"what's the grain of fact_orders?"*), the hu
 When a step or the param selector needs a fact class that is absent or below the required trust (key, grain, join, metric, a mapping for a target column), it emits a `ContextGap { stepId, needed: kind+subject, minTrust }`. The step pauses, and the gap appears in the inbox as a targeted question to the engineer (or as a probe, if one can settle it). Answering it creates the assertion and resumes the step. Minimum trust per fact class is configurable. Defaults: keys / grain / joins / STRICT rules need ≥ `confirmed`; others ≥ `documented`. An explicit "proceed on inferred" override is recorded in the manifest.
 
 ---
+
+### 7.4 Exploration mode (per business problem; owner, 2026-10-27)
+
+Most AutoDE work is exploration, a proof of concept or a proof of value, not production. A business problem can run in **exploration mode**, switched on when it is created or later, with a disclaimer the person acknowledges ("results may be completely wrong: assumptions are not verified"); who switched it and when is recorded.
+
+- **Assume and continue.** Where a step would pause on a context gap (§7.3), the configured model's best guess is recorded as an `assumption` fact (model, step, reason) and the step continues with it.
+- **Model proposals count at once,** as `assumed` trust, instead of waiting in the Context Inbox.
+- **Checks warn instead of refusing:** completeness (§5.5), grounding, the semantic layer's checks (§6.5), GOV's unmasked-sensitive-column rule.
+- **Gates take one click:** a person still advances each stage, but failed checks don't block it.
+- **Never relaxed:** platform changes only through approved runbooks; production environments keep named approvers and never run unattended, and an exploration problem targets non-production environments only; no row values reach a model without the connection's consent; no secrets in files; destructive steps need a rollback or a stated reason.
+- **Labelled everywhere:** a banner in the panel, the Workflow tab and the knowledge windows; a header in every generated deliverable and semantic YAML; a flag in grounding manifests; a line in agent assignments so other hosts behave the same.
+- **Hardening.** Switching a problem to governed lists every assumption, every model-only fact and every check that only warned (the §5.5 checklist is the to-do list). Governed mode blocks where it normally would until they are confirmed or replaced.
 
 ## 8. Context rot, freshness and causality
 
@@ -372,12 +452,33 @@ In short:
 - A step needing a missing join, key or grain pauses.
 - Tool actions are kept in the transcript.
 
-### Phase C5: Semantic model
-Scope: §6, including dbt and Snowflake semantic-view export primitives (Databricks metric views where supported) and C3 consumption by the modeling/STTM/transform agents. Depends on mcp-engine Phase GOV (governance-as-code): the model's `rules` and PII classifications come from GOV's governance assertions, and the reference problem's masking expectations need GOV's `mask` primitive.
-Acceptance: projected model equals `golden/semantic-model.yaml` after the scripted run; exports pass primitive conformance tests; no agent emits a join or metric absent from the model (a grounding check enforces this).
+### Phase C4c: Capture coverage, verification and exploration mode
+Scope: §5.5 and §7.4.
+Acceptance:
+- On the reference problem, the completeness checklist lists every table and metric in scope with what is known and what is missing; each missing item has an action.
+- Candidate keys and foreign keys are found from the reference data without a model and verified by probes.
+- A document fact whose quote is not in its section is dropped; a section the model skipped is read again.
+- An exploration problem continues past a context gap with a recorded assumption; the same problem in governed mode pauses; switching to governed lists the assumption for hardening.
+- Platform runbooks, production policy, sample-data consent and secrets behave identically in both modes (tests).
+
+### Phase C5a: Semantic layer files, composites and the editor
+Scope: §6.1–§6.5 and the Semantic Model editor (§6.7); the older semantic-layer snapshot (`SemanticLayerManager`) retires.
+Acceptance: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; changing a shared model marks dependent composites stale; drafting from the reference problem's facts produces the expected model (golden file); the checks find a missing column and a relationship that contradicts a key.
+
+### Phase C5b: The Knowledge Graph window; packs and grounding use the semantic layer
+Scope: §6.5 (graph, packs, grounding), §6.7 (Knowledge Graph window, the drawer becomes a status line).
+Acceptance: no agent emits a join or metric absent from the semantic layer (grounding check); packs include the task's definitions; the window's messages are driven by a test.
+
+### Phase C5c: Deployment and exports
+Scope: §6.6.
+Acceptance: a resolved model deploys to Snowflake as a semantic view through a runbook (manual check); Databricks metric view and dbt MetricFlow translations match golden files.
+
+### Phase C5d: Merge semantics
+Scope: correspondence between systems' entities, survivorship rules and conformed dimensions for estate merge, expressed in shared models and composites.
+Acceptance: specified when the phase is planned.
 
 ### Phase C6: Freshness, health and release evaluation
-Scope: §8.2, §8.4; eval report becomes part of the release checklist.
+Scope: §8.2, §8.4; eval report becomes part of the release checklist; the model benchmark of §5.5 (recall and precision per source type for the configured model, on demand) and corrections counted as misses.
 Acceptance: every metric target in §10.2 is met in replay mode; the live-mode report has been produced for at least two LLM providers; the ablation shows the context layer's contribution.
 
 ---
