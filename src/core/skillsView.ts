@@ -85,7 +85,11 @@ export function registerSkillsView(context: vscode.ExtensionContext, workspaceRo
     vscode.commands.registerCommand('autoDataEngineeringHub.refreshSkills', () => tree.refresh()),
     vscode.commands.registerCommand('autoDataEngineeringHub.openSkillSource', async (n?: { entry?: CatalogEntry }) => {
       const e = n?.entry;
-      if (e?.source) await vscode.env.openExternal(vscode.Uri.parse(e.source));
+      // An imported skill's source can be a local folder (PA4): reveal it instead.
+      if (e?.source) {
+        if (/^https?:\/\//.test(e.source)) await vscode.env.openExternal(vscode.Uri.parse(e.source));
+        else await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(e.source));
+      }
     }),
     vscode.commands.registerCommand('autoDataEngineeringHub.installSkill', async (n?: { entry?: CatalogEntry }) => {
       const e = tree.entry(nameOf(n) ?? '');

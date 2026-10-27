@@ -16,6 +16,7 @@ import { registerPrimitiveVersion, registerPrimitives, resetDeclarativePrimitive
 import { interviewSkills } from '../engine/skills/skillRegistry';
 import { loadSkillPack } from '../engine/agents/definitions';
 import { ToolSkillState, loadToolSkillStates } from '../engine/skills/lifecycle';
+import { knowledgeSkills } from '../engine/skills/port';
 import { SkillDefinition } from '../engine/types';
 import { LayoutKey, layoutPath } from '../engine/workspaceLayout';
 import { EngineToolError } from './errors';
@@ -207,7 +208,7 @@ export class EngineWorkspace {
     const ledgerDir = this.at('ledger');
     const catalogDir = this.at('catalog');
     const vocabFiles = [this.at('vocabulary')];
-    const key = fingerprint([ledgerDir, catalogDir, ...vocabFiles, this.at('activeProblem'), this.problemDocument('spec/business-problem') ?? '']);
+    const key = fingerprint([ledgerDir, catalogDir, ...vocabFiles, this.at('activeProblem'), this.problemDocument('spec/business-problem') ?? '', this.at('toolSkills')]);
     if (this.cachedSources && key === this.contextKey) return this.cachedSources;
 
     const ledger = new AssertionLedger(ledgerDir);
@@ -225,7 +226,8 @@ export class EngineWorkspace {
       assertions,
       conflicts: detectConflicts(assertions),
       catalogRevisions: mergeWatermarks(catalogWatermarks(graph.nodes), catalog.watermarks()),
-      catalog
+      catalog,
+      knowledgeSkills: knowledgeSkills(this.options.workspaceRoot)
     };
     this.contextKey = key;
     return this.cachedSources;

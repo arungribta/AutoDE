@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.45.14",
+  "version": "0.46.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -161,7 +161,13 @@
       },
       {
         "command": "autoDataEngineeringHub.importToolSkill",
-        "title": "AutoDE: Import Tool Skill"
+        "title": "AutoDE: Port a Skill…",
+        "icon": "$(add)"
+      },
+      {
+        "command": "autoDataEngineeringHub.updateToolSkill",
+        "title": "AutoDE: Update Skill from Its Source…",
+        "icon": "$(sync)"
       },
       {
         "command": "autoDataEngineeringHub.runToolSkill",
@@ -244,6 +250,7 @@
       "view/title": [
         { "command": "autoDataEngineeringHub.openWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@1" },
         { "command": "autoDataEngineeringHub.refreshWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@2" },
+        { "command": "autoDataEngineeringHub.importToolSkill", "when": "view == autoDataEngineeringHubSkills", "group": "navigation@0" },
         { "command": "autoDataEngineeringHub.refreshSkills", "when": "view == autoDataEngineeringHubSkills", "group": "navigation@1" }
       ],
       "view/item/context": [
@@ -251,6 +258,7 @@
         { "command": "autoDataEngineeringHub.workflowRun", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )run( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.installSkill", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )installable( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.openSkillSource", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )hasSource( |$)/", "group": "inline" },
+        { "command": "autoDataEngineeringHub.updateToolSkill", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )workspace( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-document( |$)/", "group": "inline" },
         { "command": "autoDataEngineeringHub.workflowProduce", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )produce( |$)/", "group": "workflow" },
         { "command": "autoDataEngineeringHub.workflowOpenDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )open-document( |$)/", "group": "workflow" },

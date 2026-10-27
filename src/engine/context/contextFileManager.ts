@@ -14,6 +14,7 @@ import type { IngestIdentity } from './fileIngestion';
 import { Catalog, CatalogEntry, CatalogFetcher, DEFAULT_WORKING_SET_POLICY, WorkingSetPolicy, entriesFromGraph, glossaryAliases, isStale, selectEvictions, selectSeedHits } from './catalog';
 import { buildVocabulary, parseVocabularyFile } from './vocabulary';
 import { isLive } from './assertions';
+import { knowledgeSkills } from '../skills/port';
 import { isMirror } from './projection';
 import type { Origin } from './types';
 import { BaseNode, BusinessTermNode, BusinessRuleNode, VerifiedQueryNode, GraphEdge } from './types';
@@ -938,7 +939,8 @@ export class ContextFileManager {
    * Recorded for "What the agent saw" when `title` is given.
    */
   public buildContextPack(request: ContextPackRequest, title?: string): ContextPack {
-    const pack = buildContextPack(request, this.getPackSources());
+    // Knowledge skills (PA4) are read here only: the other callers of getPackSources don't need them.
+    const pack = buildContextPack(request, { ...this.getPackSources(), knowledgeSkills: knowledgeSkills(this.root) });
     if (title) this.recordPack(title, pack);
     // Phase K2: what a pack used stays in the working set; what it rendered from the catalog enters it.
     this.catalog.touch([...pack.manifest.seeds, ...pack.manifest.nodeIds]);

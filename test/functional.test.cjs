@@ -5897,7 +5897,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_runbook_status', 'autode_approvals_list'];
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_runbook_status', 'autode_approvals_list'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -5966,6 +5966,7 @@ async function main() {
       autode_match_columns: [{ source: 'shop.orders', target: 'dw.fct_orders' }, { source: '' }],
       autode_draft_model: [{}, { x: 1 }],
       autode_skills_list: [{ group: 'external' }, { group: 'vendor' }],
+      autode_skills_analyze: [{ source: 'incoming' }, { source: '' }],
       autode_runbook_status: [{}, { id: '' }],
       autode_approvals_list: [{}, { x: 1 }],
       autode_propose_runbook: [{ runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'sql', sql: 'select 1', expect: 'one row' }] } }, { runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'shell', expect: 'x' }] } }],
@@ -9841,6 +9842,17 @@ async function main() {
       assert.ok(!A.skillFits({ meta: { scope: 'dbt', stageKinds: ['build'], platforms: ['snowflake', 'databricks'] } }, 'build', { platform: 'oracle', transformationTool: 'dbt' }));
       nodeFs.writeFileSync(ctxFile, 'specId: x\nspecVersion: 1\nstatus: built\nplatform: databricks\n');
       assert.deepStrictEqual(got('setup'), ['target-architect', ['autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance']]);
+      // v0.46.0: an imported skill that declares a stage kind joins its assignments once published and reviewed.
+      const lc = require('../dist/engine/skills/lifecycle.js');
+      const team = nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', 'finance-recon-rules');
+      nodeFs.mkdirSync(team, { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(team, 'SKILL.md'), '---\nname: finance-recon-rules\ndescription: How finance reconciles revenue.\nmetadata:\n  stageKinds: [reconcile, not-a-kind]\n---\nRevenue matches to the cent.\n');
+      lc.recordImport(team, { source: 'local', location: team }, 'arun');
+      assert.deepStrictEqual(got('reconcile'), ['source-assessor', ['autode-de-reconciliation']], 'unreviewed: not in assignments');
+      lc.setTrustTier(team, 'reviewed', 'arun');
+      assert.deepStrictEqual(got('reconcile'), ['source-assessor', ['autode-de-reconciliation', 'finance-recon-rules']]);
+      assert.match(A.assignmentFor(scope, 'reconcile', []).assignment.text, /## Skill: finance-recon-rules\nHow finance reconciles revenue\.\n\nRevenue matches to the cent\./);
+      assert.ok(!got('deploy')[1].includes('finance-recon-rules'));
       const deploy = A.assignmentFor(scope, 'deploy', [{ name: 'autode_propose_runbook', annotations: {} }, { name: 'autode_runbook_status', annotations: { readOnlyHint: true } }, { name: 'autode_execute_query', annotations: { readOnlyHint: true, openWorldHint: true } }]).assignment;
       assert.deepStrictEqual([deploy.skills.map((k) => k.id), deploy.engineTools], [['autode-databricks-deployment'], ['autode_propose_runbook', 'autode_runbook_status']], 'deploy proposes runbooks; it never queries the platform');
       assert.ok(deploy.text.includes('databricks bundle validate') && /databricks-dabs/.test(deploy.text), 'the method, and the vendor skill as a pointer');
@@ -10162,6 +10174,226 @@ async function main() {
       const cat = fresh('../dist/engine/agents/skillCatalog.js').skillCatalog({ resourcesRoot: wfRes(), workspaceRoot: ws, home: ws, env: { PATH: '' } });
       assert.ok(cat.errors.includes('role ghost-writer: unknown skill "autode-de-ghost".'), cat.errors.join('\n'));
     } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.46.0: port a skill — staged within caps (a Git repository too, at a recorded commit), discovered, analysed (knowledge or procedure, scripts, CLIs with their install guide, licence), a capability report; imported unreviewed; a skill with scripts is not published unreviewed; a non-redistributable licence is refused', async () => {
+    const path = require('node:path'); const fs = require('node:fs'); const os = require('node:os');
+    const port = require('../dist/engine/skills/port.js');
+    const lc = require('../dist/engine/skills/lifecycle.js');
+    const ex = path.join(__dirname, '..', 'examples', 'skills');
+    const staged = port.stageSource({ kind: 'local', location: ex });
+    assert.deepStrictEqual(port.discoverSkills(staged.dir).map((f) => f.subpath), ['table-freshness-check', 'team-sql-conventions']);
+    const ctx = { installed: [], autode: [], guides: [{ id: 'snowflake-cli' }, { id: 'databricks-cli' }], repoRoot: ex };
+    const proc = port.analyzeSkill(path.join(ex, 'table-freshness-check'), 'table-freshness-check', ctx);
+    assert.strictEqual(proc.classification.value, 'procedure');
+    assert.ok(proc.executes && proc.writes, 'Bash is declared: it acts');
+    assert.deepStrictEqual(proc.scripts, ['scripts/check_freshness.py']);
+    assert.deepStrictEqual(proc.clis, [{ name: 'python', guide: undefined }, { name: 'snow', guide: 'snowflake-cli' }]);
+    assert.strictEqual(proc.licence.spdx, 'MIT');
+    assert.deepStrictEqual(proc.problems, []);
+    const know = port.analyzeSkill(path.join(ex, 'team-sql-conventions'), 'team-sql-conventions', ctx);
+    assert.strictEqual(know.classification.value, 'knowledge');
+    assert.ok(!know.executes && !know.writes);
+    const report = port.capabilityReport(proc, staged.provenance);
+    assert.match(report, /\*\*Kind:\*\* procedure/);
+    assert.match(report, /Limit \(mcp-engine §3\.1\)/);
+    assert.match(report, /CLI `snow` \(AutoDE can guide its install: snowflake-cli\)/);
+    assert.doesNotMatch(port.capabilityReport(know), /Limit \(mcp-engine/);
+
+    // Caps: refused before anything is read further.
+    assert.throws(() => port.stageSource({ kind: 'local', location: ex }, { maxFiles: 1, maxBytes: 1e9, maxFileBytes: 1e9 }), /More than 1 files/);
+
+    // The model proposes; a person decides. Unknown AutoDE tools are not mapped.
+    const parsed = port.parsePortProposal({ classification: 'knowledge', why: 'reference', summary: 's', toolMapping: [{ mentioned: 'Bash', autodeTool: 'autode_run_command' }, { mentioned: 'x', autodeTool: 'made_up' }], prerequisites: [{ name: 'snow', kind: 'cli' }] }, ['autode_run_command']);
+    assert.deepStrictEqual(parsed.errors, []);
+    assert.deepStrictEqual(parsed.proposal.toolMapping.map((m) => m.autodeTool), ['autode_run_command', null]);
+    assert.strictEqual(port.parsePortProposal({ classification: 'both' }, []).errors.length, 1);
+    const withProposal = { ...proc, proposal: parsed.proposal };
+    assert.strictEqual(port.decideProposal(withProposal, 'reject').classification.value, 'procedure');
+    const accepted = port.decideProposal(withProposal, 'accept', 'procedure');
+    assert.deepStrictEqual([accepted.classification.value, accepted.classification.by, accepted.proposal.status], ['procedure', 'person', 'accepted']);
+
+    // Import: unreviewed, a draft under lifecycle management, analysis beside it (not part of the content).
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-port-ws-'));
+    const imp = port.importSkill({ workspaceRoot: ws, stagedDir: staged.dir, analysis: proc, provenance: staged.provenance, by: 'arun', managementEnabled: true });
+    assert.deepStrictEqual([imp.sidecar.status, imp.sidecar.trustTier, imp.sidecar.provenance.source, imp.sidecar.provenance.licence, imp.sidecar.provenance.subpath], ['draft', 'unreviewed', 'local', 'MIT', 'table-freshness-check']);
+    assert.ok(fs.existsSync(path.join(imp.dir, port.ANALYSIS_FILENAME)));
+    assert.strictEqual(lc.skillContentChecksum(imp.dir), imp.sidecar.provenance.contentChecksum, 'the analysis file is not content');
+    assert.throws(() => lc.publishToolSkill(imp.dir, 'arun'), /Review it before publishing: it carries scripts \(scripts\/check_freshness\.py\)/);
+    lc.setTrustTier(imp.dir, 'reviewed', 'arun');
+    assert.strictEqual(lc.publishToolSkill(imp.dir, 'arun').sidecar.status, 'published');
+    assert.throws(() => port.importSkill({ workspaceRoot: ws, stagedDir: staged.dir, analysis: proc, provenance: staged.provenance, by: 'arun' }), /already imported: replace it/);
+
+    // A non-redistributable licence is refused.
+    const lic = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-port-lic-'));
+    fs.writeFileSync(path.join(lic, 'SKILL.md'), '---\nname: vendor-skill\ndescription: d\n---\nbody\n');
+    fs.writeFileSync(path.join(lic, 'LICENSE'), 'Databricks License\nCopyright (2024) Databricks, Inc.\n');
+    const bad = port.analyzeSkill(lic, '', { ...ctx, repoRoot: lic });
+    assert.match(bad.problems.join(' '), /Databricks License.*doesn't allow copying/);
+    assert.throws(() => port.importSkill({ workspaceRoot: ws, stagedDir: lic, analysis: bad, provenance: { source: 'local', location: lic }, by: 'arun' }), /can't be imported/);
+    staged.cleanup();
+
+    // A Git repository: cloned without checkout, listed and checked, then checked out; the commit is recorded.
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-port-repo-'));
+    const git = (...a) => { const r = require('node:child_process').spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { cwd: repo, encoding: 'utf8' }); assert.strictEqual(r.status, 0, r.stderr); return r.stdout.trim(); };
+    git('init', '-q');
+    fs.mkdirSync(path.join(repo, 'skills', 'conventions'), { recursive: true });
+    fs.copyFileSync(path.join(ex, 'team-sql-conventions', 'SKILL.md'), path.join(repo, 'skills', 'conventions', 'SKILL.md'));
+    git('add', '.'); git('commit', '-q', '-m', 'one');
+    const head = git('rev-parse', 'HEAD');
+    const gs = port.stageSource({ kind: 'git', location: repo });
+    assert.deepStrictEqual([gs.provenance.source, gs.provenance.resolvedCommit, gs.files], ['git', head, 1]);
+    assert.deepStrictEqual(port.discoverSkills(gs.dir).map((f) => f.subpath), ['skills/conventions']);
+    assert.throws(() => port.stageSource({ kind: 'git', location: repo }, { maxFiles: 10, maxBytes: 10, maxFileBytes: 1e9 }), /larger than 10 bytes\. Nothing was copied/);
+    assert.throws(() => port.stageSource({ kind: 'git', location: 'not a url' }), /not a Git URL/);
+    // A hostile tree is refused from its listing, before checkout (git itself won't create one, so a fake runner lists it).
+    const fakeGit = (entries) => { const calls = []; return { calls, run: (args) => { calls.push(args[0]); return args[0] === 'ls-tree' ? { status: 0, stdout: entries.join('\0') + '\0', stderr: '' } : { status: 0, stdout: '', stderr: '' }; } }; };
+    for (const [entry, why] of [['100644 blob abc 10\t../outside/SKILL.md', /escapes it: \.\.\/outside\/SKILL\.md\. Nothing was copied/], ['120000 blob abc 10\tskills/link', /skills\/link is a symbolic link/], ['160000 commit abc -\tvendor', /vendor is a Git submodule/]]) {
+      const f = fakeGit(['100644 blob abc 10\tskills/a/SKILL.md', entry]);
+      assert.throws(() => port.stageSource({ kind: 'git', location: 'https://example.com/x.git' }, port.SOURCE_CAPS, f.run), why);
+      assert.deepStrictEqual(f.calls, ['clone', 'ls-tree'], 'never checked out');
+    }
+    const ka = port.analyzeSkill(path.join(gs.dir, 'skills', 'conventions'), 'skills/conventions', { ...ctx, repoRoot: gs.dir });
+    const k = port.importSkill({ workspaceRoot: ws, stagedDir: gs.dir, analysis: ka, provenance: gs.provenance, by: 'arun', managementEnabled: true });
+    gs.cleanup();
+    assert.ok(!fs.existsSync(gs.dir), 'the clone is removed');
+    assert.deepStrictEqual([k.sidecar.provenance.repoUrl, k.sidecar.provenance.resolvedCommit], [repo, head]);
+  });
+
+  await test('v0.46.0: knowledge skills — published and reviewed ones join the context packs whose question they match (a quarter of the budget, named in the manifest); Update Skill shows the diff and the new content is unreviewed again', async () => {
+    const path = require('node:path'); const fs = require('node:fs'); const os = require('node:os');
+    const port = require('../dist/engine/skills/port.js');
+    const lc = require('../dist/engine/skills/lifecycle.js');
+    const { buildContextPack, renderPackManifest } = require('../dist/engine/context/contextPack.js');
+    const ex = path.join(__dirname, '..', 'examples', 'skills');
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-port-src-'));
+    fs.cpSync(path.join(ex, 'team-sql-conventions'), path.join(src, 'team-sql-conventions'), { recursive: true });
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-port-ks-'));
+    const staged = port.stageSource({ kind: 'local', location: src });
+    const a = port.analyzeSkill(path.join(src, 'team-sql-conventions'), 'team-sql-conventions', { installed: [], autode: [], repoRoot: src });
+    const k = port.importSkill({ workspaceRoot: ws, stagedDir: staged.dir, analysis: a, provenance: staged.provenance, by: 'arun', managementEnabled: true });
+    lc.publishToolSkill(k.dir, 'arun');
+    assert.deepStrictEqual(port.knowledgeSkills(ws), [], 'unreviewed: not in packs');
+    lc.setTrustTier(k.dir, 'reviewed', 'arun');
+    const ks = port.knowledgeSkills(ws);
+    assert.deepStrictEqual(ks.map((s) => s.id), ['team-sql-conventions']);
+
+    const empty = { graph: { nodes: [], edges: [] }, assertions: [], conflicts: [] };
+    const pack = buildContextPack({ purpose: 'step', query: 'write the incremental staging model for orders following our naming conventions' }, { ...empty, knowledgeSkills: ks });
+    assert.match(pack.text, /## Team Knowledge\n### team-sql-conventions \(skill `team-sql-conventions`\)\n# Team SQL conventions/);
+    assert.deepStrictEqual(pack.manifest.knowledgeSkills, ['team-sql-conventions']);
+    assert.match(renderPackManifest(pack, 't'), /Team knowledge:\*\* `team-sql-conventions`/);
+    const small = buildContextPack({ purpose: 'step', query: 'incremental naming conventions', maxTokens: 1200 }, { ...empty, knowledgeSkills: ks });
+    assert.match(small.text, /cut to fit the pack/);
+    const other = buildContextPack({ purpose: 'step', query: 'list the kafka topics of the clickstream' }, { ...empty, knowledgeSkills: ks });
+    assert.doesNotMatch(other.text, /Team Knowledge/);
+    assert.strictEqual(other.manifest.knowledgeSkills, undefined);
+
+    // Update Skill: re-fetch, diff, and the new content is unreviewed (S2 trust is bound to content).
+    const md = path.join(src, 'team-sql-conventions', 'SKILL.md');
+    fs.writeFileSync(md, fs.readFileSync(md, 'utf8').replace('- Comments explain *why*, not *what*.', '- Comments explain *why*, not *what*.\n- Every mart has an owner in its YAML.'));
+    const up = port.stageUpdate(k.dir);
+    const diff = port.diffSkill(k.dir, up.freshDir);
+    assert.deepStrictEqual(diff.map((d) => [d.path, d.change]), [['SKILL.md', 'changed']]);
+    assert.strictEqual(diff[0].diff, '+ - Every mart has an owner in its YAML.');
+    const fresh = port.analyzeSkill(up.freshDir, 'team-sql-conventions', { installed: [], autode: [], repoRoot: src });
+    const sc = port.applyUpdate(k.dir, up.staged, up.freshDir, fresh, 'arun');
+    up.staged.cleanup();
+    assert.strictEqual(sc.trustTier, 'unreviewed');
+    assert.strictEqual(sc.transitions.at(-1).action, 'update');
+    assert.match(fs.readFileSync(path.join(k.dir, 'SKILL.md'), 'utf8'), /owner in its YAML/);
+    assert.deepStrictEqual(port.knowledgeSkills(ws), [], 'changed since review: out of packs until reviewed again');
+    assert.strictEqual(port.readAnalysis(k.dir).classification.value, 'knowledge');
+  });
+
+  await test('v0.46.0: port a skill on every surface — the CLI analyses and imports (several skills: choose with --skill), review and publish are a person\'s acts in a terminal; autode_skills_analyze over MCP reads only; the Port a Skill wizard goes source → report → import → review → publish, each change confirmed', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-port-cli-'));
+    const ex = nodePath.join(__dirname, '..', 'examples', 'skills');
+    const W = ['--workspace', ws];
+    let client;
+    try {
+      const several = await cli(['skills', 'analyze', ex, ...W]);
+      assert.strictEqual(several.code, 2, several.out + several.err);
+      assert.match(several.out, /2 skills found; choose one with --skill:\n  table-freshness-check/);
+      const an = await cli(['skills', 'analyze', ex, '--skill', 'team-sql-conventions', ...W, '--json']);
+      assert.strictEqual(an.code, 0, an.out + an.err);
+      assert.strictEqual(an.json().analysis.classification.value, 'knowledge');
+      assert.ok(!nodeFs.existsSync(nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills')), 'analysing copies nothing');
+      nodeFs.mkdirSync(nodePath.join(ws, '.vscode'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.vscode', 'settings.json'), '{\n  // the team manages skill versions\n  "autoDataEngineeringHub.toolSkillManagementEnabled": true,\n}\n');
+      const imp = await cli(['skills', 'import', ex, '--skill', 'table-freshness-check', ...W]);
+      assert.strictEqual(imp.code, 0, imp.out + imp.err);
+      assert.match(imp.out, /✓ Imported as table-freshness-check \(draft, unreviewed\)\. Next: `autode skills review table-freshness-check`/);
+      assert.strictEqual((await cli(['skills', 'import', ex, '--skill', 'table-freshness-check', ...W])).code, 4, 'already imported: --replace');
+      assert.strictEqual((await cli(['skills', 'publish', 'table-freshness-check', ...W])).code, 4, 'a person at a terminal');
+      const early = await cli(['skills', 'publish', 'table-freshness-check', ...W], { interactive: true, answers: ['publish'] });
+      assert.strictEqual(early.code, 4);
+      assert.match(early.err, /Review it before publishing: it carries scripts/);
+      assert.strictEqual((await cli(['skills', 'review', 'table-freshness-check', ...W], { interactive: true, answers: ['no'] })).code, 4);
+      const rev = await cli(['skills', 'review', 'table-freshness-check', ...W], { interactive: true, answers: ['reviewed'] });
+      assert.strictEqual(rev.code, 0, rev.out + rev.err);
+      assert.match(rev.out, /Limit \(mcp-engine §3\.1\)/, 'the capability report is part of the review');
+      const pub = await cli(['skills', 'publish', 'table-freshness-check', ...W], { interactive: true, answers: ['publish'] });
+      assert.strictEqual(pub.code, 0, pub.out + pub.err);
+      const listed = (await cli(['skills', 'list', '--group', 'workspace', ...W, '--json'])).json().skills;
+      assert.deepStrictEqual(listed.map((e) => [e.name, e.kind, e.scope, e.licence?.name, e.status]), [['table-freshness-check', 'procedure', 'team', 'MIT License', 'published, reviewed']]);
+      const up = await cli(['skills', 'update', 'table-freshness-check', ...W]);
+      assert.strictEqual(up.code, 0, up.out + up.err);
+      assert.match(up.out, /is up to date with its source/);
+
+      // MCP: analyse only, a workspace folder or an https URL.
+      nodeFs.cpSync(nodePath.join(ex, 'team-sql-conventions'), nodePath.join(ws, 'incoming', 'team-sql-conventions'), { recursive: true });
+      client = await mcpSession(ws);
+      const m = (await client.callTool({ name: 'autode_skills_analyze', arguments: { source: 'incoming' } })).structuredContent;
+      assert.strictEqual(m.analysis.classification.value, 'knowledge');
+      assert.strictEqual(m.provenance.location, 'incoming');
+      assert.match(m.next, /A person imports it/);
+      const outside = await client.callTool({ name: 'autode_skills_analyze', arguments: { source: '../elsewhere' } });
+      assert.ok(outside.isError && /outside the workspace/.test(JSON.stringify(outside.content)));
+      const ssh = await client.callTool({ name: 'autode_skills_analyze', arguments: { source: 'git@github.com:org/skills.git' } });
+      assert.ok(ssh.isError && /https URL/.test(JSON.stringify(ssh.content)));
+      assert.ok(!nodeFs.existsSync(nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', 'team-sql-conventions')));
+
+      // The wizard, driven by its messages.
+      const { PortSkillSession } = require('../dist/core/portSkillSession.js');
+      const posted = []; const confirms = []; const reviewed = []; let answer = true;
+      const host = {
+        user: () => 'arun', workspaceRoot: () => ws, resourcesRoot: nodePath.join(__dirname, '..'), managementEnabled: () => true,
+        pickFolder: async () => nodePath.join(ws, 'incoming'), confirm: async (t) => { confirms.push(t); return answer; },
+        complete: async () => 'Here it is: {"classification":"knowledge","why":"conventions to read","summary":"SQL rules.","toolMapping":[],"prerequisites":[]}',
+        review: async (id) => { reviewed.push(id); require('../dist/engine/skills/lifecycle.js').setTrustTier(nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', id), 'reviewed', 'arun'); },
+        post: (model) => posted.push(model), log: () => undefined, onChange: () => undefined
+      };
+      const s = new PortSkillSession(host);
+      const last = () => posted[posted.length - 1];
+      await s.onMessage({ type: 'analyze', source: { kind: 'git', location: '' } });
+      assert.match(last().note.text, /Enter the repository's URL/);
+      await s.onMessage({ type: 'example' });
+      assert.deepStrictEqual([last().step, last().skills.length, last().examples], ['choose', 2, true]);
+      await s.onMessage({ type: 'choose', subpath: 'team-sql-conventions' });
+      assert.strictEqual(last().step, 'report');
+      assert.match(last().report, /\*\*Kind:\*\* knowledge/);
+      await s.onMessage({ type: 'propose' });
+      assert.strictEqual(last().analysis.proposal.status, 'proposed');
+      await s.onMessage({ type: 'decide', decision: 'accept' });
+      assert.deepStrictEqual([last().analysis.classification.by, last().analysis.proposal.status], ['model', 'accepted']);
+      answer = false;
+      await s.onMessage({ type: 'import' });
+      assert.strictEqual(last().step, 'report', 'not confirmed: nothing imported');
+      answer = true;
+      await s.onMessage({ type: 'import' });
+      assert.deepStrictEqual([last().step, last().imported.status, last().imported.tier, last().imported.canPublish], ['imported', 'draft', 'unreviewed', true]);
+      await s.onMessage({ type: 'review' });
+      assert.deepStrictEqual(reviewed, ['team-sql-conventions']);
+      await s.onMessage({ type: 'publish' });
+      assert.match(last().note.text, /Published team-sql-conventions as version 1/);
+      assert.deepStrictEqual(confirms, ['Import team-sql-conventions?', 'Import team-sql-conventions?', 'Publish team-sql-conventions?']);
+      assert.deepStrictEqual(require('../dist/engine/skills/port.js').knowledgeSkills(ws).map((k) => k.id), ['team-sql-conventions']);
+      assert.strictEqual(require('../dist/engine/skills/port.js').readAnalysis(nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', 'team-sql-conventions')).classification.by, 'model');
+      await s.onMessage({ type: 'reset' });
+      assert.strictEqual(last().step, 'source');
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

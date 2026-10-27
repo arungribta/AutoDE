@@ -963,6 +963,30 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: in Claude Code, ask for the next stage.
   Expect: the orchestrator calls `autode_refresh_working_set` before running the assignment; an unreachable source is reported and the stage still runs.
 
+## Part 40 — v0.46.0 Port a skill
+
+- [ ] **40.1 The examples, end to end in the panel.**
+  Do: Skills view → **+** (*Port a Skill…*) → *Try AutoDE's examples* → choose *team-sql-conventions*.
+  Expect: the report says **knowledge**, MIT, no scripts, nothing it writes; *Import* asks first; then *Review…* opens the review screen; after *reviewed*, *Publish* works. The Skills view lists it under *Imported in this workspace* with `team`, its kind and licence.
+- [ ] **40.2 A procedure can't be published unreviewed.**
+  Do: port *table-freshness-check* from the examples and import it.
+  Expect: the report shows the script, `python` and `snow` (with AutoDE's Snowflake CLI guide) and the §3.1 limit; *Publish* is disabled with "Review it first: it carries scripts (scripts/check_freshness.py)".
+- [ ] **40.3 From Git.**
+  Do: port from an https repository you can read that holds a skill (several skills: you're asked to choose one).
+  Expect: the report names the commit; nothing appears in the workspace until *Import*; the imported skill's sidecar records the repository and commit.
+- [ ] **40.4 A licence that forbids copying.**
+  Do: port a skill folder whose `LICENSE` is the Databricks License.
+  Expect: "It can't be imported", with the reason; no *Import* button.
+- [ ] **40.5 Team knowledge in a pack.**
+  Do: with *team-sql-conventions* published and reviewed, ask in chat "how should I name the incremental staging model for orders?", then *What the Agent Saw*.
+  Expect: the pack has a *Team Knowledge* section with the conventions, and the manifest lists `team-sql-conventions`.
+- [ ] **40.6 Update Skill.**
+  Do: edit the source of an imported skill (a line in its `SKILL.md`), then the sync button on it in the Skills view.
+  Expect: a diff of exactly that line and the report; after *Update* the skill is unreviewed and leaves packs until reviewed again.
+- [ ] **40.7 In a terminal and in a host.**
+  Do: `autode skills analyze <repo URL> --skill <path>`; `autode skills import …`; `autode skills review <id>` and `publish <id>`; in Claude Code ask it to analyse a skill repository.
+  Expect: the CLI prints the same report; review and publish ask you to type the word; the host calls `autode_skills_analyze` and says a person imports it.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1199,5 +1223,12 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 39.3 |  |  |
 | 39.4 |  |  |
 | 39.5 |  |  |
+| 40.1 |  |  |
+| 40.2 |  |  |
+| 40.3 |  |  |
+| 40.4 |  |  |
+| 40.5 |  |  |
+| 40.6 |  |  |
+| 40.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

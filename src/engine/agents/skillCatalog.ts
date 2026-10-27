@@ -6,6 +6,8 @@ import { layoutPath } from '../workspaceLayout';
 import { checkDefinitions, loadRoles, loadSkillPack } from './definitions';
 import { loadSkillsFromDirectory } from '../skills/skillRegistry';
 import { loadToolSkillStates } from '../skills/lifecycle';
+import { parseSkillMarkdown } from '../skills/toolSkills';
+import { readAnalysis } from '../skills/port';
 
 /**
  * The skill catalog (v0.45.5; owner, 2026-10-22): one view of every skill
@@ -39,6 +41,8 @@ export interface CatalogEntry {
   owner?: string;
   /** Workspace skills: lifecycle and review state. */
   status?: string;
+  /** Imported skills: knowledge (joins context packs) or procedure (carried out with tools), from its analysis (PA4). */
+  kind?: 'knowledge' | 'procedure';
   /** AutoDE skills: the roles that use them. */
   roles?: string[];
   source?: string;
@@ -115,10 +119,20 @@ export function skillCatalog(input: CatalogInput): { entries: CatalogEntry[]; er
     version: k.meta.version, maturity: k.meta.maturity, owner: k.meta.owner, roles: roles.filter((r) => r.skills.includes(k.id)).map((r) => r.name)
   }));
   errors.push(...checkDefinitions(roles, pack.skills));
-  const workspace: CatalogEntry[] = loadToolSkillStates(layoutPath(input.workspaceRoot, 'toolSkills'), 'catalog', { migrate: false }).map((t) => ({
-    name: t.skill.id, group: 'workspace', summary: t.skill.description ?? '', stageKinds: [], platforms: [], version: t.sidecar.version,
-    status: `${t.sidecar.status ?? 'published'}, ${t.effectiveTier}${t.changedSinceReview ? ' (changed since review)' : ''}`, owner: (t.sidecar.provenance as { source?: string } | undefined)?.source ?? 'imported'
-  }));
+  // Imported skills carry the same fields as AutoDE's (PA4: one lifecycle): stage kinds and platforms from their metadata, kind and licence from their analysis.
+  const workspace: CatalogEntry[] = loadToolSkillStates(layoutPath(input.workspaceRoot, 'toolSkills'), 'catalog', { migrate: false }).map((t) => {
+    let meta: Record<string, unknown> = {};
+    try { meta = parseSkillMarkdown(fs.readFileSync(path.join(t.skill.sourceDir, 'SKILL.md'), 'utf8')).metadata ?? {}; } catch { /* unreadable: no metadata */ }
+    const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+    const a = readAnalysis(t.skill.sourceDir);
+    const p = t.sidecar.provenance;
+    return {
+      name: t.skill.id, group: 'workspace', summary: t.skill.description ?? '', stageKinds: list(meta.stageKinds), platforms: list(meta.platforms).length ? list(meta.platforms) : ['any'],
+      scope: 'team', version: t.sidecar.version, kind: a?.classification.value, owner: String(meta.owner ?? p?.source ?? 'imported'),
+      status: `${t.sidecar.status ?? 'published'}, ${t.effectiveTier}${t.changedSinceReview ? ' (changed since review)' : ''}`,
+      source: p?.repoUrl ?? p?.location, licence: a?.licence ? { name: a.licence.name, redistribution: a.licence.redistribution === 'unknown' ? 'check' : a.licence.redistribution, summary: a.licence.note } : undefined
+    };
+  });
   let interview: CatalogEntry[] = [];
   // v0.45.12: AutoDE's interview parts are skills (listed above); this group is a team's own JSON parts.
   try { interview = loadSkillsFromDirectory(layoutPath(input.workspaceRoot, 'skills')).map((s) => ({ name: s.id, group: 'interview', summary: s.description ?? s.name, stageKinds: ['specify'], platforms: ['any'], owner: 'workspace' })); } catch { /* none */ }

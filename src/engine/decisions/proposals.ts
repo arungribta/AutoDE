@@ -1,4 +1,4 @@
-import { loadSkillPack } from '../agents/definitions';
+import { stageSkills } from '../skills/port';
 import { BusinessProblemSpec, EntityMapping } from '../types';
 import { PipelineSpec } from '../pipelineSpec/types';
 import { validatePipelineSpec } from '../pipelineSpec/validator';
@@ -197,7 +197,7 @@ export function validateWorkflowProposal(w: WorkflowInstance, ctx: ProposalConte
   r.warnings.push(...errors);
   const template = templates.find((t) => t.id === w.template?.id);
   if (!template) { r.errors.push(`No workflow template "${w.template?.id}" (known: ${templates.map((t) => t.id).join(', ') || 'none'}).`); return finish(r); }
-  const skills = ctx.resourcesRoot ? loadSkillPack(ctx.resourcesRoot).skills.map((k) => ({ id: k.id, stageKinds: k.meta.stageKinds })) : undefined;
+  const skills = ctx.resourcesRoot ? stageSkills(ctx.resourcesRoot, ctx.workspaceRoot).map((k) => ({ id: k.id, stageKinds: k.meta.stageKinds })) : undefined;
   const c = checkWorkflow(w, template, { skills });
   r.errors.push(...c.errors);
   r.warnings.push(...c.warnings);

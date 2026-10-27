@@ -27,13 +27,20 @@ export const SIDECAR_FILENAME = '.autode-skill.json';
 export const MIGRATION_MARKER = '.autode-skills-migrated';
 const HISTORY_DIR = '.autode-history';
 export const HISTORY_DIRNAME = HISTORY_DIR;
+/** AutoDE's analysis of a ported skill (PA4, port.ts); like the sidecar, not part of the content. */
+const ANALYSIS_FILE = '.autode-port.json';
 
 export type ToolSkillStatus = 'draft' | 'published' | 'deprecated' | 'retired';
 export type TrustTier = 'unreviewed' | 'reviewed' | 'trusted';
 export const TRUST_TIERS: readonly TrustTier[] = ['unreviewed', 'reviewed', 'trusted'];
 
 export interface ToolSkillProvenance {
-  source: 'local' | 'git';
+  /** `dbt`: a skill found in a dbt package (PA4). */
+  source: 'local' | 'git' | 'dbt';
+  /** The local folder it was imported from (for Update Skill). */
+  location?: string;
+  /** SPDX id or name of the licence it carries. */
+  licence?: string;
   repoUrl?: string;
   ref?: string;
   resolvedCommit?: string;
@@ -42,7 +49,7 @@ export interface ToolSkillProvenance {
   importedAt: string;
 }
 
-export type ToolSkillAction = 'import' | 'migrate' | 'review' | 'publish' | 'deprecate' | 'retire';
+export type ToolSkillAction = 'import' | 'update' | 'migrate' | 'review' | 'publish' | 'deprecate' | 'retire';
 
 export interface ToolSkillTransition {
   at: string;
@@ -91,7 +98,7 @@ function listFiles(dir: string, rel = ''): string[] {
   const out: string[] = [];
   for (const e of entries) {
     const r = rel ? `${rel}/${e.name}` : e.name;
-    if (!rel && (e.name === SIDECAR_FILENAME || e.name === HISTORY_DIR)) continue;
+    if (!rel && (e.name === SIDECAR_FILENAME || e.name === HISTORY_DIR || e.name === ANALYSIS_FILE)) continue;
     if (e.isDirectory()) out.push(...listFiles(dir, r));
     else if (e.isFile()) out.push(r);
   }
@@ -130,6 +137,10 @@ export function readSidecar(skillDir: string): ToolSkillSidecar | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function writeSidecarFile(skillDir: string, sidecar: ToolSkillSidecar): void {
+  writeSidecar(skillDir, sidecar);
 }
 
 function writeSidecar(skillDir: string, sidecar: ToolSkillSidecar): void {
@@ -269,6 +280,19 @@ export function resolveSkillVersion(toolSkillsDir: string, skillId: string, vers
 
 // ── Transitions ─────────────────────────────────────────────────────────────
 
+const SCRIPT_FILE = /\.(sh|bash|zsh|ps1|psm1|py|js|mjs|cjs|ts|rb|pl|cmd|bat)$/i;
+const ACTING_TOOL = /^(write|edit|multiedit|notebookedit|bash|shell|powershell|autode_write_file|autode_run_command)$/i;
+
+/** Why a skill acts on its own (scripts, write or command tools), or undefined: such a skill isn't published unreviewed (PA4). */
+export function actsOnItsOwn(skillDir: string): string | undefined {
+  const scripts = listFiles(skillDir).filter((f) => SCRIPT_FILE.test(f) || f.startsWith('scripts/'));
+  if (scripts.length) return `carries scripts (${scripts.slice(0, 3).join(', ')}${scripts.length > 3 ? ', …' : ''})`;
+  let declared: string[] = [];
+  try { declared = loadToolSkill(skillDir).declaredTools ?? []; } catch { return undefined; }
+  const acting = declared.filter((t) => ACTING_TOOL.test(t.split('(')[0].trim()));
+  return acting.length ? `declares tools that write or run commands (${acting.join(', ')})` : undefined;
+}
+
 function copyDir(from: string, to: string): void {
   fs.mkdirSync(to, { recursive: true });
   for (const rel of listFiles(from)) {
@@ -331,6 +355,10 @@ export function publishToolSkill(skillDir: string, by: string, now = new Date().
   if (sidecar.status === 'retired') throw new Error('A retired skill cannot be published again; import it anew.');
   const wasPublished = sidecar.publishedChecksum !== undefined;
   if (wasPublished && sidecar.publishedChecksum === checksum && sidecar.status === 'published') throw new Error(`Version ${sidecar.version} is already published with this content.`);
+  if (tierForChecksum(sidecar, checksum) === 'unreviewed') {
+    const acts = actsOnItsOwn(skillDir);
+    if (acts) throw new Error(`Review it before publishing: it ${acts}.`);
+  }
   const versionBumped = wasPublished && sidecar.publishedChecksum !== checksum;
   const version = versionBumped ? sidecar.version + 1 : sidecar.version;
   const updated: ToolSkillSidecar = {

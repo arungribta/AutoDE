@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Port a Skill</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 16px 20px; max-width: 1000px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 14px 0 4px; }
+  h3 { font-size: 13px; margin: 12px 0 4px; }
+  .steps { display: flex; gap: 6px; font-size: 12px; margin: 8px 0 12px; flex-wrap: wrap; }
+  .steps span { padding: 2px 8px; border-radius: 10px; border: 1px solid var(--vscode-editorWidget-border, #555); opacity: 0.6; }
+  .steps span.on { opacity: 1; border-color: var(--vscode-focusBorder); }
+  .box { border: 1px solid var(--vscode-editorWidget-border, #555); border-radius: 6px; padding: 10px 12px; margin: 10px 0; background: var(--vscode-editorWidget-background); }
+  .note-ok { border-left: 4px solid var(--vscode-testing-iconPassed, #2ea043); }
+  .note-bad { border-left: 4px solid var(--vscode-editorError-foreground, #f14c4c); }
+  .warn { border-left: 4px solid var(--vscode-editorWarning-foreground, #cca700); }
+  .muted { opacity: 0.75; font-size: 12px; }
+  label { display: inline-flex; align-items: center; gap: 4px; margin-right: 14px; }
+  input[type=text] { font-family: inherit; font-size: 12px; padding: 4px 6px; width: 100%; box-sizing: border-box; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; margin: 4px 0; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  .report blockquote { margin: 8px 0; padding: 4px 10px; border-left: 4px solid var(--vscode-editorWarning-foreground, #cca700); }
+  .report code { background: var(--vscode-textCodeBlock-background); padding: 0 3px; border-radius: 3px; }
+  .report ul { margin: 4px 0; padding-left: 20px; }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  td, th { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }
+  button { font-family: inherit; font-size: 12px; padding: 4px 10px; margin: 6px 6px 0 0; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; cursor: pointer; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+  button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+  button:disabled { opacity: 0.5; cursor: default; }
+</style>
+</head>
+<body>
+<h1>Port a Skill</h1>
+<p class="muted">Bring a skill written for any agent (Claude, Cortex, Copilot, a vendor's) into AutoDE. Nothing is copied until you import it, and an imported skill does nothing until you review it.</p>
+<div id="root"><p class="muted">Loading…</p></div>
+<script nonce="{{nonce}}">
+(function () {
+  const vscode = acquireVsCodeApi();
+  const root = document.getElementById('root');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const send = (m) => vscode.postMessage(m);
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/_([^_]+)_/g, '<i>$1</i>');
+  // The capability report is markdown the engine wrote: headings, bullets, a quote, bold and code.
+  function md(text) {
+    const out = []; let list = false;
+    for (const line of String(text || '').split('\n')) {
+      const li = /^- (.*)$/.exec(line);
+      if (!li && list) { out.push('</ul>'); list = false; }
+      if (li) { if (!list) { out.push('<ul>'); list = true; } out.push('<li>' + inline(li[1]) + '</li>'); continue; }
+      const h = /^(#{1,3}) (.*)$/.exec(line);
+      if (h) { out.push('<h' + (h[1].length + 1) + '>' + inline(h[2]) + '</h' + (h[1].length + 1) + '>'); continue; }
+      if (line.startsWith('> ')) { out.push('<blockquote>' + inline(line.slice(2)) + '</blockquote>'); continue; }
+      if (line.trim()) out.push('<p>' + inline(line) + '</p>');
+    }
+    if (list) out.push('</ul>');
+    return out.join('');
+  }
+  let m = null;
+  const STEPS = [['source', '1 Source'], ['choose', '2 Choose'], ['report', '3 What it does'], ['imported', '4 Review and publish']];
+  function render() {
+    if (!m) return;
+    const dis = m.busy ? ' disabled' : '';
+    const h = [];
+    h.push('<div class="steps">' + STEPS.map(([k, t]) => '<span class="' + (m.step === k ? 'on' : '') + '">' + t + '</span>').join('') + '</div>');
+    if (m.note) h.push('<div class="box ' + (m.note.ok ? 'note-ok' : 'note-bad') + '">' + esc(m.note.text) + '</div>');
+    if (m.busy) h.push('<p class="muted">Working… (a Git repository is cloned into a temporary folder first)</p>');
+    if (m.step === 'source') {
+      const k = m.source.kind;
+      h.push('<div class="box"><div>' + [['git', 'Git repository'], ['local', 'Folder'], ['dbt', 'dbt package']].map(([v, t]) => '<label><input type="radio" name="kind" value="' + v + '"' + (k === v ? ' checked' : '') + dis + '> ' + t + '</label>').join('') + '</div>');
+      if (k === 'git') {
+        h.push('<input type="text" id="loc" placeholder="https://github.com/org/skills.git" value="' + esc(m.source.location) + '"' + dis + '>');
+        h.push('<input type="text" id="ref" placeholder="Branch or tag (optional)" value="' + esc(m.source.ref || '') + '"' + dis + '>');
+        h.push('<p class="muted">Cloned shallow into a temporary folder; its file list is checked (size, paths, links) before anything is checked out.</p>');
+      } else {
+        h.push('<div class="row"><input type="text" id="loc" placeholder="' + (k === 'dbt' ? 'A dbt project (its dbt_packages) or one package' : 'A skill folder (with SKILL.md), or a folder of skills') + '" value="' + esc(m.source.location) + '"' + dis + '><button data-a="browse"' + dis + '>Browse…</button></div>');
+      }
+      h.push('<button class="primary" data-a="analyze"' + dis + '>Analyse</button>' + (m.examples ? '<button data-a="example"' + dis + '>Try AutoDE\'s examples</button>' : '') + '</div>');
+    }
+    if (m.step === 'choose') {
+      h.push('<div class="box"><b>' + m.skills.length + ' skills found.</b> Choose one:<table>' + m.skills.map((s) => '<tr><td><button data-a="choose" data-p="' + esc(s.subpath) + '"' + dis + '>' + esc(s.name) + '</button></td><td class="muted">' + esc(s.subpath || '.') + '<br>' + esc(s.description) + '</td></tr>').join('') + '</table><button data-a="reset"' + dis + '>Back</button></div>');
+    }
+    if (m.step === 'report' && m.analysis) {
+      const a = m.analysis;
+      h.push('<div class="box report">' + md(m.report) + '</div>');
+      if (m.canPropose && !a.proposal) h.push('<div class="box"><b>Ask the model</b> <span class="muted">for its reading: knowledge or procedure, how its tools map to AutoDE\'s, what it needs. It is a proposal: you accept or reject it.</span><br><button data-a="propose"' + dis + '>Ask for a proposal</button></div>');
+      if (a.proposal && a.proposal.status === 'proposed') {
+        h.push('<div class="box warn"><b>The model proposes:</b> ' + esc(a.proposal.classification) + ' — ' + esc(a.proposal.why) + '<br><button class="primary" data-a="accept"' + dis + '>Accept</button><button data-a="accept-other"' + dis + '>Accept as ' + (a.proposal.classification === 'knowledge' ? 'procedure' : 'knowledge') + '</button><button data-a="reject"' + dis + '>Reject</button></div>');
+      }
+      h.push('<div class="box">' + (a.problems.length ? '<b>It can\'t be imported.</b> ' : '<b>Import it?</b> <span class="muted">It is copied into this workspace, unreviewed.</span><br><button class="primary" data-a="import"' + dis + '>Import</button>') + '<button data-a="reset"' + dis + '>Start over</button></div>');
+    }
+    if (m.step === 'imported' && m.imported) {
+      const i = m.imported;
+      h.push('<div class="box"><b>' + esc(i.id) + '</b> — ' + esc(i.status) + ', ' + esc(i.tier) + '<br>');
+      h.push('<button class="' + (i.tier === 'unreviewed' ? 'primary' : '') + '" data-a="review"' + dis + '>Review…</button>');
+      h.push('<button class="' + (i.tier !== 'unreviewed' && i.canPublish ? 'primary' : '') + '" data-a="publish"' + (i.canPublish ? dis : ' disabled') + '>Publish</button>');
+      if (i.why) h.push('<p class="muted">' + esc(i.why) + '</p>');
+      h.push('<p class="muted">Published and reviewed: a knowledge skill joins the context packs whose question it matches; a skill that declares stage kinds joins those stages\' assignments. Update Skill (CLI: <code>autode skills update ' + esc(i.id) + '</code>) re-fetches it from its source.</p>');
+      h.push('<button data-a="reset"' + dis + '>Port another</button></div>');
+    }
+    root.innerHTML = h.join('');
+  }
+  function sourceInput() {
+    const kind = (document.querySelector('input[name=kind]:checked') || {}).value || m.source.kind;
+    const loc = document.getElementById('loc'); const ref = document.getElementById('ref');
+    return { kind, location: loc ? loc.value : '', ref: ref ? ref.value : undefined };
+  }
+  root.addEventListener('change', (e) => { if (e.target.name === 'kind') send({ type: 'source', kind: e.target.value, location: '' }); });
+  root.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    const a = b.dataset.a;
+    if (a === 'analyze' || a === 'browse') send({ type: a, source: sourceInput() });
+    else if (a === 'choose') send({ type: 'choose', subpath: b.dataset.p });
+    else if (a === 'accept') send({ type: 'decide', decision: 'accept' });
+    else if (a === 'accept-other') send({ type: 'decide', decision: 'accept', classification: m.analysis.proposal.classification === 'knowledge' ? 'procedure' : 'knowledge' });
+    else if (a === 'reject') send({ type: 'decide', decision: 'reject' });
+    else send({ type: a });
+  });
+  window.addEventListener('message', (e) => { if (e.data && e.data.type === 'model') { m = e.data.model; render(); } });
+  send({ type: 'ready' });
+})();
+</script>
+</body>
+</html>

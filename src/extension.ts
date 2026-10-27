@@ -11,6 +11,8 @@ import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, regis
 import { EngineClient } from './core/engineClient';
 import { registerWorkflowView } from './core/workflowView';
 import { registerSkillsView } from './core/skillsView';
+import { PortSkillPanel } from './core/portSkillView';
+import * as port from './engine/skills/port';
 import { registerRunbookView, RunbookPanel } from './core/runbookView';
 import { getCredentialResolver } from './engine/platform/credentials';
 import { VSCODE_SECRET_RESOLVER_ID } from './engine/platform/credentials/types';
@@ -29,7 +31,6 @@ import { registerDefaultCredentialResolvers, resolveCredential } from './core/cr
 import { DataPlatformProvider, DataAgentHubSettings } from './engine/types';
 import { parseFile, detectFileFormat } from './engine/context/fileIngestion';
 import * as path from 'node:path';
-import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as lifecycle from './engine/skills/lifecycle';
 import { LAYOUT, layoutRel } from './engine/workspaceLayout';
@@ -43,22 +44,6 @@ import { resolveAllowedToolNames } from './engine/skills/toolAllowList';
  * torn down on extension shutdown instead of relying on GC.
  */
 const disposableRegistry = createDisposableRegistry();
-
-/** Recursively copies a directory via vscode.workspace.fs (used to import a skill folder). */
-async function copyDirectoryRecursive(source: vscode.Uri, target: vscode.Uri): Promise<void> {
-  await vscode.workspace.fs.createDirectory(target);
-  const entries = await vscode.workspace.fs.readDirectory(source);
-  for (const [name, type] of entries) {
-    const sourceChild = vscode.Uri.joinPath(source, name);
-    const targetChild = vscode.Uri.joinPath(target, name);
-    if (type === vscode.FileType.Directory) {
-      await copyDirectoryRecursive(sourceChild, targetChild);
-    } else if (type === vscode.FileType.File) {
-      const bytes = await vscode.workspace.fs.readFile(sourceChild);
-      await vscode.workspace.fs.writeFile(targetChild, bytes);
-    }
-  }
-}
 
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
@@ -881,45 +866,45 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage('Context re-index triggered.');
   });
 
-  // Imports a Claude Agent Skill (a folder containing SKILL.md + optional
-  // resources) into .autode/config/skills/tool-skills/<id>/ — Phase D.
-  const importToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.importToolSkill`, async () => {
-    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
-    const picked = await vscode.window.showOpenDialog({
-      canSelectFiles: false, canSelectFolders: true, canSelectMany: false,
-      openLabel: 'Import as a tool skill', title: 'Select a skill folder (must contain SKILL.md)'
+  // Port a Skill (PA4): the wizard imports a skill from a Git repository, a folder or a dbt package, with
+  // its capability report; it replaced the plain folder import (Phase D), keeping its command id.
+  const importToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.importToolSkill`, () => {
+    PortSkillPanel.show(context, {
+      user: skillActor,
+      workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      managementEnabled: () => !!configManager.getSettings().toolSkillManagementEnabled,
+      complete: async (system, user) => JSON.stringify(await hub.completeJson(system, user, 'Propose how a ported skill fits AutoDE.')),
+      review: async (id) => { await vscode.commands.executeCommand(`${EXTENSION_ID}.reviewToolSkill`, id); },
+      log: (line) => skillLog.appendLine(`${new Date().toISOString()} ${line}`),
+      onChange: () => { void vscode.commands.executeCommand(`${EXTENSION_ID}.refreshSkills`); }
     });
-    const sourceUri = picked?.[0];
-    if (!sourceUri) { return; }
+  });
+
+  // Update Skill (PA4): re-fetch an imported skill from its source, show what changed, apply after the person
+  // confirms; the new content is unreviewed (S2 binds trust to content).
+  const updateToolSkill = vscode.commands.registerCommand(`${EXTENSION_ID}.updateToolSkill`, async (skillId?: unknown) => {
+    const state = await pickToolSkill('Update a skill from its source', (s) => s.sidecar.status !== 'retired', typeof skillId === 'string' ? skillId : (skillId as { entry?: { name?: string } } | undefined)?.entry?.name);
+    if (!state) return;
+    const dir = state.skill.sourceDir;
+    let up: ReturnType<typeof port.stageUpdate>;
+    try { up = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Fetching ${state.skill.id} from its source…` }, async () => port.stageUpdate(dir)); }
+    catch (err) { vscode.window.showErrorMessage(`Update failed: ${err instanceof Error ? err.message : String(err)}`); return; }
     try {
-      const skillMdUri = vscode.Uri.joinPath(sourceUri, 'SKILL.md');
-      await vscode.workspace.fs.stat(skillMdUri); // throws if missing
-      const id = sourceUri.fsPath.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^a-zA-Z0-9_-]+/g, '_') || `skill-${Date.now().toString(36)}`;
-      const targetDir = vscode.Uri.joinPath(wsRoot, ...LAYOUT.toolSkills, id);
-      if (fs.existsSync(targetDir.fsPath)) {
-        const replace = await vscode.window.showWarningMessage(`A skill "${id}" is already imported. Replace it? Its review and version history are reset.`, { modal: true }, 'Replace');
-        if (replace !== 'Replace') { return; }
-        fs.rmSync(targetDir.fsPath, { recursive: true, force: true });
-      }
-      await copyDirectoryRecursive(sourceUri, targetDir);
-      const { loadToolSkill } = require('./engine/skills/toolSkills') as typeof import('./engine/skills/toolSkills');
-      // AutoDE's own files never come from the source: a skill cannot ship its own trust (Phase S2).
-      fs.rmSync(path.join(targetDir.fsPath, lifecycle.SIDECAR_FILENAME), { force: true });
-      fs.rmSync(path.join(targetDir.fsPath, lifecycle.HISTORY_DIRNAME), { recursive: true, force: true });
-      const management = !!configManager.getSettings().toolSkillManagementEnabled;
-      lifecycle.recordImport(targetDir.fsPath, { source: 'local' }, skillActor(), { managementEnabled: management });
-      skillLog.appendLine(`${new Date().toISOString()} ${id}: imported (${management ? 'draft' : 'published'} v1, unreviewed).`);
-      const skill = loadToolSkill(targetDir.fsPath, id);
-      const toolsNote = skill.declaredTools?.length ? ` Declares tools: ${skill.declaredTools.join(', ')}.` : '';
-      const next = await vscode.window.showInformationMessage(
-        `Imported skill "${skill.name}" (id: ${id}, ${skill.resourceFiles.length} resource file(s)).${toolsNote} It is unreviewed${management ? ' and a draft' : ''}: review it before it can run.`,
-        'Review Now'
-      );
-      if (next === 'Review Now') { await vscode.commands.executeCommand(`${EXTENSION_ID}.reviewToolSkill`, id); }
-    } catch (err) {
-      vscode.window.showErrorMessage(`Import failed: ${err instanceof Error ? err.message : String(err)}. Make sure the folder contains a SKILL.md file.`);
-    }
+      const diff = port.diffSkill(dir, up.freshDir);
+      const commit = up.staged.provenance.resolvedCommit;
+      if (!diff.length) { vscode.window.showInformationMessage(`${state.skill.id} is up to date with its source${commit ? ` (commit ${commit.slice(0, 12)})` : ''}.`); return; }
+      const fresh = port.analyzeSkill(up.freshDir, state.sidecar.provenance.subpath ?? '', port.analysisContext(context.extensionPath, vscode.workspace.workspaceFolders![0].uri.fsPath, up.staged.dir));
+      const doc = [`# Update ${state.skill.id}${commit ? ` to commit ${commit.slice(0, 12)}` : ''}`, '', ...diff.map((d) => `## ${d.change}: ${d.path}\n\n${d.diff ? '```diff\n' + d.diff + '\n```' : ''}`), '', port.capabilityReport(fresh, up.staged.provenance)].join('\n');
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'markdown', content: doc }), { preview: true });
+      if (fresh.problems.length) { vscode.window.showErrorMessage(`The new version can't be imported: ${fresh.problems.join(' ')}`); return; }
+      const ok = await vscode.window.showWarningMessage(`Apply the update to ${state.skill.id}?`, { modal: true, detail: `${diff.length} file(s) change. The new content is unreviewed: it stops running, and leaves assignments and context packs, until you review it again.` }, 'Update');
+      if (ok !== 'Update') return;
+      port.applyUpdate(dir, up.staged, up.freshDir, fresh, skillActor());
+      skillLog.appendLine(`${new Date().toISOString()} ${state.skill.id}: updated from its source${commit ? ` (${commit.slice(0, 12)})` : ''}; unreviewed.`);
+      void vscode.commands.executeCommand(`${EXTENSION_ID}.refreshSkills`);
+      const next = await vscode.window.showInformationMessage(`${state.skill.id} updated; it is unreviewed.`, 'Review Now');
+      if (next === 'Review Now') await vscode.commands.executeCommand(`${EXTENSION_ID}.reviewToolSkill`, state.skill.id);
+    } finally { up.staged.cleanup(); }
   });
 
   // Lists imported tool skills and runs the chosen one with real tool access
@@ -1066,7 +1051,7 @@ export function activate(context: vscode.ExtensionContext): void {
     copilotHandoff,
     testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
-    importToolSkill, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
+    importToolSkill, updateToolSkill, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential,
     checkPlatformPrerequisites, installOracleDriver, verifyOracleDriver, setOraclePassword, configureMcp

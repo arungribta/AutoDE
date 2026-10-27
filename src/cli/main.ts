@@ -7,6 +7,8 @@ import { waitingForYou } from '../engine/approvals/waiting';
 import { Runbook, approveRunbook, checkRunbook, listRunbooks } from '../engine/runner/runbook';
 import { loadRunbookPolicy } from '../engine/runner/policy';
 import { CatalogEntry, CatalogGroup, Runner, probeInstaller, skillCatalog, spawnRunner } from '../engine/agents/skillCatalog';
+import * as port from '../engine/skills/port';
+import * as lifecycle from '../engine/skills/lifecycle';
 import { approveStageDocument, documentApprovalProblems, isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import * as readline from 'node:readline';
 import { parseArgs } from 'node:util';
@@ -205,6 +207,11 @@ Skills (AutoDE's own, this workspace's imported ones, interview packs, and the v
   skills show <name>           One skill: what it does, its stage kinds and platforms, licence, source, how to install
   skills check <name>          Probe an external skill's install command on this machine (nothing is installed)
   skills install <name>        (terminal) Run the vendor's own install command after you confirm, then check it worked
+  skills analyze <source> [--ref <r>] [--skill <path>]   Port a skill: what a skill in a folder, Git URL or dbt package does (nothing is copied)
+  skills import <source> [--ref <r>] [--skill <path>] [--replace]   Import it into this workspace, unreviewed
+  skills update <id>           (terminal) Re-fetch an imported skill from its source, show the diff, apply after you confirm
+  skills review <id> [--tier reviewed|trusted]   (terminal) Review an imported skill's current content
+  skills publish <id>          (terminal) Publish it (a skill with scripts or write tools must be reviewed first)
 
 Waiting for you:
   approvals [list]             Everything that waits for a person, in one list: decisions, facts to review, stage
@@ -278,6 +285,9 @@ const OPTIONS = {
   reason: { type: 'string' },
   host: { type: 'string' },
   group: { type: 'string' },
+  skill: { type: 'string' },
+  replace: { type: 'boolean' },
+  tier: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -958,6 +968,7 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: cat.errors.length === 0, skills: entries, errors: cat.errors }, [text || 'No skills.', ...cat.errors.map((e) => `✗ ${e}`)].join('\n'));
     return cat.errors.length ? EXIT.FAILED : EXIT.OK;
   }
+  if (['analyze', 'import', 'update', 'review', 'publish'].includes(sub)) return cmdPortSkill(ctx, sub, name);
   const e = cat.entries.find((x) => x.name === name);
   if (!name) throw new CliError(EXIT.USAGE, `skills ${sub} needs a skill name.`);
   if (!e) throw new CliError(EXIT.NOT_FOUND, `No skill "${name}" (see \`autode skills list\`).`);
@@ -991,7 +1002,77 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: found.length > 0, skill: e.name, exitCode: r.code, installed: found }, found.length ? `✓ ${e.name} is installed: ${found.join(', ')}` : `✗ ${e.installer.command.join(' ')} ${r.code === 0 ? 'finished' : `exited with ${r.code ?? r.error}`}, but ${e.name} wasn't found in a host's skills folder. Check the vendor's output above${e.installer.docs ? `, or ${e.installer.docs}` : ''}.`);
     return found.length ? EXIT.OK : EXIT.FAILED;
   }
-  throw new CliError(EXIT.USAGE, 'skills list | show <name> | check <name> | install <name>');
+  throw new CliError(EXIT.USAGE, 'skills list | show <name> | check <name> | install <name> | analyze <source> | import <source> | update <id> | review <id> | publish <id>');
+}
+
+/**
+ * Port a skill (PA4): analyze and import from a folder, a Git URL or a dbt package; update re-fetches and shows
+ * the diff; review and publish are a person's acts in a terminal.
+ */
+async function cmdPortSkill(ctx: Ctx, sub: string, arg: string | undefined): Promise<number> {
+  if (!arg) throw new CliError(EXIT.USAGE, sub === 'analyze' || sub === 'import' ? `skills ${sub} <folder | Git URL> [--ref <branch or tag>] [--skill <path in it>]${sub === 'import' ? ' [--replace]' : ''}` : `skills ${sub} <id>`);
+  const say = (text: string) => (ctx.json ? ctx.io.err : ctx.io.out)(text);
+  const by = (ctx.values.by ?? safeUsername()).trim();
+  if (sub === 'analyze' || sub === 'import') {
+    const isGit = /^(https:\/\/|git@|ssh:\/\/|file:\/\/)/.test(arg) || arg.endsWith('.git');
+    const kind = isGit ? 'git' : fs.existsSync(path.join(arg, 'dbt_project.yml')) || /[\\/]dbt_packages[\\/]/.test(arg) ? 'dbt' : 'local';
+    let run: port.PortRun;
+    try { run = port.portSource({ kind, location: arg, ref: ctx.values.ref }, { resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, subpath: ctx.values.skill }); }
+    catch (err) { if (err instanceof port.PortError) throw new CliError(EXIT.FAILED, err.message); throw err; }
+    try {
+      if (!run.analysis) {
+        emit(ctx, { ok: false, skills: run.skills }, `${run.skills.length} skills found; choose one with --skill:\n${run.skills.map((s) => `  ${(s.subpath || '.').padEnd(40)} ${s.name}: ${s.description.slice(0, 80)}`).join('\n')}`);
+        return EXIT.USAGE;
+      }
+      const a = run.analysis;
+      if (sub === 'analyze') { emit(ctx, { ok: a.problems.length === 0, analysis: a, provenance: run.staged.provenance }, run.report!); return a.problems.length ? EXIT.FAILED : EXIT.OK; }
+      if (a.problems.length) { emit(ctx, { ok: false, analysis: a }, `${run.report}\n✗ Not imported.`); return EXIT.REFUSED; }
+      let r: ReturnType<typeof port.importSkill>;
+      try { r = port.importSkill({ workspaceRoot: ctx.workspaceRoot, stagedDir: run.staged.dir, analysis: a, provenance: run.staged.provenance, by, managementEnabled: port.managementEnabledIn(ctx.workspaceRoot), replace: ctx.values.replace }); }
+      catch (err) { if (err instanceof port.PortError) throw new CliError(EXIT.REFUSED, err.message); throw err; }
+      emit(ctx, { ok: true, id: r.id, sidecar: r.sidecar, analysis: a }, `${run.report}\n✓ Imported as ${r.id} (${r.sidecar.status}, unreviewed). Next: \`autode skills review ${r.id}\` in your terminal${r.sidecar.status === 'draft' ? `, then \`autode skills publish ${r.id}\`` : ''}.`);
+      return EXIT.OK;
+    } finally { run.staged.cleanup(); }
+  }
+  const dir = path.join(port.toolSkillsDir(ctx.workspaceRoot), arg);
+  const state = lifecycle.loadToolSkillState(port.toolSkillsDir(ctx.workspaceRoot), arg, `user:${by}`);
+  if (!state) throw new CliError(EXIT.NOT_FOUND, `No imported skill "${arg}" (see \`autode skills list --group workspace\`).`);
+  if (sub === 'update') {
+    let up: ReturnType<typeof port.stageUpdate>;
+    try { up = port.stageUpdate(dir); } catch (err) { if (err instanceof port.PortError) throw new CliError(EXIT.FAILED, err.message); throw err; }
+    try {
+      const diff = port.diffSkill(dir, up.freshDir);
+      const commit = up.staged.provenance.resolvedCommit;
+      if (!diff.length) { emit(ctx, { ok: true, changed: false, commit }, `${arg} is up to date with its source${commit ? ` (commit ${commit.slice(0, 12)})` : ''}.`); return EXIT.OK; }
+      const fresh = port.analyzeSkill(up.freshDir, state.sidecar.provenance.subpath ?? '', port.analysisContext(ctx.resourcesRoot, ctx.workspaceRoot, up.staged.dir));
+      const text = [`Changes in ${arg}${commit ? ` (to commit ${commit.slice(0, 12)})` : ''}:`, ...diff.map((d) => `\n${d.change === 'removed' ? '-' : d.change === 'added' ? '+' : '~'} ${d.path}${d.diff ? `\n${d.diff}` : ''}`), '', port.capabilityReport(fresh, up.staged.provenance)].join('\n');
+      if (fresh.problems.length) { emit(ctx, { ok: false, diff, analysis: fresh }, `${text}\n✗ The new version can't be imported.`); return EXIT.REFUSED; }
+      requirePerson(ctx, 'Updating a skill', `Run \`autode skills update ${arg}\` in a terminal, or use Update Skill in VS Code.`);
+      say(text);
+      if ((await ctx.io.prompt(`The new content is unreviewed until you review it again. Type update to apply: `)).trim().toLowerCase() !== 'update') { say('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+      const sc = port.applyUpdate(dir, up.staged, up.freshDir, fresh, `user:${by}`);
+      emit(ctx, { ok: true, changed: true, sidecar: sc }, `✓ ${arg} updated; it is unreviewed. Next: \`autode skills review ${arg}\`.`);
+      return EXIT.OK;
+    } finally { up.staged.cleanup(); }
+  }
+  if (sub === 'review') {
+    const tier = (ctx.values.tier ?? 'reviewed') as lifecycle.TrustTier;
+    if (!lifecycle.TRUST_TIERS.includes(tier)) throw new CliError(EXIT.USAGE, `--tier is one of ${lifecycle.TRUST_TIERS.join(', ')}.`);
+    requirePerson(ctx, 'Reviewing a skill', 'Review it in VS Code (AutoDE: Review Tool Skill) or in a terminal.');
+    const a = port.readAnalysis(dir);
+    say([lifecycle.buildSkillReviewDocument(state, state.skill.declaredTools), a ? port.capabilityReport(a, state.sidecar.provenance) : ''].join('\n'));
+    if ((await ctx.io.prompt(`Type ${tier} to mark this content ${tier}: `)).trim().toLowerCase() !== tier) { say('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+    const sc = lifecycle.setTrustTier(dir, tier, `user:${by}`);
+    emit(ctx, { ok: true, sidecar: sc }, `✓ ${arg} is ${tier} for its current content.${sc.status === 'draft' ? ` Next: \`autode skills publish ${arg}\`.` : ''}`);
+    return EXIT.OK;
+  }
+  requirePerson(ctx, 'Publishing a skill', 'Publish it in VS Code (AutoDE: Publish Tool Skill) or in a terminal.');
+  if ((await ctx.io.prompt(`Publish ${arg} (${state.effectiveTier})? Type publish: `)).trim().toLowerCase() !== 'publish') { say('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+  try {
+    const r = lifecycle.publishToolSkill(dir, `user:${by}`);
+    emit(ctx, { ok: true, sidecar: r.sidecar }, `✓ ${arg} published as version ${r.sidecar.version}.`);
+    return EXIT.OK;
+  } catch (err) { throw new CliError(EXIT.REFUSED, err instanceof Error ? err.message : String(err)); }
 }
 
 function cmdPlugin(ctx: Ctx, rest: string[]): number {

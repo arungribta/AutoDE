@@ -7,7 +7,8 @@ import { parseYaml } from '../context/Yaml';
 import { STAGE_KINDS, StageKind, Tier, TIERS, tierRank } from '../workflows/stageKinds';
 import { readWorkflow } from '../workflows/instance';
 import { layoutPath } from '../workspaceLayout';
-import { PackSkill, RoleTemplate, loadRoles, loadSkillPack } from './definitions';
+import { PackSkill, RoleTemplate, loadRoles } from './definitions';
+import { stageSkills } from '../skills/port';
 
 /**
  * An assignment (PA3b): what the hub hands a spoke for one stage — the role
@@ -106,7 +107,8 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   const roleName = s.agent?.role ?? kind.roles[0];
   const { roles } = loadRoles(scope.resourcesRoot, scope.workspaceRoot);
   // The skills for this stage: those whose metadata names its kind and fit the problem's target platform (v0.45.5).
-  const { skills: pack } = loadSkillPack(scope.resourcesRoot);
+  // The team's imported skills join them once published and reviewed (PA4).
+  const pack = stageSkills(scope.resourcesRoot, scope.workspaceRoot);
   const problemRoot = layoutPath(scope.workspaceRoot, 'problems', scope.problemId);
   const platform = targetPlatform(problemRoot);
   const target = { platform, transformationTool: targetField(problemRoot, 'transformationTool') };
@@ -124,7 +126,7 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   // A role with several skills gets those for this stage (the source assessor: conformance on a conformance stage),
   // and the platform's skills for the kind even when its own list predates them.
   const own = role.skills.filter((id) => forKind.has(id));
-  const platformSkills = pack.filter((k) => fits(k) && (!k.meta.platforms.includes('any') || k.meta.scope === 'dbt')).map((k) => k.id);
+  const platformSkills = pack.filter((k) => fits(k) && (!k.meta.platforms.includes('any') || k.meta.scope === 'dbt' || k.meta.scope === 'team')).map((k) => k.id);
   const ownKind = own.length || platformSkills.length ? [...new Set([...own, ...platformSkills])] : role.skills;
   const wanted = s.agent?.skills?.length ? s.agent.skills : ownKind;
   const skills = pack.filter((k) => wanted.includes(k.id)).map((k) => ({ id: k.id, name: k.name, description: k.description, instructions: k.instructions, resources: k.resources }));

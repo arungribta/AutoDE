@@ -77,7 +77,7 @@ function listResourceFiles(dir: string): string[] {
     }
     for (const entry of entries) {
       const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
-      if (!relPrefix && (entry.name === '.autode-skill.json' || entry.name === '.autode-history')) continue;
+      if (!relPrefix && (entry.name === '.autode-skill.json' || entry.name === '.autode-history' || entry.name === '.autode-port.json')) continue;
       if (entry.isDirectory()) {
         walk(path.join(current, entry.name), rel);
       } else if (entry.isFile() && entry.name !== SKILL_FILENAME) {

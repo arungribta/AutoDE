@@ -16,6 +16,7 @@ Each document answers one kind of question. When two disagree, the precedence ru
 | How do I verify a release by hand? | [manual-verification.md](manual-verification.md) | F5 checklist for v0.25.0–v0.36.0, one part per version. |
 | Data formats | [schemas/](schemas/) | JSON Schemas for context envelopes and primitive definitions. |
 | Which skills does AutoDE have, and which vendor skills does it work with? | [skills.md](skills.md) | Generated catalog: AutoDE's skills, the interview packs, external skills with their licences and how to install them. |
+| How do I write my own skill, or bring in one written for another agent? | [skills-authoring.md](skills-authoring.md) | Knowledge and procedure skills, the Port a Skill wizard and CLI, licences, updates, and the limit on hosts. |
 | What do the Snowflake, Databricks, dbt and reconciliation skills do, and how are they tested and kept from changing a platform directly? | [platform-skills.md](platform-skills.md) | When a stage gets each platform skill, runbooks, the guard hook, vendor skills, and the worked-example check. |
 | What did the October 2026 code audit remove, and what is stranded or overlapping and waiting for a decision? | [code-audit-2026-10.md](code-audit-2026-10.md) | Dead code removed, with the reason for each; stranded and overlapping paths with recommendations; what stays parked for the roadmap. |
 | How is AutoDE measured? | [../test/reference/retail-orders/README.md](../test/reference/retail-orders/README.md) | Reference problem and `npm run eval`; frozen reports in `baselines/`. |

@@ -5,7 +5,7 @@ import { WorkflowScope, computeDraft, diffWorkflow, draftFrom, ensureWorkflow, h
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
 import { MAX_BRIEF, WorkflowInstance, readWorkflow } from '../engine/workflows/instance';
 import { STAGE_KINDS } from '../engine/workflows/stageKinds';
-import { loadSkillPack } from '../engine/agents/definitions';
+import { stageSkills } from '../engine/skills/port';
 import { layoutPath } from '../engine/workspaceLayout';
 import { Actor } from '../engine/workflows/events';
 import { ToolInfo, assignmentFor, skillFits, targetPlatform } from '../engine/agents/assignment';
@@ -66,7 +66,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         const { workflow, template, suggestion } = computeDraft(scope, args.template as string | undefined);
         const current = readWorkflow(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
         const platform = targetPlatform(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
-        const pack = loadSkillPack(scope.resourcesRoot).skills;
+        const pack = stageSkills(scope.resourcesRoot, scope.workspaceRoot);
         const kinds = [...new Set(workflow.stages.map((s) => s.kind))].map((k) => ({
           kind: k, roles: STAGE_KINDS[k].roles, ceiling: STAGE_KINDS[k].ceiling, doneWhen: STAGE_KINDS[k].doneWhen,
           skills: pack.filter((s) => skillFits(s, k, { platform })).map((s) => s.id)

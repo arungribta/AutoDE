@@ -40,6 +40,8 @@ export interface ContextPackSources {
   catalogRevisions?: Record<string, string>;
   /** The estate catalog beyond the working set (Phase K2): ranked, vocabulary-aware retrieval. */
   catalog?: CatalogLookup;
+  /** Published, reviewed knowledge skills of the team (PA4); those matching the query join the pack. */
+  knowledgeSkills?: ReadonlyArray<{ id: string; name: string; description: string; text: string }>;
 }
 
 export interface PackManifest {
@@ -62,6 +64,8 @@ export interface PackManifest {
   warnings: string[];
   /** Catalog objects rendered from the catalog because they were not in the working set yet; the host promotes them (Phase K2). */
   promoted?: string[];
+  /** Knowledge skills the pack included (PA4). */
+  knowledgeSkills?: string[];
 }
 
 export interface ContextPack {
@@ -156,9 +160,11 @@ export function buildContextPack(request: ContextPackRequest, input: ContextPack
     for (const f of sources.runtimeFacts) parts.push(`- **${f.label}**: ${f.text}`);
   }
 
+  const knowledge = matchKnowledgeSkills(request.query, sources.knowledgeSkills);
+  const knowledgeBudget = knowledge.length ? Math.floor(maxTokens / 4) : 0;
   const result = seeds.length === 0
     ? renderOverview(sources, idx)
-    : renderSeeded(seeds, purpose, maxTokens - estimatePackTokens(parts.join('\n')), sources, idx, gaps);
+    : renderSeeded(seeds, purpose, maxTokens - knowledgeBudget - estimatePackTokens(parts.join('\n')), sources, idx, gaps);
   if (seeds.length === 0 && gaps.length > 0) {
     // Nothing resolved to a loaded object, but something is known to be missing: say so.
     result.lines.push('### Warnings', ...gaps.map((g) => `- **Context gap:** ${describeGap(g)}`));
@@ -173,6 +179,7 @@ export function buildContextPack(request: ContextPackRequest, input: ContextPack
     result.warnings.push(...fromCatalog.invisible.map((f) => `invisible:${f}`));
   }
   if (result.lines.length > 0) parts.push(...result.lines);
+  const usedKnowledge = renderKnowledge(knowledge, knowledgeBudget, parts);
 
   const text = parts.join('\n');
   const assertionIds = new Set<string>();
@@ -194,7 +201,8 @@ export function buildContextPack(request: ContextPackRequest, input: ContextPack
     maxTokens,
     gaps,
     warnings: result.warnings,
-    ...(fromCatalog && fromCatalog.promoted.length > 0 ? { promoted: fromCatalog.promoted.filter((id) => result.nodeIds.includes(id)) } : {})
+    ...(fromCatalog && fromCatalog.promoted.length > 0 ? { promoted: fromCatalog.promoted.filter((id) => result.nodeIds.includes(id)) } : {}),
+    ...(usedKnowledge.length ? { knowledgeSkills: usedKnowledge } : {})
   };
   const packId = 'pack-' + createHash('sha256').update(canonicalJson({ purpose, seeds, query: request.query, stepId: request.stepId, text })).digest('hex').slice(0, 20);
   return { text, manifest: { packId, ...manifestCore } };
@@ -438,6 +446,41 @@ function renderSeeded(seeds: string[], purpose: PackPurpose, budget: number, sou
   return { lines, nodeIds: [...new Set(nodeIds)], extraAssertions: [...new Set(extra)], truncated, warnings };
 }
 
+const KNOWLEDGE_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'when', 'use', 'are', 'its', 'each', 'any', 'skill', 'data', 'how', 'what', 'which', 'all']);
+const knowledgeWords = (t: string) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !KNOWLEDGE_STOP.has(w)));
+
+/** Knowledge skills whose name or description share words with the query, best first (at most two). */
+export function matchKnowledgeSkills(query: string | undefined, skills: ContextPackSources['knowledgeSkills']): Array<{ id: string; name: string; text: string }> {
+  if (!query || !skills?.length) return [];
+  const q = knowledgeWords(query);
+  return skills
+    .map((s) => { const w = knowledgeWords(`${s.name} ${s.id.replace(/-/g, ' ')} ${s.description}`); let n = 0; for (const x of q) if (w.has(x)) n++; return { s, n }; })
+    .filter((x) => x.n >= 2 || (x.n >= 1 && q.size <= 3))
+    .sort((a, b) => b.n - a.n || a.s.id.localeCompare(b.s.id))
+    .slice(0, 2)
+    .map((x) => ({ id: x.s.id, name: x.s.name, text: x.s.text }));
+}
+
+/** Appends the matched knowledge skills within their budget, cutting the last one short when needed; returns the ids included. */
+function renderKnowledge(skills: Array<{ id: string; name: string; text: string }>, budget: number, parts: string[]): string[] {
+  if (!skills.length || budget <= 0) return [];
+  const used: string[] = [];
+  let left = budget - estimatePackTokens('## Team Knowledge');
+  const block: string[] = ['## Team Knowledge'];
+  for (const s of skills) {
+    const head = `### ${s.name} (skill \`${s.id}\`)`;
+    left -= estimatePackTokens(head);
+    if (left <= 20) break;
+    let text = s.text.trim();
+    if (estimatePackTokens(text) > left) text = text.slice(0, Math.max(0, left * 4 - 30)) + '\n… (cut to fit the pack)';
+    block.push(head, text);
+    left -= estimatePackTokens(text);
+    used.push(s.id);
+  }
+  if (used.length) parts.push(...block);
+  return used;
+}
+
 /** Renders a manifest as readable markdown ("What the agent saw"). */
 export function renderPackManifest(pack: ContextPack, title: string): string {
   const m = pack.manifest;
@@ -449,6 +492,7 @@ export function renderPackManifest(pack: ContextPack, title: string): string {
   const tr = Object.entries(m.truncated).filter(([, n]) => n > 0);
   if (tr.length) L.push(`- **Left out:** ${tr.map(([k, n]) => `${n} ${k}`).join(', ')}`);
   if (m.gaps.length) L.push(`- **Context gaps:** ${m.gaps.map(describeGap).join(' ')}`);
+  if (m.knowledgeSkills?.length) L.push(`- **Team knowledge:** ${m.knowledgeSkills.map((s) => `\`${s}\``).join(', ')}`);
   L.push('', '## Context as sent', '', '```markdown', pack.text, '```');
   return L.join('\n') + '\n';
 }

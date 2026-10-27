@@ -20,6 +20,7 @@ import { primitiveCandidates, CandidateColumn } from '../engine/agents/primitive
 import { reconcilePlan } from '../engine/agents/reconcilePlan';
 import { targetPlatform } from '../engine/agents/assignment';
 import { skillCatalog } from '../engine/agents/skillCatalog';
+import * as port from '../engine/skills/port';
 import { waitingForYou } from '../engine/approvals/waiting';
 import { factView } from '../engine/context/factReview';
 import { isMirror } from '../engine/context/projection';
@@ -124,6 +125,31 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
       handler: async (args, ws) => {
         const r = skillCatalog({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot, home: process.env.AUTODE_HOME ?? os.homedir() });
         return { skills: r.entries.filter((e) => !args.group || e.group === args.group), errors: r.errors } as unknown as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_skills_analyze',
+      description: "Port a skill, first step: what a skill in a Git repository (https) or a workspace folder would do in AutoDE — knowledge (guidance that joins context packs) or procedure (carried out with tools), the tools it declares and how they map to AutoDE's, the CLIs and MCP servers it needs, its scripts, licence, overlaps with existing skills, and a capability report. Nothing is copied into the workspace. Several skills in one source are listed; pass `skill` (a path from that list) to analyse one. Importing, reviewing and publishing are a person's acts (`autode skills import|review|publish` in a terminal, or Port a Skill in VS Code).",
+      inputSchema: { type: 'object', required: ['source'], additionalProperties: false, properties: {
+        source: { type: 'string', minLength: 1, description: 'An https Git URL, or a folder relative to the workspace.' },
+        ref: { type: 'string', minLength: 1, description: 'Branch or tag (Git only).' },
+        skill: { type: 'string', description: 'The skill\'s path inside the source, when it has several.' }
+      } },
+      annotations: { ...read('Analyze a skill'), openWorldHint: true },
+      handler: async (args, ws) => {
+        const src = String(args.source);
+        const git = /^https:\/\//.test(src);
+        if (!git && /^[a-z]+:\/\/|^git@/i.test(src)) throw new EngineToolError('VALIDATION_FAILED', 'Over MCP a Git source is an https URL; use the CLI for SSH.');
+        const location = git ? src : ws.resolveInWorkspace(src);
+        let run: port.PortRun;
+        try { run = port.portSource({ kind: git ? 'git' : 'local', location, ref: args.ref as string | undefined }, { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot, subpath: args.skill as string | undefined }); }
+        catch (err) { if (err instanceof port.PortError) throw new EngineToolError('VALIDATION_FAILED', err.message); throw err; }
+        try {
+          const provenance = git ? run.staged.provenance : { ...run.staged.provenance, location: src };
+          return (run.analysis
+            ? { analysis: { ...run.analysis }, report: run.report, provenance, next: run.analysis.problems.length ? 'It can\'t be imported (see problems).' : 'A person imports it: `autode skills import` in a terminal, or Port a Skill in VS Code.' }
+            : { skills: run.skills, next: 'Several skills: call again with `skill` set to one of their paths.' }) as unknown as Record<string, unknown>;
+        } finally { run.staged.cleanup(); }
       }
     },
     {

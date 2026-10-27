@@ -630,7 +630,7 @@ Manifest checks per host run in `npm test`. Cortex Code's agent file details are
 | v0.45.0 | **PA3b: roles, briefs, skills** | Role templates and the skills pack; the planner and generated briefs with tier checks; the deterministic helper tools; the in-process executor; every TypeScript agent replaced and **deleted in the same release**; interview state on disk; agent prompts over MCP; the plugin folder and `autode plugin install`. |
 | backlog (was v0.46.0; parked 2026-10-27) | **PA3c: approvals in the host, same outcome measured** | Elicitation approvals and the policy file; host-agent eval (a scripted host, plus cassettes recorded with a real host's model; this closes the backlog item "record cassettes with the host's model"); parity tests in `npm test`. |
 
-PA4 (port a skill) follows PA3c, by the owner's decision of 2026-10-21. GOV, C5, 6 and C6 move back by two versions.
+PA4 (port a skill) follows PA3c, by the owner's decision of 2026-10-21. GOV, C5, 6 and C6 move back by two versions. PA3c was parked in the backlog on 2026-10-27, and PA4 shipped first, as v0.46.0.
 
 ##### 12. Acceptance
 
@@ -656,30 +656,8 @@ PA4 (port a skill) follows PA3c, by the owner's decision of 2026-10-21. GOV, C5,
 - The host-agent eval meets VS Code's thresholds on the reference problem: traps, contract violations, answerability, grounding, plan quality against the expected stages.
 
 #### Phase PA4: Port a skill — a guided step in the panel, no code
-Scope (absorbs S3):
-- **Sources:**
-  - a local folder;
-  - a Git URL (shallow clone; file-count and byte caps checked before anything is copied; path-traversal check; `resolvedCommit` recorded);
-  - skills shipped in dbt packages.
 
-  `SkillFormatImporter`, with the Agent Skills parser as the default.
-- **Analysis.** Deterministic: frontmatter, declared tools, scripts, resources, size, overlaps with installed skills. Model-assisted, presented as a proposal for review, never applied:
-  - classification (*knowledge*, usable as context in AutoDE's packs; *procedure*, run by an agent);
-  - mapping of the tools the skill mentions to AutoDE tools;
-  - external prerequisites (CLIs, MCP servers), reusing DRV1's prerequisite model.
-- **Capability report:** what the skill does, which of its actions become approval-gated decisions, what it reads, whether it runs scripts, and the limit of §3.1 for skills that write or execute.
-- **Review and trust** (S2, bound to the content checksum), an optional dry run on a sample workspace, then publish. A skill that runs scripts or commands is never published without review.
-- **Update Skill** re-fetches, shows a diff and resets trust to unreviewed. Never silent.
-- **Optional hardening:** AutoDE may suggest turning a repeated deterministic procedure in a skill into a primitive or tool. The skill works without it.
-- **Starter library and authoring guide:** the PA3 pack plus curated examples; authoring docs covering skills, tools and proposals.
-- **CLI:** `autode skills import` runs the deterministic analysis and writes the report. Publishing needs a human channel.
-
-Acceptance:
-- Importing a fixture skill from a local bare repository produces a report listing mapped tools and prerequisites; the skill stays unpublished until reviewed.
-- An oversized or path-escaping repository is rejected before anything is copied.
-- A knowledge skill appears as context in a relevant context pack. A procedure skill's state changes reach AutoDE only as proposals.
-- Update shows a diff and requires re-approval.
-- The whole flow runs from the panel with no code or file editing (a test drives the webview messages).
+*Shipped v0.46.0.* What was built, and the deviations (no dry run yet; the Agent Skills format is the only importer; over MCP the host's model reads the skill, no sampling; no suggestion to turn procedures into primitives): CHANGELOG 0.46.0. Requirements SKL-5 and SKL-7; design: technical-design.md, *Port a skill*; guide: skills-authoring.md. The specification as approved is in git (this file before v0.46.0).
 
 ---
 

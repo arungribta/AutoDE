@@ -6,8 +6,29 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
-## Unreleased
+## 0.46.0
 
+- **PA4: port a skill** (mcp-engine §9.2; SKL-5, SKL-7). A data engineer brings a skill written for any agent into AutoDE without code, from a Git repository, a folder or a dbt package. Guide: [docs/skills-authoring.md](docs/skills-authoring.md).
+  - **Staging.** A Git repository is cloned shallow without checkout into a temporary folder. Its file list is checked before anything is checked out: at most 2,000 files and 30 MB (5 MB per file), no path that leaves the repository, no symbolic links, no submodules. The commit is recorded. A folder is walked with the same checks. Nothing reaches the workspace before import.
+  - **Analysis** (deterministic): frontmatter; declared tools and the AutoDE tools they map to, and those with no counterpart; AutoDE engine tools and other MCP servers it names; the CLIs its instructions run, with AutoDE's install guide where there is one (Snowflake and Databricks CLIs); scripts and resources; the licence (a non-redistributable one, such as the Databricks License, refuses the import; an unrecognised one is a warning); overlaps with imported and AutoDE skills; and its kind, *knowledge* or *procedure*.
+  - **The model's proposal.** Where a model is configured, the panel can ask it for the kind, a tool mapping and prerequisites. It stays a proposal until the person accepts it (as proposed or with the other kind) or rejects it.
+  - **Capability report:** what it is, where it came from and under which licence; what it reads; which of its changes become approval-gated decisions; whether it writes files or runs scripts and commands; the limit of §3.1 for skills that write or execute; what it needs; overlaps; problems and warnings.
+  - **Import** copies the skill into `.autode/config/skills/tool-skills/<id>/`, unreviewed, with its provenance (source, location or repository and commit, licence) and the analysis beside it (`.autode-port.json`, not part of the content checksum).
+  - **Publishing needs review when a skill acts on its own:** a skill with scripts, or tools that write or run commands, is not published while its content is unreviewed (`lifecycle.publishToolSkill`). With *Tool Skill Management* off there are no drafts, as before: an import becomes usable once reviewed.
+  - **Update Skill** re-fetches from the recorded source, shows the diff file by file, and applies only when the person confirms. The new content is unreviewed (a new `update` transition), so it stops running and leaves assignments and context packs until reviewed again.
+  - **Knowledge skills in context packs.** Published, reviewed knowledge skills whose name or description match a pack's question join it under *Team Knowledge* (at most two, a quarter of the budget, cut to fit), and the manifest names them. Both the panel's packs and the MCP server's include them.
+  - **One lifecycle.** Imported skills that declare `metadata.stageKinds` join the assignments of those stages once published and reviewed, next to AutoDE's skills (AutoDE's win a name clash). They add instructions, never tools. The plan check and `autode_workflow_draft` know them too. The catalog gives imported skills the same fields as AutoDE's: stage kinds, platforms, scope `team`, kind, licence and source.
+  - **Surfaces:**
+    - **VS Code:** *AutoDE: Port a Skill…* (the **+** on the Skills view) opens a wizard: source, choose, what it does, import, then review and publish. It replaces the folder-only *Import Tool Skill*, keeping its command id. *Update Skill from Its Source…* is the sync button on an imported skill. *Open Skill Source* reveals a local source folder.
+    - **CLI:** `autode skills analyze | import <source> [--ref] [--skill] [--replace]`, and `update | review [--tier] | publish <id>`. Update, review and publish are a person's acts in a terminal. Imports follow the workspace's *Tool Skill Management* setting (`.vscode/settings.json`).
+    - **MCP:** `autode_skills_analyze` (read only: an https Git URL or a workspace folder; SSH and paths outside the workspace are refused).
+  - **Starter examples** in `examples/skills/` (shipped in the extension; *Try AutoDE's examples* in the wizard): `team-sql-conventions` (knowledge) and `table-freshness-check` (procedure, with a script). The tests use them as fixtures.
+  - **Deviations:**
+    - No optional dry run on a sample workspace yet.
+    - The *Agent Skills* format is the only importer; there is no `SkillFormatImporter` interface until a second format is needed.
+    - Over MCP the host's own model reads the skill; MCP sampling isn't used.
+    - AutoDE doesn't yet suggest turning a skill's repeated procedure into a primitive.
+  - **Measured:** 370 tests (3 new: the port engine with a fake hostile Git tree, knowledge skills and Update Skill, and the CLI, MCP and wizard end to end; the assignment test also covers imported skills). Lint: 0 errors, 21 warnings (was 22; an unused folder-copy helper went with the old import).
 - **The manual-verification kit** (`npm run manual:kit`, `scripts/manual-kit.cjs`). It builds a ready workspace from the reference problem, next to the repo:
   - the sources and the pack's documents (a BRD, a glossary, and a house-format contract with no profile yet);
   - a connection template;

@@ -20,6 +20,7 @@
 !media/sidebar.html
 !media/workflow.html
 !media/runbook.html
+!media/port-skill.html
 !media/editors/*.html
 # Bundled interview skills and Tier-2 primitives; JSON Schemas for yamlValidation.
 !skills/*.json
@@ -28,6 +29,8 @@
 !workflows/*.yaml
 !prerequisites.yaml
 !agents/*.md
+# Starter skills for Port a Skill (PA4): one knowledge skill, one procedure skill.
+!examples/skills/**
 !skills/*/**
 !skills/external.yaml
 !docs/schemas/*.json
