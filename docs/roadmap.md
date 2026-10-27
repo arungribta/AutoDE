@@ -51,12 +51,11 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.45.12 | ✅ **PA3b step 5** Business analyst (interview state on disk, BPS-7; the interview packs become `autode-de-*` skills; chat attachments move into the pack) and the planner's briefs | [mcp-engine §9.2](mcp-engine-requirements.md) | |
 | v0.45.13 | ✅ **PA3b step 6** Context curator (chat fact extraction, document reading, vocabulary proposals) | [mcp-engine §9.2](mcp-engine-requirements.md) | |
 | v0.45.14 | ✅ **Code audit follow-ups**: one path for the build stage's Pipeline Spec (Run agent); source assessment through named connections and the estate; refresh on use before a stage (`autode_refresh_working_set`); palette aliases removed; the catalog uses `checkDefinitions` | [code-audit-2026-10.md](code-audit-2026-10.md) | Owner, 2026-10-26: all recommendations accepted. |
-| v0.46.0 | **PA3c** Approvals inside the host (MCP elicitation, per-team policy); host-agent eval with host-recorded cassettes; parity tests | [mcp-engine §9.2](mcp-engine-requirements.md) | Measures "same outcome" across hosts. |
-| v0.47.0 | **PA4** Port a skill: guided panel step (import from folder, Git or dbt package; analysis; capability report; review and trust; publish; update with diff); absorbs S3 | [mcp-engine §9.2](mcp-engine-requirements.md) | A data engineer adds a capability without code or hand-splitting. |
-| v0.48.0 | **GOV** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | [mcp-engine §9.1](mcp-engine-requirements.md) | Built as a skill plus tools and proposals. Required by C5/C6 grounding checks and PII expectations. |
-| v0.49.0 | **C5** Semantic model | [context-layer §6, §11](context-layer-requirements.md) | Built on confirmed/verified assertions; also carries the merge semantics (correspondence, survivorship, conformed dimensions). Built in the §3.1 style. |
-| v0.50.0 | **6** Skill and primitive governance hardening | [mcp-engine §9](mcp-engine-requirements.md) | S3's import work moved to PA4. |
-| v0.51.0 | **C6** Freshness, context health, release evaluation | [context-layer §8, §11](context-layer-requirements.md) | Final metric targets; eval report becomes a release gate. |
+| v0.46.0 | **PA4** Port a skill: guided panel step (import from folder, Git or dbt package; analysis; capability report; review and trust; publish; update with diff); absorbs S3 | [mcp-engine §9.2](mcp-engine-requirements.md) | A data engineer adds a capability without code or hand-splitting. |
+| v0.47.0 | **GOV** Governance-as-code: `mask` primitive, sensitivity in specs, governance interview | [mcp-engine §9.1](mcp-engine-requirements.md) | Built as a skill plus tools and proposals. Required by C5/C6 grounding checks and PII expectations. |
+| v0.48.0 | **C5** Semantic model | [context-layer §6, §11](context-layer-requirements.md) | Built on confirmed/verified assertions; also carries the merge semantics (correspondence, survivorship, conformed dimensions). Built in the §3.1 style. |
+| v0.49.0 | **6** Skill and primitive governance hardening | [mcp-engine §9](mcp-engine-requirements.md) | S3's import work moved to PA4. |
+| v0.50.0 | **C6** Freshness, context health, release evaluation | [context-layer §8, §11](context-layer-requirements.md) | Final metric targets; eval report becomes a release gate. |
 | tbd | **M1–M3** Migration track: assessment; bulk mapping and generation (importing external code-converter output); reconciliation and cutover | not yet written | Agreed in outline 2026-10-15; specified and positioned after K and C4a. |
 | tbd | **RET** Embeddings as an optional, opt-in ranking signal | not yet written | Not scheduled (K2 measured 17/21 and 8/8; the misses are free paraphrases — decision log 2026-10-15). Reconsidered if real engagements show paraphrase misses that C4a's vocabulary capture does not fix. |
 
@@ -74,10 +73,10 @@ Every item from the retired backlog and checklist of the previous requirements.m
 
 | Item | From | Notes |
 |---|---|---|
+| **PA3c: approvals inside the host and the host-agent eval** (MCP elicitation under a per-team policy in `approvals.yaml`; parity tests across surfaces; a scripted host; host-recorded cassettes after a cost dry run) | was v0.46.0 | Parked by the owner on 2026-10-27: not urgent yet, and the owner plans changes to the MCP side first. Spec: mcp-engine §9.2 PA3 §6 and §12 (PA3c). |
 | **Tier-1 primitives emit Snowflake syntax for every dialect** | — | Found by v0.35.0's golden snapshots: `dedup` uses `SELECT * EXCEPT (…)` (Snowflake, BigQuery and Databricks only) and `CREATE OR REPLACE VIEW` (not T-SQL) for every dialect. The snapshots pin today's output; phase 6 (per-dialect `platforms` and the conformance suite) is where it gets fixed and the snapshots updated. |
 | One-time consent dialog for programmatic LLM use | §16.4 | Today only an opt-in setting exists. |
 | Opt-in telemetry + privacy/data-flow note | §16.4 | `telemetryEnabled` is read; nothing reports. |
-| Interview (intake) session survives a reload | §16.5 | Still in memory only (BPS-7). Not done in C4a or C4b (C4b persists the facts stated in interview answers, not the session). Natural home: PA3, when the interview becomes an AutoDE skill. |
 | Spec revision fallback keeps the comprehensive fields | §16.5 | The emergency path re-drafts with the older single-shot generator. |
 | Search, tags and export in the chat history browser | §16.7 | The sidebar history dropdown with resume exists (v0.13.0). |
 | Context drawer surfaces layers, rules, relationships read-only | §16.6, §15 | Partly done. |
@@ -153,6 +152,7 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 
 | Date | Decision |
 |---|---|
+| 2026-10-27 | **PA3c parked; PA4 next** (owner). Approvals inside the host and the host-agent eval aren't urgent yet, and the owner plans changes to the MCP side first, so PA3c moves to the backlog. PA4 (port a skill) becomes v0.46.0, and GOV, C5, 6 and C6 move up one version. The manual checks of Parts 36–39 are still pending; PA4 goes ahead before them by the owner's choice (PA4 builds on the skills, catalog and plugin those parts check). |
 | 2026-10-14 | P6 is "no *automatic* downloads": opt-in, integrity-checked driver acquisition (now DRV) is allowed. |
 | 2026-10-15 | Reorder: K and C4a before S2 and the MCP track; C4 split into C4a and C4b — estate merge and legacy migration/modernisation are the common customer engagements. |
 | 2026-10-15 | A business problem is text, a document or a document set (often non-standard, e.g. a house-format contract YAML); AutoDE builds the spec from it, closes gaps by discovery and validation first, and interviews last. |
