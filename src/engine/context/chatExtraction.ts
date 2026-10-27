@@ -68,7 +68,7 @@ export function buildChatExtractionPrompt(turn: Pick<ChatTurn, 'text' | 'previou
  * thrown. Subjects are resolved deterministically; an unresolved one is kept
  * as said and flagged `unresolved_subject`.
  */
-export function parseChatExtraction(raw: unknown, turn: ChatTurn, resolve: (ref: string) => string | undefined): ChatExtractionOutcome {
+export function parseChatExtraction(raw: unknown, turn: ChatTurn, resolve: (ref: string) => string | undefined, options: { model?: string } = {}): ChatExtractionOutcome {
   const out: ChatExtractionOutcome = { proposed: [], dropped: [], duplicates: [] };
   const facts = raw && typeof raw === 'object' && Array.isArray((raw as { facts?: unknown }).facts) ? (raw as { facts: unknown[] }).facts : [];
   if (raw !== undefined && !(raw && typeof raw === 'object' && Array.isArray((raw as { facts?: unknown }).facts))) out.dropped.push('the response had no "facts" list');
@@ -87,6 +87,7 @@ export function parseChatExtraction(raw: unknown, turn: ChatTurn, resolve: (ref:
         ...(turn.actions ?? []).slice(0, 5).map((a) => ({ type: 'user_edit' as const, ref: a }))
       ],
       trust: 'inferred', status: 'proposed', createdBy: `extractor:${turn.source}`,
+      ...(options.model ? { model: options.model } : {}),
       ...(unresolved.length ? { flags: ['unresolved_subject'] } : {})
     };
     const errors = validateAssertion(candidate);
@@ -126,7 +127,7 @@ export function linkCorrections(proposed: NewAssertion[], existing: readonly Ass
 }
 
 /** Records proposals (corrections linked, duplicates skipped). `supersedes` is kept on the proposal; nothing is retired yet. */
-export async function recordChatProposals(ledger: AssertionLedger, outcome: ChatExtractionOutcome): Promise<{ recorded: Assertion[]; corrections: Array<{ statement: string; supersedes: string }> }> {
+export async function recordChatProposals(ledger: AssertionLedger, outcome: ChatExtractionOutcome, options: { admit?: (a: NewAssertion) => NewAssertion } = {}): Promise<{ recorded: Assertion[]; corrections: Array<{ statement: string; supersedes: string }> }> {
   const existing = ledger.assertions();
   const key = (a: Pick<NewAssertion, 'kind' | 'subject' | 'predicate' | 'value'>) => canonicalJson([a.kind, a.subject.map((s) => s.toLowerCase()).sort(), a.predicate, valueKey(a.kind, a.value)]);
   const known = new Set(existing.filter((a) => isLive(a.status) || a.status === 'proposed').map(key));
@@ -138,7 +139,8 @@ export async function recordChatProposals(ledger: AssertionLedger, outcome: Chat
     fresh.push(p);
   }
   const corrections = linkCorrections(fresh, existing);
-  const events = fresh.map((p) => ledger.buildAsserted(p));
+  // A correction keeps waiting for a person in any mode: it retires a fact only once confirmed.
+  const events = fresh.map((p) => ledger.buildAsserted(options.admit && !p.supersedes ? options.admit(p) : p));
   await ledger.append(events);
   return { recorded: events.map((e) => ledger.get(e.assertionId)).filter((a): a is Assertion => !!a), corrections };
 }
@@ -158,7 +160,7 @@ export interface ExtractionRun {
  * One extraction, end to end. Never throws: whatever fails is reported in
  * `error`, because extraction must never block or fail a chat turn.
  */
-export async function extractFromTurn(input: { turn: ChatTurn; ledger: AssertionLedger; resolve: (ref: string) => string | undefined; complete: CompleteJson; timeoutMs?: number }): Promise<ExtractionRun> {
+export async function extractFromTurn(input: { turn: ChatTurn; ledger: AssertionLedger; resolve: (ref: string) => string | undefined; complete: CompleteJson; timeoutMs?: number; model?: string; admit?: (a: NewAssertion) => NewAssertion }): Promise<ExtractionRun> {
   const empty: ExtractionRun = { recorded: [], dropped: [], duplicates: [], corrections: [] };
   try {
     if (!input.turn.text.trim() || input.turn.text.trim().startsWith('/')) return empty;
@@ -169,8 +171,8 @@ export async function extractFromTurn(input: { turn: ChatTurn; ledger: Assertion
       input.complete(system, user, 'Extract the facts the engineer stated'),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`no answer within ${Math.round(timeout / 1000)} s`)), timeout).unref?.())
     ]);
-    const outcome = parseChatExtraction(raw, input.turn, input.resolve);
-    const { recorded, corrections } = await recordChatProposals(input.ledger, outcome);
+    const outcome = parseChatExtraction(raw, input.turn, input.resolve, { model: input.model });
+    const { recorded, corrections } = await recordChatProposals(input.ledger, outcome, { admit: input.admit });
     return { recorded, dropped: outcome.dropped, duplicates: outcome.duplicates, corrections };
   } catch (err) {
     return { ...empty, error: err instanceof Error ? err.message : String(err) };

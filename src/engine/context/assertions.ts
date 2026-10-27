@@ -30,10 +30,17 @@ export const ASSERTION_KINDS: readonly AssertionKind[] = [
 ];
 
 export type AssertionStatus = 'proposed' | 'active' | 'rejected' | 'superseded' | 'needs_review';
-export type TrustTier = 'verified' | 'confirmed' | 'documented' | 'inferred';
+/**
+ * `assumed` (C4c, exploration mode, §7.4): a model's proposal or best guess
+ * taken as true without a person, in an exploration problem. Live, but below
+ * `documented`, so governed checks never accept it.
+ */
+export type TrustTier = 'verified' | 'confirmed' | 'documented' | 'assumed' | 'inferred';
+
+export const TRUST_TIERS: readonly TrustTier[] = ['verified', 'confirmed', 'documented', 'assumed', 'inferred'];
 
 export interface Evidence {
-  type: 'chat_message' | 'interview_answer' | 'attachment' | 'file' | 'introspection' | 'probe' | 'spec_field' | 'user_edit';
+  type: 'chat_message' | 'interview_answer' | 'attachment' | 'file' | 'introspection' | 'probe' | 'spec_field' | 'user_edit' | 'model';
   /** chat id + message index, file path + line range, probe id, spec path, ... */
   ref: string;
   /** ≤ 300 chars quote of the evidence. */
@@ -80,9 +87,13 @@ export interface Assertion {
   flags?: string[];
   /** Why the assertion was last flagged / rejected (from the folding event). */
   reviewReason?: string;
+  /** C4c: the model that extracted or guessed it (§5.5 item 5); absent for people, parsers and probes. */
+  model?: string;
+  /** C4c: other sources that stated the same fact (folded from `corroborated` events). */
+  corroboratedBy?: string[];
 }
 
-const TRUST_RANK: Record<TrustTier, number> = { verified: 4, confirmed: 3, documented: 2, inferred: 1 };
+const TRUST_RANK: Record<TrustTier, number> = { verified: 5, confirmed: 4, documented: 3, assumed: 2, inferred: 1 };
 
 export function trustRank(tier: TrustTier): number {
   return TRUST_RANK[tier] ?? 0;
@@ -102,6 +113,7 @@ export function trustToConfidence(tier: TrustTier): number {
     case 'verified': return 1.0;
     case 'confirmed': return 0.9;
     case 'documented': return 0.8;
+    case 'assumed': return 0.6;
     default: return 0.5;
   }
 }

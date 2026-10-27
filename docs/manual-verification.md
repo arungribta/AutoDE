@@ -8,8 +8,10 @@ Time: about 90 minutes for Parts 1–8, of which Part 7 (a full plan run) takes 
 
 ---
 
-## Part 0 — Setup (once)
-
+## Part 0 — Setup (once)
+
+
+
 > **The kit (since v0.45.14).** `npm run compile && npm run manual:kit` does this setup for Parts 36 on and more. It builds a workspace next to the repo (`../autode-manual-test`; `--out <folder>` to choose, `--force` to make it again) from the reference problem: the sources, the pack's documents, a connection template, and the AutoDE plugin installed for Claude Code with its guard hook. It then runs, in a throwaway copy, every step that needs no person, no VS Code and no live platform, and writes `MANUAL-KIT.md` in the workspace. That file lists what passed or failed, and for each check what is left for you and whether this machine can run it (VS Code, Claude Code, the Snowflake and Databricks CLIs). Start from that file; the steps below are the manual equivalent.
 
 1. **Build.** In the AutoDE repo: `rm -rf dist && npm run compile`.
@@ -1008,6 +1010,30 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: with `allowSampleDataInPrompts: true` on a connection, classify a column whose name says nothing (e.g. `cust_ref`) as pii, then ask an agent to query a few rows.
   Expect: `cust_ref` comes back masked.
 
+## Part 42 — v0.48.0 Capture coverage and exploration mode
+
+- [ ] **42.1 The checklist.**
+  Do: in the kit's problem (after the specification), run *AutoDE: Capture Coverage*; then `autode coverage`.
+  Expect: every table the specification names is listed with key, grain, change column, load pattern, classification, relationships and description; *net revenue* and the retention metric are listed as missing their definition; every item not known ends with what to do. The CLI prints the same.
+- [ ] **42.2 Candidates from the data.**
+  Do: with the pack's samples added, run *AutoDE: Find Candidates from Data* (or `autode capture candidates --record`).
+  Expect: `crm.customers.shop_customer_id → shop.customers.customer_id` passes; `crm.loyalty_members.cust_no → crm.customers.cust_no` fails with orphans; the declared key of `crm.customers` is reported broken (C-20003 twice); e-mail and phone columns are found by their values; the passing facts wait in the Context Inbox already verified.
+- [ ] **42.3 Documents.**
+  Do: apply the BRD in the panel; then add a Markdown data dictionary with a `| Column | Description | PK |` table and apply it.
+  Expect: every fact the BRD gave cites a quote that is in its section; the dictionary's rows become documented proposals without a model call for them; applying a copy of the dictionary under another file name adds no new facts, and `autode facts show <id>` on one of them lists both files as evidence.
+- [ ] **42.4 The conversation, reviewed.**
+  Do: in chat, say "order_id is unique across channels" and "a customer is retained if they order again within 90 days"; type `/review`; then `/review dismiss 1`; then start a New Chat.
+  Expect: the messages no fact cites are listed with their cue (one the background extraction already recorded is not listed); the dismissed one is not listed again; New Chat says how many the closed chat left.
+- [ ] **42.5 Exploration mode on.**
+  Do: on the Business Problem card choose *Explore…* and acknowledge; run an agent on a mapping stage that has a context gap.
+  Expect: a banner in the panel and the Workflow view; the agent records an assumption (`autode facts list --all` shows it active, trust assumed) and continues; the deliverable's first line says it was built on unverified assumptions; its `.grounding.json` has `"exploration": true`; approving the stage takes one click.
+- [ ] **42.6 Checks warn; production is refused.**
+  Do: approve a target context built for an older specification version; propose and try to approve a runbook on a connection not listed under dev, sandbox or test.
+  Expect: the target context is approved with a warning that names the check; the runbook is refused because exploration targets non-production only.
+- [ ] **42.7 Back to governed.**
+  Do: *Switch to governed* on the card (or `autode problems mode governed`).
+  Expect: a hardening list opens with the assumption, the model-only facts and the warned check; approving the same target context now refuses.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1257,5 +1283,12 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 41.4 |  |  |
 | 41.5 |  |  |
 | 41.6 |  |  |
+| 42.1 |  |  |
+| 42.2 |  |  |
+| 42.3 |  |  |
+| 42.4 |  |  |
+| 42.5 |  |  |
+| 42.6 |  |  |
+| 42.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

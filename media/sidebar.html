@@ -394,6 +394,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     </div>
   </div>
 
+  <div id="explorationTopBanner" style="display:none;padding:4px 10px;font-size:11px;border-bottom:1px solid var(--border);border-left:3px solid var(--vscode-editorWarning-foreground);">⚠ Exploration mode: built on unverified assumptions; results may be completely wrong.</div>
   <!-- ═══ MAIN CONTENT ═══ -->
   <div class="main-content">
     <div class="chat-stream" id="chatStream">
@@ -580,6 +581,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   let targetContext = null;
   let sourceContext = null;
   let activeProblemId = null;
+  let problemModeState = { mode: 'governed', pending: false };
   let businessProblems = [];
   let problemSwitcherOpen = false;
 
@@ -940,6 +942,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
               '<button id="paletteSwitchProblemBtn" class="icon-btn" title="Switch business problem">⇄ Switch</button>' +
             '</div>' +
           '</div>' +
+          (problemModeState.mode === 'exploration'
+            ? '<div class="exploration-banner" style="margin-top:8px;padding:6px 8px;border-left:3px solid var(--vscode-editorWarning-foreground);background:var(--vscode-inputValidation-warningBackground, transparent);font-size:11px;">⚠ Exploration mode' + (problemModeState.pending ? ' (for the new problem)' : '') + ': built on unverified assumptions; results may be completely wrong. <a href="#" id="paletteGovernBtn">Switch to governed</a></div>'
+            : '<div class="spec-field-meta" style="margin-top:6px;">Mode: governed · <a href="#" id="paletteExploreBtn" title="Proceed on the model\'s recorded assumptions (POC/POV), under a disclaimer">Explore…</a></div>') +
           '<div id="paletteProblemList" style="margin-top:8px;">' + listHtml + '</div>' +
         '</div>' +
       '</div>';
@@ -951,6 +956,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         post('startNewBusinessProblem');
       };
     }
+    var exploreBtn = paletteProblems.querySelector('#paletteExploreBtn');
+    if (exploreBtn) { exploreBtn.onclick = function (e) { e.preventDefault(); post('setProblemMode', { mode: 'exploration' }); }; }
+    var governBtn = paletteProblems.querySelector('#paletteGovernBtn');
+    if (governBtn) { governBtn.onclick = function (e) { e.preventDefault(); post('setProblemMode', { mode: 'governed' }); }; }
     var switchBtn = paletteProblems.querySelector('#paletteSwitchProblemBtn');
     if (switchBtn) {
       switchBtn.onclick = function () {
@@ -1807,6 +1816,12 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         renderSourceEnvNote();
         break;
       case 'businessProblemsList': businessProblems = msg.problems || []; renderPaletteProblems(); break;
+      case 'problemMode':
+        problemModeState = { mode: msg.mode || 'governed', pending: !!msg.pending };
+        renderPaletteProblems();
+        var topBanner = document.getElementById('explorationTopBanner');
+        if (topBanner) { topBanner.style.display = problemModeState.mode === 'exploration' ? 'block' : 'none'; }
+        break;
       case 'specHistory': showSpecHistory(msg.text, msg.error); break;
       case 'chatSessionLoaded': loadChatSession(msg.meta, msg.transcript); break;
       case 'chatSessionsList': renderChatHistoryDropdown(msg.sessions, msg.activeChatId); break;

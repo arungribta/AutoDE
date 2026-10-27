@@ -683,6 +683,36 @@ Each one is `proposed`, `createdBy: user:capture`, subject `project` where there
 - `autode_verify_assertion` builds a `createSqlProbeExecutor()` on the named connection (its dialect from the platform) with `createProbeResolver()`, and records the outcome.
 - `autode_extract_assertions` (prompt) is the extraction prompt plus instructions to read existing facts with `autode_list_assertions` and submit with `autode_propose_assertion`.
 
+### 5.15 Capture coverage and exploration mode (v0.48.0; CTX-13, ORC-11)
+
+Capture coverage (context-layer §5.5) and exploration mode (§7.4). Deterministic everywhere except where a model reads text or guesses at a gap; every surface calls the same engine functions.
+
+**Modules.**
+
+| Module | Does |
+|---|---|
+| `src/engine/context/coverage.ts` | `inScopeTables` (the specification's text through `resolveText`, plus the mapping's sources), `specMetricNames` (fixed business nouns), `captureCoverage` → `CoverageReport` (items per table and metric, each with a status and an action), `renderCoverage`. |
+| `src/engine/context/dataCandidates.ts` | `tableShapes`, `keyColumnCandidates`, `foreignKeyCandidates`, `changeColumnCandidates`, `knownKey`; `findCandidates` runs the probes; `recordCandidates` appends an `asserted` event and, when it passed, a `verified` event in one write. |
+| `src/engine/context/capture.ts` | The per-problem wrappers the panel, CLI and MCP share: `problemCoverage`, `problemCandidates`, `packSampleExecutor`. |
+| `src/engine/context/probes.ts` | New check `shape` (`VALUE_SHAPES.email`, `.phone`; regular expressions without backslashes so they mean the same in every dialect's literal; ANSI has only the e-mail `LIKE`). Pass at ≥ 80 % of non-null values. |
+| `src/engine/context/documentExtraction.ts` | Prompt asks for `quote` per fact and a `sections` report; `parseDocumentExtraction` drops unsupported quotes (`normalizeQuote`) and returns `reread`; `agreeingReadings` (double reading); `parseDocumentDeterministic` (tables and phrases); `recordWithAgreement` (dedup by `factKey`, `corroborated` from another source). |
+| `src/engine/context/sessionReview.ts` | `factCue`, `unrecordedStatements`, dismissals in `.autode/local/session-review.json`. |
+| `src/engine/documents/problemMode.ts` | `problemMode`, `setProblemMode` (`<problem>/mode.yaml`), `admitForMode`, `recordAssumption`, `recordWarnedCheck` (`<problem>/exploration-warnings.jsonl`), `hardeningReport`, `explorationEnvironmentProblem`, `explorationHeader`. |
+
+**Ledger.** Trust gains `assumed` between `documented` and `inferred` (ranks 5…1; `TRUST_TIERS`). `Assertion.model` and `NewAssertion.model` record the extracting model. A `corroborated` event adds evidence and the agreeing actor (`corroboratedBy`); older readers ignore it.
+
+**Where the mode applies.**
+- *Admission:* `BusinessPackManager` (documents), `recordChatProposals` and `extractFromTurn` (chat, `/review record`), the panel's capture commands, `autode_propose_assertion`, `recordCandidates` all take an `admit` function; `admitForMode` turns a proposed, non-person fact into an active one at `assumed` (a verified one keeps `verified`). Corrections are never admitted.
+- *Gaps:* `stageGapsFrom(gaps, kind, mode)` drops a gap whose best trust is `assumed` or more in exploration; `renderStageGaps(gaps, mode)` tells the agent to stop and ask (governed) or to record an assumption and continue (exploration). `Assignment.mode` adds an *Exploration mode* section. `toolsForTier` grants `autode_record_assumption` to roles that may propose facts; the tool refuses in a governed problem.
+- *Approval checks:* `documentApprovalCheck` splits each stage document's problems into hard (no document, no statement, no mappings, an invalid Pipeline Spec) and soft (another specification version, a source context with no source, unmasked or undeclared sensitive columns). Governed: all refuse. Exploration: soft ones warn, are recorded with `recordWarnedCheck`, and are named in the approval message.
+- *One click:* the Workflow view and the panel skip their confirmation dialog; the CLI asks `[y/N]` for gate decisions and stage documents.
+- *Never relaxed:* `approveRunbook` and `runStep` refuse a production environment for an exploration problem; nothing else in the runner, the policy, `gateQueryResult` or the connection checks reads the mode.
+- *Labels:* `recordArtifact` prepends `explorationHeader(file)` and sets `GroundingManifest.exploration`; the sidebar and Workflow view show a banner from a `problemMode` message.
+
+**Panel.** `WebviewProvider.switchProblemMode` (modal with the disclaimer; before the problem's folder exists the choice is held and applied in `ensureActiveProblem`), `reviewSession` (`/review`), `noteUnrecorded` (on *New Chat*), `captureCoverageMarkdown`, `findCandidatesFromData`; commands `captureCoverage`, `findCandidates`; setting `capture.doubleExtraction` read by `BusinessPackManager.applyDocument`, which also re-reads unaccounted sections once.
+
+**CLI and MCP.** `autode coverage`, `autode capture candidates [--connection] [--record]`, `autode problems new --exploration`, `autode problems mode [exploration|governed]`, `autode problems hardening`. MCP: `autode_capture_coverage` and `autode_review_session` (read), `autode_find_candidates` (records proposals; probes), `autode_record_assumption` (exploration only); `autode_pack_reading` takes `sections`, `autode_pack_record_reading` takes `sections`, `reread` and `model`.
+
 ## 6. Data Platforms
 
 ### 6.1 Design Rationale
@@ -1662,6 +1692,7 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 <!-- generated:settings -->
 | Setting | Type | Default | What it does |
 |---|---|---|---|
+| `capture.doubleExtraction` | boolean | `false` | Read each business document twice and keep keys, grain and relationships only where the two readings agree (C4c). |
 | `defaultProvider` | enum: `snowflake`, `databricks`, `oracle`, `bigquery`, `redshift`, `synapse`, `other` | `"snowflake"` | Default data platform provider. |
 | `defaultDatabricksWorkspaceUrl` | string | `""` | Default Databricks workspace host (e.g. adb-1234567890123456.7.azuredatabricks.net). |
 | `defaultDatabricksHttpPath` | string | `""` | The target SQL warehouse's HTTP Path (e.g. /sql/1.0/warehouses/0123456789abcdef), copied from its Connection Details page. |
@@ -1837,11 +1868,11 @@ src/engine/agents/    # role templates, skills, assignments, the skill catalog, 
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)
   waiting.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion
-  assertions.ts, assertionSchemas.ts, businessPackManager.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, problemContexts.ts, profiles.ts, projection.ts, retrieval.ts, sourceFiles.ts, types.ts, vocabulary.ts, Yaml.ts
+  assertions.ts, assertionSchemas.ts, businessPackManager.ts, capture.ts, catalog.ts, chatExtraction.ts, conflicts.ts, conformance.ts, contextFileManager.ts, contextGaps.ts, contextPack.ts, contextStore.ts, ContextValidator.ts, contracts.ts, coverage.ts, dataCandidates.ts, discoveryGaps.ts, documentExtraction.ts, estate.ts, estateIngest.ts, factReview.ts, fileIngestion.ts, graphManager.ts, graphPersistence.ts, ledger.ts, pack.ts, packChecks.ts, probes.ts, problemContexts.ts, profiles.ts, projection.ts, retrieval.ts, sessionReview.ts, sourceFiles.ts, types.ts, vocabulary.ts, Yaml.ts
 src/engine/decisions/
   decisionStore.ts, proposals.ts
 src/engine/documents/
-  problemDocuments.ts, problems.ts, problemSlug.ts
+  problemDocuments.ts, problemMode.ts, problems.ts, problemSlug.ts
 src/engine/governance/
   governance.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports

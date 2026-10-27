@@ -6,7 +6,7 @@ import { generateDesignDoc } from '../engine/pipelineSpec/designDocGenerator';
 import { PipelineSpec } from '../engine/pipelineSpec/types';
 import { resolveText } from '../engine/context/retrieval';
 import { PackPurpose, buildContextPack } from '../engine/context/contextPack';
-import { ASSERTION_KINDS, AssertionStatus, TrustTier } from '../engine/context/assertions';
+import { ASSERTION_KINDS, AssertionStatus, TRUST_TIERS, TrustTier } from '../engine/context/assertions';
 import { isMirror } from '../engine/context/projection';
 import { buildSchemaIndex, checkSqlGrounding } from '../engine/grounding/sqlGrounding';
 import { UNSCOPED_PROBLEM, outputDirSegments } from '../engine/workspaceLayout';
@@ -40,7 +40,7 @@ export interface EngineTool {
 export const SQL_DIALECTS: readonly SqlDialect[] = ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'ansi'];
 const PACK_PURPOSES: readonly PackPurpose[] = ['interview', 'spec', 'plan', 'step', 'chat', 'qa'];
 const STATUSES: readonly AssertionStatus[] = ['proposed', 'active', 'rejected', 'superseded', 'needs_review'];
-const TRUSTS: readonly TrustTier[] = ['verified', 'confirmed', 'documented', 'inferred'];
+const TRUSTS: readonly TrustTier[] = TRUST_TIERS;
 
 const readOnly = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 

@@ -4,6 +4,7 @@ import { StageKind } from '../engine/workflows/stageKinds';
 import { isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import { stageReadiness } from '../engine/workflows/readiness';
 import { StageGap, stageGapQuery, stageGapsFrom } from '../engine/agents/stageGaps';
+import { problemMode } from '../engine/documents/problemMode';
 import { ContextGap } from '../engine/context/contextGaps';
 import { Assignment, assignmentFor } from '../engine/agents/assignment';
 import { completeStage, startStage, WorkflowError } from '../engine/workflows/runtime';
@@ -42,7 +43,7 @@ export async function stageGaps(engine: EngineAccess, problemRoot: string, kind:
   try {
     const r = await (await engine.toolSetNamed(['autode_get_context_pack'])).call('autode_get_context_pack', { purpose: 'step', query });
     if (r.isError) return [];
-    return stageGapsFrom(((JSON.parse(r.text) as { manifest?: { gaps?: ContextGap[] } }).manifest?.gaps) ?? [], kind);
+    return stageGapsFrom(((JSON.parse(r.text) as { manifest?: { gaps?: ContextGap[] } }).manifest?.gaps) ?? [], kind, problemMode(problemRoot));
   } catch { return []; }
 }
 

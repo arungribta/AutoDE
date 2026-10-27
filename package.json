@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.47.0",
+  "version": "0.48.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -172,6 +172,14 @@
       {
         "command": "autoDataEngineeringHub.classifyPersonalData",
         "title": "AutoDE: Classify Personal Data…"
+      },
+      {
+        "command": "autoDataEngineeringHub.captureCoverage",
+        "title": "AutoDE: Capture Coverage"
+      },
+      {
+        "command": "autoDataEngineeringHub.findCandidates",
+        "title": "AutoDE: Find Candidates from Data"
       },
       {
         "command": "autoDataEngineeringHub.runToolSkill",
@@ -389,6 +397,11 @@
     "configuration": {
       "title": "AutoDE",
       "properties": {
+        "autoDataEngineeringHub.capture.doubleExtraction": {
+          "type": "boolean",
+          "default": false,
+          "description": "Read each business document twice and keep keys, grain and relationships only where the two readings agree (C4c). Doubles the model calls for documents."
+        },
         "autoDataEngineeringHub.defaultProvider": {
           "type": "string",
           "enum": [

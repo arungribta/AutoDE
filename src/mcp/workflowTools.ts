@@ -12,6 +12,7 @@ import { ToolInfo, assignmentFor, skillFits, targetPlatform } from '../engine/ag
 import { recordArtifact } from '../engine/agents/artifacts';
 import { stageReadiness } from '../engine/workflows/readiness';
 import { stageContextGaps } from '../engine/agents/stageGaps';
+import { problemMode } from '../engine/documents/problemMode';
 
 /**
  * The workflow over MCP (PA3a): the runtime is the hub; an agent asks what to
@@ -96,7 +97,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         // PA3b: the full assignment when a skill does the stage's kind; otherwise why not (a person does it).
         if (next.stage.status === 'awaiting-approval') return { next, assignment: null };
         // The joins, keys and grain the stage's context doesn't back go into its assignment (v0.45.9).
-        const gaps = stageContextGaps(sources, { problemRoot: rctx(ws).problemRoot, kind: next.stage.kind, title: next.stage.title });
+        const gaps = stageContextGaps(sources, { problemRoot: rctx(ws).problemRoot, kind: next.stage.kind, title: next.stage.title, mode: problemMode(rctx(ws).problemRoot) });
         const a = assignmentFor(scope, next.stage.id, allTools(), { gaps });
         // The same check the panel's Run agent makes (v0.45.8): say what's missing before the agent starts.
         const notReady = stageReadiness({ workspaceRoot: scope.workspaceRoot, problemRoot: rctx(ws).problemRoot, kind: next.stage.kind });

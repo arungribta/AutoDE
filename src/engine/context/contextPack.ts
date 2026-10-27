@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { BaseNode, BusinessRuleNode, BusinessTermNode, ColumnNode, GraphEdge, TableNode, VerifiedQueryNode } from './types';
-import { Assertion, TrustTier, canonicalJson, isLive, trustRank } from './assertions';
+import { Assertion, TRUST_TIERS, TrustTier, canonicalJson, isLive, trustRank } from './assertions';
 import { Conflict } from './conflicts';
 import { isMirror } from './projection';
 import { GraphView, TextMatch, expandNeighborhood, resolveText } from './retrieval';
@@ -75,7 +75,7 @@ export interface ContextPack {
 
 const HOPS: Record<PackPurpose, number> = { interview: 1, spec: 1, plan: 1, step: 2, chat: 1, qa: 1 };
 const BUDGET: Record<PackPurpose, number> = { interview: 1500, spec: 2000, plan: 2500, step: 3000, chat: 2000, qa: 2500 };
-const TRUST_WEIGHT: Record<TrustTier, number> = { verified: 1.0, confirmed: 0.95, documented: 0.7, inferred: 0.4 };
+const TRUST_WEIGHT: Record<TrustTier, number> = { verified: 1.0, confirmed: 0.95, documented: 0.7, assumed: 0.5, inferred: 0.4 };
 
 /** char/4, the same heuristic as `core/tokenBudget.ts`. */
 export function estimatePackTokens(text: string): number {
@@ -488,7 +488,7 @@ export function renderPackManifest(pack: ContextPack, title: string): string {
   L.push(`- **Pack:** \`${m.packId}\` (${m.purpose}, ${m.mode}), ${m.tokenCount} of ${m.maxTokens} tokens`);
   if (m.query) L.push(`- **Task:** ${m.query}`);
   L.push(`- **Seeds:** ${m.seeds.length ? m.seeds.map((s) => `\`${s}\``).join(', ') : '_none — project overview_'}`);
-  L.push(`- **Assertions relied on:** ${m.assertions.length} (${(['verified', 'confirmed', 'documented', 'inferred'] as TrustTier[]).map((t) => `${m.assertions.filter((a) => a.trust === t).length} ${t}`).join(', ')})`);
+  L.push(`- **Assertions relied on:** ${m.assertions.length} (${TRUST_TIERS.map((t) => `${m.assertions.filter((a) => a.trust === t).length} ${t}`).join(', ')})`);
   const tr = Object.entries(m.truncated).filter(([, n]) => n > 0);
   if (tr.length) L.push(`- **Left out:** ${tr.map(([k, n]) => `${n} ${k}`).join(', ')}`);
   if (m.gaps.length) L.push(`- **Context gaps:** ${m.gaps.map(describeGap).join(' ')}`);

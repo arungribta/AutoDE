@@ -6,6 +6,7 @@ import { checkSingleStatement } from '../platform/sqlGuard';
 import { foreignDialect } from '../platform/dialectMarkers';
 import { ConnectionEntry } from '../platform/connectionsConfig';
 import { EnvironmentPolicy, RunbookPolicy, StepClass, approvalsNeeded, approverProblem, environmentOf } from './policy';
+import { explorationEnvironmentProblem } from '../documents/problemMode';
 
 /**
  * Runbooks (v0.45.6; owner, 2026-10-22): everything that changes a data
@@ -247,6 +248,8 @@ export function validApprovals(r: RunbookRecord): RunbookRecord['approvals'] {
 export function approveRunbook(problemRoot: string, r: RunbookRecord, who: string, channel: string, policy: RunbookPolicy, now = new Date()): { record?: RunbookRecord; problem?: string } {
   if (r.revision !== runbookRevision(r.runbook)) return { problem: 'The runbook was changed after it was checked: propose it again.' };
   const env = environmentOf(policy, r.runbook.connectionId);
+  const exploring = explorationEnvironmentProblem(problemRoot, env.name);
+  if (exploring) return { problem: exploring };
   const earlier = validApprovals(r).map((a) => a.by);
   const problem = approverProblem(env, who, earlier);
   if (problem) return { problem };

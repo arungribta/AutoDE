@@ -6,6 +6,38 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.48.0
+
+- **C4c: capture coverage and verification** (context-layer §5.5; CTX-13). Capture no longer depends on the model to find facts, to decide what should be known, or to be believed unchecked.
+  - **The completeness checklist** (`src/engine/context/coverage.ts`). From the specification (and the mapping, when there is one) and the estate, AutoDE lists every table in scope with its key, grain, change column, load pattern, personal-data classification, relationships to the other tables in scope and business description, and every metric the specification names with its definition, grain and filters. Each item is *known*, *proposed*, *assumed*, a *candidate* or *missing*, and every item not known carries its action: a probe, a confirmation, a question or a classification. Tables in scope are resolved from the specification's text the way context packs resolve it; metric names come from fixed business nouns (revenue, retention, churn, margin …). Surfaces: *AutoDE: Capture Coverage*, `autode coverage`, `autode_capture_coverage`.
+  - **The data before any model** (`dataCandidates.ts`). Candidate keys (columns named like a key, at most three per table, the first that is unique and never null in the data wins), grain from that key, foreign keys (a column with another table's key name, `<table>_<key>`, or `<schema>_<key>`, with compatible types; checked by the orphan probe), change columns (by name and type) and personal data by value shape (a new fixed `shape` probe for e-mail addresses and phone numbers, counts only). Declared keys are probed too, and a declared key the data breaks is reported. Those that pass are recorded as proposed facts that arrive `verified`; a person confirms what they mean. Personal data stays a person's classification. Surfaces: *AutoDE: Find Candidates from Data*, `autode capture candidates [--connection] [--record]`, `autode_find_candidates`.
+  - **Documents.**
+    - **Quote check:** every fact the model reads quotes its section word for word (case, spacing and emphasis aside); a fact whose quote isn't there is dropped as unsupported.
+    - **Section accounting:** the model reports on every section; a section it neither reported on nor took a fact from is read again, on its own, once (in the panel automatically; over MCP the answer says which sections to read again).
+    - **Deterministic first:** Markdown tables with a column-name header (a data dictionary: description, key, unique, required or nullable) and fixed phrases ("must be unique", "is never null", "is required", "has one row per") are read without a model, as documented proposals. Free text with no model available (`autode pack apply`) still yields these.
+    - **Agreement:** the same fact from a second document adds its evidence to the first (a new `corroborated` ledger event) instead of being skipped.
+    - **Double reading** (setting `capture.doubleExtraction`, off by default): keys, grain and relationships are kept only where two readings agree.
+  - **Model provenance:** facts extracted from chat, documents and MCP proposals record the model (`Assertion.model`).
+  - **The conversation, reviewed:** `/review` in chat lists the messages that read like facts (fixed cues: keys, grain, definitions, joins, rules, decisions, thresholds) and have no fact citing them; `/review record <n>` has the model read one again, `/review dismiss <n>|all` drops them. Closing a chat says how many it left. Over MCP, `autode_review_session` does the same for a host's conversation.
+- **Exploration mode** (context-layer §7.4; ORC-11), per business problem.
+  - **Switching** is a person's act, with the disclaimer acknowledged and recorded (`<problem>/mode.yaml`, kept apart from the specification so switching never makes stages stale): the panel's Business Problem card (*Explore…*; before the first message it applies to the new problem), or `autode problems new --exploration` and `autode problems mode exploration|governed` in a terminal (type `explore` or `governed`).
+  - **Assume and continue:** an agent's assignment says the problem is exploratory; at a context gap it records its best guess with `autode_record_assumption` (the fact, at a new `assumed` trust tier, flagged `assumption`, with the model, the stage and the reason) and continues. An assumed fact closes the gap in exploration only. Refused in a governed problem, where the assignment says to stop and ask.
+  - **Model proposals count at once:** facts from chat, documents, MCP proposals, capture commands and data candidates are recorded live at `assumed` trust (a verified one stays verified), flagged `exploration`. A correction still waits for a person.
+  - **Checks warn:** approving a stage's document no longer refuses for another specification version, a source context with no source, or an unmasked sensitive column; the approval says what warned and records it.
+  - **Gates take one click:** no confirmation dialog in the panel or the Workflow view; `y` instead of a typed word in a terminal. Still a person, still recorded.
+  - **Labels:** a banner in the panel and the Workflow view; a first line in every deliverable an agent records; `exploration: true` in its grounding manifest; a section in every agent assignment.
+  - **Never relaxed:** an exploration problem's runbooks may target only non-production environments (a connection no environment lists counts as production), refused at approval and at run time; runbook policy, sample-data consent, secrets and rollbacks are unchanged (tested in both modes).
+  - **Hardening:** switching back to governed lists the assumptions, the model-only facts and the checks that only warned (`autode problems hardening` at any time). Governed checks don't accept `assumed` trust, so they block until each is confirmed or replaced.
+- **Deviations:**
+  - An assumption is recorded as a fact of the kind the gap needs (a relationship, a key, a grain) flagged `assumption`, not as a fact of kind `assumption`, so the gap closes and later stages use it.
+  - Completeness doesn't block a governed approval yet: it is a to-do list in both modes, and the hardening list. Blocking on it waits for the semantic layer's checks (C5).
+  - Grounding checks already only warned on recorded deliverables, so exploration mode changes nothing there.
+  - Metric names in the specification are found by fixed nouns, so a metric named otherwise ("bookings") isn't listed until a metric fact names it.
+  - The panel's mode control is on the Business Problem card; there is no separate creation dialog.
+  - In a workspace shared by several problems, an assumed fact is live for all of them (it carries the problem's specification id); governed checks never accept it.
+  - The per-model benchmark and corrections counted as misses are C6, as specified.
+- **Measured:** 379 tests (7 new: the checklist on the reference problem; candidates from the reference samples; quotes, re-reads, parsing, agreement and double reading; the conversation review; exploration mode end to end; never relaxed, in both modes; CLI and MCP). Lint: 0 errors, 21 warnings. Eval unchanged.
+
 ## 0.47.0
 
 - **GOV: governance as code** (mcp-engine §9.1; SEC-4, SEC-5).

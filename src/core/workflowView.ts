@@ -6,6 +6,7 @@ import { WaitingItem } from '../engine/approvals/waiting';
 import { stageDetail, WorkflowScope } from '../engine/workflows/service';
 import { actorLabel } from '../engine/workflows/events';
 import { layoutPath } from '../engine/workspaceLayout';
+import { EXPLORATION_LABEL, problemMode } from '../engine/documents/problemMode';
 
 /**
  * The Workflow view (v0.44.1): a tree in AutoDE's activity bar, a full editor
@@ -141,7 +142,8 @@ export class WorkflowPanel {
       const d = stageDetail(scope, s.id);
       return [s.id, d ? { ...d, history: d.history.map((e) => ({ ...e, who: actorLabel(e.actor) })), decision: d.decision ? { ...d.decision, events: d.decision.events } : undefined } : undefined];
     }));
-    void this.panel.webview.postMessage({ type: 'model', model, details, selected: this.selected ?? model.next?.id ?? model.stages[0]?.id });
+    const exploration = problemMode(layoutPath(scope.workspaceRoot, 'problems', scope.problemId)) === 'exploration';
+    void this.panel.webview.postMessage({ type: 'model', model, details, selected: this.selected ?? model.next?.id ?? model.stages[0]?.id, exploration: exploration ? EXPLORATION_LABEL : undefined });
   }
 
   private async onMessage(m: { type: string; stage?: string; decisionId?: string; template?: string; action?: string; file?: string }): Promise<void> {
@@ -153,8 +155,12 @@ export class WorkflowPanel {
         case 'approve': case 'reject': {
           if (!m.decisionId) return;
           const verb = m.type === 'approve' ? 'Approve' : 'Reject';
-          const ok = await vscode.window.showWarningMessage(`${verb} this as ${this.host.user()}?`, { modal: true, detail: 'You are approving as a person in VS Code (the panel channel). It is recorded with your name in the decision and the workflow history.' }, verb);
-          if (ok !== verb) return;
+          // C4c: in exploration mode a gate takes one click (still a person, still recorded).
+          const oneClick = !!scope && problemMode(layoutPath(scope.workspaceRoot, 'problems', scope.problemId)) === 'exploration';
+          if (!oneClick) {
+            const ok = await vscode.window.showWarningMessage(`${verb} this as ${this.host.user()}?`, { modal: true, detail: 'You are approving as a person in VS Code (the panel channel). It is recorded with your name in the decision and the workflow history.' }, verb);
+            if (ok !== verb) return;
+          }
           await this.host.resolve(m.decisionId, m.type === 'approve' ? 'approved' : 'rejected');
           break;
         }

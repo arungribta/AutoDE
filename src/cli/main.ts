@@ -15,6 +15,10 @@ import { problemMappings } from '../engine/agents/modelDraft';
 import { approveStageDocument, documentApprovalProblems, isDocumentStage, stageDocumentFile } from '../engine/workflows/documentApproval';
 import * as readline from 'node:readline';
 import { parseArgs } from 'node:util';
+import { EXPLORATION_DISCLAIMER, hardeningReport, problemMode, renderHardening, setProblemMode } from '../engine/documents/problemMode';
+import { problemCandidates, problemCoverage } from '../engine/context/capture';
+import { renderCoverage } from '../engine/context/coverage';
+import { describeFinding } from '../engine/context/dataCandidates';
 import { EngineWorkspace } from '../mcp/workspace';
 import { EngineTool, SQL_DIALECTS, TOOLS } from '../mcp/tools';
 import { EngineToolError, redact, toEnvelope } from '../mcp/errors';
@@ -151,7 +155,10 @@ Deterministic (never change AutoDE's state):
 
 Business problems:
   problems list                Every business problem; * marks the active one
-  problems new "<statement>"   Start one: a first draft specification, made active
+  problems new "<statement>" [--exploration]   Start one: a first draft specification, made active
+                               (--exploration, terminal: proceed on recorded assumptions, under a disclaimer)
+  problems mode [exploration|governed]   (terminal) Show or switch the active problem's mode
+  problems hardening           What exploration mode left to confirm: assumptions, model-only facts, checks that only warned
   problems use <id>            Make another one active (the AutoDE panel follows)
   interview show               The requirements interview: parts covered, open questions, answers and who gave them
   interview answer <question-id> "<answer>"   Answer an open question (the panel and agent hosts continue from it)
@@ -182,6 +189,10 @@ Knowledge (confirming, rejecting, editing and adding are a person's: interactive
   facts reject <id> [--note <text>]
   facts edit <id> [--statement <text>] [--value <json>]   Correct it, confirmed
   facts conflicts              Contradicting facts
+
+Capture coverage:
+  coverage                     What a complete picture of the problem needs, per table and metric: known, proposed, assumed, missing, and the action for each
+  capture candidates [--connection <id>] [--record]   Keys, foreign keys, grain, change columns and personal data from the data, each probed
 
 Governance (personal data):
   governance show [--table <t>]   Columns that look like personal data, and how each is classified
@@ -297,6 +308,8 @@ const OPTIONS = {
   tier: { type: 'string' },
   as: { type: 'string' },
   strategy: { type: 'string' },
+  exploration: { type: 'boolean' },
+  record: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -358,6 +371,8 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'estate': return await cmdEstate(ctx, rest);
       case 'facts': return await cmdFacts(ctx, rest);
       case 'governance': return await cmdGovernance(ctx, rest);
+      case 'coverage': return await cmdCoverage(ctx);
+      case 'capture': return await cmdCapture(ctx, rest);
       case 'workflow': return await cmdWorkflow(ctx, rest);
       case 'pack': return await cmdPack(ctx, rest);
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
@@ -698,8 +713,10 @@ async function cmdDecisions(ctx: Ctx, rest: string[]): Promise<number> {
   const decision = sub === 'approve' ? 'approved' : 'rejected';
   const by = (ctx.values.by ?? safeUsername()).trim();
   ctx.io.out(describeDecision(d, store.proposal(d.id)));
-  const answer = (await ctx.io.prompt(`\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}"? Type ${sub} to confirm: `)).trim().toLowerCase();
-  if (answer !== sub) { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+  // C4c: in an exploration problem a stage gate takes one step (y), not a typed word.
+  const oneStep = d.kind === 'gate' && !!d.problemId && problemMode(layoutPath(ctx.workspaceRoot, 'problems', d.problemId)) === 'exploration';
+  const answer = (await ctx.io.prompt(oneStep ? `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}" (exploration mode)? [y/N] ` : `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}"? Type ${sub} to confirm: `)).trim().toLowerCase();
+  if (oneStep ? answer !== 'y' && answer !== 'yes' : answer !== sub) { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
   const resolved = store.resolve(d.id, { decision, by, channel: 'cli', note: ctx.values.note });
   if (resolved.status !== 'approved') { emit(ctx, { ok: true, decision: decisionView(resolved) }, `Rejected ${d.id}.`); return EXIT.OK; }
   const problemRoot = resolved.problemId ? layoutPath(ctx.workspaceRoot, 'problems', resolved.problemId) : undefined;
@@ -728,9 +745,34 @@ async function cmdProblems(ctx: Ctx, rest: string[]): Promise<number> {
   if (sub === 'new') {
     const statement = args.join(' ').trim();
     if (!statement) throw new CliError(EXIT.USAGE, 'problems new takes the problem statement, in quotes.');
+    if (ctx.values.exploration) {
+      requirePerson(ctx, 'Starting a problem in exploration mode', 'Start it governed, then switch it in the AutoDE panel or a terminal.');
+      if ((await ctx.io.prompt(`${EXPLORATION_DISCLAIMER}\nType explore to acknowledge: `)).trim().toLowerCase() !== 'explore') { ctx.io.out('Not acknowledged; nothing was started.'); return EXIT.REFUSED; }
+    }
     const { id, spec } = startProblem(ctx.workspaceRoot, statement);
-    startInterview(layoutPath(ctx.workspaceRoot, 'problems', id), spec.problemStatement, interviewParts(ctx));
-    emit(ctx, { ok: true, id, specId: spec.id, active: true }, `Started ${id} (active). Its first draft specification holds the statement; the interview follows (AutoDE panel, an AutoDE skill in your agent, or \`autode interview\`), then approval.`);
+    const problemRoot = layoutPath(ctx.workspaceRoot, 'problems', id);
+    startInterview(problemRoot, spec.problemStatement, interviewParts(ctx));
+    if (ctx.values.exploration) setProblemMode(problemRoot, 'exploration', { by: (ctx.values.by ?? safeUsername()).trim(), channel: 'cli', acknowledged: true });
+    emit(ctx, { ok: true, id, specId: spec.id, active: true, mode: problemMode(problemRoot) }, `Started ${id} (active${ctx.values.exploration ? ', exploration mode' : ''}). Its first draft specification holds the statement; the interview follows (AutoDE panel, an AutoDE skill in your agent, or \`autode interview\`), then approval.`);
+    return EXIT.OK;
+  }
+  if (sub === 'mode' || sub === 'hardening') {
+    const id = singleProblem(ctx);
+    if (!id) throw new CliError(EXIT.NOT_FOUND, 'No business problem in this workspace.');
+    const problemRoot = layoutPath(ctx.workspaceRoot, 'problems', id);
+    if (sub === 'hardening') {
+      const r = hardeningReport(problemRoot, ctx.workspaceRoot);
+      emit(ctx, { ok: true, problem: id, mode: problemMode(problemRoot), ...r }, renderHardening(r));
+      return EXIT.OK;
+    }
+    const want = args[0];
+    if (!want) { emit(ctx, { ok: true, problem: id, mode: problemMode(problemRoot) }, `${id} is ${problemMode(problemRoot)}.`); return EXIT.OK; }
+    if (want !== 'exploration' && want !== 'governed') throw new CliError(EXIT.USAGE, 'problems mode takes exploration or governed.');
+    requirePerson(ctx, 'Switching a problem\'s mode', 'Switch it in the AutoDE panel, or in a terminal.');
+    const word = want === 'exploration' ? 'explore' : 'governed';
+    if ((await ctx.io.prompt(`${want === 'exploration' ? EXPLORATION_DISCLAIMER : 'Governed mode blocks where a check fails, and lists what exploration left to harden.'}\nType ${word} to switch ${id}: `)).trim().toLowerCase() !== word) { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+    const r = setProblemMode(problemRoot, want, { by: (ctx.values.by ?? safeUsername()).trim(), channel: 'cli', acknowledged: want === 'exploration' }, { workspaceRoot: ctx.workspaceRoot });
+    emit(ctx, { ok: true, problem: id, mode: r.record.mode, changed: r.changed, hardening: r.hardening }, `${id} is ${r.record.mode}${r.changed ? '' : ' already'}.${r.hardening ? `\n\n${renderHardening(r.hardening)}` : ''}`);
     return EXIT.OK;
   }
   if (sub === 'use') {
@@ -740,7 +782,7 @@ async function cmdProblems(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, id: args[0] }, `${args[0]} is now the active business problem.`);
     return EXIT.OK;
   }
-  throw new CliError(EXIT.USAGE, 'problems takes list, new "<statement>" or use <id>.');
+  throw new CliError(EXIT.USAGE, 'problems takes list, new "<statement>" [--exploration], use <id>, mode [exploration|governed] or hardening.');
 }
 
 const ingestLine = (r: IngestResult) => `✓ ${r.source} → system ${r.system} (${r.environment}): ${r.tables} table(s), ${r.columns} column(s); catalogued ${r.catalogued}, ${r.promoted} in the working set${r.warnings.length ? `\n    ! ${r.warnings.join(' ')}` : ''}`;
@@ -1192,8 +1234,9 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
         const problems = documentApprovalProblems(rctx.problemRoot, stage.kind);
         if (problems.length) throw new CliError(EXIT.FAILED, problems.join(' '));
         const file = stageDocumentFile(rctx.problemRoot, stage.kind)!;
-        const answer = (await ctx.io.prompt(`Approve ${path.relative(ctx.workspaceRoot, file)} (${stage.title}) as "${by}"? Type approve to confirm: `)).trim().toLowerCase();
-        if (answer !== 'approve') { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+        const oneStep = problemMode(rctx.problemRoot) === 'exploration';
+        const answer = (await ctx.io.prompt(oneStep ? `Approve ${path.relative(ctx.workspaceRoot, file)} (${stage.title}) as "${by}" (exploration mode)? [y/N] ` : `Approve ${path.relative(ctx.workspaceRoot, file)} (${stage.title}) as "${by}"? Type approve to confirm: `)).trim().toLowerCase();
+        if (oneStep ? answer !== 'y' && answer !== 'yes' : answer !== 'approve') { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
         const r = approveStageDocument(rctx, stage.id, { kind: 'person', name: by }, 'cli');
         emit(ctx, { ok: true, stage: r.stage, file: path.relative(ctx.workspaceRoot, r.file).split(path.sep).join('/') }, r.message);
         return EXIT.OK;
@@ -1282,6 +1325,37 @@ async function cmdFacts(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, results: lines }, lines.join('\n'));
     return EXIT.OK;
   } finally { cfm.dispose(); }
+}
+
+/** C4c: the completeness checklist for the active problem (deterministic, records nothing). */
+async function cmdCoverage(ctx: Ctx): Promise<number> {
+  const id = singleProblem(ctx);
+  if (!id) throw new CliError(EXIT.NOT_FOUND, 'No business problem in this workspace.');
+  const ws = workspace(ctx, id);
+  const sources = await ws.contextSources();
+  const report = problemCoverage({ workspaceRoot: ctx.workspaceRoot, problemRoot: ws.problemRoot()!, sources }, { probesAvailable: true });
+  emit(ctx, { ok: true, problem: id, ...report }, renderCoverage(report));
+  return EXIT.OK;
+}
+
+/** C4c: candidate keys, foreign keys, grain, change columns and personal data from the data, probed; `--record` records those that pass. */
+async function cmdCapture(ctx: Ctx, rest: string[]): Promise<number> {
+  if (rest[0] !== 'candidates') throw new CliError(EXIT.USAGE, 'capture takes candidates [--connection <id>] [--record].');
+  const id = singleProblem(ctx);
+  if (!id) throw new CliError(EXIT.NOT_FOUND, 'No business problem in this workspace.');
+  const problemRoot = layoutPath(ctx.workspaceRoot, 'problems', id);
+  const session = platformSession(ctx);
+  const cfm = await openContext(ctx.workspaceRoot, (m) => ctx.io.err(m));
+  try {
+    const executor = combineProbeExecutors([await liveExecutor(ctx, session), sampleProbeExecutor(readPackFile(path.join(problemRoot, 'pack')), (d) => readPackDocument(ctx.workspaceRoot, d), (m) => ctx.io.err(m))]);
+    const { findings, recorded } = await problemCandidates({ workspaceRoot: ctx.workspaceRoot, problemRoot, sources: cfm.getPackSources() }, executor, { record: ctx.values.record ? cfm.getLedger() : undefined });
+    if (recorded.length) await cfm.persistCompiledGraph();
+    const lines = findings.map(describeFinding);
+    if (!executor) lines.push('No connection or sample to probe with: pass --connection <id>, or add a sample of the table to the pack.');
+    lines.push(ctx.values.record ? `${recorded.length} fact(s) recorded${recorded.some((a) => a.status === 'proposed') ? ': confirm them with `autode facts`' : ''}.` : 'Nothing was recorded: add --record to record those that passed.');
+    emit(ctx, { ok: true, findings, recorded: recorded.map((a) => ({ id: a.id, kind: a.kind, statement: a.statement, status: a.status, trust: a.trust })) }, lines.join('\n'));
+    return EXIT.OK;
+  } finally { cfm.dispose(); session.dispose(); }
 }
 
 /** GOV: personal data in the problem's sources, and a person's classification of a column. */

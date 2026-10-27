@@ -6,6 +6,7 @@ import { ContextPackSources } from '../context/contextPack';
 import { StageKind } from '../workflows/stageKinds';
 import { outputDirSegments } from '../workspaceLayout';
 import { appendEvent, Actor } from '../workflows/events';
+import { EXPLORATION_LABEL, explorationHeader, isExploration } from '../documents/problemMode';
 
 /**
  * A stage's deliverable, recorded by the agent doing the stage (PA3b): written
@@ -55,7 +56,10 @@ export function recordArtifact(input: RecordArtifactInput): RecordedArtifact {
     fs.mkdirSync(hist, { recursive: true });
     fs.copyFileSync(file, path.join(hist, `${Date.now()}.${path.basename(file)}`));
   }
-  fs.writeFileSync(file, input.content);
+  // C4c: an exploration problem's deliverables say so in their first line.
+  const exploration = isExploration(input.problemRoot);
+  const header = exploration && !input.content.includes(EXPLORATION_LABEL) ? explorationHeader(file) : '';
+  fs.writeFileSync(file, header + input.content);
   const relPath = segs.join('/');
   const manifest: GroundingManifest = buildGroundingManifest({
     artifact: { path: relPath, content: input.content, language: input.language ?? LANG[path.extname(file).toLowerCase()] ?? 'text', agent: input.who.kind === 'agent' ? input.who.name : input.who.kind },
@@ -67,6 +71,7 @@ export function recordArtifact(input: RecordArtifactInput): RecordedArtifact {
     assertions: input.sources.assertions,
     model: input.model
   });
+  if (exploration) manifest.exploration = true;
   const manifestFile = `${file}.grounding.json`;
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2));
   appendEvent(input.problemRoot, { at: new Date().toISOString(), type: 'recorded', stage: input.stage.id, actor: input.who, channel: input.channel, files: [relPath] });

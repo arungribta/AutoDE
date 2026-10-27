@@ -1,4 +1,6 @@
 import { ContextGap, GapClass, describeGap } from '../context/contextGaps';
+import { trustRank } from '../context/assertions';
+import { ProblemMode } from '../documents/problemMode';
 import { ContextPackSources, buildContextPack } from '../context/contextPack';
 import { parseBusinessProblemSpec, readProblemDocument } from '../documents/problemDocuments';
 import { StageKind } from '../workflows/stageKinds';
@@ -31,10 +33,15 @@ export function stageGapQuery(problemRoot: string, stageTitle: string): string |
   } catch { return undefined; }
 }
 
-export function stageGapsFrom(gaps: readonly ContextGap[], kind: StageKind): StageGap[] {
+/**
+ * The stage's gaps. In exploration mode (C4c, §7.4) a fact assumed earlier
+ * closes its gap: the stage goes on with it, and hardening lists it.
+ */
+export function stageGapsFrom(gaps: readonly ContextGap[], kind: StageKind, mode: ProblemMode = 'governed'): StageGap[] {
   if (!GAP_KINDS.includes(kind)) return [];
   const seen = new Set<string>();
-  return gaps.filter((g) => LISTED.includes(g.needed)).flatMap((g) => {
+  const closedByAssumption = (g: ContextGap) => mode === 'exploration' && g.reason === 'below_trust' && !!g.foundTrust && trustRank(g.foundTrust) >= trustRank('assumed');
+  return gaps.filter((g) => LISTED.includes(g.needed) && !closedByAssumption(g)).flatMap((g) => {
     const key = `${g.needed}:${[...g.subject].sort().join('|')}`;
     if (seen.has(key)) return [];
     seen.add(key);
@@ -43,18 +50,24 @@ export function stageGapsFrom(gaps: readonly ContextGap[], kind: StageKind): Sta
 }
 
 /** The gaps for one stage, from the workspace's context. */
-export function stageContextGaps(sources: ContextPackSources, input: { problemRoot: string; kind: StageKind; title: string }): StageGap[] {
+export function stageContextGaps(sources: ContextPackSources, input: { problemRoot: string; kind: StageKind; title: string; mode?: ProblemMode }): StageGap[] {
   if (!GAP_KINDS.includes(input.kind)) return [];
   const query = stageGapQuery(input.problemRoot, input.title);
   if (!query) return [];
-  return stageGapsFrom(buildContextPack({ purpose: 'step', query }, sources).manifest.gaps, input.kind);
+  return stageGapsFrom(buildContextPack({ purpose: 'step', query }, sources).manifest.gaps, input.kind, input.mode);
 }
 
-export function renderStageGaps(gaps: readonly StageGap[]): string {
+/**
+ * Governed: the agent stops at a gap and asks (C3). Exploration (§7.4): it
+ * records its best guess as an assumption and continues.
+ */
+export function renderStageGaps(gaps: readonly StageGap[], mode: ProblemMode = 'governed'): string {
   if (!gaps.length) return '';
   return [
     '## Context gaps',
-    'AutoDE\'s context doesn\'t back these yet. Don\'t infer joins, keys or grain: ask the person, propose the fact they give you (autode_propose_assertion) if your tools allow it, or record the gap as open in your deliverable so the person approving the stage sees it.',
+    mode === 'exploration'
+      ? 'AutoDE\'s context doesn\'t back these yet. This problem is in exploration mode: don\'t stop. For each gap, make your best guess, record it with autode_record_assumption (the fact, the model you are, and why you guessed it), continue with it, and list your assumptions in your summary. They are labelled as assumptions everywhere and must be confirmed before the problem is governed.'
+      : 'AutoDE\'s context doesn\'t back these yet. Don\'t infer joins, keys or grain: stop and ask the person, propose the fact they give you (autode_propose_assertion) if your tools allow it, or record the gap as open in your deliverable so the person approving the stage sees it.',
     ...gaps.map((g) => `- ${g.question}`)
   ].join('\n');
 }

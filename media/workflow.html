@@ -45,6 +45,7 @@
   .guide { margin: 8px 0; padding: 6px 8px; border-radius: 4px; background: var(--vscode-textBlockQuote-background); font-size: 12px; }
   .proposal td, .proposal th { text-align: left; font-size: 12px; padding: 3px 8px 3px 0; vertical-align: top; }
   .out { opacity: 0.6; }
+  .exploration { margin: 0 0 10px; padding: 6px 8px; border-radius: 4px; border-left: 3px solid var(--vscode-editorWarning-foreground); background: var(--vscode-inputValidation-warningBackground, var(--vscode-textBlockQuote-background)); font-size: 12px; }
   .tag { display: inline-block; font-size: 10px; padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; opacity: 0.8; margin-left: 4px; }
 </style>
 </head>
@@ -65,7 +66,7 @@
     const m = state.model;
     if (!m) { root.innerHTML = '<p class="muted">' + esc(state.error || 'Start or open a business problem to see its workflow.') + '</p>'; return; }
     const pct = m.progress.total ? Math.round(100 * m.progress.done / m.progress.total) : 0;
-    let h = '<h1>' + esc(m.problemId) + '</h1><div class="statement">' + esc(m.statement) + '</div>' +
+    let h = (state.exploration ? '<div class="exploration">⚠ ' + esc(state.exploration) + ' Approvals take one click; failed checks only warn.</div>' : '') + '<h1>' + esc(m.problemId) + '</h1><div class="statement">' + esc(m.statement) + '</div>' +
       '<div class="meta"><span>Template: <b>' + esc(m.template) + '</b></span><span>' + (m.approved ? 'Workflow approved' : 'Workflow not approved yet') + '</span><span>' + m.progress.done + ' of ' + m.progress.total + ' stages done</span>' +
       (m.next ? '<span>Next: <b>' + esc(m.next.title) + '</b> (' + esc(m.next.status) + ')</span>' : '') + '</div>' +
       '<div class="progress" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100"><div style="width:' + pct + '%"></div></div>';
@@ -138,7 +139,7 @@
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
     if (msg.type === 'model') {
-      state.model = msg.model; state.details = msg.details || {}; state.error = msg.error;
+      state.model = msg.model; state.details = msg.details || {}; state.error = msg.error; state.exploration = msg.exploration;
       if (msg.selected && !state.selected) state.selected = msg.selected;
       if (msg.selected) state.selected = msg.selected;
       render();

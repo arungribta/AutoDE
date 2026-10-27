@@ -7,7 +7,9 @@ import { ReconcileResult, documentClauses, reconcileContract } from './contracts
 import { ConformanceReport } from './conformance';
 import { ProbeExecutor, ProbeResolver, VerifyOutcome, combineProbeExecutors, createProbeResolver, verifyAssertions } from './probes';
 import { STRUCTURED_DOCUMENT, loadProfiles, packConformance, probeCandidates, profileFor, readPackDocument, readPackFile, sampleProbeExecutor } from './packChecks';
-import { buildDocumentExtractionPrompt, parseDocumentExtraction, recordExtraction, splitSections } from './documentExtraction';
+import { ExtractionOutcome, agreeingReadings, buildDocumentExtractionPrompt, parseDocumentDeterministic, parseDocumentExtraction, recordWithAgreement, splitSections } from './documentExtraction';
+import { admitForMode, problemMode } from '../documents/problemMode';
+import { NewAssertion } from './ledger';
 import { VocabularyProposal, buildVocabulary, buildVocabularyProposalPrompt, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, parseVocabularyProposal } from './vocabulary';
 import { createSubjectResolver } from './projection';
 import { writeFileAtomic, nodeFileIo } from './contextStore';
@@ -20,7 +22,7 @@ export type ApplyOutcome =
   | { status: 'applied'; reconcile: ReconcileResult; warnings: string[]; profileId: string }
   | { status: 'profile_proposed'; profilePath: string; errors?: string[] }
   | { status: 'needs_profile'; reason: string }
-  | { status: 'extracted'; proposed: number; dropped: string[] }
+  | { status: 'extracted'; proposed: number; dropped: string[]; parsed?: number; corroborated?: number; unsupported?: number; reread?: string[] }
   | { status: 'needs_llm'; reason: string }
   | { status: 'registered' }
   | { status: 'error'; reason: string };
@@ -50,8 +52,13 @@ export class BusinessPackManager {
     /** A getter: the host recreates its ContextFileManager (e.g. after Source Assessment). */
     private readonly cfmOf: () => ContextFileManager,
     private readonly log: (msg: string) => void,
-    private readonly complete?: CompleteJson
+    private readonly complete?: CompleteJson,
+    /** C4c: the model the host reads documents with, and whether keys and grain are read twice. */
+    private readonly capture: { model?: () => string | undefined; doubleExtraction?: () => boolean } = {}
   ) {}
+
+  /** The problem's mode decides whether proposals wait for a person (governed) or count at once (exploration). */
+  private admit = (a: NewAssertion): NewAssertion => admitForMode(a, problemMode(path.dirname(this.packDir)));
 
   private get cfm(): ContextFileManager { return this.cfmOf(); }
   private get packFile(): string { return path.join(this.packDir, 'pack.yaml'); }
@@ -124,10 +131,24 @@ export class BusinessPackManager {
       await this.cfm.persistCompiledGraph();
       return { status: 'applied', reconcile, warnings: model.warnings, profileId: profile.id };
     }
-    if (!this.complete) return { status: 'needs_llm', reason: 'extracting facts from free text needs a model (in an agent host: autode_pack_reading, then autode_pack_record_reading)' };
+    if (!this.complete) {
+      // C4c: tables and fixed phrases need no model; the prose waits for one.
+      const parsed = await recordWithAgreement(ledger, parseDocumentDeterministic(doc, splitSections(content), sha, createSubjectResolver(this.cfm.getPackSources().graph)), { admit: this.admit });
+      if (parsed.recorded) await this.cfm.persistCompiledGraph();
+      return { status: 'needs_llm', reason: `extracting facts from free text needs a model (in an agent host: autode_pack_reading, then autode_pack_record_reading)${parsed.recorded ? `; ${parsed.recorded} fact(s) were read from its tables and fixed phrases without one` : ''}` };
+    }
     const reading = this.readingFor(id);
     if (reading.kind !== 'facts') return { status: 'error', reason: reading.kind === 'none' ? reading.reason : 'unexpected reading' };
-    return this.recordFacts(id, await this.complete(reading.prompt.system, reading.prompt.user, `Extract facts from ${doc.path}`), reading.sha);
+    const model = this.capture.model?.();
+    const ask = (r: typeof reading) => this.complete!(r.prompt.system, r.prompt.user, `Extract facts from ${doc.path}`);
+    const first = await this.recordFacts(id, await ask(reading), reading.sha, { model, second: this.capture.doubleExtraction?.() ? await ask(reading) : undefined });
+    // §5.5 item 3: a section the model didn't account for is read again, on its own, once.
+    if (first.status !== 'extracted' || !first.reread?.length) return first;
+    const again = this.readingFor(id, first.reread);
+    if (again.kind !== 'facts') return first;
+    const second = await this.recordFacts(id, await ask(again), again.sha, { model, sections: first.reread });
+    if (second.status !== 'extracted') return first;
+    return { ...second, proposed: first.proposed + second.proposed, dropped: [...first.dropped, ...second.dropped], parsed: first.parsed, corroborated: (first.corroborated ?? 0) + (second.corroborated ?? 0), unsupported: (first.unsupported ?? 0) + (second.unsupported ?? 0) };
   }
 
   /**
@@ -136,7 +157,7 @@ export class BusinessPackManager {
    * sends it to its LLM; an agent host's model answers it, and either way the answer comes back through
    * `recordFacts` or `recordProfile`, checked the same way.
    */
-  public readingFor(id: string): ReadingRequest {
+  public readingFor(id: string, only?: readonly string[]): ReadingRequest {
     const doc = this.pack.documents.find((d) => d.id === id);
     if (!doc) return { kind: 'none', document: id, reason: `no document "${id}" in the pack` };
     if (doc.role === 'sample') return { kind: 'none', document: id, reason: 'a sample is not read: probes use it' };
@@ -150,7 +171,8 @@ export class BusinessPackManager {
       if (waiting) return { kind: 'none', document: id, reason: `profile "${waiting.id}" is waiting for a person's review` };
       return { kind: 'profile', document: id, prompt: buildProfileProposalPrompt(parsed, doc.path) };
     }
-    const sections = splitSections(content);
+    const all = splitSections(content);
+    const sections = only?.length ? all.filter((s) => only.includes(s.path)) : all;
     return { kind: 'facts', document: id, sha: contentSha(content), sections: sections.map((s) => ({ id: s.path, heading: s.heading })), prompt: buildDocumentExtractionPrompt(doc, sections) };
   }
 
@@ -160,7 +182,7 @@ export class BusinessPackManager {
    * citing their section, for a person to confirm; one already proposed or live is skipped. Refused when
    * the document changed since it was read (`sha`).
    */
-  public async recordFacts(id: string, raw: unknown, sha?: string): Promise<ApplyOutcome> {
+  public async recordFacts(id: string, raw: unknown, sha?: string, options: { model?: string; second?: unknown; sections?: readonly string[] } = {}): Promise<ApplyOutcome> {
     const doc = this.pack.documents.find((d) => d.id === id);
     if (!doc) return { status: 'error', reason: `no document "${id}" in the pack` };
     if (STRUCTURED.test(doc.path) || doc.role === 'sample') return { status: 'error', reason: `${doc.path} is not free text: its facts come from its profile` };
@@ -168,12 +190,20 @@ export class BusinessPackManager {
     try { content = this.read(doc); } catch (err) { return { status: 'error', reason: `cannot read ${doc.path}: ${err instanceof Error ? err.message : String(err)}` }; }
     const now = contentSha(content);
     if (sha && sha !== now) return { status: 'error', reason: `${doc.path} changed since it was read: read it again` };
-    const outcome = parseDocumentExtraction(raw, doc, splitSections(content), now, createSubjectResolver(this.cfm.getPackSources().graph));
-    const proposed = await recordExtraction(this.cfm.getLedger(), outcome);
+    const all = splitSections(content);
+    // A re-read covers only the sections asked again; the rest were accounted for.
+    const sections = options.sections?.length ? all.filter((s) => options.sections!.includes(s.path)) : all;
+    const resolve = createSubjectResolver(this.cfm.getPackSources().graph);
+    const ledger = this.cfm.getLedger();
+    // C4c: what the document states in a fixed form is read without a model, first (not again on a re-read).
+    const parsed = options.sections?.length ? { recorded: 0, corroborated: 0 } : await recordWithAgreement(ledger, parseDocumentDeterministic(doc, all, now, resolve), { admit: this.admit });
+    let outcome: ExtractionOutcome = parseDocumentExtraction(raw, doc, sections, now, resolve, { model: options.model });
+    if (options.second !== undefined) outcome = agreeingReadings(outcome, parseDocumentExtraction(options.second, doc, sections, now, resolve, { model: options.model }));
+    const read = await recordWithAgreement(ledger, outcome.proposed, { admit: this.admit });
     this.pack = upsertDocument(this.pack, { ...doc, sha: now });
     await this.savePack();
     await this.cfm.persistCompiledGraph();
-    return { status: 'extracted', proposed, dropped: outcome.dropped };
+    return { status: 'extracted', proposed: read.recorded, dropped: outcome.dropped, parsed: parsed.recorded, corroborated: read.corroborated + parsed.corroborated, unsupported: outcome.unsupported ?? 0, reread: outcome.reread ?? [] };
   }
 
   /** Records a proposed interpretation profile (a person confirms it by setting `status: confirmed`). */

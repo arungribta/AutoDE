@@ -53,6 +53,8 @@ export interface ArtifactGrounding {
 
 export interface GroundingManifest {
   artifact: string;
+  /** C4c: built in an exploration problem, on unverified assumptions (§7.4). */
+  exploration?: boolean;
   specId?: string;
   specVersion?: number;
   specRevision?: string;

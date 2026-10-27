@@ -58,6 +58,9 @@ Work in AutoDE happens in a business problem, a folder under `.autode/problems/`
 | `autode problems list` | Every problem with its status and specification version; `*` marks the active one. |
 | `autode problems new "<problem statement>"` | Starts a problem. It creates the folder (named from the statement, as the panel names it) and a first draft specification holding the statement, and makes the problem active. Nothing is approved: the interview, the specification and its approval follow, in the AutoDE panel or with an AutoDE skill in your agent. |
 | `autode problems use <id>` | Makes another problem active. The panel follows, and so does the MCP server. |
+| `autode problems new "<statement>" --exploration` | Starts the problem in exploration mode, after you type `explore` to acknowledge the disclaimer. Needs a terminal. |
+| `autode problems mode [exploration\|governed]` | Shows the active problem's mode, or switches it (type `explore` or `governed`; needs a terminal). Switching to governed prints the hardening list. In exploration mode gate approvals ask `[y/N]` instead of a typed word. |
+| `autode problems hardening` | What exploration mode left to confirm: assumptions, model-only facts and checks that only warned. |
 
 The active problem is per engineer (`.autode/local/`), so in CI pass `--problem <id>` or let the checking commands cover every problem.
 
@@ -110,9 +113,14 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 
 | Command | |
 |---|---|
+| `autode coverage` | The completeness checklist: per table in scope and metric the specification names, what is known, proposed, assumed, a candidate or missing, and the action for each. Deterministic; records nothing. |
+| `autode capture candidates [--connection <id>] [--record]` | Candidate keys, grain, foreign keys, change columns and personal data (by value shape) from the data, each checked by a read-only, aggregate-only probe on the connection or the pack's samples. `--record` records those that passed as proposed facts, already verified. |
+
+| Command | |
+|---|---|
 | `autode pack list` | The active problem's documents: contracts, BRDs, KPI definitions, mappings, data dictionaries and samples. |
 | `autode pack add <file> --role <role> --authority signed\|draft --doc-version <v> [--table <object id>]` | Adds a document. `signed` makes its clauses confirmed facts; `draft` makes them documented facts, to review. A sample needs `--table`. Needs a terminal. An agent can add only drafts. |
-| `autode pack apply [<doc id>...]` | Reads structured documents (YAML, JSON) through their **confirmed** interpretation profile, deterministically. A document with no confirmed profile is reported: profiles are in `.autode/knowledge/profiles/`, and a person sets `status: confirmed`. Free-text documents need a model: use the panel, or the extraction prompt in an MCP host. |
+| `autode pack apply [<doc id>...]` | Reads structured documents (YAML, JSON) through their **confirmed** interpretation profile, deterministically. A document with no confirmed profile is reported: profiles are in `.autode/knowledge/profiles/`, and a person sets `status: confirmed`. Free-text documents need a model: use the panel, or the extraction prompt in an MCP host. Their data-dictionary tables and fixed phrases ("must be unique", "is never null") are read without one. |
 | `autode vocabulary mine` | Abbreviations mined from table and column names and comments (for example `PTRN = patron`) that aren't in the vocabulary yet. |
 | `autode vocabulary accept` | Shows the mined entries and lets you pick which are right for this customer. They go to `.autode/knowledge/vocabulary.yaml`. Needs a terminal. |
 

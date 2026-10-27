@@ -9,6 +9,7 @@ import { readWorkflow } from '../workflows/instance';
 import { layoutPath } from '../workspaceLayout';
 import { PackSkill, RoleTemplate, loadRoles } from './definitions';
 import { stageSkills } from '../skills/port';
+import { EXPLORATION_LABEL, ProblemMode, problemMode } from '../documents/problemMode';
 
 /**
  * An assignment (PA3b): what the hub hands a spoke for one stage — the role
@@ -43,7 +44,8 @@ export function toolsForTier(tools: readonly ToolInfo[], tier: Tier, roleTools: 
     if (HUB_ONLY.test(t.name) && !planning) return false;
     const need = ANY_TIER.has(t.name) ? 'read' : toolTier(t);
     if (need === 'never' || tierRank(need) > tierRank(tier)) return false;
-    return !allow || allow.has(t.name);
+    // C4c: a role that may propose facts may also record an assumption (refused outside exploration mode).
+    return !allow || allow.has(t.name) || (t.name === 'autode_record_assumption' && allow.has('autode_propose_assertion'));
   }).map((t) => t.name).sort();
 }
 
@@ -68,6 +70,8 @@ export interface Assignment {
   externalSkills: Array<{ name: string; vendor?: string; summary: string; source?: string; installed: boolean; availability?: string }>;
   /** Joins, keys, grain and structure the stage's context doesn't back yet, with the question for each (v0.45.9: were plan-step pauses). */
   contextGaps: StageGap[];
+  /** C4c: the problem's mode — in exploration the agent assumes and continues at a gap. */
+  mode: ProblemMode;
   /** The whole assignment as one text, for a host agent or a prompt. */
   text: string;
 }
@@ -140,7 +144,8 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
     stage: { id: s.id, title: s.title, kind: s.kind, status: s.record.status },
     role: role.name, roleDescription: role.description, roleInstructions: role.instructions, brief: s.agent?.brief,
     skills, tier, engineTools, fileMode: tier === 'workspace-write' ? 'full' : 'read-only',
-    consumes: s.consumes, produces: s.produces, doneWhen: kind.doneWhen, tasks: s.tasks.map((t) => ({ id: t.id, title: t.title })), externalSkills, contextGaps: [...(opts.gaps ?? [])]
+    consumes: s.consumes, produces: s.produces, doneWhen: kind.doneWhen, tasks: s.tasks.map((t) => ({ id: t.id, title: t.title })), externalSkills, contextGaps: [...(opts.gaps ?? [])],
+    mode: problemMode(problemRoot)
   };
   return { assignment: { ...a, text: assignmentText(a) } };
 }
@@ -153,8 +158,9 @@ export function assignmentText(a: Omit<Assignment, 'text'>): string {
     a.brief ? `## Brief for this stage\n${a.brief}` : '',
     a.tasks.length ? `## Tasks\n${a.tasks.map((t) => `- ${t.title}`).join('\n')}` : '',
     `## What this stage needs and produces\nConsumes: ${a.consumes.join(', ') || 'nothing'}. Produces: ${a.produces.join(', ')}. Done when ${a.doneWhen}.`,
+    a.mode === 'exploration' ? `## Exploration mode\n${EXPLORATION_LABEL} Proceed on your best judgement where AutoDE's context is incomplete: record each guess as an assumption (autode_record_assumption) instead of stopping. Never relaxed: platform changes only through approved runbooks, non-production environments only, no row values without the connection's consent, no secrets in files.` : '',
     `## Your limits\nPermission tier: ${a.tier}. AutoDE tools you may call: ${a.engineTools.join(', ') || 'none'}. ${a.fileMode === 'full' ? 'You may write files in the workspace (each write is approved).' : 'You may read workspace files but not write them.'} Record each deliverable with autode_record_artifact. You never call another agent, start or hand in stages, or approve anything: AutoDE's workflow does that, and a person approves.`,
-    renderStageGaps(a.contextGaps),
+    renderStageGaps(a.contextGaps, a.mode),
     ...a.skills.map((k) => `## Skill: ${k.name}\n${k.description}\n\n${k.instructions}`),
     a.externalSkills.some((e) => e.installed)
       ? `## Vendor skills installed in this host\nUse them for the platform's specifics; AutoDE's rules still apply (approvals, runbooks, recording deliverables):\n${a.externalSkills.filter((e) => e.installed).map((e) => `- ${e.name} (${e.vendor ?? 'external'}): ${e.summary}`).join('\n')}`

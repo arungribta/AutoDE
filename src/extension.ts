@@ -881,6 +881,19 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   });
 
+  // C4c: what a complete picture of the problem needs, and facts from the data before any model.
+  const showMarkdown = async (content: string) => vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'markdown', content }));
+  const captureCoverage = vscode.commands.registerCommand(`${EXTENSION_ID}.captureCoverage`, async () => {
+    const md = sidebarProvider.captureCoverageMarkdown();
+    if (!md) { vscode.window.showInformationMessage('Open a business problem in the AutoDE panel first.'); return; }
+    await showMarkdown(md);
+  });
+  const findCandidates = vscode.commands.registerCommand(`${EXTENSION_ID}.findCandidates`, async () => {
+    const md = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'AutoDE: probing the data for keys, joins and personal data' }, () => sidebarProvider.findCandidatesFromData());
+    if (!md) { vscode.window.showInformationMessage('Open a business problem in the AutoDE panel first.'); return; }
+    await showMarkdown(md);
+  });
+
   // GOV: the person classifies personal data (a confirmed fact); masking follows from it in the build.
   const classifyPersonalData = vscode.commands.registerCommand(`${EXTENSION_ID}.classifyPersonalData`, async () => {
     const candidates = sidebarProvider.governanceCandidates();
@@ -1086,7 +1099,7 @@ export function activate(context: vscode.ExtensionContext): void {
     copilotHandoff,
     testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
-    importToolSkill, updateToolSkill, classifyPersonalData, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
+    importToolSkill, updateToolSkill, classifyPersonalData, captureCoverage, findCandidates, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,
     connectToDataPlatform, testServiceAccountCredential,
     checkPlatformPrerequisites, installOracleDriver, verifyOracleDriver, setOraclePassword, configureMcp

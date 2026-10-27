@@ -5544,8 +5544,8 @@ async function main() {
     assert.deepStrictEqual(sections.map((s) => s.path), ['retail-analytics-business-requirements-draft:L1-L1', '1-purpose:L3-L4', '2-definitions:L6-L8', '3-data-rules:L10-L12', '4-constraints:L14-L15']);
     assert.ok(dx.buildDocumentExtractionPrompt({ path: 'brd.md', role: 'brd' }, sections).user.includes('[2-definitions:L6-L8]'));
     const raw = { facts: [
-      { section: '2-definitions:L6-L8', kind: 'metric', subject: ['net revenue'], predicate: 'defined_as', value: { name: 'net revenue', definition: 'gross minus discounts and refunds, excluding cancelled orders' }, statement: 'Net revenue is gross order line value minus discounts and refunds, excluding cancelled orders.' },
-      { section: '3-data-rules:L10-L12', kind: 'quality_expectation', subject: ['shop.orders.status'], predicate: 'accepted_values', value: { check: 'accepted_values', values: ['PLACED', 'SHIPPED', 'CANCELLED', 'RETURNED'] }, statement: 'Order status is one of PLACED, SHIPPED, CANCELLED or RETURNED.' },
+      { section: '2-definitions:L6-L8', kind: 'metric', subject: ['net revenue'], predicate: 'defined_as', value: { name: 'net revenue', definition: 'gross minus discounts and refunds, excluding cancelled orders' }, statement: 'Net revenue is gross order line value minus discounts and refunds, excluding cancelled orders.', quote: 'Net revenue is gross order line value minus discounts and refunds, excluding cancelled orders.' },
+      { section: '3-data-rules:L10-L12', kind: 'quality_expectation', subject: ['shop.orders.status'], predicate: 'accepted_values', value: { check: 'accepted_values', values: ['PLACED', 'SHIPPED', 'CANCELLED', 'RETURNED'] }, statement: 'Order status is one of PLACED, SHIPPED, CANCELLED or RETURNED.', quote: 'Order status is one of PLACED, SHIPPED, CANCELLED or RETURNED' },
       { section: '9-nowhere', kind: 'decision', subject: ['x'], value: {}, statement: 'invented' },
       { section: '1-purpose:L3-L4', kind: 'key', subject: ['shop.orders'], predicate: 'unique', value: 'not a list', statement: 'bad value' }
     ] };
@@ -5897,12 +5897,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list'];
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5968,6 +5968,10 @@ async function main() {
       autode_skills_list: [{ group: 'external' }, { group: 'vendor' }],
       autode_skills_analyze: [{ source: 'incoming' }, { source: '' }],
       autode_governance_candidates: [{ tables: ['shop.customers'] }, { tables: [''] }],
+      autode_capture_coverage: [{}, { x: 1 }],
+      autode_find_candidates: [{}, { connectionId: '' }],
+      autode_review_session: [{ turns: [{ ref: 'chat:a#0', text: 'order_id is unique' }] }, { turns: [{ ref: '' , text: 'x' }] }],
+      autode_record_assumption: [{ kind: 'key', subject: ['shop.orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key', model: 'm', reason: 'r' }, { kind: 'key', subject: [], predicate: 'primary', value: [], statement: 's', model: 'm', reason: 'r' }],
       autode_runbook_status: [{}, { id: '' }],
       autode_approvals_list: [{}, { x: 1 }],
       autode_propose_runbook: [{ runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'sql', sql: 'select 1', expect: 'one row' }] } }, { runbook: { id: 'rb', title: 't', reason: 'r', connectionId: 'snowflake:dev', steps: [{ id: 's1', title: 't', kind: 'shell', expect: 'x' }] } }],
@@ -10100,9 +10104,9 @@ async function main() {
       assert.ok(r.kind === 'facts' && r.sections.length > 1 && /^[0-9a-f]{64}$/.test(r.sha), JSON.stringify(r).slice(0, 300));
       const section = r.sections[1].id;
       const facts = [
-        { section, kind: 'business_term', subject: ['customer'], predicate: 'defined_as', value: { term: 'customer', definition: 'A person with at least one order' }, statement: 'A customer is a person with at least one order.' },
-        { section: 'no-such-section', kind: 'decision', subject: ['x'], predicate: 'is', value: { text: 'x' }, statement: 'x' },
-        { section, kind: 'opinion', subject: ['x'], predicate: 'is', value: {}, statement: 'x' }
+        { section, kind: 'business_term', subject: ['customer'], predicate: 'defined_as', value: { term: 'customer', definition: 'A person with at least one order' }, statement: 'A customer is a person with at least one order.', quote: 'Finance needs daily net revenue' },
+        { section: 'no-such-section', kind: 'decision', subject: ['x'], predicate: 'is', value: { text: 'x' }, statement: 'x', quote: 'x' },
+        { section, kind: 'opinion', subject: ['x'], predicate: 'is', value: {}, statement: 'x', quote: 'per sales channel' }
       ];
       assert.strictEqual((await pm.recordFacts('brd', { facts }, 'stale')).status, 'error', 'a document changed since it was read is read again');
       const out = await pm.recordFacts('brd', { facts }, r.sha);
@@ -10137,7 +10141,7 @@ async function main() {
       const doc = (await call('autode_pack_add', { path: 'brd.md', role: 'brd', version: '1' })).document;
       const reading = await call('autode_pack_reading', { id: doc.id });
       assert.ok(reading.kind === 'facts' && reading.prompt.system && /autode_pack_record_reading/.test(reading.next));
-      const rec = await call('autode_pack_record_reading', { id: doc.id, sha: reading.sha, facts: [{ section: reading.sections[0].id, kind: 'assumption', subject: ['orders'], predicate: 'assumes', value: { text: 'Orders arrive daily' }, statement: 'Orders arrive daily.' }] });
+      const rec = await call('autode_pack_record_reading', { id: doc.id, sha: reading.sha, facts: [{ section: reading.sections[0].id, kind: 'assumption', subject: ['orders'], predicate: 'assumes', value: { text: 'Orders arrive daily' }, statement: 'Orders arrive daily.', quote: 'Retail analytics' }] });
       assert.deepStrictEqual([rec.status, rec.proposed], ['extracted', 1]);
       const both = await client.callTool({ name: 'autode_pack_record_reading', arguments: { id: doc.id } });
       assert.ok(both.isError && /facts \(free text\) or profile/.test(JSON.stringify(both.content)));
@@ -10509,6 +10513,297 @@ async function main() {
       assert.match(documentApprovalProblems(prob, 'build').join(' '), /crm\.customers\.ssn is sensitive-pii \(fact .+\); add ssn to the entity's governance block and mask it/);
       D.writePipelineSpec(prob, { ...ps, entities: [{ ...entity, governance: { columns: [{ column: 'ssn', classification: 'sensitive-pii' }] }, transforms: [...entity.transforms, { kind: 'mask', params: { sourceObject: 'stg', targetObject: 'stg_masked', passthrough: ['customer_id'], columns: [{ name: 'ssn', strategy: 'redact' }] } }] }] });
       assert.deepStrictEqual(documentApprovalProblems(prob, 'build'), []);
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.48.0: C4c — capture coverage, verification and exploration mode ──
+
+  const c4c = {
+    graph(strip = []) {
+      const { parseFile } = require('../dist/engine/context/fileIngestion.js');
+      const nodes = []; const edges = [];
+      for (const [f, sys] of [['shop.ddl', 'shop'], ['crm.ddl', 'crm']]) {
+        const r = parseFile(c4a.read(`sources/${f}`), f, { system: sys, environment: 'prod' });
+        nodes.push(...r.nodes); edges.push(...r.edges);
+      }
+      // Tables named in `strip` lose their declared key, so their key has to come from the data.
+      const tableOf = new Map(edges.filter((e) => e.type === 'contains').map((e) => [e.target, e.source]));
+      return { nodes: nodes.map((n) => (n.type === 'column' && strip.includes(tableOf.get(n.id)) ? { ...n, isPrimaryKey: false } : n)), edges };
+    },
+    samples() {
+      const { parseSampleCsv, createSampleProbeExecutor } = require('../dist/engine/context/probes.js');
+      return createSampleProbeExecutor(new Map([
+        ['obj:shop/prod/shop.customers', parseSampleCsv(c4a.read('sources/samples/shop_customers.csv'))],
+        ['obj:crm/prod/crm.customers', parseSampleCsv(c4a.read('sources/samples/crm_customers.csv'))],
+        ['obj:crm/prod/crm.loyalty_members', parseSampleCsv(c4a.read('sources/samples/loyalty_members.csv'))]
+      ]));
+    },
+    spec: { id: 'bps-ref', problemStatement: c4a.read('problem.md').split('\n').slice(2, 10).join('\n') }
+  };
+
+  await test('v0.48.0: the completeness checklist — on the reference problem every table and metric in scope is listed with what is known and what is missing, and every missing item has an action', () => {
+    const cov = require('../dist/engine/context/coverage.js');
+    const graph = c4c.graph();
+    const names = cov.specMetricNames(c4c.spec);
+    assert.ok(names.includes('net revenue') && names.some((n) => /customer retention/.test(n)), names.join());
+    const r = cov.captureCoverage({ graph, assertions: [], spec: c4c.spec });
+    const fqns = r.tables.map((t) => t.fqn);
+    for (const t of ['shop.orders', 'shop.payments', 'shop.refunds', 'shop.products', 'shop.customers', 'crm.customers']) assert.ok(fqns.includes(t), `${t} in scope: ${fqns.join()}`);
+    const orders = r.tables.find((t) => t.fqn === 'shop.orders');
+    assert.deepStrictEqual(orders.items.map((i) => i.item), ['key', 'grain', 'change_column', 'load_pattern', 'classification', 'relationships', 'description']);
+    assert.strictEqual(orders.items[0].status, 'known', 'the declared key');
+    assert.ok(r.metrics.length >= 2 && r.metrics.every((m) => m.items.every((i) => i.status === 'missing' && i.action)), 'metrics named, not defined');
+    for (const t of r.tables) for (const i of t.items) assert.ok(i.status === 'known' || i.action, `${t.fqn} ${i.item} has an action`);
+    assert.strictEqual(r.actions.length, [...r.tables, ...r.metrics].reduce((n, x) => n + x.items.filter((i) => i.status !== 'known').length, 0));
+    const pii = r.tables.find((t) => t.fqn === 'shop.customers').items.find((i) => i.item === 'classification');
+    assert.ok(pii.status === 'missing' && /email/.test(pii.detail) && pii.action.type === 'classify', JSON.stringify(pii));
+    // A fact closes its item; a proposal shows as proposed, with "confirm".
+    const grain = { id: 'G1', kind: 'grain', subject: ['obj:shop/prod/shop.orders'], predicate: 'grain', value: ['order_id'], status: 'proposed', trust: 'inferred', evidence: [{ type: 'file', ref: 'x' }], statement: 's', validFrom: '', createdBy: 'u', createdAt: '' };
+    const metric = { ...grain, id: 'M1', kind: 'metric', subject: ['net revenue'], predicate: 'defined_as', value: { name: 'net revenue', expression: 'SUM(x)', grain: ['day'], filters: [] }, status: 'active', trust: 'confirmed' };
+    const r2 = cov.captureCoverage({ graph, assertions: [grain, metric], spec: c4c.spec });
+    assert.strictEqual(r2.tables.find((t) => t.fqn === 'shop.orders').items[1].status, 'proposed');
+    assert.deepStrictEqual(r2.metrics.find((m) => m.metric === 'net revenue').items.map((i) => i.status), ['known', 'known', 'known']);
+    assert.match(cov.renderCoverage(r2), /# Capture coverage: \d+ of \d+ known[\s\S]*## shop\.orders/);
+  });
+
+  await test('v0.48.0: the data before any model — candidate keys, grain and foreign keys from the reference data, verified by probes; a declared key the data breaks is reported; personal data by value shape', async () => {
+    const dc = require('../dist/engine/context/dataCandidates.js');
+    const graph = c4c.graph(['obj:shop/prod/shop.customers']);
+    const ids = ['obj:shop/prod/shop.customers', 'obj:crm/prod/crm.customers', 'obj:crm/prod/crm.loyalty_members'];
+    const findings = await dc.findCandidates({ graph, tableIds: ids, assertions: [], executor: c4c.samples() });
+    const line = (k, fqn) => findings.filter((f) => f.kind === k && f.fqn === fqn);
+    const key = line('key', 'shop.customers')[0];
+    assert.ok(key && key.columns[0] === 'customer_id' && key.result.pass === true && key.result.source === 'sample', JSON.stringify(key));
+    assert.strictEqual(line('grain', 'shop.customers')[0].columns[0], 'customer_id');
+    assert.strictEqual(line('declared_key', 'crm.customers')[0].result.pass, false, 'cust_no is declared but C-20003 appears twice');
+    assert.strictEqual(line('declared_key', 'crm.loyalty_members')[0].result.pass, false);
+    const fk = findings.filter((f) => f.kind === 'relationship').map((f) => [`${f.fqn}.${f.columns[0]}`, `${f.to.fqn}.${f.to.columns[0]}`, f.result.pass]);
+    assert.deepStrictEqual(fk.sort(), [['crm.customers.shop_customer_id', 'shop.customers.customer_id', true], ['crm.loyalty_members.cust_no', 'crm.customers.cust_no', false]].sort());
+    assert.deepStrictEqual(findings.filter((f) => f.kind === 'change_column').map((f) => `${f.fqn}.${f.columns[0]}`).sort(), ['crm.customers.last_modified', 'shop.customers.updated_at']);
+    const shapes = findings.filter((f) => f.kind === 'personal_data').map((f) => `${f.fqn}.${f.columns[0]}:${f.shape}`).sort();
+    assert.deepStrictEqual(shapes, ['crm.customers.email:email', 'crm.customers.phone:phone', 'shop.customers.email:email', 'shop.customers.phone:phone']);
+    // The shape probe is a fixed template that returns counts only, in every dialect with regular expressions.
+    const pr = require('../dist/engine/context/probes.js');
+    for (const d of ['snowflake', 'spark_sql', 'oracle']) assert.match(pr.renderProbeSql({ check: 'shape', table: { fqn: 'crm.customers' }, columns: ['phone'], shape: 'phone' }, d), /^SELECT COUNT\(\*\) AS row_count, SUM\(.*\) AS present_count, SUM\(.*\) AS match_count FROM crm\.customers$/);
+    assert.throws(() => pr.renderProbeSql({ check: 'shape', table: { fqn: 't' }, columns: ['p'], shape: 'phone' }, 'ansi'), /regular expressions/);
+    // Recorded: those that passed, proposed but already verified; nothing twice; personal data is a person's to classify.
+    const env = await c4a.ledger();
+    try {
+      const rec = await dc.recordCandidates(env.ledger, findings);
+      assert.deepStrictEqual(rec.map((a) => a.kind).sort(), ['data_fact', 'data_fact', 'grain', 'key', 'relationship']);
+      assert.ok(rec.filter((a) => a.kind !== 'data_fact').every((a) => a.status === 'proposed' && a.trust === 'verified' && a.verification.result === 'pass'));
+      assert.strictEqual((await dc.recordCandidates(env.ledger, findings)).length, 0);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.48.0: documents — a fact whose quote is not in its section is dropped; a section the model skipped is read again; tables and fixed phrases are read without a model; a second source corroborates; the model is recorded; double reading keeps only agreeing keys', async () => {
+    const dx = require('../dist/engine/context/documentExtraction.js');
+    const sections = dx.splitSections(c4a.read('documents/pack/brd.md'));
+    const doc = { id: 'brd', path: 'docs/brd.md' };
+    const raw = { facts: [
+      { section: '2-definitions:L6-L8', kind: 'metric', subject: ['net revenue'], predicate: 'defined_as', value: { name: 'net revenue', definition: 'gross minus discounts and refunds' }, statement: 'Net revenue…', quote: 'net revenue is GROSS order line value   minus discounts' },
+      { section: '2-definitions:L6-L8', kind: 'metric', subject: ['retention'], predicate: 'defined_as', value: { name: 'retention', definition: 'within 30 days' }, statement: 'Retained within 30 days.', quote: 'another order within 30 days' },
+      { section: '3-data-rules:L10-L12', kind: 'business_rule', subject: ['orders'], predicate: 'requires', value: { text: 'Every order must have a customer' }, statement: 'Every order must have a customer.' }
+    ], sections: [{ section: '1-purpose:L3-L4', facts: 0 }] };
+    const out = dx.parseDocumentExtraction(raw, doc, sections, 'a'.repeat(64), () => undefined, { model: 'copilot:gpt-x' });
+    assert.strictEqual(out.proposed.length, 1, 'quote compared without case or spacing');
+    assert.strictEqual(out.unsupported, 2);
+    assert.ok(out.dropped.some((d) => /quote is not in the section/.test(d)) && out.dropped.some((d) => /no quote/.test(d)));
+    assert.strictEqual(out.proposed[0].model, 'copilot:gpt-x');
+    assert.strictEqual(out.proposed[0].evidence[0].excerpt, 'net revenue is GROSS order line value   minus discounts');
+    assert.deepStrictEqual(out.reread, ['retail-analytics-business-requirements-draft:L1-L1', '4-constraints:L14-L15'], 'accounted: reported, or a fact taken');
+    // Double reading: a key only the first reading saw is dropped; the rest stays.
+    const key = { kind: 'key', subject: ['t'], predicate: 'primary', value: ['a'], statement: 'k', evidence: [{ type: 'file', ref: 'x' }] };
+    const agreed = dx.agreeingReadings({ proposed: [key, { ...key, kind: 'business_term', value: { term: 'x' } }], dropped: [] }, { proposed: [], dropped: [] });
+    assert.deepStrictEqual([agreed.proposed.map((p) => p.kind), /did not agree/.test(agreed.dropped[0])], [['business_term'], true]);
+    // Deterministic first: a data dictionary and fixed phrases.
+    const dict = ['# Customer dictionary', '', '## shop.customers', '', '| Column | Description | PK | Nullable |', '|---|---|---|---|', '| customer_id | Customer number | Y | N |', '| email | E-mail address |  | Y |', '| nonexistent | Ghost |  |  |', '', 'email must be unique. shop.orders.status is never null. shop.order_items has one row per order_item_id.'].join('\n');
+    const resolve = require('../dist/engine/context/projection.js').createSubjectResolver(c4c.graph());
+    const parsed = dx.parseDocumentDeterministic({ id: 'dict', path: 'docs/dict.md' }, dx.splitSections(dict), 'b'.repeat(64), resolve);
+    const shapes = parsed.map((a) => `${a.kind}:${a.predicate}:${JSON.stringify(a.value.check ?? a.value)}:${a.subject[0].replace(/^obj:[a-z]+\/prod\//, '')}`).sort();
+    assert.deepStrictEqual(shapes, [
+      'business_term:defined_as:{"term":"customer_id","definition":"Customer number","boundTo":["obj:shop/prod/shop.customers.customer_id"]}:shop.customers.customer_id',
+      'business_term:defined_as:{"term":"email","definition":"E-mail address","boundTo":["obj:shop/prod/shop.customers.email"]}:shop.customers.email',
+      'grain:grain:["order_item_id"]:shop.order_items',
+      'key:primary:["customer_id"]:shop.customers',
+      'quality_expectation:expects:"not_null":shop.customers.customer_id',
+      'quality_expectation:expects:"not_null":shop.orders.status',
+      'quality_expectation:expects:"unique":shop.customers.email'
+    ].sort(), JSON.stringify(shapes));
+    assert.ok(parsed.every((a) => a.trust === 'documented' && a.status === 'proposed' && a.createdBy === 'parser:dict' && !a.model));
+    // Agreement: the same fact from another document corroborates; from the same one, it is a duplicate.
+    const env = await c4a.ledger();
+    try {
+      const first = await dx.recordWithAgreement(env.ledger, parsed);
+      assert.deepStrictEqual(first, { recorded: parsed.length, corroborated: 0 });
+      const again = parsed.map((a) => ({ ...a, createdBy: 'parser:contract', evidence: [{ type: 'file', ref: 'docs/contract.md#s:L1-L2@cccccccccccc' }] }));
+      assert.deepStrictEqual(await dx.recordWithAgreement(env.ledger, again.slice(0, 1)), { recorded: 0, corroborated: 1 });
+      assert.deepStrictEqual(await dx.recordWithAgreement(env.ledger, parsed.slice(0, 1)), { recorded: 0, corroborated: 0 });
+      const held = env.ledger.assertions().find((a) => a.statement === parsed[0].statement);
+      assert.deepStrictEqual([held.evidence.length, held.corroboratedBy], [2, ['parser:contract']]);
+    } finally { env.cleanup(); }
+  });
+
+  await test('v0.48.0: the conversation, reviewed — messages that read like facts and have no fact citing them are listed (not questions, not commands); dismissed ones are not listed again', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const sr = require('../dist/engine/context/sessionReview.js');
+    const turns = [
+      { ref: 'chat:c#0', text: 'order_id is unique across all channels' },
+      { ref: 'chat:c#2', text: 'Which tables hold refunds?' },
+      { ref: 'chat:c#4', text: '/rule refunds count on the refund day' },
+      { ref: 'chat:c#6', text: 'A customer is retained if they order again within 90 days' },
+      { ref: 'chat:c#8', text: 'thanks, looks good' }
+    ];
+    const cited = { evidence: [{ type: 'chat_message', ref: 'chat:c#0' }] };
+    assert.deepStrictEqual(sr.unrecordedStatements(turns, [cited]).map((s) => s.ref), ['chat:c#6']);
+    assert.deepStrictEqual(sr.unrecordedStatements(turns, []).map((s) => s.ref), ['chat:c#0', 'chat:c#6']);
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-review-'));
+    try {
+      sr.dismissStatements(ws, ['chat:c#6']);
+      assert.deepStrictEqual(sr.unrecordedStatements(turns, [cited], sr.dismissedStatements(ws)), []);
+      assert.match(sr.renderUnrecorded(sr.unrecordedStatements(turns, [])), /2 message\(s\)[\s\S]*\/review record <n>/);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.48.0: exploration mode — switched with an acknowledged disclaimer; a stage continues past a context gap with a recorded assumption where governed mode stops and asks; checks warn; switching to governed lists everything to harden', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const M = fresh('../dist/engine/documents/problemMode.js');
+    const SG = require('../dist/engine/agents/stageGaps.js');
+    const A = require('../dist/engine/agents/assignment.js');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const D = require('../dist/engine/documents/problemDocuments.js');
+    const DA = fresh('../dist/engine/workflows/documentApproval.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-explore-'));
+    try {
+      const root = layoutPath(ws, 'problems', 'p1');
+      nodeFs.mkdirSync(root, { recursive: true });
+      D.writeBusinessProblemSpec(root, { id: 'bps-1', version: 2, status: 'approved', problemStatement: 'Retention', objectives: [], successCriteria: [], scope: { in: [], out: [] }, constraints: [], assumptions: [], createdAt: 'x', updatedAt: 'x' });
+      assert.strictEqual(M.problemMode(root), 'governed');
+      assert.throws(() => M.setProblemMode(root, 'exploration', { by: 'ana', channel: 'cli' }), /disclaimer/);
+      // Governed: a gap stops the agent; an assumption is refused.
+      const gap = { needed: 'relationship', subject: ['a', 'b'], text: 'orders ↔ customers', reason: 'absent', minTrust: 'confirmed' };
+      assert.match(SG.renderStageGaps(SG.stageGapsFrom([gap], 'mapping'), 'governed'), /stop and ask the person/);
+      const ledger = new AssertionLedger(layoutPath(ws, 'ledger'));
+      await ledger.load();
+      const guess = { kind: 'relationship', subject: ['shop.orders', 'shop.customers'], predicate: 'joins_to', value: { from: { entity: 'shop.orders', columns: ['customer_id'] }, to: { entity: 'shop.customers', columns: ['customer_id'] } }, statement: 'orders.customer_id joins customers.customer_id', model: 'copilot:gpt-x', stepId: 'map', reason: 'same column name' };
+      await assert.rejects(M.recordAssumption(ledger, root, guess), /governed/);
+      // Exploration: acknowledged, recorded; the agent assumes and continues; the assumption closes the gap.
+      const r = M.setProblemMode(root, 'exploration', { by: 'ana', channel: 'cli', acknowledged: true }, { now: new Date('2026-10-27T10:00:00Z') });
+      assert.deepStrictEqual([r.record.mode, r.record.by, r.record.acknowledged === M.EXPLORATION_DISCLAIMER, r.record.history.length], ['exploration', 'ana', true, 1]);
+      const text = SG.renderStageGaps(SG.stageGapsFrom([gap], 'mapping', 'exploration'), 'exploration');
+      assert.match(text, /don't stop[\s\S]*autode_record_assumption/);
+      const a = await M.recordAssumption(ledger, root, guess);
+      assert.deepStrictEqual([a.status, a.trust, a.flags, a.model, a.specId, a.evidence[0].ref], ['active', 'assumed', ['assumption', 'exploration'], 'copilot:gpt-x', 'bps-1', 'model:copilot:gpt-x@map']);
+      const closed = { ...gap, reason: 'below_trust', foundTrust: 'assumed' };
+      assert.deepStrictEqual(SG.stageGapsFrom([closed], 'mapping', 'exploration'), [], 'the assumption closes it in exploration');
+      assert.strictEqual(SG.stageGapsFrom([closed], 'mapping', 'governed').length, 1, 'but not in governed mode');
+      // Model proposals count at once, at assumed trust (a correction still waits).
+      const p = { kind: 'business_term', subject: ['x'], predicate: 'defined_as', value: { term: 'x' }, statement: 's', evidence: [{ type: 'file', ref: 'r' }], status: 'proposed', trust: 'inferred' };
+      assert.deepStrictEqual([M.admitForMode(p, 'exploration').status, M.admitForMode(p, 'exploration').trust], ['active', 'assumed']);
+      assert.strictEqual(M.admitForMode(p, 'governed'), p);
+      // The assignment says so, for any host.
+      const asg = A.assignmentText({ problemId: 'p1', stage: { id: 'map', title: 'Map', kind: 'mapping', status: 'ready' }, role: 'r', roleDescription: 'd', roleInstructions: 'i', skills: [], tier: 'propose', engineTools: [], fileMode: 'read-only', consumes: [], produces: [], doneWhen: 'x', tasks: [], externalSkills: [], contextGaps: [], mode: 'exploration' });
+      assert.match(asg, /## Exploration mode[\s\S]*autode_record_assumption[\s\S]*non-production environments only/);
+      assert.ok(A.toolsForTier([{ name: 'autode_record_assumption', annotations: {} }], 'propose', ['autode_propose_assertion']).includes('autode_record_assumption'));
+      // Checks warn instead of refusing: a target context built for another specification version.
+      nodeFs.mkdirSync(nodePath.join(root, 'context'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(root, 'context', 'target-context.yaml'), 'specId: bps-1\nspecVersion: 1\nstatus: built\nplatform: snowflake\n');
+      assert.deepStrictEqual(DA.documentApprovalCheck(root, 'target-context').errors, []);
+      assert.match(DA.documentApprovalCheck(root, 'target-context').warnings[0], /another version/);
+      M.recordWarnedCheck(root, { check: 'target context approval', stage: 'target', detail: 'built for another version' });
+      // Back to governed: the hardening list; the same check refuses again.
+      const g = M.setProblemMode(root, 'governed', { by: 'ana', channel: 'cli' }, { workspaceRoot: ws });
+      assert.deepStrictEqual([g.hardening.assumptions.map((x) => x.id), g.hardening.modelOnly.length, g.hardening.warned.length], [[a.id], 0, 1]);
+      assert.match(M.renderHardening(g.hardening), /## Assumptions \(1\)[\s\S]*guessed by copilot:gpt-x[\s\S]*## Checks that only warned \(1\)/);
+      assert.match(DA.documentApprovalProblems(root, 'target-context')[0], /another version/);
+      assert.strictEqual(M.readModeRecord(root).history.length, 2);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.48.0: never relaxed — runbook policy, production, sample-data consent and secrets behave the same in both modes; an exploration problem targets non-production environments only; deliverables and manifests are labelled', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const M = fresh('../dist/engine/documents/problemMode.js');
+    const RB = fresh('../dist/engine/runner/runbook.js');
+    const P = fresh('../dist/engine/runner/policy.js');
+    const { gateQueryResult } = require('../dist/engine/platform/sampleData.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-relax-'));
+    try {
+      const root = layoutPath(ws, 'problems', 'p1');
+      nodeFs.mkdirSync(root, { recursive: true });
+      nodeFs.mkdirSync(nodePath.dirname(layoutPath(ws, 'approvals')), { recursive: true });
+      nodeFs.writeFileSync(layoutPath(ws, 'approvals'), 'runbooks:\n  environments:\n    dev: { connections: [snowflake:dev], approvers: any }\n    prod: { connections: [snowflake:prod], approvers: [priya] }\n');
+      const policy = P.loadRunbookPolicy(ws);
+      const connections = [{ id: 'snowflake:dev', platform: 'snowflake', credentials: { resolver: 'cli', ref: 'dev' } }, { id: 'snowflake:prod', platform: 'snowflake', credentials: { resolver: 'cli', ref: 'prod' } }];
+      const rb = (conn) => ({ id: 'deploy-x', title: 't', reason: 'r', connectionId: conn, steps: [{ id: 's1', title: 'drop', kind: 'sql', sql: 'DROP TABLE x', expect: 'gone' }, { id: 's2', title: 'cli', kind: 'cli', argv: ['snow', 'object', 'list', '--password=hunter2'], expect: 'x' }] });
+      const record = (conn) => ({ runbook: rb(conn), revision: RB.runbookRevision(rb(conn)), environment: '', status: 'awaiting-approval', problemId: 'p1', approvals: [], steps: {} });
+      const rows = { columns: ['email'], rows: [{ email: 'a@b.c' }], rowCount: 1 };
+      const outcome = (mode) => {
+        if (mode === 'exploration') M.setProblemMode(root, 'exploration', { by: 'ana', channel: 'cli', acknowledged: true }); else M.setProblemMode(root, 'governed', { by: 'ana', channel: 'cli' });
+        const check = RB.checkRunbook(rb('snowflake:dev'), { workspaceRoot: ws, connections, policy });
+        return {
+          check: [check.ok, check.errors.some((e) => /no rollback|rollback/.test(e)), check.errors.some((e) => /credential|not allowed/.test(e))],
+          consent: gateQueryResult(rows, { allowSampleData: false, metadata: false, connectionId: 'snowflake:dev' }).withheld !== undefined,
+          devApproval: !!RB.approveRunbook(root, record('snowflake:dev'), 'ana', 'cli', policy).record,
+          prodByStranger: RB.approveRunbook(root, record('snowflake:prod'), 'bob', 'cli', policy).problem
+        };
+      };
+      const governed = outcome('governed');
+      const exploration = outcome('exploration');
+      assert.deepStrictEqual(governed.check, [false, true, true], 'destructive needs a rollback; no credentials in argv');
+      assert.deepStrictEqual([exploration.check, exploration.consent, exploration.devApproval], [governed.check, governed.consent, governed.devApproval]);
+      assert.match(governed.prodByStranger, /not an approver/);
+      assert.match(exploration.prodByStranger, /exploration mode, which targets non-production environments only/);
+      assert.match(RB.approveRunbook(root, record('snowflake:unlisted'), 'priya', 'cli', policy).problem, /non-production/, 'unlisted counts as production');
+      // Labelled: the deliverable's first line and its grounding manifest.
+      const { recordArtifact } = fresh('../dist/engine/agents/artifacts.js');
+      const out = recordArtifact({ workspaceRoot: ws, problemId: 'p1', problemRoot: root, stage: { id: 'build', kind: 'build' }, path: 'models/x.sql', content: 'select 1', who: { kind: 'agent', name: 'pipeline-engineer' }, channel: 'mcp', sources: { graph: { nodes: [], edges: [] }, assertions: [] } });
+      const sql = nodeFs.readFileSync(nodePath.join(ws, out.path), 'utf8');
+      assert.ok(sql.startsWith(`-- ${M.EXPLORATION_LABEL}\n`) && sql.endsWith('select 1'), sql);
+      assert.strictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(ws, out.manifestPath), 'utf8')).exploration, true);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.48.0: capture and exploration on every surface — autode coverage, problems mode (a person, acknowledged) and hardening; autode_capture_coverage, autode_record_assumption (refused when governed) and proposals admitted in exploration over MCP', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-c4c-'));
+    let client;
+    try {
+      nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), c4a.read('sources/shop.ddl'));
+      client = await mcpSession(ws);
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const raw = async (name, args = {}) => client.callTool({ name, arguments: args });
+      await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
+      await call('autode_start_problem', { problemStatement: 'Daily net revenue from shop.orders and shop.refunds, by channel' });
+      const cov = await call('autode_capture_coverage');
+      assert.ok(cov.tables.some((t) => t.fqn === 'shop.orders') && cov.metrics.some((m) => m.metric === 'net revenue') && /# Capture coverage/.test(cov.markdown), JSON.stringify(cov).slice(0, 400));
+      const guess = { kind: 'grain', subject: ['shop.refunds'], predicate: 'grain', value: ['refund_id'], statement: 'one row per refund', model: 'claude', reason: 'its key' };
+      const refused = await raw('autode_record_assumption', guess);
+      assert.ok(refused.isError && /governed/.test(JSON.stringify(refused.content)));
+      await client.close(); client = undefined;
+      // The CLI: a person switches the mode, acknowledging the disclaimer.
+      const W = ['--workspace', ws];
+      assert.strictEqual((await cli(['problems', 'mode', 'exploration', ...W])).code, 4, 'a person at a terminal');
+      assert.strictEqual((await cli(['problems', 'mode', 'exploration', ...W], { interactive: true, answers: ['yes'] })).code, 4, 'acknowledged by typing explore');
+      const sw = await cli(['problems', 'mode', 'exploration', ...W], { interactive: true, answers: ['explore'] });
+      assert.strictEqual(sw.code, 0, sw.out + sw.err);
+      assert.match(sw.asked[0], /results may be completely wrong/i);
+      assert.match((await cli(['problems', 'mode', ...W])).out, /is exploration/);
+      client = await mcpSession(ws);
+      const c2 = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const a = await c2('autode_record_assumption', guess);
+      assert.deepStrictEqual([a.assertion.status, a.assertion.trust], ['active', 'assumed']);
+      const p = await c2('autode_propose_assertion', { assertion: { kind: 'business_term', subject: ['channel'], predicate: 'defined_as', value: { term: 'channel', definition: 'web or store' }, statement: 'Channel is web or store.', evidence: [{ type: 'chat_message', ref: 'chat:x#1' }] }, model: 'claude' });
+      assert.deepStrictEqual([p.assertion.status, p.assertion.trust], ['active', 'assumed']);
+      assert.match(p.next, /exploration mode/);
+      await client.close(); client = undefined;
+      const cov2 = await cli(['coverage', ...W]);
+      assert.ok(cov2.code === 0 && /## shop\.refunds[\s\S]*~ grain: one row per \(refund_id\)/.test(cov2.out), cov2.out);
+      const hard = await cli(['problems', 'hardening', ...W, '--json']);
+      assert.deepStrictEqual([hard.json().assumptions.length, hard.json().modelOnly.length], [1, 1]);
+      const back = await cli(['problems', 'mode', 'governed', ...W], { interactive: true, answers: ['governed'] });
+      assert.ok(back.code === 0 && /## Assumptions \(1\)[\s\S]*## Model-only facts \(1\)/.test(back.out), back.out);
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

@@ -5,7 +5,8 @@ import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocumen
 import { validatePipelineSpec } from '../pipelineSpec/validator';
 import { AssertionLedger } from '../context/ledger';
 import { layoutPath } from '../workspaceLayout';
-import { governanceFacts, governanceGaps } from '../governance/governance';
+import { governanceFacts, governanceGaps, unmaskedSensitive } from '../governance/governance';
+import { problemMode, recordWarnedCheck } from '../documents/problemMode';
 import { StageKind } from './stageKinds';
 import { readWorkflow } from './instance';
 import { Actor, appendEvent } from './events';
@@ -41,12 +42,35 @@ export function stageDocumentFile(problemRoot: string, kind: StageKind): string 
   return rel ? path.join(problemRoot, ...rel) : undefined;
 }
 
-/** What stops the stage's document from being approved now (empty: it can be). */
+/** What stops the stage's document from being approved now (empty: it can be). In exploration mode, checks only warn. */
 export function documentApprovalProblems(problemRoot: string, kind: StageKind): string[] {
+  return documentApprovalCheck(problemRoot, kind).errors;
+}
+
+/**
+ * The checks on a stage's document, split by mode (C4c, §7.4): in governed
+ * mode every failed check refuses; in exploration mode the checks that guard
+ * consistency and governance (another specification version, a source
+ * context with no source, an unmasked sensitive column) only warn. A
+ * document that isn't there or can't be read always refuses.
+ */
+export function documentApprovalCheck(problemRoot: string, kind: StageKind): { errors: string[]; warnings: string[] } {
+  const { hard, soft } = documentChecks(problemRoot, kind);
+  return problemMode(problemRoot) === 'exploration' ? { errors: hard, warnings: soft } : { errors: [...hard, ...soft], warnings: [] };
+}
+
+function documentChecks(problemRoot: string, kind: StageKind): { hard: string[]; soft: string[] } {
+  const all = documentProblems(problemRoot, kind);
+  return { hard: all.filter((p) => !p.soft).map((p) => p.text), soft: all.filter((p) => p.soft).map((p) => p.text) };
+}
+
+function documentProblems(problemRoot: string, kind: StageKind): Array<{ text: string; soft?: boolean }> {
+  const hard = (texts: string[]) => texts.map((text) => ({ text }));
+  const soft = (texts: string[]) => texts.map((text) => ({ text, soft: true }));
   const name = NAMES[kind] ?? kind;
   const file = stageDocumentFile(problemRoot, kind);
-  if (!file) return [`${kind} stages have no document of their own.`];
-  if (!fs.existsSync(file)) return [`There is no ${name} yet.`];
+  if (!file) return hard([`${kind} stages have no document of their own.`]);
+  if (!fs.existsSync(file)) return hard([`There is no ${name} yet.`]);
   const text = fs.readFileSync(file, 'utf8');
   const specText = readProblemDocument(problemRoot, 'spec');
   const spec = specText ? parseBusinessProblemSpec(specText) : undefined;
@@ -54,22 +78,22 @@ export function documentApprovalProblems(problemRoot: string, kind: StageKind): 
   switch (kind) {
     case 'specify': {
       const s = parseBusinessProblemSpec(text);
-      return s.problemStatement?.trim() ? [] : ['The specification has no problem statement.'];
+      return s.problemStatement?.trim() ? [] : hard(['The specification has no problem statement.']);
     }
     case 'target-context': case 'source-assessment': {
       const d = parseYaml(text) as Record<string, unknown>;
-      const errors = sameSpec(d) ? [] : [`The ${name} was built for another version of the specification: rebuild it first.`];
+      const errors = sameSpec(d) ? [] : soft([`The ${name} was built for another version of the specification: rebuild it first.`]);
       const w = readWorkflow(problemRoot);
       if (kind === 'source-assessment' && w && workflowNeedsSources(w) && (d.status === 'not_applicable' || !Array.isArray(d.sources) || !d.sources.length)) {
-        errors.push('This workflow maps sources, so the source context needs at least one source: bring the source into the estate (Ingest File, `autode estate ingest`), then pick it (Pick from the Estate, `autode context sources --system <id>`).');
+        errors.push(...soft(['This workflow maps sources, so the source context needs at least one source: bring the source into the estate (Ingest File, `autode estate ingest`), then pick it (Pick from the Estate, `autode context sources --system <id>`).']));
       }
       return errors;
     }
     case 'mapping': {
       const m = parseMappingContext(text);
-      const errors: string[] = [];
-      if (!m.mappings.length) errors.push('The mapping has no entity mappings yet.');
-      if (!sameSpec(m)) errors.push('The mapping was built for another version of the specification.');
+      const errors: Array<{ text: string; soft?: boolean }> = [];
+      if (!m.mappings.length) errors.push(...hard(['The mapping has no entity mappings yet.']));
+      if (!sameSpec(m)) errors.push(...soft(['The mapping was built for another version of the specification.']));
       return errors;
     }
     case 'build': {
@@ -79,7 +103,9 @@ export function documentApprovalProblems(problemRoot: string, kind: StageKind): 
       const ledger = new AssertionLedger(layoutPath(path.resolve(problemRoot, '..', '..', '..'), 'ledger'));
       ledger.loadSync();
       const gaps = governanceGaps(p, governanceFacts(ledger.assertions())).errors;
-      return [...(v.valid ? [] : v.errors), ...gaps].map((e) => `Pipeline Spec: ${e}`);
+      const masking = new Set(v.valid ? [] : unmaskedSensitive(p));
+      const label = (e: string) => `Pipeline Spec: ${e}`;
+      return [...(v.valid ? [] : v.errors).map((e) => ({ text: label(e), soft: masking.has(e) })), ...soft(gaps.map(label))];
     }
     default: return [];
   }
@@ -91,9 +117,11 @@ export function approveStageDocument(ctx: RuntimeContext, stageId: string, who: 
   if (!w || !s || !s.included) throw new WorkflowError('NOT_FOUND', `No stage "${stageId}".`);
   const file = stageDocumentFile(ctx.problemRoot, s.kind);
   if (!file) throw new WorkflowError('NOT_ALLOWED', `${stageId} is approved through its gate, not a document.`);
-  const problems = documentApprovalProblems(ctx.problemRoot, s.kind);
-  if (problems.length) throw new WorkflowError('CHECK_FAILED', problems.join(' '));
+  const check = documentApprovalCheck(ctx.problemRoot, s.kind);
+  if (check.errors.length) throw new WorkflowError('CHECK_FAILED', check.errors.join(' '));
   const at = now.toISOString();
+  // Exploration mode: what only warned is kept for hardening.
+  for (const w of check.warnings) recordWarnedCheck(ctx.problemRoot, { at, check: `${NAMES[s.kind]} approval`, stage: s.id, detail: w });
   const text = fs.readFileSync(file, 'utf8');
   switch (s.kind) {
     case 'specify':
@@ -111,5 +139,5 @@ export function approveStageDocument(ctx: RuntimeContext, stageId: string, who: 
     }
   }
   appendEvent(ctx.problemRoot, { at, type: 'approved', stage: s.id, actor: who, channel, files: [path.relative(ctx.workspaceRoot, file).split(path.sep).join('/')] });
-  return { stage: s.id, file, message: `${NAMES[s.kind]} approved by ${who.name}: ${stageId} is done.` };
+  return { stage: s.id, file, message: `${NAMES[s.kind]} approved by ${who.name}: ${stageId} is done.${check.warnings.length ? ` Exploration mode: ${check.warnings.length} check(s) only warned (${check.warnings.join(' ')}); they are listed for hardening.` : ''}` };
 }

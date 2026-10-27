@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.47.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.48.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -172,6 +172,27 @@ The Business Problem Specification (`spec/business-problem.yaml`) holds:
 
 Review it in the panel, change it by asking in chat ("move refunds out of scope"), and click **✓ Approve Specification**. An approved specification is versioned: revising it later makes a new version, and the stages built on the old one become stale.
 
+### 5.4 Exploration mode
+
+Most work with AutoDE is exploration, a proof of concept or a proof of value, not production. A business problem can run in **exploration mode**: AutoDE then proceeds on the model's recommendations instead of stopping to ask, and labels everything it produces so nobody mistakes it for grounded work.
+
+**Switching it on.** On the panel's Business Problem card, choose **Explore…** and acknowledge the disclaimer ("results may be completely wrong: assumptions are not verified"). Before the problem's first message it applies to the new problem. In a terminal: `autode problems new "<statement>" --exploration`, or `autode problems mode exploration`, typing `explore` to acknowledge. Who switched it, and when, is recorded in `.autode/problems/<id>/mode.yaml`.
+
+**What changes:**
+
+| Governed (the default) | Exploration |
+|---|---|
+| At a context gap (an unknown join, key or grain) the agent stops and asks you. | The agent records its best guess as an **assumption** (with the model, the stage and why) and continues. |
+| Facts a model proposes wait in the Context Inbox. | They count at once, at **assumed** trust. |
+| A failed check refuses an approval (another specification version, a source context with no source, an unmasked sensitive column). | It warns; the approval says what warned, and AutoDE keeps the list. |
+| Approving asks you to confirm (a typed word in a terminal). | One click (`y` in a terminal). Still you, still recorded. |
+
+**What never changes:** platform changes go only through approved runbooks; an exploration problem may target **non-production environments only** (a connection your approvals file doesn't list under dev, sandbox or test counts as production, and its runbooks are refused); row values reach a model only where the connection allows sample data; no secrets in files; destructive steps need a rollback.
+
+**Labels.** A banner in the panel and the Workflow view; a first line in every deliverable an agent records ("built on unverified assumptions; results may be completely wrong"); `"exploration": true` in its grounding manifest; and a section in every agent's assignment, so agents in Claude Code or other hosts behave the same.
+
+**Back to governed.** Choose **Switch to governed** on the card, or `autode problems mode governed`. AutoDE lists what to harden: every assumption, every fact only a model vouched for, and every check that only warned (`autode problems hardening` shows the list at any time). Governed checks don't accept assumed facts, so the problem blocks where it normally would until you confirm or replace them.
+
 ---
 
 ## 6. The pack: the client's documents
@@ -186,7 +207,10 @@ Review it in the panel, change it by asking in chat ("move refunds out of scope"
 ### 6.2 How documents are read
 
 - **Structured documents in a house format** (a client's own YAML data contract, say) are read through an **interpretation profile**. The model proposes the profile once; you confirm it (it lives in `.autode/knowledge/profiles/`). From then on AutoDE reads every version of that document deterministically, with no model.
-- **Free text** (a BRD) is read into proposed facts. Each fact cites the section it came from, and facts that don't validate or whose subject AutoDE can't find are dropped, with the reason shown.
+- **Free text** (a BRD) is read into proposed facts. Each fact cites the section it came from and **quotes it word for word**: a fact whose quote isn't in that section is dropped as unsupported, and so are facts that don't validate, with the reason shown. The model reports on every section; a section it skipped is read again on its own. Facts carry the model that read them.
+- **Tables and fixed phrases need no model.** A Markdown data dictionary (a table with a *Column* header and *Description*, *PK*, *Unique*, *Required* or *Nullable* columns) and sentences such as "`email` must be unique", "`status` is never null" or "`order_items` has one row per `order_item_id`" are read deterministically, as documented proposals, whenever the document is applied (even with no model, as in `autode pack apply`).
+- **Two documents that agree** strengthen each other: the same fact from a second document adds its evidence instead of a duplicate.
+- **Double reading** (setting `capture.doubleExtraction`) reads each document twice and keeps keys, grain and relationships only where both readings agree. It doubles the model calls.
 - **Binary formats** (Word, PDF) are not read yet: export them to Markdown or text.
 
 **Apply** (*AutoDE: Apply Business-Problem Pack*) reads the documents and records their facts. In a terminal, `autode pack apply` reads structured documents through their confirmed profiles; free text needs a model (the panel, or an agent host).
@@ -242,7 +266,7 @@ Everything AutoDE knows about the data is a **fact**:
 
 Each fact has:
 - **evidence:** where it came from (a column's introspection, a document section, your chat message, a probe);
-- **trust:** `verified` (checked against data) > `confirmed` (by a person) > `documented` (from a signed or draft document) > `inferred` (a model's reading);
+- **trust:** `verified` (checked against data) > `confirmed` (by a person) > `documented` (from a signed or draft document) > `assumed` (a model's reading or guess, taken as true in exploration mode, [§5.4](#54-exploration-mode)) > `inferred` (a model's reading, waiting for you);
 - **status:** `proposed`, `active`, `needs review`, `superseded`, `rejected`.
 
 Facts are kept in an append-only ledger (`.autode/knowledge/ledger/`): history is never lost, and every change records who made it.
@@ -254,6 +278,7 @@ Facts are kept in an append-only ledger (`.autode/knowledge/ledger/`): history i
 - **Conversation:** after each chat or interview turn, the model proposes the facts you stated, in the background. A later, different value for the same fact (you corrected yourself) supersedes the earlier one once you confirm it.
 - **Without a model:** type `/define`, `/rule`, `/decide` or `/assume` in chat to record a fact directly.
 - **Agents:** they propose facts; you confirm them.
+- **The data itself** ([§8.6](#86-facts-from-the-data)): keys, joins and personal data found and checked without a model.
 
 ### 8.3 The Context Inbox
 
@@ -265,7 +290,28 @@ From a terminal: `autode facts`, `autode facts show <id>`, `autode facts confirm
 
 ### 8.4 Context gaps
 
-When a step needs something nobody knows (how two tables join, the key of a table, the grain of a fact table), it **pauses with a context gap** instead of guessing. The gap says exactly what is missing; once you record the fact, the step continues.
+When a stage needs something nobody knows (how two tables join, the key of a table, the grain of a fact table), its agent gets the **context gap** in its assignment: it asks you instead of guessing, or leaves the gap open in its deliverable for the approver. Once you record the fact, the gap closes. In exploration mode the agent records its best guess as an assumption instead, and continues ([§5.4](#54-exploration-mode)).
+
+### 8.5 Capture coverage: what is still missing
+
+*AutoDE: Capture Coverage* (`autode coverage`) is a checklist of what a complete picture of the problem needs, built without a model from the specification and the estate:
+
+- **per table in scope** (those the specification or the mapping names): key, grain, change column, load pattern, personal-data classification, relationships to the other tables in scope, business description;
+- **per metric the specification names** (revenue, retention, churn, margin …): definition, grain, filters.
+
+Each item is ✓ known, ? proposed (waiting for you), ~ assumed (exploration), ◦ a candidate AutoDE found, or ✗ missing, and every item not known says what closes it: a probe, a confirmation in the Context Inbox, a question for you or the curator, or a classification. Use it before approving the specification's downstream stages, and as the to-do list when hardening an exploration.
+
+### 8.6 Facts from the data
+
+*AutoDE: Find Candidates from Data* (`autode capture candidates --record`) looks at the tables in scope before any model does:
+
+- **keys:** columns named like a key, tested for uniqueness and nulls (a declared key is tested too, and a key the data breaks is reported);
+- **grain** from the key it found;
+- **joins:** a column named after another table's key (`cust_no`, `customer_id` for `customers.id`, `shop_customer_id` for `shop.customers.customer_id`), tested for orphans;
+- **change columns** (`updated_at`, `last_modified` …);
+- **personal data by value:** columns whose values look like e-mail addresses or phone numbers.
+
+Every test is a fixed probe that returns counts only, on the live connection or on the pack's samples. What passes is recorded as a proposed fact that is already **verified**; you confirm what it means. Personal data stays yours to classify ([§12](#12-personal-data)).
 
 ---
 
@@ -476,6 +522,7 @@ The chat in the panel is for questions and changes about the active problem: "wh
 | `/spec <text>` | Draft or revise the specification |
 | `/workflow` | Open the Workflow view |
 | `/define`, `/rule`, `/decide`, `/assume` | Record a fact without the model |
+| `/review` | The messages in this chat that read like facts (a key, a rule, a definition, a threshold) and that no fact cites. `/review record <n>` has the model read one again; `/review dismiss <n>` or `/review dismiss all` drops them. Starting a New Chat tells you how many the old one left. |
 | `/skill <id> <instruction>` | Run an imported skill |
 | `/context` | Show the context status |
 | `/connect`, `/target`, `/settings` | Open settings |
@@ -524,9 +571,9 @@ Primitives are the reviewed generators the compiler uses: `rename_cast`, `dedup`
 The same engine in a terminal, on the same files. It never calls a model and holds no credentials. The commands, in groups:
 
 - **Checks (safe in CI):** `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor`, and `check`, the CI gate, which also fails while a high-stakes decision is pending.
-- **Problems and estate:** `problems list | new | use`, `estate ingest | extract`, `context show | target | sources`.
+- **Problems and estate:** `problems list | new [--exploration] | use | mode | hardening`, `estate ingest | extract`, `context show | target | sources`.
 - **Interview and workflow:** `interview show | answer`, `workflow templates | status | plan | approve | next | start | complete | skip | reopen | history`.
-- **Knowledge:** `facts …`, `pack …`, `vocabulary …`, `governance show | classify`, `design-doc`, `query`, `explain`.
+- **Knowledge:** `facts …`, `coverage`, `capture candidates`, `pack …`, `vocabulary …`, `governance show | classify`, `design-doc`, `query`, `explain`.
 - **Decisions and approvals:** `approvals`, `decisions list | show | approve | reject`.
 - **Connections:** `connections add | list | test | remove`.
 - **Runbooks:** `runbook list | show | approve`.
@@ -572,7 +619,7 @@ All settings start with `autoDataEngineeringHub.`.
 | Connections | `activeSourceConnection`, `activeTargetConnection`; per-platform defaults for the cards (`defaultSnowflake*`, `defaultDatabricks*`, `defaultTarget*`, `defaultOracle*`); `snowflakeCliPath`, `databricksCliPath`, `dataPlatformCliConsent` (allow AutoDE to list your CLI connections) |
 | Oracle and drivers | `oracleConfigDir`, `oracleWalletLocation`, `driversDirectory` |
 | Discovery | `discovery.profileQueryBudget`, `discovery.profileConcurrency`, `queryTimeoutSeconds` |
-| Knowledge | `context.workingSetMaxTables`, `context.evictAfterDays`, `context.schemaTtlDays` |
+| Knowledge | `context.workingSetMaxTables`, `context.evictAfterDays`, `context.schemaTtlDays`, `capture.doubleExtraction` (read documents twice; keep keys, grain and joins only where both readings agree) |
 | Output | `artifactDirectory` |
 | Lifecycles | `toolSkillManagementEnabled` (drafts and versions for imported skills), `primitiveManagementEnabled` |
 
@@ -582,8 +629,6 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](roadmap.md)):
 
-- **Exploration mode** (v0.48.0), per business problem, for exploration and proofs of concept: where AutoDE would pause, it records the model's best guess as an assumption and continues; checks warn instead of blocking; gates take one click. A disclaimer you acknowledge, labels on everything produced, and a hardening list when you switch the problem to governed. Platform safety doesn't relax.
-- **More robust capture** (v0.48.0): a completeness checklist per table and metric, keys and relationships found from the data, stricter document reading.
 - **The semantic layer** (v0.49.0–v0.52.0): shared semantic models as Snowflake semantic model YAML in the deliverables folder, composed per use case, deployable as Snowflake semantic views, Databricks metric views or dbt MetricFlow; a Semantic Model editor and a Knowledge Graph window.
 
 ---
@@ -594,7 +639,8 @@ Specified and scheduled ([roadmap](roadmap.md)):
 |---|---|
 | "No language model available" | Check the provider in settings and **Test**. For Copilot or Claude Code, turn on `languageModelProgrammaticConsent`. *AutoDE: Show Active Language Model Status* says what AutoDE sees. |
 | A connection won't save | AutoDE saves only after a successful test: read the card's message. Check the platform's prerequisites on the card (*Check Platform Prerequisites*). `autode doctor` shows readiness from a terminal. |
-| An agent paused | It hit a context gap: the message says which fact is missing. Record it (Context Inbox, `/define`), then run the agent again. |
+| An agent paused | It hit a context gap: the message says which fact is missing. Record it (Context Inbox, `/define`), then run the agent again. Or, for a proof of concept, switch the problem to exploration mode. |
+| A runbook is refused in an exploration problem | Exploration targets non-production only: list the connection under dev, sandbox or test in `.autode/config/approvals.yaml`, or switch the problem to governed. |
 | A stage is stale | An input changed after it was approved (a new spec version, a re-opened stage). Review the stage's output and approve it again. |
 | Approval is refused | The checks failed: the message lists why (for a build, for example, an unmasked sensitive column). |
 | A runbook step is refused | Its command isn't allowlisted, it carries a credential flag, or a destructive step lacks a rollback. `autode runbook show <id>` explains each step. |

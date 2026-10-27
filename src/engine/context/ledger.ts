@@ -18,7 +18,9 @@ import { validateAssertion } from './assertionSchemas';
 export type LedgerEventType =
   | 'asserted' | 'confirmed' | 'rejected' | 'superseded' | 'verified' | 'verification_failed' | 'flagged_needs_review'
   /** Phase K1: a graph id was re-keyed (`from` → `to`); `assertionId` is `alias:<from>`. */
-  | 'aliased';
+  | 'aliased'
+  /** C4c: another source stated the same fact (§5.5 item 3, agreement); adds its evidence. */
+  | 'corroborated';
 
 export interface LedgerEvent {
   /** ULID; folding order. */
@@ -42,6 +44,8 @@ export interface LedgerEvent {
   /** `aliased`: the old and new graph id. */
   from?: string;
   to?: string;
+  /** `corroborated`: the agreeing source's evidence. */
+  evidence?: Evidence[];
 }
 
 export interface LedgerSnapshot {
@@ -120,6 +124,10 @@ function applyEvent(byId: Map<string, Assertion>, e: LedgerEvent): void {
       if (e.verification) a.verification = { ...e.verification };
       if (e.reason) a.reviewReason = e.reason;
       break;
+    case 'corroborated':
+      a.evidence = [...a.evidence, ...(e.evidence ?? [])];
+      if (!(a.corroboratedBy ?? []).includes(e.actor)) a.corroboratedBy = [...(a.corroboratedBy ?? []), e.actor];
+      break;
     case 'flagged_needs_review':
       if (a.status === 'active' || a.status === 'proposed') a.status = 'needs_review';
       if (e.reason) a.reviewReason = e.reason;
@@ -141,6 +149,8 @@ export interface NewAssertion {
   specId?: string;
   createdBy?: string;
   flags?: string[];
+  /** C4c: the model that extracted or guessed it. */
+  model?: string;
 }
 
 export class AssertionValidationError extends Error {
@@ -312,11 +322,12 @@ export class AssertionLedger {
     if (input.supersedes) assertion.supersedes = input.supersedes;
     if (input.specId) assertion.specId = input.specId;
     if (input.flags && input.flags.length > 0) assertion.flags = [...input.flags];
+    if (input.model) assertion.model = input.model;
     return { id: this.ulid(), type: 'asserted', assertionId: id, at, actor: createdBy, causedBy, assertion };
   }
 
   /** Builds (but does not append) a lifecycle event about an existing assertion. */
-  public buildEvent(type: Exclude<LedgerEventType, 'asserted'>, assertionId: string, actor: string, extra: Partial<Pick<LedgerEvent, 'causedBy' | 'by' | 'trust' | 'verification' | 'reason'>> = {}): LedgerEvent {
+  public buildEvent(type: Exclude<LedgerEventType, 'asserted'>, assertionId: string, actor: string, extra: Partial<Pick<LedgerEvent, 'causedBy' | 'by' | 'trust' | 'verification' | 'reason' | 'evidence'>> = {}): LedgerEvent {
     return { id: this.ulid(), type, assertionId, at: this.now().toISOString(), actor, ...extra };
   }
 

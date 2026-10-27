@@ -88,13 +88,13 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
     {
       name: 'autode_pack_reading',
       description: "What reading a pack document needs from your model (the same prompts the AutoDE panel sends its LLM): for free text, its sections (cite them by id) and the extraction prompt; for a structured document no confirmed profile reads, the prompt to propose a reading profile; otherwise why nothing is needed. Answer it with your model and record the answer with autode_pack_record_reading.",
-      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1, description: 'The pack document id (autode_pack_list).' } } },
+      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1, description: 'The pack document id (autode_pack_list).' }, sections: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Only these section ids: the ones autode_pack_record_reading asked to read again.' } } },
       annotations: { title: 'What reading a document needs', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       handler: async (args, ws) => {
         const { pm, cfm } = await pack(ws);
         try {
-          const r = pm.readingFor(String(args.id));
-          const next = r.kind === 'facts' ? 'Read the document with this prompt and record the JSON { "facts": [...] } with autode_pack_record_reading (facts, sha).'
+          const r = pm.readingFor(String(args.id), args.sections as string[] | undefined);
+          const next = r.kind === 'facts' ? 'Read the document with this prompt and record the JSON { "facts": [...], "sections": [...] } with autode_pack_record_reading (facts, sections, sha, model). Each fact quotes its section word for word.'
             : r.kind === 'profile' ? 'Propose a profile with this prompt and record the JSON with autode_pack_record_reading (profile). A person confirms it; then autode_pack_apply reads the document.'
               : r.reason;
           return { ...r, next } as unknown as Record<string, unknown>;
@@ -106,7 +106,10 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
       description: "Record what your model read from a pack document (as autode_pack_reading asked): facts from free text (each citing a section id the document has; recorded as proposed facts for a person to confirm, duplicates skipped, invalid ones reported as dropped), or a proposed reading profile for a structured document (written for review: a person sets status: confirmed). Pass the sha you were given, so a document changed since is read again.",
       inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: {
         id: { type: 'string', minLength: 1 },
-        facts: { type: 'array', items: { type: 'object' }, description: 'The facts, as the extraction prompt specifies.' },
+        facts: { type: 'array', items: { type: 'object' }, description: 'The facts, as the extraction prompt specifies (each with its verbatim quote).' },
+        sections: { type: 'array', items: { type: 'object' }, description: 'Your report on every section: { section, facts } (C4c: a section left out is read again).' },
+        reread: { type: 'array', items: { type: 'string' }, description: 'When this records a re-read: the section ids that were read again.' },
+        model: { type: 'string', description: 'The model that read it (recorded on each fact).' },
         sha: { type: 'string', description: 'The document version autode_pack_reading returned.' },
         profile: { type: 'object', description: 'The proposed profile, as the profile prompt specifies.' }
       } },
@@ -115,9 +118,10 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
         if (!!args.facts === !!args.profile) throw new EngineToolError('VALIDATION_FAILED', 'Give facts (free text) or profile (structured), not both.');
         const { pm, cfm } = await pack(ws);
         try {
-          const r = args.facts ? await pm.recordFacts(String(args.id), { facts: args.facts }, args.sha as string | undefined) : await pm.recordProfile(String(args.id), args.profile);
+          const r = args.facts ? await pm.recordFacts(String(args.id), { facts: args.facts, sections: args.sections ?? [] }, args.sha as string | undefined, { model: args.model as string | undefined, sections: args.reread as string[] | undefined }) : await pm.recordProfile(String(args.id), args.profile);
           if (r.status === 'error') throw new EngineToolError('VALIDATION_FAILED', r.reason);
-          return { ...r, next: r.status === 'extracted' ? 'A person confirms the facts in the AutoDE Context Inbox (or autode facts). Tell the user.' : 'A person reviews the profile and sets status: confirmed; then autode_pack_apply reads the document.' } as unknown as Record<string, unknown>;
+          const reread = r.status === 'extracted' && r.reread?.length && !(args.reread as string[] | undefined)?.length ? ` Sections you didn't account for: read them again (autode_pack_reading with sections ${JSON.stringify(r.reread)}), then record that reading with reread set to them.` : '';
+          return { ...r, next: r.status === 'extracted' ? `A person confirms the facts in the AutoDE Context Inbox (or autode facts). Tell the user.${reread}` : 'A person reviews the profile and sets status: confirmed; then autode_pack_apply reads the document.' } as unknown as Record<string, unknown>;
         } finally { cfm.dispose(); }
       }
     },

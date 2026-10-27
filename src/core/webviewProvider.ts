@@ -52,6 +52,11 @@ import { Decision, DecisionStore } from '../engine/decisions/decisionStore';
 import { ApplyResult, ProposalContext, applyDecision, processResolved } from '../engine/decisions/proposals';
 import { layoutPath } from '../engine/workspaceLayout';
 import { ChatTurn, citedFactIds, extractFromTurn, parseCaptureCommand } from '../engine/context/chatExtraction';
+import { EXPLORATION_DISCLAIMER, admitForMode, problemMode, renderHardening, setProblemMode } from '../engine/documents/problemMode';
+import { problemCandidates, problemCoverage } from '../engine/context/capture';
+import { renderCoverage } from '../engine/context/coverage';
+import { describeFinding } from '../engine/context/dataCandidates';
+import { dismissStatements, dismissedStatements, renderUnrecorded, unrecordedStatements } from '../engine/context/sessionReview';
 import { createSubjectResolver } from '../engine/context/projection';
 import { createProbeResolver, verifyAssertions } from '../engine/context/probes';
 import { Assertion } from '../engine/context/assertions';
@@ -143,6 +148,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private problemRoot?: vscode.Uri;
   /** Phase C4a: probes on the source connection (set by extension.ts when it connects). */
   private liveProbes?: ProbeExecutor;
+  /** C4c: exploration chosen (by this person) before the new problem's folder exists. */
+  private pendingExploration?: string;
   private platformOnboarding?: PlatformOnboarding;
   private activeProblemManager?: ActiveProblemManager;
   /** `undefined` = no active business problem yet (fresh workspace, or "Start New" before the first draft). */
@@ -349,6 +356,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postContextGateStatus();
       this.postContextUpdate();
       this.postMessage('activeProblemChanged', { problemId: undefined });
+      this.postProblemMode();
       return;
     }
 
@@ -399,6 +407,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postContextGateStatus();
       this.postContextUpdate();
       this.postMessage('activeProblemChanged', { problemId, spec: existingSpec });
+      this.postProblemMode();
       this.resumeInterview();
     } catch (err) {
       this.postLog(`Spec manager initialization failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -421,6 +430,75 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const slug = generateProblemSlug(problemStatement, existing.map((p) => p.id));
     await this.activeProblemManager.setActiveProblemId(slug);
     await this.activateProblem(slug);
+    if (this.pendingExploration && this.problemRoot) {
+      setProblemMode(this.problemRoot.fsPath, 'exploration', { by: this.pendingExploration, channel: 'panel', acknowledged: true });
+      this.pendingExploration = undefined;
+      this.postProblemMode();
+    }
+  }
+
+  /** C4c: the active problem's mode, for the panel's banner. */
+  private postProblemMode(): void {
+    this.postMessage('problemMode', { mode: this.problemRoot ? problemMode(this.problemRoot.fsPath) : this.pendingExploration ? 'exploration' : 'governed', pending: !this.problemRoot && !!this.pendingExploration });
+  }
+
+  /** The model facts are extracted with, recorded on each (§5.5 item 5). */
+  private modelLabel(): string {
+    const s = this.configManager.getSettings();
+    return `${s.activeLlmProvider}${s.activeLlmModel ? `:${s.activeLlmModel}` : ''}`;
+  }
+
+  /** A person's act: switches the active problem's mode (exploration needs the disclaimer acknowledged). */
+  private async switchProblemMode(mode: 'exploration' | 'governed'): Promise<void> {
+    const by = this.panelUser();
+    if (mode === 'exploration') {
+      const ok = await vscode.window.showWarningMessage('Run this business problem in exploration mode?', { modal: true, detail: EXPLORATION_DISCLAIMER }, 'I understand: explore');
+      if (ok !== 'I understand: explore') return;
+      if (!this.problemRoot) { this.pendingExploration = by; this.postLog('The new business problem will start in exploration mode.'); this.postProblemMode(); return; }
+      setProblemMode(this.problemRoot.fsPath, 'exploration', { by, channel: 'panel', acknowledged: true });
+      this.postLog(`Exploration mode on, acknowledged by ${by}.`);
+    } else {
+      if (!this.problemRoot) { this.pendingExploration = undefined; this.postProblemMode(); return; }
+      const ok = await vscode.window.showWarningMessage('Switch this business problem to governed?', { modal: true, detail: 'Failed checks block again, and what exploration mode assumed must be confirmed or replaced. AutoDE lists it.' }, 'Switch to governed');
+      if (ok !== 'Switch to governed') return;
+      const r = setProblemMode(this.problemRoot.fsPath, 'governed', { by, channel: 'panel' }, { workspaceRoot: this.workspaceRoot?.fsPath });
+      this.postLog(`Governed mode on (${by}).`);
+      if (r.hardening) await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'markdown', content: renderHardening(r.hardening) }));
+    }
+    this.postProblemMode();
+    this.postDecisions();
+  }
+
+  /** `/review`: messages of this chat that read like facts and aren't recorded; `record <n>` reads one again, `dismiss <n>|all` drops them. */
+  private async reviewSession(text: string): Promise<void> {
+    const ledger = this.ledger();
+    const root = this.workspaceRoot?.fsPath;
+    if (!ledger || !root || !this.chatSessionManager || !this.activeChatId) { this.postMessage('chatResponse', { message: 'Open a workspace and a chat to review it.', error: true }); return; }
+    const chatId = this.activeChatId;
+    const transcript = await this.chatSessionManager.loadTranscript(chatId);
+    const turns = transcript.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'user').map(({ m, i }) => ({ ref: `chat:${chatId}#${i}`, text: m.content }));
+    const list = unrecordedStatements(turns, ledger.assertions(), dismissedStatements(root));
+    const [, verb, arg] = /^\/review\s*(record|dismiss)?\s*(\S+)?/i.exec(text.trim()) ?? [];
+    const picked = arg === 'all' ? list : list.filter((_, n) => String(n + 1) === arg);
+    if (verb && !picked.length) { this.postMessage('chatResponse', { message: `No item "${arg ?? ''}" to ${verb}.\n\n${renderUnrecorded(list)}`, error: true }); return; }
+    if (verb?.toLowerCase() === 'dismiss') { dismissStatements(root, picked.map((p) => p.ref)); this.postMessage('chatResponse', { message: `Dismissed ${picked.length}.` }); return; }
+    if (verb?.toLowerCase() === 'record') {
+      let n = 0;
+      for (const p of picked) {
+        const run = await extractFromTurn({ turn: { ref: p.ref, text: p.text, source: 'chat' }, ledger, resolve: createSubjectResolver(this.contextFileManager!.getPackSources().graph as Parameters<typeof createSubjectResolver>[0]), complete: (system, user, purpose) => this.hub.completeJson(system, user, purpose), model: this.modelLabel(), admit: this.admitter() });
+        n += run.recorded.length;
+      }
+      this.postMessage('chatResponse', { message: n ? `Recorded ${n} fact(s); they are in the Context Inbox.` : 'The model found no fact in it: record it yourself with /define, /rule, /decide or /assume, or dismiss it.' });
+      this.postDecisions();
+      return;
+    }
+    this.postMessage('chatResponse', { message: renderUnrecorded(list) });
+  }
+
+  /** The active problem's mode applied to a proposal (exploration admits it at once). */
+  private admitter(): ((a: Parameters<typeof admitForMode>[0]) => Parameters<typeof admitForMode>[0]) {
+    const mode = problemMode(this.problemRoot?.fsPath);
+    return (a) => admitForMode(a, mode);
   }
 
   /**
@@ -462,6 +540,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           }
           // C4b: /define, /rule, /decide, /assume — straight to a proposed fact, no model.
           if (await this.captureFact(chatMessage, priorHistory.length)) break;
+          // C4c: /review — what this chat said that may be a fact and isn't recorded.
+          if (/^\/review\b/i.test(chatMessage.trim())) { await this.reviewSession(chatMessage); break; }
           const turnRef = `chat:${this.activeChatId ?? 'none'}#${priorHistory.length}`;
           const previousReply = [...priorHistory].reverse().find((m) => m.role === 'ai')?.content;
           const extractionSource: ChatTurn['source'] = this.specOpsEngine || !this.specManager?.getSpec() ? 'interview' : 'chat';
@@ -1039,7 +1119,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'newChat': {
+          await this.noteUnrecorded();
           await this.startNewChat();
+          break;
+        }
+        case 'setProblemMode': {
+          await this.switchProblemMode(message.mode === 'exploration' ? 'exploration' : 'governed');
           break;
         }
         case 'listChatSessions': {
@@ -1359,8 +1444,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const parsed = parseCaptureCommand(text, `chat:${this.activeChatId ?? 'none'}#${turnIndex}`, resolve);
     if (!parsed) return false;
     if ('error' in parsed) { this.postMessage('chatResponse', { message: parsed.error, error: true }); return true; }
-    const a = await ledger.assert(parsed);
-    this.postMessage('chatResponse', { message: `Recorded as a proposed ${a.kind.replace('_', ' ')}: "${a.statement}". Confirm it in the Context Inbox.` });
+    const a = await ledger.assert(this.admitter()(parsed));
+    this.postMessage('chatResponse', { message: a.status === 'active' ? `Recorded as an assumed ${a.kind.replace('_', ' ')} (exploration mode): "${a.statement}".` : `Recorded as a proposed ${a.kind.replace('_', ' ')}: "${a.statement}". Confirm it in the Context Inbox.` });
     this.postDecisions();
     return true;
   }
@@ -1371,7 +1456,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!ledger || !this.contextFileManager) return;
     try {
       const resolve = createSubjectResolver(this.contextFileManager.getPackSources().graph as Parameters<typeof createSubjectResolver>[0]);
-      const run = await extractFromTurn({ turn, ledger, resolve, complete: (system, user, purpose) => this.hub.completeJson(system, user, purpose) });
+      const run = await extractFromTurn({ turn, ledger, resolve, complete: (system, user, purpose) => this.hub.completeJson(system, user, purpose), model: this.modelLabel(), admit: this.admitter() });
       if (run.error) { console.log(`[AutoDE] fact extraction skipped: ${run.error}`); return; }
       if (run.dropped.length) console.log(`[AutoDE] fact extraction dropped ${run.dropped.length}: ${run.dropped.join('; ')}`);
       if (!run.recorded.length) return;
@@ -1703,7 +1788,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private createPackManager(contextRoot: vscode.Uri): BusinessPackManager {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
     return new BusinessPackManager(path.join(contextRoot.fsPath, 'pack'), workspaceRoot.fsPath, () => this.contextFileManager!, (m) => this.postLog(m),
-      (system, user, purpose) => this.hub.completeJson(system, user, purpose));
+      (system, user, purpose) => this.hub.completeJson(system, user, purpose),
+      { model: () => this.modelLabel(), doubleExtraction: () => vscode.workspace.getConfiguration('autoDataEngineeringHub').get<boolean>('capture.doubleExtraction', false) });
   }
 
   private requirePack(): BusinessPackManager | undefined {
@@ -1902,6 +1988,23 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return governanceCandidates(tables.map((t) => ({ fqn: t.fqn, columns: [...t.columns.keys()] })), governanceFacts(sources.assertions));
   }
 
+  /** C4c: the completeness checklist for the active problem, as Markdown. */
+  public captureCoverageMarkdown(): string | undefined {
+    if (!this.contextFileManager || !this.problemRoot || !this.workspaceRoot) return undefined;
+    const report = problemCoverage({ workspaceRoot: this.workspaceRoot.fsPath, problemRoot: this.problemRoot.fsPath, sources: this.contextFileManager.getPackSources() }, { probesAvailable: !!(this.liveProbes || this.packManager?.sampleExecutor()) });
+    return renderCoverage(report);
+  }
+
+  /** C4c: candidates from the data, probed (live where connected, else the pack's samples); those that pass are recorded. */
+  public async findCandidatesFromData(): Promise<string | undefined> {
+    if (!this.contextFileManager || !this.problemRoot || !this.workspaceRoot) return undefined;
+    const executor = this.packManager ? this.packManager.probeExecutor(this.liveProbes) : this.liveProbes;
+    const { findings, recorded } = await problemCandidates({ workspaceRoot: this.workspaceRoot.fsPath, problemRoot: this.problemRoot.fsPath, sources: this.contextFileManager.getPackSources() }, executor, { record: this.contextFileManager.getLedger() });
+    if (recorded.length) await this.contextFileManager.persistCompiledGraph();
+    this.postDecisions();
+    return ['# Candidates from the data', '', ...findings.map((f) => `- ${describeFinding(f)}`), '', executor ? `${recorded.length} fact(s) recorded${recorded.some((a) => a.status === 'proposed') ? ': confirm them in the Context Inbox' : ''}. Personal-data findings are classified by a person (AutoDE: Classify Personal Data…).` : 'Nothing to probe with: connect the source, or add a sample of the table to the pack.'].join('\n');
+  }
+
   /** GOV: the person in the panel classifies a column (a confirmed fact). */
   public async classifyColumn(input: { table: string; column: string; classification: Classification; strategy?: 'hash' | 'redact'; by: string }): Promise<string> {
     if (!this.contextFileManager) throw new Error('The context layer is not initialized yet: open the AutoDE panel first.');
@@ -1991,6 +2094,20 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    * the chat: it is saved with the problem and its open questions are asked
    * again in the new chat.
    */
+  /** End of a session (C4c): say how many of its messages may be facts that weren't recorded. */
+  private async noteUnrecorded(): Promise<void> {
+    const ledger = this.ledger();
+    const root = this.workspaceRoot?.fsPath;
+    if (!ledger || !root || !this.chatSessionManager || !this.activeChatId) return;
+    try {
+      const chatId = this.activeChatId;
+      const transcript = await this.chatSessionManager.loadTranscript(chatId);
+      const turns = transcript.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'user').map(({ m, i }) => ({ ref: `chat:${chatId}#${i}`, text: m.content }));
+      const n = unrecordedStatements(turns, ledger.assertions(), dismissedStatements(root)).length;
+      if (n) this.postLog(`The chat you closed has ${n} message(s) that read like facts and aren't recorded: reopen it (Chat History) and type /review.`);
+    } catch { /* best-effort */ }
+  }
+
   private async startNewChat(): Promise<void> {
     if (!this.chatSessionManager) { this.postLog('Chat sessions are not initialized.'); return; }
     this.pendingRevision = false;
@@ -2157,8 +2274,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         if (!s || !file) { this.postLog(`Stage ${stage} has no document of its own.`); return; }
         if (action === 'open-document') { await vscode.window.showTextDocument(vscode.Uri.file(file)); return; }
         if (action === 'approve-document') {
-          const ok = await vscode.window.showWarningMessage(`Approve ${s.title} as ${by}?`, { modal: true, detail: `This approves ${path.relative(scope.workspaceRoot, file)} (the panel channel) and completes the stage. It is recorded with your name in the document and the workflow history.` }, 'Approve');
-          if (ok !== 'Approve') return;
+          // C4c: in exploration mode a stage's document is approved in one click.
+          if (problemMode(rctx.problemRoot) !== 'exploration') {
+            const ok = await vscode.window.showWarningMessage(`Approve ${s.title} as ${by}?`, { modal: true, detail: `This approves ${path.relative(scope.workspaceRoot, file)} (the panel channel) and completes the stage. It is recorded with your name in the document and the workflow history.` }, 'Approve');
+            if (ok !== 'Approve') return;
+          }
           const r = approveStageDocument(rctx, stage, { kind: 'person', name: by }, 'panel');
           await this.reloadContextFile(normalizeFsPath(file));
           this.postLog(r.message);

@@ -16,7 +16,22 @@ import { createSubjectResolver } from './projection';
  * no live connector, which merges and legacy migrations often have.
  */
 
-export type ProbeCheck = 'unique' | 'not_null' | 'accepted_values' | 'orphans' | 'freshness';
+export type ProbeCheck = 'unique' | 'not_null' | 'accepted_values' | 'orphans' | 'freshness' | 'shape';
+
+/**
+ * C4c: value shapes that suggest personal data (§5.5 item 2). Fixed patterns,
+ * no backslashes (so they mean the same in every dialect's string literal);
+ * a probe counts matches, never returns a value.
+ */
+export const VALUE_SHAPES = {
+  email: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}$',
+  // A leading + or a separator: a bare run of digits is more often an id than a phone number.
+  phone: '^([+][0-9 ().-]{7,}[0-9]|[0-9]{2,4}[ ().-][0-9 ().-]{5,}[0-9])$'
+} as const;
+export type ValueShape = keyof typeof VALUE_SHAPES;
+
+/** Share of non-null values that must match for a column to have the shape. */
+export const SHAPE_THRESHOLD = 0.8;
 
 export interface ProbeTable {
   /** Name as the platform knows it (`DB.SCHEMA.TABLE`). */
@@ -35,6 +50,8 @@ export interface ProbeSpec {
   to?: ProbeTable & { columns: string[] };
   /** `freshness`. */
   maxAgeHours?: number;
+  /** `shape`. */
+  shape?: ValueShape;
 }
 
 export interface ProbeResult {
@@ -129,6 +146,17 @@ export function renderProbeSql(spec: ProbeSpec, dialect: ProbeDialect, options: 
     }
     case 'freshness':
       return `SELECT COUNT(*) AS row_count, MAX(${cols[0]}) AS max_value FROM ${from}`;
+    case 'shape': {
+      if (!spec.shape || !VALUE_SHAPES[spec.shape]) throw new Error('Probe refused: shape is email or phone.');
+      const re = VALUE_SHAPES[spec.shape];
+      const c = cols[0];
+      const match = dialect === 'snowflake' ? `REGEXP_LIKE(TO_VARCHAR(${c}), '${re}')`
+        : dialect === 'spark_sql' ? `CAST(${c} AS STRING) RLIKE '${re}'`
+          : dialect === 'oracle' ? `REGEXP_LIKE(TO_CHAR(${c}), '${re}')`
+            : spec.shape === 'email' ? `${c} LIKE '%_@_%._%'` : undefined;
+      if (!match) throw new Error('Probe refused: the phone shape needs a dialect with regular expressions.');
+      return `SELECT COUNT(*) AS row_count, SUM(CASE WHEN ${c} IS NOT NULL THEN 1 ELSE 0 END) AS present_count, SUM(CASE WHEN ${c} IS NOT NULL AND ${match} THEN 1 ELSE 0 END) AS match_count FROM ${from}`;
+    }
   }
 }
 
@@ -173,6 +201,13 @@ export function interpretProbe(spec: ProbeSpec, row: Record<string, unknown>, sa
       const ageH = Number.isFinite(at) ? (now.getTime() - at) / 3_600_000 : NaN;
       const pass = Number.isFinite(ageH) ? ageH <= (spec.maxAgeHours ?? 24) : undefined;
       return { ...base, pass, observed: { rows, ageHours: Number.isFinite(ageH) ? Math.round(ageH) : 'unknown' }, detail: pass === undefined ? `no timestamp in ${name}` : `latest ${name} is ${Math.round(ageH)} h old (allowed ${spec.maxAgeHours ?? 24} h)` };
+    }
+    case 'shape': {
+      const present = num(row, 'present_count');
+      const matches = num(row, 'match_count');
+      if (present === 0) return { ...base, pass: undefined, observed: { rows, present: 0 }, detail: `${name} has no values in ${where}` };
+      const pass = matches / present >= SHAPE_THRESHOLD;
+      return { ...base, pass, observed: { rows, present, matches }, detail: `${matches} of ${present} value(s) of ${name} (${pct(matches, present)}) look like ${spec.shape === 'email' ? 'e-mail addresses' : 'phone numbers'} in ${where}` };
     }
   }
 }
@@ -226,6 +261,11 @@ export function createSampleProbeExecutor(samples: ReadonlyMap<string, ReadonlyA
       } else if (spec.check === 'freshness') {
         const ts = rows.map((r) => col(r, spec.columns[0])).filter((v): v is string => v !== null).sort();
         agg.max_value = ts[ts.length - 1];
+      } else if (spec.check === 'shape') {
+        const re = new RegExp(VALUE_SHAPES[spec.shape ?? 'email']);
+        const present = rows.map((r) => col(r, spec.columns[0])).filter((v): v is string => v !== null);
+        agg.present_count = present.length;
+        agg.match_count = present.filter((v) => re.test(v)).length;
       }
       return { ...interpretProbe(spec, agg, true), source: 'sample' };
     }

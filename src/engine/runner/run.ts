@@ -4,6 +4,7 @@ import { completeStage } from '../workflows/runtime';
 import { RunbookPolicy, environmentOf } from './policy';
 import { CheckedStep, RunbookRecord, StepState, checkRunbook, readRunbook, runLogFile, runbookFile, runnableProblem, writeRunbook } from './runbook';
 import { appendRunLog } from './runLog';
+import { explorationEnvironmentProblem } from '../documents/problemMode';
 
 /**
  * The runner (v0.45.6): deterministic code that runs an approved runbook's
@@ -68,7 +69,7 @@ export async function runStep(input: RunInput): Promise<RunResult> {
   const now = input.now ?? (() => new Date());
   const r = readRunbook(input.problemRoot, input.runbookId);
   if (!r) return { ok: false, message: `No runbook "${input.runbookId}" has been approved in this problem.` };
-  const notRunnable = runnableProblem(r, input.policy);
+  const notRunnable = runnableProblem(r, input.policy) ?? explorationEnvironmentProblem(input.problemRoot, environmentOf(input.policy, r.runbook.connectionId).name);
   if (notRunnable) return { ok: false, message: notRunnable, record: r };
   // Checked again now, with today's connections and policy.
   const check = checkRunbook(r.runbook, { workspaceRoot: input.workspaceRoot, connections: input.connections, policy: input.policy });

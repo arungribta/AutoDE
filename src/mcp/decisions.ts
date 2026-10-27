@@ -13,6 +13,13 @@ import { layoutPath } from '../engine/workspaceLayout';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
 import { PlatformSession } from './platform';
+import { admitForMode, problemMode, recordAssumption } from '../engine/documents/problemMode';
+import { dismissedStatements, unrecordedStatements } from '../engine/context/sessionReview';
+import { packSampleExecutor, problemCandidates, problemCoverage } from '../engine/context/capture';
+import { describeFinding } from '../engine/context/dataCandidates';
+import { renderCoverage } from '../engine/context/coverage';
+import { combineProbeExecutors } from '../engine/context/probes';
+import { ASSERTION_KINDS } from '../engine/context/assertions';
 
 /**
  * Phase PA1 tools (docs/mcp-engine-requirements.md §9.2): agents propose
@@ -117,11 +124,14 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
         const by = [options.clientName(), args.skill ? `skill:${String(args.skill)}` : '', args.model ? `model:${String(args.model)}` : ''].filter(Boolean).join(':');
         const ledger = new AssertionLedger(layoutPath(ws.options.workspaceRoot, 'ledger'));
         await ledger.load();
-        const outcome = { proposed: [{ kind: p.kind, subject: refs.map((r) => resolve(r) ?? r), predicate: p.predicate, value: p.value ?? {}, statement: p.statement, evidence: p.evidence, specId: p.specId, trust: 'inferred' as const, status: 'proposed' as const, createdBy: `mcp:${by || 'client'}`, ...(unresolved.length ? { flags: ['unresolved_subject'] } : {}) }], dropped: [], duplicates: [] as string[] };
-        const { recorded, corrections } = await recordChatProposals(ledger, outcome);
+        const outcome = { proposed: [{ kind: p.kind, subject: refs.map((r) => resolve(r) ?? r), predicate: p.predicate, value: p.value ?? {}, statement: p.statement, evidence: p.evidence, specId: p.specId, trust: 'inferred' as const, status: 'proposed' as const, createdBy: `mcp:${by || 'client'}`, ...(args.model ? { model: String(args.model) } : {}), ...(unresolved.length ? { flags: ['unresolved_subject'] } : {}) }], dropped: [], duplicates: [] as string[] };
+        // C4c: in an exploration problem a proposal counts at once, at assumed trust.
+        const mode = problemMode(ws.problemRoot());
+        const { recorded, corrections } = await recordChatProposals(ledger, outcome, { admit: (x) => admitForMode(x, mode) });
         if (!recorded.length) return { duplicate: true, message: 'AutoDE already holds this fact (same kind, subject, predicate and value); nothing was added.' };
         const a = recorded[0];
         const stakes = stakesFor('assertion', a);
+        if (a.status === 'active') return { assertion: { id: a.id, kind: a.kind, subject: a.subject, predicate: a.predicate, statement: a.statement, status: a.status, trust: a.trust, flags: a.flags }, stakes, next: 'This problem is in exploration mode: the fact counts now, at assumed trust. A person confirms it before the problem is governed.' };
         return {
           assertion: { id: a.id, kind: a.kind, subject: a.subject, predicate: a.predicate, statement: a.statement, status: a.status, trust: a.trust, flags: a.flags, supersedes: a.supersedes },
           stakes, corrects: corrections[0]?.supersedes,
@@ -154,6 +164,79 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
           allowSampleDataInPrompts: { type: 'boolean', description: 'Whether row values may reach language models. Default false; say why if you propose true.' }
         }
       }),
+    {
+      // C4c (§7.4): exploration mode's "assume and continue" at a context gap.
+      name: 'autode_record_assumption',
+      description: 'In an EXPLORATION-mode problem only: where AutoDE\'s context has a gap (a join, key or grain your assignment lists), record your best guess as a live fact at assumed trust, with the model you are and why you guessed it, and continue. It is labelled an assumption everywhere and listed for hardening when the problem is governed. Refused in a governed problem: there, stop and ask the person.',
+      inputSchema: { type: 'object', required: ['kind', 'subject', 'predicate', 'value', 'statement', 'model', 'reason'], additionalProperties: false, properties: {
+        kind: { type: 'string', enum: ['key', 'grain', 'relationship', 'business_term', 'metric', 'business_rule', 'quality_expectation', 'decision', 'assumption'] },
+        subject: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1 }, predicate: { type: 'string', minLength: 1 }, value: {},
+        statement: { type: 'string', minLength: 1 }, model: { type: 'string', minLength: 1, description: 'The model making the guess.' },
+        reason: { type: 'string', minLength: 1, description: 'Why this guess.' }, stage: { type: 'string', description: 'The stage that needed it.' }
+      } },
+      annotations: { title: 'Record an assumption (exploration)', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws) => {
+        const root = ws.problemRoot();
+        if (!root) throw new EngineToolError('NOT_FOUND', 'No active business problem.');
+        if (problemMode(root) !== 'exploration') throw new EngineToolError('PERMISSION_DENIED', 'This problem is governed: stop and ask the person, then propose the fact they give you (autode_propose_assertion).', { mode: 'governed' });
+        const kind = String(args.kind) as NewAssertion['kind'];
+        if (!ASSERTION_KINDS.includes(kind)) throw new EngineToolError('VALIDATION_FAILED', `Unknown kind "${kind}".`);
+        const src = await ws.contextSources();
+        const resolve = createSubjectResolver(src.graph as Parameters<typeof createSubjectResolver>[0]);
+        const ledger = new AssertionLedger(layoutPath(ws.options.workspaceRoot, 'ledger'));
+        await ledger.load();
+        try {
+          const a = await recordAssumption(ledger, root, { kind, subject: (args.subject as string[]).map((r) => resolve(r) ?? r), predicate: String(args.predicate), value: args.value ?? {}, statement: String(args.statement), model: String(args.model), reason: String(args.reason), stepId: args.stage as string | undefined, createdBy: `mcp:${options.clientName() ?? 'client'}` });
+          return { assertion: { id: a.id, kind: a.kind, subject: a.subject, statement: a.statement, status: a.status, trust: a.trust, flags: a.flags }, next: 'Continue with it, and list it among your assumptions in your summary.' };
+        } catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+      }
+    },
+    {
+      name: 'autode_review_session',
+      description: 'End-of-session review (C4c): from the user\'s messages in your conversation, which read like facts (a key, a rule, a definition, a threshold …) but have no fact recorded from them. Give each message with a stable ref; ask the user to record (autode_propose_assertion, citing the ref) or dismiss each one.',
+      inputSchema: { type: 'object', required: ['turns'], additionalProperties: false, properties: { turns: { type: 'array', maxItems: 500, items: { type: 'object', required: ['ref', 'text'], additionalProperties: false, properties: { ref: { type: 'string', minLength: 1 }, text: { type: 'string' } } } } } },
+      annotations: { title: 'Review a session for unrecorded facts', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (args, ws) => {
+        const src = await ws.contextSources();
+        return { unrecorded: unrecordedStatements(args.turns as Array<{ ref: string; text: string }>, src.assertions, dismissedStatements(ws.options.workspaceRoot)) };
+      }
+    },
+    {
+      name: 'autode_capture_coverage',
+      description: 'The completeness checklist for the active problem (C4c): for every table its specification or mapping names, whether its key, grain, change column, load pattern, personal-data classification, relationships and description are known, proposed, assumed, a candidate or missing; for every metric it names, its definition, grain and filters. Every item not known comes with the action that closes it. Deterministic; records nothing.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: { title: 'Capture coverage', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (_args, ws) => {
+        const root = ws.problemRoot();
+        if (!root) throw new EngineToolError('NOT_FOUND', 'No active business problem.');
+        const src = await ws.contextSources();
+        const report = problemCoverage({ workspaceRoot: ws.options.workspaceRoot, problemRoot: root, sources: src }, { probesAvailable: true });
+        return { ...report, markdown: renderCoverage(report) } as unknown as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_find_candidates',
+      description: 'Facts from the data before any model (C4c): candidate keys, foreign keys, grain, change columns, and personal data by value shape, for the active problem\'s tables, each checked by a fixed, read-only, aggregate-only probe (on connectionId if given, else on the pack\'s samples). Those that pass are recorded as proposed facts, already verified, for a person to confirm (counted at once in an exploration problem). Never returns row values.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { connectionId: { type: 'string', minLength: 1 } } },
+      annotations: { title: 'Find candidates from data', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      handler: async (args, ws) => {
+        const root = ws.problemRoot();
+        if (!root) throw new EngineToolError('NOT_FOUND', 'No active business problem.');
+        let live;
+        if (args.connectionId) {
+          const entry = session.entry(String(args.connectionId));
+          const dialect: ProbeDialect = entry.platform === 'databricks' ? 'spark_sql' : entry.platform === 'oracle' ? 'oracle' : entry.platform === 'snowflake' ? 'snowflake' : 'ansi';
+          const manager = await session.connect(entry);
+          live = createSqlProbeExecutor(async (sql) => (await manager.executeQuery(sql, { maxRows: 10 })).rows as Array<Record<string, unknown>>, dialect);
+        }
+        const executor = combineProbeExecutors([live, packSampleExecutor(ws.options.workspaceRoot, root)]);
+        const ledger = new AssertionLedger(layoutPath(ws.options.workspaceRoot, 'ledger'));
+        await ledger.load();
+        const src = await ws.contextSources();
+        const { findings, recorded } = await problemCandidates({ workspaceRoot: ws.options.workspaceRoot, problemRoot: root, sources: src }, executor, { record: ledger });
+        return { findings: findings.map((f) => ({ ...f, line: describeFinding(f) })), recorded: recorded.map((a) => ({ id: a.id, kind: a.kind, statement: a.statement, status: a.status, trust: a.trust })), next: recorded.length ? 'A person confirms the recorded facts in the AutoDE Context Inbox (or autode facts). Personal-data findings are classified by a person (autode governance classify).' : 'Nothing new to record.' };
+      }
+    },
     {
       name: 'autode_review_assertion',
       description: 'Confirm or reject a proposed LOW-stakes fact (glossary term, naming convention, assumption) after asking the user. Other facts are refused here: a person confirms them in the AutoDE Context Inbox.',

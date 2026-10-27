@@ -162,30 +162,9 @@ A new panel section listing `proposed`, `needs_review` and conflicting assertion
 
 ### 5.5 Capture coverage and verification (C4c; owner, 2026-10-27)
 
-Facts come from the connected databases, the user's prompts and documents. Models differ in how well they read, so capture must not depend on the model to **find** facts, to decide **what should be known**, or to be **believed** unchecked.
+**Status:** ✅ shipped in v0.48.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-13; HOW: technical-design.md §5.15; usage: [user-guide.md](user-guide.md) §8.5–8.6. The full specification text is in git (this file at v0.47.0).
 
-1. **What must be known — a deterministic checklist.** From the approved specification and the estate, AutoDE lists what a complete picture needs:
-   - for every table in scope: key, grain, change column, load pattern, personal-data classification (GOV), relationships to the other in-scope tables, and a business description;
-   - for every metric the specification names: definition, grain and filters.
-
-   Completeness is scored per table and per metric. Every missing item becomes a targeted action: a probe, a question for the curator or the interview, or a context gap. The model can be shallow; it can't silently skip.
-2. **The data before any model.** Deterministic candidates, verified by probes:
-   - candidate keys (non-null and unique);
-   - foreign keys (name match plus a value-inclusion probe);
-   - grain from the candidate keys;
-   - change columns;
-   - personal data by name and value shape.
-
-   Probes make them `verified`. The model's job narrows to business meaning.
-3. **Documents.**
-   - **Quote check:** each fact carries a verbatim quote, and AutoDE checks that it appears in the cited section; a fact whose quote isn't there is dropped as unsupported.
-   - **Section accounting:** the model reports on every section (its facts, or "nothing factual"); a section with no report is read again in a smaller batch.
-   - **Deterministic first:** tables (a data dictionary) and pattern phrases ("must be unique", "one row per", "never null") are parsed without a model; the model reads the prose.
-   - **Agreement:** the same fact from two sources raises its confidence; disagreement is a conflict (§8.1).
-4. **Conversation.** The raw message stays as evidence. At the end of a session, AutoDE lists what the user said that may be a fact but wasn't recorded, for the user to record or dismiss.
-5. **Model provenance.** Every fact extracted by a model records the model. Optionally, high-stakes facts (keys, classifications) are extracted twice and kept only where the runs agree.
-
-The model benchmark (recall and precision per source type for the configured model, on the reference problem, run on demand) and corrections counted as misses are part of C6.
+In short: capture doesn't depend on the model to find facts, decide what should be known, or be believed unchecked. A deterministic completeness checklist per table and metric, each missing item with its action; keys, grain, foreign keys, change columns and personal data found from the data and checked by probes; document facts checked against verbatim quotes, every section accounted for, tables and fixed phrases parsed without a model, agreement across sources; the model recorded on each fact, with optional double reading; an end-of-session review of chat. The model benchmark (recall and precision per source type, on the reference problem) and corrections counted as misses are part of C6.
 
 ## 6. Semantic layer
 
@@ -299,15 +278,9 @@ When a step or the param selector needs a fact class that is absent or below the
 
 ### 7.4 Exploration mode (per business problem; owner, 2026-10-27)
 
-Most AutoDE work is exploration, a proof of concept or a proof of value, not production. A business problem can run in **exploration mode**, switched on when it is created or later, with a disclaimer the person acknowledges ("results may be completely wrong: assumptions are not verified"); who switched it and when is recorded.
+**Status:** ✅ shipped in v0.48.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md ORC-11; HOW: technical-design.md §5.15; usage: [user-guide.md](user-guide.md) §5.4. The full specification text is in git (this file at v0.47.0).
 
-- **Assume and continue.** Where a step would pause on a context gap (§7.3), the configured model's best guess is recorded as an `assumption` fact (model, step, reason) and the step continues with it.
-- **Model proposals count at once,** as `assumed` trust, instead of waiting in the Context Inbox.
-- **Checks warn instead of refusing:** completeness (§5.5), grounding, the semantic layer's checks (§6.5), GOV's unmasked-sensitive-column rule.
-- **Gates take one click:** a person still advances each stage, but failed checks don't block it.
-- **Never relaxed:** platform changes only through approved runbooks; production environments keep named approvers and never run unattended, and an exploration problem targets non-production environments only; no row values reach a model without the connection's consent; no secrets in files; destructive steps need a rollback or a stated reason.
-- **Labelled everywhere:** a banner in the panel, the Workflow tab and the knowledge windows; a header in every generated deliverable and semantic YAML; a flag in grounding manifests; a line in agent assignments so other hosts behave the same.
-- **Hardening.** Switching a problem to governed lists every assumption, every model-only fact and every check that only warned (the §5.5 checklist is the to-do list). Governed mode blocks where it normally would until they are confirmed or replaced.
+In short: a business problem can run in exploration mode, switched by a person who acknowledges the disclaimer. At a context gap an agent records its best guess as an assumption (`assumed` trust) and continues; model proposals count at once at `assumed` trust; approval checks warn; gates take one click; everything produced is labelled. Never relaxed: runbooks, production policy (exploration targets non-production only), sample-data consent, secrets, rollbacks. Switching to governed lists the assumptions, model-only facts and warned checks; governed checks don't accept `assumed`. The semantic layer's checks (§6.5) will warn in exploration mode too.
 
 ## 8. Context rot, freshness and causality
 
@@ -453,13 +426,7 @@ In short:
 - Tool actions are kept in the transcript.
 
 ### Phase C4c: Capture coverage, verification and exploration mode
-Scope: §5.5 and §7.4.
-Acceptance:
-- On the reference problem, the completeness checklist lists every table and metric in scope with what is known and what is missing; each missing item has an action.
-- Candidate keys and foreign keys are found from the reference data without a model and verified by probes.
-- A document fact whose quote is not in its section is dropped; a section the model skipped is read again.
-- An exploration problem continues past a context gap with a recorded assumption; the same problem in governed mode pauses; switching to governed lists the assumption for hardening.
-- Platform runbooks, production policy, sample-data consent and secrets behave identically in both modes (tests).
+**Status:** ✅ shipped in v0.48.0 (§5.5, §7.4). Acceptance met by the tests named in CHANGELOG.md 0.48.0: the checklist on the reference problem lists every table and metric in scope with an action for each missing item; candidate keys and foreign keys come from the reference samples without a model and are verified by probes; an unsupported quote is dropped and a skipped section read again; an exploration problem continues past a gap with a recorded assumption, a governed one stops and asks, and switching lists the assumption; platform runbooks, production policy, sample-data consent and secrets behave the same in both modes.
 
 ### Phase C5a: Semantic layer files, composites and the editor
 Scope: §6.1–§6.5 and the Semantic Model editor (§6.7); the older semantic-layer snapshot (`SemanticLayerManager`) retires.

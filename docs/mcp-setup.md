@@ -264,6 +264,8 @@ When you allow sample data, values in columns that look like personal data (`ema
 - Glossary terms, naming conventions and assumptions are low stakes: the agent may confirm or reject them with `autode_review_assertion` after asking you.
 - Every other fact is confirmed by a person in the AutoDE **Context Inbox**.
 
+In an **exploration-mode** problem (since 0.48.0) a proposed fact counts at once, at `assumed` trust, and at a context gap the agent records its best guess with `autode_record_assumption` instead of stopping; the assignment from `autode_workflow_next` says which mode the problem is in. Pass `model` when you propose: AutoDE records it on the fact.
+
 `autode_verify_assertion` checks a key, grain, relationship or data expectation against a connection with a read-only, aggregate-only probe, and records the result. The `autode_extract_assertions` prompt turns a message into proposed facts with your client's own model.
 
 **Other changes.** Nothing an agent does through the server changes AutoDE's state or a data platform directly. Instead:
@@ -337,6 +339,10 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_execute_query` | Run one read-only statement, with at most 10 000 rows (100 by default). |
 | `autode_propose_assertion` | Propose a fact; a person confirms it in the Context Inbox, or you confirm a low-stakes one with `autode_review_assertion` after asking ([Proposing changes](#proposing-changes)). |
 | `autode_review_assertion` / `autode_verify_assertion` | Confirm or reject a low-stakes fact; verify a fact against data. |
+| `autode_capture_coverage` | The completeness checklist for the active problem: per table and metric, what is known and missing, and the action for each. |
+| `autode_find_candidates` | Keys, grain, joins, change columns and personal data from the data (probes on a connection or the pack's samples); those that pass are recorded as proposed, verified facts. |
+| `autode_review_session` | Which of the user's messages read like facts but have no fact recorded from them. |
+| `autode_record_assumption` | In an exploration-mode problem only: record your best guess at a context gap, with your model and why, and continue. |
 | `autode_propose_spec_change`, `autode_propose_pipeline_spec`, `autode_propose_connection`, `autode_propose_vocabulary` | Propose a change; it becomes a decision a person approves ([Proposing changes](#proposing-changes)). |
 | `autode_list_decisions` / `autode_get_decision` | See decisions, their proposals, validation and history. |
 | `autode_resolve_decision` | Approve or reject a low-stakes decision after asking the user. |
