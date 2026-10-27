@@ -1,115 +1,48 @@
-# Auto Data Engineering Hub (AutoDE)
+# AutoDE — Auto Data Engineering Hub
 
-Auto Data Engineering Hub (AutoDE) is a VS Code extension that provides an AI-powered command-center for designing, planning, validating, and executing data engineering workflows. The extension is provider-agnostic (Snowflake-first) and supports multiple LLM providers. It features an agentic hub-and-spoke architecture, a DE Agent Workspace webview, plan-and-execute engine, and provider adapters.
+AutoDE is a data engineering workspace for VS Code. It takes a business problem from the first conversation to deployed, documented pipelines on Snowflake or Databricks (with Oracle as a source), with AI agents doing the drafting and a person deciding.
 
-This repository contains the extension source code, a webview-based UI (media/sidebar.html), and the core orchestration and provider adapter scaffolding.
+- **You decide.** Specifications, workflows, mappings, models, Pipeline Specs and platform changes wait for a person. Agents propose; they never approve.
+- **Grounded.** AutoDE knows the estate (the real tables and columns) and the facts about it, each with its evidence and trust. Generated SQL is checked against the estate, and every deliverable carries a manifest of what it relied on.
+- **Generated, not freehand.** Pipelines are described as data and compiled by reviewed primitives into SQL for Snowflake, Databricks, BigQuery, PostgreSQL or SQL Server.
+- **Nothing changes a platform without you.** Platform changes run as approved runbooks, step by step, with dry runs and a tamper-evident log.
+- **Works where you work.** The VS Code panel, a terminal (`autode`), and agent hosts such as Claude Code, Cortex Code and the GitHub Copilot CLI over MCP, all on the same files.
 
----
+## Get started
 
-## Features (current)
+1. Install the `.vsix`: Extensions view → **… → Install from VSIX…**.
+2. Open your project folder and click the AutoDE icon in the activity bar.
+3. Choose a model in the panel's settings (GitHub Copilot, Claude Code, OpenAI, Azure OpenAI, Anthropic, Gemini or Ollama).
+4. Connect your source and target platforms and **Save as named connection**.
+5. **＋ New** business problem, and describe the work.
 
-- **DE Agent Workspace** webview with a conversation-first flow (Objective → Plan → Execute → Refine)
-- **GitHub Copilot integration** via VS Code's Language Model API (`vscode.lm`) — no API key, opt-in consent
-- **Multi-LLM support** (OpenAI, Azure OpenAI, Anthropic, Gemini, Ollama, Copilot)
-- **Agentic sub-agents**: Source Assessment, Data Modeler (dimensional / data-vault / OBT / 3NF), Transformation Scaffolder (dbt), STTM Mapper, Ingestion, Documentation
-- **Workflow phases** (discover → model → build → validate) with deliverables written to a visible, configurable `autode-output/` folder (AutoDE's own working state lives in `.autode/`)
-- **Context Layer** (`src/context/`) — in-memory graph (GraphManager), context file loading/watching
-- **Data platform adapter layer** (`src/dqm/`) — Snowflake + Databricks adapters (see status caveats below)
-- **Bottom panel dashboard** (`src/core/panelProvider.ts`) and **5 custom editors** (DataModel, STTM, Graph, Profile, Doc)
-- **Webview CSP nonce injection** (`src/core/webviewSecurity.ts`) so inline scripts run under VS Code's default CSP
-
----
-
-## Quick start (development)
-
-Requirements:
-- Node.js (LTS)
-- npm
-- Visual Studio Code
-
-Commands (run from repository root):
-
-1. Install dependencies
-
-   npm install
-
-2. Compile TypeScript
-
-   npm run compile
-
-   For incremental development, use:
-
-   npm run watch
-
-3. Open in VS Code
-
-   - Open this folder in VS Code.
-   - Run the "Auto Data Engineering Hub: Open Sidebar" command (Command Palette) or open the Activity Bar icon.
-
-4. Package (optional)
-
-   If you want a VSIX package you can install into VS Code, use `vsce` (not required):
-
-   - Install vsce: `npm i -g vsce`
-   - Package: `vsce package`
-
----
-
-## Development notes
-
-- Webview UI: `media/sidebar.html` (workspace), `media/panel.html` (dashboard), `media/editors/*.html` (custom editors) — all single-file HTML, served with a CSP nonce via `src/core/webviewSecurity.ts`.
-- Core code:
-  - `src/core/` — hub, webview/panel providers, config manager, Copilot adapter, types
-  - `src/context/` — graph manager, context/project/target config managers
-  - `src/dqm/` — data platform adapters (Snowflake, Databricks)
-  - `src/agents/` — sub-agents (discover/model/build/validate)
-  - `src/editors/` — custom text editors
-- Settings are defined in `package.json` under the `contributes.configuration` section. Secrets (LLM keys, Snowflake password/passphrase) are stored via VS Code SecretStorage.
-- **Known issue:** the Cline extension (`saoudrizwan.claude-dev`) can crash the Extension Development Host (SIGABRT / exit code 134) during startup. The F5 launch config disables it via `--disable-extension=saoudrizwan.claude-dev` to keep the dev host stable.
-
----
-
-## Security & secrets
-
-- Do not commit secrets (API keys, private keys)
-- The extension uses VS Code SecretStorage for sensitive values. Use the extension settings UI or the webview settings controls to store secrets via the host extension (they will be saved using the ExtensionContext secrets API).
-
----
-
-## Contributing
-
-- Use feature branches and open a pull request against `main`.
-- Keep changes small and focused; follow the existing TypeScript style.
-- The project includes a Co-authored-by trailer for commits made through automated tools; keep it if merging automated commits.
-
----
-
-## Context layer
-
-AutoDE keeps what it knows about a business problem and its data in `.autode/`. Every fact is an assertion in an append-only ledger with provenance, trust and status; the context graph is projected from it. Each LLM call receives a task-scoped context pack, every generated artifact carries a grounding manifest, and `npm run eval` measures how grounded the output is on a reference problem. Current behaviour and status: see the documentation below; release history: [CHANGELOG.md](CHANGELOG.md).
-
-## Architecture Diagram
-
-A draw.io diagram depicting the Context Layer architecture and integration with the extension host and webview is available at `media/architecture.drawio` (drawn before v0.25.0; it predates the engine boundary and the ledger).
+**Read the [user guide](docs/user-guide.md)**: setup, a first problem end to end, and every feature in detail.
 
 ## Documentation
 
-Start at [docs/README.md](docs/README.md), which says which document answers what:
+| For | Read |
+|---|---|
+| Data engineers using AutoDE | [User guide](docs/user-guide.md), [CLI](docs/cli.md), [agent hosts and MCP](docs/mcp-setup.md), [writing and porting skills](docs/skills-authoring.md) |
+| Engineers maintaining AutoDE | [Engineering onboarding guide](docs/engineering-onboarding-guide.md), [technical design](docs/technical-design.md) |
+| What and why, what's next | [Requirements](docs/requirements.md), [roadmap](docs/roadmap.md), [changelog](CHANGELOG.md) |
 
-- [docs/requirements.md](docs/requirements.md) — what AutoDE does and why (shipped behaviour)
-- [docs/mcp-engine-requirements.md](docs/mcp-engine-requirements.md), [docs/context-layer-requirements.md](docs/context-layer-requirements.md) — specifications for planned work
-- [docs/roadmap.md](docs/roadmap.md) — phase order, status, backlog and decisions
-- [docs/technical-design.md](docs/technical-design.md) — how it is built
-- [CHANGELOG.md](CHANGELOG.md) — what changed in each version
+[docs/README.md](docs/README.md) lists every document and which question it answers.
 
----
+## Build from source
+
+Node.js (LTS) and npm:
+
+```bash
+npm install
+npm run compile        # TypeScript, then the bundles in dist/
+npm test               # the functional suite
+npm run package:cli    # the autode CLI tarball, in dist/
+```
+
+Open the folder in VS Code and press F5 to run the extension in a development host. See the [engineering onboarding guide](docs/engineering-onboarding-guide.md) before changing code.
 
 ## License
 
 AutoDE is free to use for any purpose, including commercial use, under the MIT License (see [LICENSE](LICENSE)): you may use, copy, modify, merge, publish, distribute, sublicense and sell it, provided the copyright and licence notice stay with substantial copies. It comes without warranty.
 
 The packaged extension bundles open-source libraries under their own permissive licences; their notices are generated at build time into `dist/THIRD-PARTY-NOTICES.md` and ship inside the package.
-
----
-
-If you'd like the README content adjusted (more examples, architecture diagrams, or contributor guidance), tell me what to add and I'll update it and push a new commit.
