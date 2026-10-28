@@ -5864,7 +5864,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -5946,6 +5946,7 @@ async function main() {
       autode_maintenance_next: [{ role: 'knowledge-engineer' }, { role: '' }],
       autode_maintenance_scan: [{}, { x: 1 }],
       autode_dismiss_turns: [{ refs: ['chat:x#1'] }, { refs: [] }],
+      autode_work_order: [{ role: 'knowledge-engineer', task: 'Write an article' }, { role: 'knowledge-engineer' }],
       autode_propose_article: [{ article: { slug: 'customer-ids', title: 'Customer IDs', about: ['obj:shop/prod/shop.customers'], cites: [], body: 'Text.' } }, { article: { slug: 'Bad Slug', title: 't', about: [], cites: [], body: 'x' } }],
       autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
@@ -11941,6 +11942,47 @@ async function main() {
     for (const c of ['autoDataEngineeringHub.workOnMaintenanceItem', 'autoDataEngineeringHub.dismissMaintenanceItem', 'autoDataEngineeringHub.scanWorkspaceForKnowledge']) assert.ok(pkg.contributes.commands.some((x) => x.command === c), c);
     const html = fs.readFileSync(nodePath.join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
     for (const t of ['data-maint="work"', "type: 'maintenance'", 'Needs attention']) assert.ok(html.includes(t), t);
+  });
+
+  await test('v0.52.1: the chat as the front door — it answers from AutoDE\'s read-only tools and names the agent for work (HANDOFF line, known roles only); @agent hands one message over; the layers\' agents run with a work order at the propose tier when a person starts them, stage roles\' work points to its stage; autode_work_order gives hosts the same', async () => {
+    const os = require('node:os'); const fs = require('node:fs');
+    const F = fresh('../dist/engine/agents/chatFrontDoor.js');
+    const roles = fresh('../dist/engine/agents/definitions.js').loadRoles(wfRes()).roles;
+    assert.deepStrictEqual(F.parseMention('@knowledge-engineer write an article on customer ids', roles), { role: 'knowledge-engineer', task: 'write an article on customer ids' });
+    assert.strictEqual(F.parseMention('@someone do it', roles), undefined, 'an unknown agent is just text');
+    assert.strictEqual(F.parseMention('email me @knowledge-engineer', roles), undefined, 'only at the start');
+    const reply = 'The knowledge engineer writes that article, citing the facts.\n\nHANDOFF: knowledge-engineer | Write an article on why orders has two customer ids';
+    assert.deepStrictEqual(F.parseHandoff(reply, roles), { text: 'The knowledge engineer writes that article, citing the facts.', handoff: { role: 'knowledge-engineer', task: 'Write an article on why orders has two customer ids' } });
+    assert.deepStrictEqual(F.parseHandoff('HANDOFF: wizard | do magic', roles).handoff, undefined);
+    assert.deepStrictEqual(F.parseHandoff('Revenue is net of refunds.', roles), { text: 'Revenue is net of refunds.' });
+    assert.deepStrictEqual(['knowledge-engineer', 'semantic-modeler', 'context-curator', 'data-modeler', 'business-analyst'].map(F.isStageRole), [false, false, false, true, true]);
+    const tools = [{ name: 'autode_search_assets', annotations: { readOnlyHint: true } }, { name: 'autode_get_asset_context', annotations: { readOnlyHint: true } }, { name: 'autode_propose_article', annotations: {} }, { name: 'autode_execute_query', annotations: { readOnlyHint: true, openWorldHint: true } }, { name: 'autode_record_artifact', annotations: {} }];
+    assert.deepStrictEqual(F.chatToolNames(tools), ['autode_get_asset_context', 'autode_search_assets'], 'reads only, from the chat list');
+    const prompt = F.chatFrontDoorPrompt(roles, ['autode_search_assets']);
+    assert.ok(/HANDOFF: <agent> \| <the task in one sentence>/.test(prompt) && /- knowledge-engineer: /.test(prompt) && /don't do it yourself/.test(prompt), prompt.slice(0, 300));
+    const ws = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-fd-'));
+    let client;
+    try {
+      assert.deepStrictEqual(F.handoffFor(ws, undefined, 'knowledge-engineer', 't'), { role: 'knowledge-engineer', task: 't', kind: 'run' });
+      assert.deepStrictEqual(F.handoffFor(ws, undefined, 'data-modeler', 't'), { role: 'data-modeler', task: 't', kind: 'stage' }, 'stage work never runs beside its stage');
+      // The executor: the person-started run gets the role's work order and only its propose-tier tools.
+      const { runHandoff } = fresh('../dist/core/agentExecutor.js');
+      const seen = {};
+      const engine = { listTools: async () => [...tools, { name: 'autode_resolve_decision', annotations: { destructiveHint: true } }], toolSetNamed: async (names) => { seen.tools = names; return { names }; }, dispose: async () => {} };
+      const host = { createEngine: () => engine, activeProvider: () => 'copilot', log: () => {}, runAgentWithTools: async (p, o) => { seen.prompt = p; seen.system = o.systemPrompt; seen.mode = o.toolExecutionMode; return { text: 'Proposed article customer-ids.', audit: [], provider: 'copilot' }; } };
+      const r = await runHandoff(host, { workspaceRoot: ws, resourcesRoot: wfRes() }, 'knowledge-engineer', 'Write an article on customer ids');
+      assert.deepStrictEqual([r.ok, seen.mode, seen.tools], [true, 'read-only', ['autode_get_asset_context', 'autode_propose_article', 'autode_search_assets']]);
+      assert.ok(/You are AutoDE's knowledge-engineer/.test(seen.system) && /## The task\nWrite an article on customer ids/.test(seen.system) && /Skill: autode-core-knowledge-articles/.test(seen.system));
+      assert.match((await runHandoff({ ...host, activeProvider: () => 'claude' }, { workspaceRoot: ws, resourcesRoot: wfRes() }, 'knowledge-engineer', 'x')).message, /@knowledge-engineer x/);
+      // Hosts: the same work order over MCP.
+      client = await mcpSession(ws);
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const order = await call('autode_work_order', { role: 'semantic-modeler', task: 'Add net revenue to sales' });
+      assert.ok(order.order.role === 'semantic-modeler' && order.order.engineTools.includes('autode_propose_semantic_model') && !order.order.engineTools.includes('autode_resolve_decision'), JSON.stringify(order.order.engineTools));
+      assert.strictEqual((await call('autode_work_order', { role: 'data-modeler', task: 'model it' })).handoff.kind, 'stage');
+    } finally { if (client) await client.close(); fs.rmSync(ws, { recursive: true, force: true }); }
+    const html = fs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    for (const t of ["type: 'runHandoff'", "type: 'openHandoffStage'", 'function addHandoff']) assert.ok(html.includes(t), t);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

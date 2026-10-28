@@ -89,6 +89,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .message { max-width: 90%; border-radius: var(--radius); padding: 8px 10px; font-size: var(--font-size); line-height: 1.5; animation: msgIn 0.2s ease; }
 @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .message.user { align-self: flex-end; background: var(--accent-subtle); border: 1px solid var(--accent-border); }
+.handoff-row { margin-top: 8px; display: flex; gap: 6px; }
 .message.ai { align-self: flex-start; background: var(--surface-elevated); border: 1px solid var(--border-soft); }
 .message.pending .msg-content { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .typing-dots { display: inline-flex; gap: 3px; flex-shrink: 0; }
@@ -556,6 +557,22 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function escapeHtml(str) { return String(str).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"'); }
 
   // ── Chat ──
+  /** v0.52.1: a handover the chat suggests — the person starts the agent (Run it), or opens the stage that does the work. */
+  function addHandoff(div, h) {
+    var row = document.createElement('div'); row.className = 'handoff-row';
+    var b = document.createElement('button');
+    if (h.kind === 'stage') {
+      b.textContent = h.stage ? 'Open stage: ' + h.stage.title : 'Open the Workflow';
+      b.title = 'This is workflow stage work: it runs from its stage and is approved at its gate.';
+      b.addEventListener('click', function () { vscode.postMessage({ type: 'openHandoffStage', stage: h.stage ? h.stage.id : undefined }); });
+    } else {
+      b.className = 'primary';
+      b.textContent = 'Run it (' + h.role + ')';
+      b.title = h.task + ' — the agent proposes; you approve.';
+      b.addEventListener('click', function () { b.disabled = true; vscode.postMessage({ type: 'runHandoff', role: h.role, task: h.task }); });
+    }
+    row.appendChild(b); div.appendChild(row); chatStream.scrollTop = chatStream.scrollHeight;
+  }
   function addMessage(role, content, label, citations) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + withCitations(formatContent(content), citations) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
   // C4b: [fact:<id>] in an answer becomes a chip; hovering shows the fact it rests on.
   function withCitations(html, citations) { var n = 0; return html.replace(/\[fact:([0-9A-Z]{26})\]/g, function (_, id) { n++; var t = citations && citations[id] ? citations[id] : 'fact ' + id + ' (not found)'; return '<span class="fact-chip" title="' + escapeHtml(t) + '">fact ' + n + '</span>'; }); }
@@ -1715,7 +1732,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
-      case 'chatResponse': endPending(); if (msg.message) { addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE', msg.citations); } if (msg.actions && msg.actions.length) { addLogEntry('Actions: ' + msg.actions.join('; ')); } break;
+      case 'chatResponse': endPending(); if (msg.message) { var replyDiv = addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE', msg.citations); if (msg.handoff) { addHandoff(replyDiv, msg.handoff); } } if (msg.actions && msg.actions.length) { addLogEntry('Actions: ' + msg.actions.join('; ')); } break;
       case 'sourcesList': renderSourcesList(msg.sources); break;
       case 'specQuestion': endPending(); discoveryActive = true; discoveryProgress = msg.progress || discoveryProgress; if (msg.question) { addSpecQuestion(msg.question); } renderPaletteSpec(); break;
       case 'specQuestions': endPending(); discoveryActive = true; discoveryProgress = msg.progress || discoveryProgress; if (msg.questions && msg.questions.length) { addSpecQuestionsForm(msg.questions); } renderPaletteSpec(); break;

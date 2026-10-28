@@ -347,6 +347,7 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_maintenance_list` | Open knowledge-maintenance items (semantic contradictions and gaps, stale articles, unplaced terms, unread documents, unreviewed chat turns, stale stages), each naming the agent suited to it. |
 | `autode_maintenance_next` | The next item and its work order: role, skills, brief and the tools allowed. The host runs it when the user asks. |
 | `autode_maintenance_scan` | Scans the workspace for documents no pack holds and queues them (when the user asks). |
+| `autode_work_order` | Hands a task to one of AutoDE's agents: the role's work order (template, skills, task, allowed tools) for a sub-agent of that name. Stage work returns its stage instead. |
 | `autode_dismiss_turns` | Marks recorded chat turns that state no fact as reviewed. |
 | `autode_search_articles` | Knowledge articles about an asset or by words, with their state, whether stale, and opening paragraph; read one as `autode://article/<slug>`. |
 | `autode_propose_article` | Propose a knowledge article that cites facts; a person approves it. |

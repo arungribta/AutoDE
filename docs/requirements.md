@@ -275,6 +275,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **CHT-4 — The assistant is read-only by default;** write and command access is granted per chat, explicitly. *Status:* Shipped.
 - **CHT-5 — Facts stated in chat are captured as proposed facts, and answers cite the facts they rest on.** Capture runs after each chat and interview turn without slowing or failing it; facts can also be captured explicitly without the model; what the assistant did in a turn (files written, commands run) is remembered in the conversation. *Status:* Shipped v0.41.0. Extraction quality depends on the configured model and is checked by hand (manual verification) until a recorded evaluation exists.
 - **CHT-6 — Chat history can be searched, tagged and exported.** *Status:* Not met.
+- **CHT-7 — One chat is the front door to AutoDE's knowledge and agents.** It answers questions from AutoDE's read-only tools (the same answers as the Knowledge Explorer). For work an agent does, it names the agent and the person starts it with one click; stage work opens its stage. `@<agent>` hands one message over. There is no persona picker. *Why:* people think in tasks, not roles; a picked persona narrows the tools a question needs and is a mode people forget they are in (owner, 2026-10-28). *Status:* Shipped v0.52.1.
 
 *Planned work:* search, tags and export (CHT-6, roadmap backlog).
 

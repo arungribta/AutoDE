@@ -12,7 +12,7 @@ import { readEvents, Actor } from '../engine/workflows/events';
 import { layoutPath } from '../engine/workspaceLayout';
 import { readWorkflow } from '../engine/workflows/instance';
 import { MaintenanceItem } from '../engine/maintenance/queue';
-import { maintenanceAssignment } from '../engine/maintenance/brief';
+import { maintenanceAssignment, workOrder } from '../engine/maintenance/brief';
 
 /**
  * AutoDE's in-process executor (PA3b): runs a stage's assignment with the
@@ -124,6 +124,29 @@ export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunSco
     return { ok: true, message: text.trim().slice(0, 4000) || `${a.assignment.role} finished.` };
   } catch (err) {
     return { ok: false, message: `${item.agent} couldn't finish: ${err instanceof Error ? err.message : String(err)}` };
+  } finally {
+    await engine.dispose();
+  }
+}
+
+/**
+ * A task a person hands to an agent from the chat (v0.52.1): the role's
+ * work order, run with the panel's model at the propose tier. Started by the
+ * person (Run it, or an `@agent` message); the agent proposes, nothing is
+ * approved here. Stage work never comes here: it goes through its stage.
+ */
+export async function runHandoff(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, role: string, task: string): Promise<{ ok: boolean; message: string }> {
+  if (host.activeProvider() === 'claude') return { ok: false, message: `With Claude Code as the model, ask Claude Code itself: "@${role} ${task}" (the plugin installs AutoDE's agents there).` };
+  const engine = host.createEngine(`${role} (VS Code)`);
+  if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).' };
+  try {
+    const w = workOrder(scope.resourcesRoot, scope.workspaceRoot, role, { title: `Task from the chat: ${task.slice(0, 80)}`, body: `## The task\n${task}`, closing: 'Reply with what you found or proposed and where a person approves it.' }, await engine.listTools());
+    if (!w.order) return { ok: false, message: w.reason ?? `No agent ${role}.` };
+    host.log(`${role}: ${task.slice(0, 80)} — ${w.order.engineTools.length} AutoDE tools.`);
+    const { text } = await host.runAgentWithTools(task, { systemPrompt: w.order.text, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(w.order.engineTools), justification: `AutoDE ${role}: ${task.slice(0, 80)}` });
+    return { ok: true, message: text.trim().slice(0, 6000) || `${role} finished.` };
+  } catch (err) {
+    return { ok: false, message: `${role} couldn't finish: ${err instanceof Error ? err.message : String(err)}` };
   } finally {
     await engine.dispose();
   }

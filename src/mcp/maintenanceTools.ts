@@ -3,7 +3,8 @@ import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
 import { ToolInfo } from '../engine/agents/assignment';
 import { MAINTENANCE_RULES, MaintenanceItem, MaintenanceRule, openMaintenanceItems } from '../engine/maintenance/queue';
-import { maintenanceAssignment } from '../engine/maintenance/brief';
+import { maintenanceAssignment, workOrder } from '../engine/maintenance/brief';
+import { handoffFor } from '../engine/agents/chatFrontDoor';
 import { loadMaintenanceConfig } from '../engine/maintenance/policy';
 import { scanWorkspace } from '../engine/maintenance/scan';
 import { dismissStatements } from '../engine/context/sessionReview';
@@ -61,6 +62,20 @@ export function maintenanceTools(allTools: () => readonly ToolInfo[] = () => [])
         const r = scanWorkspace(ws.options.workspaceRoot);
         const reading = (await workspaceMaintenance(ws, true)).filter((i) => i.rule === 'document-reading');
         return { found: r.documents.length, skipped: r.skipped, truncated: r.truncated, toRead: reading as unknown as Record<string, unknown>[], next: reading.length ? 'Tell the user what was found; the context curator reads each (autode_maintenance_next with role context-curator) when they ask.' : 'Every document found is read already.' };
+      }
+    },
+    {
+      name: 'autode_work_order',
+      description: 'Hand a task to one of AutoDE\'s agents (v0.52.1): the work order for the role — its template, skills, the task and the AutoDE tools it may use, in order.text — for a sub-agent of that name, or for you to follow. Work that is a workflow stage\'s (a stage role: data-modeler, sttm-mapper, pipeline-engineer …) returns the stage instead: do it through autode_workflow_next. Only when the user asks for the work.',
+      inputSchema: { type: 'object', required: ['role', 'task'], additionalProperties: false, properties: { role: { type: 'string', minLength: 1 }, task: { type: 'string', minLength: 1 } } },
+      annotations: read('Work order for an agent'),
+      handler: async (args, ws) => {
+        const role = String(args.role); const task = String(args.task);
+        const h = handoffFor(ws.options.workspaceRoot, ws.activeProblemId(), role, task);
+        if (h.kind === 'stage') return { handoff: h as unknown as Record<string, unknown>, next: h.stage ? `This is the "${h.stage.title}" stage's work: take it with autode_workflow_next (the orchestrator skill).` : `This is workflow stage work for ${role}, and the active problem has no open stage for it.` };
+        const w = workOrder(ws.options.resourcesRoot, ws.options.workspaceRoot, role, { title: `Task: ${task.slice(0, 80)}`, body: `## The task\n${task}`, closing: 'Reply with what you found or proposed and where a person approves it.' }, allTools());
+        if (!w.order) throw new EngineToolError('NOT_FOUND', w.reason ?? `No agent ${role}.`);
+        return { handoff: h as unknown as Record<string, unknown>, order: w.order as unknown as Record<string, unknown> };
       }
     },
     {

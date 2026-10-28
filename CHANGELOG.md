@@ -6,6 +6,16 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.52.1
+
+- **The chat as AutoDE's front door** (CHT-7; owner, after a team member asked whether chatting means talking to the orchestrator, and whether users should pick an agent). Until now the panel chat was neither: a general assistant with a context pack and file tools, unable to call AutoDE's own tools or reach an agent.
+  - **Questions:** each chat turn gets AutoDE's read-only tools (search, asset context, browse, graph, articles, facts, resolve, semantic list, maintenance queue, workflow status, approvals, decisions), so answers match the Knowledge Explorer.
+  - **Work:** the chat names the agent that does it and ends its reply with a `HANDOFF` line that AutoDE turns into **Run it** (only known roles). The semantic modeler, knowledge engineer and context curator then run with a work order at the propose tier (`runHandoff`; `workOrder`, which the maintenance items now share). Stage roles' work shows **Open stage** instead. The chat never starts an agent itself.
+  - **`@<agent> <task>`** at the start of a message hands that message over (a stage agent's name opens its stage).
+  - **Hosts:** `autode_work_order` returns the same work order, or the stage.
+  - **Not built:** a persistent agent picker (rejected, decision log); with Claude Code as the panel's model its own loop doesn't take AutoDE's in-process tools, so the hint is to ask Claude Code with the plugin.
+  - Measured: 404 tests (1 new: parsing, routing, the executor's work order and tools, the MCP tool, the panel's buttons; the pinned tool-list tests include `autode_work_order`).
+
 ## 0.52.0
 
 - **MM2: agents and knowledge maintenance** (context-layer §5.6, §6.8; CTX-20). Before building, a challenge list was reviewed with the owner. The owner's answers: suggestions go to the existing queue (*Waiting for you*), not a second one; a person can also start a whole-workspace scan; one role per layer; one item per cause.

@@ -89,7 +89,9 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
 import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
-import { ExecutorHost, runMaintenance, runStage } from './agentExecutor';
+import { ExecutorHost, runHandoff, runMaintenance, runStage } from './agentExecutor';
+import { RoleTemplate, loadRoles } from '../engine/agents/definitions';
+import { chatFrontDoorPrompt, chatToolNames, handoffFor, parseHandoff, parseMention } from '../engine/agents/chatFrontDoor';
 import { MaintenanceItem, gateMaintenance, openMaintenanceItems } from '../engine/maintenance/queue';
 import { draftRunsLeft, noteDraftRun } from '../engine/maintenance/policy';
 import { dismissItem, scanWorkspace } from '../engine/maintenance/scan';
@@ -546,6 +548,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (await this.captureFact(chatMessage, priorHistory.length)) break;
           // C4c: /review — what this chat said that may be a fact and isn't recorded.
           if (/^\/review\b/i.test(chatMessage.trim())) { await this.reviewSession(chatMessage); break; }
+          // v0.52.1: `@<agent> <task>` hands this one message to that agent (stage work goes to its stage).
+          const mention = parseMention(chatMessage, this.agentRoles());
+          if (mention) { await this.handOff(mention.role, mention.task || chatMessage); break; }
           const turnRef = `chat:${this.activeChatId ?? 'none'}#${priorHistory.length}`;
           const previousReply = [...priorHistory].reverse().find((m) => m.role === 'ai')?.content;
           const extractionSource: ChatTurn['source'] = this.specOpsEngine || !this.specManager?.getSpec() ? 'interview' : 'chat';
@@ -590,11 +595,24 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             // Phase K2: load (query-through) and promote what the message is about before its pack is built.
             try { await this.contextFileManager?.prepareContext({ purpose: 'chat', query: chatMessage }); } catch (err) { this.postLog(`Loading context failed (the pack reports what is missing): ${err instanceof Error ? err.message : String(err)}`); }
             const combinedContext = this.contextPackText('chat', chatMessage, `Chat: ${chatMessage.slice(0, 60)}`);
-            const result = await this.hub.chat(chatMessage, combinedContext, toolMode, {
-              history: priorHistory,
-              priorSummary: priorMeta?.summary,
-              claudeSessionId: priorMeta?.claudeSessionId
-            });
+            // v0.52.1: the chat answers from AutoDE's read-only tools, and names the agent for work (it never starts one).
+            const engine = this.hub.createEngine('chat (VS Code)');
+            const roles = this.agentRoles();
+            let result: Awaited<ReturnType<DataAgentHubHub['chat']>>;
+            try {
+              const chatTools = engine?.listTools ? chatToolNames(await engine.listTools()) : [];
+              const engineTools = chatTools.length && engine?.toolSetNamed ? await engine.toolSetNamed(chatTools) : undefined;
+              result = await this.hub.chat(chatMessage, combinedContext, toolMode, {
+                history: priorHistory,
+                priorSummary: priorMeta?.summary,
+                claudeSessionId: priorMeta?.claudeSessionId,
+                engineTools,
+                frontDoor: chatFrontDoorPrompt(roles, engineTools ? chatTools : [])
+              });
+            } finally { await engine?.dispose(); }
+            const parsed = parseHandoff(result.message, roles);
+            result = { ...result, message: parsed.text };
+            const handoff = parsed.handoff ? handoffFor(this.workspaceRoot?.fsPath ?? '', this.workflowScope()?.problemId, parsed.handoff.role, parsed.handoff.task) : undefined;
             if (this.chatSessionManager && this.activeChatId && (result.updatedSummary !== undefined || result.newClaudeSessionId)) {
               const patch: { summary?: string; claudeSessionId?: string } = {};
               if (result.updatedSummary !== undefined) { patch.summary = result.updatedSummary; }
@@ -606,12 +624,21 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             if (turnActions.length && this.chatSessionManager && this.activeChatId) {
               this.chatSessionManager.appendMessage(this.activeChatId, { role: 'log', content: turnActions.join('; '), at: new Date().toISOString() }).catch(() => { /* best-effort */ });
             }
-            this.postMessage('chatResponse', { message: result.message, citations: this.citationsFor(result.message), actions: turnActions });
+            this.postMessage('chatResponse', { message: result.message, citations: this.citationsFor(result.message), actions: turnActions, ...(handoff ? { handoff } : {}) });
             scheduleExtraction();
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             this.postMessage('chatResponse', { message: errMsg, error: true });
           }
+          break;
+        }
+        case 'runHandoff': {
+          // v0.52.1: the person clicked Run it on a handover the chat suggested.
+          if (typeof message.role === 'string' && typeof message.task === 'string') await this.handOff(message.role, message.task);
+          break;
+        }
+        case 'openHandoffStage': {
+          await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow', typeof message.stage === 'string' ? message.stage : undefined);
           break;
         }
         case 'updateSettings': {
@@ -1740,6 +1767,30 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     if (!root) return [];
     const ledger = this.ledger();
     return waitingForYou({ workspaceRoot: root, resourcesRoot: this.context.extensionPath, problemId: this.workflowScope()?.problemId, facts: ledger ? inbox(ledger).facts : [], maintenance: this.maintenanceItems() });
+  }
+
+  /** v0.52.1: AutoDE's role templates (bundled and the team's), for the chat's handovers and @mentions. */
+  private agentRoles(): RoleTemplate[] {
+    try { return loadRoles(this.context.extensionPath, this.workspaceRoot?.fsPath).roles; } catch { return []; }
+  }
+
+  /**
+   * v0.52.1: a task handed to an agent — by a click on Run it, or an `@agent` message. The layers' agents
+   * run now with a work order (they propose; a person approves); stage roles' work opens its stage instead.
+   */
+  private async handOff(role: string, task: string): Promise<void> {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root) return;
+    const h = handoffFor(root, this.workflowScope()?.problemId, role, task);
+    if (h.kind === 'stage') {
+      this.postMessage('chatResponse', { message: h.stage ? `That is the **${h.stage.title}** stage's work (${role}). It runs from its stage, so it is grounded in the stage's inputs and approved at its gate.` : `That is workflow stage work for the ${role}, and this problem has no open stage for it. Open the Workflow to plan or re-open one.`, handoff: h });
+      return;
+    }
+    this.postMessage('chatResponse', { message: `Handing over to the **${role}**…` });
+    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${role} is working`, cancellable: false },
+      () => runHandoff(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, role, task));
+    this.postMessage('chatResponse', { message: r.ok ? `${r.message}\n\n_What the ${role} proposed waits for you: the Context Inbox, or Waiting for you._` : r.message, error: !r.ok });
+    this.postDecisions();
   }
 
   /** MM2: the open knowledge-maintenance items, from the panel's own sources. */

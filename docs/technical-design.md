@@ -931,6 +931,14 @@ Each rule is wrapped, so a rule that fails yields no items rather than breaking 
 
 Under `draft`, the panel calls `draftAtStageBoundary` after a successful stage run.
 
+**The chat as the front door** (v0.52.1; CHT-7; `src/engine/agents/chatFrontDoor.ts`).
+- The panel chat creates an engine client (`chat (VS Code)`) per turn and offers the model `chatToolNames`: the read tier of `CHAT_TOOLS`.
+- `chatFrontDoorPrompt` adds the agents' descriptions and the handover convention: a final `HANDOFF: <role> | <task>` line. `parseHandoff` strips it and accepts known roles only.
+- `handoffFor` sends the layers' roles (no stage kind lists them) to `runHandoff` in `agentExecutor.ts`, which runs `workOrder` in `maintenance/brief.ts` at the propose tier. Stage roles are sent to the active problem's next open stage of that role.
+- `parseMention` handles a leading `@<role>`.
+- The chat never starts an agent itself: a click (*Run it*) or a mention does.
+- `autode_work_order` gives hosts the same work order.
+
 **Agents.** `agents/semantic-modeler.md` and `agents/knowledge-engineer.md` belong to no stage kind: they work items, and later a `semantic-foundation` workflow (ONT1). Their skills have `stageKinds: []`.
 
 ## 6. Data Platforms
@@ -2084,7 +2092,7 @@ src/editors/    # custom editors
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
-  artifacts.ts, assignment.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, reconcilePlan.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
+  artifacts.ts, assignment.ts, chatFrontDoor.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, reconcilePlan.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)
   waiting.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion

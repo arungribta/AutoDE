@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.52.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.52.1. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -766,6 +766,12 @@ The chat in the panel is for questions and changes about the active problem: "wh
 | `/clear` | Clear the conversation |
 
 - **History:** *AutoDE: New Chat*, *Chat History*, *Discard Chat*. Chats are personal (not committed).
+
+**One chat, and AutoDE's agents behind it** (v0.52.1). You don't pick an agent to chat with:
+- **Questions** are answered by the chat itself, from AutoDE's own knowledge: it searches the estate, reads an asset's full context, articles, facts, the semantic layer, the maintenance queue and the workflow (read-only), as the Knowledge Explorer would.
+- **Work** that one of AutoDE's agents does (fix the sales model, write an article, place glossary terms, read a document for facts) isn't done by the chat. It says which agent does it and shows **Run it**. The agent proposes, and you approve as usual. Work that belongs to a workflow stage (a model, a mapping, pipelines) shows **Open stage** instead: it runs from its stage, grounded in the stage's inputs and approved at its gate.
+- **`@<agent> <task>`** at the start of a message hands that one message to the agent directly, for example `@knowledge-engineer write an article on why orders has two customer ids`. The agents you can address this way are `semantic-modeler`, `knowledge-engineer` and `context-curator`; a stage agent's name opens its stage.
+- With Claude Code as the model, ask Claude Code itself: AutoDE's plugin installs the same agents there, and it hands work to them (or you @-mention them).
 
 ---
 

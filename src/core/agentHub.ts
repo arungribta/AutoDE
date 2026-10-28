@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ConfigurationManager } from './configManager';
-import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, EngineAccess } from '../engine/types';
+import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, EngineAccess, EngineToolSet } from '../engine/types';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeToolSkillAgent } from '../agents/build/ToolSkillAgent';
 import { SpecOpsEngine } from '../engine/interview/specOps';
@@ -451,7 +451,7 @@ Message: ${message}`;
     message: string,
     schemaContext?: string,
     toolExecutionMode: ToolExecutionMode = 'read-only',
-    opts?: { history?: ChatMessage[]; priorSummary?: string; claudeSessionId?: string }
+    opts?: { history?: ChatMessage[]; priorSummary?: string; claudeSessionId?: string; engineTools?: EngineToolSet; frontDoor?: string }
   ): Promise<{ message: string; updatedSummary?: string; newClaudeSessionId?: string; actions: ToolCallAuditEntry[] }> {
     const trimmed = message.trim();
     if (!trimmed) {
@@ -507,7 +507,7 @@ Message: ${message}`;
     try {
       const rawResponse = await this.callConfiguredLlm(
         prompt,
-        DataAgentHubHub.buildChatSystemPrompt(toolExecutionMode),
+        [DataAgentHubHub.buildChatSystemPrompt(toolExecutionMode), opts?.frontDoor].filter(Boolean).join('\n\n'),
         'Answer a data engineering question in the Auto Data Engineering Hub sidebar chat.',
         // Grounded chat: every provider that supports tool execution gets the
         // same read (default) / write (opt-in, approved) grant. See core/agenticTools.ts.
@@ -516,7 +516,8 @@ Message: ${message}`;
           history: resumingClaude ? undefined : historyTurns,
           claudeSessionId,
           isNewClaudeSession: startingClaudeSession,
-          auditSink: actions
+          auditSink: actions,
+          engineTools: opts?.engineTools
         }
       );
       return {
@@ -631,6 +632,8 @@ Message: ${message}`;
       isNewClaudeSession?: boolean;
       /** C4b: the tool calls the turn made, for the transcript (tool-action memory). */
       auditSink?: ToolCallAuditEntry[];
+      /** v0.52.1: AutoDE's read-only tools for the chat (AutoDE-owned loops; Claude Code's own loop ignores them). */
+      engineTools?: EngineToolSet;
     }
   ): Promise<string> {
     const settings = this.configManager.getSettings();
@@ -648,7 +651,8 @@ Message: ${message}`;
           history: opts?.history,
           claudeSessionId: opts?.claudeSessionId,
           isNewClaudeSession: opts?.isNewClaudeSession,
-          auditSink: opts?.auditSink
+          auditSink: opts?.auditSink,
+          engineTools: opts?.engineTools
         },
         this.buildLlmContext()
       );
