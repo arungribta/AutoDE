@@ -340,7 +340,7 @@ Click any of them for its page: a relationship shows the join; a verified query 
   - certification: *verified*, *documented*, *unverified*, or *draft* for unapproved semantic models;
   - status, review state (knowledge facts), classification, glossary term.
 
-  Domain, owner and tags appear greyed until the metadata model gives them data (MM, v0.51.0). Counts are for your search before filtering, so you can see the alternatives.
+  Domain, owner and tags appear greyed until the metadata model gives them data (MM1, v0.51.0). Counts are for your search before filtering, so you can see the alternatives.
 - **Asset pages** have these tabs:
   - **Overview:** where the asset came from, when it was captured and verified, keys and grain, decisions and assumptions in scope (including team-wide ones), conflicts.
   - **Schema:** columns with type, key, nullability, classification and certification.
@@ -382,7 +382,7 @@ Databases and schemas have pages too, with their contents. A table whose DDL nam
 
 **From a terminal:** `autode explore` (overview), `autode explore browse [<id>]` (the tree), `autode explore semantic` (each model's tables, metrics, relationships, verified queries and instructions), `--layer physical|context|semantic` on search, `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, and `autode explore graph [--system s] [--model m] [--columns]` for the landscape. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
 
-The vocabulary follows the industry's standards and catalogs (context-layer specification §6.11). Tags, a full glossary, typed rules, owners, domains and certification come with the metadata model (MM, v0.51.0); lineage from the platform and impact analysis with LIN (v0.52.0); ontology concepts with ONT1 (v0.53.0).
+The vocabulary follows the industry's standards and catalogs (context-layer specification §6.11). Tags, a full glossary, typed rules, owners, domains and certification come with the metadata model (MM1, v0.51.0); the semantic modeler and knowledge engineer agents, and knowledge maintenance, with MM2 (v0.52.0); lineage from the platform and impact analysis with LIN (v0.53.0); ontology concepts with ONT1 (v0.54.0).
 ---
 
 ## 9. The workflow
@@ -764,12 +764,13 @@ All settings start with `autoDataEngineeringHub.`.
 Specified and scheduled ([roadmap](roadmap.md)):
 
 - **The metadata model** (v0.51.0): tags (a `kpi` tag marks key metrics), a glossary with categories and related terms, classifications, typed rules (validation, policy, standard, guidance), owners and stewards, domains and data products, certification and custom properties, and **knowledge articles**: reviewed write-ups of pitfalls, history and golden sources, which cite facts and reach agents in their context.
-- **Lineage and impact** (v0.52.0): table and column lineage from the platform, your mappings and AutoDE's artifacts; what a change would break.
-- **Ontology and terminology** (v0.53.0–v0.54.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
-- **AtScale import** (v0.55.0); Horizon, Collibra and Unity Catalog later.
-- **Deploying the semantic layer** (v0.56.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
-- **Merge semantics** (v0.57.0): conformed dimensions and survivorship across systems, in shared models and composites.
-- **Patterns and recommendations** (v0.58.0): SCD2, CDC merge and snapshot primitives; a recommended pipeline type with its reasons; team preferences; data contracts for the tables you build.
+- **Agents that keep the layers current** (v0.52.0): a semantic modeler and a knowledge engineer. Whatever you say in chat, and every document you bring for any purpose, is read for knowledge. When a fact changes, AutoDE lists what it affects (a semantic model, an article) and which agent can draft the update. By default it only suggests; you approve every change.
+- **Lineage and impact** (v0.53.0): table and column lineage from the platform, your mappings and AutoDE's artifacts; what a change would break.
+- **Ontology and terminology** (v0.54.0–v0.55.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
+- **AtScale import** (v0.56.0); Horizon, Collibra and Unity Catalog later.
+- **Deploying the semantic layer** (v0.57.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
+- **Merge semantics** (v0.58.0): conformed dimensions and survivorship across systems, in shared models and composites.
+- **Patterns and recommendations** (v0.59.0): SCD2, CDC merge and snapshot primitives; a recommended pipeline type with its reasons; team preferences; data contracts for the tables you build.
 
 ---
 

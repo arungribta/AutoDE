@@ -200,6 +200,49 @@ A new panel section listing `proposed`, `needs_review` and conflicting assertion
 
 In short: capture doesn't depend on the model to find facts, decide what should be known, or be believed unchecked. A deterministic completeness checklist per table and metric, each missing item with its action; keys, grain, foreign keys, change columns and personal data found from the data and checked by probes; document facts checked against verbatim quotes, every section accounted for, tables and fixed phrases parsed without a model, agreement across sources; the model recorded on each fact, with optional double reading; an end-of-session review of chat. The model benchmark (recall and precision per source type, on the reference problem) and corrections counted as misses are part of C6.
 
+### 5.6 Knowledge maintenance: what keeps the layers current (MM2; owner, 2026-10-28)
+
+New knowledge arrives in chat and in documents brought for other purposes, and a change to one fact can affect semantic models, articles and artifacts. **Deterministic triggers** decide that something needs attention, **agents** interpret it, and **a person** decides. No agent watches everything all the time: that would cost model calls on every event, be noisy, and not be reproducible.
+
+**One way in.** Everything new enters the **context layer** first, as a proposed fact with its evidence. Chat and documents never write the semantic layer: a semantic change is a proposal derived from confirmed facts (§6.1 authority), and a person approves it.
+
+**Capture triggers** (knowledge coming in):
+- **Chat on every surface.**
+  - The panel keeps its per-turn extraction (C4b).
+  - In Claude Code, AutoDE's plugin adds a hook at the end of each turn. It records the turn as *not yet reviewed*: the hook runs no model, it only makes sure the turn can't be forgotten.
+  - In hosts without hooks, `autode_workflow_next` and the approvals list report unreviewed turns.
+  - The context curator's skill works through them, as `/review` does (C4c).
+- **Every document, whatever it was brought for.**
+  - Any document AutoDE touches (an attachment, a pack document, a contract, a mapping specification, an ingested file) is registered once, with its purpose, **and** queued for a knowledge reading. Its purpose and its knowledge are separate concerns.
+  - The reading runs the deterministic pass first (tables, glossary sections, fixed phrases; C4c), then the model, with section accounting.
+  - It is deduplicated by content hash, so attaching the same document again doesn't read it again.
+- **The estate.** A refresh that finds a schema change sends dependent facts to review (§8.1).
+
+**Propagation triggers** (changes rippling out). Each ledger event (a fact asserted, confirmed, superseded, rejected, or failing verification) runs deterministic **impact rules**. Each rule produces a **maintenance item** naming the agent suited to it:
+
+| Event | Item | Agent |
+|---|---|---|
+| A confirmed metric or relationship fact contradicts an approved semantic model | The element, the fact, the difference | Semantic modeler |
+| A confirmed metric, join or term has no semantic counterpart | A candidate addition to the model covering its tables | Semantic modeler |
+| A column or table a semantic expression or base table uses is renamed, dropped or retyped | The element and the change | Semantic modeler |
+| A base table becomes ambiguous (§6.4a) | The candidates | Semantic modeler |
+| A fact a knowledge article cites is superseded or rejected | The article, now stale, and the change | Knowledge engineer |
+| A new term fits no glossary category or concept | Where it might go | Knowledge engineer |
+| An artifact's backing fact changes | The artifact is stale (§8.3, existing) | The stage's agent |
+
+**The queue.**
+- Items are idempotent: they are keyed by their cause, so the same cause never adds a second item.
+- An item closes itself when what it asks for is resolved: the model changes, the article is updated, the fact is settled.
+- Items appear in *Waiting for you*, in the Explorer on the assets they concern, on the CLI (`autode maintenance`) and over MCP (`autode_maintenance_list`, `autode_maintenance_next`).
+- The orchestrator skill checks the queue at the start and end of every stage.
+- In a governed problem, a stage's gate lists open items that touch the stage's assets; in exploration mode they only warn.
+
+**Who acts: the workspace policy** (`.autode/config/maintenance.yaml`):
+- **`suggest`** (the default) creates items only. A person starts the named agent with one click, or a host agent picks items up with `autode_maintenance_next`. There are no surprise model costs.
+- **`draft`** lets AutoDE run the named agent at stage boundaries or when idle, within a model-call budget, to **draft a proposal**.
+- **`off`.**
+- **Never auto-approve.** A change to a shared semantic model or an article is approved by a person, as every other change is.
+
 ## 6. Semantic layer
 
 *Decided with the owner, 2026-10-27; replaces the earlier "semantic model projected from assertions". Built in phases C5a–C5d (§11); C5a (§6.1–6.5, the editor) shipped in v0.49.0. Ontology and terminology (§6.8), imports (§6.9) and the Knowledge Explorer (§6.10) were added on 2026-10-28 (§1.1).*
@@ -390,9 +433,9 @@ The ontology never blocks a gate: a problem without a pack works as before.
 Packs shipped with AutoDE live in `ontologies/`. FIBO comes first; others follow when an engagement needs them and their licence allows redistribution, which is checked when each pack is planned. Other standards are imported from the team's own copy. Parsing OWL needs an RDF parser, which requires a P6 decision record (licence, size) at ONT1. Shipped packs are converted when AutoDE is built, so at runtime the parser is needed only for files a user supplies.
 
 **Two roles, one per layer** (revised 2026-10-28; earlier a single "semantic architect"). Like every AutoDE agent, each is a role template (`agents/<role>.md`: rules, allowed tools, skills) whose skills are its own agentic procedure. Each calls AutoDE's tools in a loop, run by the host's model (the VS Code executor or an agent host through the plugin), proposes, and leaves decisions to a person.
-- **Semantic modeler** (semantic layer; **MM**). It drafts and refines shared models and composites: metrics, joins, synonyms, verified queries, `kpi` tags. It works through `autode_semantic_draft`, `autode_semantic_check`, `autode_semantic_resolve` and `autode_propose_semantic_model`. It resolves ambiguous base tables and binds models.
+- **Semantic modeler** (semantic layer; **MM2**). It drafts and refines shared models and composites: metrics, joins, synonyms, verified queries, `kpi` tags. It works through `autode_semantic_draft`, `autode_semantic_check`, `autode_semantic_resolve` and `autode_propose_semantic_model`. It resolves ambiguous base tables and binds models.
 - **Knowledge engineer** (context layer):
-  - in **MM**, it structures the glossary (categories, related terms, stewards) and drafts knowledge articles from what is known, citing facts;
+  - in **MM2**, it structures the glossary (categories, related terms, stewards) and drafts knowledge articles from what is known, citing facts;
   - in **ONT1**, it onboards standards (seed concepts, placement), aligns terms to concepts (`means`) and proposes *represents* links.
 - The **context curator** keeps capturing facts, documents and vocabulary from conversations and documents.
 - A workflow template, `semantic-foundation`, runs them: onboard a standard (knowledge engineer) → align the vocabulary (knowledge engineer) → draft shared models (semantic modeler) → approve (a person).
@@ -804,7 +847,7 @@ Acceptance:
 - Search and the asset page answer within NFR-1 on the large-estate fixture.
 - The asset page, `autode explore asset` and `autode_get_asset_context` return the same content.
 
-### Phase MM: The metadata model
+### Phase MM1: The metadata model
 Scope: §6.11.
 - **Tags:** `key=value`, with tag groups.
 - **Glossary:** SKOS-shaped (categories, related, broader and narrower terms, steward, status), and assignment to assets.
@@ -819,7 +862,6 @@ Scope: §6.11.
   - inclusion in packs, replacing the keyword-matched knowledge skills for knowledge about entities (skills stay for procedures);
   - on every surface: `autode_search_articles`, `autode explore articles`.
 - **The `kpi` tag** and a *KPIs* filter.
-- **Two agents** (§6.8): the **semantic modeler** (role template and skills for drafting, refining and binding semantic models) and the **knowledge engineer**'s first skills (glossary structure, knowledge articles).
 - **Every surface:** every Explorer facet, asset section, CLI view and MCP field.
 - **Migration:** existing facts are converted automatically and the change is recorded in the ledger.
 
@@ -831,8 +873,24 @@ Acceptance:
 - Tags written as `key=value` round-trip with Snowflake tag syntax (golden).
 - The domain, owner and tag facets are live.
 
+### Phase MM2: Agents and knowledge maintenance
+Scope:
+- **Two agents** (§6.8): the **semantic modeler** (role template and skills for drafting, refining and binding semantic models) and the **knowledge engineer**'s first skills (glossary structure, knowledge articles).
+- **Knowledge maintenance** (§5.6):
+  - capture triggers: the Claude Code hook that records turns for review, unreviewed turns reported in other hosts, and a knowledge reading queued for every document whatever its purpose;
+  - the impact rules and the maintenance queue;
+  - the workspace policy (`suggest` by default, `draft`, `off`);
+  - the queue on every surface (*Waiting for you*, the Explorer, `autode maintenance`, `autode_maintenance_list` and `autode_maintenance_next`), and the orchestrator checking it at stage boundaries.
+
+Acceptance:
+- On the reference problem, confirming a metric fact that contradicts the approved `sales` model creates one item for the semantic modeler, naming the element and the difference. Confirming it again adds no second item, and changing the model closes it.
+- Superseding a fact an article cites creates one item for the knowledge engineer.
+- A document attached for the interview is queued for a knowledge reading once, and attaching it again doesn't queue it again.
+- In Claude Code, a turn recorded by the hook appears as unreviewed until the curator reviews it. In an MCP host without hooks, `autode_workflow_next` reports it.
+- Under `suggest`, no model is called. Under `draft`, the named agent drafts a proposal within the budget, and nothing is approved without a person.
+
 ### Phase LIN: Lineage and impact
-Scope: §8.5, and the Explorer's Lineage tab and impact view. Owners and domains come from MM.
+Scope: §8.5, and the Explorer's Lineage tab and impact view. Owners and domains come from MM1.
 
 Acceptance:
 - On the reference problem, designed and generated lineage links every target column to its source columns.

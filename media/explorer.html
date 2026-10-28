@@ -304,7 +304,7 @@
   function renderFacets(facets, pendingFacets) {
     const pendingSet = new Set(pendingFacets || []);
     const html = Object.keys(FACET_TITLES).filter((f) => pendingSet.has(f) || Object.keys(facets[f] || {}).length).map((f) => {
-      if (pendingSet.has(f)) return `<div class="facet pending"><h3>${esc(FACET_TITLES[f])}</h3><div class="muted">Arrives with the metadata model (MM, v0.51.0).</div></div>`;
+      if (pendingSet.has(f)) return `<div class="facet pending"><h3>${esc(FACET_TITLES[f])}</h3><div class="muted">Arrives with the metadata model (MM1, v0.51.0).</div></div>`;
       const entries = Object.entries(facets[f]).sort((a, b) => f === 'certification' ? CERT.indexOf(a[0]) - CERT.indexOf(b[0]) : b[1] - a[1]);
       return `<div class="facet"><h3>${esc(FACET_TITLES[f])}</h3>${entries.map(([v, n]) => `<label><input type="checkbox" data-facet="${esc(f)}" value="${esc(v)}" ${(state.filters[f] || []).includes(v) ? 'checked' : ''}> ${f === 'assetType' ? esc(KIND[v] || v) : f === 'layer' ? esc(LAYER[v] || v) : esc(v.replace(/_/g, ' '))}<span class="n">${n}</span></label>`).join('')}</div>`;
     }).join('');
@@ -482,7 +482,7 @@
       const o = c.overview; const a = c.asset;
       const rows = [['Id', `<code>${esc(a.id)}</code>`], a.fqn ? ['Qualified name', `<code>${esc(a.fqn)}</code>`] : null, a.database ? ['Database · schema', esc(a.database + (a.schema ? ' · ' + a.schema : ''))] : null, a.system ? ['System', esc(a.system + ' / ' + (a.environment || 'default'))] : null, a.platform ? ['Platform', esc(a.platform)] : null, a.certification ? ['Certification', certBadge(a.certification, a.trust) + (a.trust ? ` <span class="muted small">evidence: ${esc(a.trust)}</span>` : '')] : null, (a.glossaryTerms || []).length ? ['Glossary terms', esc(a.glossaryTerms.join(', '))] : null, o.aliases.length ? ['Also called', esc(o.aliases.join(', '))] : null, o.tags.length ? ['Tags', esc(o.tags.join(', '))] : null,
         o.origin ? ['Source', esc(`${o.origin.source} (${o.origin.ref})`)] : null, o.origin && o.origin.reliability ? ['Reliability', esc(o.origin.reliability)] : null, o.origin && o.origin.extractedAt ? ['Captured', esc(o.origin.extractedAt.slice(0, 19).replace('T', ' '))] : null, o.origin && o.origin.lastVerifiedAt ? ['Last verified', esc(o.origin.lastVerifiedAt.slice(0, 19).replace('T', ' '))] : null, o.loadedAt ? ['Loaded from the platform', esc(o.loadedAt.slice(0, 19).replace('T', ' '))] : null,
-        ['Owner · domain · tags', '<span class="muted">Arrive with the metadata model (MM, v0.51.0)</span>']].filter(Boolean);
+        ['Owner · domain · tags', '<span class="muted">Arrive with the metadata model (MM1, v0.51.0)</span>']].filter(Boolean);
       const def = c.meaning.definition;
       return `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
         ${def && def.expr ? `<h4>Definition</h4><pre class="mono">${esc(def.expr)}</pre>` : ''}

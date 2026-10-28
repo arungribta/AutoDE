@@ -189,6 +189,13 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - One semantic model serves every environment.
 
   *Why:* estates hold the same table in prod and dev, in archives, in staging schemas and in other accounts; an agent that picks the wrong one is confidently wrong. *Status:* Shipped v0.50.3; the per-environment database map at deployment comes in C5c.
+- **CTX-20 — The layers stay current without anyone having to remember.**
+  - New knowledge in chat (on every surface) and in any document, whatever it was brought for, is captured as proposed facts.
+  - Changes to facts are traced deterministically to the semantic models, articles and artifacts they affect, as maintenance items that name the agent suited to each.
+  - A workspace policy decides whether agents only suggest (the default) or also draft.
+  - A person approves every change.
+
+  *Why:* knowledge that arrives in passing is otherwise lost, and definitions drift from the facts they rest on. *Status:* Planned (MM2).
 - **CTX-16 — Definitions and metadata from the customer's tools can be imported:** AtScale (first), Snowflake Horizon, Collibra and Unity Catalog, into facts and semantic models through the usual gates. *Why:* customers already hold this knowledge, and AutoDE should use it rather than rebuild it. *Status:* Planned (IMP1; IMP2–IMP4 unscheduled).
 
 *Planned work:* semantic model — §6 (C5); the metadata model — §6.11 (MM); ontology and terminology — §6.8 (ONT1, ONT2); imports — §6.9 (IMP1–IMP4); lineage and impact — §8.5 (LIN); freshness policy and context health — §8.2, §8.4 (C6).

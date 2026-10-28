@@ -336,7 +336,7 @@ export interface SearchOptions {
 export const FACETS = ['layer', 'assetType', 'system', 'platform', 'environment', 'database', 'schema', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm'] as const;
 export type FacetName = typeof FACETS[number];
 export type Facets = Record<FacetName, Record<string, number>>;
-/** Facets the metadata model defines but that have no data yet (MM, v0.51.0): shown, disabled. */
+/** Facets the metadata model defines but that have no data yet (MM1, v0.51.0): shown, disabled. */
 export const PENDING_FACETS: readonly FacetName[] = ['domain', 'owner', 'tag'];
 
 export interface SearchResult {
@@ -609,7 +609,7 @@ export function getAssetContext(sources: ExploreSources, ref: string): AssetCont
   return {
     asset, overview, ...(schema ? { schema } : {}), ...(contents ? { contents } : {}), ...(ambiguousBase?.length ? { ambiguousBase } : {}),
     meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: [] },
-    lineage: { related, note: 'Relationships, mappings and derivations known today. Observed (platform), designed (mappings, specifications) and generated (artifacts) lineage, and impact analysis, arrive in LIN (v0.52.0).' },
+    lineage: { related, note: 'Relationships, mappings and derivations known today. Observed (platform), designed (mappings, specifications) and generated (artifacts) lineage, and impact analysis, arrive in LIN (v0.53.0).' },
     governance: { classifications, rules },
     facts, memory,
     usedBy: { artifacts, semanticModels, queries },
