@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.51.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.52.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -450,7 +450,43 @@ An asset's owners default to its domain's owners for any role it doesn't name. D
 
 Applying tags to Snowflake or Databricks is a platform change: an agent with the platform's governance skill writes it as a runbook, and you approve it.
 
-The semantic modeler and knowledge engineer agents, and knowledge maintenance, come with MM2 (v0.52.0); lineage from the platform and impact analysis with LIN (v0.53.0); ontology concepts with ONT1 (v0.54.0).
+The semantic modeler and knowledge engineer agents, and knowledge maintenance, are in §8.9; lineage from the platform and impact analysis with LIN (v0.53.0); ontology concepts with ONT1 (v0.54.0).
+### 8.9 Keeping the layers current
+
+Knowledge arrives while you work: you mention in chat that `order_id` is unique, or a document you attached for the interview defines churn. And one change ripples: a corrected metric no longer matches the semantic model, and an article cites a fact that was replaced. AutoDE notices these without a model and raises **maintenance items**. Each item says what happened, what to do, and which agent is suited to it. You decide.
+
+**Where you see them:**
+- *Waiting for you* in the Workflow view: choose an item, then **Work on it** (the agent proposes; you approve the proposal as usual) or **Dismiss…** (give a reason);
+- the Knowledge Explorer: **Needs attention** on the assets an item concerns;
+- in a terminal: `autode maintenance` lists them, `autode maintenance next` shows the next, and `autode maintenance dismiss <key> --reason "…"` sets one aside;
+- in an agent host: ask it to work on AutoDE's maintenance items (`autode_maintenance_next`).
+
+**The agents:**
+- the **semantic modeler** fixes semantic models: a metric that disagrees with its confirmed definition, a column that was renamed or dropped, a table that exists in several databases, a confirmed metric or join the model lacks;
+- the **knowledge engineer** keeps the glossary organised (categories, broader and related terms) and updates stale knowledge articles;
+- the **context curator** reads documents for knowledge and reviews chat messages that read like facts.
+
+**What raises items:**
+- **Chat.** In Claude Code, AutoDE's plugin records each message you send (`.autode/local/turns/`, on your machine only). Messages that read like facts and have no fact recorded become one item per session. The curator proposes facts from them or marks them reviewed. The panel's chat is read as before.
+- **Documents.** Every document in a problem's pack is read for knowledge once at each content, whatever you added it for. To find documents elsewhere in the workspace, run **AutoDE: Scan Workspace for Knowledge** (or `autode maintenance scan`): Markdown and text files no pack holds are queued.
+- **Changes.** A confirmed fact that contradicts a semantic model; a cited fact replaced under an article; terms with no category; a stage whose deliverables went stale.
+
+**An item goes away by itself** when what caused it is resolved: the proposal is approved, the document is read, the message is recorded or dismissed. Dismissing is yours alone; if the cause changes, a new item appears.
+
+**Stage approvals.** In a governed problem, items that touch the problem's tables or its unread documents hold a stage's approval until they are resolved or dismissed. In exploration mode they are only listed.
+
+**Who acts.** Set `.autode/config/maintenance.yaml`:
+
+```yaml
+policy: suggest      # suggest (default): items only, no model calls
+                     # draft: after an agent finishes a stage, AutoDE starts the next item's agent itself
+                     # off: no items
+draft:
+  runsPerDay: 3      # how many agent runs AutoDE may start on its own each day
+```
+
+Nothing is approved without you, under any policy.
+
 ---
 
 ## 9. The workflow

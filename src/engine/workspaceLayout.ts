@@ -54,6 +54,8 @@ export const LAYOUT = {
   domains: [AUTODE_DIR, 'config', 'domains.yaml'],
   /** MM1: knowledge articles (Markdown with front matter) that cite facts. */
   articles: [AUTODE_DIR, 'knowledge', 'articles'],
+  /** MM2 (§5.6): who acts on knowledge maintenance — suggest (default), draft or off. */
+  maintenancePolicy: [AUTODE_DIR, 'config', 'maintenance.yaml'],
   /** Which decision kinds may be approved by MCP elicitation (PA3c). */
   approvals: [AUTODE_DIR, 'config', 'approvals.yaml'],
   decisions: [AUTODE_DIR, 'decisions'],
@@ -62,6 +64,9 @@ export const LAYOUT = {
   connectionReadiness: [AUTODE_DIR, 'local', 'connection-readiness.json'],
   activeProblem: [AUTODE_DIR, 'local', 'active-problem.json'],
   chats: [AUTODE_DIR, 'local', 'chats'],
+  /** MM2: chat turns recorded by host hooks (Claude Code), for review; and this engineer's maintenance state (dismissals, scan, drafts). */
+  turns: [AUTODE_DIR, 'local', 'turns'],
+  maintenanceState: [AUTODE_DIR, 'local', 'maintenance.json'],
   derived: [AUTODE_DIR, 'local', 'derived'],
   graph: [AUTODE_DIR, 'local', 'derived', 'graph.json'],
   catalog: [AUTODE_DIR, 'local', 'catalog'],

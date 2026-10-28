@@ -6,6 +6,45 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.52.0
+
+- **MM2: agents and knowledge maintenance** (context-layer §5.6, §6.8; CTX-20). Before building, a challenge list was reviewed with the owner. The owner's answers: suggestions go to the existing queue (*Waiting for you*), not a second one; a person can also start a whole-workspace scan; one role per layer; one item per cause.
+  - **Two agents**, each a role template with its own skills and tools (propose tier):
+    - the **semantic modeler** (`agents/semantic-modeler.md`; skill `autode-core-semantic-modeling`) drafts, refines and repairs shared semantic models from confirmed facts: contradictions, broken references, ambiguous base tables, missing metrics, joins and synonyms;
+    - the **knowledge engineer** (`agents/knowledge-engineer.md`; skills `autode-core-glossary-structure`, `autode-core-knowledge-articles`) places glossary terms as SKOS concepts and writes and repairs knowledge articles.
+    - Both, and the context curator, share `autode-core-knowledge-maintenance` (working the queue). The new skills are `preview` maturity.
+  - **The maintenance queue** (`src/engine/maintenance/`). Deterministic rules, no model, raise items that name the agent suited to each:
+    - a confirmed fact that contradicts an approved (or since-changed) shared model, a column or table the model uses that is gone, an ambiguous base table: from the model's own check;
+    - a confirmed metric, join or bound term with no counterpart in a model that covers its tables;
+    - a knowledge article whose cited fact was superseded, rejected or sent to review;
+    - glossary terms with no category (one item for all of them);
+    - a document not read at its current content (pack documents; documents the workspace scan found), one item per content hash;
+    - chat turns that read like facts and aren't reviewed, one item per session;
+    - a stale stage (§8.3).
+
+    An item's key is its cause, so the same cause never makes a second item, and it closes itself when the cause is gone.
+  - **Capture triggers:**
+    - a Claude Code **turn hook** (`autode hook turn`, UserPromptSubmit, in the plugin and in installed settings beside the guard) records each submitted message in `.autode/local/turns/`. It prints nothing and never blocks;
+    - `autode_review_session` with no turns reviews the recorded ones; the curator proposes facts citing them, or dismisses those that state none (`autode_dismiss_turns`);
+    - every pack document whose content hasn't been read is queued; the same content attached twice, or to another problem, is read once;
+    - **the whole-workspace scan** (owner's addition): *AutoDE: Scan Workspace for Knowledge*, `autode maintenance scan`, `autode_maintenance_scan`. It finds Markdown and text documents no pack holds and queues them; a person starts it.
+  - **The policy** (`.autode/config/maintenance.yaml`): `suggest` (default: items only, no model call), `draft` (in VS Code, after an agent finishes a stage, AutoDE starts the agent of the next item, up to `draft.runsPerDay` runs a day) or `off`. Nothing is ever approved without a person.
+  - **On every surface:**
+    - *Waiting for you* (VS Code tree, `autode approvals`, `autode_approvals_list`), with *Work on it* and *Dismiss…*;
+    - the Explorer's **Needs attention** block on the assets an item concerns;
+    - `autode maintenance [list|next|turns|scan|dismiss|policy]`;
+    - `autode_maintenance_list`, `autode_maintenance_next` (the work order: role, skills, brief, allowed tools);
+    - `autode_workflow_next` reports open items, unreviewed turns and those touching the problem; the orchestrator skill checks the queue before and after each stage;
+    - commands *Work on a Maintenance Item…*, *Dismiss a Maintenance Item…*, *Scan Workspace for Knowledge*.
+  - **The gate:** in a governed problem, open items touching the problem's tables, or its unread documents, refuse a stage approval (panel, Workflow view, `autode workflow approve`, `autode decisions approve` of a gate) until they are resolved or a person dismisses them with a reason. In exploration mode they only warn.
+  - **Deliberate deviations from the specification:**
+    - the queue is **computed from the state** the rules read (ledger, semantic layer, articles, packs, turns, workflow), not stored per ledger event. It gives the same items on every surface, whichever surface changed the facts, and needs no event plumbing. Dismissals are per engineer (`.autode/local/maintenance.json`);
+    - the hook records the message when it is **submitted** (UserPromptSubmit), not at the end of the turn: the user's words are what the review needs, and the event carries them without reading the transcript;
+    - the `draft` budget counts **agent runs** a day, not model calls, and runs only at stage boundaries in VS Code ("when idle" is not built). Host agents pick items up with `autode_maintenance_next` when the user asks;
+    - documents: pack documents (interview attachments reach the pack since v0.45.12) and the scan's. Attachments without a pack document, and binary formats, are not queued;
+    - an estate schema change still sends dependent facts to the Context Inbox (§8.1); it is not a separate maintenance item.
+  - Measured: 403 tests (3 new: the maintenance queue, with the owner's acceptance cases; capture triggers and the scan; the agents, the gate and every surface; the pinned tool, skill, hook and bundle-budget tests are updated, the development bundle budget raised to 2.5 MB). The eval is unchanged (no rule calls a model).
+
 ## 0.51.0
 
 - **MM1: the metadata model** (context-layer §6.11; CTX-17, CTX-18), using the names of the standards and catalogs. Before building, a challenge list was reviewed with the owner.

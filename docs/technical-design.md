@@ -892,6 +892,47 @@ Decision kind `article` (`ArticlePayload`, `validateArticleProposal`). Applying 
   - the *Quality* and *Knowledge* tabs, metadata rows with empty states, and *KPIs*;
   - the commands `newKnowledgeArticle` and `approveKnowledgeArticle`.
 
+### 5.19 Knowledge maintenance and the two layer agents (v0.52.0; MM2)
+
+Context-layer §5.6, §6.8.
+
+**The queue is a function, not a store.** `maintenanceItems(input)` (`src/engine/maintenance/queue.ts`) runs the rules over the current state and returns items. `openMaintenanceItems` drops this engineer's dismissals. Nothing records "an event happened". So:
+- an item's `key` is its cause (`<rule>:<what>[:<hash of the difference>]`): the same cause gives the same key, and a changed cause a new one;
+- an item closes when its cause is gone, on every surface at once;
+- the rules never call a model, under any policy.
+
+The rules, in order:
+
+| Rule | Reads | Agent |
+|---|---|---|
+| `semantic-contradiction`, `semantic-broken`, `semantic-ambiguous` | `checkSemanticModel` errors on shared models that are approved or changed since | semantic-modeler |
+| `semantic-gap` | confirmed (`active`, trust confirmed or verified) metric, relationship and bound term facts with no counterpart in an approved model covering their tables (`semanticTablesFor`) | semantic-modeler |
+| `article-stale` | `checkArticle(...).staleBecause` on articles not deprecated | knowledge-engineer |
+| `glossary-structure` | live terms with no `category` (one item; the key hashes their ids) | knowledge-engineer |
+| `document-reading` | pack documents whose content hash differs from the hash recorded at their last reading, deduplicated by hash across problems; documents in the last scan | context-curator |
+| `unreviewed-turns` | `unreviewedTurns` (the C4c cues over recorded turns, minus cited and dismissed) | context-curator |
+| `stage-stale` | `statusFor` stages with status `stale` (approved workflows only) | the stage's role |
+
+Each rule is wrapped, so a rule that fails yields no items rather than breaking the list. Subjects carry asset ids, `sem:` ids, `article:<slug>`, `doc:<path>` and fact ids. `itemsTouching` matches them, treating a column's item as its table's too.
+
+**Turns** (`turns.ts`). `recordHookTurn` takes Claude Code's UserPromptSubmit event, finds the workspace above `cwd` that has `.autode/`, and appends to `.autode/local/turns/<host>-<session>.jsonl` (ref `chat:<host>-<session>#<n>`). Slash commands and empty messages aren't recorded. `autode hook turn` calls it, writes nothing to stdout (on that event, stdout joins the context) and always exits 0. `guardHooks`/`mergeGuardHook` in `plugin.ts` carry both hooks; AutoDE's entries are found by their `hook guard|turn` command.
+
+**Policy and state** (`policy.ts`). `.autode/config/maintenance.yaml` holds `policy` and `draft.runsPerDay`. `.autode/local/maintenance.json` holds dismissals (by, at, reason), the last scan and the draft runs. `draftRunsLeft` counts today's runs under `draft` (0 otherwise).
+
+**The scan** (`scan.ts`). It walks the workspace for `.md`, `.markdown`, `.txt`, `.rst` and `.adoc` files no pack holds. It skips dot folders, `.autode`, `autode-output`, `node_modules`, `dist`, `out`, `build`, `target` and virtualenvs, and stops at 500 files, skipping files over 2 MB. It records the paths and hashes; the rule computes the rest.
+
+**Work orders** (`brief.ts`). `maintenanceAssignment` renders the named role's template, its skills and the item, and lists the tools the role may call at the `propose` tier (`toolsForTier`: no hub-only or destructive tool). The same text serves `autode_maintenance_next` and the VS Code executor's `runMaintenance` (`src/core/agentExecutor.ts`, read-only file mode).
+
+**Where it surfaces:**
+- `waitingForYou` takes `maintenance` items (kind `maintenance`, low stakes); each caller computes them from its own sources;
+- `exploreSources` computes them and `assetContext` lists those touching the asset;
+- `autode_workflow_next` adds `maintenance` (`problemMaintenance`);
+- `gateMaintenance` holds a governed gate. It is checked by the CLI (`workflow approve`, `decisions approve` of a gate) and by the panel (approve document, resolve gate); MCP never approves stages.
+
+Under `draft`, the panel calls `draftAtStageBoundary` after a successful stage run.
+
+**Agents.** `agents/semantic-modeler.md` and `agents/knowledge-engineer.md` belong to no stage kind: they work items, and later a `semantic-foundation` workflow (ONT1). Their skills have `stageKinds: []`.
+
 ## 6. Data Platforms
 
 ### 6.1 Design Rationale
@@ -2062,6 +2103,8 @@ src/engine/interview/
   specOps.ts, state.ts
 src/engine/knowledge/
   articles.ts
+src/engine/maintenance/
+  brief.ts, policy.ts, queue.ts, scan.ts, turns.ts
 src/engine/metadata/
   model.ts, record.ts
 src/engine/pipelineSpec/    # Pipeline Specification
@@ -2089,7 +2132,7 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   documentApproval.ts, events.ts, instance.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, platform.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, maintenanceTools.ts, platform.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 ```
 <!-- /generated:source-tree -->
 

@@ -244,6 +244,12 @@ export function activate(context: vscode.ExtensionContext): void {
     recordMetadata: (input, remove) => sidebarProvider.recordMetadata(input, remove),
     user: skillActor
   }));
+  // MM2: knowledge maintenance — a person starts an item's agent, sets an item aside, or scans the whole workspace.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(`${EXTENSION_ID}.workOnMaintenanceItem`, (key?: unknown) => sidebarProvider.workOnMaintenanceItem(typeof key === 'string' ? key : undefined)),
+    vscode.commands.registerCommand(`${EXTENSION_ID}.dismissMaintenanceItem`, (key?: unknown) => sidebarProvider.dismissMaintenanceItem(typeof key === 'string' ? key : undefined)),
+    vscode.commands.registerCommand(`${EXTENSION_ID}.scanWorkspaceForKnowledge`, () => sidebarProvider.scanWorkspaceForKnowledge())
+  );
   // MM1: knowledge articles — start one, approve the open one (a person, at its current revision).
   context.subscriptions.push(
     vscode.commands.registerCommand(`${EXTENSION_ID}.newKnowledgeArticle`, async () => {

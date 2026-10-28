@@ -206,7 +206,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - A workspace policy decides whether agents only suggest (the default) or also draft.
   - A person approves every change.
 
-  *Why:* knowledge that arrives in passing is otherwise lost, and definitions drift from the facts they rest on. *Status:* Planned (MM2).
+  *Why:* knowledge that arrives in passing is otherwise lost, and definitions drift from the facts they rest on. *Status:* Shipped v0.52.0 (MM2): the semantic modeler and knowledge engineer; the maintenance queue (computed from state, keyed by cause, closing itself); the Claude Code turn hook; reading every pack document once per content; the person-started workspace scan; the `suggest` / `draft` / `off` policy; governed stage gates held by items touching the problem.
 - **CTX-16 — Definitions and metadata from the customer's tools can be imported:** AtScale (first), Snowflake Horizon, Collibra and Unity Catalog, into facts and semantic models through the usual gates. *Why:* customers already hold this knowledge, and AutoDE should use it rather than rebuild it. *Status:* Planned (IMP1; IMP2–IMP4 unscheduled).
 
 *Planned work:* semantic model — §6 (C5); the metadata model — §6.11 (MM); ontology and terminology — §6.8 (ONT1, ONT2); imports — §6.9 (IMP1–IMP4); lineage and impact — §8.5 (LIN); freshness policy and context health — §8.2, §8.4 (C6).

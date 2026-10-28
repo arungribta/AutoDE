@@ -199,7 +199,7 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
   const disposables: vscode.Disposable[] = [bar, vscode.window.registerTreeDataProvider('autoDataEngineeringHubWorkflow', tree)];
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (root) {
-    for (const glob of ['.autode/problems/**/*.{yaml,yml,jsonl}', '.autode/decisions/*.yaml', '.autode/local/active-problem.json', '.autode/knowledge/estate.yaml']) {
+    for (const glob of ['.autode/problems/**/*.{yaml,yml,jsonl}', '.autode/decisions/*.yaml', '.autode/local/active-problem.json', '.autode/knowledge/estate.yaml', '.autode/local/turns/*.jsonl', '.autode/local/maintenance.json', '.autode/knowledge/articles/*.md']) {
       const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, glob));
       w.onDidChange(refresh); w.onDidCreate(refresh); w.onDidDelete(refresh);
       disposables.push(w);
@@ -222,6 +222,16 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
       else if (i.opens.view === 'workflow' || i.opens.view === 'workflow-stage') WorkflowPanel.show(context, host, refresh, i.opens.ref);
       else if (i.opens.view === 'inbox') { await vscode.commands.executeCommand('autoDataEngineeringHubSidebar.focus'); void vscode.window.showInformationMessage('The facts wait in the Context Inbox, in the AutoDE panel.'); }
       else if (i.opens.view === 'file' && i.opens.ref) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(i.opens.ref));
+      else if (i.opens.view === 'maintenance' && i.opens.ref) {
+        // MM2: a maintenance item is work for an agent; a person starts it, or sets it aside with a reason.
+        const pick = await vscode.window.showQuickPick([
+          ...(i.agent && i.agent !== 'person' ? [{ label: `$(play) Work on it`, description: `the ${i.agent} proposes; you approve`, act: 'work' }] : []),
+          { label: '$(close) Dismiss…', description: 'set it aside, with a reason', act: 'dismiss' }
+        ], { title: i.title, placeHolder: i.detail.slice(0, 200) });
+        if (pick?.act === 'work') await vscode.commands.executeCommand('autoDataEngineeringHub.workOnMaintenanceItem', i.opens.ref);
+        else if (pick?.act === 'dismiss') await vscode.commands.executeCommand('autoDataEngineeringHub.dismissMaintenanceItem', i.opens.ref);
+        refresh();
+      }
       else if (i.opens.view === 'decision' && i.opens.ref && scope) await vscode.window.showTextDocument(vscode.Uri.file(path.join(layoutPath(scope.workspaceRoot, 'decisions'), `${i.opens.ref}.yaml`)));
     }),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowRun', act('run')),

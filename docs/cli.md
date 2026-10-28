@@ -127,6 +127,13 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 | `autode metadata remove <asset> --tag k \| --owner role=person \| …` | A person removes it (the fact is rejected, kept in history). |
 | `autode metadata migrate` | Records the v0.51.0 migration: classifications out of business rules, rules with a type and modality. |
 | `autode articles list` \| `show <name>` \| `new <name> --title "…" --about <ids>` \| `check [<name>]` \| `approve <name>` | Knowledge articles: list with state and staleness, read, start a draft, check citations, approve (a person at a terminal). |
+| `autode maintenance [list] [--all] [--role <r>]` | Open knowledge-maintenance items, each with the agent suited to it and what to do. `--all` covers every problem's documents. |
+| `autode maintenance next [--role <r>]` | The next item. |
+| `autode maintenance turns [dismiss <ref>…]` | Messages the Claude Code hook recorded that read like facts and aren't reviewed; mark some reviewed. |
+| `autode maintenance scan` | Scans the workspace for Markdown and text documents no pack holds, and queues them for a reading. |
+| `autode maintenance dismiss <key> --reason "…"` | A person sets an item aside (interactive terminal). |
+| `autode maintenance policy` | Shows the policy: `suggest` (default), `draft` or `off`. |
+| `autode hook turn` | The plugin's UserPromptSubmit hook: records the message for review; prints nothing, never blocks. |
 | `autode explore semantic` | The semantic layer: each model (approved or draft) with its logical tables, metrics, relationships, verified queries and custom instructions. |
 | `autode explore asset <id or name>` | Everything known about one asset, as Markdown (the Knowledge Explorer's page); `--json` for the same JSON as `autode_get_asset_context`. |
 | `autode explore graph <id or name> [--hops 1-3]` | The graph around an asset. |

@@ -344,6 +344,10 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_propose_semantic_model` | Propose a shared model or a composite; a person approves it. |
 | `autode_search_assets` | Search everything AutoDE knows (objects, columns, terms, semantic elements, relationships, verified queries, facts, the estate catalog), with facets; each result names its layer (physical, context, semantic), and `layers` filters by it. The resource `autode://explore/semantic` lists each semantic model's tables, metrics, relationships, verified queries and instructions. |
 | `autode_get_asset_context` | Everything known about one asset: schema, meaning, relationships, governance, facts with evidence, decisions in scope, what uses it. Read it before deciding about the asset. Also the resource `autode://asset/{id}`. |
+| `autode_maintenance_list` | Open knowledge-maintenance items (semantic contradictions and gaps, stale articles, unplaced terms, unread documents, unreviewed chat turns, stale stages), each naming the agent suited to it. |
+| `autode_maintenance_next` | The next item and its work order: role, skills, brief and the tools allowed. The host runs it when the user asks. |
+| `autode_maintenance_scan` | Scans the workspace for documents no pack holds and queues them (when the user asks). |
+| `autode_dismiss_turns` | Marks recorded chat turns that state no fact as reviewed. |
 | `autode_search_articles` | Knowledge articles about an asset or by words, with their state, whether stale, and opening paragraph; read one as `autode://article/<slug>`. |
 | `autode_propose_article` | Propose a knowledge article that cites facts; a person approves it. |
 | `autode_browse_assets` | The estate as a tree: databases, then schemas, tables and columns, with ids and child counts. |

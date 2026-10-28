@@ -1,3 +1,4 @@
+import { openMaintenanceItems } from '../maintenance/queue';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ContextPackSources } from '../context/contextPack';
@@ -59,7 +60,8 @@ export function exploreSources(workspaceRoot: string, context: ContextPackSource
     semantic: loadSemanticLayer(workspaceRoot, { problemId, includeDrafts: true }),
     artifacts: artifactUses(workspaceRoot),
     metadata: loadMetadataConfig(workspaceRoot),
-    articles: context.articles ?? listArticles(workspaceRoot)
+    articles: context.articles ?? listArticles(workspaceRoot),
+    maintenance: (() => { try { return openMaintenanceItems({ workspaceRoot, problemId, sources: context }); } catch { return []; } })()
   };
 }
 

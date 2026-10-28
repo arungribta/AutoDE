@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.51.0",
+  "version": "0.52.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -237,6 +237,9 @@
       { "command": "autoDataEngineeringHub.openKnowledgeExplorer", "title": "AutoDE: Open Knowledge Explorer", "icon": "$(type-hierarchy)" },
       { "command": "autoDataEngineeringHub.newKnowledgeArticle", "title": "AutoDE: New Knowledge Article…" },
       { "command": "autoDataEngineeringHub.approveKnowledgeArticle", "title": "AutoDE: Approve Knowledge Article" },
+      { "command": "autoDataEngineeringHub.workOnMaintenanceItem", "title": "AutoDE: Work on a Maintenance Item…" },
+      { "command": "autoDataEngineeringHub.dismissMaintenanceItem", "title": "AutoDE: Dismiss a Maintenance Item…" },
+      { "command": "autoDataEngineeringHub.scanWorkspaceForKnowledge", "title": "AutoDE: Scan Workspace for Knowledge" },
       { "command": "autoDataEngineeringHub.refreshWorkflow", "title": "AutoDE: Refresh Workflow", "icon": "$(refresh)" },
       { "command": "autoDataEngineeringHub.workflowRun", "title": "Run Stage Agent", "icon": "$(play)" },
       { "command": "autoDataEngineeringHub.refreshSkills", "title": "Refresh Skills", "icon": "$(refresh)" },

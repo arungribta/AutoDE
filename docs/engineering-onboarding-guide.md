@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.51.0 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.52.0 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -205,6 +205,11 @@ An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `bu
   - knowledge articles cite facts and go stale with them.
 
   Don't add platform-specific writers to the engine: one-off platform changes are runbooks written by agents with platform skills (decision log, 2026-10-28).
+
+- **Knowledge maintenance** (v0.52.0, `src/engine/maintenance/`):
+  - the queue is a pure function of the state (`maintenanceItems`), keyed by cause. Add a rule there; don't add event hooks;
+  - turns are recorded by `autode hook turn` (Claude Code UserPromptSubmit);
+  - the semantic modeler and knowledge engineer are role templates (`agents/`) that work items through `maintenanceAssignment`.
 
 *Requirements CTX-8, GRD-10, UI-7; design §5.17.*
 

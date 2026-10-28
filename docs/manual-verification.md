@@ -1148,6 +1148,27 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: `autode metadata show shop.orders`; `autode articles list`; in Claude Code ask "who owns shop.orders and what should I know about it?".
   Expect: the CLI output; the host calls `autode_get_asset_context` (owners, domain, articles) and `autode_search_articles`.
 
+## Part 49 — v0.52.0 Knowledge maintenance
+
+- [ ] **49.1 A contradiction.**
+  Do: approve the `sales` model; in the Context Inbox, correct the net revenue metric fact to another expression and confirm it.
+  Expect: *Waiting for you* shows one item "sales order_items.net_revenue contradicts what is known" for the semantic-modeler; confirming again adds none. *Work on it*: the agent proposes a model change; approve it, and the item disappears.
+- [ ] **49.2 A stale article.**
+  Do: supersede a fact a knowledge article cites.
+  Expect: one item for the knowledge-engineer; the article's page in the Explorer shows it under **Needs attention**.
+- [ ] **49.3 Documents.**
+  Do: attach a document in the interview; attach it again. Then put a `notes.md` with a definition anywhere in the workspace and run *AutoDE: Scan Workspace for Knowledge*.
+  Expect: one reading item for the attachment; one for `notes.md`. Applying the pack closes the first.
+- [ ] **49.4 Claude Code turns.**
+  Do: `autode plugin install --host claude`, accept the hooks (/hooks); in Claude Code say "order_id is always unique in shop.orders"; then ask it to review the session.
+  Expect: `.autode/local/turns/` has the message; `autode maintenance turns` lists it; the curator proposes a fact citing it, and it leaves the list.
+- [ ] **49.5 The gate.**
+  Do: with an open item touching the problem's tables, approve a stage in a governed problem; then dismiss the item with a reason and approve again; switch to exploration and repeat.
+  Expect: the first approval is refused with the item list; after dismissal it goes through; in exploration it goes through with a warning.
+- [ ] **49.6 The policy.**
+  Do: set `policy: draft` with `runsPerDay: 1`; run a stage's agent in the panel; run another.
+  Expect: after the first stage, the next item's agent runs on its own (log line); after the second, nothing more that day. With `policy: off`, no items.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1436,5 +1457,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 48.4 |  |  |
 | 48.5 |  |  |
 | 48.6 |  |  |
+| 49.1 |  |  |
+| 49.2 |  |  |
+| 49.3 |  |  |
+| 49.4 |  |  |
+| 49.5 |  |  |
+| 49.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

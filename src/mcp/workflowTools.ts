@@ -1,3 +1,4 @@
+import { problemMaintenance } from '../engine/maintenance/queue';
 import { EngineTool, ToolAnnotations } from './tools';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
@@ -95,13 +96,16 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         const next = nextAssignment(rctx(ws));
         if (!next) return { next: null };
         // PA3b: the full assignment when a skill does the stage's kind; otherwise why not (a person does it).
-        if (next.stage.status === 'awaiting-approval') return { next, assignment: null };
+        // MM2: the knowledge-maintenance items and unreviewed chat turns, and those touching this problem's assets.
+        const m = problemMaintenance({ workspaceRoot: scope.workspaceRoot, resourcesRoot: scope.resourcesRoot, problemId: scope.problemId, sources });
+        const maintenance = { open: m.open, unreviewedTurns: m.unreviewedTurns, touching: m.touching.map((i) => ({ key: i.key, rule: i.rule, agent: i.agent, title: i.title })) };
+        if (next.stage.status === 'awaiting-approval') return { next, assignment: null, maintenance };
         // The joins, keys and grain the stage's context doesn't back go into its assignment (v0.45.9).
         const gaps = stageContextGaps(sources, { problemRoot: rctx(ws).problemRoot, kind: next.stage.kind, title: next.stage.title, mode: problemMode(rctx(ws).problemRoot) });
         const a = assignmentFor(scope, next.stage.id, allTools(), { gaps });
         // The same check the panel's Run agent makes (v0.45.8): say what's missing before the agent starts.
         const notReady = stageReadiness({ workspaceRoot: scope.workspaceRoot, problemRoot: rctx(ws).problemRoot, kind: next.stage.kind });
-        return { next, assignment: a.assignment ?? null, ...(a.reason ? { noAssignment: a.reason } : {}), ...(notReady.length ? { notReady } : {}) };
+        return { next, assignment: a.assignment ?? null, ...(a.reason ? { noAssignment: a.reason } : {}), ...(notReady.length ? { notReady } : {}), maintenance };
         });
       }
     },

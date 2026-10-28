@@ -49,7 +49,7 @@ import { checkPrerequisites } from '../engine/platform/prerequisites';
 import { connectionStatus, forgetReadiness, readReadiness, recordReadiness } from '../engine/platform/connectionReadiness';
 import { ConnectionDraft, ConnectionRole, loadConnectionsConfig, removeConnection, saveConnection, validateConnectionDraft } from '../engine/platform/connectionsConfig';
 import { credentialNeeds, discoverCliConnections, draftEntry, setupFields } from '../engine/platform/connectionSetup';
-import { listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
+import { activeProblemId, listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
 import { IngestResult, ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
 import { FactView, ReviewAction, bulkConfirmDocumented, factView, inbox, reviewFact } from '../engine/context/factReview';
 import { BusinessPackManager } from '../engine/context/businessPackManager';
@@ -71,6 +71,11 @@ import { Catalog } from '../engine/context/catalog';
 import { layoutPath } from '../engine/workspaceLayout';
 import { SqlDialect } from '../engine/transforms/types';
 import { guardHookEvent } from '../engine/runner/hostGuard';
+import { recordHookTurn, unreviewedTurns } from '../engine/maintenance/turns';
+import { MaintenanceItem, gateMaintenance, openMaintenanceItems } from '../engine/maintenance/queue';
+import { loadMaintenanceConfig } from '../engine/maintenance/policy';
+import { dismissItem, scanWorkspace } from '../engine/maintenance/scan';
+import { dismissStatements } from '../engine/context/sessionReview';
 import { isOpenInterview, readInterview, recordInterview, startInterview, summarizeInterview, writeInterview } from '../engine/interview/state';
 import { interviewSkills } from '../engine/skills/skillRegistry';
 import { loadSkillPack } from '../engine/agents/definitions';
@@ -148,9 +153,11 @@ export function nodeIo(): CliIo {
  * shell commands, nothing else.
  */
 async function hookCommand(args: readonly string[], io: CliIo): Promise<number> {
-  if (args[0] !== 'guard') { io.err('autode hook guard  (reads the host\'s PreToolUse event on stdin)'); return EXIT.USAGE; }
+  if (args[0] !== 'guard' && args[0] !== 'turn') { io.err('autode hook guard|turn  (reads the host\'s PreToolUse / UserPromptSubmit event on stdin)'); return EXIT.USAGE; }
   let event: unknown;
   try { event = JSON.parse((await (io.readStdin ?? (async () => ''))()) || 'null'); } catch { return EXIT.OK; }
+  // MM2: the turn hook records the message for review and prints nothing (on UserPromptSubmit, output would join the context); it never blocks.
+  if (args[0] === 'turn') { try { recordHookTurn(event, io.cwd); } catch { /* never in the user's way */ } return EXIT.OK; }
   const v = guardHookEvent(event, io.cwd);
   if (!v.block) return EXIT.OK;
   io.err(v.reason ?? 'Blocked by AutoDE.');
@@ -231,6 +238,14 @@ Metadata (MM1; setting it is a person's: interactive terminal):
   articles check [<slug>]      Citations and staleness against the facts
   articles show <slug> | articles approve <slug>   (approve: terminal)
 
+Knowledge maintenance (MM2; what keeps the layers current):
+  maintenance [list] [--all] [--role <r>]   Open items: semantic contradictions and gaps, stale articles, unplaced terms, unread documents, unreviewed chat turns, stale stages — each with the agent suited to it
+  maintenance next [--role <r>]   The next item and what to do about it
+  maintenance turns [dismiss <ref>…]   Chat messages recorded by the Claude Code hook that read like facts and aren't reviewed
+  maintenance scan             Scan the whole workspace for text documents no pack holds, and queue them for a reading
+  maintenance dismiss <key> --reason "<why>"   (terminal) Set an item aside
+  maintenance policy           Who acts: suggest (default) | draft | off, from .autode/config/maintenance.yaml
+
 Capture coverage:
   coverage                     What a complete picture of the problem needs, per table and metric: known, proposed, assumed, missing, and the action for each
   capture candidates [--connection <id>] [--record]   Keys, foreign keys, grain, change columns and personal data from the data, each probed
@@ -292,6 +307,7 @@ Agent hosts (Claude Code, Cortex Code, GitHub Copilot CLI):
   plugin install --host claude|cortex|copilot [--scope project|user]   Copy AutoDE's agents and skills into the host's folders
                                and wire its MCP server (or print the step, where the host has no file for it)
   hook guard                   The plugin's PreToolUse hook: blocks platform-changing snow/databricks commands (host event JSON on stdin; exit 2 = blocked)
+  hook turn                    The plugin's UserPromptSubmit hook: records the message for review (MM2); prints nothing, never blocks
 
 Server:
   mcp [--allow-cli] [--drivers <folder>]   The AutoDE MCP server over stdio (platform changes: runbooks)
@@ -433,6 +449,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'explore': return await cmdExplore(ctx, rest);
       case 'metadata': return await cmdMetadata(ctx, rest);
       case 'articles': return await cmdArticles(ctx, rest);
+      case 'maintenance': return await cmdMaintenance(ctx, rest);
       case 'workflow': return await cmdWorkflow(ctx, rest);
       case 'pack': return await cmdPack(ctx, rest);
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
@@ -773,6 +790,7 @@ async function cmdDecisions(ctx: Ctx, rest: string[]): Promise<number> {
   const decision = sub === 'approve' ? 'approved' : 'rejected';
   const by = (ctx.values.by ?? safeUsername()).trim();
   ctx.io.out(describeDecision(d, store.proposal(d.id)));
+  if (sub === 'approve' && d.kind === 'gate' && d.problemId) await gateMaintenanceCheck(ctx, d.problemId);
   // C4c: in an exploration problem a stage gate takes one step (y), not a typed word.
   const oneStep = d.kind === 'gate' && !!d.problemId && problemMode(layoutPath(ctx.workspaceRoot, 'problems', d.problemId)) === 'exploration';
   const answer = (await ctx.io.prompt(oneStep ? `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}" (exploration mode)? [y/N] ` : `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}"? Type ${sub} to confirm: `)).trim().toLowerCase();
@@ -920,8 +938,10 @@ async function cmdApprovals(ctx: Ctx, rest: string[]): Promise<number> {
   const ws = workspace(ctx);
   const cfm = await openContext(ctx.workspaceRoot, () => undefined);
   let facts: FactView[] = [];
-  try { facts = inbox(cfm.getLedger()).facts; } finally { cfm.dispose?.(); }
-  const items = waitingForYou({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId: ctx.values.problem ?? ws.activeProblemId(), facts });
+  let maintenance: MaintenanceItem[] = [];
+  const problemId = ctx.values.problem ?? ws.activeProblemId();
+  try { facts = inbox(cfm.getLedger()).facts; maintenance = openMaintenanceItems({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId, sources: cfm.getPackSources() }); } finally { cfm.dispose?.(); }
+  const items = waitingForYou({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId, facts, maintenance });
   emit(ctx, { ok: true, items }, items.length
     ? items.map((i) => `  ${i.stakes === 'high' ? '!' : '·'} ${i.title}${i.problemId ? ` [${i.problemId}]` : ''}\n      ${i.detail}\n      approve: ${i.cli}`).join('\n') + `\n${items.length} item(s) wait for a person.`
     : 'Nothing waits for you.');
@@ -1293,6 +1313,7 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
         requirePerson(ctx, 'Approving', 'Approve it in the AutoDE panel or the Workflow view instead.');
         const problems = documentApprovalProblems(rctx.problemRoot, stage.kind);
         if (problems.length) throw new CliError(EXIT.FAILED, problems.join(' '));
+        await gateMaintenanceCheck(ctx, problemId);
         const file = stageDocumentFile(rctx.problemRoot, stage.kind)!;
         const oneStep = problemMode(rctx.problemRoot) === 'exploration';
         const answer = (await ctx.io.prompt(oneStep ? `Approve ${path.relative(ctx.workspaceRoot, file)} (${stage.title}) as "${by}" (exploration mode)? [y/N] ` : `Approve ${path.relative(ctx.workspaceRoot, file)} (${stage.title}) as "${by}"? Type approve to confirm: `)).trim().toLowerCase();
@@ -1527,6 +1548,73 @@ async function cmdArticles(ctx: Ctx, rest: string[]): Promise<number> {
     return r.ok ? EXIT.OK : EXIT.FAILED;
   }
   throw new CliError(EXIT.USAGE, 'articles list | show <slug> | new <slug> --title "<title>" --about <ids> | check [<slug>] | approve <slug>');
+}
+
+/**
+ * MM2 (§5.6): knowledge maintenance — the items AutoDE's rules raised, the next one's work order,
+ * recorded chat turns to review, the whole-workspace scan (a person starts it), dismissing an item
+ * (a person, with a reason) and the policy.
+ */
+async function cmdMaintenance(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list', ...args] = rest;
+  const ws = ctx.workspaceRoot;
+  const config = loadMaintenanceConfig(ws);
+  if (sub === 'policy') {
+    emit(ctx, { ok: !config.errors.length, ...config }, [`Policy: ${config.policy}${config.policy === 'draft' ? ` (up to ${config.runsPerDay} agent run(s) a day)` : ''}. Set it in .autode/config/maintenance.yaml (suggest | draft | off).`, ...config.errors].join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'dismiss') {
+    if (args.length !== 1 || !ctx.values.reason) throw new CliError(EXIT.USAGE, 'maintenance dismiss <key> --reason "<why>"');
+    requirePerson(ctx, 'Dismissing a maintenance item', 'Dismiss it in VS Code (Waiting for you), or here in a terminal.');
+    dismissItem(ws, args[0], (ctx.values.by ?? safeUsername()).trim(), ctx.values.reason);
+    emit(ctx, { ok: true, dismissed: args[0] }, `Dismissed ${args[0]}: ${ctx.values.reason}. A changed cause raises a new item.`);
+    return EXIT.OK;
+  }
+  if (sub === 'scan') {
+    const r = scanWorkspace(ws);
+    ctx.io.err(`Scanned the workspace: ${r.documents.length} text document(s) no pack holds${r.truncated ? ' (stopped at 500)' : ''}${r.skipped.length ? `; skipped ${r.skipped.join(', ')}` : ''}.`);
+  }
+  const cfm = await openContext(ws, () => undefined);
+  try {
+    const sources = cfm.getPackSources();
+    if (sub === 'turns') {
+      if (args[0] === 'dismiss') {
+        if (args.length < 2) throw new CliError(EXIT.USAGE, 'maintenance turns dismiss <ref>…');
+        dismissStatements(ws, args.slice(1));
+        emit(ctx, { ok: true, dismissed: args.slice(1) }, `Marked ${args.length - 1} turn(s) reviewed.`);
+        return EXIT.OK;
+      }
+      const turns = unreviewedTurns(ws, sources.assertions);
+      emit(ctx, { ok: true, turns }, turns.length ? [`${turns.length} recorded message(s) read like facts and aren't reviewed:`, ...turns.map((t) => `  ${t.ref}  (${t.cue}) "${t.text.replace(/\s+/g, ' ').slice(0, 140)}"`), '', 'Record each as a fact (autode facts propose, citing the ref), or: autode maintenance turns dismiss <ref>…'].join('\n') : 'No recorded message waits for review.');
+      return EXIT.OK;
+    }
+    const items = openMaintenanceItems({ workspaceRoot: ws, resourcesRoot: ctx.resourcesRoot, problemId: activeProblemId(ws), sources, all: ctx.values.all === true || sub === 'scan' })
+      .filter((i) => !ctx.values.role || i.agent === ctx.values.role);
+    const line = (i: MaintenanceItem) => [`  ${i.title}`, `      ${i.agent} · ${i.rule} · ${i.key}`, `      ${i.detail.replace(/\s+/g, ' ').slice(0, 300)}`, `      Next: ${i.next}`].join('\n');
+    if (sub === 'list' || sub === 'scan') {
+      const shown = sub === 'scan' ? items.filter((i) => i.rule === 'document-reading') : items;
+      const head = config.policy === 'off' ? 'Knowledge maintenance is off (.autode/config/maintenance.yaml).' : shown.length ? `${shown.length} open maintenance item(s) (policy ${config.policy}):` : 'Nothing to maintain.';
+      emit(ctx, { ok: true, policy: config.policy, items: shown }, [head, ...shown.map(line), ...(shown.length ? ['', 'Each names the agent suited to it: in VS Code, Waiting for you → Work on it; in an agent host, autode_maintenance_next. A person dismisses one with: autode maintenance dismiss <key> --reason "<why>".'] : [])].join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'next') {
+      const item = items.find((i) => i.agent !== 'person');
+      if (!item) { emit(ctx, { ok: true, item: null }, 'Nothing to maintain.'); return EXIT.OK; }
+      emit(ctx, { ok: true, item }, [`Next: ${item.title}`, line(item)].join('\n'));
+      return EXIT.OK;
+    }
+  } finally { cfm.dispose(); }
+  throw new CliError(EXIT.USAGE, 'maintenance [list] [--all] [--role <r>] | next [--role <r>] | turns [dismiss <ref>…] | scan | dismiss <key> --reason "<why>" | policy');
+}
+
+/** The stage gate's maintenance check (MM2): governed problems refuse while items touch their assets; exploration warns. */
+async function gateMaintenanceCheck(ctx: Ctx, problemId: string): Promise<void> {
+  const cfm = await openContext(ctx.workspaceRoot, () => undefined);
+  try {
+    const g = gateMaintenance({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId, sources: cfm.getPackSources() });
+    if (g.blocking) throw new CliError(EXIT.FAILED, g.message!);
+    if (g.message) ctx.io.err(g.message);
+  } finally { cfm.dispose(); }
 }
 
 /** C5b: the Knowledge Explorer in a terminal — the same engine answers as the VS Code Explorer and the MCP tools. */

@@ -17,6 +17,7 @@ import { workflowTools } from './workflowTools';
 import { agentTools } from './agentTools';
 import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, readResource } from './catalogs';
 import { semanticTools } from './semanticTools';
+import { maintenanceTools } from './maintenanceTools';
 import { ARTICLE_RESOURCE_TEMPLATE, ASSET_RESOURCE_TEMPLATE, exploreTools } from './exploreTools';
 
 /**
@@ -116,7 +117,7 @@ export function createAutodeServer(options: ServerOptions): Server {
   const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: false, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   // The decision tools read the client's name (from `initialize`) at call time.
   const ref: { server?: Server } = {};
-  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name, () => tools), ...agentTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name }), ...semanticTools(), ...exploreTools()];
+  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name, () => tools), ...agentTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name }), ...semanticTools(), ...exploreTools(), ...maintenanceTools(() => tools)];
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {

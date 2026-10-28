@@ -23,7 +23,8 @@ export type ExplorerMessage =
   | { type: 'open'; target: OpenTarget }
   | { type: 'copyMarkdown'; id: string }
   | { type: 'exportGraph'; format: 'svg' | 'png'; data: string }
-  | { type: 'editMetadata'; id: string };
+  | { type: 'editMetadata'; id: string }
+  | { type: 'maintenance'; key: string; act: 'work' | 'dismiss' };
 
 export type OpenTarget =
   | { kind: 'file'; path: string }
@@ -37,7 +38,8 @@ export type ExplorerAction =
   | { kind: 'openWorkflow' }
   | { kind: 'copy'; text: string }
   | { kind: 'save'; format: 'svg' | 'png'; data: string }
-  | { kind: 'editMetadata'; id: string; label: string };
+  | { kind: 'editMetadata'; id: string; label: string }
+  | { kind: 'maintenance'; key: string; act: 'work' | 'dismiss' };
 
 export interface ExplorerAnswer {
   /** Posted back to the webview. */
@@ -82,6 +84,8 @@ export async function answerExplorerMessage(msg: ExplorerMessage, host: Explorer
     if (!ctx || ctx.asset.assetType === 'knowledge_fact' || ctx.asset.assetType === 'knowledge_article' || ctx.asset.assetType === 'domain' || ctx.asset.assetType === 'data_product') return { reply: { type: 'toast', message: 'Metadata is set on tables, columns, terms and semantic elements.' } };
     return { action: { kind: 'editMetadata', id: ctx.asset.id, label: ctx.asset.fqn ?? ctx.asset.label } };
   }
+  // MM2: a maintenance item on an asset page — the host starts its agent, or a person dismisses it.
+  if (msg.type === 'maintenance') return typeof msg.key === 'string' && (msg.act === 'work' || msg.act === 'dismiss') ? { action: { kind: 'maintenance', key: msg.key, act: msg.act } } : { reply: { type: 'toast', message: 'Unknown maintenance action.' } };
   if (msg.type === 'exportGraph') {
     if (!/^data:image\/(svg\+xml|png)[;,]/.test(msg.data) && !msg.data.startsWith('<svg')) return { reply: { type: 'toast', message: 'Nothing to export.' } };
     return { action: { kind: 'save', format: msg.format, data: msg.data } };

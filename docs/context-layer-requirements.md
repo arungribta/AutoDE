@@ -202,6 +202,8 @@ In short: capture doesn't depend on the model to find facts, decide what should 
 
 ### 5.6 Knowledge maintenance: what keeps the layers current (MM2; owner, 2026-10-28)
 
+**Status:** ✅ shipped in v0.52.0. What changed and the deliberate deviations (the queue is computed from state rather than stored per event; the hook records on submit; the draft budget counts agent runs): CHANGELOG.md 0.52.0; WHAT/WHY: requirements.md CTX-20; HOW: technical-design.md §5.19; usage: user-guide.md §8.9. The owner added a whole-workspace scan a person starts.
+
 New knowledge arrives in chat and in documents brought for other purposes, and a change to one fact can affect semantic models, articles and artifacts. **Deterministic triggers** decide that something needs attention, **agents** interpret it, and **a person** decides. No agent watches everything all the time: that would cost model calls on every event, be noisy, and not be reproducible.
 
 **One way in.** Everything new enters the **context layer** first, as a proposed fact with its evidence. Chat and documents never write the semantic layer: a semantic change is a proposal derived from confirmed facts (§6.1 authority), and a person approves it.
@@ -878,6 +880,8 @@ Acceptance:
 - The domain, owner and tag facets are live.
 
 ### Phase MM2: Agents and knowledge maintenance
+**Status:** ✅ shipped in v0.52.0. Acceptance met by the tests named in CHANGELOG.md 0.52.0. The `draft` criterion is met in VS Code (the executor, within the day's budget of agent runs); host agents act on items when the user asks.
+
 Scope:
 - **Two agents** (§6.8): the **semantic modeler** (role template and skills for drafting, refining and binding semantic models) and the **knowledge engineer**'s first skills (glossary structure, knowledge articles).
 - **Knowledge maintenance** (§5.6):

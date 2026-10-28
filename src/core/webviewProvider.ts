@@ -89,7 +89,10 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
 import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
-import { runStage } from './agentExecutor';
+import { ExecutorHost, runMaintenance, runStage } from './agentExecutor';
+import { MaintenanceItem, gateMaintenance, openMaintenanceItems } from '../engine/maintenance/queue';
+import { draftRunsLeft, noteDraftRun } from '../engine/maintenance/policy';
+import { dismissItem, scanWorkspace } from '../engine/maintenance/scan';
 import { WaitingItem, waitingForYou } from '../engine/approvals/waiting';
 import { approveStageDocument, stageDocumentFile } from '../engine/workflows/documentApproval';
 import { readWorkflow } from '../engine/workflows/instance';
@@ -1572,6 +1575,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const ctx = this.decisionContext();
     if (!store || !ctx) return;
     try {
+      const pending = store.get(id);
+      if (decision === 'approved' && pending?.kind === 'gate' && pending.problemId && await this.maintenanceHoldsGate(pending.problemId)) return;
       const resolved = store.resolve(id, { decision, by: this.panelUser(), channel: 'panel', note });
       if (resolved.status === 'approved') {
         const result = await applyDecision(store, id, ctx);
@@ -1734,7 +1739,90 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const root = this.workspaceRoot?.fsPath;
     if (!root) return [];
     const ledger = this.ledger();
-    return waitingForYou({ workspaceRoot: root, resourcesRoot: this.context.extensionPath, problemId: this.workflowScope()?.problemId, facts: ledger ? inbox(ledger).facts : [] });
+    return waitingForYou({ workspaceRoot: root, resourcesRoot: this.context.extensionPath, problemId: this.workflowScope()?.problemId, facts: ledger ? inbox(ledger).facts : [], maintenance: this.maintenanceItems() });
+  }
+
+  /** MM2: the open knowledge-maintenance items, from the panel's own sources. */
+  public maintenanceItems(options: { all?: boolean } = {}): MaintenanceItem[] {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root || !this.contextFileManager) return [];
+    try { return openMaintenanceItems({ workspaceRoot: root, resourcesRoot: this.context.extensionPath, problemId: this.workflowScope()?.problemId, sources: this.contextFileManager.getPackSources(), all: options.all }); } catch { return []; }
+  }
+
+  private executorHost(): ExecutorHost {
+    return { createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) };
+  }
+
+  /** MM2: a person starts the agent an item names (one click from Waiting for you or the Explorer). */
+  public async workOnMaintenanceItem(key?: string): Promise<void> {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root) return;
+    const items = this.maintenanceItems({ all: true }).filter((i) => i.agent !== 'person');
+    let item = key ? items.find((i) => i.key === key) : undefined;
+    if (!key) {
+      const pick = await vscode.window.showQuickPick(items.map((i) => ({ label: i.title, description: i.agent, detail: i.detail.slice(0, 200), i })), { title: 'AutoDE: Work on a Maintenance Item' });
+      item = pick?.i;
+      if (!pick) return;
+    }
+    if (!item) { void vscode.window.showInformationMessage(key ? 'That item is resolved or dismissed already.' : 'Nothing to maintain.'); return; }
+    const chosen = item;
+    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${chosen.agent} is on "${chosen.title}"`, cancellable: false },
+      () => runMaintenance(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, chosen));
+    this.postLog(r.message);
+    if (r.ok) void vscode.window.showInformationMessage(`The ${chosen.agent} finished: what it proposed waits for you (the Context Inbox, or Waiting for you).`);
+    else void vscode.window.showWarningMessage(r.message.split('\n')[0]);
+    this.postDecisions();
+  }
+
+  /** MM2: a person sets an item aside, with a reason. */
+  public async dismissMaintenanceItem(key?: string): Promise<void> {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root) return;
+    let k = key;
+    if (!k) {
+      const pick = await vscode.window.showQuickPick(this.maintenanceItems({ all: true }).map((i) => ({ label: i.title, description: i.agent, i })), { title: 'AutoDE: Dismiss a Maintenance Item' });
+      k = pick?.i.key;
+    }
+    if (!k) return;
+    const reason = await vscode.window.showInputBox({ title: 'Why is it set aside?', prompt: 'Recorded with your name; a changed cause raises a new item.', validateInput: (v) => (v.trim() ? undefined : 'A reason is required.') });
+    if (!reason?.trim()) return;
+    dismissItem(root, k, this.panelUser(), reason.trim());
+    this.postLog(`Dismissed ${k}: ${reason.trim()}`);
+  }
+
+  /** MM2 (owner, 2026-10-28): a person scans the whole workspace for documents whose knowledge isn't read yet. */
+  public async scanWorkspaceForKnowledge(): Promise<void> {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root) return;
+    const r = scanWorkspace(root);
+    const reading = this.maintenanceItems({ all: true }).filter((i) => i.rule === 'document-reading');
+    const msg = `Scanned the workspace: ${r.documents.length} text document(s) no pack holds${r.truncated ? ' (stopped at 500)' : ''}; ${reading.length} document(s) to read for knowledge, in Waiting for you.`;
+    this.postLog(msg + (r.skipped.length ? ` Skipped: ${r.skipped.join(', ')}.` : ''));
+    void vscode.window.showInformationMessage(msg);
+  }
+
+  /** MM2: the stage gate's maintenance check — true when it holds the approval (governed), after telling the person why. */
+  private async maintenanceHoldsGate(problemId: string): Promise<boolean> {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root || !this.contextFileManager) return false;
+    const g = gateMaintenance({ workspaceRoot: root, resourcesRoot: this.context.extensionPath, problemId, sources: this.contextFileManager.getPackSources() });
+    if (!g.message) return false;
+    this.postLog(g.message);
+    if (g.blocking) void vscode.window.showWarningMessage(`${g.items.length} open maintenance item(s) touch this problem's assets and hold the approval: resolve or dismiss them (Waiting for you).`, { modal: true, detail: g.message });
+    return g.blocking;
+  }
+
+  /** MM2, policy `draft`: at a stage boundary AutoDE starts the agent of the next item itself, within the day's budget. */
+  private async draftAtStageBoundary(): Promise<void> {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root || draftRunsLeft(root) <= 0) return;
+    const item = this.maintenanceItems().find((i) => i.agent !== 'person');
+    if (!item) return;
+    noteDraftRun(root, item.key, item.agent);
+    this.postLog(`Maintenance (policy draft): the ${item.agent} drafts a proposal for "${item.title}".`);
+    const r = await runMaintenance(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, item);
+    this.postLog(r.message);
+    this.postDecisions();
   }
 
   public currentWorkflowScope(): WorkflowScope | undefined {
@@ -2297,6 +2385,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
             { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
         this.postLog(r.ok ? `${r.message}${r.outputs.length ? ` Recorded: ${r.outputs.join(', ')}.` : ''}` : r.message);
+        if (r.ok) void this.draftAtStageBoundary();
         if (!r.ok) void vscode.window.showWarningMessage(r.message.split('\n')[0]);
         this.postDecisions();
       } else if ((action === 'approve-document' || action === 'produce' || action === 'open-document') && stage) {
@@ -2310,6 +2399,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const ok = await vscode.window.showWarningMessage(`Approve ${s.title} as ${by}?`, { modal: true, detail: `This approves ${path.relative(scope.workspaceRoot, file)} (the panel channel) and completes the stage. It is recorded with your name in the document and the workflow history.` }, 'Approve');
             if (ok !== 'Approve') return;
           }
+          if (await this.maintenanceHoldsGate(scope.problemId)) return;
           const r = approveStageDocument(rctx, stage, { kind: 'person', name: by }, 'panel');
           await this.reloadContextFile(normalizeFsPath(file));
           this.postLog(r.message);

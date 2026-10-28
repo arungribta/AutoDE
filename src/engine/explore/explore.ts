@@ -1,3 +1,4 @@
+import { MaintenanceItem, itemsTouching } from '../maintenance/queue';
 import { Assertion, TrustTier, isLive, trustRank } from '../context/assertions';
 import { Conflict } from '../context/conflicts';
 import { createSubjectResolver, isMirror } from '../context/projection';
@@ -117,6 +118,8 @@ export interface ExploreSources {
   metadata?: MetadataConfig;
   /** Knowledge articles (MM1). */
   articles?: readonly Article[];
+  /** Open knowledge-maintenance items (MM2): an asset page lists those that concern it. */
+  maintenance?: readonly MaintenanceItem[];
 }
 
 export interface ArtifactUse {
@@ -547,6 +550,8 @@ export interface AssetContext {
   articles?: Array<{ id: string; slug: string; title: string; state: string; stale: string[] }>;
   /** A glossary term's definition and SKOS links (MM1). */
   term?: Record<string, unknown>;
+  /** MM2: open maintenance items about it — what needs attention, and the agent suited to it. */
+  maintenance?: Array<Pick<MaintenanceItem, 'key' | 'rule' | 'agent' | 'title' | 'detail' | 'next'>>;
   facts: FactRow[];
   /** Decisions and assumptions in scope: about this asset, or team-wide. */
   memory: FactRow[];
@@ -692,11 +697,12 @@ export function getAssetContext(sources: ExploreSources, ref: string): AssetCont
   })();
   const scopeSet = new Set(scope);
   const articles = (sources.articles ?? []).filter((a) => a.about.some((x) => scopeSet.has(x))).map((a) => ({ id: articleId(a.slug), slug: a.slug, title: a.title, state: a.state, stale: checkArticle(a, sources.assertions).staleBecause }));
+  const maintenance = itemsTouching(sources.maintenance ?? [], [n.id]).map((i) => ({ key: i.key, rule: i.rule, agent: i.agent, title: i.title, detail: i.detail, next: i.next }));
   const termFact = n.type === 'business_term' ? (n.supportedBy ?? []).map((id) => idx.assertions.get(id)).find((a) => a?.kind === 'business_term') : undefined;
   const ambiguousBase = Array.isArray(n.metadata?.ambiguous) ? (n.metadata.ambiguous as string[]).map((id) => idx.nodes.get(id)).filter((x): x is BaseNode => !!x).map((x) => summarize(x, idx)) : undefined;
   return {
     asset, overview, ...(schema ? { schema } : {}), ...(contents ? { contents } : {}), ...(ambiguousBase?.length ? { ambiguousBase } : {}),
-    ...(metadata ? { metadata } : {}), ...(quality.length ? { quality } : {}), ...(articles.length ? { articles } : {}), ...(termFact ? { term: { ...(termFact.value as Record<string, unknown>) } } : {}),
+    ...(metadata ? { metadata } : {}), ...(quality.length ? { quality } : {}), ...(articles.length ? { articles } : {}), ...(maintenance.length ? { maintenance } : {}), ...(termFact ? { term: { ...(termFact.value as Record<string, unknown>) } } : {}),
     meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: [] },
     lineage: { related, note: 'Relationships, mappings and derivations known today. Observed (platform), designed (mappings, specifications) and generated (artifacts) lineage, and impact analysis, arrive in LIN (v0.53.0).' },
     governance: { classifications, rules },

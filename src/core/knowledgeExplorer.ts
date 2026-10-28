@@ -79,6 +79,7 @@ export class KnowledgeExplorerPanel {
       case 'openWorkflow': await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow'); return;
       case 'copy': await vscode.env.clipboard.writeText(a.text); return;
       case 'editMetadata': await editMetadata(this.host, this.panel, a.id, a.label); return;
+      case 'maintenance': await vscode.commands.executeCommand(a.act === 'work' ? 'autoDataEngineeringHub.workOnMaintenanceItem' : 'autoDataEngineeringHub.dismissMaintenanceItem', a.key); return;
       case 'save': {
         const target = await vscode.window.showSaveDialog({ filters: a.format === 'svg' ? { SVG: ['svg'] } : { PNG: ['png'] }, defaultUri: this.host.workspaceRoot() ? vscode.Uri.file(path.join(this.host.workspaceRoot()!, `knowledge-graph.${a.format}`)) : undefined });
         if (!target) return;

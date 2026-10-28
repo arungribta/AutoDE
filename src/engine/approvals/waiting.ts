@@ -6,6 +6,7 @@ import { readWorkflow } from '../workflows/instance';
 import { isDocumentStage } from '../workflows/documentApproval';
 import { listRunbooks, Runbook } from '../runner/runbook';
 import { semanticWaiting } from '../semantic/store';
+import { MaintenanceItem } from '../maintenance/queue';
 
 /**
  * Waiting for you (v0.45.7, SIMP-1): everything that waits for a person, in
@@ -17,7 +18,7 @@ import { semanticWaiting } from '../semantic/store';
  * second rulebook.
  */
 
-export type WaitingKind = 'decision' | 'facts' | 'stage-document' | 'runbook' | 'semantic';
+export type WaitingKind = 'decision' | 'facts' | 'stage-document' | 'runbook' | 'semantic' | 'maintenance';
 
 export interface WaitingItem {
   /** Stable: `decision:<id>`, `facts:<problem>`, `stage:<problem>/<stage>`, `runbook:<problem>/<id>`. */
@@ -29,7 +30,9 @@ export interface WaitingItem {
   problemId?: string;
   since?: string;
   /** Where to open it in VS Code. */
-  opens: { view: 'decision' | 'inbox' | 'workflow-stage' | 'workflow' | 'runbook' | 'file'; ref?: string };
+  opens: { view: 'decision' | 'inbox' | 'workflow-stage' | 'workflow' | 'runbook' | 'file' | 'maintenance'; ref?: string };
+  /** MM2: a maintenance item's agent (the role suited to it). */
+  agent?: string;
   /** The command that approves it in a terminal (a person, at an interactive terminal). */
   cli: string;
 }
@@ -41,6 +44,8 @@ export interface WaitingInput {
   problemId?: string;
   /** The Context Inbox's facts (proposed or needing review), from the caller's ledger. */
   facts?: readonly FactView[];
+  /** MM2: the open knowledge-maintenance items (the caller computes them from its own sources). */
+  maintenance?: readonly MaintenanceItem[];
 }
 
 function decisionItem(d: Decision, store: DecisionStore): WaitingItem {
@@ -85,6 +90,8 @@ export function waitingForYou(input: WaitingInput): WaitingItem[] {
   try {
     for (const s of semanticWaiting(input.workspaceRoot, input.problemId)) items.push({ key: s.key, kind: 'semantic', title: s.title, detail: s.detail, stakes: 'high', problemId: input.problemId, opens: { view: 'file', ref: s.file }, cli: s.cli });
   } catch { /* an unreadable semantic folder is reported by the editor */ }
+  // MM2: knowledge maintenance — work for an agent, which a person starts (suggest) or AutoDE drafts (draft); low stakes until a proposal comes of it.
+  for (const m of input.maintenance ?? []) items.push({ key: `maintenance:${m.key}`, kind: 'maintenance', title: m.title, detail: `${m.detail} — ${m.agent === 'person' ? 'a person' : m.agent}: ${m.next}`, stakes: 'low', problemId: m.problemId, opens: { view: 'maintenance', ref: m.key }, cli: m.cli, agent: m.agent });
   // High stakes first, then oldest first.
   return items.sort((a, b) => (a.stakes === b.stakes ? 0 : a.stakes === 'high' ? -1 : 1) || String(a.since ?? '').localeCompare(String(b.since ?? '')));
 }

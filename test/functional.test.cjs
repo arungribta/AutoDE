@@ -5864,12 +5864,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5942,6 +5942,10 @@ async function main() {
       autode_get_asset_context: [{ asset: 'shop.orders' }, { asset: '' }],
       autode_browse_assets: [{ parent: 'phys:shop/default/(unknown)' }, { parent: '' }],
       autode_search_articles: [{ query: 'customer', about: 'obj:shop/prod/shop.customers' }, { query: 1 }],
+      autode_maintenance_list: [{ role: 'semantic-modeler' }, { rule: 'everything' }],
+      autode_maintenance_next: [{ role: 'knowledge-engineer' }, { role: '' }],
+      autode_maintenance_scan: [{}, { x: 1 }],
+      autode_dismiss_turns: [{ refs: ['chat:x#1'] }, { refs: [] }],
       autode_propose_article: [{ article: { slug: 'customer-ids', title: 'Customer IDs', about: ['obj:shop/prod/shop.customers'], cites: [], body: 'Text.' } }, { article: { slug: 'Bad Slug', title: 't', about: [], cites: [], body: 'x' } }],
       autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
@@ -6092,8 +6096,8 @@ async function main() {
     // Since v0.42.0 the server lives in the CLI bundle (dist/mcp-server.js is a shim for `autode mcp`).
     const bundle = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'dist', 'autode.js'), 'utf8');
     assert.ok(!/require\(["']vscode["']\)/.test(bundle), 'the MCP bundle requires vscode');
-    // The unminified development build (v0.45.3: 1.55 MB); the shipped build is minified (about 830 KB) and the package test budgets the tarball.
-    assert.ok(bundle.length < 2 * 1024 * 1024, `autode.js is ${Math.round(bundle.length / 1024)} KB (development budget 2 MB)`);
+    // The unminified development build (v0.45.3: 1.55 MB; v0.52.0: 2.02 MB, feature code, no new dependency); the shipped build is minified and the package test budgets the tarball.
+    assert.ok(bundle.length < 2.5 * 1024 * 1024, `autode.js is ${Math.round(bundle.length / 1024)} KB (development budget 2.5 MB)`);
   });
 
   // ── v0.36.0: .autode/ workspace layout, visible deliverables, migration from .ai-context/ ──
@@ -8475,7 +8479,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-orchestrator', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-orchestrator', 'autode-core-semantic-modeling', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
       'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project',
       'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
@@ -9890,7 +9894,7 @@ async function main() {
       const out = nodePath.join(ws, 'plugin');
       Pl.buildPlugin({ resourcesRoot: wfRes(), outDir: out, version: '0.0.0', entry });
       const hooks = JSON.parse(nodeFs.readFileSync(nodePath.join(out, 'hooks', 'hooks.json'), 'utf8'));
-      assert.deepStrictEqual(hooks, { hooks: { PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook guard', timeout: 15 }] }] } });
+      assert.deepStrictEqual(hooks, { hooks: { PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook guard', timeout: 15 }] }], UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook turn', timeout: 10 }] }] } });
       assert.ok(nodeFs.existsSync(nodePath.join(out, 'agents', 'target-architect.md')) && nodeFs.existsSync(nodePath.join(out, 'skills', 'autode-databricks-deployment', 'SKILL.md')));
       const settings = nodePath.join(ws, '.claude', 'settings.json');
       nodeFs.mkdirSync(nodePath.dirname(settings), { recursive: true });
@@ -9906,7 +9910,7 @@ async function main() {
       assert.deepStrictEqual([s.hooks.PreToolUse.length, r.written.includes(settings)], [2, false], 'once, and unchanged on reinstall');
       nodeFs.writeFileSync(settings, '{ "hooks": // a comment\n }');
       r = install();
-      assert.ok(r.errors.some((e) => /settings\.json[\s\S]*guard hook was not added/.test(e)) && nodeFs.readFileSync(settings, 'utf8').includes('// a comment'), 'left alone');
+      assert.ok(r.errors.some((e) => /settings\.json[\s\S]*AutoDE.s hooks were not added/.test(e)) && nodeFs.readFileSync(settings, 'utf8').includes('// a comment'), 'left alone');
       for (const host of ['cortex', 'copilot']) assert.ok(Pl.installPlugin({ host, scope: 'project', resourcesRoot: wfRes(), workspaceRoot: ws, home, entry }).notes.some((n) => /convention/.test(n)), host);
     } finally { for (const d of [ws, home]) nodeFs.rmSync(d, { recursive: true, force: true }); }
   });
@@ -10109,7 +10113,7 @@ async function main() {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const D = fresh('../dist/engine/agents/definitions.js');
     const curator = D.loadRoles(wfRes()).roles.find((r) => r.name === 'context-curator');
-    assert.deepStrictEqual(curator.skills, ['autode-core-fact-extraction', 'autode-core-document-reading', 'autode-core-vocabulary']);
+    assert.deepStrictEqual(curator.skills, ['autode-core-fact-extraction', 'autode-core-document-reading', 'autode-core-vocabulary', 'autode-core-knowledge-maintenance']);
     const pack = D.loadSkillPack(wfRes()).skills;
     for (const id of curator.skills) assert.deepStrictEqual(pack.find((k) => k.id === id).meta.stageKinds, [], id);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cur-'));
@@ -11726,6 +11730,217 @@ async function main() {
     const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
     for (const t of ["data-act=\"meta\"", "type: 'editMetadata'", "['quality', 'Quality']", "['knowledge', 'Knowledge']", 'data-kpis', 'metaRows']) assert.ok(html.includes(t), t);
     for (const f of ['autode-snowflake-governance', 'autode-databricks-governance']) assert.match(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'skills', f, 'SKILL.md'), 'utf8'), /AutoDE's own tags/, f);
+  });
+
+  const mm2 = {
+    salesText() { return require('node:fs').readFileSync(nodePath.join(__dirname, 'golden', 'semantic', 'retail-orders.sales.yaml'), 'utf8').replace(/\r\n/g, '\n'); },
+    newRevenue: 'SUM(order_items.quantity * order_items.unit_price)',
+    // A confirmed metric fact that replaces the golden one and defines net revenue another way.
+    contradicted() {
+      const golden = c5a.golden();
+      return [...golden.map((a) => (a.id === 'A-metric-net-revenue' ? { ...a, status: 'superseded', supersededBy: 'F-new-rev' } : a)), { id: 'F-new-rev', kind: 'metric', subject: ['metric:net_revenue'], predicate: 'defined_as', value: { name: 'net_revenue', expression: mm2.newRevenue }, statement: 'Net revenue is quantity times unit price', status: 'active', trust: 'confirmed', evidence: [{ type: 'chat_message', ref: 'chat:x#1' }], supersedes: 'A-metric-net-revenue', createdBy: 'user:ana', createdAt: '', validFrom: '' }];
+    },
+    problem(ws, id, docs, mode) {
+      const fs = require('node:fs');
+      const root = nodePath.join(ws, '.autode', 'problems', id);
+      fs.mkdirSync(nodePath.join(root, 'pack'), { recursive: true });
+      fs.writeFileSync(nodePath.join(root, 'pack', 'pack.yaml'), 'documents:\n' + docs.map((d) => `  - { path: ${d.path}, role: brd, authority: draft, version: "1"${d.sha ? `, sha: ${d.sha}` : ''} }\n`).join(''));
+      if (mode) fs.writeFileSync(nodePath.join(root, 'mode.yaml'), `mode: ${mode}\nsince: "2026-10-28"\nby: ana\nacknowledged: true\nhistory: []\n`);
+      return root;
+    }
+  };
+
+  await test('v0.52.0: the maintenance queue — confirming a metric fact that contradicts the approved sales model raises one item for the semantic modeler naming the element and the difference, the same cause never a second, and changing the model closes it; superseding a fact an article cites raises one for the knowledge engineer; items are computed, never stored; dismissing is this engineer\'s; policy off raises none; draft counts its budget', () => {
+    const fs = require('node:fs');
+    const Q = fresh('../dist/engine/maintenance/queue.js');
+    const P = fresh('../dist/engine/maintenance/policy.js');
+    const { dismissItem } = fresh('../dist/engine/maintenance/scan.js');
+    const S = require('../dist/engine/semantic/store.js');
+    const A = require('../dist/engine/knowledge/articles.js');
+    const w = c5a.ws();
+    try {
+      const graph = c5a.graph();
+      S.writeShared(w.ws, 'sales', mm2.salesText(), { approved: { by: 'ana', at: '2026-10-28T00:00:00.000Z', channel: 'cli' } });
+      const items = (assertions) => Q.maintenanceItems({ workspaceRoot: w.ws, sources: { graph, assertions } });
+      const of = (list, rule) => list.filter((i) => i.rule === rule);
+      assert.deepStrictEqual(of(items(c5a.golden()), 'semantic-contradiction'), [], 'the approved model agrees with what is known');
+      const first = of(items(mm2.contradicted()), 'semantic-contradiction');
+      assert.strictEqual(first.length, 1, JSON.stringify(first, null, 1));
+      assert.deepStrictEqual([first[0].agent, /order_items\.net_revenue/.test(first[0].title), first[0].detail.includes('F-new-rev') && first[0].detail.includes(mm2.newRevenue)], ['semantic-modeler', true, true], first[0].detail);
+      assert.ok(first[0].subjects.includes('sem:sales/order_items/net_revenue') && first[0].subjects.includes('F-new-rev'), first[0].subjects.join());
+      assert.deepStrictEqual(of(items(mm2.contradicted()), 'semantic-contradiction').map((i) => i.key), [first[0].key], 'the same cause, the same single item');
+      // The modeler's change, made: the model now says what the fact says. The item closes itself.
+      const M = require('../dist/engine/semantic/model.js');
+      const model = M.parseSemanticModel(mm2.salesText()).model;
+      model.tables.find((t) => t.name === 'order_items').metrics.find((m) => m.name === 'net_revenue').expr = mm2.newRevenue;
+      const fixed = M.serializeSemanticModel(model);
+      fs.writeFileSync(nodePath.join(w.ws, 'autode-output', 'semantic', 'sales.yaml'), fixed);
+      const after = items(mm2.contradicted());
+      assert.deepStrictEqual(of(after, 'semantic-contradiction'), [], of(after, 'semantic-contradiction').map((i) => i.detail).join('\n'));
+      assert.ok(!fs.existsSync(nodePath.join(w.ws, '.autode', 'local', 'maintenance.json')), 'nothing stored to compute the queue');
+      // A knowledge article citing the fact that is now superseded.
+      A.writeArticle(w.ws, 'revenue', { title: 'What revenue means here', about: ['metric:net_revenue'], cites: ['A-metric-net-revenue'], body: 'Revenue is net of refunds [fact:A-metric-net-revenue].\n' });
+      assert.deepStrictEqual(of(items(c5a.golden()), 'article-stale'), []);
+      const stale = of(items(mm2.contradicted()), 'article-stale');
+      assert.deepStrictEqual([stale.length, stale[0].agent, /superseded by F-new-rev/.test(stale[0].detail), stale[0].subjects.includes('article:revenue')], [1, 'knowledge-engineer', true, true], JSON.stringify(stale));
+      // Dismissing is this engineer's, recorded with the reason; a changed cause would be a new key.
+      dismissItem(w.ws, stale[0].key, 'ana', 'rewriting it next week');
+      assert.deepStrictEqual(of(Q.openMaintenanceItems({ workspaceRoot: w.ws, sources: { graph, assertions: mm2.contradicted() } }), 'article-stale'), []);
+      assert.strictEqual(P.readMaintenanceState(w.ws).dismissed[stale[0].key].reason, 'rewriting it next week');
+      // The policy: off raises nothing; draft has a daily budget of agent runs; suggest none.
+      fs.mkdirSync(nodePath.join(w.ws, '.autode', 'config'), { recursive: true });
+      const policy = (t) => fs.writeFileSync(nodePath.join(w.ws, '.autode', 'config', 'maintenance.yaml'), t);
+      policy('policy: off\n');
+      assert.deepStrictEqual(items(mm2.contradicted()), []);
+      assert.strictEqual(P.draftRunsLeft(w.ws), 0);
+      policy('policy: draft\ndraft:\n  runsPerDay: 1\n');
+      assert.strictEqual(P.draftRunsLeft(w.ws), 1);
+      P.noteDraftRun(w.ws, 'k', 'semantic-modeler');
+      assert.strictEqual(P.draftRunsLeft(w.ws), 0, 'the budget is spent');
+      assert.deepStrictEqual(P.parseMaintenanceConfig('policy: always\n').errors.length, 1);
+      assert.strictEqual(P.parseMaintenanceConfig('').policy, 'suggest', 'suggest by default');
+    } finally { w.done(); }
+  });
+
+  await test('v0.52.0: capture triggers — a document in a pack is queued for a knowledge reading once (the same content attached twice is one item) and is done when read at its content; the person-triggered workspace scan queues documents no pack holds; a chat turn the Claude Code hook records is unreviewed until a fact cites it or it is dismissed; the hook prints nothing and never blocks', async () => {
+    const os = require('node:os'); const fs = require('node:fs');
+    const Q = fresh('../dist/engine/maintenance/queue.js');
+    const T = fresh('../dist/engine/maintenance/turns.js');
+    const { scanWorkspace } = fresh('../dist/engine/maintenance/scan.js');
+    const { contentSha } = require('../dist/engine/context/pack.js');
+    const { dismissStatements } = require('../dist/engine/context/sessionReview.js');
+    const ws = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-mm2-'));
+    try {
+      const brd = c4a.read('documents/pack/brd.md');
+      fs.writeFileSync(nodePath.join(ws, 'brd.md'), brd);
+      fs.mkdirSync(nodePath.join(ws, 'copy'));
+      fs.writeFileSync(nodePath.join(ws, 'copy', 'brd.md'), brd);
+      mm2.problem(ws, 'retail-ab12', [{ path: 'brd.md' }, { path: 'copy/brd.md' }]);
+      const sources = { graph: { nodes: [], edges: [] }, assertions: [] };
+      const reading = () => Q.maintenanceItems({ workspaceRoot: ws, problemId: 'retail-ab12', sources }).filter((i) => i.rule === 'document-reading');
+      const r1 = reading();
+      assert.deepStrictEqual([r1.length, r1[0].agent, r1[0].problemId, r1[0].subjects.sort()], [1, 'context-curator', 'retail-ab12', ['doc:brd.md', 'doc:copy/brd.md']], JSON.stringify(r1));
+      assert.deepStrictEqual(reading().map((i) => i.key), r1.map((i) => i.key), 'attaching it again adds nothing');
+      mm2.problem(ws, 'retail-ab12', [{ path: 'brd.md', sha: contentSha(brd) }, { path: 'copy/brd.md' }]);
+      assert.deepStrictEqual(reading(), [], 'read at this content (anywhere): done');
+      fs.appendFileSync(nodePath.join(ws, 'brd.md'), '\nThe fiscal year starts in April.\n');
+      assert.strictEqual(reading().length, 1, 'changed content is read again');
+      // The workspace scan: documents no pack holds; AutoDE's own folders and dependencies are skipped.
+      fs.mkdirSync(nodePath.join(ws, 'notes')); fs.writeFileSync(nodePath.join(ws, 'notes', 'glossary.md'), '# Glossary\nAOV means average order value.\n');
+      fs.mkdirSync(nodePath.join(ws, 'node_modules', 'x'), { recursive: true }); fs.writeFileSync(nodePath.join(ws, 'node_modules', 'x', 'README.md'), 'not ours');
+      const scan = scanWorkspace(ws);
+      assert.deepStrictEqual(scan.documents.map((d) => d.path), ['notes/glossary.md']);
+      const all = Q.maintenanceItems({ workspaceRoot: ws, problemId: 'retail-ab12', sources, all: true }).filter((i) => i.rule === 'document-reading');
+      assert.ok(all.some((i) => i.subjects.includes('doc:notes/glossary.md') && /workspace scan/.test(i.detail) && /autode_pack_add/.test(i.next)), JSON.stringify(all));
+      // Turns: the hook records each submitted message in the workspace it was typed in.
+      fs.mkdirSync(nodePath.join(ws, 'sub'));
+      const ev = (prompt) => ({ hook_event_name: 'UserPromptSubmit', session_id: 's1', cwd: nodePath.join(ws, 'sub'), prompt });
+      const t1 = T.recordHookTurn(ev('order_id is always unique in shop.orders'), ws);
+      assert.strictEqual(t1.ref, 'chat:claude-code-s1#1');
+      assert.strictEqual(T.recordHookTurn(ev('/help'), ws), undefined, 'a slash command is not a turn');
+      T.recordHookTurn(ev('Can you show me the orders table?'), ws);
+      assert.strictEqual(T.recordHookTurn({ ...ev('x'), cwd: nodePath.parse(ws).root }, ws), undefined, 'outside an AutoDE workspace nothing is recorded');
+      assert.deepStrictEqual(T.unreviewedTurns(ws, []).map((t) => t.ref), ['chat:claude-code-s1#1'], 'a question reads like no fact');
+      const turnItem = Q.maintenanceItems({ workspaceRoot: ws, sources }).filter((i) => i.rule === 'unreviewed-turns');
+      assert.deepStrictEqual([turnItem.length, turnItem[0].agent, turnItem[0].subjects], [1, 'context-curator', ['chat:claude-code-s1#1']]);
+      assert.deepStrictEqual(T.unreviewedTurns(ws, [{ evidence: [{ type: 'chat_message', ref: 'chat:claude-code-s1#1' }] }]), [], 'a fact cites it: reviewed');
+      dismissStatements(ws, ['chat:claude-code-s1#1']);
+      assert.deepStrictEqual(T.unreviewedTurns(ws, []), [], 'dismissed: reviewed');
+      // `autode hook turn`: records, prints nothing (its output would join the host's context), exits 0 whatever it reads.
+      const { run } = fresh('../dist/cli/main.js');
+      const out = [];
+      const io = (stdin) => ({ out: (t) => out.push(t), err: (t) => out.push(t), env: {}, cwd: ws, interactive: false, prompt: async () => '', readStdin: async () => stdin });
+      assert.strictEqual(await run(['hook', 'turn'], io(JSON.stringify(ev('Revenue means net of refunds')))), 0);
+      assert.strictEqual(await run(['hook', 'turn'], io('not json')), 0);
+      assert.deepStrictEqual([out, T.listTurns(ws).length], [[], 3]);
+    } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.52.0: the agents, the gate and every surface — semantic modeler and knowledge engineer role templates with their skills; a work order per item at the propose tier; a governed stage gate held by items touching the problem, exploration only warning; Waiting for you, the Explorer, autode maintenance and the MCP tools; workflow_next and the session review report recorded turns; the plugin carries the turn hook', async () => {
+    const os = require('node:os'); const fs = require('node:fs');
+    const D = fresh('../dist/engine/agents/definitions.js');
+    const roles = D.loadRoles(wfRes()).roles;
+    const pack = D.loadSkillPack(wfRes()).skills;
+    const role = (n) => roles.find((r) => r.name === n);
+    assert.deepStrictEqual(role('semantic-modeler').skills, ['autode-core-semantic-modeling', 'autode-core-knowledge-maintenance']);
+    assert.deepStrictEqual(role('knowledge-engineer').skills, ['autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance']);
+    assert.ok(role('semantic-modeler').tools.includes('autode_propose_semantic_model') && role('knowledge-engineer').tools.includes('autode_propose_article') && role('context-curator').tools.includes('autode_dismiss_turns'));
+    for (const id of ['autode-core-semantic-modeling', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance']) assert.deepStrictEqual(pack.find((k) => k.id === id).meta.stageKinds, [], id);
+    assert.match(pack.find((k) => k.id === 'autode-core-orchestrator').instructions, /autode_maintenance_list/);
+    const ws = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-mm2s-'));
+    let client;
+    try {
+      const brd = c4a.read('documents/pack/brd.md');
+      fs.writeFileSync(nodePath.join(ws, 'brd.md'), brd);
+      const problemRoot = mm2.problem(ws, 'retail-ab12', [{ path: 'brd.md' }]);
+      require('../dist/engine/documents/problems.js').setActiveProblem(ws, 'retail-ab12');
+      const sources = { graph: { nodes: [], edges: [] }, assertions: [] };
+      const Q = fresh('../dist/engine/maintenance/queue.js');
+      // The gate: governed holds, exploration warns.
+      const g = Q.gateMaintenance({ workspaceRoot: ws, problemId: 'retail-ab12', sources });
+      assert.ok(g.blocking && /hold the approval/.test(g.message) && /autode maintenance dismiss/.test(g.message), g.message);
+      mm2.problem(ws, 'retail-ab12', [{ path: 'brd.md' }], 'exploration');
+      const g2 = Q.gateMaintenance({ workspaceRoot: ws, problemId: 'retail-ab12', sources });
+      assert.ok(!g2.blocking && /Exploration mode/.test(g2.message), g2.message);
+      fs.rmSync(nodePath.join(problemRoot, 'mode.yaml'));
+      // A work order: the role's text and skills, the propose tier (no hub-only or destructive tools).
+      const item = Q.maintenanceItems({ workspaceRoot: ws, problemId: 'retail-ab12', sources })[0];
+      const { maintenanceAssignment } = fresh('../dist/engine/maintenance/brief.js');
+      const tools = [{ name: 'autode_pack_apply', annotations: {} }, { name: 'autode_resolve_decision', annotations: { destructiveHint: true } }, { name: 'autode_workflow_complete_stage', annotations: {} }, { name: 'autode_maintenance_list', annotations: { readOnlyHint: true } }];
+      const a = maintenanceAssignment(wfRes(), ws, item, tools).assignment;
+      assert.deepStrictEqual([a.role, a.engineTools], ['context-curator', ['autode_maintenance_list', 'autode_pack_apply']]);
+      assert.ok(a.text.includes(item.key) && /you never approve, apply or dismiss/.test(a.text) && /Skill: autode-core-knowledge-maintenance/.test(a.text), a.text.slice(0, 400));
+      // Waiting for you.
+      const { waitingForYou } = fresh('../dist/engine/approvals/waiting.js');
+      const waiting = waitingForYou({ workspaceRoot: ws, resourcesRoot: wfRes(), problemId: 'retail-ab12', maintenance: [item] });
+      assert.deepStrictEqual(waiting.filter((i) => i.kind === 'maintenance').map((i) => [i.key, i.agent, i.stakes, i.opens.view]), [[`maintenance:${item.key}`, 'context-curator', 'low', 'maintenance']]);
+      // MCP.
+      client = await mcpSession(ws);
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const names = (await client.listTools()).tools.map((t) => t.name);
+      for (const n of ['autode_maintenance_list', 'autode_maintenance_next', 'autode_maintenance_scan', 'autode_dismiss_turns']) assert.ok(names.includes(n), n);
+      const list = await call('autode_maintenance_list');
+      assert.deepStrictEqual([list.policy, list.items.map((i) => i.rule)], ['suggest', ['document-reading']]);
+      const next = await call('autode_maintenance_next', { role: 'context-curator' });
+      assert.ok(next.assignment.role === 'context-curator' && next.assignment.engineTools.includes('autode_pack_apply') && !next.assignment.engineTools.some((t) => /resolve_decision|complete_stage/.test(t)), JSON.stringify(next.assignment.engineTools));
+      assert.deepStrictEqual((await call('autode_maintenance_next', { role: 'semantic-modeler' })).item, null);
+      require('../dist/engine/maintenance/turns.js').recordTurn(ws, { host: 'claude-code', session: 's9', text: 'order_id is always unique in shop.orders' });
+      const review = await call('autode_review_session', {});
+      assert.deepStrictEqual([review.recorded, review.unrecorded.map((t) => t.ref)], [true, ['chat:claude-code-s9#1']]);
+      const wn = await call('autode_workflow_next');
+      if (wn.next) assert.ok(wn.maintenance && wn.maintenance.unreviewedTurns === 1 && wn.maintenance.touching.some((i) => i.rule === 'document-reading'), JSON.stringify(wn.maintenance));
+      assert.deepStrictEqual((await call('autode_dismiss_turns', { refs: ['chat:claude-code-s9#1', 'chat:nope#1'] })), { dismissed: ['chat:claude-code-s9#1'], unknown: ['chat:nope#1'] });
+      fs.writeFileSync(nodePath.join(ws, 'notes.md'), 'Churn means no order in 90 days.\n');
+      const scanned = await call('autode_maintenance_scan');
+      assert.ok(scanned.found === 1 && scanned.toRead.some((i) => i.subjects.includes('doc:notes.md')), JSON.stringify(scanned).slice(0, 400));
+      const approvals = await call('autode_approvals_list');
+      assert.ok(approvals.items.some((i) => i.kind === 'maintenance'), 'Waiting for you over MCP');
+      await client.close(); client = undefined;
+      // CLI.
+      const W = ['--workspace', ws];
+      const listed = await cli(['maintenance', ...W]);
+      assert.ok(listed.code === 0 && /open maintenance item\(s\) \(policy suggest\)/.test(listed.out) && /context-curator · document-reading/.test(listed.out), listed.out + listed.err);
+      assert.strictEqual((await cli(['maintenance', 'dismiss', item.key, '--reason', 'old copy', ...W])).code, 4, 'a person at a terminal');
+      assert.strictEqual((await cli(['maintenance', 'dismiss', item.key, '--reason', 'old copy', ...W], { interactive: true })).code, 0);
+      assert.ok(!(await cli(['maintenance', '--json', ...W])).json().items.some((i) => i.key === item.key), 'dismissed');
+      assert.match((await cli(['maintenance', 'policy', ...W])).out, /Policy: suggest/);
+      assert.match((await cli(['maintenance', 'turns', ...W])).out, /No recorded message waits for review/);
+      assert.match((await cli(['approvals', ...W])).out, /notes\.md/);
+      // The Explorer: an asset page's items, and its buttons.
+      const { answerExplorerMessage } = fresh('../dist/core/knowledgeExplorerModel.js');
+      assert.deepStrictEqual((await answerExplorerMessage({ type: 'maintenance', key: 'k1', act: 'work' }, { workspaceRoot: () => ws, sources: async () => undefined })).action, { kind: 'maintenance', key: 'k1', act: 'work' });
+      assert.deepStrictEqual(Q.itemsTouching([{ key: 'a', subjects: ['obj:shop/prod/shop.orders.amount'] }, { key: 'b', subjects: ['obj:shop/prod/shop.ordersx'] }], ['obj:shop/prod/shop.orders']).map((i) => i.key), ['a'], 'a column\'s item is its table\'s');
+    } finally { if (client) await client.close(); fs.rmSync(ws, { recursive: true, force: true }); }
+    // The plugin carries the turn hook beside the guard.
+    const Pl = fresh('../dist/engine/agents/plugin.js');
+    const hooks = Pl.guardHooks({ command: 'node', args: ['/x/dist/autode.js', 'mcp', '--workspace', '.'] });
+    assert.deepStrictEqual(hooks.UserPromptSubmit, [{ hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook turn', timeout: 10 }] }]);
+    const merged = JSON.parse(Pl.mergeGuardHook(JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'mine' }] }] } }), { command: 'node', args: ['/x/dist/autode.js', 'mcp'] }).text);
+    assert.deepStrictEqual(merged.hooks.UserPromptSubmit.map((h) => h.hooks[0].command), ['mine', 'node /x/dist/autode.js hook turn'], 'the team\'s own hooks are kept');
+    const pkg = require('../package.json');
+    for (const c of ['autoDataEngineeringHub.workOnMaintenanceItem', 'autoDataEngineeringHub.dismissMaintenanceItem', 'autoDataEngineeringHub.scanWorkspaceForKnowledge']) assert.ok(pkg.contributes.commands.some((x) => x.command === c), c);
+    const html = fs.readFileSync(nodePath.join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
+    for (const t of ['data-maint="work"', "type: 'maintenance'", 'Needs attention']) assert.ok(html.includes(t), t);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

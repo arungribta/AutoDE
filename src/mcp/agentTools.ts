@@ -1,3 +1,4 @@
+import { openMaintenanceItems } from '../engine/maintenance/queue';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EngineTool, ToolAnnotations } from './tools';
@@ -98,7 +99,8 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
         const src = await ws.contextSources();
         const byId = new Map(src.assertions.map((a) => [a.id, a] as const));
         const facts = src.assertions.filter((a) => !isMirror(a) && (a.status === 'proposed' || a.status === 'needs_review')).map((a) => factView(a, byId));
-        return { items: waitingForYou({ workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot, problemId: ws.activeProblemId(), facts }) } as unknown as Record<string, unknown>;
+        const maintenance = openMaintenanceItems({ workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot, problemId: ws.activeProblemId(), sources: src });
+        return { items: waitingForYou({ workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot, problemId: ws.activeProblemId(), facts, maintenance }) } as unknown as Record<string, unknown>;
       }
     },
     {

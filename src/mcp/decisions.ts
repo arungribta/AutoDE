@@ -1,3 +1,4 @@
+import { unreviewedTurns } from '../engine/maintenance/turns';
 import { markInterviewFed } from '../engine/interview/state';
 import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
 import { Decision, DecisionError, DecisionStore } from '../engine/decisions/decisionStore';
@@ -199,11 +200,12 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
     },
     {
       name: 'autode_review_session',
-      description: 'End-of-session review (C4c): from the user\'s messages in your conversation, which read like facts (a key, a rule, a definition, a threshold …) but have no fact recorded from them. Give each message with a stable ref; ask the user to record (autode_propose_assertion, citing the ref) or dismiss each one.',
-      inputSchema: { type: 'object', required: ['turns'], additionalProperties: false, properties: { turns: { type: 'array', maxItems: 500, items: { type: 'object', required: ['ref', 'text'], additionalProperties: false, properties: { ref: { type: 'string', minLength: 1 }, text: { type: 'string' } } } } } },
+      description: 'End-of-session review (C4c): from the user\'s messages in your conversation, which read like facts (a key, a rule, a definition, a threshold …) but have no fact recorded from them. Give each message with a stable ref; ask the user to record (autode_propose_assertion, citing the ref) or dismiss each one. Without turns (MM2), the messages AutoDE\'s hook recorded in this workspace (Claude Code) are reviewed; dismiss those that state no fact with autode_dismiss_turns.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { turns: { type: 'array', maxItems: 500, items: { type: 'object', required: ['ref', 'text'], additionalProperties: false, properties: { ref: { type: 'string', minLength: 1 }, text: { type: 'string' } } } } } },
       annotations: { title: 'Review a session for unrecorded facts', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       handler: async (args, ws) => {
         const src = await ws.contextSources();
+        if (!args.turns) return { recorded: true, unrecorded: unreviewedTurns(ws.options.workspaceRoot, src.assertions) };
         return { unrecorded: unrecordedStatements(args.turns as Array<{ ref: string; text: string }>, src.assertions, dismissedStatements(ws.options.workspaceRoot)) };
       }
     },

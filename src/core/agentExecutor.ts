@@ -11,6 +11,8 @@ import { completeStage, startStage, WorkflowError } from '../engine/workflows/ru
 import { readEvents, Actor } from '../engine/workflows/events';
 import { layoutPath } from '../engine/workspaceLayout';
 import { readWorkflow } from '../engine/workflows/instance';
+import { MaintenanceItem } from '../engine/maintenance/queue';
+import { maintenanceAssignment } from '../engine/maintenance/brief';
 
 /**
  * AutoDE's in-process executor (PA3b): runs a stage's assignment with the
@@ -95,6 +97,33 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   } catch (err) {
     const message = err instanceof WorkflowError || err instanceof Error ? err.message : String(err);
     return { ok: false, message: `${role} couldn't finish ${stageId}: ${message}`, outputs: [] };
+  } finally {
+    await engine.dispose();
+  }
+}
+
+/**
+ * A knowledge-maintenance item, worked by the role it names (MM2; §5.6): the
+ * work order `autode_maintenance_next` gives a host agent, run with the
+ * panel's model at the propose tier. A person starts it (policy `suggest`),
+ * or AutoDE does at a stage boundary within the budget (`draft`). The agent
+ * proposes; nothing is approved here.
+ */
+export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, item: MaintenanceItem): Promise<{ ok: boolean; message: string }> {
+  if (host.activeProvider() === 'claude') return { ok: false, message: 'With Claude Code as the model, work on it in Claude Code: ask it to take the next AutoDE maintenance item (autode_maintenance_next).' };
+  const engine = host.createEngine(`${item.agent} (VS Code)`);
+  if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).' };
+  try {
+    const a = maintenanceAssignment(scope.resourcesRoot, scope.workspaceRoot, item, await engine.listTools());
+    if (!a.assignment) return { ok: false, message: a.reason ?? 'No agent for this item.' };
+    host.log(`${a.assignment.role}: ${item.title} — ${a.assignment.engineTools.length} AutoDE tools.`);
+    const { text } = await host.runAgentWithTools(
+      'Work on this maintenance item now. Propose what it needs; then reply with a short summary for the person who approves it: what you proposed, where it is approved, and anything uncertain.',
+      { systemPrompt: a.assignment.text, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(a.assignment.engineTools), justification: `AutoDE ${a.assignment.role}: ${item.title}` }
+    );
+    return { ok: true, message: text.trim().slice(0, 4000) || `${a.assignment.role} finished.` };
+  } catch (err) {
+    return { ok: false, message: `${item.agent} couldn't finish: ${err instanceof Error ? err.message : String(err)}` };
   } finally {
     await engine.dispose();
   }

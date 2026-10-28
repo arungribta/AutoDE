@@ -40,23 +40,33 @@ export function serverEntry(resourcesRoot: string, env: NodeJS.ProcessEnv = proc
   return { command: 'node', args: [path.join(resourcesRoot, 'dist', 'autode.js'), ...args] };
 }
 
-/** The guard hook's command (v0.45.11): the same program as the server, running `hook guard`. */
-export function guardEntry(entry: ServerEntry): ServerEntry {
+/** The guard hook's command (v0.45.11): the same program as the server, running `hook guard` (MM2: `hook turn` for the turn hook). */
+export function guardEntry(entry: ServerEntry, sub: 'guard' | 'turn' = 'guard'): ServerEntry {
   const i = entry.args.indexOf('mcp');
-  return { command: entry.command, args: [...(i >= 0 ? entry.args.slice(0, i) : entry.args), 'hook', 'guard'] };
+  return { command: entry.command, args: [...(i >= 0 ? entry.args.slice(0, i) : entry.args), 'hook', sub] };
 }
 
 /** Shell tools the guard checks, by the hosts' tool names. */
 const GUARDED_TOOLS = 'Bash|PowerShell';
 
-/** Claude Code's hooks for the plugin folder (`hooks/hooks.json`) and settings files. */
-export function guardHooks(entry: ServerEntry): { PreToolUse: Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string; timeout: number }> }> } {
-  return { PreToolUse: [{ matcher: GUARDED_TOOLS, hooks: [{ type: 'command', command: shellLine(guardEntry(entry)), timeout: 15 }] }] };
+type HookEntry = { matcher?: string; hooks: Array<{ type: 'command'; command: string; timeout: number }> };
+
+/**
+ * Claude Code's hooks for the plugin folder (`hooks/hooks.json`) and settings files: the guard
+ * (PreToolUse), and since MM2 the turn hook (UserPromptSubmit), which records each message the
+ * user submits for review. It runs no model and prints nothing, so it adds nothing to the context.
+ */
+export function guardHooks(entry: ServerEntry): { PreToolUse: HookEntry[]; UserPromptSubmit: HookEntry[] } {
+  return {
+    PreToolUse: [{ matcher: GUARDED_TOOLS, hooks: [{ type: 'command', command: shellLine(guardEntry(entry)), timeout: 15 }] }],
+    UserPromptSubmit: [{ hooks: [{ type: 'command', command: shellLine(guardEntry(entry, 'turn')), timeout: 10 }] }]
+  };
 }
 
 /**
- * The settings text with AutoDE's guard set in `hooks.PreToolUse` (replacing an earlier AutoDE entry,
- * found by its `hook guard` command); other hooks and keys are kept.
+ * The settings text with AutoDE's hooks set in `hooks.PreToolUse` and `hooks.UserPromptSubmit`
+ * (replacing earlier AutoDE entries, found by their `hook guard` / `hook turn` command); other
+ * hooks and keys are kept.
  */
 export function mergeGuardHook(existing: string | undefined, entry: ServerEntry): { text: string; changed: boolean } {
   let doc: Record<string, unknown> = {};
@@ -66,11 +76,17 @@ export function mergeGuardHook(existing: string | undefined, entry: ServerEntry)
     doc = parsed as Record<string, unknown>;
   }
   const hooks = (doc.hooks && typeof doc.hooks === 'object' && !Array.isArray(doc.hooks) ? doc.hooks : {}) as Record<string, unknown>;
-  const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse as Array<{ hooks?: Array<{ command?: string }> }> : [];
-  const isOurs = (m: { hooks?: Array<{ command?: string }> }) => (m.hooks ?? []).some((h) => / hook guard$/.test(String(h.command ?? '')));
-  const next = [...pre.filter((m) => !isOurs(m)), guardHooks(entry).PreToolUse[0]];
-  const changed = JSON.stringify(pre) !== JSON.stringify(next);
-  return { text: JSON.stringify({ ...doc, hooks: { ...hooks, PreToolUse: next } }, null, 2) + '\n', changed };
+  const isOurs = (m: { hooks?: Array<{ command?: string }> }) => (m.hooks ?? []).some((h) => / hook (guard|turn)$/.test(String(h.command ?? '')));
+  const ours = guardHooks(entry);
+  let changed = false;
+  const next: Record<string, unknown> = { ...hooks };
+  for (const event of ['PreToolUse', 'UserPromptSubmit'] as const) {
+    const current = Array.isArray(hooks[event]) ? hooks[event] as Array<{ hooks?: Array<{ command?: string }> }> : [];
+    const merged = [...current.filter((m) => !isOurs(m)), ...ours[event]];
+    if (JSON.stringify(current) !== JSON.stringify(merged)) changed = true;
+    next[event] = merged;
+  }
+  return { text: JSON.stringify({ ...doc, hooks: next }, null, 2) + '\n', changed };
 }
 
 const yamlList = (xs: readonly string[]) => `[${xs.map((x) => JSON.stringify(x)).join(', ')}]`;
@@ -205,9 +221,9 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
     try {
       const h = mergeGuardHook(fs.existsSync(settings) ? fs.readFileSync(settings, 'utf8') : undefined, input.entry);
       if (h.changed) write(settings, h.text, written);
-      notes.push(`The guard hook is in ${settings}: Claude Code shows new hooks for review (/hooks).`);
+      notes.push(`The guard hook and the turn hook (it records your messages for review, in .autode/local/turns/) are in ${settings}: Claude Code shows new hooks for review (/hooks).`);
     } catch (err) {
-      errors.push(`${settings}: ${err instanceof Error ? err.message : String(err)} The guard hook was not added; add it under hooks.PreToolUse: ${JSON.stringify(guardHooks(input.entry).PreToolUse[0])}`);
+      errors.push(`${settings}: ${err instanceof Error ? err.message : String(err)} AutoDE's hooks were not added; add them under hooks: ${JSON.stringify(guardHooks(input.entry))}`);
     }
   } else if (input.host === 'cortex') {
     const dir = input.scope === 'project' ? path.join(base, '.cortex', 'skills') : path.join(input.home, '.snowflake', 'cortex', 'skills');

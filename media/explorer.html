@@ -91,6 +91,8 @@
   .cert-documented { color: var(--t-documented); }
   .cert-unverified { color: var(--t-assumed); border-color: var(--t-assumed); border-style: dashed; }
   .cert-draft { color: var(--muted); border-style: dashed; }
+  .attention { border: 1px solid var(--border); border-left: 3px solid var(--accent, var(--border)); border-radius: 4px; padding: 6px 10px; margin: 8px 0; }
+  .attention h4 { margin: 2px 0 4px; }
   .cert-deprecated { color: var(--danger); border-color: var(--danger); text-decoration: line-through; }
   .facet.pending h3 { opacity: 0.6; }
   .layers { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
@@ -476,6 +478,7 @@
         ${file ? `<button class="btn" data-open-file="${esc(file)}">Open in Semantic Model editor</button>` : ''}
         ${c.facts.some((f) => f.status === 'proposed' || f.status === 'needs_review') || c.conflicts.length ? '<button class="btn primary" data-open="inbox">Review in the Context Inbox</button>' : ''}
       </div>
+      ${(c.maintenance || []).length ? `<div class="attention" role="note" aria-label="Needs attention"><h4>Needs attention</h4>${c.maintenance.map((m) => `<div class="item"><div><span class="badge">${esc(m.rule.replace(/-/g, ' '))}</span> ${esc(m.title)}</div><div class="ev">${esc(m.detail)}</div><div class="ev">${esc(m.agent === 'person' ? 'A person' : 'The ' + m.agent)}: ${esc(m.next)}</div><div class="actions">${m.agent !== 'person' ? `<button class="btn" data-maint="work" data-key="${esc(m.key)}" title="The agent proposes; you approve">Work on it (${esc(m.agent)})</button>` : ''}<button class="btn" data-maint="dismiss" data-key="${esc(m.key)}">Dismiss…</button></div></div>`).join('')}</div>` : ''}
       <div role="tablist" class="tabs" aria-label="Asset sections">${tabs.map(([t, l]) => `<button role="tab" data-tab="${t}" aria-selected="${state.tab === t}" id="tab-${t}">${esc(l)}${count(tabCount(t, c))}</button>`).join('')}</div>
       <div role="tabpanel" id="tabpanel" aria-labelledby="tab-${state.tab}">${renderTab(state.tab, c)}</div>`;
     if (state.tab === 'graph') loadGraph();
@@ -587,6 +590,7 @@
     if (act && act.dataset.act === 'graph') { state.tab = 'graph'; persist(); renderAsset(); return; }
     if (act && act.dataset.act === 'copy') { post({ type: 'copyMarkdown', id: current.asset.id }); return; }
     if (act && act.dataset.act === 'meta') { post({ type: 'editMetadata', id: current.asset.id }); return; }
+    const mt = e.target.closest('[data-maint]'); if (mt) { post({ type: 'maintenance', key: mt.dataset.key, act: mt.dataset.maint }); return; }
     if (e.target.closest('.gcard')) return;
     if (e.target.id === 'gFit' && graphs.asset) { graphs.asset.fit(undefined, 30); return; }
     if (e.target.id === 'gPng' && graphs.asset) { exportPng(graphs.asset); return; }
