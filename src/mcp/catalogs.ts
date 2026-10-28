@@ -7,6 +7,7 @@ import { EngineWorkspace, PROBLEM_DOCUMENTS } from './workspace';
 import { layoutRel } from '../engine/workspaceLayout';
 import { loadRoles, loadSkillPack } from '../engine/agents/definitions';
 import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
+import { semanticResources } from './semanticTools';
 
 /**
  * MCP prompts (§5.4) and resources (§5.5) — read-only views of the
@@ -121,7 +122,8 @@ export function listResources(ws: EngineWorkspace): ResourceInfo[] {
   ws.ensurePrimitives();
   const primitives = listPrimitives().map((p) => ({ uri: `autode://primitives/${p.kind}`, name: `Primitive ${p.kind}`, description: p.description, mimeType: 'application/json' }))
     .sort((a, b) => a.uri.localeCompare(b.uri));
-  return [...docs, ...primitives];
+  const semantic = semanticResources(ws).map(({ file: _file, ...r }) => r);
+  return [...docs, ...semantic, ...primitives];
 }
 
 export function readResource(ws: EngineWorkspace, uri: string): { uri: string; mimeType: string; text: string; revision: string } {
@@ -132,6 +134,12 @@ export function readResource(ws: EngineWorkspace, uri: string): { uri: string; m
     const file = ws.problemDocument(key);
     if (!file) throw new EngineToolError('NOT_FOUND', ws.activeProblemId() ? `The active business problem has no ${PROBLEM_DOCUMENTS[key].name} yet.` : 'No business problem is active.');
     const { text, revision } = ws.readWithRevision(file);
+    return { uri, mimeType: 'application/yaml', text, revision };
+  }
+  if (key.startsWith('semantic/')) {
+    const hit = semanticResources(ws).find((r) => r.uri === uri);
+    if (!hit) throw new EngineToolError('NOT_FOUND', `No semantic model at "${uri}" (autode_semantic_list).`);
+    const { text, revision } = ws.readWithRevision(hit.file);
     return { uri, mimeType: 'application/yaml', text, revision };
   }
   const kind = /^primitives\/(.+)$/.exec(key)?.[1];

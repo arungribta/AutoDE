@@ -5,6 +5,7 @@ import { statusFor } from '../workflows/service';
 import { readWorkflow } from '../workflows/instance';
 import { isDocumentStage } from '../workflows/documentApproval';
 import { listRunbooks, Runbook } from '../runner/runbook';
+import { semanticWaiting } from '../semantic/store';
 
 /**
  * Waiting for you (v0.45.7, SIMP-1): everything that waits for a person, in
@@ -16,7 +17,7 @@ import { listRunbooks, Runbook } from '../runner/runbook';
  * second rulebook.
  */
 
-export type WaitingKind = 'decision' | 'facts' | 'stage-document' | 'runbook';
+export type WaitingKind = 'decision' | 'facts' | 'stage-document' | 'runbook' | 'semantic';
 
 export interface WaitingItem {
   /** Stable: `decision:<id>`, `facts:<problem>`, `stage:<problem>/<stage>`, `runbook:<problem>/<id>`. */
@@ -28,7 +29,7 @@ export interface WaitingItem {
   problemId?: string;
   since?: string;
   /** Where to open it in VS Code. */
-  opens: { view: 'decision' | 'inbox' | 'workflow-stage' | 'workflow' | 'runbook'; ref?: string };
+  opens: { view: 'decision' | 'inbox' | 'workflow-stage' | 'workflow' | 'runbook' | 'file'; ref?: string };
   /** The command that approves it in a terminal (a person, at an interactive terminal). */
   cli: string;
 }
@@ -80,6 +81,10 @@ export function waitingForYou(input: WaitingInput): WaitingItem[] {
       items.push({ key: `runbook:${input.problemId}/${r.runbook.id}`, kind: 'runbook', title: `Second approval: ${r.runbook.title}`, detail: `${r.environment} needs a second approver; approved so far by ${r.approvals.map((a) => a.by).join(', ')}.`, stakes: 'high', problemId: input.problemId, since: r.approvals[0]?.at, opens: { view: 'runbook', ref: r.runbook.id }, cli: `autode runbook approve ${r.runbook.id}` });
     }
   }
+  // C5a: shared semantic models not approved at their current revision (workspace-level), and the problem's stale composites.
+  try {
+    for (const s of semanticWaiting(input.workspaceRoot, input.problemId)) items.push({ key: s.key, kind: 'semantic', title: s.title, detail: s.detail, stakes: 'high', problemId: input.problemId, opens: { view: 'file', ref: s.file }, cli: s.cli });
+  } catch { /* an unreadable semantic folder is reported by the editor */ }
   // High stakes first, then oldest first.
   return items.sort((a, b) => (a.stakes === b.stakes ? 0 : a.stakes === 'high' ? -1 : 1) || String(a.since ?? '').localeCompare(String(b.since ?? '')));
 }

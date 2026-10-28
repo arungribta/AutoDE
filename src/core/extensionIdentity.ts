@@ -9,6 +9,7 @@ export const EDITOR_STTM = 'autoDE.sttmEditor';
 export const EDITOR_GRAPH = 'autoDE.graphEditor';
 export const EDITOR_PROFILE = 'autoDE.profileEditor';
 export const EDITOR_DOC = 'autoDE.docEditor';
+export const EDITOR_SEMANTIC = 'autoDE.semanticModelEditor';
 
 export const SECRET_KEYS = {
   llmApiKey: 'autoDataEngineeringHub.llmApiKey',

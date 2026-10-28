@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.48.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.49.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -18,14 +18,15 @@
 12. [Personal data](#12-personal-data)
 13. [Platform changes: runbooks](#13-platform-changes-runbooks)
 14. [Grounding and traceability](#14-grounding-and-traceability)
-15. [Chat](#15-chat)
-16. [Skills](#16-skills)
-17. [Primitives](#17-primitives)
-18. [Working outside VS Code](#18-working-outside-vs-code)
-19. [What goes where on disk](#19-what-goes-where-on-disk)
-20. [Settings](#20-settings)
-21. [Coming next](#21-coming-next)
-22. [Troubleshooting](#22-troubleshooting)
+15. [The semantic layer](#15-the-semantic-layer)
+16. [Chat](#16-chat)
+17. [Skills](#17-skills)
+18. [Primitives](#18-primitives)
+19. [Working outside VS Code](#19-working-outside-vs-code)
+20. [What goes where on disk](#20-what-goes-where-on-disk)
+21. [Settings](#21-settings)
+22. [Coming next](#22-coming-next)
+23. [Troubleshooting](#23-troubleshooting)
 
 ---
 
@@ -53,7 +54,7 @@ The extension contains everything it needs: no `npm install`, no Python.
 
 ### 2.2 Open a workspace
 
-AutoDE works on the folder you open in VS Code (the first folder of a multi-root workspace). Use one folder per client engagement, ideally a git repository: AutoDE's state is plain files meant to be committed and reviewed (see [§19](#19-what-goes-where-on-disk)).
+AutoDE works on the folder you open in VS Code (the first folder of a multi-root workspace). Use one folder per client engagement, ideally a git repository: AutoDE's state is plain files meant to be committed and reviewed (see [§20](#20-what-goes-where-on-disk)).
 
 Click the AutoDE icon. You'll see three views:
 - **Workspace:** the panel, with chat, the business problem, the specification, the Context Inbox and the settings.
@@ -97,8 +98,8 @@ The **Saved connections** list at the top of the tab shows each connection's rea
 
 ### 2.5 Optional: the terminal and agent hosts
 
-- **The `autode` CLI:** `npm install -g autode-<version>.tgz` (Node.js 18 or later). See [§18](#18-working-outside-vs-code).
-- **Claude Code, Cortex Code or the Copilot CLI:** `autode plugin install --host claude` (or `cortex`, `copilot`). See [§18.2](#182-agent-hosts).
+- **The `autode` CLI:** `npm install -g autode-<version>.tgz` (Node.js 18 or later). See [§19](#19-working-outside-vs-code).
+- **Claude Code, Cortex Code or the Copilot CLI:** `autode plugin install --host claude` (or `cortex`, `copilot`). See [§19.2](#192-agent-hosts).
 
 ---
 
@@ -266,7 +267,7 @@ Everything AutoDE knows about the data is a **fact**:
 
 Each fact has:
 - **evidence:** where it came from (a column's introspection, a document section, your chat message, a probe);
-- **trust:** `verified` (checked against data) > `confirmed` (by a person) > `documented` (from a signed or draft document) > `assumed` (a model's reading or guess, taken as true in exploration mode, [§5.4](#54-exploration-mode)) > `inferred` (a model's reading, waiting for you);
+- **trust:** `verified` (checked against data) > `confirmed` (by a person) > `documented` (from a signed or draft document) > `assumed` (a model's reading or guess, taken as true in exploration mode, [§5.4](#55-exploration-mode)) > `inferred` (a model's reading, waiting for you);
 - **status:** `proposed`, `active`, `needs review`, `superseded`, `rejected`.
 
 Facts are kept in an append-only ledger (`.autode/knowledge/ledger/`): history is never lost, and every change records who made it.
@@ -278,7 +279,7 @@ Facts are kept in an append-only ledger (`.autode/knowledge/ledger/`): history i
 - **Conversation:** after each chat or interview turn, the model proposes the facts you stated, in the background. A later, different value for the same fact (you corrected yourself) supersedes the earlier one once you confirm it.
 - **Without a model:** type `/define`, `/rule`, `/decide` or `/assume` in chat to record a fact directly.
 - **Agents:** they propose facts; you confirm them.
-- **The data itself** ([§8.6](#86-facts-from-the-data)): keys, joins and personal data found and checked without a model.
+- **The data itself** ([§8.6](#87-facts-from-the-data)): keys, joins and personal data found and checked without a model.
 
 ### 8.3 The Context Inbox
 
@@ -290,7 +291,7 @@ From a terminal: `autode facts`, `autode facts show <id>`, `autode facts confirm
 
 ### 8.4 Context gaps
 
-When a stage needs something nobody knows (how two tables join, the key of a table, the grain of a fact table), its agent gets the **context gap** in its assignment: it asks you instead of guessing, or leaves the gap open in its deliverable for the approver. Once you record the fact, the gap closes. In exploration mode the agent records its best guess as an assumption instead, and continues ([§5.4](#54-exploration-mode)).
+When a stage needs something nobody knows (how two tables join, the key of a table, the grain of a fact table), its agent gets the **context gap** in its assignment: it asks you instead of guessing, or leaves the gap open in its deliverable for the approver. Once you record the fact, the gap closes. In exploration mode the agent records its best guess as an assumption instead, and continues ([§5.4](#55-exploration-mode)).
 
 ### 8.5 Capture coverage: what is still missing
 
@@ -510,7 +511,63 @@ From a terminal: `autode runbook list | show <id> | approve <id>`.
 
 ---
 
-## 15. Chat
+## 15. The semantic layer
+
+The semantic layer holds the business definitions a BI tool or Cortex Analyst uses: what a metric means, which dimensions slice it, how tables join for analysis, the questions it answers. It is a deliverable, kept as YAML in your repository, approved by a person. It is separate from AutoDE's knowledge (§8): facts say what is true of the data; the semantic layer says how the business wants to read it.
+
+### 15.1 Shared models and composites
+
+- **Shared semantic models** live in `autode-output/semantic/<subject>.yaml`, one per subject area (sales, customer, finance). Their format is **Snowflake's semantic model YAML** (tables with `base_table`, `primary_key`, `dimensions`, `time_dimensions`, `facts`, `metrics`, `filters`; `relationships`; `verified_queries`), deployable as it is. AutoDE refuses keys Snowflake doesn't know; its own notes (which facts each element rests on, who approved it) live in `.autode/semantic/`, never in the model.
+- **Composites** are a use case's view, in the problem's own folder: `autode-output/<problem>/semantic/<name>.yaml`. A composite names the shared models it **uses** (all their tables, or some; all their metrics, or some), **adds** its own metrics, filters and verified queries, and **describes** (descriptions and synonyms only):
+
+```yaml
+autode: semantic-composite/1
+name: revenue_by_channel
+uses:
+  - model: sales
+    metrics: [net_revenue]
+  - model: customer
+    tables: [customers]
+add:
+  metrics:
+    - { table: orders, name: revenue_per_order, expr: "net_revenue / COUNT(order_id)" }
+describe:
+  orders.channel: { synonyms: [sales channel] }
+```
+
+- **No redefinition.** A composite never changes a shared expression, key or join: a different calculation is a new metric with its own name. AutoDE refuses it and says so.
+- **No collisions.** Two shared models used together that define the same table must define it the same way; otherwise AutoDE names the difference.
+- **Resolving** writes `<name>.resolved.yaml`: one self-contained Snowflake model, what gets deployed. The same inputs always give the same bytes, and the file's header records the version of every shared model it came from.
+- **Stale.** When a shared model changes, composites resolved from its earlier version are stale until resolved again; resolving shows the changes.
+
+### 15.2 The Semantic Model editor
+
+Files in a `semantic` folder open in the **Semantic Model editor** (*Reopen Editor With… → Text Editor* for the plain YAML). The file stays the source of truth: every change is an ordinary edit you can undo, diff and commit.
+
+- **Form:** each table with its key and elements; edit expressions, descriptions and synonyms, add or remove metrics and filters. For a composite: what it uses, adds and describes, and the model as it would resolve now.
+- **Diagram:** the tables and their joins.
+- **YAML:** the raw file.
+- **Checks**, shown inline (✗ an error, ! a warning):
+  - against the estate: base tables and columns exist, expressions use known columns and elements, types fit;
+  - against the knowledge: a join whose "one" side isn't its table's key (it would fan out), a primary key no fact supports or a fact contradicts, a metric its fact defines otherwise.
+- **Actions:** *Draft from knowledge* (shared models: adds the tables, elements and joins AutoDE knows and the model lacks; nothing you wrote changes), *Resolve* (composites), *Approve…*, *Check again*.
+
+New files: *AutoDE: New Shared Semantic Model (Draft from Knowledge)…* drafts one from the tables the active problem names; *AutoDE: New Semantic Composite…* starts a composite over the shared models you pick.
+
+### 15.3 Drafting from knowledge
+
+A draft is deterministic and uses only facts a person confirmed or a probe verified: tables and primary keys from declared keys and key facts; joins from foreign keys and relationship facts (direction and type from their cardinality); time dimensions, dimensions and facts from column types; metrics from metric facts that have an expression (one defined in words only is listed as left out); synonyms from glossary terms bound to columns; a personal-data note on classified columns. A base table whose name has no database gets `SET_DATABASE`, and the checks remind you to set it. A model may later suggest better descriptions; you edit and approve.
+
+### 15.4 Approval
+
+- **A shared model** is approved by a person, workspace-wide, at its exact version: in the editor (*Approve…*) or `autode semantic approve <name>`. A failing check refuses it. Editing it afterwards makes it *changed since approved*, and it waits in *Waiting for you* until approved again. An agent proposes a shared model as a decision (`autode_propose_semantic_model`); approving that decision approves the version it writes.
+- **A composite** is approved within its problem, at its resolved version, once resolved and not stale. In exploration mode ([§5.4](#54-exploration-mode)) failed checks only warn.
+
+Deployment (Snowflake semantic views, Databricks metric views, dbt MetricFlow) comes next; see [Coming next](#22-coming-next).
+
+---
+
+## 16. Chat
 
 The chat in the panel is for questions and changes about the active problem: "which tables hold refunds?", "why is the grain of orders the line?", "move refunds out of scope".
 
@@ -533,9 +590,9 @@ The chat in the panel is for questions and changes about the active problem: "wh
 
 ---
 
-## 16. Skills
+## 17. Skills
 
-### 16.1 The Skills view
+### 17.1 The Skills view
 
 Every skill in one place:
 - **AutoDE skills** (`autode-<scope>-<capability>`), each with the stage kinds and platforms it serves, its version and maturity, and the roles that use it;
@@ -544,36 +601,36 @@ Every skill in one place:
 
 Catalog: [skills.md](skills.md). From a terminal: `autode skills list | show | check | install`.
 
-### 16.2 Platform skills
+### 17.2 Platform skills
 
 AutoDE's own Snowflake and Databricks skills (ingestion, pipelines, governance, performance, deployment), plus dbt and reconciliation. A stage gets them by its kind and the target platform; dbt skills only when dbt is the transformation tool. They change platforms only through runbooks. Details: [platform-skills.md](platform-skills.md).
 
-### 16.3 Your team's skills
+### 17.3 Your team's skills
 
 *AutoDE: Port a Skill…* (the **+** on the Skills view) brings in a skill from a Git repository, a folder or a dbt package, written for any agent: AutoDE reports what it does, what it needs and what it may change, and imports it unreviewed. You review it, then publish it. A **knowledge** skill (your conventions) then joins the context packs whose question it matches; a skill that declares stage kinds joins those stages' assignments. *Update Skill from Its Source…* fetches a new version and shows the diff. How to write and port skills: [skills-authoring.md](skills-authoring.md).
 
-### 16.4 Running a skill yourself
+### 17.4 Running a skill yourself
 
 *AutoDE: Run Tool Skill* (or `/skill`) runs a published, reviewed skill with an instruction. A **reviewed** skill gets read-only tools; a **trusted** one may write files and run commands, each confirmed. Changing a skill's files makes it unreviewed again.
 
 ---
 
-## 17. Primitives
+## 18. Primitives
 
 Primitives are the reviewed generators the compiler uses: `rename_cast`, `dedup`, `incremental_load` and `mask` are built in, for every dialect. A team adds its own as YAML definitions (Tier 2) in `.autode/config/primitives/`: a parameter schema, a template per dialect with a deliberately small template language (no logic), preview parameters and output checks. The **Transform Primitives** palette in the panel lists them with a live preview. With `primitiveManagementEnabled` on, definitions are drafted, published, deprecated and retired, and an approved Pipeline Spec stays pinned to the version it used.
 
 ---
 
-## 18. Working outside VS Code
+## 19. Working outside VS Code
 
-### 18.1 The `autode` command line
+### 19.1 The `autode` command line
 
 The same engine in a terminal, on the same files. It never calls a model and holds no credentials. The commands, in groups:
 
 - **Checks (safe in CI):** `validate`, `compile`, `grounding`, `conformance`, `probe`, `doctor`, and `check`, the CI gate, which also fails while a high-stakes decision is pending.
 - **Problems and estate:** `problems list | new [--exploration] | use | mode | hardening`, `estate ingest | extract`, `context show | target | sources`.
 - **Interview and workflow:** `interview show | answer`, `workflow templates | status | plan | approve | next | start | complete | skip | reopen | history`.
-- **Knowledge:** `facts …`, `coverage`, `capture candidates`, `pack …`, `vocabulary …`, `governance show | classify`, `design-doc`, `query`, `explain`.
+- **Knowledge:** `facts …`, `coverage`, `capture candidates`, `semantic show | draft | compose | resolve | check | approve`, `pack …`, `vocabulary …`, `governance show | classify`, `design-doc`, `query`, `explain`.
 - **Decisions and approvals:** `approvals`, `decisions list | show | approve | reject`.
 - **Connections:** `connections add | list | test | remove`.
 - **Runbooks:** `runbook list | show | approve`.
@@ -581,26 +638,28 @@ The same engine in a terminal, on the same files. It never calls a model and hol
 
 Commands that decide something (approve, reject, classify, review, publish) need a person at an interactive terminal and a typed confirmation, and refuse to run when `CI` is set. Full reference, options and exit codes: [cli.md](cli.md).
 
-### 18.2 Agent hosts
+### 19.2 Agent hosts
 
 `autode plugin install --host claude` (or `cortex`, `copilot`) installs AutoDE's agents, skills and commands (`/autode-status`, `/autode-next`, `/autode-approve`) into the host's folders and registers the MCP server. Then ask the agent to continue your AutoDE problem: the orchestrator skill takes each stage's assignment, has the named agent do it, hands the stage in, and stops at every approval. Your host supplies the model; AutoDE supplies the process, the checks and the approvals. Approvals stay with you: in the panel, in a terminal, or in a committed decision file.
 
-### 18.3 MCP
+### 19.3 MCP
 
 `autode mcp` exposes the engine to any MCP client (Claude Code, Codex, Cursor, Cline, VS Code's agent mode, where it is available with no configuration). Reads are read-only; changes come back as proposals for a person. Setup per host: [mcp-setup.md](mcp-setup.md).
 
 ---
 
-## 19. What goes where on disk
+## 20. What goes where on disk
 
 ```
 <your repository>/
   .autode/                      AutoDE's working state
     problems/<id>/              spec, interview, pack, workflow, contexts, Pipeline Spec, runbooks   (commit)
     knowledge/                  facts (ledger), estate, profiles, vocabulary                         (commit)
+    semantic/                   the semantic layer's notes: backing facts, approvals, resolutions   (commit)
     config/                     connections, approval policy, workflows, agents, skills, primitives  (commit)
     local/                      your active problem, chats, caches, catalog                         (not committed)
-  autode-output/<problem>/      the deliverables: SQL, YAML, documents, manifests                    (commit)
+  autode-output/semantic/       shared semantic models (Snowflake semantic model YAML)               (commit)
+  autode-output/<problem>/      the deliverables: SQL, YAML, documents, manifests, semantic/ composites (commit)
 ```
 
 - **Commit** everything except `.autode/local/` (AutoDE writes a `.gitignore` for it). Reviewing AutoDE's state in pull requests is part of the design.
@@ -609,7 +668,7 @@ Commands that decide something (approve, reject, classify, review, publish) need
 
 ---
 
-## 20. Settings
+## 21. Settings
 
 All settings start with `autoDataEngineeringHub.`.
 
@@ -625,15 +684,17 @@ All settings start with `autoDataEngineeringHub.`.
 
 ---
 
-## 21. Coming next
+## 22. Coming next
 
 Specified and scheduled ([roadmap](roadmap.md)):
 
-- **The semantic layer** (v0.49.0–v0.52.0): shared semantic models as Snowflake semantic model YAML in the deliverables folder, composed per use case, deployable as Snowflake semantic views, Databricks metric views or dbt MetricFlow; a Semantic Model editor and a Knowledge Graph window.
+- **The Knowledge Graph window** (v0.50.0): explore objects, facts and semantic elements in a window of their own; context packs and grounding use the approved semantic layer, so an agent can't invent a join or metric it lacks.
+- **Deploying the semantic layer** (v0.51.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
+- **Merge semantics** (v0.52.0): conformed dimensions and survivorship across systems, in shared models and composites.
 
 ---
 
-## 22. Troubleshooting
+## 23. Troubleshooting
 
 | Symptom | What to do |
 |---|---|

@@ -19,6 +19,13 @@ import { EXPLORATION_DISCLAIMER, hardeningReport, problemMode, renderHardening, 
 import { problemCandidates, problemCoverage } from '../engine/context/capture';
 import { renderCoverage } from '../engine/context/coverage';
 import { describeFinding } from '../engine/context/dataCandidates';
+import * as sem from '../engine/semantic/store';
+import { checkSemanticModel, SemanticFinding } from '../engine/semantic/checks';
+import { draftSemanticModel } from '../engine/semantic/draft';
+import { resolveComposite } from '../engine/semantic/composite';
+import { newCompositeText } from '../engine/semantic/editorState';
+import { problemTableIds } from '../engine/context/capture';
+import { createSubjectResolver } from '../engine/context/projection';
 import { EngineWorkspace } from '../mcp/workspace';
 import { EngineTool, SQL_DIALECTS, TOOLS } from '../mcp/tools';
 import { EngineToolError, redact, toEnvelope } from '../mcp/errors';
@@ -190,6 +197,14 @@ Knowledge (confirming, rejecting, editing and adding are a person's: interactive
   facts edit <id> [--statement <text>] [--value <json>]   Correct it, confirmed
   facts conflicts              Contradicting facts
 
+Semantic layer (approving is a person's: interactive terminal):
+  semantic show                Shared semantic models (approved, changed, unapproved) and the active problem's composites (resolved, stale)
+  semantic draft <name> [--tables t1,t2] [--database <db>]   Draft a shared model from confirmed facts and the estate (never overwrites)
+  semantic compose <name> --models <m1,m2>   Start a composite of the active problem over shared models
+  semantic resolve <composite> Resolve it into <name>.resolved.yaml (deterministic; refused on a collision or a redefinition)
+  semantic check <name>        Check a shared model or composite against the estate and the facts
+  semantic approve <name>      (terminal) Approve a shared model (workspace-wide) or a composite (in its problem)
+
 Capture coverage:
   coverage                     What a complete picture of the problem needs, per table and metric: known, proposed, assumed, missing, and the action for each
   capture candidates [--connection <id>] [--record]   Keys, foreign keys, grain, change columns and personal data from the data, each probed
@@ -310,6 +325,9 @@ const OPTIONS = {
   strategy: { type: 'string' },
   exploration: { type: 'boolean' },
   record: { type: 'boolean' },
+  tables: { type: 'string' },
+  database: { type: 'string' },
+  models: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -373,6 +391,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'governance': return await cmdGovernance(ctx, rest);
       case 'coverage': return await cmdCoverage(ctx);
       case 'capture': return await cmdCapture(ctx, rest);
+      case 'semantic': return await cmdSemantic(ctx, rest);
       case 'workflow': return await cmdWorkflow(ctx, rest);
       case 'pack': return await cmdPack(ctx, rest);
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
@@ -1356,6 +1375,98 @@ async function cmdCapture(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, findings, recorded: recorded.map((a) => ({ id: a.id, kind: a.kind, statement: a.statement, status: a.status, trust: a.trust })) }, lines.join('\n'));
     return EXIT.OK;
   } finally { cfm.dispose(); session.dispose(); }
+}
+
+/** C5a: the semantic layer — shared models and the active problem's composites. */
+async function cmdSemantic(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'show', name] = rest;
+  const ws = ctx.workspaceRoot;
+  const problemId = singleProblem(ctx);
+  const findingLine = (f: SemanticFinding) => `  ${f.severity === 'error' ? '✗' : '!'} ${f.where}: ${f.message}`;
+  if (sub === 'show') {
+    const shared = sem.listShared(ws);
+    const composites = sem.listComposites(ws, problemId);
+    const lines = [
+      'Shared semantic models:', ...(shared.length ? shared.map((s) => `  ${s.name.padEnd(24)} ${s.status}${s.approved ? ` (approved by ${s.approved.by} at ${s.approved.revision})` : ''}  ${s.model?.tables.length ?? 0} table(s)  rev ${s.revision}`) : ['  none yet: autode semantic draft <name>']),
+      `Composites${problemId ? ` of ${problemId}` : ''}:`, ...(composites.length ? composites.map((c) => `  ${c.name.padEnd(24)} ${c.status}${c.staleBecause.length ? ` — ${c.staleBecause.join('; ')}` : ''}  uses ${c.composite?.uses.map((u) => u.model).join(', ') ?? '?'}${c.approvalCurrent ? `  approved by ${c.approved?.by}` : ''}`) : ['  none yet: autode semantic compose <name> --models <m1,m2>'])
+    ];
+    emit(ctx, { ok: true, shared: shared.map(({ model: _m, ...s }) => s), composites: composites.map(({ composite: _c, ...c }) => c) }, lines.join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'compose') {
+    if (!name || !problemId) throw new CliError(EXIT.USAGE, 'semantic compose <name> --models <shared1,shared2>, in a workspace with an active problem.');
+    const dir = sem.semanticPaths(ws).compositeDir(problemId);
+    const file = path.join(dir, `${name}.yaml`);
+    if (fs.existsSync(file)) throw new CliError(EXIT.FAILED, `${rel(ctx, file)} exists.`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, newCompositeText(name, (ctx.values.models ?? '').split(',').map((x) => x.trim()).filter(Boolean)));
+    emit(ctx, { ok: true, file: rel(ctx, file) }, `Wrote ${rel(ctx, file)}: add what the use case needs, then autode semantic resolve ${name}.`);
+    return EXIT.OK;
+  }
+  if (sub === 'resolve') {
+    if (!name || !problemId) throw new CliError(EXIT.USAGE, 'semantic resolve <composite>, in a workspace with an active problem.');
+    const r = sem.resolveCompositeFile(ws, problemId, name);
+    if (!r.ok) { emit(ctx, { ok: false, errors: r.errors }, `✗ ${name} doesn't resolve:\n${r.errors.map((e) => `  - ${e}`).join('\n')}`); return EXIT.FAILED; }
+    emit(ctx, { ok: true, resolvedFile: rel(ctx, r.resolvedFile), changed: r.changed, revisions: r.revisions, diff: r.diff }, `✓ ${rel(ctx, r.resolvedFile)} ${r.changed ? 'written' : 'unchanged'} (${Object.entries(r.revisions).map(([m, v]) => `${m}@${v}`).join(', ')})${r.diff ? `\n${r.diff}` : ''}`);
+    return EXIT.OK;
+  }
+  const cfm = await openContext(ws, (m) => ctx.io.err(m));
+  try {
+    const sources = cfm.getPackSources();
+    const composite = problemId && name ? sem.readComposite(ws, problemId, name) : undefined;
+    const findingsFor = (): { errors: string[]; findings: SemanticFinding[] } => {
+      if (composite) {
+        if (!composite.composite) return { errors: composite.errors, findings: [] };
+        const r = resolveComposite(composite.composite, sem.sharedLoader(ws));
+        return { errors: r.errors, findings: r.model ? checkSemanticModel(r.model, sources) : [] };
+      }
+      const s = name ? sem.readShared(ws, name) : undefined;
+      if (!s) throw new CliError(EXIT.NOT_FOUND, `No shared model or composite "${name ?? ''}" (autode semantic show).`);
+      return { errors: s.errors, findings: s.model ? checkSemanticModel(s.model, sources) : [] };
+    };
+    if (sub === 'check') {
+      if (!name) throw new CliError(EXIT.USAGE, 'semantic check <shared model or composite>.');
+      const { errors, findings } = findingsFor();
+      const bad = errors.length + findings.filter((f) => f.severity === 'error').length;
+      emit(ctx, { ok: bad === 0, errors, findings }, [...errors.map((e) => `  ✗ ${e}`), ...findings.map(findingLine), bad ? `${bad} error(s).` : `✓ ${name} passes${findings.length ? ` (${findings.length} warning(s))` : ''}.`].join('\n'));
+      return bad ? EXIT.FAILED : EXIT.OK;
+    }
+    if (sub === 'draft') {
+      if (!name) throw new CliError(EXIT.USAGE, 'semantic draft <name> [--tables t1,t2] [--database <db>].');
+      const resolve = createSubjectResolver(sources.graph as Parameters<typeof createSubjectResolver>[0]);
+      const ids = ctx.values.tables ? ctx.values.tables.split(',').map((t) => t.trim()).filter(Boolean).map((t) => resolve(t) ?? t)
+        : problemId ? problemTableIds({ workspaceRoot: ws, problemRoot: layoutPath(ws, 'problems', problemId), sources }) : [];
+      if (!ids.length) throw new CliError(EXIT.NOT_FOUND, 'No table to draft from: pass --tables, or name the tables in the active problem\'s specification.');
+      const d = draftSemanticModel({ graph: sources.graph, assertions: sources.assertions, tableIds: ids, name, database: ctx.values.database });
+      let written: sem.SharedEntry;
+      try { written = sem.writeDraft(ws, name, d.model, d.backing, d.notes); } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+      const findings = checkSemanticModel(d.model, sources);
+      emit(ctx, { ok: true, file: rel(ctx, written.file), notes: d.notes, findings }, [`Drafted ${rel(ctx, written.file)}: ${d.model.tables.length} table(s), ${d.model.relationships?.length ?? 0} relationship(s).`, ...d.notes.map((n) => `  · ${n}`), ...findings.map(findingLine), `Review it, then a person approves it: autode semantic approve ${name}.`].join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'approve') {
+      if (!name) throw new CliError(EXIT.USAGE, 'semantic approve <shared model or composite>.');
+      requirePerson(ctx, 'Approving a semantic model', 'Approve it in the Semantic Model editor in VS Code, or in a terminal.');
+      const { errors, findings } = findingsFor();
+      if (errors.length) throw new CliError(EXIT.FAILED, `${name} isn't valid: ${errors.join('; ')}`);
+      const by = (ctx.values.by ?? safeUsername()).trim();
+      ctx.io.out([...findings.map(findingLine)].join('\n'));
+      if (composite && problemId) {
+        const problemRoot = layoutPath(ws, 'problems', problemId);
+        const oneStep = problemMode(problemRoot) === 'exploration';
+        const answer = (await ctx.io.prompt(oneStep ? `Approve the composite ${name} as "${by}" (exploration mode)? [y/N] ` : `Approve the composite ${name} as "${by}"? Type approve: `)).trim().toLowerCase();
+        if (oneStep ? answer !== 'y' && answer !== 'yes' : answer !== 'approve') { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+        const r = sem.approveComposite(ws, problemId, name, { by, channel: 'cli', findings, problemRoot });
+        emit(ctx, { ok: r.ok, message: r.message, warnings: r.warnings }, r.message);
+        return r.ok ? EXIT.OK : EXIT.FAILED;
+      }
+      if ((await ctx.io.prompt(`Approve the shared semantic model ${name} as "${by}"? Every problem that uses it is affected. Type approve: `)).trim().toLowerCase() !== 'approve') { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+      const r = sem.approveShared(ws, name, { by, channel: 'cli', findings });
+      emit(ctx, { ok: r.ok, message: r.message }, r.message);
+      return r.ok ? EXIT.OK : EXIT.FAILED;
+    }
+  } finally { cfm.dispose(); }
+  throw new CliError(EXIT.USAGE, 'semantic takes show, check <name>, draft <name>, compose <name>, resolve <composite> or approve <name>.');
 }
 
 /** GOV: personal data in the problem's sources, and a person's classification of a column. */

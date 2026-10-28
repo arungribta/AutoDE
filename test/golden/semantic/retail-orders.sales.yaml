@@ -1,0 +1,209 @@
+name: sales
+tables:
+  - name: orders
+    base_table:
+      database: RETAIL
+      schema: shop
+      table: orders
+    primary_key:
+      columns:
+        - order_id
+    dimensions:
+      - name: order_id
+        expr: order_id
+        data_type: BIGINT
+        unique: true
+      - name: customer_id
+        expr: customer_id
+        data_type: INTEGER
+      - name: status
+        expr: status
+        data_type: VARCHAR(20)
+      - name: channel
+        expr: channel
+        data_type: VARCHAR(20)
+      - name: currency
+        expr: currency
+        data_type: VARCHAR(3)
+      - name: promotion_id
+        expr: promotion_id
+        data_type: INTEGER
+    time_dimensions:
+      - name: order_ts
+        expr: order_ts
+        data_type: TIMESTAMP
+      - name: updated_at
+        expr: updated_at
+        data_type: TIMESTAMP
+    facts:
+      - name: shipping_amount
+        expr: shipping_amount
+        data_type: DECIMAL(10,2)
+      - name: tax_amount
+        expr: tax_amount
+        data_type: DECIMAL(10,2)
+  - name: order_items
+    base_table:
+      database: RETAIL
+      schema: shop
+      table: order_items
+    primary_key:
+      columns:
+        - order_item_id
+    dimensions:
+      - name: order_item_id
+        expr: order_item_id
+        data_type: BIGINT
+        unique: true
+      - name: order_id
+        expr: order_id
+        data_type: BIGINT
+      - name: product_id
+        expr: product_id
+        data_type: INTEGER
+    time_dimensions:
+      - name: created_at
+        expr: created_at
+        data_type: TIMESTAMP
+    facts:
+      - name: quantity
+        expr: quantity
+        data_type: INTEGER
+      - name: unit_price
+        expr: unit_price
+        data_type: DECIMAL(10,2)
+      - name: discount_amount
+        expr: discount_amount
+        data_type: DECIMAL(10,2)
+    metrics:
+      - name: net_revenue
+        description: A-metric-net-revenue. Use with the filter net_revenue_scope.
+        expr: SUM(order_items.quantity * order_items.unit_price -
+          COALESCE(order_items.discount_amount, 0)) - SUM(refunds.amount)
+    filters:
+      - name: net_revenue_scope
+        description: What net_revenue counts.
+        expr: orders.status <> 'CANCELLED'
+  - name: refunds
+    base_table:
+      database: RETAIL
+      schema: shop
+      table: refunds
+    primary_key:
+      columns:
+        - refund_id
+    dimensions:
+      - name: refund_id
+        expr: refund_id
+        data_type: BIGINT
+        unique: true
+      - name: order_id
+        expr: order_id
+        data_type: BIGINT
+      - name: order_item_id
+        expr: order_item_id
+        data_type: BIGINT
+      - name: reason
+        expr: reason
+        data_type: VARCHAR(100)
+    time_dimensions:
+      - name: refunded_at
+        expr: refunded_at
+        data_type: TIMESTAMP
+    facts:
+      - name: amount
+        expr: amount
+        data_type: DECIMAL(10,2)
+  - name: shop_customers
+    base_table:
+      database: RETAIL
+      schema: shop
+      table: customers
+    primary_key:
+      columns:
+        - customer_id
+    dimensions:
+      - name: customer_id
+        expr: customer_id
+        data_type: INTEGER
+        unique: true
+      - name: email
+        expr: email
+        data_type: VARCHAR(255)
+      - name: phone
+        expr: phone
+        data_type: VARCHAR(32)
+      - name: first_name
+        expr: first_name
+        data_type: VARCHAR(100)
+      - name: last_name
+        expr: last_name
+        data_type: VARCHAR(100)
+      - name: marketing_opt_in
+        expr: marketing_opt_in
+        data_type: BOOLEAN
+      - name: country_code
+        expr: country_code
+        data_type: VARCHAR(2)
+    time_dimensions:
+      - name: created_at
+        expr: created_at
+        data_type: TIMESTAMP
+      - name: updated_at
+        expr: updated_at
+        data_type: TIMESTAMP
+  - name: crm_customers
+    base_table:
+      database: RETAIL
+      schema: crm
+      table: customers
+    primary_key:
+      columns:
+        - cust_no
+    dimensions:
+      - name: cust_no
+        expr: cust_no
+        data_type: VARCHAR(20)
+        unique: true
+      - name: shop_customer_id
+        expr: shop_customer_id
+        data_type: INTEGER
+      - name: full_name
+        expr: full_name
+        data_type: VARCHAR(200)
+      - name: email
+        expr: email
+        data_type: VARCHAR(255)
+      - name: phone
+        expr: phone
+        data_type: VARCHAR(32)
+      - name: segment_code
+        expr: segment_code
+        data_type: VARCHAR(10)
+      - name: lifecycle_stage
+        expr: lifecycle_stage
+        data_type: VARCHAR(20)
+    time_dimensions:
+      - name: created_date
+        expr: created_date
+        data_type: DATE
+      - name: last_modified
+        expr: last_modified
+        data_type: TIMESTAMP
+relationships:
+  - name: order_items_to_orders
+    left_table: order_items
+    right_table: orders
+    relationship_columns:
+      - left_column: order_id
+        right_column: order_id
+    join_type: left_outer
+    relationship_type: many_to_one
+  - name: crm_customers_to_shop_customers
+    left_table: crm_customers
+    right_table: shop_customers
+    relationship_columns:
+      - left_column: shop_customer_id
+        right_column: customer_id
+    join_type: left_outer
+    relationship_type: one_to_one

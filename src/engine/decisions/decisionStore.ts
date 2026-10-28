@@ -29,6 +29,8 @@ export type DecisionKind =
   | 'gate'
   /** A runbook: platform changes checked by the engine and run by the runner once approved (v0.45.6). */
   | 'runbook'
+  /** A shared semantic model or a composite, written by an agent (C5a); approving a shared model's proposal approves that revision. */
+  | 'semantic_model'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 

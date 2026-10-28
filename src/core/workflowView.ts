@@ -221,6 +221,7 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
       if (i.opens.view === 'runbook' && i.opens.ref) await vscode.commands.executeCommand('autoDataEngineeringHub.openRunbook', i.opens.ref);
       else if (i.opens.view === 'workflow' || i.opens.view === 'workflow-stage') WorkflowPanel.show(context, host, refresh, i.opens.ref);
       else if (i.opens.view === 'inbox') { await vscode.commands.executeCommand('autoDataEngineeringHubSidebar.focus'); void vscode.window.showInformationMessage('The facts wait in the Context Inbox, in the AutoDE panel.'); }
+      else if (i.opens.view === 'file' && i.opens.ref) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(i.opens.ref));
       else if (i.opens.view === 'decision' && i.opens.ref && scope) await vscode.window.showTextDocument(vscode.Uri.file(path.join(layoutPath(scope.workspaceRoot, 'decisions'), `${i.opens.ref}.yaml`)));
     }),
     vscode.commands.registerCommand('autoDataEngineeringHub.workflowRun', act('run')),

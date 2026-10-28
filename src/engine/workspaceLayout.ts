@@ -59,7 +59,9 @@ export const LAYOUT = {
   derived: [AUTODE_DIR, 'local', 'derived'],
   graph: [AUTODE_DIR, 'local', 'derived', 'graph.json'],
   catalog: [AUTODE_DIR, 'local', 'catalog'],
-  schemaGraph: [AUTODE_DIR, 'local', 'schema-graph.json']
+  schemaGraph: [AUTODE_DIR, 'local', 'schema-graph.json'],
+  /** The semantic layer's metadata (C5a): backing facts, approvals, the revisions composites were resolved from. */
+  semantic: [AUTODE_DIR, 'semantic']
 } as const;
 
 export type LayoutKey = keyof typeof LAYOUT;

@@ -113,6 +113,12 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 
 | Command | |
 |---|---|
+| `autode semantic show` | The shared semantic models (approved, changed since approved, unapproved, invalid) and the active problem's composites (resolved, stale with why, unresolved). |
+| `autode semantic draft <name> [--tables t1,t2] [--database <db>]` | Drafts a shared model in `autode-output/semantic/<name>.yaml` from confirmed facts and the estate, for the tables given or those the active problem names. Never overwrites an existing model. |
+| `autode semantic compose <name> --models <m1,m2>` | Starts a composite of the active problem over shared models. |
+| `autode semantic resolve <composite>` | Resolves it into `<name>.resolved.yaml` and prints the diff. Refused, with the reasons, on a missing model, a collision or a redefinition. |
+| `autode semantic check <name>` | Checks a shared model or a composite against the estate and the facts; exit 1 on an error. |
+| `autode semantic approve <name>` | A person approves a shared model (workspace-wide, at its current version) or a composite (in its problem). Needs a terminal; type `approve` (`y` for a composite in exploration mode). |
 | `autode coverage` | The completeness checklist: per table in scope and metric the specification names, what is known, proposed, assumed, a candidate or missing, and the action for each. Deterministic; records nothing. |
 | `autode capture candidates [--connection <id>] [--record]` | Candidate keys, grain, foreign keys, change columns and personal data (by value shape) from the data, each checked by a read-only, aggregate-only probe on the connection or the pack's samples. `--record` records those that passed as proposed facts, already verified. |
 

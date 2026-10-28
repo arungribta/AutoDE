@@ -3564,42 +3564,6 @@ async function main() {
     assert.strictEqual(mgr.getContext().mappings[0].id, 'm2');
   });
 
-  await test('SemanticLayerManager.build() captures the live shared graph\'s current content/counts as a spec-pinned snapshot, and archives the prior graph content (not just metadata) on revising an approved predecessor', async () => {
-    const mock = mappingFsMapMock();
-    try { delete require.cache[require.resolve('../dist/context/SemanticLayerManager.js')]; } catch { /* not loaded */ }
-    try { delete require.cache[require.resolve('../dist/context/GraphManager.js')]; } catch { /* not loaded */ }
-    const { SemanticLayerManager } = withMock(mock, () => require('../dist/context/SemanticLayerManager.js'));
-    const { GraphManager } = withMock(mock, () => require('../dist/context/GraphManager.js'));
-
-    const graph = new GraphManager();
-    await graph.addNode({ id: 't1', type: 'table', label: 'orders', database: 'db', schema: 's', fqn: 'db.s.orders', isView: false, metadata: {}, version: 1 });
-    await graph.addNode({ id: 'c1', type: 'column', label: 'order_id', dataType: 'INT', isNullable: false, isPrimaryKey: true, isForeignKey: false, metadata: {}, version: 1 });
-    await graph.addEdge({ id: 'e1', source: 't1', target: 'c1', type: 'contains' });
-
-    const mgr = new SemanticLayerManager({ fsPath: '/ws' }, graph, () => {});
-    await withMock(mock, () => mgr.initialize());
-    assert.strictEqual(mgr.getSnapshot(), undefined);
-
-    const built = await withMock(mock, () => mgr.build('bps-1', 1));
-    assert.strictEqual(built.nodeCount, 2);
-    assert.strictEqual(built.edgeCount, 1);
-    assert.strictEqual(built.version, 1);
-
-    const graphContent = await withMock(mock, () => mgr.getGraphContent());
-    assert.strictEqual(graphContent.nodes.length, 2);
-    assert.strictEqual(graphContent.edges.length, 1);
-
-    await withMock(mock, () => mgr.save({ ...mgr.getSnapshot(), status: 'approved' }));
-    assert.strictEqual(mgr.getSnapshot().version, 1, 'approving a not-yet-approved snapshot must not bump the version');
-
-    await graph.addNode({ id: 't2', type: 'table', label: 'customers', database: 'db', schema: 's', fqn: 'db.s.customers', isView: false, metadata: {}, version: 1 });
-    const rebuilt = await withMock(mock, () => mgr.build('bps-1', 1));
-    assert.strictEqual(rebuilt.version, 2, 'revising an approved predecessor bumps the version');
-    assert.strictEqual(rebuilt.nodeCount, 3, 'the rebuild captures the graph\'s current (updated) content');
-    assert.strictEqual(mock.store.has('/ws/context/history/semantic-layer.spec1.v1.yaml'), true, 'the approved v1 predecessor\'s metadata was archived');
-    assert.strictEqual(mock.store.has('/ws/context/history/semantic-layer.spec1.v1.json'), true, 'the approved v1 predecessor\'s captured graph content was archived too, not just its metadata');
-  });
-
   // ── Step 7: Governance layer (provenance/reliability, staleness, re-verify) ──
 
   await test('parseCsv()/parseDdl() tag every node reliability: "best-effort-inferred" (Step 7) — a structural file parse is a real fact about the file, but has never been checked against the live source', () => {
@@ -3733,18 +3697,17 @@ async function main() {
     assert.strictEqual(store.get(file), ': : not yaml [', 'the in-progress external edit is not overwritten');
   });
 
-  await test('v0.25.0: Source/Target/Mapping/Semantic-layer managers reload external edits and refuse stale saves', async () => {
+  await test('v0.25.0: Source/Target/Mapping managers reload external edits and refuse stale saves', async () => {
     const cases = [
       ['../dist/context/SourceContextManager.js', 'SourceContextManager', 'source-context.yaml', { specId: 's', specVersion: 1, status: 'pending', sources: [], answers: {} }],
       ['../dist/context/TargetContextManager.js', 'TargetContextManager', 'target-context.yaml', { specId: 's', specVersion: 1, status: 'pending', answers: {} }],
-      ['../dist/context/MappingContextManager.js', 'MappingContextManager', 'mapping-context.yaml', { specId: 's', specVersion: 1, status: 'pending', mappings: [] }],
-      ['../dist/context/SemanticLayerManager.js', 'SemanticLayerManager', 'semantic-layer.yaml', { specId: 's', specVersion: 1, status: 'pending', nodeCount: 0, edgeCount: 0 }]
+      ['../dist/context/MappingContextManager.js', 'MappingContextManager', 'mapping-context.yaml', { specId: 's', specVersion: 1, status: 'pending', mappings: [] }]
     ];
     for (const [rel, cls, fileName, record] of cases) {
       const { mock, store } = revisionFsMock();
       const Ctor = loadFresh(mock, rel)[cls];
       const { RevisionConflictError } = withMock(mock, () => require('../dist/engine/context/contextStore.js'));
-      const mgr = cls === 'SemanticLayerManager' ? new Ctor({ fsPath: '/ws/p1' }, { serializeSnapshot: () => ({ nodes: [], edges: [] }) }, () => {}) : new Ctor({ fsPath: '/ws/p1' }, () => {});
+      const mgr = new Ctor({ fsPath: '/ws/p1' }, () => {});
       await withMock(mock, () => mgr.initialize());
       await withMock(mock, () => mgr.save(record));
       const file = `/ws/p1/context/${fileName}`;
@@ -5847,7 +5810,8 @@ async function main() {
     nodeFs.writeFileSync(nodePath.join(ctx, 'local', 'active-problem.json'), JSON.stringify({ problemId: 'retail-ab12' }));
     nodeFs.writeFileSync(nodePath.join(prob, 'spec', 'business-problem.yaml'), 'id: bps-1\nversion: 1\nstatus: draft\nproblemStatement: Retail analytics\n');
     nodeFs.writeFileSync(nodePath.join(prob, 'spec', 'pipeline.yaml'), JSON.stringify(samplePipelineSpec()));
-    nodeFs.writeFileSync(nodePath.join(prob, 'context', 'semantic-layer.yaml'), `notes: connect with password=hunter2 and token: ${['gh', 'p_', 'q'.repeat(36)].join('')}\n`);
+    nodeFs.mkdirSync(nodePath.join(ws, 'autode-output', 'semantic'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ws, 'autode-output', 'semantic', 'sales.yaml'), `name: sales\ndescription: connect with password=hunter2 and token ${['gh', 'p_', 'q'.repeat(36)].join('')}\ntables:\n  - name: orders\n    base_table: { database: DB, schema: shop, table: orders }\n`);
     // Ledger: a small estate, mirrored the way the extension mirrors it.
     const { parseDdl } = fresh('../dist/engine/context/fileIngestion.js');
     const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
@@ -5897,19 +5861,19 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage'];
-      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates'].sort());
+      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
       assert.ok(prompts.includes('autode_interview_data-flow') && prompts.includes('autode_interview_requirements-discovery') && prompts.includes('autode_extract_assertions'), prompts.join());
       assert.deepStrictEqual(prompts.filter((p) => p.startsWith('autode_skill_')), ['autode_skill_reviewed-one'], 'unreviewed and unmigrated pre-S2 skills are not exposed');
       const uris = (await client.listResources()).resources.map((r) => r.uri);
-      for (const u of ['autode://spec/business-problem', 'autode://spec/pipeline', 'autode://context/semantic-layer', 'autode://primitives/dedup']) assert.ok(uris.includes(u), u);
+      for (const u of ['autode://spec/business-problem', 'autode://spec/pipeline', 'autode://semantic/shared/sales', 'autode://primitives/dedup']) assert.ok(uris.includes(u), u);
       assert.ok(!uris.includes('autode://context/source'), 'documents that do not exist are not listed');
       assert.deepStrictEqual((await client.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate), ['autode://primitives/{kind}']);
     } finally { await client.close(); f.done(); }
@@ -5969,6 +5933,11 @@ async function main() {
       autode_skills_analyze: [{ source: 'incoming' }, { source: '' }],
       autode_governance_candidates: [{ tables: ['shop.customers'] }, { tables: [''] }],
       autode_capture_coverage: [{}, { x: 1 }],
+      autode_semantic_list: [{}, { x: 1 }],
+      autode_semantic_check: [{ name: 'sales' }, { name: '' }],
+      autode_semantic_draft: [{ name: 'sales' }, { name: '1bad' }],
+      autode_semantic_resolve: [{ name: 'revenue' }, { name: '' }],
+      autode_propose_semantic_model: [{ semanticModel: { scope: 'shared', name: 'sales', content: 'name: sales' } }, { semanticModel: { scope: 'global', name: 'sales', content: 'x' } }],
       autode_find_candidates: [{}, { connectionId: '' }],
       autode_review_session: [{ turns: [{ ref: 'chat:a#0', text: 'order_id is unique' }] }, { turns: [{ ref: '' , text: 'x' }] }],
       autode_record_assumption: [{ kind: 'key', subject: ['shop.orders'], predicate: 'primary', value: ['order_id'], statement: 'order_id is the key', model: 'm', reason: 'r' }, { kind: 'key', subject: [], predicate: 'primary', value: [], statement: 's', model: 'm', reason: 'r' }],
@@ -6076,7 +6045,7 @@ async function main() {
 
       const spec = await client.readResource({ uri: 'autode://spec/business-problem' });
       assert.ok(/Retail analytics/.test(spec.contents[0].text) && /^[0-9a-f]{64}$/.test(spec.contents[0]._meta.revision));
-      const sem = await client.readResource({ uri: 'autode://context/semantic-layer' });
+      const sem = await client.readResource({ uri: 'autode://semantic/shared/sales' });
       assert.ok(!/hunter2|qqqqqqqqqq/.test(sem.contents[0].text), sem.contents[0].text);
       const prim = await client.readResource({ uri: 'autode://primitives/dedup' });
       assert.ok(JSON.parse(prim.contents[0].text).paramSchema.required.includes('partitionByColumns'));
@@ -7505,7 +7474,7 @@ async function main() {
       const written = await cli(['compile', '--dialect', 'postgres', ...W, '--out', out, '--json']);
       assert.strictEqual(written.code, 0, written.err);
       assert.ok(written.json().written.length > 0 && written.json().written.every((x) => nodeFs.existsSync(x) && x.startsWith(out)));
-      assert.ok(!nodeFs.existsSync(nodePath.join(f.ws, 'autode-output')), 'nothing written into the workspace');
+      assert.ok(!nodeFs.existsSync(nodePath.join(f.ws, 'autode-output', 'retail-ab12')), 'nothing written into the workspace (its shared semantic model is part of the fixture)');
       // grounding: known tables pass, unknown ones fail.
       nodeFs.writeFileSync(nodePath.join(out, 'good.sql'), 'SELECT o.order_id, c.email FROM shop.orders o JOIN shop.customers c ON o.customer_id = c.customer_id');
       nodeFs.writeFileSync(nodePath.join(out, 'bad.sql'), 'SELECT x FROM shop.refunds');
@@ -7579,7 +7548,8 @@ async function main() {
       const packed = pack(dir, tmp);
       assert.ok(nodeFs.existsSync(packed.tarball));
       assert.ok(packed.size < 600 * 1024, `tarball ${Math.round(packed.size / 1024)} KB (budget 600 KB)`);
-      assert.ok(packed.unpackedSize < 2 * 1024 * 1024, `unpacked ${Math.round(packed.unpackedSize / 1024)} KB (budget 2 MB)`);
+      // The development build is not minified (the published one is, at well under half): this budget guards growth, not the shipped size.
+      assert.ok(packed.unpackedSize < 2.5 * 1024 * 1024, `unpacked ${Math.round(packed.unpackedSize / 1024)} KB (budget 2.5 MB)`);
       for (const want of ['package.json', 'README.md', 'LICENSE', 'dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'media/autode-icon-64.png', 'skills/autode-de-interview-requirements/SKILL.md']) assert.ok(packed.files.includes(want), `missing ${want}`);
       for (const rel of packed.files) {
         const text = nodeFs.readFileSync(nodePath.join(dir, rel), 'utf8');
@@ -10804,6 +10774,267 @@ async function main() {
       assert.deepStrictEqual([hard.json().assumptions.length, hard.json().modelOnly.length], [1, 1]);
       const back = await cli(['problems', 'mode', 'governed', ...W], { interactive: true, answers: ['governed'] });
       assert.ok(back.code === 0 && /## Assumptions \(1\)[\s\S]*## Model-only facts \(1\)/.test(back.out), back.out);
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.49.0: C5a — the semantic layer: shared models, composites, checks, the editor ──
+
+  const c5a = {
+    graph() { return c4c.graph(); },
+    golden() {
+      const { createSubjectResolver } = require('../dist/engine/context/projection.js');
+      const { parseYaml } = require('../dist/engine/context/Yaml.js');
+      const resolve = createSubjectResolver(c5a.graph());
+      return parseYaml(c4a.read('golden/assertions.yaml')).assertions.map((a) => ({ ...a, subject: a.subject.map((s) => resolve(s) ?? s), statement: a.statement ?? a.id, createdBy: 'golden', createdAt: '', validFrom: '' }));
+    },
+    ws() {
+      const os = require('node:os'); const fs = require('node:fs'); const p = require('node:path');
+      const ws = fs.mkdtempSync(p.join(os.tmpdir(), 'autode-sem-'));
+      return { ws, shared: (name, text) => { fs.mkdirSync(p.join(ws, 'autode-output', 'semantic'), { recursive: true }); fs.writeFileSync(p.join(ws, 'autode-output', 'semantic', `${name}.yaml`), text); }, composite: (problem, name, text) => { fs.mkdirSync(p.join(ws, 'autode-output', problem, 'semantic'), { recursive: true }); fs.writeFileSync(p.join(ws, 'autode-output', problem, 'semantic', `${name}.yaml`), text); }, done: () => fs.rmSync(ws, { recursive: true, force: true }) };
+    },
+    sales: [
+      'name: sales',
+      'tables:',
+      '  - name: orders',
+      '    base_table: { database: RETAIL, schema: shop, table: orders }',
+      '    primary_key: { columns: [order_id] }',
+      '    dimensions:',
+      '      - { name: order_id, expr: order_id, data_type: BIGINT, unique: true }',
+      '      - { name: channel, expr: channel }',
+      '      - { name: customer_id, expr: customer_id }',
+      '    time_dimensions:',
+      '      - { name: order_ts, expr: order_ts }',
+      '    facts:',
+      '      - { name: tax_amount, expr: tax_amount }',
+      '    metrics:',
+      '      - { name: total_tax, expr: SUM(tax_amount) }',
+      '  - name: customers',
+      '    base_table: { database: RETAIL, schema: shop, table: customers }',
+      '    primary_key: { columns: [customer_id] }',
+      '    dimensions:',
+      '      - { name: customer_id, expr: customer_id }',
+      'relationships:',
+      '  - name: orders_to_customers',
+      '    left_table: orders',
+      '    right_table: customers',
+      '    relationship_columns: [{ left_column: customer_id, right_column: customer_id }]',
+      '    join_type: left_outer',
+      '    relationship_type: many_to_one',
+      ''
+    ].join('\n'),
+    customer: [
+      'name: customer',
+      'tables:',
+      '  - name: customers',
+      '    base_table: { database: RETAIL, schema: shop, table: customers }',
+      '    primary_key: { columns: [customer_id] }',
+      '    dimensions:',
+      '      - { name: customer_id, expr: customer_id }',
+      '      - { name: country_code, expr: country_code }',
+      '    metrics:',
+      '      - { name: customer_count, expr: COUNT(DISTINCT customer_id) }',
+      ''
+    ].join('\n')
+  };
+
+  await test('v0.49.0: shared models are Snowflake semantic model YAML — unknown keys refused (AutoDE\'s metadata goes beside them), names unique, relationships between its tables; serialization is fixed-order and byte-stable', () => {
+    const M = require('../dist/engine/semantic/model.js');
+    const ok = M.parseSemanticModel(c5a.sales);
+    assert.deepStrictEqual([ok.errors, ok.model.tables.map((t) => t.name)], [[], ['orders', 'customers']]);
+    const bad = M.parseSemanticModel(c5a.sales.replace('    primary_key: { columns: [order_id] }', '    primary_key: { columns: [order_id] }\n    autode_backing: [F1]'));
+    assert.match(bad.errors.join(), /"autode_backing" is not a Snowflake semantic model key[\s\S]*\.autode\/semantic/);
+    assert.match(M.parseSemanticModel(c5a.sales.replace('      - { name: channel, expr: channel }', '      - { name: channel, expr: channel }\n      - { name: channel, expr: currency }')).errors.join(), /"channel" is defined twice/);
+    assert.match(M.parseSemanticModel(c5a.sales.replace('right_table: customers', 'right_table: clients')).errors.join(), /no table "clients"/);
+    assert.match(M.parseSemanticModel(c5a.sales.replace('    base_table: { database: RETAIL, schema: shop, table: customers }', '')).errors.join(), /"base_table" is required/);
+    const text = M.serializeSemanticModel(ok.model);
+    assert.strictEqual(M.serializeSemanticModel(M.parseSemanticModel(text).model), text, 'stable');
+    assert.ok(text.indexOf('base_table') < text.indexOf('primary_key') && text.indexOf('primary_key') < text.indexOf('dimensions'));
+    assert.strictEqual(M.semanticRevision(text), M.semanticRevision(text.replace(/\n/g, '\r\n')), 'line endings don\'t change the revision');
+  });
+
+  await test('v0.49.0: composites — resolve byte-identically twice; a redefinition of a shared expression, key or join is refused; a collision between shared models is named; changing a shared model makes the composite stale until resolved again, with the diff', () => {
+    const fs = require('node:fs');
+    const C = require('../dist/engine/semantic/composite.js');
+    const S = fresh('../dist/engine/semantic/store.js');
+    const w = c5a.ws();
+    try {
+      w.shared('sales', c5a.sales); w.shared('customer', c5a.customer);
+      const comp = ['autode: semantic-composite/1', 'name: revenue_by_channel', 'description: Daily revenue by channel.', 'uses:', '  - model: sales', '    metrics: [total_tax]', '  - model: customer', '    tables: [customers]', 'add:', '  metrics:', '    - { table: orders, name: tax_per_order, expr: "SUM(tax_amount) / COUNT(order_id)" }', 'describe:', '  orders.channel: { synonyms: [sales channel] }', ''].join('\n');
+      w.composite('p1', 'revenue_by_channel', comp);
+      const r1 = S.resolveCompositeFile(w.ws, 'p1', 'revenue_by_channel');
+      assert.ok(r1.ok, r1.errors.join());
+      const first = fs.readFileSync(r1.resolvedFile, 'utf8');
+      const r2 = S.resolveCompositeFile(w.ws, 'p1', 'revenue_by_channel');
+      assert.deepStrictEqual([r2.changed, fs.readFileSync(r2.resolvedFile, 'utf8') === first], [false, true], 'byte-identical');
+      assert.match(first, /^# Resolved by AutoDE from the composite revenue_by_channel[\s\S]*# Shared models: customer@[0-9a-f]{12}, sales@[0-9a-f]{12}\n/);
+      const resolved = require('../dist/engine/semantic/model.js').parseSemanticModel(first).model;
+      const customers = resolved.tables.find((t) => t.name === 'customers');
+      assert.deepStrictEqual(customers.metrics.map((m) => m.name), ['customer_count'], 'the same table from two models: identical, merged');
+      const orders = resolved.tables.find((t) => t.name === 'orders');
+      assert.deepStrictEqual([orders.metrics.map((m) => m.name), orders.dimensions.find((d) => d.name === 'channel').synonyms], [['total_tax', 'tax_per_order'], ['sales channel']]);
+      assert.strictEqual(S.readComposite(w.ws, 'p1', 'revenue_by_channel').status, 'resolved');
+      // Redefinitions are refused.
+      const load = S.sharedLoader(w.ws);
+      const redefine = C.parseComposite(comp.replace('name: tax_per_order, expr: "SUM(tax_amount) / COUNT(order_id)"', 'name: total_tax, expr: "SUM(tax_amount) * 2"')).composite;
+      assert.match(C.resolveComposite(redefine, load).errors.join(), /total_tax: refused — orders\.total_tax is already defined by the shared model sales[\s\S]*new metric with its own name/);
+      assert.match(C.parseComposite(comp.replace('add:\n', 'add:\n  relationships: []\n')).errors.join(), /add\.relationships: refused[\s\S]*joins and columns belong to the shared model/);
+      assert.match(C.parseComposite(comp.replace('orders.channel: { synonyms: [sales channel] }', 'orders.channel: { expr: currency }')).errors.join(), /describe\.orders\.channel\.expr: refused/);
+      // A collision is named.
+      w.shared('customer', c5a.customer.replace('primary_key: { columns: [customer_id] }', 'primary_key: { columns: [country_code] }'));
+      assert.match(S.resolveCompositeFile(w.ws, 'p1', 'revenue_by_channel').errors.join(), /collision: table "customers" is defined differently by sales and customer \(primary_key \(customer_id\) vs \(country_code\)\)/);
+      w.shared('customer', c5a.customer);
+      // Changing a shared model makes the composite stale.
+      w.shared('sales', c5a.sales.replace('expr: SUM(tax_amount)', 'expr: SUM(tax_amount + 0)'));
+      const stale = S.readComposite(w.ws, 'p1', 'revenue_by_channel');
+      assert.deepStrictEqual([stale.status, /the shared model sales changed/.test(stale.staleBecause.join())], ['stale', true]);
+      assert.ok(S.semanticWaiting(w.ws, 'p1').some((x) => x.key === 'semantic:p1/revenue_by_channel' && /Resolve/.test(x.title)));
+      const again = S.resolveCompositeFile(w.ws, 'p1', 'revenue_by_channel');
+      assert.ok(again.changed && /\+ .*SUM\(tax_amount \+ 0\)/.test(again.diff), again.diff);
+      assert.strictEqual(S.readComposite(w.ws, 'p1', 'revenue_by_channel').status, 'resolved');
+    } finally { w.done(); }
+  });
+
+  await test('v0.49.0: drafting from the reference problem\'s facts gives the expected model (golden file); the checks find a missing column and a relationship that contradicts a key', () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const D = require('../dist/engine/semantic/draft.js');
+    const M = require('../dist/engine/semantic/model.js');
+    const K = require('../dist/engine/semantic/checks.js');
+    const graph = c5a.graph(); const assertions = c5a.golden();
+    const ids = ['shop.orders', 'shop.order_items', 'shop.refunds', 'shop.customers', 'crm.customers'].map((t) => `obj:${t.split('.')[0]}/prod/${t}`);
+    const d = D.draftSemanticModel({ graph, assertions, tableIds: ids, name: 'sales', database: 'RETAIL' });
+    const text = M.serializeSemanticModel(d.model);
+    const golden = p.join(__dirname, 'golden', 'semantic', 'retail-orders.sales.yaml');
+    if (process.env.AUTODE_UPDATE_GOLDEN === '1') { fs.mkdirSync(p.dirname(golden), { recursive: true }); fs.writeFileSync(golden, text); }
+    assert.strictEqual(text, fs.readFileSync(golden, 'utf8').replace(/\r\n/g, '\n'), 'matches the golden draft (AUTODE_UPDATE_GOLDEN=1 to update after review)');
+    assert.deepStrictEqual(M.validateSemanticModel(JSON.parse(JSON.stringify(d.model))).errors, [], 'a valid Snowflake model');
+    assert.deepStrictEqual(d.backing['relationship:order_items_to_orders'], ['A-rel-items-orders']);
+    assert.deepStrictEqual(d.backing['order_items.net_revenue'], ['A-metric-net-revenue']);
+    assert.ok(d.notes.some((n) => /retention_90d: its fact defines it in words only/.test(n)), d.notes.join());
+    assert.ok(!d.model.relationships.some((r) => /support_tickets/.test(r.name)), 'trap 4: no invented join');
+    const clean = K.checkSemanticModel(d.model, { graph, assertions });
+    assert.deepStrictEqual(clean.filter((f) => f.severity === 'error'), [], JSON.stringify(clean));
+    // A missing column, and a join whose "one" side isn't the key.
+    const broken = JSON.parse(JSON.stringify(d.model));
+    broken.tables.find((t) => t.name === 'orders').dimensions.push({ name: 'region', expr: 'region' });
+    broken.relationships.push({ name: 'orders_to_items', left_table: 'orders', right_table: 'order_items', relationship_columns: [{ left_column: 'order_id', right_column: 'order_id' }], relationship_type: 'many_to_one' });
+    broken.tables.find((t) => t.name === 'order_items').metrics[0].expr = 'SUM(order_items.quantity)';
+    const f = K.checkSemanticModel(broken, { graph, assertions }).filter((x) => x.severity === 'error').map((x) => `${x.where}: ${x.message}`);
+    assert.ok(f.some((x) => /^orders\.region: region isn't a column of shop\.orders/.test(x)), f.join('\n'));
+    assert.ok(f.some((x) => /^relationship:orders_to_items: contradicts the key of order_items \(order_item_id\)/.test(x)), f.join('\n'));
+    assert.ok(f.some((x) => /^order_items\.net_revenue: fact A-metric-net-revenue defines net_revenue as/.test(x)), 'a metric its fact defines otherwise');
+    assert.deepStrictEqual(K.exprIdentifiers("SUM(CASE WHEN o.status <> 'CANCELLED' THEN amount ELSE 0 END)"), ['o.status', 'amount']);
+  });
+
+  await test('v0.49.0: approval and the editor — a shared model is approved by a person at its revision (refused while a check fails; an edit makes it "changed" and waiting); an agent\'s proposal, once approved, writes and approves it; a composite in exploration approves with warnings; the editor\'s state, form edits and an add-only draft merge', async () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const S = fresh('../dist/engine/semantic/store.js');
+    const E = fresh('../dist/engine/semantic/editorState.js');
+    const P = fresh('../dist/engine/decisions/proposals.js');
+    const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+    const M = fresh('../dist/engine/documents/problemMode.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const ctx = (ws) => ({ workspaceRoot: ws, graph: c5a.graph(), assertions: c5a.golden() });
+    const w = c5a.ws();
+    try {
+      w.shared('sales', c5a.sales);
+      const s1 = E.semanticEditorState(p.join(w.ws, 'autode-output', 'semantic', 'sales.yaml'), c5a.sales, ctx(w.ws));
+      assert.deepStrictEqual([s1.kind, s1.name, s1.shared.status], ['shared', 'sales', 'unapproved']);
+      const err = { severity: 'error', where: 'orders', message: 'x' };
+      assert.strictEqual(S.approveShared(w.ws, 'sales', { by: 'ana', channel: 'cli', findings: [err] }).ok, false, 'a failing check refuses');
+      assert.ok(S.approveShared(w.ws, 'sales', { by: 'ana', channel: 'cli', findings: [] }).ok);
+      assert.strictEqual(S.readShared(w.ws, 'sales').status, 'approved');
+      assert.ok(fs.existsSync(p.join(w.ws, '.autode', 'semantic', 'shared', 'sales.yaml')) && !/approved/.test(fs.readFileSync(p.join(w.ws, 'autode-output', 'semantic', 'sales.yaml'), 'utf8')), 'metadata beside the model, never in it');
+      // Form edits: new text for the file (undoable in the editor).
+      let text = E.applySemanticEdit(c5a.sales, { op: 'set', table: 'orders', list: 'dimensions', name: 'channel', field: 'synonyms', value: 'sales channel, route' });
+      text = E.applySemanticEdit(text, { op: 'add', table: 'orders', list: 'metrics', name: 'order_count', expr: 'COUNT(order_id)' });
+      text = E.applySemanticEdit(text, { op: 'remove', table: 'orders', list: 'facts', name: 'tax_amount' });
+      assert.match(text, /synonyms:\n\s+- sales channel\n\s+- route/);
+      assert.ok(/order_count/.test(text) && !/name: tax_amount/.test(text));
+      assert.throws(() => E.applySemanticEdit(text, { op: 'add', table: 'orders', list: 'metrics', name: 'channel', expr: 'x' }), /exists/);
+      w.shared('sales', text);
+      assert.strictEqual(S.readShared(w.ws, 'sales').status, 'changed');
+      assert.ok(S.semanticWaiting(w.ws).some((x) => x.key === 'semantic:sales' && /changed since ana approved it/.test(x.detail)));
+      // Draft from knowledge merges add-only.
+      const d = require('../dist/engine/semantic/draft.js').draftSemanticModel({ graph: c5a.graph(), assertions: c5a.golden(), tableIds: ['obj:shop/prod/shop.orders', 'obj:shop/prod/shop.order_items'], name: 'sales', database: 'RETAIL' });
+      const merged = E.mergeDraft(text, d.model);
+      assert.ok(merged.added.includes('order_items') && merged.added.includes('orders.currency') && merged.added.includes('relationship order_items_to_orders'), merged.added.join());
+      assert.ok(/order_count/.test(merged.text) && /- sales channel/.test(merged.text), 'nothing written is changed');
+      // An agent's proposal: validated, then applied once a person approves — writing and approving it.
+      const root = layoutPath(w.ws, 'problems', 'p1');
+      fs.mkdirSync(root, { recursive: true });
+      const store = new DecisionStore(w.ws);
+      assert.throws(() => P.propose(store, { workspaceRoot: w.ws, problemRoot: root, problemId: 'p1' }, 'semantic_model', { scope: 'shared', name: 'customer', content: 'name: customer\ntables: []\n' }, { proposedBy: { host: 'mcp' } }), /tables/);
+      const dec = P.propose(store, { workspaceRoot: w.ws, problemRoot: root, problemId: 'p1' }, 'semantic_model', { scope: 'shared', name: 'customer', content: c5a.customer }, { proposedBy: { host: 'mcp', client: 'test' } });
+      assert.deepStrictEqual([dec.stakes, dec.subject.document, dec.subject.revision], ['high', 'semantic:shared/customer', 'none']);
+      store.resolve(dec.id, { decision: 'approved', by: 'ana', channel: 'panel' });
+      const applied = await P.applyDecision(store, dec.id, { workspaceRoot: w.ws, problemRoot: root, problemId: 'p1' });
+      assert.ok(applied.applied, applied.message);
+      assert.deepStrictEqual([S.readShared(w.ws, 'customer').status, S.readShared(w.ws, 'customer').approved.by], ['approved', 'ana']);
+      // A composite: approved within its problem; in exploration a failing check only warns.
+      w.composite('p1', 'tax', ['autode: semantic-composite/1', 'name: tax', 'uses:', '  - model: customer', ''].join('\n'));
+      assert.strictEqual(S.approveComposite(w.ws, 'p1', 'tax', { by: 'ana', channel: 'cli', findings: [], problemRoot: root }).ok, false, 'not resolved yet');
+      assert.ok(S.resolveCompositeFile(w.ws, 'p1', 'tax').ok);
+      assert.strictEqual(S.approveComposite(w.ws, 'p1', 'tax', { by: 'ana', channel: 'cli', findings: [err], problemRoot: root }).ok, false, 'governed: refused');
+      M.setProblemMode(root, 'exploration', { by: 'ana', channel: 'cli', acknowledged: true });
+      const ex = S.approveComposite(w.ws, 'p1', 'tax', { by: 'ana', channel: 'cli', findings: [err], problemRoot: root });
+      assert.deepStrictEqual([ex.ok, ex.warnings], [true, ['orders: x']]);
+      assert.strictEqual(S.readComposite(w.ws, 'p1', 'tax').approvalCurrent, true);
+      const cs = E.semanticEditorState(p.join(w.ws, 'autode-output', 'p1', 'semantic', 'tax.yaml'), fs.readFileSync(p.join(w.ws, 'autode-output', 'p1', 'semantic', 'tax.yaml'), 'utf8'), ctx(w.ws));
+      assert.deepStrictEqual([cs.kind, cs.problemId, cs.mode, cs.compositeStatus.status, !!cs.preview], ['composite', 'p1', 'exploration', 'resolved', true]);
+      assert.strictEqual(E.semanticEditorState(p.join(w.ws, 'autode-output', 'p1', 'semantic', 'tax.resolved.yaml'), '', ctx(w.ws)).kind, 'resolved');
+      // The old snapshot is gone.
+      assert.ok(!fs.existsSync(p.join(__dirname, '..', 'dist', 'context', 'SemanticLayerManager.js')));
+    } finally { w.done(); }
+  });
+
+  await test('v0.49.0: the semantic layer on every surface — autode semantic draft, show, compose, resolve, check, approve (a person); over MCP list, check, draft, resolve, resources and a proposal; the editor is registered for semantic folders', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-c5a-'));
+    let client;
+    try {
+      nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), c4a.read('sources/shop.ddl'));
+      client = await mcpSession(ws);
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
+      await call('autode_start_problem', { problemStatement: 'Daily tax from shop.orders by channel' });
+      const draft = await call('autode_semantic_draft', { name: 'sales', database: 'RETAIL' });
+      assert.ok(/name: sales[\s\S]*base_table:[\s\S]*table: orders/.test(draft.yaml) && /autode_propose_semantic_model/.test(draft.next), JSON.stringify(draft).slice(0, 300));
+      const prop = await call('autode_propose_semantic_model', { semanticModel: { scope: 'shared', name: 'sales', content: draft.yaml } });
+      assert.strictEqual(prop.decision.stakes, 'high');
+      await client.close(); client = undefined;
+      const W = ['--workspace', ws];
+      // The CLI: a draft never overwrites; compose, resolve, check; approving is a person's.
+      const d = await cli(['semantic', 'draft', 'sales', '--database', 'RETAIL', ...W]);
+      assert.strictEqual(d.code, 0, d.out + d.err);
+      assert.strictEqual((await cli(['semantic', 'draft', 'sales', ...W])).code, 1, 'never overwrites');
+      const pid = JSON.parse(nodeFs.readFileSync(nodePath.join(ws, '.autode', 'local', 'active-problem.json'), 'utf8')).problemId;
+      assert.strictEqual((await cli(['semantic', 'compose', 'daily_tax', '--models', 'sales', ...W])).code, 0);
+      const res = await cli(['semantic', 'resolve', 'daily_tax', ...W]);
+      assert.ok(res.code === 0 && /daily_tax\.resolved\.yaml written \(sales@[0-9a-f]{12}\)/.test(res.out), res.out + res.err);
+      assert.strictEqual((await cli(['semantic', 'check', 'sales', ...W])).code, 0);
+      assert.strictEqual((await cli(['semantic', 'approve', 'sales', ...W])).code, 4, 'a person at a terminal');
+      const ap = await cli(['semantic', 'approve', 'sales', ...W], { interactive: true, answers: ['approve'] });
+      assert.ok(ap.code === 0 && /sales approved by/.test(ap.out), ap.out + ap.err);
+      const show = await cli(['semantic', 'show', ...W]);
+      assert.ok(/sales\s+approved/.test(show.out) && /daily_tax\s+resolved/.test(show.out), show.out);
+      // MCP reads what the CLI wrote.
+      client = await mcpSession(ws);
+      const c2 = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const list = await c2('autode_semantic_list');
+      assert.deepStrictEqual([list.shared.map((s) => [s.name, s.status]), list.composites.map((c) => [c.name, c.status, c.problemId === pid])], [[['sales', 'approved']], [['daily_tax', 'resolved', true]]]);
+      assert.deepStrictEqual((await c2('autode_semantic_check', { name: 'sales' })).errors, []);
+      assert.ok((await c2('autode_semantic_resolve', { name: 'daily_tax' })).changed === false);
+      const uris = (await client.listResources()).resources.map((r) => r.uri);
+      for (const u of ['autode://semantic/shared/sales', 'autode://semantic/composite/daily_tax', 'autode://semantic/resolved/daily_tax']) assert.ok(uris.includes(u), u);
+      assert.match((await client.readResource({ uri: 'autode://semantic/resolved/daily_tax' })).contents[0].text, /^# Resolved by AutoDE/);
+      // The extension registers the editor for semantic folders and the commands.
+      const pkg = require('../package.json');
+      const ed = pkg.contributes.customEditors.find((e) => e.viewType === 'autoDE.semanticModelEditor');
+      assert.deepStrictEqual([ed.selector[0].filenamePattern, ed.priority], ['**/semantic/*.yaml', 'default']);
+      const cmds = pkg.contributes.commands.map((c) => c.command);
+      assert.ok(cmds.includes('autoDataEngineeringHub.newSemanticModel') && cmds.includes('autoDataEngineeringHub.newSemanticComposite') && !cmds.includes('autoDataEngineeringHub.buildSemanticLayer'));
+      const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'editors', 'semanticModelEditor.html'), 'utf8');
+      assert.ok(!/\son[a-z]+=/i.test(html), 'no inline handlers (the webview CSP allows only its nonce\'d script)');
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

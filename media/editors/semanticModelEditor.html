@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Semantic Model</title>
+<style>
+:root { color-scheme: light dark; }
+body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); font-size: 13px; margin: 0; padding: 12px 16px 32px; }
+h1 { font-size: 16px; margin: 0; }
+h2 { font-size: 13px; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: .04em; color: var(--vscode-descriptionForeground); }
+h3 { font-size: 13px; margin: 0; }
+.bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--vscode-panel-border); }
+.spacer { flex: 1; }
+.pill { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid currentColor; opacity: .85; }
+.pill.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
+.pill.warn { color: var(--vscode-editorWarning-foreground, #d29922); }
+.pill.err { color: var(--vscode-errorForeground, #f85149); }
+button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; cursor: pointer; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button:disabled { opacity: .5; cursor: default; }
+.tabs { display: flex; gap: 2px; margin: 10px 0; }
+.tabs button { border-radius: 3px 3px 0 0; }
+.tabs button.on { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.note { margin: 8px 0; padding: 6px 8px; border-left: 3px solid var(--vscode-editorWarning-foreground); background: var(--vscode-textBlockQuote-background); font-size: 12px; }
+.note.err { border-left-color: var(--vscode-errorForeground); }
+.findings div { font-size: 12px; padding: 2px 0; }
+.findings .e { color: var(--vscode-errorForeground); }
+.findings .w { color: var(--vscode-editorWarning-foreground); }
+.card { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 8px 10px; margin: 8px 0; }
+.card.flag-e { border-color: var(--vscode-errorForeground); }
+.muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
+table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+td, th { text-align: left; font-size: 12px; padding: 2px 6px 2px 0; vertical-align: top; }
+th { color: var(--vscode-descriptionForeground); font-weight: normal; }
+tr.flag-e td:first-child::before { content: '✗ '; color: var(--vscode-errorForeground); }
+tr.flag-w td:first-child::before { content: '! '; color: var(--vscode-editorWarning-foreground); }
+input, textarea { font: inherit; font-size: 12px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); padding: 2px 4px; width: 100%; box-sizing: border-box; }
+input[readonly] { opacity: .8; border-color: transparent; background: transparent; }
+textarea.yaml { font-family: var(--vscode-editor-font-family); min-height: 60vh; }
+code { font-family: var(--vscode-editor-font-family); }
+svg text { fill: var(--vscode-editor-foreground); font-size: 12px; }
+svg rect { fill: var(--vscode-editorWidget-background, rgba(127,127,127,.1)); stroke: var(--vscode-panel-border); }
+svg line { stroke: var(--vscode-descriptionForeground); }
+</style>
+</head>
+<body>
+<div id="root"><p class="muted">Loading…</p></div>
+<script>
+(function () {
+  const vscode = acquireVsCodeApi();
+  const root = document.getElementById('root');
+  const send = (m) => vscode.postMessage(m);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let data = null;
+  let tab = (vscode.getState() || {}).tab || 'form';
+  const LISTS = ['dimensions', 'time_dimensions', 'facts', 'metrics', 'filters'];
+  const LABEL = { dimensions: 'Dimensions', time_dimensions: 'Time dimensions', facts: 'Facts', metrics: 'Metrics', filters: 'Filters' };
+
+  function flag(where) {
+    const f = (data.state && data.state.findings) || [];
+    if (f.some((x) => x.where === where && x.severity === 'error')) return 'flag-e';
+    if (f.some((x) => x.where === where)) return 'flag-w';
+    return '';
+  }
+
+  function statusPills(s) {
+    const out = [];
+    if (s.mode === 'exploration') out.push('<span class="pill warn">exploration</span>');
+    if (s.shared) {
+      const cls = s.shared.status === 'approved' ? 'ok' : s.shared.status === 'invalid' ? 'err' : 'warn';
+      const label = s.shared.status === 'approved' ? 'approved by ' + s.shared.approved.by : s.shared.status === 'changed' ? 'changed since approved' : s.shared.status;
+      out.push('<span class="pill ' + cls + '">' + esc(label) + '</span>', '<span class="muted">rev ' + esc(s.shared.revision) + '</span>');
+    }
+    if (s.compositeStatus) {
+      const c = s.compositeStatus;
+      out.push('<span class="pill ' + (c.status === 'resolved' ? 'ok' : c.status === 'invalid' ? 'err' : 'warn') + '">' + esc(c.status) + '</span>');
+      if (c.approvalCurrent) out.push('<span class="pill ok">approved by ' + esc(c.approved.by) + '</span>');
+    }
+    const errors = (s.errors || []).length + (s.findings || []).filter((f) => f.severity === 'error').length;
+    const warnings = (s.findings || []).filter((f) => f.severity === 'warning').length + (s.warnings || []).length;
+    out.push(errors ? '<span class="pill err">' + errors + ' error(s)</span>' : '<span class="pill ok">checks pass</span>');
+    if (warnings) out.push('<span class="pill warn">' + warnings + ' warning(s)</span>');
+    return out.join(' ');
+  }
+
+  function toolbar(s) {
+    const b = [];
+    if (s.kind === 'shared') b.push('<button data-act="draft" title="Add what AutoDE knows and the model lacks (tables, elements, relationships); nothing you wrote changes">Draft from knowledge</button>');
+    if (s.kind === 'composite') b.push('<button data-act="resolve" class="primary">Resolve</button>', '<button data-act="openResolved">Open resolved</button>');
+    if (s.kind === 'shared' || s.kind === 'composite') b.push('<button data-act="approve"' + (s.kind === 'shared' ? ' class="primary"' : '') + '>Approve…</button>');
+    b.push('<button data-act="refresh">Check again</button>', '<button data-act="openText">Open as text</button>');
+    return b.join(' ');
+  }
+
+  function findingsBlock(s) {
+    const rows = (s.errors || []).map((e) => '<div class="e">✗ ' + esc(e) + '</div>')
+      .concat((s.warnings || []).map((w) => '<div class="w">! ' + esc(w) + '</div>'))
+      .concat((s.findings || []).map((f) => '<div class="' + (f.severity === 'error' ? 'e' : 'w') + '">' + (f.severity === 'error' ? '✗ ' : '! ') + '<code>' + esc(f.where) + '</code>: ' + esc(f.message) + '</div>'));
+    return rows.length ? '<h2>Checks</h2><div class="findings">' + rows.join('') + '</div>' : '';
+  }
+
+  function elementRows(t, list, editable) {
+    const items = t[list] || [];
+    if (!items.length && !(editable && (list === 'metrics' || list === 'filters'))) return '';
+    let h = '<tr><th colspan="5">' + LABEL[list] + '</th></tr>';
+    for (const e of items) {
+      const where = t.name + '.' + e.name;
+      const ro = editable ? '' : ' readonly';
+      h += '<tr class="' + flag(where) + '"><td><code>' + esc(e.name) + '</code>' + (e.data_type ? ' <span class="muted">' + esc(e.data_type) + '</span>' : '') + '</td>' +
+        '<td><input' + ro + ' data-edit="expr" data-table="' + esc(t.name) + '" data-list="' + list + '" data-name="' + esc(e.name) + '" value="' + esc(e.expr) + '"></td>' +
+        '<td><input' + ro + ' placeholder="description" data-edit="description" data-table="' + esc(t.name) + '" data-list="' + list + '" data-name="' + esc(e.name) + '" value="' + esc(e.description || '') + '"></td>' +
+        '<td><input' + ro + ' placeholder="synonyms, comma separated" data-edit="synonyms" data-table="' + esc(t.name) + '" data-list="' + list + '" data-name="' + esc(e.name) + '" value="' + esc((e.synonyms || []).join(', ')) + '"></td>' +
+        '<td>' + (editable ? '<button data-remove="' + esc(e.name) + '" data-table="' + esc(t.name) + '" data-list="' + list + '" title="Remove">×</button>' : '') + '</td></tr>';
+    }
+    if (editable && (list === 'metrics' || list === 'filters')) {
+      h += '<tr><td><input placeholder="new ' + (list === 'metrics' ? 'metric' : 'filter') + ' name" data-new-name="' + esc(t.name) + '|' + list + '"></td><td><input placeholder="expression" data-new-expr="' + esc(t.name) + '|' + list + '"></td><td colspan="3"><button data-add="' + esc(t.name) + '|' + list + '">Add</button></td></tr>';
+    }
+    return h;
+  }
+
+  function modelForm(m, editable) {
+    let h = '';
+    if (m.description) h += '<p>' + esc(m.description) + '</p>';
+    h += '<h2>Tables (' + m.tables.length + ')</h2>';
+    for (const t of m.tables) {
+      const b = t.base_table;
+      h += '<div class="card ' + (flag(t.name) === 'flag-e' ? 'flag-e' : '') + '"><h3><code>' + esc(t.name) + '</code> <span class="muted">' + esc(b.database + '.' + b.schema + '.' + b.table) + (t.primary_key ? ' · key (' + esc(t.primary_key.columns.join(', ')) + ')' : ' · no primary key') + '</span></h3>' +
+        '<input ' + (editable ? '' : 'readonly ') + 'placeholder="table description" data-edit="description" data-table="' + esc(t.name) + '" value="' + esc(t.description || '') + '">' +
+        '<table>' + LISTS.map((l) => elementRows(t, l, editable)).join('') + '</table></div>';
+    }
+    const rels = m.relationships || [];
+    h += '<h2>Relationships (' + rels.length + ')</h2>';
+    h += rels.length ? '<table>' + rels.map((r) => '<tr class="' + flag('relationship:' + r.name) + '"><td><code>' + esc(r.name) + '</code></td><td>' + esc(r.left_table) + ' → ' + esc(r.right_table) + '</td><td>' + esc(r.relationship_columns.map((c) => c.left_column + ' = ' + c.right_column).join(' AND ')) + '</td><td class="muted">' + esc((r.relationship_type || 'many_to_one') + ', ' + (r.join_type || 'left_outer')) + '</td></tr>').join('') + '</table>' : '<p class="muted">None. Relationships come from foreign keys and confirmed relationship facts (Draft from knowledge), or the YAML.</p>';
+    const vq = m.verified_queries || [];
+    if (vq.length) h += '<h2>Verified queries (' + vq.length + ')</h2>' + vq.map((q) => '<div class="card"><b>' + esc(q.question) + '</b><pre><code>' + esc(q.sql) + '</code></pre></div>').join('');
+    return h;
+  }
+
+  function compositeForm(s) {
+    const c = s.composite;
+    let h = '';
+    if (s.compositeStatus && s.compositeStatus.staleBecause && s.compositeStatus.staleBecause.length) h += '<div class="note">Stale: ' + esc(s.compositeStatus.staleBecause.join('; ')) + '. Resolve it again.</div>';
+    h += '<h2>Uses</h2><table>' + c.uses.map((u) => '<tr><td><code>' + esc(u.model) + '</code></td><td class="muted">tables: ' + esc((u.tables || ['all']).join(', ')) + (u.metrics ? ' · metrics: ' + esc(u.metrics.join(', ')) : '') + '</td></tr>').join('') + '</table>';
+    const add = c.add || {};
+    const adds = [].concat((add.metrics || []).map((a) => ['metric', a]), (add.filters || []).map((a) => ['filter', a]));
+    h += '<h2>Adds</h2>' + (adds.length ? '<table>' + adds.map(([k, a]) => '<tr class="' + flag(a.table + '.' + a.name) + '"><td>' + k + '</td><td><code>' + esc(a.table + '.' + a.name) + '</code></td><td><code>' + esc(a.expr) + '</code></td></tr>').join('') + '</table>' : '<p class="muted">Nothing: it uses the shared definitions as they are.</p>');
+    const desc = Object.entries(c.describe || {});
+    if (desc.length) h += '<h2>Describes</h2><table>' + desc.map(([k, v]) => '<tr><td><code>' + esc(k) + '</code></td><td>' + esc(v.description || '') + '</td><td class="muted">' + esc((v.synonyms || []).join(', ')) + '</td></tr>').join('') + '</table>';
+    h += '<p class="muted">Edit the composite in the YAML view: it may add metrics, filters and verified queries and change descriptions and synonyms, never a shared expression, key or join.</p>';
+    if (s.preview) h += '<h2>As it resolves now</h2>' + modelForm(s.preview, false);
+    return h;
+  }
+
+  function diagram(m) {
+    if (!m || !m.tables.length) return '<p class="muted">Nothing to draw.</p>';
+    const W = 180, H = 46, gapX = 70, gapY = 50, cols = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(m.tables.length))));
+    const pos = {};
+    m.tables.forEach((t, i) => { pos[t.name] = { x: 10 + (i % cols) * (W + gapX), y: 10 + Math.floor(i / cols) * (H + gapY) }; });
+    const width = 20 + cols * (W + gapX), height = 20 + Math.ceil(m.tables.length / cols) * (H + gapY);
+    let svg = '<svg width="' + width + '" height="' + height + '" role="img" aria-label="Relationships between the model\'s tables">';
+    for (const r of m.relationships || []) {
+      const a = pos[r.left_table], b = pos[r.right_table];
+      if (!a || !b) continue;
+      const x1 = a.x + W / 2, y1 = a.y + H / 2, x2 = b.x + W / 2, y2 = b.y + H / 2;
+      svg += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '"/><text x="' + ((x1 + x2) / 2 + 4) + '" y="' + ((y1 + y2) / 2 - 4) + '">' + esc(r.relationship_type === 'one_to_one' ? '1:1' : 'N:1') + '</text>';
+    }
+    for (const t of m.tables) {
+      const p = pos[t.name];
+      svg += '<rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="4"/><text x="' + (p.x + 8) + '" y="' + (p.y + 18) + '">' + esc(t.name) + '</text><text x="' + (p.x + 8) + '" y="' + (p.y + 36) + '" opacity=".7">' + esc((t.metrics || []).length + ' metric(s), ' + ((t.dimensions || []).length + (t.time_dimensions || []).length) + ' dim(s)') + '</text>';
+    }
+    return svg + '</svg>';
+  }
+
+  function render() {
+    if (!data) return;
+    const s = data.state;
+    if (!data.ready || !s) { root.innerHTML = '<p class="muted">Open the AutoDE panel to load the workspace: the editor checks the model against its estate and facts.</p>'; return; }
+    const kindLabel = { shared: 'Shared semantic model', composite: 'Composite', resolved: 'Resolved model (generated: don\'t edit)', other: 'Semantic model' }[s.kind];
+    let h = '<div class="bar"><h1>' + esc(s.name || data.file) + '</h1><span class="muted">' + esc(kindLabel) + (s.problemId ? ' · ' + esc(s.problemId) : '') + '</span> ' + statusPills(s) + '<span class="spacer"></span>' + toolbar(s) + '</div>';
+    if (s.mode === 'exploration' && s.kind !== 'shared') h += '<div class="note">Exploration mode: built on unverified assumptions; failed checks only warn when approving.</div>';
+    if (data.dirty) h += '<div class="note">Unsaved changes: approving and resolving save the file first.</div>';
+    h += '<div class="tabs">' + ['form', 'diagram', 'yaml'].map((t) => '<button data-tab="' + t + '" class="' + (tab === t ? 'on' : '') + '">' + { form: 'Form', diagram: 'Diagram', yaml: 'YAML' }[t] + '</button>').join('') + '</div>';
+    if (tab === 'yaml') {
+      h += '<textarea class="yaml" id="yaml" spellcheck="false">' + esc(data.text) + '</textarea><p><button class="primary" data-act="applyYaml">Apply to the file</button> <span class="muted">An ordinary edit: undo reverts it.</span></p>';
+    } else if (tab === 'diagram') {
+      h += diagram(s.kind === 'composite' ? s.preview : s.model);
+    } else if (s.kind === 'composite' && s.composite) {
+      h += compositeForm(s);
+    } else if (s.model) {
+      h += modelForm(s.model, s.kind === 'shared' || s.kind === 'other');
+    } else {
+      h += '<div class="note err">The file isn\'t a valid semantic model yet: fix it in the YAML view.</div>';
+    }
+    h += findingsBlock(s);
+    root.innerHTML = h;
+  }
+
+  root.addEventListener('click', (ev) => {
+    const el = ev.target.closest('button');
+    if (!el) return;
+    if (el.dataset.tab) { tab = el.dataset.tab; vscode.setState({ tab }); render(); return; }
+    if (el.dataset.act === 'applyYaml') { send({ type: 'yaml', text: document.getElementById('yaml').value }); return; }
+    if (el.dataset.act) { send({ type: el.dataset.act }); return; }
+    if (el.dataset.remove) { send({ type: 'edit', edit: { op: 'remove', table: el.dataset.table, list: el.dataset.list, name: el.dataset.remove } }); return; }
+    if (el.dataset.add) {
+      const [table, list] = el.dataset.add.split('|');
+      const name = root.querySelector('[data-new-name="' + el.dataset.add + '"]').value.trim();
+      const expr = root.querySelector('[data-new-expr="' + el.dataset.add + '"]').value.trim();
+      if (name && expr) send({ type: 'edit', edit: { op: 'add', table, list, name, expr } });
+    }
+  });
+  root.addEventListener('change', (ev) => {
+    const el = ev.target;
+    if (!el.dataset || !el.dataset.edit || el.readOnly) return;
+    send({ type: 'edit', edit: { op: 'set', table: el.dataset.table, list: el.dataset.list || undefined, name: el.dataset.name || undefined, field: el.dataset.edit, value: el.value } });
+  });
+  window.addEventListener('message', (ev) => { if (ev.data.type === 'state') { data = ev.data; render(); } });
+  send({ type: 'ready' });
+})();
+</script>
+</body>
+</html>

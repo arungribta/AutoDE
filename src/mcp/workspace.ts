@@ -44,8 +44,7 @@ export const PROBLEM_DOCUMENTS: Readonly<Record<string, { rel: string; name: str
   'spec/pipeline': { rel: 'spec/pipeline.yaml', name: 'Pipeline Specification', description: 'Entities and transform steps of the active business problem.' },
   'context/source': { rel: 'context/source-context.yaml', name: 'Source context', description: 'Source systems of the active problem.' },
   'context/target': { rel: 'context/target-context.yaml', name: 'Target context', description: 'Target environment of the active problem.' },
-  'context/mapping': { rel: 'context/mapping-context.yaml', name: 'Mapping context', description: 'Source-to-target mappings of the active problem.' },
-  'context/semantic-layer': { rel: 'context/semantic-layer.yaml', name: 'Semantic layer', description: 'Semantic layer of the active problem.' }
+  'context/mapping': { rel: 'context/mapping-context.yaml', name: 'Mapping context', description: 'Source-to-target mappings of the active problem.' }
 };
 
 function fingerprint(paths: readonly string[]): string {

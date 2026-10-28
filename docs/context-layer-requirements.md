@@ -168,7 +168,7 @@ In short: capture doesn't depend on the model to find facts, decide what should 
 
 ## 6. Semantic layer
 
-*Decided with the owner, 2026-10-27; replaces the earlier "semantic model projected from assertions". Built in phases C5a–C5d (§11).*
+*Decided with the owner, 2026-10-27; replaces the earlier "semantic model projected from assertions". Built in phases C5a–C5d (§11); C5a (§6.1–6.5, the editor) shipped in v0.49.0.*
 
 ### 6.1 Two layers
 
@@ -429,8 +429,7 @@ In short:
 **Status:** ✅ shipped in v0.48.0 (§5.5, §7.4). Acceptance met by the tests named in CHANGELOG.md 0.48.0: the checklist on the reference problem lists every table and metric in scope with an action for each missing item; candidate keys and foreign keys come from the reference samples without a model and are verified by probes; an unsupported quote is dropped and a skipped section read again; an exploration problem continues past a gap with a recorded assumption, a governed one stops and asks, and switching lists the assumption; platform runbooks, production policy, sample-data consent and secrets behave the same in both modes.
 
 ### Phase C5a: Semantic layer files, composites and the editor
-Scope: §6.1–§6.5 and the Semantic Model editor (§6.7); the older semantic-layer snapshot (`SemanticLayerManager`) retires.
-Acceptance: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; changing a shared model marks dependent composites stale; drafting from the reference problem's facts produces the expected model (golden file); the checks find a missing column and a relationship that contradicts a key.
+**Status:** ✅ shipped in v0.49.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-11; HOW: technical-design.md §5.16; usage: [user-guide.md](user-guide.md) §15. §6 stays the specification for C5b–C5d. Acceptance met by the tests named in CHANGELOG.md 0.49.0: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; a changed shared model makes its composites stale; the reference draft matches its golden file; the checks find a missing column and a join that contradicts a key. The older semantic-layer snapshot is retired.
 
 ### Phase C5b: The Knowledge Graph window; packs and grounding use the semantic layer
 Scope: §6.5 (graph, packs, grounding), §6.7 (Knowledge Graph window, the drawer becomes a status line).

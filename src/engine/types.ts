@@ -496,29 +496,6 @@ export interface MappingContext {
   approvedAt?: string;
 }
 
-/**
- * A persisted, versioned snapshot of the Unified Semantic Layer — per the
- * architecture review's Q3, the semantic layer is already one unified
- * `GraphManager` graph (source and target nodes coexist via
- * `Origin.environment` tagging), so this is deliberately NOT a second
- * modeling system. It's an explicit, spec-pinned point-in-time capture of
- * that one graph's node/edge counts, generated only on an explicit "Build"
- * action (never silently/automatically, matching this codebase's consistent
- * governance pattern) — the same reasoning `PipelineSpec`/primitive-version
- * pinning already use: a later live-graph change shouldn't silently
- * invalidate what a pipeline was actually generated against.
- */
-export interface SemanticLayerSnapshot {
-  specId: string;
-  specVersion: number;
-  version?: number;
-  status: ContextStatus;
-  nodeCount: number;
-  edgeCount: number;
-  builtAt?: string;
-  approvedAt?: string;
-}
-
 // ── Artifact Types ──
 
 export type ArtifactType = 'data_model' | 'sttm_mapping' | 'ddl_script' | 'pipeline_dag' | 'architecture_diagram' | 'data_dictionary' | 'sql_script' | 'requirements_doc' | 'discovery_report' | 'data_profile' | 'knowledge_graph' | 'validation_report' | 'test_suite';

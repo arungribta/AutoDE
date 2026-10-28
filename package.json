@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.48.0",
+  "version": "0.49.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -92,10 +92,6 @@
         "title": "AutoDE: Create Mapping (Source → Target)"
       },
       {
-        "command": "autoDataEngineeringHub.buildSemanticLayer",
-        "title": "AutoDE: Build Unified Semantic Layer Snapshot"
-      },
-      {
         "command": "autoDataEngineeringHub.compactContextLedger",
         "title": "AutoDE: Compact Context Ledger"
       },
@@ -172,6 +168,14 @@
       {
         "command": "autoDataEngineeringHub.classifyPersonalData",
         "title": "AutoDE: Classify Personal Data…"
+      },
+      {
+        "command": "autoDataEngineeringHub.newSemanticModel",
+        "title": "AutoDE: New Shared Semantic Model (Draft from Knowledge)…"
+      },
+      {
+        "command": "autoDataEngineeringHub.newSemanticComposite",
+        "title": "AutoDE: New Semantic Composite…"
       },
       {
         "command": "autoDataEngineeringHub.captureCoverage",
@@ -382,6 +386,16 @@
           }
         ],
         "priority": "option"
+      },
+      {
+        "viewType": "autoDE.semanticModelEditor",
+        "displayName": "AutoDE Semantic Model",
+        "selector": [
+          {
+            "filenamePattern": "**/semantic/*.yaml"
+          }
+        ],
+        "priority": "default"
       },
       {
         "viewType": "autoDE.docEditor",

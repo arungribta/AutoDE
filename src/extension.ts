@@ -25,7 +25,13 @@ import { SttmEditorProvider } from './editors/SttmEditorProvider';
 import { GraphEditorProvider } from './editors/GraphEditorProvider';
 import { ProfileEditorProvider } from './editors/ProfileEditorProvider';
 import { DocEditorProvider } from './editors/DocEditorProvider';
-import { EDITOR_DATA_MODEL, EDITOR_STTM, EDITOR_GRAPH, EDITOR_PROFILE, EDITOR_DOC } from './core/extensionIdentity';
+import { EDITOR_DATA_MODEL, EDITOR_STTM, EDITOR_GRAPH, EDITOR_PROFILE, EDITOR_DOC, EDITOR_SEMANTIC } from './core/extensionIdentity';
+import { SemanticModelEditorProvider } from './editors/SemanticModelEditorProvider';
+import * as semanticStore from './engine/semantic/store';
+import { newCompositeText } from './engine/semantic/editorState';
+import { draftSemanticModel } from './engine/semantic/draft';
+import { problemTableIds } from './engine/context/capture';
+import { layoutPath } from './engine/workspaceLayout';
 import { createDisposableRegistry } from './core/disposables';
 import { createVscodeFileIo } from './context/vscodeFileIo';
 import { registerDefaultCredentialResolvers, resolveCredential } from './core/credentials';
@@ -33,6 +39,7 @@ import { DataPlatformProvider, DataAgentHubSettings } from './engine/types';
 import { parseFile, detectFileFormat } from './engine/context/fileIngestion';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as fs from 'node:fs';
 import * as lifecycle from './engine/skills/lifecycle';
 import { LAYOUT, layoutRel } from './engine/workspaceLayout';
 import { describeMigration, migrateWorkspace } from './engine/workspaceMigration';
@@ -762,31 +769,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
-  /**
-   * The second half of Step 6 — an explicit, spec-pinned snapshot of the
-   * already-unified semantic graph (per the architecture review's Q3, the
-   * graph itself doesn't need a second modeling system; this just captures
-   * its state at a point in time, mirroring the version-pinning
-   * `PipelineSpec`/primitive-versioning already use elsewhere). Never runs
-   * automatically — a real snapshot action, not a background sync.
-   */
-  const buildSemanticLayer = vscode.commands.registerCommand(`${EXTENSION_ID}.buildSemanticLayer`, async () => {
-    try {
-      const snapshot = await sidebarProvider.buildSemanticLayer();
-      if (!snapshot) {
-        vscode.window.showErrorMessage('No active business problem — approve a specification first.');
-        return;
-      }
-      const msg = `Unified Semantic Layer snapshot built: spec v${snapshot.specVersion} rev${snapshot.version} (${snapshot.nodeCount} node(s), ${snapshot.edgeCount} edge(s)).`;
-      vscode.window.showInformationMessage(msg);
-      sidebarProvider.logToChat(msg);
-    } catch (err) {
-      const msg = `Could not build the Unified Semantic Layer snapshot: ${err instanceof Error ? err.message : String(err)}`;
-      vscode.window.showErrorMessage(msg);
-      sidebarProvider.logToChat(msg);
-    }
-  });
-
   // Phase K1 (v0.31.0): the estate — systems, environments, roles and which
   // connections/files feed them — lives in .autode/knowledge/estate.yaml.
   const openEstate = vscode.commands.registerCommand(`${EXTENSION_ID}.openEstate`, async () => {
@@ -1086,6 +1068,41 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage('Chat discarded.');
   });
 
+  // C5a: the semantic layer — a new shared model drafted from knowledge, a new composite, opened in the Semantic Model editor.
+  const semanticEditorHost = { context: () => sidebarProvider.semanticEditorContext(), user: () => { try { return os.userInfo().username || 'user'; } catch { return 'user'; } }, changed: () => void vscode.commands.executeCommand('autoDataEngineeringHub.refreshWorkflow') };
+  const newSemanticModel = vscode.commands.registerCommand(`${EXTENSION_ID}.newSemanticModel`, async () => {
+    const ctx = sidebarProvider.semanticEditorContext();
+    if (!ctx) { vscode.window.showInformationMessage('Open the AutoDE panel first.'); return; }
+    const name = await vscode.window.showInputBox({ title: 'New shared semantic model', prompt: 'Its subject area, e.g. sales, customer, finance', validateInput: (v) => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(v.trim()) ? undefined : 'Letters, digits, _ and -' });
+    if (!name) return;
+    const problem = sidebarProvider.getActiveProblemId();
+    const ids = problem ? problemTableIds({ workspaceRoot: ctx.workspaceRoot, problemRoot: layoutPath(ctx.workspaceRoot, 'problems', problem), sources: ctx }) : [];
+    if (!ids.length) { vscode.window.showWarningMessage('No table to draft from: the active problem\'s specification names no table AutoDE knows.'); return; }
+    try {
+      const d = draftSemanticModel({ graph: ctx.graph, assertions: ctx.assertions, tableIds: ids, name: name.trim() });
+      const e = semanticStore.writeDraft(ctx.workspaceRoot, name.trim(), d.model, d.backing, d.notes);
+      await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(e.file), EDITOR_SEMANTIC);
+      if (d.notes.length) vscode.window.showInformationMessage(`Drafted from knowledge. Left out: ${d.notes.join('; ')}`);
+    } catch (err) { vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err)); }
+  });
+  const newSemanticComposite = vscode.commands.registerCommand(`${EXTENSION_ID}.newSemanticComposite`, async () => {
+    const ctx = sidebarProvider.semanticEditorContext();
+    const problem = sidebarProvider.getActiveProblemId();
+    if (!ctx || !problem) { vscode.window.showInformationMessage('Open a business problem in the AutoDE panel first: a composite belongs to one.'); return; }
+    const shared = semanticStore.listShared(ctx.workspaceRoot);
+    if (!shared.length) { vscode.window.showInformationMessage('There is no shared semantic model to compose yet: AutoDE: New Shared Semantic Model.'); return; }
+    const picked = await vscode.window.showQuickPick(shared.map((s) => ({ label: s.name, description: s.status })), { canPickMany: true, title: 'Which shared models does the use case use?' });
+    if (!picked?.length) return;
+    const name = await vscode.window.showInputBox({ title: 'New composite', prompt: 'A name for the use case, e.g. revenue_by_channel', validateInput: (v) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) ? undefined : 'Letters, digits and _' });
+    if (!name) return;
+    const dir = semanticStore.semanticPaths(ctx.workspaceRoot).compositeDir(problem);
+    const file = path.join(dir, `${name.trim()}.yaml`);
+    if (fs.existsSync(file)) { vscode.window.showErrorMessage(`${name} exists.`); return; }
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, newCompositeText(name.trim(), picked.map((p) => p.label)));
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), EDITOR_SEMANTIC);
+  });
+
   // ── Register all providers and commands ──
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(EXTENSION_VIEW_ID, sidebarProvider, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -1094,10 +1111,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(EDITOR_GRAPH, new GraphEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_PROFILE, new ProfileEditorProvider(context)),
     vscode.window.registerCustomEditorProvider(EDITOR_DOC, new DocEditorProvider(context)),
+    vscode.window.registerCustomEditorProvider(EDITOR_SEMANTIC, new SemanticModelEditorProvider(context, semanticEditorHost)),
+    newSemanticModel, newSemanticComposite,
     openSidebar,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     copilotHandoff,
-    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, buildSemanticLayer, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, updateToolSkill, classifyPersonalData, captureCoverage, findCandidates, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,

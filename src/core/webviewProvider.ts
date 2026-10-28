@@ -27,7 +27,6 @@ import { ChatSessionManager } from '../context/ChatSessionManager';
 import { TargetContextManager } from '../context/TargetContextManager';
 import { SourceContextManager } from '../context/SourceContextManager';
 import { MappingContextManager } from '../context/MappingContextManager';
-import { SemanticLayerManager } from '../context/SemanticLayerManager';
 import { ActiveProblemManager } from '../context/ActiveProblemManager';
 import { isOpenInterview, markInterviewFed, openQuestions, readInterview, startInterview, writeInterview } from '../engine/interview/state';
 import { BusinessPackManager } from '../context/BusinessPackManager';
@@ -53,6 +52,7 @@ import { ApplyResult, ProposalContext, applyDecision, processResolved } from '..
 import { layoutPath } from '../engine/workspaceLayout';
 import { ChatTurn, citedFactIds, extractFromTurn, parseCaptureCommand } from '../engine/context/chatExtraction';
 import { EXPLORATION_DISCLAIMER, admitForMode, problemMode, renderHardening, setProblemMode } from '../engine/documents/problemMode';
+import type { GraphView } from '../engine/context/retrieval';
 import { problemCandidates, problemCoverage } from '../engine/context/capture';
 import { renderCoverage } from '../engine/context/coverage';
 import { describeFinding } from '../engine/context/dataCandidates';
@@ -127,7 +127,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   private targetContextManager?: TargetContextManager;
   private sourceContextManager?: SourceContextManager;
   private mappingContextManager?: MappingContextManager;
-  private semanticLayerManager?: SemanticLayerManager;
   /**
    * The most recent live connection outcome, per role — brownfield work
    * routinely needs both a source (to read from) and a target (to write to),
@@ -346,7 +345,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.targetContextManager = undefined;
       this.sourceContextManager = undefined;
       this.mappingContextManager = undefined;
-      this.semanticLayerManager = undefined;
       this.pipelineSpecManager = undefined;
       this.packManager = undefined;
       this.specOpsEngine = undefined;
@@ -366,7 +364,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.targetContextManager = new TargetContextManager(contextRoot, (msg: string) => this.postLog(msg));
     this.sourceContextManager = new SourceContextManager(contextRoot, (msg: string) => this.postLog(msg));
     this.mappingContextManager = new MappingContextManager(contextRoot, (msg: string) => this.postLog(msg));
-    this.semanticLayerManager = new SemanticLayerManager(contextRoot, this.graphManager, (msg: string) => this.postLog(msg));
     this.pipelineSpecManager = new PipelineSpecManager(contextRoot, (msg: string) => this.postLog(msg));
     this.problemRoot = contextRoot;
     // Another problem's interview isn't this one's; this problem's open interview is resumed below.
@@ -383,7 +380,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       await this.targetContextManager.initialize();
       await this.sourceContextManager.initialize();
       await this.mappingContextManager.initialize();
-      await this.semanticLayerManager.initialize();
       await this.pipelineSpecManager.initialize();
       const existingSpec = this.specManager.getSpec();
       this.contextFileManager?.setActiveSpecId(existingSpec?.id);
@@ -1298,8 +1294,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       },
       { uri: this.sourceContextManager?.getFileUri(), reload: () => this.sourceContextManager!.reload(), after: () => this.postContextGateStatus() },
       { uri: this.targetContextManager?.getFileUri(), reload: () => this.targetContextManager!.reload(), after: () => this.postContextGateStatus() },
-      { uri: this.mappingContextManager?.getFileUri(), reload: () => this.mappingContextManager!.reload(), after: () => this.postContextGateStatus() },
-      { uri: this.semanticLayerManager?.getFileUri(), reload: () => this.semanticLayerManager!.reload(), after: () => undefined }
+      { uri: this.mappingContextManager?.getFileUri(), reload: () => this.mappingContextManager!.reload(), after: () => this.postContextGateStatus() }
     ];
     const owner = owners.find((o) => o.uri && normalizeFsPath(o.uri.fsPath) === key);
     if (!owner || !owner.reload) return false;
@@ -1961,10 +1956,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return this.mappingContextManager.upsertMapping(mapping);
   }
 
-  public getSemanticLayerSnapshot() {
-    return this.semanticLayerManager?.getSnapshot();
-  }
-
   /**
    * Step 7 (governance layer) — the current set of source-tagged table/view
    * FQNs in the shared graph, for `extension.ts`'s `reVerifySourceSchema`
@@ -1979,6 +1970,18 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /** GOV: personal-data candidates in the working set (the mapped sources first), for *Classify Personal Data…*. */
+  /** The active business problem's id (the Semantic Model commands). */
+  public getActiveProblemId(): string | undefined {
+    return this.activeProblemId;
+  }
+
+  /** C5a: what the Semantic Model editor checks against — the workspace's estate and facts. */
+  public semanticEditorContext(): { workspaceRoot: string; graph: GraphView; assertions: readonly Assertion[] } | undefined {
+    if (!this.contextFileManager || !this.workspaceRoot) return undefined;
+    const s = this.contextFileManager.getPackSources();
+    return { workspaceRoot: this.workspaceRoot.fsPath, graph: s.graph, assertions: s.assertions };
+  }
+
   public governanceCandidates(): GovernanceCandidate[] {
     if (!this.contextFileManager) return [];
     const sources = this.contextFileManager.getPackSources();
@@ -2021,19 +2024,6 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    */
   public async compactContextLedger(prune: boolean): Promise<{ assertions: number; prunedFiles: number } | undefined> {
     return this.contextFileManager?.compactLedger(prune);
-  }
-
-  /**
-   * The one explicit "Build Semantic Layer" action (Step 6, second half) —
-   * captures the live shared graph's current content/counts as a spec-pinned,
-   * versioned snapshot. Never runs implicitly; called only from
-   * `extension.ts`'s `buildSemanticLayer` command.
-   */
-  public async buildSemanticLayer() {
-    if (!this.semanticLayerManager) return undefined;
-    const spec = this.specManager?.getSpec();
-    if (!spec) return undefined;
-    return this.semanticLayerManager.build(spec.id, spec.version);
   }
 
   /**

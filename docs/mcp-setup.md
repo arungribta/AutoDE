@@ -339,6 +339,9 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_execute_query` | Run one read-only statement, with at most 10 000 rows (100 by default). |
 | `autode_propose_assertion` | Propose a fact; a person confirms it in the Context Inbox, or you confirm a low-stakes one with `autode_review_assertion` after asking ([Proposing changes](#proposing-changes)). |
 | `autode_review_assertion` / `autode_verify_assertion` | Confirm or reject a low-stakes fact; verify a fact against data. |
+| `autode_semantic_list` / `autode_semantic_check` / `autode_semantic_draft` | The semantic layer: shared models and composites with their status; check a model or composite; draft a shared model from AutoDE's facts (nothing written). |
+| `autode_semantic_resolve` | Resolve one of the active problem's composites (deterministic; refused on a collision or redefinition). |
+| `autode_propose_semantic_model` | Propose a shared model or a composite; a person approves it. |
 | `autode_capture_coverage` | The completeness checklist for the active problem: per table and metric, what is known and missing, and the action for each. |
 | `autode_find_candidates` | Keys, grain, joins, change columns and personal data from the data (probes on a connection or the pack's samples); those that pass are recorded as proposed, verified facts. |
 | `autode_review_session` | Which of the user's messages read like facts but have no fact recorded from them. |

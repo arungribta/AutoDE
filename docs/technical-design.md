@@ -584,7 +584,7 @@ Edges (`GraphEdge`): `contains` (table → column), `foreign_key`, `maps_to` (te
 - **`SourceContext`** (`src/engine/types.ts`): one container per spec version with `sources: SourceContextEntry[]` (each with `connectionId`, method `connected`/`described`, connection summary); a pre-v0.19.0 flat file is migrated on load. **`TargetContext`**: platform, modelling approach, tools, naming, environment, location. Both are built from fixed question sequences (`src/core/targetContextQuestions.ts`, `sourceContextQuestions.ts`) whose answers carry keyword-evidence suggested defaults, and go `pending → built → approved`. Approving target context is the sole source of `AgentHub.setTargetEnvironment()`; greenfield marks source context not applicable automatically.
 - **Versioning**: `version` bumps only when revising an approved predecessor of the same spec lineage; predecessors are archived to `context/history/{source,target,mapping}-context.spec<N>.v<M>.yaml`.
 - **`MappingContext`** (`MappingContextManager`): `EntityMapping { id, sourceEntityId, sourceFqn, targetEntityId?, targetName, columns[{sourceColumn, targetColumn, transformExpression?}], notes? }` with pinned source/target context versions; `upsertMapping`/`removeMapping` drop an approved set back to `built`. `AutoDE: Create Mapping` picks source and target tables from the graph (or a typed target name for greenfield) and auto-matches columns by name.
-- **Semantic layer snapshot** (`SemanticLayerManager`): an explicit, spec-pinned, versioned capture of graph content (`semantic-layer.yaml` + `.snapshot.json`, both archived together). Becomes the semantic model in C5.
+- **Semantic layer** (v0.49.0): replaced the earlier spec-pinned graph snapshot (`SemanticLayerManager`, retired); see §5.16.
 - **Reliability** (STC-9): live extraction sets `confidence 1.0`, `reliability: 'live-verified'`, `lastVerifiedAt`; file ingestion sets `best-effort-inferred`; packs annotate file-derived tables. `AutoDE: Re-verify Source Schema` re-runs extraction and diffs source-tagged table fqns before/after (present, new, missing) without deleting anything.
 
 ### 5.9 File ingestion (STC-7)
@@ -712,6 +712,23 @@ Capture coverage (context-layer §5.5) and exploration mode (§7.4). Determinist
 **Panel.** `WebviewProvider.switchProblemMode` (modal with the disclaimer; before the problem's folder exists the choice is held and applied in `ensureActiveProblem`), `reviewSession` (`/review`), `noteUnrecorded` (on *New Chat*), `captureCoverageMarkdown`, `findCandidatesFromData`; commands `captureCoverage`, `findCandidates`; setting `capture.doubleExtraction` read by `BusinessPackManager.applyDocument`, which also re-reads unaccounted sections once.
 
 **CLI and MCP.** `autode coverage`, `autode capture candidates [--connection] [--record]`, `autode problems new --exploration`, `autode problems mode [exploration|governed]`, `autode problems hardening`. MCP: `autode_capture_coverage` and `autode_review_session` (read), `autode_find_candidates` (records proposals; probes), `autode_record_assumption` (exploration only); `autode_pack_reading` takes `sections`, `autode_pack_record_reading` takes `sections`, `reread` and `model`.
+
+### 5.16 The semantic layer (v0.49.0; CTX-11, C5a)
+
+Shared semantic models and composites (context-layer §6). Everything below is engine code under `src/engine/semantic/`, deterministic, shared by the editor, the CLI and MCP.
+
+| Module | Does |
+|---|---|
+| `model.ts` | Types for Snowflake's semantic model YAML; `SEMANTIC_MODEL_SCHEMA` (Ajv, `additionalProperties: false`, `measures` accepted as the older name of `facts`); `validateSemanticModel` / `parseSemanticModel` (format, then unique names and relationship tables); `serializeSemanticModel` (fixed key order, empty lists dropped, optional `#` header); `semanticRevision` (SHA-256 of the LF-normalised text, 12 hex); `findElement`, `tableElements`. |
+| `composite.ts` | The composite format (`autode: semantic-composite/1`), `parseComposite` (schema errors rewritten in the composite's terms), `resolveComposite(c, load)` → model + revisions + errors (subset, merge identical tables, collisions, additions, describes, then the result validated as a model), `serializeResolved`. |
+| `draft.ts` | `draftSemanticModel({ graph, assertions, tableIds, name, database })` → model, `backing` (element → fact ids), `notes`. Only live facts at ≥ confirmed; declared keys and foreign keys from the estate. |
+| `checks.ts` | `checkSemanticModel(model, { graph, assertions })` → findings (`error` / `warning`, `where`, `message`); `exprIdentifiers`. Base tables matched by `db.schema.table` or `schema.table`; keys via `dataCandidates.knownKey`. |
+| `store.ts` | Paths (`semanticPaths`: the `artifactDirectory` setting from `.vscode/settings.json`, else `autode-output`; metadata under `LAYOUT.semantic` = `.autode/semantic/{shared,composites/<problem>}/`); `readShared` / `listShared` (status approved, changed, unapproved, invalid); `listComposites` / `readComposite` (resolved, stale with reasons, unresolved, invalid); `resolveCompositeFile` (writes only when the bytes change; records the revisions); `writeShared`, `writeDraft` (never overwrites); `approveShared`, `approveComposite` (mode-aware); `semanticWaiting`. |
+| `editorState.ts` | `semanticFileKind` (by folder), `semanticEditorState` (the editor's whole state, with a composite's preview resolution and the checks), `applySemanticEdit` (set, add, remove → new text), `mergeDraft` (add-only), `newCompositeText`. |
+
+**Decisions.** Kind `semantic_model` (`SemanticModelPayload { scope, name, content }`), subject `semantic:shared/<name>` or `semantic:<problem>/<name>` with the file's revision; applying a shared model writes it with the approver's approval, a composite writes and resolves it.
+
+**Surfaces.** The editor: `SemanticModelEditorProvider` (custom text editor `autoDE.semanticModelEditor`, default for `**/semantic/*.yaml`) over `editorState`; host from `WebviewProvider.semanticEditorContext()`. Commands `newSemanticModel`, `newSemanticComposite`. *Waiting for you* gains kind `semantic` (opens the file). CLI `autode semantic …`; MCP `src/mcp/semanticTools.ts` (tools and `autode://semantic/...` resources) and `autode_propose_semantic_model` in `decisions.ts`.
 
 ## 6. Data Platforms
 
@@ -1854,13 +1871,13 @@ src/agents/build/    # the tool-skill runner
 src/cli/    # the autode command line (no vscode; §10.8)
   main.ts
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
-  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, MappingContextManager.ts, PipelineSpecManager.ts, SemanticLayerManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
+  ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, MappingContextManager.ts, PipelineSpecManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
   agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, portSkillSession.ts, portSkillView.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
-  DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SttmEditorProvider.ts
+  DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SemanticModelEditorProvider.ts, SttmEditorProvider.ts
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
@@ -1891,6 +1908,8 @@ src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
 src/engine/runner/    # runbooks: checks, policy, the runner and its log
   hostGuard.ts, policy.ts, run.ts, runbook.ts, runLog.ts
+src/engine/semantic/
+  checks.ts, composite.ts, draft.ts, editorState.ts, model.ts, store.ts
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
   lifecycle.ts, port.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
 src/engine/transforms/    # primitive registry
@@ -1902,7 +1921,7 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   documentApproval.ts, events.ts, instance.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, runnerHost.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 ```
 <!-- /generated:source-tree -->
 

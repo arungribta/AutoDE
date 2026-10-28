@@ -21,6 +21,12 @@ import { appendEvent } from '../workflows/events';
 import { loadTemplates } from '../workflows/templates';
 
 export interface VocabularyProposalPayload { entries: Array<Pick<VocabularyProposal, 'kind' | 'from' | 'to'>> }
+
+/** A semantic model change (C5a): the whole file, shared (`<artifactDirectory>/semantic/<name>.yaml`) or a composite of the active problem. */
+export interface SemanticModelPayload { scope: 'shared' | 'composite'; name: string; content: string }
+import { parseSemanticModel, semanticRevision } from '../semantic/model';
+import { parseComposite, resolveComposite } from '../semantic/composite';
+import { readComposite, readShared, resolveCompositeFile, semanticPaths, sharedLoader, writeShared } from '../semantic/store';
 import { layoutPath } from '../workspaceLayout';
 import {
   ProblemDocumentKind, parseBusinessProblemSpec, parsePipelineSpecDocument, readProblemDocument,
@@ -36,7 +42,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  */
 
 /** What can be proposed. `mapping` and `platform_change` decisions were retired in v0.45.8 (SIMP-2): mappings are drafted into the mapping document, platform changes are runbooks; their old decision files still read. */
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook' | 'semantic_model'>;
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -218,6 +224,7 @@ function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown):
     return { document: doc, revision: text === undefined ? 'none' : computeRevision(text) };
   }
   if (kind === 'connection') return { connectionId: draftEntry({ ...(payload as ConnectionDraft), fields: (payload as ConnectionDraft).fields ?? {} }).id };
+  if (kind === 'semantic_model') { const s = payload as SemanticModelPayload; return { document: `semantic:${s.scope === 'shared' ? 'shared' : ctx.problemId}/${s.name}`, revision: semanticFileRevision(ctx, s) }; }
   return undefined;
 }
 
@@ -230,7 +237,34 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'vocabulary': { const v = payload as VocabularyProposalPayload; return { title: `Vocabulary: ${v.entries.map((e) => e.kind === 'abbreviation' ? `${e.from.toUpperCase()}=${e.to}` : `${e.from}~${e.to}`).join(', ')}`.slice(0, 160), summary: `${v.entries.length} retrieval vocabulary entr${v.entries.length === 1 ? 'y' : 'ies'}.` }; }
     case 'runbook': { const r = payload as Runbook; return { title: `Runbook ${r.id}: ${r.title} (${r.steps?.length ?? 0} steps on ${r.connectionId})`.slice(0, 160), summary: r.reason ?? '' }; }
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
+    case 'semantic_model': { const s = payload as SemanticModelPayload; return { title: `${s.scope === 'shared' ? 'Shared semantic model' : 'Semantic composite'} ${s.name}`, summary: s.scope === 'shared' ? 'A workspace-level change: every problem that uses this model is affected.' : 'A composite of the active problem; it is resolved once applied.' }; }
   }
+}
+
+/** The revision of the semantic file a proposal would replace (`none` when new). */
+function semanticFileRevision(ctx: ProposalContext, s: SemanticModelPayload): string {
+  if (s.scope === 'shared') return readShared(ctx.workspaceRoot, s.name)?.revision ?? 'none';
+  const c = ctx.problemId ? readComposite(ctx.workspaceRoot, ctx.problemId, s.name) : undefined;
+  return c && fs.existsSync(c.file) ? semanticRevision(fs.readFileSync(c.file, 'utf8')) : 'none';
+}
+
+/** A semantic model proposal: the Snowflake format (shared) or the composite format, and for a composite, that it resolves. */
+export function validateSemanticModelProposal(s: SemanticModelPayload, ctx: ProposalContext): ValidationReport {
+  const r = report();
+  if (!s || (s.scope !== 'shared' && s.scope !== 'composite') || !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(String(s.name ?? '')) || typeof s.content !== 'string') { r.errors.push('give scope (shared or composite), a name (letters, digits, _ and -) and the file content'); return finish(r); }
+  if (s.scope === 'shared') {
+    r.checks.push('the Snowflake semantic model format: known keys only, unique names, relationships between its tables');
+    const p = parseSemanticModel(s.content);
+    r.errors.push(...p.errors); r.warnings.push(...p.warnings);
+    if (readShared(ctx.workspaceRoot, s.name)) r.warnings.push(`It replaces the shared model ${s.name}: every problem that uses it is affected, and their composites become stale.`);
+  } else {
+    needProblem(ctx, r);
+    r.checks.push('the composite format', 'it resolves against the shared models: nothing missing, no collision, no redefinition of a shared expression, key or join');
+    const p = parseComposite(s.content);
+    r.errors.push(...p.errors);
+    if (p.composite) r.errors.push(...resolveComposite(p.composite, sharedLoader(ctx.workspaceRoot)).errors);
+  }
+  return finish(r);
 }
 
 /** A runbook proposal: the engine's own checks (classification, allowlist, arguments, rollback, the environment's policy). */
@@ -253,6 +287,7 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'vocabulary': return validateVocabularyProposal(payload as VocabularyProposalPayload);
     case 'workflow': return validateWorkflowProposal(payload as WorkflowInstance, ctx);
     case 'runbook': return validateRunbookProposal(payload as Runbook, ctx);
+    case 'semantic_model': return validateSemanticModelProposal(payload as SemanticModelPayload, ctx);
   }
 }
 
@@ -382,6 +417,27 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         if (!r.record) { const failed = store.markFailed(id, r.problem ?? 'not approved'); return { decision: failed, applied: false, message: `${id}: ${r.problem}` }; }
         const done = store.markApplied(id, `Approved by ${approver} for ${record.environment}; ${r.record.status === 'approved' ? 'ready to run' : 'waiting for a second approver'}.`);
         return { decision: done, applied: true, message: r.record.status === 'approved' ? `Runbook ${rb.id} approved by ${approver} (${record.environment}): run it from its Runbook tab in VS Code.` : `Runbook ${rb.id}: first approval by ${approver}; ${record.environment} needs a second approver (the Runbook tab, or autode runbook approve ${rb.id}).` };
+      }
+      case 'semantic_model': {
+        const s = store.proposal<SemanticModelPayload>(id);
+        if (d.subject?.revision && d.subject.revision !== semanticFileRevision(ctx, s)) {
+          const sup = store.markSuperseded(id, `${s.name} changed after the proposal was made; propose again against the current version.`);
+          return { decision: sup, applied: false, message: sup.events[sup.events.length - 1].note ?? '' };
+        }
+        const channel = [...d.events].reverse().find((e) => e.type === 'approved')?.channel ?? 'file';
+        if (s.scope === 'shared') {
+          // The person who approved the decision approved this revision of the shared model.
+          writeShared(ctx.workspaceRoot, s.name, s.content, { approved: { by: approver, at: now.toISOString(), channel } });
+          const done = store.markApplied(id, `Written and approved by ${approver}.`);
+          return { decision: done, applied: true, message: `Shared semantic model ${s.name} written and approved by ${approver}. Composites that use it are stale until resolved again.` };
+        }
+        if (!ctx.problemId) return { decision: d, applied: false, message: 'No active business problem; open it to apply this composite.' };
+        const dir = semanticPaths(ctx.workspaceRoot).compositeDir(ctx.problemId);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, `${s.name}.yaml`), s.content);
+        const res = resolveCompositeFile(ctx.workspaceRoot, ctx.problemId, s.name);
+        const done = store.markApplied(id, res.ok ? `Written and resolved (approved by ${approver}).` : `Written; it no longer resolves: ${res.errors.join('; ')}`);
+        return { decision: done, applied: true, message: res.ok ? `Composite ${s.name} written and resolved: ${path.relative(ctx.workspaceRoot, res.resolvedFile)}. Approve it within the problem (autode semantic approve ${s.name}).` : `Composite ${s.name} written, but it doesn't resolve now: ${res.errors.join('; ')}` };
       }
       case 'connection': {
         const saved = saveConnection(ctx.workspaceRoot, store.proposal<ConnectionDraft>(id));

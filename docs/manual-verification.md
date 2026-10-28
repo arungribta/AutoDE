@@ -1034,6 +1034,27 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: *Switch to governed* on the card (or `autode problems mode governed`).
   Expect: a hardening list opens with the assumption, the model-only facts and the warned check; approving the same target context now refuses.
 
+## Part 43 — v0.49.0 The semantic layer
+
+- [ ] **43.1 Draft a shared model.**
+  Do: in the kit's problem, run *AutoDE: New Shared Semantic Model (Draft from Knowledge)…*, name it `sales`.
+  Expect: `autode-output/semantic/sales.yaml` opens in the Semantic Model editor with the tables the specification names, their keys, dimensions, time dimensions and facts; relationships only where a foreign key or a confirmed relationship fact backs them; a warning per base table that its database is a placeholder. The YAML has no AutoDE-only keys.
+- [ ] **43.2 Edit and check.**
+  Do: in the Form, add a metric `order_count` = `COUNT(order_id)` on orders; change a dimension's expression to a column that doesn't exist; use Undo.
+  Expect: each change is an ordinary edit of the file (the YAML view shows it; Undo reverts it); the bad expression shows ✗ with "isn't a column".
+- [ ] **43.3 Approve.**
+  Do: *Approve…*; then edit a description and save.
+  Expect: refused while a check fails; after fixing, approved (the pill says by whom). After the edit, it shows "changed since approved" and appears in *Waiting for you*.
+- [ ] **43.4 A composite.**
+  Do: *AutoDE: New Semantic Composite…*, pick `sales`; add a metric with the name of an existing shared metric; Resolve. Then rename it and Resolve again.
+  Expect: the first resolve is refused ("a composite never redefines a shared element…"); the second writes `<name>.resolved.yaml` with a header naming `sales@<revision>`. Resolving again changes nothing.
+- [ ] **43.5 Stale.**
+  Do: change the shared model, save, approve it; open the composite.
+  Expect: the composite shows *stale* (the shared model changed) and waits in *Waiting for you*; Resolve shows the changes.
+- [ ] **43.6 In a terminal and a host.**
+  Do: `autode semantic show`, `autode semantic check sales`, `autode semantic approve sales`; in Claude Code ask to add a metric to the shared model.
+  Expect: the CLI lists both files with their status and asks you to type `approve`; the host calls `autode_propose_semantic_model` and tells you to approve the decision, which writes and approves the model.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1290,5 +1311,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 42.5 |  |  |
 | 42.6 |  |  |
 | 42.7 |  |  |
+| 43.1 |  |  |
+| 43.2 |  |  |
+| 43.3 |  |  |
+| 43.4 |  |  |
+| 43.5 |  |  |
+| 43.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.
