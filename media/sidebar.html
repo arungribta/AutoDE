@@ -152,19 +152,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .artifact-group.stale { color: var(--warning, #e6a014); }
 .artifact-group.current { color: var(--success, #2ea043); }
 
-/* ── Context Drawer ── */
-.ctx-drawer { border-top: 1px solid var(--border-soft); flex-shrink: 0; background: var(--surface); overflow: hidden; transition: max-height var(--transition-slow); }
-.ctx-drawer.collapsed { max-height: 32px; }
-.ctx-drawer.expanded { max-height: 260px; }
-.ctx-drawer-header { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px; cursor: pointer; user-select: none; font-size: var(--font-size-sm); color: var(--text-muted); min-height: 32px; }
-.ctx-drawer-header:hover { background: var(--surface-hover); }
-.ctx-drawer-header .ctx-drawer-title { font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
-.ctx-drawer-body { padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border-subtle); max-height: 220px; overflow-y: auto; }
-.ctx-drawer-body .ctx-section-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
-.ctx-drawer-body .ctx-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-.ctx-drawer-body .ctx-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-hover); border: 1px solid var(--border-soft); border-radius: var(--radius-pill); padding: 2px 8px; font-size: var(--font-size-sm); color: var(--text-muted); cursor: pointer; transition: all var(--transition-fast); }
-.ctx-drawer-body .ctx-chip:hover { background: var(--surface-active); color: var(--text); border-color: var(--border); }
-.ctx-drawer-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+/* ── Context status line (C5b: replaces the context drawer) ── */
+.ctx-status { display: flex; align-items: center; gap: 8px; padding: 4px 10px; min-height: 26px; border-top: 1px solid var(--border-soft); background: var(--surface); flex-shrink: 0; font-size: var(--font-size-sm); color: var(--text-muted); }
+.ctx-status .ctx-status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-status button { background: none; border: none; padding: 0; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: var(--font-size-sm); }
+.ctx-status button:hover, .ctx-status button:focus-visible { text-decoration: underline; }
 
 /* ── Chat Input ── */
 .chat-input-area { border-top: 1px solid var(--border-soft); padding: 8px 10px; flex-shrink: 0; background: var(--surface); }
@@ -378,7 +370,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         <span class="dot err" id="targetConnDot"></span>
         <span id="targetConnLabel">Target: not connected</span>
       </div>
-      <div class="metric" id="ctxMetric" title="Click to expand context drawer">
+      <div class="metric" id="ctxMetric" title="Open the Knowledge Explorer">
         <span>📊</span>
         <span class="metric-value" id="ctxMetricText">Context 0k</span>
         <div class="metric-bar"><div class="metric-bar-fill" id="ctxMetricBar" style="width:0%"></div></div>
@@ -409,38 +401,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       </div>
     </div>
 
-    <!-- Context Drawer -->
-    <div class="ctx-drawer collapsed" id="ctxDrawer">
-      <div class="ctx-drawer-header" id="ctxDrawerToggle">
-        <span class="ctx-drawer-title"><span>📊</span> Semantic Context Layer</span>
-        <span class="ctx-drawer-stats"><span id="ctxDrawerStats">0 tables · 0 terms · 0 queries</span><span id="ctxDrawerChevron">▶</span></span>
-      </div>
-      <div class="ctx-drawer-body" id="ctxDrawerBody">
-        <div class="ctx-section-title">Source Environment Context</div>
-        <div id="ctxSourceEnvNote" class="spec-field-meta" style="margin-bottom:8px;">Approve a specification to see whether source-environment context applies.</div>
-        <div class="ctx-section-title">Database Metadata</div>
-        <div class="ctx-grid" id="ctxDbGrid"><span class="ctx-chip" style="opacity:0.5">No metadata synced</span></div>
-        <div class="ctx-section-title">Business Context</div>
-        <div class="ctx-grid" id="ctxBizGrid"><span class="ctx-chip" style="opacity:0.5">No business terms</span></div>
-        <div class="ctx-section-title">Verified Queries</div>
-        <div class="ctx-grid" id="ctxQueryGrid"><span class="ctx-chip" style="opacity:0.5">No verified queries</span></div>
-        <div class="ctx-section-title">Context Sources</div>
-        <div class="ctx-sources-form" style="display:flex;gap:4px;margin-bottom:6px;">
-          <input id="sourcePathInput" placeholder="docs/glossary.md" style="flex:1;min-width:0;" />
-          <select id="sourceKindSelect">
-            <option value="business_context">Business Context</option>
-            <option value="verified_queries">Verified Queries</option>
-            <option value="data_definitions">Data Definitions</option>
-          </select>
-          <button id="registerSourceBtn" class="icon-btn" title="Register source">+ Add</button>
-        </div>
-        <div id="sourcesList" class="ctx-grid"><span class="ctx-chip" style="opacity:0.5">No sources registered</span></div>
-        <div class="ctx-drawer-actions">
-          <button id="ctxReindexBtn" class="icon-btn" title="Re-index context">⟳ Re-index</button>
-          <button id="synthesizeBtn" class="icon-btn" title="Synthesize context">🔄 Synthesize</button>
-          <button id="ctxOpenFolderBtn" class="icon-btn" title="Open the .autode folder (AutoDE's working state)">📂 Open .autode</button>
-        </div>
-      </div>
+    <!-- Context status line (C5b): what AutoDE knows, one click from the Knowledge Explorer -->
+    <div class="ctx-status" id="ctxStatus" role="status">
+      <span aria-hidden="true">📊</span>
+      <span class="ctx-status-text" id="ctxStatusText">Nothing known yet</span>
+      <button id="ctxOpenExplorerBtn" title="Search and explore what AutoDE knows: tables, columns, terms, facts, semantic models">Knowledge Explorer</button>
     </div>
 
     <!-- Chat Input -->
@@ -555,9 +520,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   const targetConnPill = $('#targetConnPill'), targetConnDot = $('#targetConnDot'), targetConnLabel = $('#targetConnLabel');
   const snowflakeStatus = $('#snowflakeStatus');
   const ctxMetricText = $('#ctxMetricText'), ctxMetricBar = $('#ctxMetricBar');
-  const ctxDrawer = $('#ctxDrawer'), ctxDrawerToggle = $('#ctxDrawerToggle'), ctxDrawerChevron = $('#ctxDrawerChevron'), ctxDrawerStats = $('#ctxDrawerStats');
+  const ctxStatusText = $('#ctxStatusText');
   const ctxDbGrid = $('#ctxDbGrid'), ctxBizGrid = $('#ctxBizGrid'), ctxQueryGrid = $('#ctxQueryGrid');
-  const sourcePathInput = $('#sourcePathInput'), sourceKindSelect = $('#sourceKindSelect'), sourcesList = $('#sourcesList');
+  const sourcesList = $('#sourcesList');
   const slideOverlay = $('#slideOverlay'), slidePanel = $('#slidePanel'), slideCloseBtn = $('#slideCloseBtn');
   const mentionDropdown = $('#mentionDropdown');
   const chatHistoryBtn = $('#chatHistoryBtn'), chatHistoryDropdown = $('#chatHistoryDropdown');
@@ -1246,12 +1211,12 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   var openWf = $('#paletteOpenWorkflow');
   if (openWf) openWf.onclick = function () { post('openWorkflowView'); };
 
-  // ── Context Drawer ──
-  ctxDrawerToggle.onclick = function () { var isExpanded = ctxDrawer.classList.contains('expanded'); if (isExpanded) { ctxDrawer.classList.remove('expanded'); ctxDrawer.classList.add('collapsed'); ctxDrawerChevron.textContent = '▶'; } else { ctxDrawer.classList.remove('collapsed'); ctxDrawer.classList.add('expanded'); ctxDrawerChevron.textContent = '▼'; } };
-  $('#ctxMetric').onclick = function () { ctxDrawer.classList.remove('collapsed'); ctxDrawer.classList.add('expanded'); ctxDrawerChevron.textContent = '▼'; };
+  // ── Context status line (C5b) ──
+  $('#ctxOpenExplorerBtn').onclick = function () { post('openKnowledgeExplorer'); };
+  $('#ctxMetric').onclick = function () { post('openKnowledgeExplorer'); };
   function updateContextDrawer(stats) {
     contextStats = stats || contextStats;
-    ctxDrawerStats.textContent = (contextStats.tables||0) + ' tables · ' + (contextStats.terms||0) + ' terms · ' + (contextStats.queries||0) + ' queries';
+    ctxStatusText.textContent = (contextStats.tables||0) + ' tables · ' + (contextStats.terms||0) + ' terms · ' + (contextStats.queries||0) + ' queries';
     ctxMetricText.textContent = 'Context ' + (contextStats.tokens ? (contextStats.tokens >= 1000 ? (contextStats.tokens/1000).toFixed(1) + 'k' : contextStats.tokens) : '0') + ' tokens';
     var pct = contextStats.maxTokens > 0 ? Math.min(100, Math.round(((contextStats.tokens||0) / contextStats.maxTokens) * 100)) : 0;
     ctxMetricBar.style.width = pct + '%';
@@ -1340,7 +1305,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       }
     };
   }
-  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } beginPending(currentSpec ? 'Revising the specification…' : 'Drafting the specification…'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': case '/execute': case '/workflow': post('openWorkflowView'); break; case '/skill': var skillArgs = text.replace('/skill', '').trim(); var skillMatch = skillArgs.match(/^(\S+)\s+([\s\S]+)$/); if (!skillMatch) { addMessage('ai', 'Usage: /skill <skillId> <instruction> — import a skill first via "AutoDE: Import Tool Skill".', 'AutoDE'); break; } beginPending('Running skill "' + skillMatch[1] + '"… this may write files or run commands, and will ask for your approval.'); post('runToolSkill', { skillId: skillMatch[1], instruction: skillMatch[2] }); break; case '/context': ctxDrawerToggle.click(); break; case '/connect': openSlidePanel('connect'); break; case '/target': openSlidePanel('target'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/define': case '/rule': case '/decide': case '/assume': post('chat', { message: text, toolMode: chatToolMode }); break; case '/reindex': post('reindex'); break; case '/clear': chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
+  function handleSlashCommand(text) { var cmd = text.split(' ')[0].toLowerCase(); switch (cmd) { case '/spec': var specText = text.replace('/spec', '').trim(); if (!specText) { addMessage('ai', 'Usage: /spec <describe the business problem you need to solve>', 'AutoDE'); break; } beginPending(currentSpec ? 'Revising the specification…' : 'Drafting the specification…'); if (currentSpec) { post('refineSpec', { refinement: specText }); } else { post('generateSpec', { prompt: specText }); } break; case '/plan': case '/execute': case '/workflow': post('openWorkflowView'); break; case '/skill': var skillArgs = text.replace('/skill', '').trim(); var skillMatch = skillArgs.match(/^(\S+)\s+([\s\S]+)$/); if (!skillMatch) { addMessage('ai', 'Usage: /skill <skillId> <instruction> — import a skill first via "AutoDE: Import Tool Skill".', 'AutoDE'); break; } beginPending('Running skill "' + skillMatch[1] + '"… this may write files or run commands, and will ask for your approval.'); post('runToolSkill', { skillId: skillMatch[1], instruction: skillMatch[2] }); break; case '/context': case '/explore': post('openKnowledgeExplorer'); break; case '/connect': openSlidePanel('connect'); break; case '/target': openSlidePanel('target'); break; case '/settings': openSlidePanel('llm'); break; case '/sync': post('syncMetadata'); break; case '/define': case '/rule': case '/decide': case '/assume': post('chat', { message: text, toolMode: chatToolMode }); break; case '/reindex': post('reindex'); break; case '/clear': chatStream.innerHTML = ''; if (welcomeBlock) welcomeBlock.style.display = ''; break; default: addMessage('ai', 'Unknown command: ' + cmd, 'AutoDE'); break; } }
 
   // ── @-mention ──
   function handleMentionInput(e) { var val = chatInput.value; var cursorPos = chatInput.selectionStart; var textBeforeCursor = val.substring(0, cursorPos); var mentionMatch = textBeforeCursor.match(/@(\w*)$/); if (mentionMatch) { var query = mentionMatch[1].toLowerCase(); var items = buildMentionItems(query); if (items.length > 0) { renderMentionDropdown(items); mentionDropdown.classList.add('visible'); } else { mentionDropdown.classList.remove('visible'); } } else { mentionDropdown.classList.remove('visible'); } }
@@ -1391,10 +1356,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       }
     });
   }
-  $('#ctxReindexBtn').onclick = function () { post('reindex'); };
-  $('#ctxOpenFolderBtn').onclick = function () { post('openContextFolder'); };
-  $('#registerSourceBtn').onclick = function () { var path = sourcePathInput.value.trim(); var kind = sourceKindSelect.value; if (!path) { showToast('Enter a source file path', 'error'); return; } post('registerSource', { path: path, kind: kind }); sourcePathInput.value = ''; };
-  $('#synthesizeBtn').onclick = function () { post('synthesize'); showToast('Synthesizing context...', ''); };
   $('#testCopilotBtn').onclick = function () { post('testLanguageModel', { provider: 'copilot' }); };
   $('#openCopilotHandoffBtn').onclick = function () { post('openCopilotHandoff'); };
   if ($('#testClaudeBtn')) $('#testClaudeBtn').onclick = function () { post('testLanguageModel', { provider: 'claude' }); };
@@ -1748,6 +1709,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'platformsState': platformsState = msg.state; renderPlatformsState(); break;
       case 'decisionsList': decisionsState = { pending: msg.pending || [], recent: msg.recent || [] }; renderDecisions(); break;
       case 'inboxState': inboxState = msg; renderDecisions(); break;
+      case 'openInbox': openPalette(); break;
       case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
       case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;

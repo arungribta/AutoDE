@@ -159,7 +159,10 @@ function freshClaude(mock) {
 
 // ---------- runner ----------
 const results = [];
+// AUTODE_TEST_GREP=<regex> runs only the tests whose names match (development; the full suite is the gate).
+const testGrep = process.env.AUTODE_TEST_GREP ? new RegExp(process.env.AUTODE_TEST_GREP) : undefined;
 async function test(name, fn) {
+  if (testGrep && !testGrep.test(name)) return;
   try { await fn(); results.push({ name, ok: true }); console.log('  PASS  ' + name); }
   catch (e) { results.push({ name, ok: false, err: e }); console.error('  FAIL  ' + name + '\n    ' + (e?.stack || e)); }
 }
@@ -5861,7 +5864,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -5875,7 +5878,8 @@ async function main() {
       const uris = (await client.listResources()).resources.map((r) => r.uri);
       for (const u of ['autode://spec/business-problem', 'autode://spec/pipeline', 'autode://semantic/shared/sales', 'autode://primitives/dedup']) assert.ok(uris.includes(u), u);
       assert.ok(!uris.includes('autode://context/source'), 'documents that do not exist are not listed');
-      assert.deepStrictEqual((await client.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate), ['autode://primitives/{kind}']);
+      assert.deepStrictEqual((await client.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate), ['autode://primitives/{kind}', 'autode://asset/{id}']);
+      for (const u of ['autode://explore/overview', 'autode://explore/estate']) assert.ok(uris.includes(u), u);
     } finally { await client.close(); f.done(); }
   });
 
@@ -5934,6 +5938,9 @@ async function main() {
       autode_governance_candidates: [{ tables: ['shop.customers'] }, { tables: [''] }],
       autode_capture_coverage: [{}, { x: 1 }],
       autode_semantic_list: [{}, { x: 1 }],
+      autode_search_assets: [{ query: 'orders', kinds: ['table'], trust: ['verified'] }, { query: 'orders', trust: ['certain'] }],
+      autode_get_asset_context: [{ asset: 'shop.orders' }, { asset: '' }],
+      autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
       autode_semantic_draft: [{ name: 'sales' }, { name: '1bad' }],
       autode_semantic_resolve: [{ name: 'revenue' }, { name: '' }],
@@ -11036,6 +11043,251 @@ async function main() {
       const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'editors', 'semanticModelEditor.html'), 'utf8');
       assert.ok(!/\son[a-z]+=/i.test(html), 'no inline handlers (the webview CSP allows only its nonce\'d script)');
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.50.0: C5b — the Knowledge Explorer; packs and grounding use the semantic layer ──
+
+  const c5b = {
+    index(extra = []) {
+      const L = require('../dist/engine/semantic/layer.js');
+      const { parseSemanticModel } = require('../dist/engine/semantic/model.js');
+      const sales = { name: 'sales', source: 'shared', revision: 'r1', approved: true, file: 'autode-output/semantic/sales.yaml', backing: { 'orders.total_tax': ['f1'] }, model: parseSemanticModel(c5a.sales).model };
+      return L.indexSemanticLayer([sales, ...extra]);
+    },
+    ops() {
+      // Two covered tables with no relationship between them.
+      const { parseSemanticModel } = require('../dist/engine/semantic/model.js');
+      const text = ['name: ops', 'tables:', '  - name: payments', '    base_table: { database: RETAIL, schema: shop, table: payments }', '    dimensions:', '      - { name: order_id, expr: order_id }', ''].join('\n');
+      return { name: 'ops', source: 'shared', revision: 'r2', approved: true, file: 'x', model: parseSemanticModel(text).model };
+    }
+  };
+
+  await test('v0.50.0: the approved semantic layer — a draft is no authority; a task\'s tables get their metrics, filters and relationships in the pack; elements become graph nodes linked to physical tables and columns, with the facts behind them', () => {
+    const L = require('../dist/engine/semantic/layer.js');
+    const { semanticGraph } = require('../dist/engine/semantic/layerGraph.js');
+    const { parseSemanticModel } = require('../dist/engine/semantic/model.js');
+    const { buildContextPack } = fresh('../dist/engine/context/contextPack.js');
+    const draft = { name: 'sales', source: 'shared', revision: 'r1', approved: false, file: 'x', model: parseSemanticModel(c5a.sales).model };
+    assert.strictEqual(L.indexSemanticLayer([draft]).models.length, 0, 'a draft is no authority');
+    assert.strictEqual(L.indexSemanticLayer([draft], { includeDrafts: true }).models.length, 1, 'but it can be browsed');
+    const index = c5b.index();
+    const defs = L.definitionsFor(index, ['shop.orders']);
+    assert.deepStrictEqual([defs.metrics.map((m) => m.name), defs.relationships.map((r) => r.name), defs.models], [['total_tax'], ['orders_to_customers'], ['sales@r1']]);
+    assert.strictEqual(L.definitionsFor(index, ['crm.customers']).tables.length, 0, 'the schema has to match, not just the name');
+    const graph = c5a.graph();
+    const g = semanticGraph(index, graph);
+    const edge = (type, s, t) => g.edges.some((e) => e.type === type && e.source === s && e.target === t);
+    assert.ok(edge('maps_to', 'sem:sales/orders', 'obj:shop/prod/shop.orders'));
+    assert.ok(edge('derives_from', 'sem:sales/orders/total_tax', 'obj:shop/prod/shop.orders.tax_amount'), 'a metric derives from the columns its expression uses');
+    assert.ok(edge('related_to', 'sem:sales/orders', 'sem:sales/customers'));
+    const metric = g.nodes.find((n) => n.id === 'sem:sales/orders/total_tax');
+    assert.deepStrictEqual([metric.type, metric.supportedBy, metric.metadata.expr], ['metric', ['f1'], 'SUM(tax_amount)']);
+    // Packs: the approved definitions for the task's tables, mandatory and recorded in the manifest.
+    const pack = buildContextPack({ purpose: 'step', seeds: ['obj:shop/prod/shop.orders'] }, { graph, assertions: [], conflicts: [], semantic: index });
+    assert.match(pack.text, /### Semantic definitions[^\n]*\n[\s\S]*Metric \*\*total_tax\*\* on orders \(sales\): `SUM\(tax_amount\)`[\s\S]*Join orders → customers on customer_id = customer_id \(many-to-one, left outer\)/);
+    assert.deepStrictEqual(pack.manifest.semanticModels, ['sales@r1']);
+    const other = buildContextPack({ purpose: 'step', seeds: ['obj:crm/prod/crm.customers'] }, { graph, assertions: [], conflicts: [], semantic: index });
+    assert.ok(!/Semantic definitions/.test(other.text) && !other.manifest.semanticModels, 'nothing for tables the layer doesn\'t cover');
+  });
+
+  await test('v0.50.0: the semantic grounding check — the layer\'s own join and metric pass (either direction); a join on other columns, a join the layer has no relationship for, a metric computed differently and a metric only the facts know are flagged; tables it doesn\'t cover and a table merged into itself aren\'t judged; with no approved layer nothing is checked', () => {
+    const { checkSemanticGrounding, knownMetricNames } = require('../dist/engine/grounding/semanticGrounding.js');
+    const L = require('../dist/engine/semantic/layer.js');
+    const index = c5b.index([c5b.ops()]);
+    const check = (sql, known = []) => checkSemanticGrounding([{ name: 'a.sql', content: sql }], index, { knownMetrics: known });
+    const ok = check('SELECT o.channel, SUM(o.tax_amount) AS total_tax FROM shop.orders o LEFT JOIN shop.customers c ON o.customer_id = c.customer_id GROUP BY o.channel');
+    assert.deepStrictEqual([ok.checked, ok.joinsChecked, ok.joinsDefined, ok.metricsChecked, ok.metricsDefined, ok.issues], [true, 1, 1, 1, 1, []]);
+    assert.deepStrictEqual(check('SELECT * FROM shop.customers c JOIN shop.orders o ON c.customer_id = o.customer_id').issues, [], 'either direction');
+    const other = check('SELECT * FROM shop.orders o JOIN shop.customers c ON o.order_id = c.customer_id');
+    assert.match(other.issues[0].detail, /joins shop\.orders and shop\.customers on .*; the semantic layer joins them on orders\.customer_id = customers\.customer_id \(sales: orders_to_customers\)/);
+    const invented = check('SELECT * FROM shop.payments p JOIN shop.customers c ON p.order_id = c.customer_id');
+    assert.ok(/has no relationship between them/.test(invented.issues[0].detail) && /autode_propose_semantic_model/.test(invented.issues[0].fix), JSON.stringify(invented.issues));
+    const differently = check('SELECT COUNT(o.tax_amount) AS total_tax FROM shop.orders o');
+    assert.match(differently.issues[0].detail, /computes total_tax as COUNT\(o\.tax_amount\); the semantic layer defines total_tax as SUM\(tax_amount\)/);
+    assert.deepStrictEqual(knownMetricNames(c5a.golden()).includes('net_revenue'), true, 'metric facts name their metrics');
+    const absent = check('SELECT SUM(o.shipping_amount) AS net_revenue FROM shop.orders o', knownMetricNames(c5a.golden()));
+    assert.match(absent.issues[0].detail, /net_revenue, a metric AutoDE's facts know but no approved semantic model defines/);
+    const unjudged = check('SELECT COUNT(*) AS row_count FROM crm.customers a JOIN crm.loyalty_members b ON a.customer_id = b.customer_id');
+    assert.deepStrictEqual([unjudged.joinsChecked, unjudged.metricsChecked, unjudged.issues], [0, 0, []]);
+    assert.deepStrictEqual(check('SELECT * FROM shop.orders a JOIN shop.orders b ON a.order_id = b.order_id').issues, [], 'a table joined to itself is no relationship');
+    assert.strictEqual(checkSemanticGrounding([{ name: 'a.sql', content: 'SELECT 1' }], undefined).checked, false);
+    const drafts = L.indexSemanticLayer([{ ...c5b.ops(), approved: false }], { includeDrafts: true });
+    assert.strictEqual(checkSemanticGrounding([{ name: 'a.sql', content: 'SELECT * FROM shop.payments p JOIN shop.customers c ON p.order_id = c.customer_id' }], drafts).checked, false, 'drafts are not checked against');
+  });
+
+  await test('v0.50.0: recording SQL — a governed problem refuses a join or metric the approved layer doesn\'t define (nothing is written); an exploration problem records it with a warning; the manifest carries the semantic check, its sources by category and each decision\'s confidence', () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const { recordArtifact } = fresh('../dist/engine/agents/artifacts.js');
+    const { confidenceOf } = require('../dist/engine/grounding/manifest.js');
+    const M = fresh('../dist/engine/documents/problemMode.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const w = c5a.ws();
+    try {
+      const root = layoutPath(w.ws, 'problems', 'p1');
+      fs.mkdirSync(root, { recursive: true });
+      const sources = { graph: c5a.graph(), assertions: [], conflicts: [], semantic: c5b.index(), catalogRevisions: { 'shop/prod': 'rev1' } };
+      const input = (path, content, extra = {}) => ({ workspaceRoot: w.ws, problemId: 'p1', problemRoot: root, stage: { id: 'b1', kind: 'build' }, path, content, who: { kind: 'agent', name: 'pipeline-engineer' }, channel: 'tool', sources, ...extra });
+      const bad = 'SELECT * FROM shop.orders o JOIN shop.customers c ON o.order_id = c.customer_id';
+      assert.throws(() => recordArtifact(input('bad.sql', bad)), /bad\.sql was not recorded: it doesn't follow the approved semantic layer\. Join: joins shop\.orders and shop\.customers/);
+      assert.ok(!fs.existsSync(p.join(w.ws, 'autode-output', 'p1', '03-build', 'b1', 'bad.sql')), 'nothing is written');
+      assert.ok(recordArtifact(input('notes.md', bad)).path.endsWith('notes.md'), 'only SQL is checked');
+      const good = recordArtifact(input('good.sql', 'SELECT o.channel, SUM(o.tax_amount) AS total_tax FROM shop.orders o LEFT JOIN shop.customers c ON o.customer_id = c.customer_id GROUP BY 1', { primitiveUses: [{ kind: 'dedup', params: { sourceObject: 'shop.orders', partitionByColumns: ['order_id'] }, source: 'primitive' }] }));
+      const man = JSON.parse(fs.readFileSync(p.join(w.ws, good.manifestPath), 'utf8'));
+      assert.deepStrictEqual([man.grounding.semantic.joinsDefined, man.grounding.semantic.metricsDefined, man.grounding.semantic.issues], [1, 1, []]);
+      assert.deepStrictEqual([man.sources.semantic, man.sources.metadata, man.sources.pattern], [['sales@r1'], ['shop/prod@rev1'], ['primitive:dedup']]);
+      assert.ok(man.decisions.length > 0 && man.decisions.every((d) => d.confidence === (d.backedBy ? d.backedBy.trust : 'unbacked')), JSON.stringify(man.decisions));
+      assert.deepStrictEqual([confidenceOf(['verified', 'documented', 'confirmed']), confidenceOf([])], ['documented', 'unbacked'], 'the weakest backing, never a stated number');
+      M.setProblemMode(root, 'exploration', { by: 'ana', channel: 'cli', acknowledged: true });
+      const explored = recordArtifact(input('bad.sql', bad));
+      assert.ok(explored.warnings.some((x) => /^GROUNDING_SEMANTIC: Join: joins shop\.orders and shop\.customers/.test(x)), explored.warnings.join('\n'));
+    } finally { w.done(); }
+  });
+
+  await test('v0.50.0: exploring — search over names, aliases, descriptions and facts (every word must match), facets counted before filtering, an empty query browses; the asset context of a table, a column, a semantic metric and a fact; a capped graph; the fact table; the overview', () => {
+    const E = fresh('../dist/engine/explore/explore.js');
+    const graph = c5a.graph();
+    const golden = c5a.golden();
+    const sources = { graph, assertions: golden, conflicts: [], semantic: c5b.index(), artifacts: [{ path: 'autode-output/p1/03-build/b1/stg_orders.sql', assertions: [], subjects: ['obj:shop/prod/shop.orders'], warnings: 0 }] };
+    const r = E.searchAssets(sources, 'orders');
+    assert.strictEqual(r.results[0].id, 'obj:shop/prod/shop.orders', JSON.stringify(r.results.slice(0, 3)));
+    assert.ok(r.facets.kind.table >= 1 && r.facets.kind.semantic_table === 1 && r.facets.kind.column > 1, JSON.stringify(r.facets.kind));
+    const cols = E.searchAssets(sources, 'orders', { kinds: ['column'] });
+    assert.ok(cols.results.every((x) => x.kind === 'column') && cols.facets.kind.table >= 1, 'facets are counted before filtering');
+    const loose = E.searchAssets(sources, 'orders zzzz');
+    assert.ok(loose.approximate === true && !E.searchAssets(sources, 'orders').approximate, 'every word must match; otherwise results are related ones, and say so');
+    assert.ok(E.searchAssets(sources, '').total > 100, 'an empty query browses everything');
+    const fact = golden.find((a) => a.id === 'A-grain-orders');
+    assert.ok(E.searchAssets(sources, fact.statement.split(' ').slice(0, 3).join(' ')).results.some((x) => x.kind === 'fact' && x.id === fact.id), 'facts are searchable');
+    // A table: schema, meaning (the semantic table and metrics, not every element), what uses it.
+    const t = E.getAssetContext(sources, 'shop.orders');
+    assert.strictEqual(t.asset.id, 'obj:shop/prod/shop.orders', 'found by its fqn');
+    assert.ok(t.schema.columns.some((c) => c.label === 'order_id' && c.primaryKey));
+    assert.deepStrictEqual(t.meaning.semantic.map((s) => s.id).sort(), ['sem:sales/orders', 'sem:sales/orders/total_tax']);
+    assert.ok(t.schema.grain.some((f) => f.id === 'A-grain-orders'), 'grain from its facts');
+    assert.deepStrictEqual([t.usedBy.artifacts.map((a) => a.path), t.usedBy.semanticModels.map((m) => m.label)], [['autode-output/p1/03-build/b1/stg_orders.sql'], ['sales']]);
+    assert.ok(t.lineage.related.every((x) => !x.asset.id.startsWith('sem:')), 'semantic links are under Meaning');
+    // A column: its table, the semantic elements built on it.
+    const col = E.getAssetContext(sources, 'obj:shop/prod/shop.orders.tax_amount');
+    assert.strictEqual(col.overview.parent.id, 'obj:shop/prod/shop.orders');
+    assert.deepStrictEqual(col.meaning.semantic.map((s) => s.id).sort(), ['sem:sales/orders/tax_amount', 'sem:sales/orders/total_tax']);
+    // A semantic metric: its definition and the columns it derives from.
+    const m = E.getAssetContext(sources, 'sem:sales/orders/total_tax');
+    assert.deepStrictEqual([m.asset.kind, m.asset.approved, m.meaning.definition.expr], ['metric', true, 'SUM(tax_amount)']);
+    assert.ok(m.lineage.related.some((x) => x.relation === 'derives_from' && x.asset.id === 'obj:shop/prod/shop.orders.tax_amount'));
+    // A fact: what it is about.
+    const f = E.getAssetContext(sources, 'A-grain-orders');
+    assert.deepStrictEqual([f.asset.kind, f.facts[0].id, f.lineage.related[0].asset.id], ['fact', 'A-grain-orders', 'obj:shop/prod/shop.orders']);
+    assert.strictEqual(E.getAssetContext(sources, 'no such thing'), undefined);
+    // The graph: capped, with what's left out counted; columns only when asked.
+    const g = E.exploreGraph(sources, 'shop.orders', { hops: 2, cap: 2 });
+    assert.ok(g.capped && g.nodes.length === 2 && Object.values(g.hidden).reduce((a, b) => a + b, 0) > 0, JSON.stringify(g));
+    assert.ok(!E.exploreGraph(sources, 'shop.orders').nodes.some((n) => n.kind === 'column') && E.exploreGraph(sources, 'shop.orders', { includeColumns: true }).nodes.some((n) => n.kind === 'column'));
+    // Facts and the overview.
+    const keys = E.listFacts(sources, { kinds: ['key'] });
+    assert.ok(keys.rows.length > 0 && keys.rows.every((x) => x.kind === 'key') && Object.keys(keys.facets.kind).length > 1);
+    const o = E.exploreOverview(sources);
+    assert.deepStrictEqual([o.counts.semanticModels, o.counts.approvedSemanticModels, o.counts.metrics, o.counts.tables > 10], [1, 1, 1, true]);
+  });
+
+  await test('v0.50.0: NFR-1 — on the large-estate fixture (about 2 000 tables and 50 000 columns; 200 in the working set, the rest in the catalog) searching, opening an asset, its graph and the overview each take under 100 ms', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { generateLargeEstate } = require('./eval/lib/largeEstate.cjs');
+    const { parseFile } = require('../dist/engine/context/fileIngestion.js');
+    const { Catalog, entriesFromGraph } = require('../dist/engine/context/catalog.js');
+    const E = fresh('../dist/engine/explore/explore.js');
+    const est = generateLargeEstate();
+    const nodes = []; const edges = [];
+    for (const f of est.files) { const r = parseFile(f.ddl, `${f.system}.sql`, { system: f.system, environment: 'prod' }); nodes.push(...r.nodes); edges.push(...r.edges); }
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-c5b-cat-'));
+    try {
+      const catalog = new Catalog(dir);
+      catalog.upsert(entriesFromGraph(nodes, edges));
+      await catalog.buildIndex();
+      const working = new Set(nodes.filter((n) => n.type === 'table').slice(0, 200).map((n) => n.id));
+      const inSet = (id) => working.has(id) || working.has(edges.find((e) => e.type === 'contains' && e.target === id)?.source);
+      const containsOf = new Map(edges.filter((e) => e.type === 'contains').map((e) => [e.target, e.source]));
+      const graph = { nodes: nodes.filter((n) => working.has(n.id) || working.has(containsOf.get(n.id))), edges: edges.filter((e) => working.has(e.source) || working.has(containsOf.get(e.source))) };
+      void inSet;
+      const sources = { graph, assertions: [], conflicts: [], catalog };
+      const time = (fn) => { const t = process.hrtime.bigint(); const r = fn(); return { r, ms: Number(process.hrtime.bigint() - t) / 1e6 }; };
+      const first = time(() => E.searchAssets(sources, 'customer order'));
+      const again = time(() => E.searchAssets(sources, 'customer order'));
+      const browse = time(() => E.searchAssets(sources, ''));
+      const id = first.r.results.find((x) => x.kind === 'table').id;
+      const asset = time(() => E.getAssetContext(sources, id));
+      const graphView = time(() => E.exploreGraph(sources, id, { hops: 2 }));
+      const overview = time(() => E.exploreOverview(sources));
+      const ms = { first: first.ms, again: again.ms, browse: browse.ms, asset: asset.ms, graph: graphView.ms, overview: overview.ms };
+      assert.ok(catalog.size > 1900 && first.r.fromCatalog > 0, `catalog ${catalog.size}, from catalog ${first.r.fromCatalog}`);
+      assert.ok(Object.values(ms).every((x) => x < 100), JSON.stringify(ms));
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('v0.50.0: every surface the same — the Explorer\'s messages, autode explore and autode_get_asset_context return the same asset context; search, graph, resources and the semantic grounding check over MCP; the Explorer opens only workspace files; the sidebar has a status line instead of the drawer; the panel ships with its graph library', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-c5b-'));
+    let client;
+    try {
+      nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), c4a.read('sources/shop.ddl'));
+      client = await mcpSession(ws);
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
+      await call('autode_start_problem', { problemStatement: 'Daily tax from shop.orders by channel' });
+      require('../dist/engine/semantic/store.js').writeShared(ws, 'sales', c5a.sales, { approved: { by: 'ana', at: '2026-10-28T00:00:00.000Z', channel: 'cli' } });
+      const viaMcp = await call('autode_get_asset_context', { asset: 'shop.orders' });
+      assert.strictEqual(viaMcp.asset.id, 'obj:shop/default/shop.orders');
+      assert.deepStrictEqual(viaMcp.meaning.semantic.map((s) => s.id).sort(), ['sem:sales/orders', 'sem:sales/orders/total_tax']);
+      const viaCli = (await cli(['explore', 'asset', 'shop.orders', '--workspace', ws, '--json'])).json().context;
+      const { answerExplorerMessage } = fresh('../dist/core/knowledgeExplorerModel.js');
+      const { EngineWorkspace } = require('../dist/mcp/workspace.js');
+      const { exploreSources } = require('../dist/engine/explore/sources.js');
+      const { activeProblemId } = require('../dist/engine/documents/problems.js');
+      const engineWs = new EngineWorkspace({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..') });
+      const host = { workspaceRoot: () => ws, sources: async () => exploreSources(ws, await engineWs.contextSources(), activeProblemId(ws)) };
+      const viaPanel = (await answerExplorerMessage({ type: 'request', requestId: 7, request: { type: 'asset', id: 'shop.orders' } }, host)).reply;
+      const plain = (x) => JSON.parse(JSON.stringify(x));
+      assert.deepStrictEqual([viaPanel.type, viaPanel.requestId], ['response', 7]);
+      assert.deepStrictEqual(plain(viaPanel.body.context), plain(viaMcp), 'the Explorer and MCP');
+      assert.deepStrictEqual(plain(viaCli), plain(viaMcp), 'the CLI and MCP');
+      // Search, graph and resources over MCP.
+      const found = await call('autode_search_assets', { query: 'tax', kinds: ['metric'] });
+      assert.deepStrictEqual(found.results.map((x) => x.id), ['sem:sales/orders/total_tax']);
+      assert.ok((await call('autode_explore_graph', { asset: 'shop.orders' })).nodes.some((n) => n.id === 'sem:sales/orders'));
+      assert.ok((await client.listResourceTemplates()).resourceTemplates.some((t) => t.uriTemplate === 'autode://asset/{id}'));
+      assert.ok((await client.listResources()).resources.some((r) => r.uri === 'autode://explore/overview'));
+      const res = await client.readResource({ uri: `autode://asset/${encodeURIComponent('obj:shop/default/shop.orders')}` });
+      assert.strictEqual(JSON.parse(res.contents[0].text).asset.id, 'obj:shop/default/shop.orders');
+      const grounding = await call('autode_check_grounding', { content: 'SELECT * FROM shop.orders o JOIN shop.customers c ON o.order_id = c.customer_id' });
+      assert.ok(grounding.semantic.checked && grounding.semantic.issues.length === 1, JSON.stringify(grounding.semantic));
+      // The CLI's other views.
+      const s = await cli(['explore', 'search', 'tax', '--kind', 'metric', '--workspace', ws]);
+      assert.ok(s.code === 0 && /metric\s+total_tax/.test(s.out), s.out + s.err);
+      assert.match((await cli(['explore', '--workspace', ws])).out, /Semantic layer: 1 model\(s\), 1 approved, 1 metric\(s\)/);
+      assert.match((await cli(['explore', 'graph', 'shop.orders', '--workspace', ws])).out, /orders —maps to→ shop\.orders/);
+      assert.strictEqual((await cli(['explore', 'asset', 'nothing-like-it', '--workspace', ws])).code, 5);
+      // The Explorer's other messages.
+      const ready = (await answerExplorerMessage({ type: 'ready' }, host)).reply;
+      assert.deepStrictEqual([ready.type, ready.requestId, ready.body.overview.counts.tables], ['response', 0, 11]);
+      assert.deepStrictEqual((await answerExplorerMessage({ type: 'open', target: { kind: 'file', path: '../outside.txt' } }, host)).reply.type, 'toast', 'never outside the workspace');
+      assert.deepStrictEqual((await answerExplorerMessage({ type: 'open', target: { kind: 'file', path: 'autode-output/semantic/sales.yaml' } }, host)).action, { kind: 'openFile', file: nodePath.join(ws, 'autode-output', 'semantic', 'sales.yaml') });
+      assert.deepStrictEqual((await answerExplorerMessage({ type: 'open', target: { kind: 'inbox' } }, host)).action, { kind: 'openInbox' });
+      assert.match((await answerExplorerMessage({ type: 'copyMarkdown', id: 'shop.orders' }, host)).action.text, /^# shop\.orders\n[\s\S]*## Schema[\s\S]*\| order_id \| BIGINT \| PK \|/);
+      assert.strictEqual((await answerExplorerMessage({ type: 'exportGraph', format: 'png', data: 'javascript:alert(1)' }, host)).reply.type, 'toast');
+      assert.strictEqual((await answerExplorerMessage({ type: 'ready' }, { workspaceRoot: () => undefined, sources: async () => undefined })).reply.type, 'empty');
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    // The panel, the sidebar and the package.
+    const read = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', f), 'utf8');
+    const html = read('media/explorer.html');
+    assert.ok(html.includes('<script src="{{cytoscapeUri}}"></script>') && !/\son[a-z]+=/i.test(html) && !/https?:\/\/(?!www\.w3\.org)/.test(html), 'the bundled library, no inline handlers, nothing from the network');
+    for (const t of ["type: 'search'", "type: 'asset'", "type: 'graph'", "type: 'facts'", "type: 'estate'", 'role="tablist"', 'aria-selected', 'vscode.setState']) assert.ok(html.includes(t), t);
+    const side = read('media/sidebar.html');
+    assert.ok(!side.includes('ctxDrawer') && !side.includes('registerSourceBtn') && side.includes('id="ctxStatus"') && side.includes("post('openKnowledgeExplorer')"));
+    const pkg = require('../package.json');
+    assert.ok(pkg.contributes.commands.some((c) => c.command === 'autoDataEngineeringHub.openKnowledgeExplorer'));
+    assert.strictEqual(pkg.devDependencies.cytoscape, '3.34.3', 'pinned');
+    const ignore = read('.vscodeignore');
+    assert.ok(ignore.includes('!dist/cytoscape.min.js') && ignore.includes('!media/explorer.html'));
+    assert.ok(nodeFs.existsSync(nodePath.join(__dirname, '..', 'dist', 'cytoscape.min.js')) && /^## cytoscape 3\.34\.3 — MIT/m.test(read('dist/THIRD-PARTY-NOTICES.md')));
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

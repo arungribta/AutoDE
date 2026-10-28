@@ -7,6 +7,7 @@ import { problemMode } from '../documents/problemMode';
 import { SemanticModel, parseSemanticModel, semanticRevision, serializeSemanticModel } from './model';
 import { Composite, SharedSource, isCompositeText, parseComposite, resolveComposite, serializeResolved } from './composite';
 import { SemanticFinding } from './checks';
+import { LoadedModel, SemanticLayerIndex, indexSemanticLayer } from './layer';
 
 /**
  * The semantic layer's files (C5a; docs/context-layer-requirements.md §6.2):
@@ -236,5 +237,31 @@ export function semanticWaiting(workspaceRoot: string, problemId?: string): Arra
   for (const c of listComposites(workspaceRoot, problemId)) {
     if (c.status === 'stale' || c.status === 'unresolved') out.push({ key: `semantic:${c.problemId}/${c.name}`, title: `Resolve the composite ${c.name}`, detail: c.status === 'stale' ? c.staleBecause.join('; ') : 'Not resolved yet.', file: c.file, cli: `autode semantic resolve ${c.name}` });
   }
+  return out;
+}
+
+/** Reads the workspace's semantic layer: approved shared models and the problem's approved composites (as resolved). */
+export function loadSemanticLayer(workspaceRoot: string, options: { problemId?: string; includeDrafts?: boolean } = {}): SemanticLayerIndex {
+  const loaded: LoadedModel[] = [];
+  for (const s of listShared(workspaceRoot)) {
+    if (!s.model) continue;
+    loaded.push({ name: s.name, source: 'shared', revision: s.revision, approved: s.status === 'approved', file: s.file, backing: s.backing, model: s.model });
+  }
+  if (options.problemId) {
+    for (const c of listComposites(workspaceRoot, options.problemId)) {
+      if (!fs.existsSync(c.resolvedFile)) continue;
+      const text = fs.readFileSync(c.resolvedFile, 'utf8');
+      const parsed = parseSemanticModel(text);
+      if (!parsed.model) continue;
+      loaded.push({ name: c.name, source: 'composite', problemId: c.problemId, revision: semanticRevision(text), approved: c.approvalCurrent, file: c.resolvedFile, model: parsed.model });
+    }
+  }
+  return indexSemanticLayer(loaded, options);
+}
+
+/** The files the layer is read from, for callers that cache on them. */
+export function semanticLayerFiles(workspaceRoot: string, problemId?: string): string[] {
+  const out = listShared(workspaceRoot).map((s) => s.file);
+  if (problemId) for (const c of listComposites(workspaceRoot, problemId)) out.push(c.file, c.resolvedFile);
   return out;
 }

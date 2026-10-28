@@ -17,6 +17,7 @@ import { workflowTools } from './workflowTools';
 import { agentTools } from './agentTools';
 import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, readResource } from './catalogs';
 import { semanticTools } from './semanticTools';
+import { ASSET_RESOURCE_TEMPLATE, exploreTools } from './exploreTools';
 
 /**
  * The AutoDE MCP server (docs/mcp-engine-requirements.md §3, §5; phases 3
@@ -115,12 +116,12 @@ export function createAutodeServer(options: ServerOptions): Server {
   const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: false, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   // The decision tools read the client's name (from `initialize`) at call time.
   const ref: { server?: Server } = {};
-  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name, () => tools), ...agentTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name }), ...semanticTools()];
+  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name, () => tools), ...agentTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name }), ...semanticTools(), ...exploreTools()];
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {
       capabilities: { tools: {}, prompts: {}, resources: {} },
-      instructions: `AutoDE data-engineering engine. Work happens in a business problem: autode_list_problems, autode_start_problem, autode_select_problem. Its workflow is the hub: autode_workflow_status and autode_workflow_next say what to do next; hand stages in with autode_workflow_complete_stage; a person approves gates. Bring the estate in with autode_ingest_file (DDL/CSV/JSON) or autode_ingest_metadata (a connection's schemas). Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, and autode_check_grounding to check SQL before proposing it. autode_list_connections lists the data platforms (if one is missing, propose it with autode_propose_connection); autode_explain_sql dry-runs SQL without executing it. Nothing you do changes AutoDE's state or a data platform directly: propose changes with the autode_propose_* tools; each becomes a decision a person approves (high stakes: only in the AutoDE panel, the CLI or the decision file; low stakes: ask the user, then autode_resolve_decision). autode_execute_query runs reads only; platform changes are runbooks (autode_propose_runbook), approved by a person and run by AutoDE's runner. autode_approvals_list says what waits for a person.`
+      instructions: `AutoDE data-engineering engine. Work happens in a business problem: autode_list_problems, autode_start_problem, autode_select_problem. Its workflow is the hub: autode_workflow_status and autode_workflow_next say what to do next; hand stages in with autode_workflow_complete_stage; a person approves gates. Bring the estate in with autode_ingest_file (DDL/CSV/JSON) or autode_ingest_metadata (a connection's schemas). Find transform primitives with autode_search_primitives, read their parameter schema with autode_describe_primitive, and generate SQL with autode_compile_transform rather than writing it by hand. Use autode_resolve and autode_get_context_pack to learn what the estate and the business problem hold, autode_search_assets and autode_get_asset_context for everything known about a table, column, term or metric before deciding about it, and autode_check_grounding to check SQL before proposing it (joins and metrics must follow the approved semantic layer). autode_list_connections lists the data platforms (if one is missing, propose it with autode_propose_connection); autode_explain_sql dry-runs SQL without executing it. Nothing you do changes AutoDE's state or a data platform directly: propose changes with the autode_propose_* tools; each becomes a decision a person approves (high stakes: only in the AutoDE panel, the CLI or the decision file; low stakes: ask the user, then autode_resolve_decision). autode_execute_query runs reads only; platform changes are runbooks (autode_propose_runbook), approved by a person and run by AutoDE's runner. autode_approvals_list says what waits for a person.`
     }
   );
   ref.server = server;
@@ -176,11 +177,11 @@ export function createAutodeServer(options: ServerOptions): Server {
     }
   });
 
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [PRIMITIVE_RESOURCE_TEMPLATE] }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [PRIMITIVE_RESOURCE_TEMPLATE, ASSET_RESOURCE_TEMPLATE] }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     try {
-      const r = readResource(ws, request.params.uri);
+      const r = await readResource(ws, request.params.uri);
       return { contents: [{ uri: r.uri, mimeType: r.mimeType, text: redact(r.text), _meta: { revision: r.revision } }] };
     } catch (err) {
       throw protocolError(err);

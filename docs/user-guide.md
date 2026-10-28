@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.49.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.50.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -314,6 +314,32 @@ Each item is ✓ known, ? proposed (waiting for you), ~ assumed (exploration), �
 
 Every test is a fixed probe that returns counts only, on the live connection or on the pack's samples. What passes is recorded as a proposed fact that is already **verified**; you confirm what it means. Personal data stays yours to classify ([§12](#12-personal-data)).
 
+
+### 8.7 The Knowledge Explorer
+
+*AutoDE: Open Knowledge Explorer* (also from the Workflow view's title bar, the 📊 status line under the chat, `/explore` or `/context`) opens a tab for exploring everything AutoDE knows. It only reads: changes still go through the Context Inbox, decisions and the Semantic Model editor.
+
+- **Search** (press `/`): tables, views, columns, glossary terms, rules, verified queries, semantic models, metrics and facts, by name, alias, synonym or description. Every word must match. If nothing does, AutoDE shows related results from your vocabulary and says so. Tables from the estate catalog that aren't loaded yet appear too, marked *catalog only*.
+- **Filters** on the left: kind, system, environment, trust, status, classification. Counts are for your search before filtering, so you can see the alternatives.
+- **Asset pages** have these tabs:
+  - **Overview:** where the asset came from, when it was captured and verified, keys and grain, decisions and assumptions in scope (including team-wide ones), conflicts.
+  - **Schema:** columns with type, key, nullability, classification and trust.
+  - **Meaning:** glossary terms, and the semantic tables, metrics and elements built on it.
+  - **Lineage:** relationships, mappings and derivations known so far.
+  - **Facts:** each fact with evidence, trust and history.
+  - **Governance:** classifications and masking, and the rules that name it.
+  - **Used by:** artifacts whose manifests rest on it, semantic models, verified queries.
+  - **Graph.**
+
+  *Copy as Markdown* puts the page on the clipboard. *Review in the Context Inbox* appears when something waits for you.
+- **Graph:** the asset and its neighbours, one to three hops out. Choose the edge types and layout (force, layered or concentric), and whether to show columns. The border colour is trust; dashed means inferred or draft. Click a node to open it. Export as PNG or SVG. A busy node shows "+N" for what isn't drawn.
+- **Facts** view: every fact, filterable by kind, status, trust and text.
+- **Estate** view: systems and environments with their catalog tables, working set and objects you can't see; connections and whether they're ready; what feeds each system.
+- **Keyboard:** `/` to search, ↑ ↓ and Enter in the results, ← → between tabs, Alt+← and Alt+→ for back and forward.
+
+**From a terminal:** `autode explore` (overview), `autode explore search <words> [--kind table,column] [--system s]`, `autode explore asset <id or name>` (the asset page as Markdown) and `autode explore graph <id or name> [--hops 2]`. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
+
+Owners and domains, lineage from the platform and impact analysis come with LIN (v0.51.0); ontology concepts with ONT1 (v0.52.0).
 ---
 
 ## 9. The workflow
@@ -508,6 +534,8 @@ From a terminal: `autode runbook list | show <id> | approve <id>`.
 - **Grounding manifests.** Every generated file has a manifest next to it: the tables and columns it references (resolved against the estate), the primitives that wrote it, and the facts behind its decisions. *AutoDE: Explain This Artifact* shows it.
 - **Grounding checks** flag unresolved or ambiguous names and incompatible join or cast types: `autode grounding <file.sql>`.
 - **Citations.** Chat answers cite the facts they use (`[fact:<id>]`).
+- **The semantic layer governs joins and metrics.** Once a shared model or composite is approved (§15), every pack over its tables carries its metrics, filters and joins, and the agent is told to use them. SQL that joins two of its tables in a way it doesn't define, computes one of its metrics differently, or computes a metric your facts know but no approved model defines, is **refused** when an agent records it in a governed problem; the message says what to change. In exploration mode it is recorded with a warning. `autode grounding <file.sql>` and the MCP tool `autode_check_grounding` show the same result.
+- **Confidence** on a decision in a manifest is the weakest trust of the facts behind it, or *unbacked*. AutoDE never records a model's own idea of how sure it is.
 
 ---
 
@@ -562,6 +590,10 @@ A draft is deterministic and uses only facts a person confirmed or a probe verif
 
 - **A shared model** is approved by a person, workspace-wide, at its exact version: in the editor (*Approve…*) or `autode semantic approve <name>`. A failing check refuses it. Editing it afterwards makes it *changed since approved*, and it waits in *Waiting for you* until approved again. An agent proposes a shared model as a decision (`autode_propose_semantic_model`); approving that decision approves the version it writes.
 - **A composite** is approved within its problem, at its resolved version, once resolved and not stale. In exploration mode ([§5.4](#54-exploration-mode)) failed checks only warn.
+
+### 15.5 How agents use it
+
+Only approved versions count. A draft, or a shared model changed since its approval, is shown in the Knowledge Explorer (marked *draft*) but is not handed to agents and doesn't govern their SQL. See §14 for what an agent receives and what it is refused.
 
 Deployment (Snowflake semantic views, Databricks metric views, dbt MetricFlow) comes next; see [Coming next](#22-coming-next).
 
@@ -688,7 +720,6 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](roadmap.md)):
 
-- **The Knowledge Explorer** (v0.50.0): search everything AutoDE knows, open a page for any table, column, term or semantic element, and explore the graph. The same is available from `autode explore` and over MCP. Context packs and grounding use the approved semantic layer, so an agent can't invent a join or metric the layer lacks.
 - **Lineage and impact** (v0.51.0): table and column lineage from the platform, your mappings and AutoDE's artifacts; owners and domains; what a change would break.
 - **Ontology and terminology** (v0.52.0–v0.53.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
 - **AtScale import** (v0.54.0); Horizon, Collibra and Unity Catalog later.

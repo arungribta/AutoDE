@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { buildGroundingManifest, GroundingManifest, PrimitiveUse } from '../grounding/manifest';
 import { buildSchemaIndex } from '../grounding/sqlGrounding';
+import { checkSemanticGrounding, describeSemanticIssues, knownMetricNames } from '../grounding/semanticGrounding';
 import { ContextPackSources } from '../context/contextPack';
 import { StageKind } from '../workflows/stageKinds';
 import { outputDirSegments } from '../workspaceLayout';
@@ -15,6 +16,10 @@ import { EXPLORATION_LABEL, explorationHeader, isExploration } from '../document
  * manifest beside it that the panel writes, and noted in the workflow's
  * history. It is a draft: the stage's gate is where a person approves it
  * (owner's decision 2026-10-21: one approval, not one per artifact).
+ *
+ * SQL that joins or measures in a way the approved semantic layer doesn't
+ * define is refused in a governed problem and only warned about in an
+ * exploration one (C5b; docs/context-layer-requirements.md §6.5).
  */
 
 const PHASE_OF: Record<StageKind, string> = {
@@ -50,6 +55,12 @@ export function recordArtifact(input: RecordArtifactInput): RecordedArtifact {
   if (!rel || rel.split('/').includes('..') || path.isAbsolute(input.path) || /^[A-Za-z]:/.test(input.path)) throw new Error(`"${input.path}" must be a relative path inside the stage's folder.`);
   const segs = [...outputDirSegments(input.problemId, input.outputDir), PHASE_OF[input.stage.kind], input.stage.id, ...rel.split('/')];
   const file = path.join(input.workspaceRoot, ...segs);
+  const language = input.language ?? LANG[path.extname(file).toLowerCase()] ?? 'text';
+  const exploration = isExploration(input.problemRoot);
+  if (language === 'sql' && !exploration) {
+    const sem = checkSemanticGrounding([{ name: rel, content: input.content }], input.sources.semantic, { knownMetrics: knownMetricNames(input.sources.assertions) });
+    if (sem.issues.length) throw new Error(`${rel} was not recorded: it doesn't follow the approved semantic layer. ${describeSemanticIssues(sem.issues).join(' ')}`);
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (fs.existsSync(file)) {
     const hist = path.join(path.dirname(file), 'history');
@@ -57,18 +68,18 @@ export function recordArtifact(input: RecordArtifactInput): RecordedArtifact {
     fs.copyFileSync(file, path.join(hist, `${Date.now()}.${path.basename(file)}`));
   }
   // C4c: an exploration problem's deliverables say so in their first line.
-  const exploration = isExploration(input.problemRoot);
   const header = exploration && !input.content.includes(EXPLORATION_LABEL) ? explorationHeader(file) : '';
   fs.writeFileSync(file, header + input.content);
   const relPath = segs.join('/');
   const manifest: GroundingManifest = buildGroundingManifest({
-    artifact: { path: relPath, content: input.content, language: input.language ?? LANG[path.extname(file).toLowerCase()] ?? 'text', agent: input.who.kind === 'agent' ? input.who.name : input.who.kind },
+    artifact: { path: relPath, content: input.content, language, agent: input.who.kind === 'agent' ? input.who.name : input.who.kind },
     catalogRevisions: input.sources.catalogRevisions,
     stepId: input.stage.id,
     primitiveUses: input.primitiveUses ?? [],
     graph: input.sources.graph,
     schemaIndex: buildSchemaIndex(input.sources.graph.nodes, input.sources.graph.edges),
     assertions: input.sources.assertions,
+    semantic: input.sources.semantic,
     model: input.model
   });
   if (exploration) manifest.exploration = true;

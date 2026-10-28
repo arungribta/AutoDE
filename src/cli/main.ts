@@ -24,6 +24,9 @@ import { checkSemanticModel, SemanticFinding } from '../engine/semantic/checks';
 import { draftSemanticModel } from '../engine/semantic/draft';
 import { resolveComposite } from '../engine/semantic/composite';
 import { newCompositeText } from '../engine/semantic/editorState';
+import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
+import { renderAssetMarkdown, renderGraph, renderOverview, renderSearch } from '../engine/explore/render';
+import type { AssetContext, AssetKind, ExploreOverview, GraphSlice, SearchResult } from '../engine/explore/explore';
 import { problemTableIds } from '../engine/context/capture';
 import { createSubjectResolver } from '../engine/context/projection';
 import { EngineWorkspace } from '../mcp/workspace';
@@ -205,6 +208,12 @@ Semantic layer (approving is a person's: interactive terminal):
   semantic check <name>        Check a shared model or composite against the estate and the facts
   semantic approve <name>      (terminal) Approve a shared model (workspace-wide) or a composite (in its problem)
 
+Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer and MCP):
+  explore                      Overview: objects, facts by status, systems, semantic models
+  explore search <words…> [--kind table,column,…] [--system <s>] [--all]   Search names, aliases, synonyms, descriptions and facts; facet counts
+  explore asset <id|name>      Everything known about one asset: schema, meaning, relationships, governance, facts, decisions, used by
+  explore graph <id|name> [--hops 1-3]   The graph around an asset
+
 Capture coverage:
   coverage                     What a complete picture of the problem needs, per table and metric: known, proposed, assumed, missing, and the action for each
   capture candidates [--connection <id>] [--record]   Keys, foreign keys, grain, change columns and personal data from the data, each probed
@@ -328,6 +337,7 @@ const OPTIONS = {
   tables: { type: 'string' },
   database: { type: 'string' },
   models: { type: 'string' },
+  hops: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -392,6 +402,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'coverage': return await cmdCoverage(ctx);
       case 'capture': return await cmdCapture(ctx, rest);
       case 'semantic': return await cmdSemantic(ctx, rest);
+      case 'explore': return await cmdExplore(ctx, rest);
       case 'workflow': return await cmdWorkflow(ctx, rest);
       case 'pack': return await cmdPack(ctx, rest);
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
@@ -1375,6 +1386,41 @@ async function cmdCapture(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, findings, recorded: recorded.map((a) => ({ id: a.id, kind: a.kind, statement: a.statement, status: a.status, trust: a.trust })) }, lines.join('\n'));
     return EXIT.OK;
   } finally { cfm.dispose(); session.dispose(); }
+}
+
+/** C5b: the Knowledge Explorer in a terminal — the same engine answers as the VS Code Explorer and the MCP tools. */
+async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'overview', ...words] = rest;
+  const problemId = singleProblem(ctx);
+  const ws = workspace(ctx, problemId);
+  const sources = exploreSources(ctx.workspaceRoot, await ws.contextSources(), problemId);
+  const ask = (request: ExploreRequest) => handleExploreRequest(request, sources, ctx.workspaceRoot);
+  const list = (v: string | undefined) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : undefined);
+  if (sub === 'overview') {
+    const o = ask({ type: 'overview' }).overview as ExploreOverview;
+    emit(ctx, { ok: true, overview: o }, renderOverview(o));
+    return EXIT.OK;
+  }
+  if (sub === 'search') {
+    const r = ask({ type: 'search', query: words.join(' '), ...(list(ctx.values.kind) ? { kinds: list(ctx.values.kind) as AssetKind[] } : {}), ...(ctx.values.system ? { systems: [ctx.values.system] } : {}), ...(ctx.values.environment ? { environments: [ctx.values.environment] } : {}), limit: ctx.values.all ? 1000 : 25 }).result as SearchResult;
+    emit(ctx, { ok: true, ...r }, renderSearch(r));
+    return r.total ? EXIT.OK : EXIT.NOT_FOUND;
+  }
+  const ref = words.join(' ');
+  if (!ref) throw new CliError(EXIT.USAGE, `explore ${sub} <id|name> (find it with autode explore search <words>).`);
+  if (sub === 'asset') {
+    const r = ask({ type: 'asset', id: ref });
+    if (!r.context) throw new CliError(EXIT.NOT_FOUND, String(r.error));
+    emit(ctx, { ok: true, context: r.context }, renderAssetMarkdown(r.context as AssetContext));
+    return EXIT.OK;
+  }
+  if (sub === 'graph') {
+    const r = ask({ type: 'graph', id: ref, ...(ctx.values.hops ? { hops: Number(ctx.values.hops) } : {}) });
+    if (!r.slice) throw new CliError(EXIT.NOT_FOUND, String(r.error));
+    emit(ctx, { ok: true, graph: r.slice }, renderGraph(r.slice as GraphSlice));
+    return EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, asset or graph.`);
 }
 
 /** C5a: the semantic layer — shared models and the active problem's composites. */

@@ -1008,6 +1008,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'listDecisions':
         case 'openWorkflowView': { await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow'); break; }
+        case 'openKnowledgeExplorer': { await vscode.commands.executeCommand('autoDataEngineeringHub.openKnowledgeExplorer'); break; }
         case 'workflowAction': {
           const m = message as unknown as { action?: unknown; stage?: unknown; arg?: unknown };
           if (typeof m.action === 'string') await this.workflowAction(m.action, typeof m.stage === 'string' ? m.stage : undefined, typeof m.arg === 'string' ? m.arg : undefined);
@@ -2055,6 +2056,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       label: roleLabel,
       text: `Connected to ${platformText}${detailText}.${noSchemaHint}`
     });
+  }
+
+  /** C5b: the Knowledge Explorer's "Review in the Inbox" — the palette, where the Context Inbox is. */
+  public openInbox(): void {
+    this.postDecisions();
+    void this.view?.webview.postMessage({ type: 'openInbox' });
   }
 
   private postContextUpdate(): void {

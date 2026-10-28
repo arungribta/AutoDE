@@ -15,6 +15,9 @@ import { Catalog, CatalogEntry, CatalogFetcher, DEFAULT_WORKING_SET_POLICY, Work
 import { buildVocabulary, parseVocabularyFile } from './vocabulary';
 import { isLive } from './assertions';
 import { knowledgeSkills } from '../skills/port';
+import { loadSemanticLayer, semanticLayerFiles, semanticPaths } from '../semantic/store';
+import type { SemanticLayerIndex } from '../semantic/layer';
+import { activeProblemId } from '../documents/problems';
 import { isMirror } from './projection';
 import type { Origin } from './types';
 import { BaseNode, BusinessTermNode, BusinessRuleNode, VerifiedQueryNode, GraphEdge } from './types';
@@ -929,9 +932,19 @@ export class ContextFileManager {
       conflicts: this.conflicts,
       runtimeFacts: [...this.runtimeFacts.values()],
       catalogRevisions: mergeWatermarks(catalogWatermarks(snapshot.nodes), this.catalog.watermarks()),
-      catalog: this.catalog
+      catalog: this.catalog,
+      semantic: this.semanticLayer()
     };
   }
+
+  /** The approved semantic layer for the active problem (C5b), re-read only when its files change. */
+  private semanticLayer(): SemanticLayerIndex {
+    const problemId = activeProblemId(this.root);
+    const key = [problemId ?? '', ...semanticLayerFiles(this.root, problemId), semanticPaths(this.root).sidecar].map((f) => { try { const st = fs.statSync(f); return `${f}:${st.mtimeMs}:${st.size}`; } catch { return `${f}:-`; } }).join('|');
+    if (!this.semanticCache || this.semanticCache.key !== key) this.semanticCache = { key, index: loadSemanticLayer(this.root, { problemId }) };
+    return this.semanticCache.index;
+  }
+  private semanticCache: { key: string; index: SemanticLayerIndex } | undefined;
 
   /**
    * A task-scoped context pack (C3, v0.30.0; docs/context-layer-requirements.md

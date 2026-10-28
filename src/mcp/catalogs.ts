@@ -8,6 +8,7 @@ import { layoutRel } from '../engine/workspaceLayout';
 import { loadRoles, loadSkillPack } from '../engine/agents/definitions';
 import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
 import { semanticResources } from './semanticTools';
+import { exploreResources, readExploreResource } from './exploreTools';
 
 /**
  * MCP prompts (§5.4) and resources (§5.5) — read-only views of the
@@ -123,10 +124,10 @@ export function listResources(ws: EngineWorkspace): ResourceInfo[] {
   const primitives = listPrimitives().map((p) => ({ uri: `autode://primitives/${p.kind}`, name: `Primitive ${p.kind}`, description: p.description, mimeType: 'application/json' }))
     .sort((a, b) => a.uri.localeCompare(b.uri));
   const semantic = semanticResources(ws).map(({ file: _file, ...r }) => r);
-  return [...docs, ...semantic, ...primitives];
+  return [...docs, ...semantic, ...exploreResources(), ...primitives];
 }
 
-export function readResource(ws: EngineWorkspace, uri: string): { uri: string; mimeType: string; text: string; revision: string } {
+export async function readResource(ws: EngineWorkspace, uri: string): Promise<{ uri: string; mimeType: string; text: string; revision: string }> {
   const m = /^autode:\/\/(.+)$/.exec(uri);
   if (!m) throw new EngineToolError('NOT_FOUND', `Unknown resource "${uri}".`);
   const key = m[1];
@@ -142,6 +143,8 @@ export function readResource(ws: EngineWorkspace, uri: string): { uri: string; m
     const { text, revision } = ws.readWithRevision(hit.file);
     return { uri, mimeType: 'application/yaml', text, revision };
   }
+  const explored = await readExploreResource(ws, key);
+  if (explored) return { uri, mimeType: 'application/json', ...explored };
   const kind = /^primitives\/(.+)$/.exec(key)?.[1];
   if (kind) {
     ws.ensurePrimitives();

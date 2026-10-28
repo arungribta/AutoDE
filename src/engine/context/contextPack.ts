@@ -6,6 +6,7 @@ import { isMirror } from './projection';
 import { GraphView, TextMatch, expandNeighborhood, resolveText } from './retrieval';
 import { ContextGap, DEFAULT_MIN_TRUST, describeGap, detectRelationshipGaps } from './contextGaps';
 import { CatalogLookup, selectSeedHits } from './catalog';
+import { SemanticLayerIndex, definitionsFor } from '../semantic/layer';
 
 /**
  * Task-scoped context packs (C3, v0.30.0; docs/context-layer-requirements.md
@@ -42,6 +43,8 @@ export interface ContextPackSources {
   catalog?: CatalogLookup;
   /** Published, reviewed knowledge skills of the team (PA4); those matching the query join the pack. */
   knowledgeSkills?: ReadonlyArray<{ id: string; name: string; description: string; text: string }>;
+  /** The approved semantic layer (C5b): definitions for the pack's tables. */
+  semantic?: SemanticLayerIndex;
 }
 
 export interface PackManifest {
@@ -66,6 +69,8 @@ export interface PackManifest {
   promoted?: string[];
   /** Knowledge skills the pack included (PA4). */
   knowledgeSkills?: string[];
+  /** Approved semantic models (`name@revision`) whose definitions the pack included (C5b). */
+  semanticModels?: string[];
 }
 
 export interface ContextPack {
@@ -202,7 +207,8 @@ export function buildContextPack(request: ContextPackRequest, input: ContextPack
     gaps,
     warnings: result.warnings,
     ...(fromCatalog && fromCatalog.promoted.length > 0 ? { promoted: fromCatalog.promoted.filter((id) => result.nodeIds.includes(id)) } : {}),
-    ...(usedKnowledge.length ? { knowledgeSkills: usedKnowledge } : {})
+    ...(usedKnowledge.length ? { knowledgeSkills: usedKnowledge } : {}),
+    ...(result.semanticModels?.length ? { semanticModels: result.semanticModels } : {})
   };
   const packId = 'pack-' + createHash('sha256').update(canonicalJson({ purpose, seeds, query: request.query, stepId: request.stepId, text })).digest('hex').slice(0, 20);
   return { text, manifest: { packId, ...manifestCore } };
@@ -241,7 +247,7 @@ function catalogSeeds(query: string, sources: ContextPackSources): { seeds: stri
   return { seeds, promoted, gaps, invisible, graph: { nodes: [...sources.graph.nodes, ...extra.nodes], edges: [...sources.graph.edges, ...extra.edges] } };
 }
 
-interface Rendered { lines: string[]; nodeIds: string[]; extraAssertions: string[]; truncated: Record<string, number>; warnings: string[] }
+interface Rendered { lines: string[]; nodeIds: string[]; extraAssertions: string[]; truncated: Record<string, number>; warnings: string[]; semanticModels?: string[] }
 
 /**
  * No seeds: the project overview — exactly what `buildContextPrompt()`
@@ -411,6 +417,22 @@ function renderSeeded(seeds: string[], purpose: PackPurpose, budget: number, sou
     } else truncated.relationships = rels.length;
   }
 
+  // ── The approved semantic layer's definitions for these tables (C5b, §6.5): mandatory,
+  // so an agent joins and measures the way the layer says instead of inferring it ──
+  let semanticModels: string[] | undefined;
+  if (sources.semantic) {
+    const defs = definitionsFor(sources.semantic, [...seedTables].map((t) => tableName(idx.nodes.get(t) as TableNode)));
+    if (defs.tables.length) {
+      const where = (model: string, table: string) => `${table} (${model})`;
+      const block = ['### Semantic definitions (approved: use these, never your own)'];
+      for (const m of defs.metrics) block.push(`- Metric **${m.name}** on ${where(m.model, m.table)}: \`${m.expr}\`${m.synonyms.length ? ` — also called ${m.synonyms.join(', ')}` : ''}${m.description ? ` — ${m.description}` : ''}`);
+      for (const f of defs.filters) block.push(`- Filter **${f.name}** on ${where(f.model, f.table)}: \`${f.expr}\``);
+      for (const r of defs.relationships) block.push(`- Join ${r.leftTable} → ${r.rightTable} on ${r.columns.map((c) => `${c.left} = ${c.right}`).join(' AND ')}${r.relationshipType ? ` (${r.relationshipType.replace(/_/g, '-')}${r.joinType ? `, ${r.joinType.replace(/_/g, ' ')}` : ''})` : ''} — ${r.model}: ${r.name}`);
+      if (block.length === 1) block.push(`- ${defs.tables.map((t) => where(t.model, t.table.name)).join(', ')}: no metrics, filters or relationships defined yet.`);
+      if (fits(block)) { push(block); semanticModels = defs.models; } else truncated.semantic = block.length - 1;
+    }
+  }
+
   // ── Terms, metrics and verified queries reached from the seeds ──
   const defs = byScore([...scope].filter((id) => {
     const n = idx.nodes.get(id);
@@ -443,7 +465,7 @@ function renderSeeded(seeds: string[], purpose: PackPurpose, budget: number, sou
 
   const dropped = Object.entries(truncated).filter(([, n]) => n > 0);
   if (dropped.length > 0) lines.push(`_Not shown (token budget): ${dropped.map(([k, n]) => `${n} ${k}`).join(', ')}._`);
-  return { lines, nodeIds: [...new Set(nodeIds)], extraAssertions: [...new Set(extra)], truncated, warnings };
+  return { lines, nodeIds: [...new Set(nodeIds)], extraAssertions: [...new Set(extra)], truncated, warnings, ...(semanticModels ? { semanticModels } : {}) };
 }
 
 const KNOWLEDGE_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'when', 'use', 'are', 'its', 'each', 'any', 'skill', 'data', 'how', 'what', 'which', 'all']);
@@ -493,6 +515,7 @@ export function renderPackManifest(pack: ContextPack, title: string): string {
   if (tr.length) L.push(`- **Left out:** ${tr.map(([k, n]) => `${n} ${k}`).join(', ')}`);
   if (m.gaps.length) L.push(`- **Context gaps:** ${m.gaps.map(describeGap).join(' ')}`);
   if (m.knowledgeSkills?.length) L.push(`- **Team knowledge:** ${m.knowledgeSkills.map((s) => `\`${s}\``).join(', ')}`);
+  if (m.semanticModels?.length) L.push(`- **Semantic layer:** ${m.semanticModels.map((s) => `\`${s}\``).join(', ')}`);
   L.push('', '## Context as sent', '', '```markdown', pack.text, '```');
   return L.join('\n') + '\n';
 }

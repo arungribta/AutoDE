@@ -9,6 +9,7 @@ import { PackPurpose, buildContextPack } from '../engine/context/contextPack';
 import { ASSERTION_KINDS, AssertionStatus, TRUST_TIERS, TrustTier } from '../engine/context/assertions';
 import { isMirror } from '../engine/context/projection';
 import { buildSchemaIndex, checkSqlGrounding } from '../engine/grounding/sqlGrounding';
+import { checkSemanticGrounding, knownMetricNames } from '../engine/grounding/semanticGrounding';
 import { UNSCOPED_PROBLEM, outputDirSegments } from '../engine/workspaceLayout';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
@@ -278,7 +279,7 @@ export const TOOLS: readonly EngineTool[] = [
   },
   {
     name: 'autode_check_grounding',
-    description: 'Check generated SQL against the estate AutoDE knows: unresolved tables and columns, ambiguous names, incompatible types. Use it to self-check code before proposing it.',
+    description: 'Check generated SQL against the estate AutoDE knows (unresolved tables and columns, ambiguous names, incompatible types) and against the approved semantic layer (joins it has no relationship for, metrics computed differently from its definition or missing from it). Use it to self-check code before recording or proposing it: a governed problem refuses SQL with semantic issues.',
     inputSchema: {
       type: 'object', required: ['content'], additionalProperties: false,
       properties: { content: { type: 'string', minLength: 1 }, dialect: dialectSchema, name: { type: 'string', description: 'A label for the artifact in the result.' } }
@@ -287,8 +288,10 @@ export const TOOLS: readonly EngineTool[] = [
     handler: async (args, ws) => {
       const src = await ws.contextSources();
       const index = buildSchemaIndex(src.graph.nodes, src.graph.edges);
-      const result = checkSqlGrounding([{ name: String(args.name ?? 'input.sql'), content: String(args.content) }], index);
-      return { ...(result as unknown as Record<string, unknown>), knownTables: index.tables.length };
+      const artifact = { name: String(args.name ?? 'input.sql'), content: String(args.content) };
+      const result = checkSqlGrounding([artifact], index);
+      const semantic = checkSemanticGrounding([artifact], src.semantic, { knownMetrics: knownMetricNames(src.assertions) });
+      return { ...(result as unknown as Record<string, unknown>), knownTables: index.tables.length, semantic };
     }
   }
 ];

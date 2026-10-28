@@ -10,6 +10,7 @@ import { checkPrerequisitesCommand, installDriverCommand, verifyDriverCommand, P
 import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, registerMcpProvider, vscodeSecretEnv } from './core/mcpConfig';
 import { EngineClient } from './core/engineClient';
 import { registerWorkflowView } from './core/workflowView';
+import { registerKnowledgeExplorer } from './core/knowledgeExplorer';
 import { registerSkillsView } from './core/skillsView';
 import { PortSkillPanel } from './core/portSkillView';
 import * as port from './engine/skills/port';
@@ -234,6 +235,11 @@ export function activate(context: vscode.ExtensionContext): void {
     workflowAction: (action, stage, arg) => sidebarProvider.workflowActionFromView(action, stage, arg),
     user: skillActor,
     waiting: () => sidebarProvider.waitingForYou()
+  }));
+  // C5b: the Knowledge Explorer — search, asset pages, graph, facts, estate — over the engine's workspace.
+  context.subscriptions.push(...registerKnowledgeExplorer(context, {
+    workspaceRoot: firstFolder,
+    openInbox: () => { void vscode.commands.executeCommand(`${EXTENSION_ID}.openSidebar`).then(() => sidebarProvider.openInbox()); }
   }));
   // Phase 5: agents reach the engine's MCP tools through an in-process client, started on first use.
   hub.setEngineFactory((clientName?: string) => {

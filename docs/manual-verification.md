@@ -1055,6 +1055,30 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: `autode semantic show`, `autode semantic check sales`, `autode semantic approve sales`; in Claude Code ask to add a metric to the shared model.
   Expect: the CLI lists both files with their status and asks you to type `approve`; the host calls `autode_propose_semantic_model` and tells you to approve the decision, which writes and approves the model.
 
+## Part 44 — v0.50.0 The Knowledge Explorer; packs and grounding use the semantic layer
+
+- [ ] **44.1 Open and search.**
+  Do: in the kit, *AutoDE: Open Knowledge Explorer*. Press `/`, type `order`, then tick *Table* under Kind.
+  Expect: an overview first (tables, catalog, facts by trust, systems, semantic models). Results appear as you type, best first; Kind still lists the other kinds with their counts; ↑ ↓ Enter open a result.
+- [ ] **44.2 An asset page.**
+  Do: open `shop.orders`; go through every tab; click a column, then Alt+←.
+  Expect: Schema lists its columns with keys and classifications; Facts shows grain and key facts with evidence; Used by lists artifacts whose manifests rest on it; the column page names the table in its breadcrumb; Back returns to the table.
+- [ ] **44.3 The graph.**
+  Do: on `shop.orders`, *Show in graph*; set hops to 2, layout Layered, tick Columns; click a node; export PNG and SVG.
+  Expect: the table at the centre with a highlighted border; trust as border colour; columns appear when ticked; clicking a node opens it; both files save and open.
+- [ ] **44.4 The semantic layer in packs.**
+  Do: draft and approve the `sales` model (Part 43), then run the build stage's agent and open *What the Agent Saw* for its step.
+  Expect: the pack has *Semantic definitions (approved…)* with the model's metrics and joins, and the manifest names `sales@<revision>`.
+- [ ] **44.5 An invented join is refused.**
+  Do: in a governed problem, ask the agent (or call `autode_record_artifact` from Claude Code) to record SQL joining two tables of the approved model on columns the model doesn't relate. Switch the problem to exploration mode and repeat.
+  Expect: governed — refused, naming the join and what the layer defines; nothing is written. Exploration — recorded, and the manifest carries `GROUNDING_SEMANTIC`.
+- [ ] **44.6 Facts, estate and the status line.**
+  Do: open the Facts view, filter by trust; open the Estate view; in the sidebar, click the 📊 status line and type `/explore`.
+  Expect: facts newest first with counts per filter; systems, environments, catalog and connection readiness; the status line and `/explore` both open the Explorer; the old drawer and its *Add source* form are gone.
+- [ ] **44.7 In a terminal and a host.**
+  Do: `autode explore`, `autode explore search tax --kind metric`, `autode explore asset shop.orders`; in Claude Code ask "what do we know about shop.orders?".
+  Expect: the CLI prints the overview, the metric and the asset page as Markdown; the host calls `autode_get_asset_context` (or reads `autode://asset/...`) and answers from it.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1317,5 +1341,12 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 43.4 |  |  |
 | 43.5 |  |  |
 | 43.6 |  |  |
+| 44.1 |  |  |
+| 44.2 |  |  |
+| 44.3 |  |  |
+| 44.4 |  |  |
+| 44.5 |  |  |
+| 44.6 |  |  |
+| 44.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

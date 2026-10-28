@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}' {{cspSource}};">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Explorer</title>
+<style>
+  :root {
+    --gap: 12px; --radius: 6px;
+    --border: var(--vscode-editorWidget-border, var(--vscode-panel-border, #4446));
+    --muted: var(--vscode-descriptionForeground);
+    --surface: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+    --hover: var(--vscode-list-hoverBackground);
+    --active: var(--vscode-list-activeSelectionBackground);
+    --active-fg: var(--vscode-list-activeSelectionForeground);
+    --link: var(--vscode-textLink-foreground);
+    --t-verified: var(--vscode-testing-iconPassed, #2ea043);
+    --t-confirmed: var(--vscode-charts-blue, #3794ff);
+    --t-documented: var(--vscode-descriptionForeground, #888);
+    --t-assumed: var(--vscode-charts-orange, #d18616);
+    --t-inferred: var(--vscode-editorWarning-foreground, #cca700);
+    --danger: var(--vscode-editorError-foreground, #f14c4c);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; }
+  .btn { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid transparent; border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+  .btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
+  .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .btn.primary:hover { background: var(--vscode-button-hoverBackground); }
+  .btn:focus-visible, .link:focus-visible, [tabindex]:focus-visible, input:focus-visible, select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+  .link { background: none; border: none; padding: 0; color: var(--link); cursor: pointer; text-align: left; }
+  .link:hover { text-decoration: underline; }
+  input[type=search], input[type=text], select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 4px; padding: 4px 8px; font: inherit; }
+  code, .mono { font-family: var(--vscode-editor-font-family); font-size: 0.95em; }
+  .muted { color: var(--muted); }
+  .small { font-size: 11px; }
+
+  /* Top bar */
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  header h1 { font-size: 13px; margin: 0; font-weight: 600; white-space: nowrap; }
+  .searchbox { flex: 1; display: flex; align-items: center; gap: 6px; max-width: 640px; position: relative; }
+  .searchbox input { width: 100%; padding-left: 26px; }
+  .searchbox .icon { position: absolute; left: 8px; opacity: 0.6; pointer-events: none; }
+  .searchbox kbd { position: absolute; right: 8px; font-size: 10px; opacity: 0.6; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+  nav.views { display: flex; gap: 2px; }
+  nav.views button { background: none; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; color: var(--muted); }
+  nav.views button[aria-selected=true] { color: var(--vscode-foreground); background: var(--hover); font-weight: 600; }
+  .history { display: flex; gap: 2px; }
+  .history button { background: none; border: none; cursor: pointer; padding: 2px 6px; border-radius: 4px; color: var(--muted); }
+  .history button:disabled { opacity: 0.35; cursor: default; }
+  .history button:not(:disabled):hover { background: var(--hover); color: var(--vscode-foreground); }
+
+  main { flex: 1; min-height: 0; display: flex; }
+  .view { flex: 1; min-height: 0; display: none; }
+  .view.on { display: flex; }
+
+  /* Explore: facets | results | asset */
+  aside.facets { width: 200px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; padding: 10px 12px; }
+  .facet { margin-bottom: 14px; }
+  .facet h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+  .facet label { display: flex; align-items: center; gap: 6px; padding: 1px 0; cursor: pointer; font-size: 12px; }
+  .facet label .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  section.results { width: 340px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .results-head { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  ul.list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+  ul.list li { padding: 6px 12px; cursor: pointer; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+  ul.list li:hover { background: var(--hover); }
+  ul.list li[aria-selected=true] { background: var(--active); color: var(--active-fg); }
+  ul.list li .t { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  ul.list li .t .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  ul.list li .s { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+  ul.list li[aria-selected=true] .s { color: inherit; opacity: 0.85; }
+  .more { padding: 8px 12px; text-align: center; }
+  article.asset { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 22px 40px; }
+
+  /* Badges */
+  .badge { display: inline-flex; align-items: center; gap: 3px; border-radius: 10px; padding: 0 7px; font-size: 10.5px; line-height: 17px; border: 1px solid var(--border); white-space: nowrap; color: var(--muted); }
+  .kind { text-transform: uppercase; letter-spacing: 0.04em; font-size: 9.5px; font-weight: 600; }
+  .trust::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+  .trust-verified { color: var(--t-verified); border-color: var(--t-verified); }
+  .trust-confirmed { color: var(--t-confirmed); border-color: var(--t-confirmed); }
+  .trust-documented { color: var(--t-documented); }
+  .trust-assumed { color: var(--t-assumed); border-color: var(--t-assumed); }
+  .trust-inferred { color: var(--t-inferred); border-color: var(--t-inferred); border-style: dashed; }
+  .pii { color: var(--danger); border-color: var(--danger); }
+  .draft { border-style: dashed; }
+
+  /* Asset page */
+  .crumbs { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .asset-head h2 { margin: 2px 0 4px; font-size: 18px; font-weight: 600; word-break: break-word; }
+  .asset-head .fqn { font-family: var(--vscode-editor-font-family); font-size: 12px; color: var(--muted); word-break: break-all; }
+  .asset-head .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .asset-head .desc { margin: 6px 0 10px; max-width: 80ch; line-height: 1.5; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 14px; }
+  [role=tablist].tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; overflow-x: auto; }
+  [role=tablist].tabs button { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+  [role=tablist].tabs button[aria-selected=true] { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); }
+  [role=tablist].tabs button .count { margin-left: 4px; font-size: 10px; opacity: 0.8; }
+  h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 18px 0 6px; font-weight: 600; }
+  table.grid { border-collapse: collapse; width: 100%; font-size: 12px; }
+  table.grid th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); padding: 5px 8px; position: sticky; top: 0; background: var(--vscode-editor-background); }
+  table.grid td { border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); padding: 5px 8px; vertical-align: top; }
+  table.grid tr.click { cursor: pointer; }
+  table.grid tr.click:hover td { background: var(--hover); }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 12px; }
+  dl.kv dt { color: var(--muted); }
+  dl.kv dd { margin: 0; word-break: break-word; }
+  .item { padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+  .item .ev { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .note { border-left: 3px solid var(--link); background: var(--vscode-textBlockQuote-background); padding: 6px 10px; font-size: 12px; margin: 10px 0; }
+  .warn { border-left-color: var(--t-assumed); }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  .empty .big { font-size: 28px; opacity: 0.5; display: block; margin-bottom: 6px; }
+
+  /* Overview */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 10px 0 18px; }
+  .tile { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; background: var(--surface); }
+  .tile .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border); margin: 4px 0 2px; }
+  .bar span { display: block; height: 100%; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+
+  /* Graph */
+  .graph-wrap { display: flex; flex-direction: column; height: calc(100vh - 260px); min-height: 360px; border: 1px solid var(--border); border-radius: var(--radius); }
+  .graph-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .graph-tools label { display: inline-flex; align-items: center; gap: 4px; }
+  #cy { flex: 1; min-height: 0; }
+  .graph-foot { padding: 4px 8px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+
+  /* Facts and estate views */
+  .page { flex: 1; overflow-y: auto; padding: 14px 22px 40px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; background: var(--surface); }
+  .card h3 { margin: 0 0 4px; font-size: 13px; }
+  .toast { position: fixed; bottom: 16px; right: 16px; background: var(--vscode-notifications-background, var(--surface)); color: var(--vscode-notifications-foreground, inherit); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 12px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  .toast.on { opacity: 1; }
+  @media (max-width: 1000px) { aside.facets { display: none; } section.results { width: 280px; } }
+  @media (max-width: 700px) { section.results { display: none; } section.results.force { display: flex; width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Knowledge Explorer</h1>
+  <div class="history" aria-label="History">
+    <button id="home" title="Overview (Alt+Home)" aria-label="Overview">⌂</button>
+    <button id="back" title="Back (Alt+Left)" aria-label="Back" disabled>←</button>
+    <button id="fwd" title="Forward (Alt+Right)" aria-label="Forward" disabled>→</button>
+  </div>
+  <div class="searchbox" role="search">
+    <span class="icon" aria-hidden="true">⌕</span>
+    <input id="q" type="search" placeholder="Search tables, columns, terms, metrics, facts…" aria-label="Search what AutoDE knows" autocomplete="off" spellcheck="false">
+    <kbd aria-hidden="true">/</kbd>
+  </div>
+  <nav class="views" role="tablist" aria-label="Views">
+    <button role="tab" data-view="explore" aria-selected="true">Explore</button>
+    <button role="tab" data-view="facts" aria-selected="false">Facts</button>
+    <button role="tab" data-view="estate" aria-selected="false">Estate</button>
+  </nav>
+</header>
+<main>
+  <div class="view on" id="view-explore">
+    <aside class="facets" id="facets" aria-label="Filters"></aside>
+    <section class="results" aria-label="Results">
+      <div class="results-head"><span id="resultCount">Everything AutoDE knows</span><button class="link small" id="clearFilters" hidden>Clear filters</button></div>
+      <ul class="list" id="results" role="listbox" aria-label="Search results" tabindex="0"></ul>
+    </section>
+    <article class="asset" id="asset" aria-live="polite"></article>
+  </div>
+  <div class="view" id="view-facts"><div class="page" id="factsPage"></div></div>
+  <div class="view" id="view-estate"><div class="page" id="estatePage"></div></div>
+</main>
+<div class="toast" id="toast" role="status"></div>
+<script src="{{cytoscapeUri}}"></script>
+<script nonce="{{nonce}}">
+(function () {
+  const vscode = acquireVsCodeApi();
+  const $ = (s) => document.querySelector(s);
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const KIND = { table: 'Table', view: 'View', column: 'Column', business_term: 'Term', business_rule: 'Rule', verified_query: 'Query', metric: 'Metric', semantic_model: 'Semantic model', semantic_table: 'Semantic table', semantic_element: 'Semantic element', fact: 'Fact' };
+  const TRUST = ['verified', 'confirmed', 'documented', 'assumed', 'inferred'];
+  const FACET_TITLES = { kind: 'Kind', system: 'System', environment: 'Environment', trust: 'Trust', status: 'Status', classification: 'Classification' };
+  const FACET_PARAM = { kind: 'kinds', system: 'systems', environment: 'environments', trust: 'trust', status: 'statuses', classification: 'classifications' };
+
+  // ── State (kept when the panel is hidden or VS Code restarts the webview) ──
+  const saved = vscode.getState() || {};
+  const state = { view: saved.view || 'explore', query: saved.query || '', filters: saved.filters || {}, history: saved.history || [], pos: saved.pos != null ? saved.pos : -1, tab: saved.tab || 'overview', results: [], total: 0, selected: -1, graph: saved.graph || { hops: 1, columns: false, layout: 'cose', types: [] }, factsFilter: saved.factsFilter || {} };
+  const persist = () => vscode.setState({ view: state.view, query: state.query, filters: state.filters, history: state.history.slice(-50), pos: Math.min(state.pos, 49), tab: state.tab, graph: state.graph, factsFilter: state.factsFilter });
+
+  // ── Requests to the engine ──
+  let nextId = 1; const pending = new Map();
+  const ask = (request) => new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); vscode.postMessage({ type: 'request', requestId: id, request }); });
+  const post = (m) => vscode.postMessage(m);
+  window.addEventListener('message', (e) => {
+    const m = e.data;
+    if (m.type === 'response') { const r = pending.get(m.requestId); if (r) { pending.delete(m.requestId); r(m.body); } else if (m.requestId === 0) onOverview(m.body); }
+    else if (m.type === 'empty') renderEmpty(m.message);
+    else if (m.type === 'toast') toast(m.message);
+    else if (m.type === 'showAsset') openAsset(m.id, true);
+    else if (m.type === 'error') toast(m.message);
+  });
+  let toastTimer; const toast = (t) => { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('on'), 2200); };
+
+  // ── Small renderers ──
+  const kindBadge = (k) => `<span class="badge kind">${esc(KIND[k] || k)}</span>`;
+  const trustBadge = (t) => t ? `<span class="badge trust trust-${esc(t)}" title="Trust: ${esc(t)}">${esc(t)}</span>` : '';
+  const clsBadge = (c) => c && c !== 'none' ? `<span class="badge ${/pii/.test(c) ? 'pii' : ''}" title="Classification">${esc(c)}</span>` : '';
+  const draftBadge = (a) => a.approved === false ? '<span class="badge draft" title="Not approved at its current revision: packs and grounding don\'t use it yet">draft</span>' : a.approved === true ? '<span class="badge trust trust-confirmed" title="Approved">approved</span>' : '';
+  const where = (a) => [a.system && (a.system + (a.environment ? '/' + a.environment : '')), a.inWorkingSet === false ? 'catalog only' : ''].filter(Boolean).join(' · ');
+  const assetLink = (a) => `<button class="link" data-asset="${esc(a.id)}">${esc(a.fqn || a.label)}</button>`;
+  const count = (n) => n ? `<span class="count">${n}</span>` : '';
+
+  // ── Views ──
+  function setView(v) {
+    state.view = v; persist();
+    document.querySelectorAll('nav.views button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
+    document.querySelectorAll('.view').forEach((el) => el.classList.toggle('on', el.id === 'view-' + v));
+    if (v === 'facts') loadFacts();
+    if (v === 'estate') loadEstate();
+  }
+  document.querySelector('nav.views').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
+
+  // ── Search ──
+  let searchTimer; let offset = 0;
+  $('#q').value = state.query;
+  $('#q').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { state.query = $('#q').value; persist(); offset = 0; search(); }, 180); });
+  $('#q').addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); select(0); $('#results').focus(); } if (e.key === 'Enter') { clearTimeout(searchTimer); state.query = $('#q').value; offset = 0; search().then(() => { if (state.results.length) openAsset(state.results[0].id); }); } });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== $('#q') && !/input|select|textarea/i.test(document.activeElement.tagName)) { e.preventDefault(); setView('explore'); $('#q').focus(); $('#q').select(); }
+    if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+    if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+  });
+  async function search(append) {
+    const req = { type: 'search', query: state.query, limit: 50, offset };
+    for (const [f, vals] of Object.entries(state.filters)) if (vals && vals.length) req[FACET_PARAM[f]] = vals;
+    const body = await ask(req);
+    if (!body.result) return;
+    const r = body.result;
+    state.results = append ? state.results.concat(r.results) : r.results; state.total = r.total;
+    renderFacets(r.facets); renderResults(r);
+  }
+  function renderFacets(facets) {
+    const html = Object.keys(FACET_TITLES).filter((f) => Object.keys(facets[f] || {}).length).map((f) => {
+      const entries = Object.entries(facets[f]).sort((a, b) => f === 'trust' ? TRUST.indexOf(a[0]) - TRUST.indexOf(b[0]) : b[1] - a[1]);
+      return `<div class="facet"><h3>${esc(FACET_TITLES[f])}</h3>${entries.map(([v, n]) => `<label><input type="checkbox" data-facet="${esc(f)}" value="${esc(v)}" ${(state.filters[f] || []).includes(v) ? 'checked' : ''}> ${f === 'kind' ? esc(KIND[v] || v) : esc(v)}<span class="n">${n}</span></label>`).join('')}</div>`;
+    }).join('');
+    $('#facets').innerHTML = html || '<div class="muted small">No filters for these results.</div>';
+    $('#clearFilters').hidden = !Object.values(state.filters).some((v) => v && v.length);
+  }
+  $('#facets').addEventListener('change', (e) => {
+    const cb = e.target.closest('input[data-facet]'); if (!cb) return;
+    const f = cb.dataset.facet; const set = new Set(state.filters[f] || []);
+    cb.checked ? set.add(cb.value) : set.delete(cb.value); state.filters[f] = [...set]; persist(); offset = 0; search();
+  });
+  $('#clearFilters').addEventListener('click', () => { state.filters = {}; persist(); offset = 0; search(); });
+  function renderResults(r) {
+    $('#resultCount').textContent = r.total ? `${r.approximate ? 'No exact match; related: ' : ''}${r.total} result${r.total === 1 ? '' : 's'}${r.fromCatalog ? ` · ${r.fromCatalog} from the estate catalog` : ''}` : (state.query ? `Nothing matches "${state.query}"` : 'Nothing known yet');
+    const current = state.history[state.pos];
+    $('#results').innerHTML = state.results.map((a, i) => `<li role="option" id="r${i}" data-i="${i}" aria-selected="${current === a.id}"><div class="t">${kindBadge(a.kind)}<span class="name">${esc(a.label)}</span>${a.trust ? trustBadge(a.trust) : ''}</div><div class="s">${esc([a.fqn && a.fqn !== a.label ? a.fqn : '', where(a), a.classification || '', a.approved === false ? 'draft' : '', a.kind === 'fact' ? a.description : ''].filter(Boolean).join(' · '))}</div></li>`).join('')
+      + (state.results.length < r.total ? `<li class="more"><button class="btn" id="loadMore">Show more (${r.total - state.results.length} left)</button></li>` : '');
+  }
+  $('#results').addEventListener('click', (e) => {
+    if (e.target.id === 'loadMore') { offset = state.results.length; search(true); return; }
+    const li = e.target.closest('li[data-i]'); if (li) { select(Number(li.dataset.i)); openAsset(state.results[Number(li.dataset.i)].id); }
+  });
+  $('#results').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); select(Math.min(state.selected + 1, state.results.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (state.selected <= 0) $('#q').focus(); else select(state.selected - 1); }
+    else if (e.key === 'Enter' && state.selected >= 0) openAsset(state.results[state.selected].id);
+  });
+  function select(i) {
+    state.selected = i;
+    document.querySelectorAll('#results li[data-i]').forEach((li) => li.setAttribute('aria-selected', String(Number(li.dataset.i) === i)));
+    const el = $('#r' + i); if (el) { el.scrollIntoView({ block: 'nearest' }); $('#results').setAttribute('aria-activedescendant', 'r' + i); }
+  }
+
+  // ── History ──
+  function go(d) { const p = state.pos + d; if (p < 0 || p >= state.history.length) return; state.pos = p; persist(); openAsset(state.history[p], false, true); }
+  const home = () => { setView('explore'); current = undefined; document.querySelectorAll('#results li[data-i]').forEach((li) => li.setAttribute('aria-selected', 'false')); renderOverview(); };
+  $('#home').addEventListener('click', home);
+  document.addEventListener('keydown', (e) => { if (e.altKey && e.key === 'Home') { e.preventDefault(); home(); } });
+  $('#back').addEventListener('click', () => go(-1));
+  $('#fwd').addEventListener('click', () => go(1));
+  const updateHistory = () => { $('#back').disabled = state.pos <= 0; $('#fwd').disabled = state.pos >= state.history.length - 1; };
+
+  // ── Overview (no asset open) ──
+  let overview;
+  function onOverview(body) { overview = body.overview; if (state.history[state.pos]) openAsset(state.history[state.pos], false, true); else renderOverview(); search(); setView(state.view); }
+  function renderEmpty(message) { $('#asset').innerHTML = `<div class="empty"><span class="big">◌</span>${esc(message)}</div>`; }
+  function renderOverview() {
+    const o = overview; if (!o) return;
+    const c = o.counts;
+    if (!c.tables && !c.facts && !c.catalogTables && !c.semanticModels) { renderEmpty('Nothing known yet. Bring the estate in (AutoDE: Ingest File, autode ingest, or a connection in Settings), then come back.'); return; }
+    const total = Object.values(o.facts.byTrust).reduce((a, b) => a + b, 0) || 1;
+    $('#asset').innerHTML = `
+      <h2 style="margin:0 0 2px">What AutoDE knows</h2><div class="muted">Search above, or pick a starting point. Everything here is read-only; changes go through the Context Inbox, decisions and the Semantic Model editor.</div>
+      <div class="tiles">
+        ${[[c.tables, 'Tables in the working set'], [c.catalogTables, 'Tables in the estate catalog'], [c.columns, 'Columns'], [c.terms, 'Glossary terms'], [c.facts, 'Facts'], [c.semanticModels, `Semantic models (${c.approvedSemanticModels} approved)`], [c.metrics, 'Metrics'], [o.conflicts, 'Conflicts']].map(([v, l]) => `<div class="tile"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}
+      </div>
+      <h4>Facts by trust</h4>
+      <div class="bar" role="img" aria-label="Facts by trust">${TRUST.map((t) => o.facts.byTrust[t] ? `<span style="width:${(o.facts.byTrust[t] / total) * 100}%;background:var(--t-${t})" title="${t}: ${o.facts.byTrust[t]}"></span>` : '').join('')}</div>
+      <div class="legend">${TRUST.filter((t) => o.facts.byTrust[t]).map((t) => `<span>${trustBadge(t)} ${o.facts.byTrust[t]}</span>`).join('')}</div>
+      ${o.needsReview || o.conflicts ? `<div class="note warn">${o.needsReview} fact(s) to review and ${o.conflicts} conflict(s). <button class="link" data-open="inbox">Open the Context Inbox</button></div>` : ''}
+      ${o.systems.length ? `<h4>Systems</h4><table class="grid"><tr><th>System</th><th>Environment</th><th>Tables in the working set</th></tr>${o.systems.map((s) => `<tr class="click" data-system="${esc(s.system)}"><td>${esc(s.system)}</td><td>${esc(s.environment)}</td><td>${s.tables}</td></tr>`).join('')}</table>` : ''}
+      ${o.semanticModels.length ? `<h4>Semantic models</h4>${o.semanticModels.map((m) => `<div class="item">${assetLink(m)} ${draftBadge(m)}</div>`).join('')}` : '<h4>Semantic models</h4><div class="muted small">None yet: AutoDE: New Semantic Model, or autode semantic draft.</div>'}`;
+    updateHistory();
+  }
+
+  // ── Asset page ──
+  let current;
+  async function openAsset(id, push = true, fromHistory = false) {
+    if (state.view !== 'explore') setView('explore');
+    if (push && !fromHistory) { state.history = state.history.slice(0, state.pos + 1); if (state.history[state.pos] !== id) state.history.push(id); state.pos = state.history.length - 1; persist(); }
+    updateHistory();
+    $('#asset').innerHTML = '<div class="empty">Loading…</div>';
+    const body = await ask({ type: 'asset', id });
+    if (!body.context) { $('#asset').innerHTML = `<div class="empty">${esc(body.error || 'Not found.')}</div>`; return; }
+    current = body.context;
+    document.querySelectorAll('#results li[data-i]').forEach((li) => li.setAttribute('aria-selected', String(state.results[Number(li.dataset.i)] && state.results[Number(li.dataset.i)].id === id)));
+    renderAsset();
+  }
+  const TABS = [['overview', 'Overview'], ['schema', 'Schema'], ['meaning', 'Meaning'], ['lineage', 'Lineage'], ['facts', 'Facts'], ['governance', 'Governance'], ['usedby', 'Used by'], ['graph', 'Graph']];
+  function tabCount(t, c) {
+    if (t === 'schema') return c.schema ? c.schema.columns.length : 0;
+    if (t === 'meaning') return c.meaning.terms.length + c.meaning.semantic.length;
+    if (t === 'lineage') return c.lineage.related.length;
+    if (t === 'facts') return c.facts.length;
+    if (t === 'governance') return c.governance.classifications.length + c.governance.rules.length;
+    if (t === 'usedby') return c.usedBy.artifacts.length + c.usedBy.semanticModels.length + c.usedBy.queries.length;
+    return 0;
+  }
+  function renderAsset() {
+    const c = current; const a = c.asset;
+    const tabs = TABS.filter(([t]) => t !== 'schema' || c.schema).filter(([t]) => t !== 'graph' || a.kind !== 'fact');
+    if (!tabs.some(([t]) => t === state.tab)) state.tab = 'overview';
+    const parent = c.overview.parent;
+    const file = c.meaning.definition && c.meaning.definition.file;
+    $('#asset').innerHTML = `
+      <div class="crumbs">${a.system ? `<span>${esc(a.system)}${a.environment ? ' / ' + esc(a.environment) : ''}</span><span>›</span>` : ''}${parent ? `${assetLink(parent)}<span>›</span>` : ''}<span>${esc(a.label)}</span></div>
+      <div class="asset-head">
+        <h2>${esc(a.kind === 'fact' ? 'Fact' : a.label)}</h2>
+        ${a.fqn && a.fqn !== a.label ? `<div class="fqn">${esc(a.fqn)}</div>` : ''}
+        <div class="badges">${kindBadge(a.kind)}${trustBadge(a.trust)}${clsBadge(a.classification)}${draftBadge(a)}${a.status ? `<span class="badge">${esc(a.status)}</span>` : ''}${a.inWorkingSet === false ? '<span class="badge" title="Known from the estate catalog; loaded into the working set when a task uses it">catalog only</span>' : ''}${c.conflicts.length ? `<span class="badge pii">${c.conflicts.length} conflict(s)</span>` : ''}</div>
+        ${a.description ? `<div class="desc">${esc(a.description)}</div>` : ''}
+        ${a.kind === 'fact' ? `<div class="desc">${esc(a.label)}</div>` : ''}
+      </div>
+      <div class="actions">
+        ${a.kind !== 'fact' ? '<button class="btn" data-act="graph">Show in graph</button>' : ''}
+        <button class="btn" data-act="copy" title="Copy this page as Markdown">Copy as Markdown</button>
+        ${file ? `<button class="btn" data-open-file="${esc(file)}">Open in Semantic Model editor</button>` : ''}
+        ${c.facts.some((f) => f.status === 'proposed' || f.status === 'needs_review') || c.conflicts.length ? '<button class="btn primary" data-open="inbox">Review in the Context Inbox</button>' : ''}
+      </div>
+      <div role="tablist" class="tabs" aria-label="Asset sections">${tabs.map(([t, l]) => `<button role="tab" data-tab="${t}" aria-selected="${state.tab === t}" id="tab-${t}">${esc(l)}${count(tabCount(t, c))}</button>`).join('')}</div>
+      <div role="tabpanel" id="tabpanel" aria-labelledby="tab-${state.tab}">${renderTab(state.tab, c)}</div>`;
+    if (state.tab === 'graph') loadGraph();
+  }
+  const factItem = (f) => `<div class="item"><div>${f.about ? `<span class="badge">${esc(f.about)}</span> ` : ''}<button class="link" data-asset="${esc(f.id)}">${esc(f.statement)}</button> ${trustBadge(f.trust)} <span class="badge">${esc(f.status)}</span></div><div class="ev">${esc(f.kind)} · ${esc(f.predicate)} · ${esc(f.createdBy)} · ${esc((f.validFrom || '').slice(0, 10))}${f.evidence.length ? ' · ' + f.evidence.map((e) => esc(e.type + ' ' + e.ref) + (e.excerpt ? ` — “${esc(e.excerpt)}”` : '')).join('; ') : ''}${f.verification ? ` · probe ${esc(f.verification.result)} ${esc(f.verification.at.slice(0, 10))}` : ''}${f.supersedes ? ` · supersedes <button class="link" data-asset="${esc(f.supersedes)}">${esc(f.supersedes.slice(0, 10))}…</button>` : ''}</div></div>`;
+  function renderTab(t, c) {
+    const empty = (m) => `<div class="empty">${esc(m)}</div>`;
+    if (t === 'overview') {
+      const o = c.overview; const a = c.asset;
+      const rows = [['Id', `<code>${esc(a.id)}</code>`], a.fqn ? ['Qualified name', `<code>${esc(a.fqn)}</code>`] : null, a.system ? ['System', esc(a.system + ' / ' + (a.environment || 'default'))] : null, o.aliases.length ? ['Also called', esc(o.aliases.join(', '))] : null, o.tags.length ? ['Tags', esc(o.tags.join(', '))] : null,
+        o.origin ? ['Source', esc(`${o.origin.source} (${o.origin.ref})`)] : null, o.origin && o.origin.reliability ? ['Reliability', esc(o.origin.reliability)] : null, o.origin && o.origin.extractedAt ? ['Captured', esc(o.origin.extractedAt.slice(0, 19).replace('T', ' '))] : null, o.origin && o.origin.lastVerifiedAt ? ['Last verified', esc(o.origin.lastVerifiedAt.slice(0, 19).replace('T', ' '))] : null, o.loadedAt ? ['Loaded from the platform', esc(o.loadedAt.slice(0, 19).replace('T', ' '))] : null,
+        ['Owner · domain', '<span class="muted">Arrive with lineage (LIN)</span>']].filter(Boolean);
+      const def = c.meaning.definition;
+      return `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
+        ${def && def.expr ? `<h4>Definition</h4><pre class="mono">${esc(def.expr)}</pre>` : ''}
+        ${def && def.baseTable ? `<h4>Base table</h4><code>${esc(def.baseTable)}</code>${(def.primaryKey || []).length ? ` · primary key <code>${esc(def.primaryKey.join(', '))}</code>` : ''}` : ''}
+        ${c.schema && (c.schema.keys.length || c.schema.grain.length) ? `<h4>Keys and grain</h4>${[...c.schema.keys, ...c.schema.grain].map(factItem).join('')}` : ''}
+        ${c.memory.length ? `<h4>Decisions and assumptions in scope</h4>${c.memory.map(factItem).join('')}` : ''}
+        ${c.conflicts.length ? `<h4>Conflicts</h4>${c.conflicts.map((x) => `<div class="note warn">${esc(x.rule)}: ${x.sides.map(esc).join(' <b>vs</b> ')}</div>`).join('')}` : ''}
+        <h4>Where this came from</h4><div class="small muted">${[c.sources.metadata.length ? 'Metadata: ' + c.sources.metadata.join(', ') : '', c.sources.semantic.length ? 'Semantic: ' + c.sources.semantic.join(', ') : '', c.sources.governance.length ? 'Governance: ' + c.sources.governance.length + ' fact(s)' : '', c.sources.facts + ' fact(s)'].filter(Boolean).map(esc).join(' · ')}</div>`;
+    }
+    if (t === 'schema') {
+      const s = c.schema;
+      if (!s.columns.length) return empty('No columns known.');
+      return `<table class="grid"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Null</th><th>Classification</th><th>Trust</th></tr></thead><tbody>${s.columns.map((col) => `<tr class="click" data-asset="${esc(col.id)}" tabindex="0"><td><b>${esc(col.label)}</b>${col.description ? `<div class="small muted">${esc(col.description)}</div>` : ''}</td><td class="mono">${esc(col.dataType || '?')}</td><td>${col.primaryKey ? 'PK' : col.foreignKey ? 'FK' : ''}</td><td>${col.nullable ? 'yes' : 'no'}</td><td>${clsBadge(col.classification)}${col.strategy ? ` <span class="small muted">${esc(col.strategy)}</span>` : ''}</td><td>${trustBadge(col.trust)}</td></tr>`).join('')}</tbody></table>
+        ${s.profile.length ? `<h4>Profile</h4>${s.profile.map(factItem).join('')}` : ''}`;
+    }
+    if (t === 'meaning') {
+      const m = c.meaning;
+      if (!m.terms.length && !m.semantic.length && !(m.definition && m.definition.expr)) return empty('No business meaning recorded yet: no glossary term is bound to it and no semantic model covers it. Ontology concepts arrive in ONT1.');
+      return `${m.terms.length ? `<h4>Glossary terms</h4>${m.terms.map((x) => `<div class="item">${assetLink(x)} ${trustBadge(x.trust)}${x.description ? `<div class="ev">${esc(x.description)}</div>` : ''}</div>`).join('')}` : ''}
+        ${m.semantic.length ? `<h4>In the semantic layer</h4><table class="grid"><thead><tr><th>Element</th><th>Kind</th><th>Model</th><th>Expression</th><th></th></tr></thead><tbody>${m.semantic.map((x) => `<tr class="click" data-asset="${esc(x.id)}" tabindex="0"><td><b>${esc(x.label)}</b></td><td>${esc(KIND[x.kind] || x.kind)}</td><td>${esc(x.model || '')}</td><td class="mono">${esc(x.expr || '')}</td><td>${draftBadge(x)}</td></tr>`).join('')}</tbody></table>` : ''}
+        <div class="note small">Packs and the grounding check use only <b>approved</b> semantic definitions. Ontology concepts and scoped terminology arrive in ONT1.</div>`;
+    }
+    if (t === 'lineage') {
+      const rel = c.lineage.related;
+      const up = rel.filter((r) => r.direction === 'out'); const down = rel.filter((r) => r.direction === 'in');
+      const rows = (list) => list.length ? `<table class="grid"><tbody>${list.map((r) => `<tr class="click" data-asset="${esc(r.asset.id)}" tabindex="0"><td>${esc(r.relation.replace(/_/g, ' '))}</td><td>${kindBadge(r.asset.kind)} <b>${esc(r.asset.fqn || r.asset.label)}</b></td><td>${trustBadge(r.trust)}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">None known.</div>';
+      return `<div class="note small">${esc(c.lineage.note)}</div><h4>From this asset</h4>${rows(up)}<h4>To this asset</h4>${rows(down)}`;
+    }
+    if (t === 'facts') return c.facts.length ? c.facts.map(factItem).join('') : empty('No facts recorded about it yet.');
+    if (t === 'governance') {
+      const g = c.governance;
+      if (!g.classifications.length && !g.rules.length) return empty('No classifications or rules apply to it.');
+      return `${g.classifications.length ? `<h4>Classifications</h4><table class="grid"><thead><tr><th>Column</th><th>Classification</th><th>Masking</th><th>Trust</th></tr></thead><tbody>${g.classifications.map((x) => `<tr${x.factId ? ` class="click" data-asset="${esc(x.factId)}" tabindex="0"` : ''}><td>${esc(x.column)}</td><td>${clsBadge(x.classification)}</td><td>${esc(x.strategy || '')}</td><td>${trustBadge(x.trust)}</td></tr>`).join('')}</tbody></table>` : ''}
+        ${g.rules.length ? `<h4>Rules</h4>${g.rules.map((r) => `<div class="item"><span class="badge ${r.enforcement === 'STRICT' ? 'pii' : ''}">${esc(r.enforcement)}</span> ${esc(r.text)}</div>`).join('')}` : ''}
+        <div class="note small">Policies as data (GDPR, PCI, SOX → required controls) arrive in ONT2.</div>`;
+    }
+    if (t === 'usedby') {
+      const u = c.usedBy;
+      if (!u.artifacts.length && !u.semanticModels.length && !u.queries.length) return empty('Nothing AutoDE built or defined uses it yet.');
+      return `${u.artifacts.length ? `<h4>Artifacts</h4><table class="grid"><thead><tr><th>Artifact</th><th>Agent</th><th>Built</th><th>Warnings</th></tr></thead><tbody>${u.artifacts.map((x) => `<tr class="click" data-open-file="${esc(x.path)}" tabindex="0"><td class="mono">${esc(x.path)}</td><td>${esc(x.agent || '')}</td><td>${esc((x.generatedAt || '').slice(0, 10))}</td><td>${x.warnings || ''}</td></tr>`).join('')}</tbody></table>` : ''}
+        ${u.semanticModels.length ? `<h4>Semantic models</h4>${u.semanticModels.map((m) => `<div class="item">${assetLink(m)} ${draftBadge(m)}</div>`).join('')}` : ''}
+        ${u.queries.length ? `<h4>Verified queries</h4>${u.queries.map((q) => `<div class="item">${assetLink(q)}</div>`).join('')}` : ''}`;
+    }
+    if (t === 'graph') {
+      const types = ['contains', 'foreign_key', 'related_to', 'maps_to', 'derives_from', 'uses_table', 'constrained_by'];
+      const g = state.graph;
+      return `<div class="graph-wrap"><div class="graph-tools">
+          <label>Hops <select id="gHops">${[1, 2, 3].map((h) => `<option ${g.hops === h ? 'selected' : ''}>${h}</option>`).join('')}</select></label>
+          <label>Layout <select id="gLayout"><option value="cose" ${g.layout === 'cose' ? 'selected' : ''}>Force</option><option value="breadthfirst" ${g.layout === 'breadthfirst' ? 'selected' : ''}>Layered</option><option value="concentric" ${g.layout === 'concentric' ? 'selected' : ''}>Concentric</option></select></label>
+          <label><input type="checkbox" id="gCols" ${g.columns ? 'checked' : ''}> Columns</label>
+          <span class="muted">Edges:</span>${types.map((t) => `<label><input type="checkbox" data-etype="${t}" ${!g.types.length || g.types.includes(t) ? 'checked' : ''}> ${t.replace(/_/g, ' ')}</label>`).join('')}
+          <span style="flex:1"></span><button class="btn" id="gFit">Fit</button><button class="btn" id="gPng">PNG</button><button class="btn" id="gSvg">SVG</button>
+        </div><div id="cy" role="img" aria-label="Graph around ${esc(c.asset.label)}"></div><div class="graph-foot" id="gFoot"></div></div>`;
+    }
+    return '';
+  }
+  $('#asset').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; persist(); renderAsset(); return; }
+    const act = e.target.closest('[data-act]');
+    if (act && act.dataset.act === 'graph') { state.tab = 'graph'; persist(); renderAsset(); return; }
+    if (act && act.dataset.act === 'copy') { post({ type: 'copyMarkdown', id: current.asset.id }); return; }
+    if (e.target.id === 'gFit' && cy) { cy.fit(undefined, 30); return; }
+    if (e.target.id === 'gPng' && cy) { post({ type: 'exportGraph', format: 'png', data: cy.png({ full: true, scale: 2, bg: getComputedStyle(document.body).backgroundColor }) }); return; }
+    if (e.target.id === 'gSvg' && cy) { post({ type: 'exportGraph', format: 'svg', data: toSvg() }); return; }
+    handleLinks(e);
+  });
+  $('#asset').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { const row = e.target.closest('tr[data-asset], tr[data-open-file]'); if (row) handleLinks({ target: row }); }
+    const tab = e.target.closest('[role=tab][data-tab]');
+    if (tab && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { const all = [...document.querySelectorAll('#asset [role=tab]')]; const i = all.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : -1); const n = all[(i + all.length) % all.length]; state.tab = n.dataset.tab; persist(); renderAsset(); $('#tab-' + state.tab).focus(); }
+  });
+  $('#asset').addEventListener('change', (e) => {
+    if (e.target.id === 'gHops') state.graph.hops = Number(e.target.value);
+    else if (e.target.id === 'gLayout') state.graph.layout = e.target.value;
+    else if (e.target.id === 'gCols') state.graph.columns = e.target.checked;
+    else if (e.target.dataset.etype) state.graph.types = [...document.querySelectorAll('[data-etype]')].filter((x) => x.checked).map((x) => x.dataset.etype);
+    else return;
+    persist(); loadGraph();
+  });
+  function handleLinks(e) {
+    const a = e.target.closest('[data-asset]'); if (a) { openAsset(a.dataset.asset); return; }
+    const f = e.target.closest('[data-open-file]'); if (f) { post({ type: 'open', target: { kind: 'file', path: f.dataset.openFile } }); return; }
+    const o = e.target.closest('[data-open]'); if (o) { post({ type: 'open', target: { kind: o.dataset.open } }); return; }
+    const sys = e.target.closest('[data-system]'); if (sys) { state.filters = { system: [sys.dataset.system] }; persist(); offset = 0; search(); }
+  }
+
+  // ── Graph (Cytoscape.js, bundled) ──
+  let cy;
+  const css = (name, fallback) => getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;
+  async function loadGraph() {
+    const g = state.graph;
+    const body = await ask({ type: 'graph', id: current.asset.id, hops: g.hops, includeColumns: g.columns, ...(g.types.length && g.types.length < 7 ? { edgeTypes: g.types } : {}) });
+    const host = $('#cy'); if (!host) return;
+    if (!body.slice) { host.innerHTML = `<div class="empty">${esc(body.error || 'Not in the graph.')}</div>`; return; }
+    if (typeof cytoscape !== 'function') { host.innerHTML = '<div class="empty">The graph library did not load.</div>'; return; }
+    const s = body.slice;
+    const fg = css('--vscode-foreground', '#ccc'); const muted = css('--vscode-descriptionForeground', '#999'); const bg = css('--vscode-editor-background', '#1e1e1e'); const accent = css('--vscode-focusBorder', '#007fd4');
+    const trustColor = { verified: css('--vscode-testing-iconPassed', '#2ea043'), confirmed: css('--vscode-charts-blue', '#3794ff'), documented: muted, assumed: css('--vscode-charts-orange', '#d18616'), inferred: css('--vscode-editorWarning-foreground', '#cca700') };
+    const shape = { table: 'round-rectangle', view: 'round-rectangle', column: 'ellipse', business_term: 'diamond', business_rule: 'triangle', verified_query: 'rhomboid', metric: 'hexagon', semantic_model: 'barrel', semantic_table: 'round-tag', semantic_element: 'ellipse' };
+    if (cy) cy.destroy();
+    cy = cytoscape({
+      container: host, wheelSensitivity: 0.25, minZoom: 0.2, maxZoom: 3,
+      elements: [
+        ...s.nodes.map((n) => ({ data: { id: n.id, label: n.label + (s.hidden[n.id] ? `  +${s.hidden[n.id]}` : ''), kind: n.kind, trust: n.trust || 'none', center: n.id === s.center ? 1 : 0, draft: n.approved === false ? 1 : 0 } })),
+        ...s.edges.map((e) => ({ data: { id: e.id, source: e.source, target: e.target, type: e.type, label: e.type.replace(/_/g, ' ') } }))
+      ],
+      style: [
+        { selector: 'node', style: { label: 'data(label)', color: fg, 'font-size': 10, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-wrap': 'ellipsis', 'text-max-width': 140, 'background-color': bg, 'border-width': 2, 'border-color': muted, width: 22, height: 22, shape: (el) => shape[el.data('kind')] || 'ellipse' } },
+        ...Object.entries(trustColor).map(([t, col]) => ({ selector: `node[trust = "${t}"]`, style: { 'border-color': col } })),
+        { selector: 'node[trust = "inferred"], node[draft = 1]', style: { 'border-style': 'dashed' } },
+        { selector: 'node[kind = "table"], node[kind = "view"]', style: { width: 34, height: 24 } },
+        { selector: 'node[kind = "column"], node[kind = "semantic_element"]', style: { width: 14, height: 14, 'font-size': 9 } },
+        { selector: 'node[center = 1]', style: { 'border-width': 4, 'border-color': accent, 'font-weight': 'bold' } },
+        { selector: 'edge', style: { width: 1.2, 'line-color': muted, 'target-arrow-color': muted, 'target-arrow-shape': 'triangle', 'arrow-scale': 0.8, 'curve-style': 'bezier', opacity: 0.75 } },
+        { selector: 'edge[type = "contains"]', style: { 'line-style': 'dotted', 'target-arrow-shape': 'none', opacity: 0.45 } },
+        { selector: 'edge[type = "derives_from"], edge[type = "maps_to"]', style: { 'line-style': 'dashed' } },
+        { selector: 'edge[type = "foreign_key"], edge[type = "related_to"]', style: { width: 2 } },
+        { selector: 'edge:selected, edge.hover', style: { label: 'data(label)', 'font-size': 9, color: fg, 'text-background-color': bg, 'text-background-opacity': 1, 'line-color': accent, 'target-arrow-color': accent, opacity: 1 } },
+        { selector: 'node:selected', style: { 'border-color': accent, 'border-width': 3 } }
+      ],
+      layout: layoutFor(s.center)
+    });
+    cy.on('tap', 'node', (ev) => { const id = ev.target.id(); if (id !== current.asset.id) openAsset(id); });
+    cy.on('mouseover', 'edge', (ev) => ev.target.addClass('hover'));
+    cy.on('mouseout', 'edge', (ev) => ev.target.removeClass('hover'));
+    const hidden = Object.values(s.hidden).reduce((a, b) => a + b, 0);
+    $('#gFoot').innerHTML = `<span>${s.nodes.length} node(s), ${s.edges.length} edge(s)</span>${hidden ? `<span>${hidden} more not shown (cap): open a node to go further</span>` : ''}<span>Border colour: trust · dashed: inferred or draft · click a node to open it · scroll to zoom</span>`;
+  }
+  function layoutFor(center) {
+    const l = state.graph.layout;
+    if (l === 'breadthfirst') return { name: 'breadthfirst', directed: true, roots: '#' + CSS.escape(center), spacingFactor: 1.2, padding: 30, animate: false };
+    if (l === 'concentric') return { name: 'concentric', concentric: (n) => (n.id() === center ? 10 : 1), levelWidth: () => 1, padding: 30, animate: false };
+    return { name: 'cose', padding: 30, animate: false, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, randomize: false };
+  }
+  /** SVG of the current view, from node positions (no extra library). */
+  function toSvg() {
+    const bb = cy.elements().boundingBox(); const pad = 30; const w = Math.ceil(bb.w + pad * 2); const h = Math.ceil(bb.h + pad * 2);
+    const x = (p) => (p.x - bb.x1 + pad).toFixed(1); const y = (p) => (p.y - bb.y1 + pad).toFixed(1);
+    const fg = css('--vscode-foreground', '#333'); const muted = css('--vscode-descriptionForeground', '#888');
+    const lines = cy.edges().map((e) => `<line x1="${x(e.source().position())}" y1="${y(e.source().position())}" x2="${x(e.target().position())}" y2="${y(e.target().position())}" stroke="${muted}" stroke-width="1.2"${e.data('type') === 'contains' ? ' stroke-dasharray="2,3"' : /derives_from|maps_to/.test(e.data('type')) ? ' stroke-dasharray="5,3"' : ''}/>`);
+    const nodes = cy.nodes().map((n) => { const p = n.position(); const col = n.style('border-color'); return `<g><circle cx="${x(p)}" cy="${y(p)}" r="${n.data('kind') === 'column' ? 7 : 11}" fill="white" stroke="${col}" stroke-width="2"/><text x="${x(p)}" y="${(Number(y(p)) + 24).toFixed(1)}" font-size="10" text-anchor="middle" fill="${fg}" font-family="sans-serif">${esc(n.data('label'))}</text></g>`; });
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${lines.join('')}${nodes.join('')}</svg>`;
+  }
+
+  // ── Facts view ──
+  async function loadFacts() {
+    const f = state.factsFilter;
+    const body = await ask({ type: 'facts', limit: 200, ...(f.text ? { text: f.text } : {}), ...(f.kind ? { kinds: [f.kind] } : {}), ...(f.status ? { statuses: [f.status] } : {}), ...(f.trust ? { trust: [f.trust] } : {}) });
+    const r = body.result; if (!r) return;
+    const opt = (name, values, cur) => `<select data-ff="${name}" aria-label="${name}"><option value="">Any ${name}</option>${Object.entries(values).sort((a, b) => b[1] - a[1]).map(([v, n]) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(v)} (${n})</option>`).join('')}</select>`;
+    $('#factsPage').innerHTML = `<div class="toolbar"><input type="text" data-ff="text" placeholder="Filter by statement or subject" value="${esc(f.text || '')}" aria-label="Filter facts" style="min-width:260px">${opt('kind', r.facets.kind, f.kind)}${opt('status', r.facets.status, f.status)}${opt('trust', r.facets.trust, f.trust)}<span class="muted small">${r.total} fact(s)${r.rows.length < r.total ? `, first ${r.rows.length}` : ''}</span><span style="flex:1"></span><button class="btn primary" data-open="inbox">Review in the Context Inbox</button></div>
+      ${r.rows.length ? `<table class="grid"><thead><tr><th>Statement</th><th>Kind</th><th>About</th><th>Status</th><th>Trust</th><th>By</th><th>Since</th></tr></thead><tbody>${r.rows.map((x) => `<tr class="click" data-asset="${esc(x.id)}" tabindex="0"><td>${esc(x.statement)}</td><td>${esc(x.kind)}</td><td class="small">${esc(x.subjects.join(', '))}</td><td>${esc(x.status)}</td><td>${trustBadge(x.trust)}</td><td class="small">${esc(x.createdBy)}</td><td class="small">${esc((x.validFrom || '').slice(0, 10))}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No facts match.</div>'}`;
+  }
+  let factsTimer;
+  $('#factsPage').addEventListener('input', (e) => { const k = e.target.dataset.ff; if (!k) return; state.factsFilter[k] = e.target.value || undefined; persist(); clearTimeout(factsTimer); factsTimer = setTimeout(loadFacts, k === 'text' ? 250 : 0); });
+  $('#factsPage').addEventListener('click', handleLinks);
+  $('#factsPage').addEventListener('keydown', (e) => { if (e.key === 'Enter') { const row = e.target.closest('tr[data-asset]'); if (row) openAsset(row.dataset.asset); } });
+
+  // ── Estate view ──
+  async function loadEstate() {
+    const body = await ask({ type: 'estate' }); const est = body.estate; if (!est) return;
+    const pill = (r) => `<span class="badge ${r === 'ready' ? 'trust trust-verified' : r === 'failed' ? 'pii' : ''}">${esc(r)}</span>`;
+    $('#estatePage').innerHTML = `<h2 style="margin:0 0 8px">Estate</h2>
+      ${est.errors.length ? `<div class="note warn">${est.errors.map(esc).join('<br>')}</div>` : ''}
+      ${est.systems.length ? `<div class="cards">${est.systems.map((s) => `<div class="card"><h3>${esc(s.name)} <span class="badge">${esc(s.role)}</span></h3>${s.environments.length ? `<table class="grid"><thead><tr><th>Environment</th><th>Tables</th><th>In working set</th><th>Not visible</th></tr></thead><tbody>${s.environments.map((e) => `<tr class="click" data-system="${esc(s.id)}"><td>${esc(e.environment)}</td><td>${e.tables}</td><td>${e.inWorkingSet}</td><td>${e.notVisible || ''}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">Nothing loaded from it yet.</div>'}</div>`).join('')}</div>` : '<div class="empty">No systems yet: ingest a file or connect a platform.</div>'}
+      <h4>Connections</h4>${est.connections.length ? `<table class="grid"><thead><tr><th>Connection</th><th>Platform</th><th>Role</th><th>Ready</th><th>Checked</th></tr></thead><tbody>${est.connections.map((c) => `<tr><td class="mono">${esc(c.id)}</td><td>${esc(c.platform)}</td><td>${esc(c.role)}</td><td>${pill(c.readiness)}${c.detail ? `<div class="small muted">${esc(c.detail)}</div>` : ''}</td><td class="small">${esc((c.checkedAt || '').slice(0, 16).replace('T', ' '))}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">None in .autode/config/connections.yaml.</div>'}
+      ${est.bindings.length ? `<h4>What feeds each system</h4><table class="grid"><thead><tr><th>System</th><th>Environment</th><th>From</th><th>Schemas</th></tr></thead><tbody>${est.bindings.map((b) => `<tr><td>${esc(b.system)}</td><td>${esc(b.environment || 'default')}</td><td class="mono">${esc(b.connection || b.file || '')}</td><td class="small">${esc((b.schemas || []).join(', '))}</td></tr>`).join('')}</tbody></table>` : ''}`;
+  }
+  $('#estatePage').addEventListener('click', (e) => { const sys = e.target.closest('[data-system]'); if (sys) { setView('explore'); } handleLinks(e); });
+
+  updateHistory();
+  post({ type: 'ready' });
+})();
+</script>
+</body>
+</html>

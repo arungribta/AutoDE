@@ -3,7 +3,7 @@
 AutoDE is a data engineering workspace for VS Code. It takes a business problem from the first conversation to deployed, documented pipelines on Snowflake or Databricks (with Oracle as a source), with AI agents doing the drafting and a person deciding.
 
 - **You decide.** Specifications, workflows, mappings, models, Pipeline Specs and platform changes wait for a person. Agents propose; they never approve.
-- **Grounded.** AutoDE knows the estate (the real tables and columns) and the facts about it, each with its evidence and trust. Generated SQL is checked against the estate, and every deliverable carries a manifest of what it relied on.
+- **Grounded.** AutoDE knows the estate (the real tables and columns) and the facts about it, each with its evidence and trust. Generated SQL is checked against the estate and the approved semantic layer (no invented joins or metrics), and every deliverable carries a manifest of what it relied on. The Knowledge Explorer shows everything AutoDE knows, and the same is available to the CLI and to agents.
 - **Generated, not freehand.** Pipelines are described as data and compiled by reviewed primitives into SQL for Snowflake, Databricks, BigQuery, PostgreSQL or SQL Server.
 - **Nothing changes a platform without you.** Platform changes run as approved runbooks, step by step, with dry runs and a tamper-evident log.
 - **Works where you work.** The VS Code panel, a terminal (`autode`), and agent hosts such as Claude Code, Cortex Code and the GitHub Copilot CLI over MCP, all on the same files.

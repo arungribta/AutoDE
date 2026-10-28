@@ -12,6 +12,8 @@
 !dist/autode.js
 !dist/mcp-server.js
 !dist/THIRD-PARTY-NOTICES.md
+# The Knowledge Explorer's graph library (C5b), loaded by its webview.
+!dist/cytoscape.min.js
 # Icons: marketplace PNG, the MCP server's PNG, the activity-bar glyph.
 !media/autode-icon-256.png
 !media/autode-icon-64.png
@@ -21,6 +23,7 @@
 !media/workflow.html
 !media/runbook.html
 !media/port-skill.html
+!media/explorer.html
 !media/editors/*.html
 # Bundled interview skills and Tier-2 primitives; JSON Schemas for yamlValidation.
 !skills/*.json

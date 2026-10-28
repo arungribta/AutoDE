@@ -5,6 +5,7 @@
  *   dist/extension.js   — the VS Code extension (external: vscode)
  *   dist/autode.js      — the `autode` CLI, `autode mcp` included (no externals; any Node ≥ 18)
  *   dist/mcp-server.js  — a two-line shim for `autode mcp`, kept for existing client configurations
+ *   dist/cytoscape.min.js — the graph library of the Knowledge Explorer webview (C5b), copied as published
  * All are self-contained, so the VSIX ships no node_modules/, and the VSIX and
  * the `autode` package (scripts/pack-cli.cjs) carry the same dist/autode.js.
  *
@@ -52,8 +53,18 @@ async function main() {
   }
   fs.writeFileSync(path.join(root, 'dist', 'mcp-server.js'), MCP_SHIM);
   console.log('wrote dist/mcp-server.js (shim for autode mcp)');
+  // Webview libraries ship as their published minified files (no CDN: webviews load only what the VSIX carries).
+  for (const [name, file] of WEBVIEW_LIBRARIES) {
+    const dir = path.join(root, 'node_modules', name);
+    fs.copyFileSync(path.join(dir, file), path.join(root, 'dist', path.basename(file)));
+    bundledPackages.set(name, dir);
+    console.log(`copied dist/${path.basename(file)} (${name})`);
+  }
   writeNotices(bundledPackages);
 }
+
+/** Libraries a webview loads, by package and published file (P6 decision record: docs/roadmap.md decision log, 2026-10-28). */
+const WEBVIEW_LIBRARIES = [['cytoscape', 'dist/cytoscape.min.js']];
 
 /** The phase-3 server path, still in users' MCP configurations: the same server as `autode mcp`. */
 const MCP_SHIM = `#!/usr/bin/env node
@@ -77,7 +88,7 @@ function writeNotices(packages) {
     const text = licenseFile ? fs.readFileSync(path.join(dir, licenseFile), 'utf8').trim() : `No licence file in the package; package.json declares: ${licence}.`;
     sections.push(`## ${name}${pkg.version ? ` ${pkg.version}` : ''} — ${licence}\n\n${pkg.homepage || (pkg.repository && (pkg.repository.url || pkg.repository)) || ''}\n\n\`\`\`\n${text}\n\`\`\`\n`);
   }
-  const header = '# Third-party notices\n\nAutoDE (MIT, see LICENSE) bundles the following open-source packages into dist/extension.js and dist/autode.js. Their licences and notices follow.\n\n';
+  const header = '# Third-party notices\n\nAutoDE (MIT, see LICENSE) bundles the following open-source packages into dist/extension.js and dist/autode.js, and ships the Knowledge Explorer\'s graph library as dist/cytoscape.min.js. Their licences and notices follow.\n\n';
   fs.writeFileSync(path.join(root, 'dist', 'THIRD-PARTY-NOTICES.md'), header + sections.join('\n'));
   console.log(`wrote dist/THIRD-PARTY-NOTICES.md (${packages.size} packages)`);
 }

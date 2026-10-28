@@ -371,6 +371,8 @@ Imported items become `documented` facts or proposed semantic models, through th
 
 ### 6.10 Knowledge Explorer (C5b; grown by LIN and ONT1; owner, 2026-10-28)
 
+**Status:** the views listed for C5b shipped in v0.50.0 (CHANGELOG.md 0.50.0; HOW: technical-design.md §5.17; usage: user-guide.md §8.7). Lineage and impact (LIN) and the ontology and glossary view (ONT1) are still to come; the text below stays their specification.
+
 A webview panel, like the Workflow tab, where data engineers and architects explore what AutoDE knows. It should feel as professional and easy to use as a modern data catalog, inside the editor. It is read-only by default: every change goes through the existing channels (proposals, the Context Inbox, decisions, the Semantic Model editor).
 
 - **Search everywhere.** One search box across objects, columns, terms, concepts, semantic elements, facts and artifacts. It matches names, aliases, synonyms and comments (K2's retrieval). Facets: type, system, environment, domain, owner, trust, status, classification and staleness.
@@ -447,6 +449,8 @@ When a step or the param selector needs a fact class that is absent or below the
 In short: a business problem can run in exploration mode, switched by a person who acknowledges the disclaimer. At a context gap an agent records its best guess as an assumption (`assumed` trust) and continues; model proposals count at once at `assumed` trust; approval checks warn; gates take one click; everything produced is labelled. Never relaxed: runbooks, production policy (exploration targets non-production only), sample-data consent, secrets, rollbacks. Switching to governed lists the assumptions, model-only facts and warned checks; governed checks don't accept `assumed`. The semantic layer's checks (§6.5) will warn in exploration mode too.
 
 ### 7.5 Asset context and explainability (C5b; owner, 2026-10-28)
+
+**Status:** ✅ shipped in v0.50.0 for asset context, decision confidence in grounding manifests and manifest sources; later phases add the shape to their own recommendations.
 
 - **Asset context.** One deterministic function returns everything AutoDE knows about an asset, each item with its source and trust:
   - metadata;
@@ -663,6 +667,8 @@ In short:
 **Status:** ✅ shipped in v0.49.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-11; HOW: technical-design.md §5.16; usage: [user-guide.md](user-guide.md) §15. §6 stays the specification for C5b–C5d. Acceptance met by the tests named in CHANGELOG.md 0.49.0: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; a changed shared model makes its composites stale; the reference draft matches its golden file; the checks find a missing column and a join that contradicts a key. The older semantic-layer snapshot is retired.
 
 ### Phase C5b: The Knowledge Explorer, asset context; packs and grounding use the semantic layer
+**Status:** ✅ shipped in v0.50.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-8, CTX-11, GRD-10, UI-7; HOW: technical-design.md §5.17; usage: user-guide.md §8.7, §14, §15.5. Acceptance met by the tests named in CHANGELOG.md 0.50.0.
+
 Scope:
 - §6.5: graph, packs and grounding.
 - §6.10: the Knowledge Explorer's search, asset page (Overview, Schema, Meaning as far as the semantic layer goes, Facts, Governance, Used by), graph, facts and estate; the drawer becomes a status line.

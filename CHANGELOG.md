@@ -6,6 +6,44 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.50.0
+
+- **C5b: the Knowledge Explorer; packs and grounding use the semantic layer** (context-layer §6.5, §6.10, §7.5; CTX-8, CTX-11, GRD-10, UI-7).
+  - **The approved semantic layer as an index** (`src/engine/semantic/layer.ts`, loaded by `loadSemanticLayer` in `store.ts`): shared models approved at their current revision, plus the active problem's composites approved at their current resolution. Drafts are kept out of the authority; the Explorer can list them, flagged. `definitionsFor` gives the metrics, filters and relationships of a task's physical tables (matched on schema and table). `layerGraph.ts` turns the layer into graph nodes (new node types `semantic_model`, `semantic_table`, `semantic_element`; metrics are `metric`): logical tables `maps_to` their physical tables, elements `derives_from` the columns their expressions use, relationships are `related_to`, and each node carries the facts behind it from the sidecar.
+  - **Packs** carry a mandatory *Semantic definitions (approved: use these, never your own)* block for their tables: metrics with their expressions and synonyms, filters, and joins with columns and type. The manifest records the models used as `semanticModels` (`name@revision`). *What the agent saw* shows them.
+  - **The semantic grounding check** (`src/engine/grounding/semanticGrounding.ts`, deterministic): a join between two tables the approved layer covers must be one of its relationships, on its columns (either direction). An aggregate named after an approved metric or synonym must compute it as defined (compared unqualified, with the table's facts expanded). An aggregate named after a metric the facts know but no approved model defines is flagged. Joins between tables the layer doesn't cover, a table joined to itself (a merge) and unknown aggregate names aren't judged. With no approved layer nothing is checked.
+    - `autode_record_artifact` **refuses** such SQL in a governed problem, naming each issue and its fix, and writes nothing. In exploration mode it records the file with a `GROUNDING_SEMANTIC` warning.
+    - `autode_check_grounding` returns the result as `semantic`, so external agents can check before recording.
+    - Manifests carry `grounding.semantic`.
+  - **Explainability and traceability:**
+    - Each decision in a grounding manifest has a `confidence`: the weakest trust tier among its backing, or `unbacked` (`confidenceOf`). A model's stated confidence is never recorded.
+    - Manifests list their sources by category (`sources`: semantic, metadata, pattern, governance, ontology, lineage).
+  - **Exploring** (`src/engine/explore/`): one implementation behind every surface.
+    - `searchAssets`: objects, columns, terms, rules, queries, semantic elements, facts, and catalog tables outside the working set. Every word must match a name, alias, synonym or description. When nothing does, results come from the vocabulary and are flagged `approximate`. Facets: kind, system, environment, trust, status and classification, counted before filtering.
+    - `getAssetContext`: overview and provenance; schema with keys, grain, profile and classifications; meaning (glossary terms; for a table, the semantic tables over it and metrics built on it; for a column, the elements derived from it); relationships and derivations; governance (classifications, rules linked to or naming it); facts with evidence, trust and history; decisions and assumptions in scope, including team-wide ones; what uses it (artifacts, by their grounding manifests; semantic models; verified queries); conflicts; sources by category. An asset can be found by id, by fact id, by catalog id, or by a unique name or fqn.
+    - `exploreGraph`: one to three hops, by edge type, columns on request, capped, with what's left out counted per node.
+    - Also `listFacts`, `exploreOverview` and `estateView` (systems, environments, catalog tiers, the working set, connections and their readiness). `handleExploreRequest` answers all of them.
+    - `render.ts` renders the asset page as Markdown.
+  - **The Knowledge Explorer** (`src/core/knowledgeExplorer.ts`, `media/explorer.html`, command *AutoDE: Open Knowledge Explorer*, also on the Workflow view's title bar):
+    - **Search** with facet filters, a result list and keyboard navigation (`/` to search, arrows, Enter, Alt+←/→ for history).
+    - **Asset pages** with tabs (Overview, Schema, Meaning, Lineage, Facts, Governance, Used by, Graph), breadcrumbs, *Copy as Markdown*, *Open in Semantic Model editor* and *Review in the Context Inbox*.
+    - **Graph** (Cytoscape.js): force, layered and concentric layouts; hops; edge-type filters; columns on request; trust shown as border colour, dashed for inferred or draft; export as PNG or SVG.
+    - **Facts** view (filterable, newest first) and **Estate** view.
+    - An overview when no asset is open. VS Code theme colours, ARIA roles, and state kept when hidden.
+    - It reads through the engine's workspace, the one the CLI and the MCP server read. Its messages are handled by `knowledgeExplorerModel.ts` without VS Code, and it opens only files inside the workspace.
+  - **The sidebar's context drawer is now a status line** (counts and a *Knowledge Explorer* link). `/context` and `/explore` open the Explorer, and its *Review in the Context Inbox* opens the palette. The drawer's controls for the older knowledge files (register a source, synthesize, re-index, open `.autode`) are gone from the sidebar; re-index stays on the top bar.
+  - **CLI:** `autode explore` (overview), `explore search <words> [--kind] [--system] [--environment] [--all]`, `explore asset <id|name>` and `explore graph <id|name> [--hops]`, with `--json` for the same JSON as MCP. **MCP:** `autode_search_assets`, `autode_get_asset_context` and `autode_explore_graph` (read-only), plus the resources `autode://asset/{id}` (a template), `autode://explore/overview` and `autode://explore/estate`. Resource reads are asynchronous.
+  - **Cytoscape.js 3.34.3** (MIT) is pinned as a development dependency. The build copies its published `cytoscape.min.js` to `dist/` (about 435 KB), the VSIX ships it, and `dist/THIRD-PARTY-NOTICES.md` carries its licence. The decision record is in the roadmap's decision log.
+  - **Tests:** `AUTODE_TEST_GREP=<regex>` runs only matching tests during development; the full suite remains the gate.
+- **Deviations:**
+  - Lists are paged ("Show more", 50 at a time) rather than virtualised; on the large-estate fixture every request answers within NFR-1, so paging is enough.
+  - SVG export is AutoDE's own, drawn from node positions: Cytoscape's SVG exporter is a separate package under another licence. PNG uses Cytoscape's own export.
+  - Owner, domain, observed lineage and impact are LIN; ontology concepts are ONT1. The Explorer shows where they will appear.
+  - Explainability is carried by grounding-manifest decisions. Other recommendations (mappings, pipeline types) gain the shape as their phases add them (ONT2, PAT).
+  - The sidebar's old message handlers for registering knowledge files remain in the provider, unreachable from the UI; the older knowledge files move into the ledger later (C5 cleanup).
+  - The Explorer's search falls back to vocabulary-aware matching only when plain matching finds nothing, and says so (`approximate`). Mixing the two would let one unmatched word slip through.
+- **Measured:** 389 tests (6 new: the approved layer, packs and graph; the semantic grounding check; refusal and manifests; exploring; NFR-1 on the large estate; every surface the same; 2 existing tests list the new tools). Large-estate fixture (2 000 tables, about 50 000 columns; 200 in the working set): every Explorer request (search, asset, graph, overview) under 100 ms; with the whole estate in the graph, the index build takes about 90 ms and a search about 35 ms. Lint: 0 errors, 21 warnings. Eval: unchanged (the reference run has no approved semantic layer).
+
 ## 0.49.0
 
 - **C5a: the semantic layer — shared models, composites, checks and the editor** (context-layer §6.1–6.5, §6.7; CTX-11 in part).

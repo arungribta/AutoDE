@@ -119,6 +119,10 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 | `autode semantic resolve <composite>` | Resolves it into `<name>.resolved.yaml` and prints the diff. Refused, with the reasons, on a missing model, a collision or a redefinition. |
 | `autode semantic check <name>` | Checks a shared model or a composite against the estate and the facts; exit 1 on an error. |
 | `autode semantic approve <name>` | A person approves a shared model (workspace-wide, at its current version) or a composite (in its problem). Needs a terminal; type `approve` (`y` for a composite in exploration mode). |
+| `autode explore` | Overview of what AutoDE knows: objects, facts by status, systems, semantic models. |
+| `autode explore search <words> [--kind table,column,…] [--system <s>] [--environment <e>] [--all]` | Search names, aliases, synonyms, descriptions and facts (every word must match), with facet counts; exit 5 when nothing matches. |
+| `autode explore asset <id or name>` | Everything known about one asset, as Markdown (the Knowledge Explorer's page); `--json` for the same JSON as `autode_get_asset_context`. |
+| `autode explore graph <id or name> [--hops 1-3]` | The graph around an asset. |
 | `autode coverage` | The completeness checklist: per table in scope and metric the specification names, what is known, proposed, assumed, a candidate or missing, and the action for each. Deterministic; records nothing. |
 | `autode capture candidates [--connection <id>] [--record]` | Candidate keys, grain, foreign keys, change columns and personal data (by value shape) from the data, each checked by a read-only, aggregate-only probe on the connection or the pack's samples. `--record` records those that passed as proposed facts, already verified. |
 

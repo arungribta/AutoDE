@@ -4,6 +4,8 @@ import { createSubjectResolver, isMirror } from '../context/projection';
 import { ContextGap, DEFAULT_MIN_TRUST } from '../context/contextGaps';
 import { assertionRevision, PackManifest } from '../context/contextPack';
 import { GroundingResult, SchemaIndex, checkSqlGrounding } from './sqlGrounding';
+import { SemanticGroundingResult, checkSemanticGrounding, describeSemanticIssues, knownMetricNames } from './semanticGrounding';
+import type { SemanticLayerIndex } from '../semantic/layer';
 
 /**
  * Grounding manifests and checks (C3, v0.30.0; docs/context-layer-requirements.md
@@ -33,6 +35,25 @@ export interface DecisionRecord {
   unbacked?: boolean;
   /** Backed, but below the required trust (§7.3). */
   belowTrust?: boolean;
+  /** The weakest trust among what backs it, or `unbacked` (§7.5; never a number a model states). */
+  confidence?: Confidence;
+}
+
+/** Confidence of a decision or recommendation (§7.5): the weakest trust tier among its backing, `unbacked` when nothing backs it. */
+export type Confidence = TrustTier | 'unbacked';
+
+export function confidenceOf(backing: readonly TrustTier[]): Confidence {
+  return backing.length ? [...backing].sort((a, b) => trustRank(a) - trustRank(b))[0] : 'unbacked';
+}
+
+/** Where an artifact's context came from, by category (§7.5 traceability). */
+export interface ManifestSources {
+  semantic: string[];
+  metadata: string[];
+  pattern: string[];
+  governance: string[];
+  ontology: string[];
+  lineage: string[];
 }
 
 export interface RuleCheck {
@@ -47,6 +68,8 @@ export interface ArtifactGrounding {
   typeIssues: GroundingResult['typeIssues'];
   decisions: { total: number; backed: number; unbacked: number; belowTrust: number };
   rules: RuleCheck[];
+  /** Joins and metrics against the approved semantic layer (C5b). */
+  semantic?: Pick<SemanticGroundingResult, 'checked' | 'joinsChecked' | 'joinsDefined' | 'metricsChecked' | 'metricsDefined' | 'issues'>;
   /** `GROUNDING_UNRESOLVED` etc. — what the panel shows on the artifact. */
   warnings: string[];
 }
@@ -70,6 +93,8 @@ export interface GroundingManifest {
   overrides: Array<{ usedFor: string; reason: string }>;
   gaps: ContextGap[];
   grounding: ArtifactGrounding;
+  /** Its context's sources by category (C5b, §7.5). */
+  sources?: ManifestSources;
   model?: string;
   generatedAt: string;
 }
@@ -138,6 +163,7 @@ export function backDecisions(
     } else {
       rec.unbacked = true;
     }
+    rec.confidence = confidenceOf(backing ? [backing.trust] : []);
     records.push(rec);
   }
   return records;
@@ -199,8 +225,23 @@ export interface BuildManifestInput {
   graph: { nodes: readonly BaseNode[]; edges: readonly GraphEdge[] };
   schemaIndex: SchemaIndex;
   assertions: readonly Assertion[];
+  /** The approved semantic layer (C5b): joins and metrics are checked against it. */
+  semantic?: SemanticLayerIndex;
   model?: string;
   now?: () => Date;
+}
+
+/** The manifest's sources by category (§7.5): which semantic models, catalogs, primitives, classifications and lineage it rests on. */
+function manifestSources(input: BuildManifestInput, used: readonly Assertion[], sem: SemanticGroundingResult | undefined): ManifestSources {
+  const uniq = (xs: Iterable<string>) => [...new Set(xs)].sort();
+  return {
+    semantic: uniq([...(input.pack?.semanticModels ?? []), ...(sem?.checked ? sem.models : [])]),
+    metadata: uniq(Object.entries(input.catalogRevisions ?? {}).map(([k, v]) => `${k}@${v}`)),
+    pattern: uniq(input.primitiveUses.filter((u) => u.source === 'primitive').map((u) => `primitive:${u.kind}${u.version ? `@${u.version}` : ''}`)),
+    governance: uniq(used.filter((a) => a.predicate === 'classification').map((a) => `fact:${a.id}`)),
+    ontology: [],
+    lineage: uniq(input.primitiveUses.map((u) => u.lineage).filter((l): l is string => !!l))
+  };
 }
 
 export function buildGroundingManifest(input: BuildManifestInput): GroundingManifest {
@@ -228,6 +269,8 @@ export function buildGroundingManifest(input: BuildManifestInput): GroundingMani
   const unbacked = decisions.filter((d) => d.unbacked);
   if (unbacked.length > 0) warnings.push(`GROUNDING_UNBACKED: ${unbacked.map((d) => d.usedFor).join(', ')}`);
   for (const r of rules) if (r.status === 'violation') warnings.push(`RULE_VIOLATION: ${r.text} (${r.detail})`);
+  const sem = isSql ? checkSemanticGrounding([{ name: input.artifact.path, content: input.artifact.content }], input.semantic, { knownMetrics: knownMetricNames(input.assertions) }) : undefined;
+  if (sem?.issues.length) warnings.push(`GROUNDING_SEMANTIC: ${describeSemanticIssues(sem.issues).join(' ')}`);
 
   const keyLike = (usedFor: string) => /(key|partition|grain|dedup|merge)/i.test(usedFor.split('.').pop() ?? '');
   const decisionGaps: ContextGap[] = decisions.filter((d) => d.unbacked || d.belowTrust).map((d) => ({
@@ -263,8 +306,10 @@ export function buildGroundingManifest(input: BuildManifestInput): GroundingMani
       typeIssues: g?.typeIssues ?? [],
       decisions: { total: decisions.length, backed: decisions.filter((d) => d.backedBy).length, unbacked: unbacked.length, belowTrust: decisions.filter((d) => d.belowTrust).length },
       rules,
+      ...(sem?.checked ? { semantic: { checked: sem.checked, joinsChecked: sem.joinsChecked, joinsDefined: sem.joinsDefined, metricsChecked: sem.metricsChecked, metricsDefined: sem.metricsDefined, issues: sem.issues } } : {}),
       warnings
     },
+    sources: manifestSources(input, [...used.values()].map((u) => byId.get(u.id)).filter((a): a is Assertion => !!a), sem),
     model: input.model,
     generatedAt: (input.now ?? (() => new Date()))().toISOString()
   };

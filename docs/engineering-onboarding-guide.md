@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.49.0 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.50.0 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -80,7 +80,8 @@ The doc map with precedence rules is [README.md](README.md). **Rule of thumb:** 
 └───────────────────────────────┬──────────────────────────────────────────┘
                                 │ postMessage
                      media/sidebar.html (one-file webview: chat, context
-                     drawer, workflow palette, settings) + custom editors
+                     status line, workflow palette, settings) + custom
+                     editors + panels (workflow, runbook, knowledge explorer)
 
 dist/autode.js — src/cli + src/mcp over src/engine: the autode CLI and, as
 `autode mcp`, a separate, LLM-free MCP server (stdio) for Claude Code, Codex,
@@ -171,6 +172,18 @@ An **agent** is a role template (`agents/<role>.md`: its AutoDE tools, permissio
 
 ### 4.4 Assertions, ledger, trust
 An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `business_term`, `metric`, `quality_expectation`, `decision`, …) about subjects (object ids), with a **status** (`proposed`, `active`, `needs_review`, `superseded`, `rejected`), a **trust** tier (`verified` > `confirmed` > `documented` > `assumed` > `inferred`) and evidence. Facts a model extracted record the model. The **ledger** (`.autode/knowledge/ledger/*.jsonl`) appends events; folding them gives the current assertions. Graph nodes are **mirrors** of schema assertions. Nothing an LLM proposes becomes trusted without a person (or, for `verified`, a probe). **Capture coverage** (v0.48.0, `src/engine/context/coverage.ts`, `dataCandidates.ts`, `capture.ts`) lists per table and metric what is known and missing, and finds keys, joins and personal data from the data before any model. **Exploration mode** (`src/engine/documents/problemMode.ts`) is per problem: model proposals and assumptions go live at `assumed` trust, which no governed check accepts; approval checks split into hard and soft (`documentApprovalCheck`); runbooks can't target production. *Requirements CTX-*, ORC-11; design §5.3–5.4, §5.15.* The **semantic layer** (v0.49.0, `src/engine/semantic/`) is separate: business definitions as Snowflake semantic model YAML in the deliverables folder (shared models, and each problem's composites resolved into deployable models), approved by a person, with AutoDE's notes in `.autode/semantic/`; the Semantic Model editor is a custom text editor over the engine's `editorState.ts`. *Requirement CTX-11; design §5.16.*
+
+- **Packs and grounding** (v0.50.0) read only the **approved** layer (`layer.ts`, `loadSemanticLayer`).
+  - Packs add the definitions of their tables.
+  - `semanticGrounding.ts` refuses, in a governed problem, SQL that joins or measures differently from the layer.
+- **Exploring** (v0.50.0, `src/engine/explore/`) is one implementation, `handleExploreRequest`, behind three surfaces:
+  - the Knowledge Explorer panel (`src/core/knowledgeExplorer.ts` and its VS Code-free message model);
+  - `autode explore`;
+  - the MCP tools `autode_search_assets`, `autode_get_asset_context` and `autode_explore_graph`.
+
+  Change one and all three change. A test asserts that the three return the same asset context.
+
+*Requirements CTX-8, GRD-10, UI-7; design §5.17.*
 
 ### 4.5 Estate, catalog, working set
 Objects have estate-qualified ids: `obj:<system>/<environment>/<fqn>` (e.g. `obj:shop/prod/shop.orders`); `.autode/knowledge/estate.yaml` records systems, environments and which connection or file feeds them. Each system has a **catalog** (`.autode/local/catalog/…`, git-ignored, rebuildable) holding the whole estate in tiers (names → structure → profile). Only the **working set** — what problems use, 200 tables by default — is mirrored into the ledger and graph; a task that needs a catalogued table promotes it. *Design §5.11–5.12.*

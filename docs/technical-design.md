@@ -368,8 +368,8 @@ The UI uses a single scrollable workspace with distinct sections. A thin, icon-b
 │    - Context assembly previews  │
 │                                 │
 ├─────────────────────────────────┤
-│  CONTEXT ASSEMBLY DRAWER        │  ← Collapsible: shows what context
-│  (expandable)                   │     will be sent with next prompt
+│  CONTEXT STATUS LINE            │  ← Counts + link to the Knowledge
+│                                 │     Explorer (v0.50.0)
 ├─────────────────────────────────┤
 │  CHAT INPUT + ACTION BAR        │  ← Message input, Send, Plan, Execute
 └─────────────────────────────────┘
@@ -381,7 +381,7 @@ The UI uses a single scrollable workspace with distinct sections. A thin, icon-b
 |---------|-----|-------------|
 | **Provider pill** | `providerPill` | Shows active LLM (e.g., "Copilot" or "Claude" with green dot). Clicking opens LLM settings. |
 | **Connection pill** | `connPill` | Shows data platform connection status. Clicking opens connection settings. |
-| **Context meter** | `ctxMetric` | Token/entity counter with mini progress bar. Clicking expands context drawer. |
+| **Context meter** | `ctxMetric` | Token/entity counter with mini progress bar. Clicking opens the Knowledge Explorer (v0.50.0). |
 | **Plan status** | `planMetric` | Shows plan step count and execution status. |
 | **Refresh button** | `refreshBtn` | Triggers context re-index. |
 | **Stop button** | `stopBtn` | Stops plan execution. |
@@ -422,15 +422,9 @@ The chat stream is the primary interaction surface. Every interaction — planni
 └──────────────────────────────────────────────┘
 ```
 
-### 4.4 Context Drawer
+### 4.4 Context status line
 
-A persistent, collapsible panel between the chat stream and input area:
-
-- **Collapsed state**: 32px header showing summary stats
-- **Expanded state**: Up to 260px showing entity chips organized by category
-- **Categories**: Database Metadata, Business Context, Verified Queries
-- **Chips**: Clickable pill-shaped elements that insert `@entityname` into the chat input
-- **Actions**: Re-index button, Open .autode folder button
+Since v0.50.0 (C5b) the former context drawer is one line between the chat stream and the input: counts of tables, terms and queries, and a *Knowledge Explorer* link (`post('openKnowledgeExplorer')`). Exploring what AutoDE knows happens in the Knowledge Explorer (§5.17); the drawer's controls for the older knowledge files are gone from the sidebar (their provider handlers remain, unreachable, until those files move into the ledger).
 
 ### 4.5 Slide-Out Settings Panel
 
@@ -468,7 +462,7 @@ Typing `@` in the chat input triggers an autocomplete dropdown populated from th
 |---------|--------|
 | `/plan` | Generate execution plan |
 | `/execute` | Execute current plan |
-| `/context` | Expand context drawer |
+| `/context`, `/explore` | Open the Knowledge Explorer |
 | `/connect` | Open connection settings |
 | `/settings` | Open settings panel |
 | `/sync` | Sync database metadata |
@@ -729,6 +723,59 @@ Shared semantic models and composites (context-layer §6). Everything below is e
 **Decisions.** Kind `semantic_model` (`SemanticModelPayload { scope, name, content }`), subject `semantic:shared/<name>` or `semantic:<problem>/<name>` with the file's revision; applying a shared model writes it with the approver's approval, a composite writes and resolves it.
 
 **Surfaces.** The editor: `SemanticModelEditorProvider` (custom text editor `autoDE.semanticModelEditor`, default for `**/semantic/*.yaml`) over `editorState`; host from `WebviewProvider.semanticEditorContext()`. Commands `newSemanticModel`, `newSemanticComposite`. *Waiting for you* gains kind `semantic` (opens the file). CLI `autode semantic …`; MCP `src/mcp/semanticTools.ts` (tools and `autode://semantic/...` resources) and `autode_propose_semantic_model` in `decisions.ts`.
+
+### 5.17 The Knowledge Explorer; packs and grounding use the semantic layer (v0.50.0; C5b)
+
+Context-layer §6.5, §6.10, §7.5. Engine code is deterministic and shared by the VS Code panel, the CLI and MCP.
+
+**The approved layer.**
+- `src/engine/semantic/layer.ts` (pure; imports only `model.ts`):
+  - `indexSemanticLayer(loaded, { includeDrafts })` → `SemanticLayerIndex`, holding models, tables with their base `schema.table`, elements, relationships with base tables, `byBaseName` and `metricsByName` (names and synonyms). Drafts enter the index only with `includeDrafts`.
+  - `definitionsFor(index, fqns)` and `semanticTablesFor`; matching is on schema and table, and the database is ignored.
+  - Graph ids `sem:<model>`, `sem:<model>/<table>` and `sem:<model>/<table>/<element>`.
+- `store.ts` adds `loadSemanticLayer(root, { problemId, includeDrafts })`. It reads shared models whose status is `approved`, and the problem's composites from their resolved files, approved when `approvalCurrent`. `semanticLayerFiles` serves cache keys.
+- `layerGraph.ts`: `semanticGraph(index, graph)` → nodes (`semantic_model`, `semantic_table`, `metric`, `semantic_element`; `metadata.approved`; `supportedBy` from the sidecar's `backing`) and edges:
+  - `contains`;
+  - `maps_to` from a semantic table to its physical table;
+  - `derives_from` from an element to each physical column its expression names (`exprIdentifiers`);
+  - `related_to` for relationships.
+
+**Packs.**
+- `ContextPackSources.semantic` holds the approved index:
+  - MCP: `EngineWorkspace.contextSources()`, keyed on the layer's files;
+  - VS Code: `ContextFileManager.getPackSources()`, cached on mtimes.
+- `renderSeeded` adds a mandatory *Semantic definitions* block for the seed tables, after relationships; if it doesn't fit the budget it counts as `truncated.semantic`.
+- `PackManifest.semanticModels` records `name@revision`.
+
+**Grounding.** `src/engine/grounding/semanticGrounding.ts`:
+- `checkSemanticGrounding(artifacts, index, { knownMetrics })` → `{ checked, joinsChecked, joinsDefined, metricsChecked, metricsDefined, issues[{kind, detail, fix}], models }`.
+- **Joins:** `alias.col = alias.col` inside `ON` clauses whose two aliases resolve to different base tables that both have approved semantic tables; the join must match a relationship's column pair in either orientation.
+- **Metrics:** `AGG(...) AS name`, where the name is an approved metric or synonym; compared with `normalizeExpr` against the metric's expression and its form with the table's own elements expanded. A name in `knownMetricNames(assertions)` (live metric facts) that no approved model defines is also flagged.
+- `buildGroundingManifest({ semantic })` stores `grounding.semantic` and a `GROUNDING_SEMANTIC` warning.
+- `recordArtifact` runs the check before writing SQL. It throws in a governed problem; in an exploration problem it records the file with the warning.
+- `autode_check_grounding` returns `semantic`.
+- **Explainability:** `DecisionRecord.confidence = confidenceOf(trusts)` (the weakest tier, or `unbacked`). `GroundingManifest.sources` (`ManifestSources`) comes from the pack's models, the catalog revisions, primitives, classification facts used, and primitive lineage.
+
+**Explore.** `src/engine/explore/`:
+
+| Module | Does |
+|---|---|
+| `explore.ts` | `ExploreSources` (graph, assertions, conflicts, catalog, semantic index with drafts, `ArtifactUse[]`). A per-sources index (`WeakMap`): the graph plus the semantic overlay, edges out and in, columns and tables, facts by subject, classifications per column (`governanceFacts`), and cached `AssetSummary`s. `searchAssets` (text score over label, fqn, aliases and description, every word required; facts; catalog hits outside the working set; `resolveText` only when nothing matched, then `approximate`; facets before filters; offset and limit). `resolveAsset` and `getAssetContext` (`AssetContext`: overview, schema, meaning, lineage so far, governance, facts, memory, usedBy, conflicts, sources; facts and catalog-only tables have their own shapes). `exploreGraph` (BFS, 1–3 hops, edge types, columns on request, `cap` with `hidden` counts). `listFacts`, `exploreOverview`. |
+| `sources.ts` | `artifactUses(root)` (reads every `*.grounding.json` under the deliverables folder, at most 5 000, skipping `history/`). `exploreSources(root, contextSources, problemId)`. `estateView` (estate.yaml systems and bindings, catalog tiers per system and environment, working-set counts, connections with `connectionStatus`). `ExploreRequest` and `handleExploreRequest`. |
+| `render.ts` | Text renderings for the CLI and *Copy as Markdown*: `renderSearch`, `renderOverview`, `renderAssetMarkdown`, `renderGraph`. |
+
+Measured on the large-estate fixture (§10.3; about 50 000 columns): with the whole estate in the graph, the index build takes about 90 ms and a search about 35 ms; with 200 tables in the working set, every request takes well under 100 ms.
+
+**Surfaces.**
+- **VS Code:** `src/core/knowledgeExplorer.ts` (panel `autodeKnowledgeExplorer`, command `openKnowledgeExplorer [assetId]`).
+  - It reads through an `EngineWorkspace` (the CLI's and MCP's reader), re-reading the manifests and drafts at most every 2 s.
+  - `knowledgeExplorerModel.ts` (no `vscode`) answers `ready`, `request`, `open` (workspace files only), `copyMarkdown` and `exportGraph`, and returns actions for the host.
+  - `media/explorer.html` is a single file that loads `dist/cytoscape.min.js` through `asWebviewUri`. The CSP allows scripts only by nonce and from `cspSource`. There are no inline handlers. State lives in `vscode.setState`.
+  - `WebviewProvider.openInbox()` posts `openInbox` to the sidebar.
+- **CLI:** `autode explore [overview|search|asset|graph]`.
+- **MCP:** `src/mcp/exploreTools.ts` provides `autode_search_assets`, `autode_get_asset_context` and `autode_explore_graph`, and the resources `autode://asset/{id}` (template), `autode://explore/overview` and `autode://explore/estate`. `readResource` is now async.
+
+**Build.** `scripts/bundle.cjs` copies `WEBVIEW_LIBRARIES` (`cytoscape/dist/cytoscape.min.js`) into `dist/` and adds their licences to `THIRD-PARTY-NOTICES.md`. `.vscodeignore` ships `dist/cytoscape.min.js` and `media/explorer.html`.
 
 ## 6. Data Platforms
 
@@ -1873,7 +1920,7 @@ src/cli/    # the autode command line (no vscode; §10.8)
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
   ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, MappingContextManager.ts, PipelineSpecManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, portSkillSession.ts, portSkillView.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, configManager.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, knowledgeExplorer.ts, knowledgeExplorerModel.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, portSkillSession.ts, portSkillView.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors
@@ -1890,10 +1937,12 @@ src/engine/decisions/
   decisionStore.ts, proposals.ts
 src/engine/documents/
   problemDocuments.ts, problemMode.ts, problems.ts, problemSlug.ts
+src/engine/explore/
+  explore.ts, render.ts, sources.ts
 src/engine/governance/
   governance.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
-  manifest.ts, sqlGrounding.ts
+  manifest.ts, semanticGrounding.ts, sqlGrounding.ts
 src/engine/interview/
   specOps.ts, state.ts
 src/engine/pipelineSpec/    # Pipeline Specification
@@ -1909,7 +1958,7 @@ src/engine/platform/executionBackends/    # CLI and REST execution
 src/engine/runner/    # runbooks: checks, policy, the runner and its log
   hostGuard.ts, policy.ts, run.ts, runbook.ts, runLog.ts
 src/engine/semantic/
-  checks.ts, composite.ts, draft.ts, editorState.ts, model.ts, store.ts
+  checks.ts, composite.ts, draft.ts, editorState.ts, layer.ts, layerGraph.ts, model.ts, store.ts
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
   lifecycle.ts, port.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
 src/engine/transforms/    # primitive registry
@@ -1921,7 +1970,7 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   documentApproval.ts, events.ts, instance.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, platform.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, platform.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 ```
 <!-- /generated:source-tree -->
 
