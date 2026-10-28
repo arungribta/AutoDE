@@ -71,7 +71,8 @@ export function governanceFacts(assertions: readonly Assertion[]): ColumnGoverna
   const byColumn = new Map<string, ColumnGovernance>();
   const rank = (s: string) => (s === 'active' ? 2 : 1);
   for (const a of assertions) {
-    if (a.kind !== 'business_rule' || a.predicate !== CLASSIFICATION_PREDICATE || !LIVE.has(a.status)) continue;
+    // MM1: the `classification` kind, and GOV-era classifications stored as business rules (before migration).
+    if (!((a.kind === 'classification' || a.kind === 'business_rule') && a.predicate === CLASSIFICATION_PREDICATE) || !LIVE.has(a.status)) continue;
     const v = (a.value ?? {}) as { classification?: string; strategy?: string };
     if (!CLASSIFICATIONS.includes(v.classification as Classification)) continue;
     for (const subject of a.subject) {
@@ -181,8 +182,8 @@ export async function classifyColumn(ledger: AssertionLedger, nodeIds: readonly 
   const subject = columnSubject(nodeIds, input.table, input.column);
   const strategy = personal ? input.strategy ?? defaultStrategy(input.column, input.classification) : undefined;
   const fact = {
-    kind: 'business_rule' as const, subject: [subject], predicate: CLASSIFICATION_PREDICATE,
-    value: { classification: input.classification, ...(strategy ? { strategy } : {}), level: 'STRICT', text: input.note ?? '' },
+    kind: 'classification' as const, subject: [subject], predicate: CLASSIFICATION_PREDICATE,
+    value: { classification: input.classification, ...(strategy ? { strategy } : {}), text: input.note ?? '' },
     statement: `${input.table}.${input.column} is ${input.classification}${strategy ? `, masked by ${strategy}` : ''}.`,
     evidence: [{ type: 'user_edit' as const, ref: `${input.channel}:${input.by}`, ...(input.note ? { excerpt: input.note.slice(0, 300) } : {}) }],
     trust: 'confirmed' as const, status: 'active' as const, createdBy: input.by

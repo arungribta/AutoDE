@@ -24,6 +24,9 @@ export interface VocabularyProposalPayload { entries: Array<Pick<VocabularyPropo
 
 /** A semantic model change (C5a): the whole file, shared (`<artifactDirectory>/semantic/<name>.yaml`) or a composite of the active problem. */
 export interface SemanticModelPayload { scope: 'shared' | 'composite'; name: string; content: string }
+/** A knowledge article an agent proposes (MM1): the whole article; the slug names its file. */
+export interface ArticlePayload { slug: string; title: string; about: string[]; cites: string[]; body: string; domain?: string; tags?: string[] }
+import { ArticleFile, articleRevision, approveArticle, checkArticle, readArticle, writeArticle } from '../knowledge/articles';
 import { parseSemanticModel, semanticRevision } from '../semantic/model';
 import { parseComposite, resolveComposite } from '../semantic/composite';
 import { readComposite, readShared, resolveCompositeFile, semanticPaths, sharedLoader, writeShared } from '../semantic/store';
@@ -42,7 +45,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  */
 
 /** What can be proposed. `mapping` and `platform_change` decisions were retired in v0.45.8 (SIMP-2): mappings are drafted into the mapping document, platform changes are runbooks; their old decision files still read. */
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook' | 'semantic_model'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook' | 'semantic_model' | 'article'>;
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -225,6 +228,7 @@ function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown):
   }
   if (kind === 'connection') return { connectionId: draftEntry({ ...(payload as ConnectionDraft), fields: (payload as ConnectionDraft).fields ?? {} }).id };
   if (kind === 'semantic_model') { const s = payload as SemanticModelPayload; return { document: `semantic:${s.scope === 'shared' ? 'shared' : ctx.problemId}/${s.name}`, revision: semanticFileRevision(ctx, s) }; }
+  if (kind === 'article') { const a = payload as ArticlePayload; return { document: `article:${a.slug}`, revision: readArticle(ctx.workspaceRoot, a.slug)?.revision ?? 'none' }; }
   return undefined;
 }
 
@@ -238,6 +242,7 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'runbook': { const r = payload as Runbook; return { title: `Runbook ${r.id}: ${r.title} (${r.steps?.length ?? 0} steps on ${r.connectionId})`.slice(0, 160), summary: r.reason ?? '' }; }
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
     case 'semantic_model': { const s = payload as SemanticModelPayload; return { title: `${s.scope === 'shared' ? 'Shared semantic model' : 'Semantic composite'} ${s.name}`, summary: s.scope === 'shared' ? 'A workspace-level change: every problem that uses this model is affected.' : 'A composite of the active problem; it is resolved once applied.' }; }
+    case 'article': { const a = payload as ArticlePayload; return { title: `Knowledge article: ${a.title}`.slice(0, 160), summary: `About ${a.about.join(', ')}; cites ${a.cites.length} fact(s). Approving it gives it to agents working on what it is about.` }; }
   }
 }
 
@@ -288,7 +293,22 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'workflow': return validateWorkflowProposal(payload as WorkflowInstance, ctx);
     case 'runbook': return validateRunbookProposal(payload as Runbook, ctx);
     case 'semantic_model': return validateSemanticModelProposal(payload as SemanticModelPayload, ctx);
+    case 'article': return validateArticleProposal(payload as ArticlePayload, ctx);
   }
+}
+
+/** A knowledge article proposal: a valid name and front matter, every `[fact:…]` cited, every cited fact standing (§6.11). */
+export function validateArticleProposal(a: ArticlePayload, ctx: ProposalContext): ValidationReport {
+  const r = report();
+  r.checks.push('a name (lower-case letters, digits, -), a title, and what it is about', 'every [fact:<id>] in the text is in cites, and every cited fact exists and still stands');
+  if (!a || !/^[a-z0-9][a-z0-9-]*$/.test(String(a.slug ?? '')) || !String(a.title ?? '').trim() || !Array.isArray(a.about) || !a.about.length || typeof a.body !== 'string') { r.errors.push('give slug (lower-case letters, digits, -), title, about (asset, term or domain ids) and body'); return finish(r); }
+  const ledger = new AssertionLedger(layoutPath(ctx.workspaceRoot, 'ledger'));
+  ledger.loadSync();
+  const c = checkArticle({ about: a.about, cites: a.cites ?? [], body: a.body }, ledger.assertions());
+  r.errors.push(...c.errors, ...c.staleBecause.map((s) => `it would be stale at once: ${s}`));
+  r.warnings.push(...c.warnings);
+  if (readArticle(ctx.workspaceRoot, a.slug)) r.warnings.push(`It replaces the article ${a.slug}.`);
+  return finish(r);
 }
 
 /** Validates and, if valid, records a pending decision. Nothing else is written. */
@@ -417,6 +437,24 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         if (!r.record) { const failed = store.markFailed(id, r.problem ?? 'not approved'); return { decision: failed, applied: false, message: `${id}: ${r.problem}` }; }
         const done = store.markApplied(id, `Approved by ${approver} for ${record.environment}; ${r.record.status === 'approved' ? 'ready to run' : 'waiting for a second approver'}.`);
         return { decision: done, applied: true, message: r.record.status === 'approved' ? `Runbook ${rb.id} approved by ${approver} (${record.environment}): run it from its Runbook tab in VS Code.` : `Runbook ${rb.id}: first approval by ${approver}; ${record.environment} needs a second approver (the Runbook tab, or autode runbook approve ${rb.id}).` };
+      }
+      case 'article': {
+        const a = store.proposal<ArticlePayload>(id);
+        const current = readArticle(ctx.workspaceRoot, a.slug);
+        if (d.subject?.revision && d.subject.revision !== (current?.revision ?? 'none')) {
+          const sup = store.markSuperseded(id, `${a.slug} changed after the proposal was made; propose again against the current version.`);
+          return { decision: sup, applied: false, message: sup.events[sup.events.length - 1].note ?? '' };
+        }
+        const channel = [...d.events].reverse().find((e) => e.type === 'approved')?.channel ?? 'file';
+        const file: Omit<ArticleFile, 'status' | 'approved'> = { title: a.title, about: a.about, cites: a.cites ?? [], body: a.body, author: d.proposedBy?.client ?? d.proposedBy?.host ?? 'agent', ...(a.domain ? { domain: a.domain } : {}), ...(a.tags?.length ? { tags: a.tags } : {}) };
+        writeArticle(ctx.workspaceRoot, a.slug, file, { overwrite: true });
+        const ledger = new AssertionLedger(layoutPath(ctx.workspaceRoot, 'ledger'));
+        ledger.loadSync();
+        // The person who approved the decision approved this revision of the article.
+        const ok = approveArticle(ctx.workspaceRoot, a.slug, { by: approver, channel, assertions: ledger.assertions(), at: now });
+        if (!ok.ok) { const failed = store.markFailed(id, ok.message); return { decision: failed, applied: false, message: ok.message }; }
+        const done = store.markApplied(id, `Written and approved by ${approver} (revision ${articleRevision(file)}).`);
+        return { decision: done, applied: true, message: `Knowledge article ${a.slug} written and approved by ${approver}.` };
       }
       case 'semantic_model': {
         const s = store.proposal<SemanticModelPayload>(id);

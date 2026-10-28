@@ -22,7 +22,8 @@ export type ExplorerMessage =
   | { type: 'request'; requestId: number; request: ExploreRequest }
   | { type: 'open'; target: OpenTarget }
   | { type: 'copyMarkdown'; id: string }
-  | { type: 'exportGraph'; format: 'svg' | 'png'; data: string };
+  | { type: 'exportGraph'; format: 'svg' | 'png'; data: string }
+  | { type: 'editMetadata'; id: string };
 
 export type OpenTarget =
   | { kind: 'file'; path: string }
@@ -35,7 +36,8 @@ export type ExplorerAction =
   | { kind: 'openInbox' }
   | { kind: 'openWorkflow' }
   | { kind: 'copy'; text: string }
-  | { kind: 'save'; format: 'svg' | 'png'; data: string };
+  | { kind: 'save'; format: 'svg' | 'png'; data: string }
+  | { kind: 'editMetadata'; id: string; label: string };
 
 export interface ExplorerAnswer {
   /** Posted back to the webview. */
@@ -72,6 +74,13 @@ export async function answerExplorerMessage(msg: ExplorerMessage, host: Explorer
     const sources = await host.sources();
     const body = sources ? handleExploreRequest({ type: 'asset', id: msg.id }, sources, root) : undefined;
     return body?.context ? { action: { kind: 'copy', text: renderAssetMarkdown(body.context as AssetContext) }, reply: { type: 'toast', message: 'Copied as Markdown.' } } : { reply: { type: 'toast', message: 'Nothing to copy.' } };
+  }
+  if (msg.type === 'editMetadata') {
+    const sources = await host.sources();
+    const body = sources ? handleExploreRequest({ type: 'asset', id: msg.id }, sources, root) : undefined;
+    const ctx = body?.context as AssetContext | undefined;
+    if (!ctx || ctx.asset.assetType === 'knowledge_fact' || ctx.asset.assetType === 'knowledge_article' || ctx.asset.assetType === 'domain' || ctx.asset.assetType === 'data_product') return { reply: { type: 'toast', message: 'Metadata is set on tables, columns, terms and semantic elements.' } };
+    return { action: { kind: 'editMetadata', id: ctx.asset.id, label: ctx.asset.fqn ?? ctx.asset.label } };
   }
   if (msg.type === 'exportGraph') {
     if (!/^data:image\/(svg\+xml|png)[;,]/.test(msg.data) && !msg.data.startsWith('<svg')) return { reply: { type: 'toast', message: 'Nothing to export.' } };

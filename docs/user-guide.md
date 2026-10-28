@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.50.3. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.51.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -340,7 +340,7 @@ Click any of them for its page: a relationship shows the join; a verified query 
   - certification: *verified*, *documented*, *unverified*, or *draft* for unapproved semantic models;
   - status, review state (knowledge facts), classification, glossary term.
 
-  Domain, owner and tags appear greyed until the metadata model gives them data (MM1, v0.51.0). Counts are for your search before filtering, so you can see the alternatives.
+  Domain, owner and tags too (§8.8). Counts are for your search before filtering, so you can see the alternatives.
 - **Asset pages** have these tabs:
   - **Overview:** where the asset came from, when it was captured and verified, keys and grain, decisions and assumptions in scope (including team-wide ones), conflicts.
   - **Schema:** columns with type, key, nullability, classification and certification.
@@ -382,7 +382,75 @@ Databases and schemas have pages too, with their contents. A table whose DDL nam
 
 **From a terminal:** `autode explore` (overview), `autode explore browse [<id>]` (the tree), `autode explore semantic` (each model's tables, metrics, relationships, verified queries and instructions), `--layer physical|context|semantic` on search, `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, and `autode explore graph [--system s] [--model m] [--columns]` for the landscape. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
 
-The vocabulary follows the industry's standards and catalogs (context-layer specification §6.11). Tags, a full glossary, typed rules, owners, domains and certification come with the metadata model (MM1, v0.51.0); the semantic modeler and knowledge engineer agents, and knowledge maintenance, with MM2 (v0.52.0); lineage from the platform and impact analysis with LIN (v0.53.0); ontology concepts with ONT1 (v0.54.0).
+### 8.8 Metadata: owners, domains, tags, certification, articles
+
+The names follow the industry's standards and catalogs (context-layer specification §6.11).
+
+**On every asset.** Open it in the Knowledge Explorer and choose **Set metadata…**, or use `autode metadata set` in a terminal:
+
+| Metadata | What it is | Set with |
+|---|---|---|
+| Owners | Business owner, technical owner, data steward (several of each) | *Add an owner*; `--owner data_steward=ana` |
+| Domain | The business area it belongs to | *Set the domain*; `--domain Sales`; or a pattern in `domains.yaml` |
+| Tags | `key` or `key=value` labels; a metric tagged `kpi` is a KPI | *Add a tag*; `--tag tier=gold` |
+| Certification | *verified*, *draft* or *deprecated*, by a person (otherwise derived from evidence) | *Certify*; `--certify verified` |
+| Custom properties | Your team's own fields | *Set a custom property*; `--property retention_days=30` |
+
+Each is recorded as a confirmed fact with you as its source; changing one keeps the history. An agent proposes them for you to confirm, except tags, which it may confirm itself after asking you.
+
+**Your team's structure**, in `.autode/config/` and reviewed like code:
+
+```yaml
+# tags.yaml: controlled tags (others are allowed too)
+groups:
+  - name: business
+    tags:
+      - key: kpi
+        description: A key performance indicator
+      - key: tier
+        values: [gold, silver, bronze]
+```
+```yaml
+# properties.yaml: custom properties and their types
+properties:
+  - name: retention_days
+    type: number
+  - name: source_of_truth
+    type: enum
+    values: [crm, shop]
+```
+```yaml
+# domains.yaml: domains, their owners, data products and which assets they hold
+domains:
+  - name: Sales
+    owners: [{ role: business_owner, person: ana }]
+    assets: ["obj:shop/*"]          # by id or qualified name; * matches anything
+    semanticModels: [sales]          # the model's tables and metrics are in the domain
+    dataProducts:
+      - name: Daily revenue
+        assets: ["*shop.orders", "*shop.order_items"]
+```
+
+An asset's owners default to its domain's owners for any role it doesn't name. Domains and data products have pages of their own, listing what is in them.
+
+**Rules** have a type (*definition*, *validation*, *policy*, *standard*, *guidance*) and are *mandatory* or *advisory*. Rules written before v0.51.0 were converted (STRICT became mandatory), and the history records the change. **Guidance** rules ("fiscal year starts in April") are given to agents working on the assets they cover; team-wide guidance goes to every task. Classifications (personal data and so on) are no longer stored as rules; they're classifications.
+
+**Glossary terms** have a category, broader, narrower and related terms, a steward, an abbreviation, examples and a status (draft, approved, deprecated).
+
+**Quality expectations** are grouped by dimension: completeness, uniqueness, validity, consistency, timeliness, accuracy. See an asset's *Quality* tab.
+
+**Knowledge articles** record what facts alone can't say: pitfalls, history, golden sources, how to reconcile two systems.
+- Create one with *AutoDE: New Knowledge Article…* or `autode articles new <name> --title "…" --about <asset ids>`. It's a Markdown file in `.autode/knowledge/articles/`.
+- Cite the facts it rests on as `[fact:<id>]`, and list them under `cites`.
+- Approve it with *AutoDE: Approve Knowledge Article* (with the article open) or `autode articles approve <name>`.
+- Approved articles are given to agents working on what they're about.
+- If a fact an article cites is superseded, the article is marked **stale** and says why. Editing it after approval needs approval again.
+- `autode articles check` checks every article's citations.
+- An asset's *Knowledge* tab lists the articles about it.
+
+Applying tags to Snowflake or Databricks is a platform change: an agent with the platform's governance skill writes it as a runbook, and you approve it.
+
+The semantic modeler and knowledge engineer agents, and knowledge maintenance, come with MM2 (v0.52.0); lineage from the platform and impact analysis with LIN (v0.53.0); ontology concepts with ONT1 (v0.54.0).
 ---
 
 ## 9. The workflow

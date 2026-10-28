@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.50.3 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.51.0 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -198,6 +198,13 @@ An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `bu
   - Use `physicalRef` and `matchBase` in `semantic/layer.ts`: they compare database, schema and table where both sides know them, within the model's binding, and return the candidates when several fit.
   - Databases and schemas are computed containers (`containerGraph` in `explore.ts`).
   - Test identity against `test/reference/realistic-estate/`, not only the tidy reference problem.
+- **The metadata model** (v0.51.0, `src/engine/metadata/`, `src/engine/knowledge/articles.ts`):
+  - per-asset metadata is facts (kind `metadata`); the team's structure is `.autode/config/{tags,properties,domains}.yaml`;
+  - classifications are their own kind;
+  - rules are read through `ruleOf` (type and modality);
+  - knowledge articles cite facts and go stale with them.
+
+  Don't add platform-specific writers to the engine: one-off platform changes are runbooks written by agents with platform skills (decision log, 2026-10-28).
 
 *Requirements CTX-8, GRD-10, UI-7; design §5.17.*
 

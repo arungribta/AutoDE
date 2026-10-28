@@ -30,6 +30,7 @@ Written by AutoDE from Databricks' public documentation (Unity Catalog privilege
 - **Column masks** are SQL UDFs in a `governance` schema, attached with `ALTER TABLE … ALTER COLUMN … SET MASK`. Use `is_account_group_member('<group>')` to decide who sees clear values.
 - **Row filters** are boolean UDFs attached with `ALTER TABLE … SET ROW FILTER <function> ON (<column>)`.
 - **Tags** classify columns (`SET TAGS ('pii' = 'email')`). Where the workspace has governed tags and attribute-based policies, a policy on the tag can replace per-column masks. Name that as an option for the stakeholder.
+- **AutoDE's own tags** (`key=value`, from its metadata model): read them with `autode_get_asset_context` (or `autode_search_assets`, facet tag), and apply them as they are recorded: `ALTER TABLE … SET TAGS ('key' = 'value')` or `ALTER TABLE … ALTER COLUMN … SET TAGS (…)`. Don't invent tags that AutoDE doesn't record; propose them as facts instead.
 
 Classification: `GRANT`, `SET MASK` and `SET ROW FILTER` are changes. `REVOKE`, `DROP` and `CREATE OR REPLACE` are destructive and need a rollback. Create functions with `IF NOT EXISTS`. Masks and filters need compute that supports them (a SQL warehouse, or serverless). Say so if the consumers use something else.
 

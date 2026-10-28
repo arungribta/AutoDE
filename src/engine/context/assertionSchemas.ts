@@ -44,7 +44,12 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
   business_term: {
     type: 'object',
     required: ['term'],
-    properties: { term: { type: 'string', minLength: 1 }, definition: { type: 'string' }, formula: { type: 'string' }, boundTo: { type: 'array', items: { type: 'string' } } }
+    // MM1 (§6.11): SKOS-shaped — category, broader / narrower / related terms, steward, status.
+    properties: {
+      term: { type: 'string', minLength: 1 }, definition: { type: 'string' }, formula: { type: 'string' }, boundTo: { type: 'array', items: { type: 'string' } },
+      category: { type: 'string' }, broader: { type: 'array', items: { type: 'string' } }, narrower: { type: 'array', items: { type: 'string' } }, related: { type: 'array', items: { type: 'string' } },
+      steward: { type: 'string' }, status: { enum: ['draft', 'approved', 'deprecated'] }, abbreviation: { type: 'string' }, examples: { type: 'array', items: { type: 'string' } }
+    }
   },
   metric: {
     type: 'object',
@@ -62,12 +67,17 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
   business_rule: {
     type: 'object',
     // GOV: predicate `classification` on a column carries its classification and, for personal data, the mask strategy.
-    properties: { text: { type: 'string' }, level: { enum: ['STRICT', 'RECOMMENDED'] }, strategy: { type: 'string' }, classification: { enum: ['none', 'pii', 'sensitive-pii', 'confidential'] } }
+    // MM1 (§6.11, SBVR): ruleType and modality; `level` is the older name of modality (STRICT = mandatory).
+    properties: {
+      text: { type: 'string' }, level: { enum: ['STRICT', 'RECOMMENDED'] }, strategy: { type: 'string' }, classification: { enum: ['none', 'pii', 'sensitive-pii', 'confidential'] },
+      ruleType: { enum: ['definition', 'validation', 'policy', 'standard', 'guidance'] }, modality: { enum: ['mandatory', 'advisory'] },
+      scope: { enum: ['asset', 'domain', 'team'] }, domain: { type: 'string' }, expression: { type: 'string' }, owner: { type: 'string' }
+    }
   },
   quality_expectation: {
     type: 'object',
     required: ['check'],
-    properties: { check: { enum: ['not_null', 'accepted_values', 'freshness', 'unique', 'range', 'schema'] }, values: { type: 'array' }, maxAgeHours: { type: 'number' }, dataType: { type: 'string' }, isNullable: { type: 'boolean' }, columns: { type: 'object' } }
+    properties: { check: { enum: ['not_null', 'accepted_values', 'freshness', 'unique', 'range', 'schema', 'pattern', 'referential'] }, values: { type: 'array' }, maxAgeHours: { type: 'number' }, dataType: { type: 'string' }, isNullable: { type: 'boolean' }, columns: { type: 'object' }, pattern: { type: 'string' }, references: { type: 'string' }, dimension: { enum: ['completeness', 'uniqueness', 'validity', 'consistency', 'timeliness', 'accuracy'] } }
   },
   decision: { type: 'object' },
   assumption: { type: 'object' },
@@ -77,6 +87,22 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
     type: 'object',
     required: ['sql'],
     properties: { sql: { type: 'string' }, dialect: { type: 'string' } }
+  },
+  classification: {
+    type: 'object',
+    required: ['classification'],
+    properties: { classification: { type: 'string', minLength: 1 }, strategy: { enum: ['hash', 'redact'] }, text: { type: 'string' } }
+  },
+  // Predicates: tag {key, value?, group?}; owner {role, person}; domain {domain}; certification {status, note?}; property {name, value}.
+  metadata: {
+    type: 'object',
+    oneOf: [
+      { required: ['key'], properties: { key: { type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_.-]*$' }, value: { type: 'string' }, group: { type: 'string' } } },
+      { required: ['role', 'person'], properties: { role: { enum: ['business_owner', 'technical_owner', 'data_steward'] }, person: { type: 'string', minLength: 1 } } },
+      { required: ['domain'], properties: { domain: { type: 'string', minLength: 1 } } },
+      { required: ['status'], properties: { status: { enum: ['verified', 'draft', 'deprecated'] }, note: { type: 'string' } } },
+      { required: ['name', 'value'], properties: { name: { type: 'string', minLength: 1 }, value: {} } }
+    ]
   }
 };
 

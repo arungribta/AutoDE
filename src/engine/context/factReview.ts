@@ -2,7 +2,7 @@ import { Assertion } from './assertions';
 import { AssertionLedger } from './ledger';
 import { detectConflicts } from './conflicts';
 import { isMirror } from './projection';
-import { LOW_STAKES_ASSERTION_KINDS } from '../decisions/decisionStore';
+import { isLowStakesFact } from '../decisions/decisionStore';
 
 /**
  * Reviewing facts — the Context Inbox's logic (C4b), shared by the panel and
@@ -36,7 +36,7 @@ export function factView(a: Assertion, byId: ReadonlyMap<string, Assertion>): Fa
     createdBy: a.createdBy, flags: a.flags, reviewReason: a.reviewReason, evidence: a.evidence.slice(0, 3) as FactView['evidence'],
     supersedes: a.supersedes ? { id: a.supersedes, statement: byId.get(a.supersedes)?.statement } : undefined,
     verification: a.verification ? { result: a.verification.result, detail: a.verification.detail } : undefined,
-    stakes: LOW_STAKES_ASSERTION_KINDS.includes(a.kind) ? 'low' : 'high'
+    stakes: isLowStakesFact(a.kind, a.predicate) ? 'low' : 'high'
   };
 }
 

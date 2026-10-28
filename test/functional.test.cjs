@@ -5864,8 +5864,8 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
-      const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
+      const readTools = ['autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
@@ -5878,7 +5878,7 @@ async function main() {
       const uris = (await client.listResources()).resources.map((r) => r.uri);
       for (const u of ['autode://spec/business-problem', 'autode://spec/pipeline', 'autode://semantic/shared/sales', 'autode://primitives/dedup']) assert.ok(uris.includes(u), u);
       assert.ok(!uris.includes('autode://context/source'), 'documents that do not exist are not listed');
-      assert.deepStrictEqual((await client.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate), ['autode://primitives/{kind}', 'autode://asset/{id}']);
+      assert.deepStrictEqual((await client.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate), ['autode://primitives/{kind}', 'autode://asset/{id}', 'autode://article/{slug}']);
       for (const u of ['autode://explore/overview', 'autode://explore/estate']) assert.ok(uris.includes(u), u);
     } finally { await client.close(); f.done(); }
   });
@@ -5941,6 +5941,8 @@ async function main() {
       autode_search_assets: [{ query: 'orders', assetTypes: ['table'], certifications: ['verified'] }, { query: 'orders', certifications: ['certain'] }],
       autode_get_asset_context: [{ asset: 'shop.orders' }, { asset: '' }],
       autode_browse_assets: [{ parent: 'phys:shop/default/(unknown)' }, { parent: '' }],
+      autode_search_articles: [{ query: 'customer', about: 'obj:shop/prod/shop.customers' }, { query: 1 }],
+      autode_propose_article: [{ article: { slug: 'customer-ids', title: 'Customer IDs', about: ['obj:shop/prod/shop.customers'], cites: [], body: 'Text.' } }, { article: { slug: 'Bad Slug', title: 't', about: [], cites: [], body: 'x' } }],
       autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
       autode_semantic_draft: [{ name: 'sales' }, { name: '1bad' }],
@@ -11313,7 +11315,7 @@ async function main() {
     assert.deepStrictEqual(['verified', 'confirmed', 'documented', 'assumed', 'inferred'].map(E.certificationOf), ['verified', 'verified', 'documented', 'unverified', 'unverified']);
     const r = E.searchAssets(sources, 'orders');
     assert.deepStrictEqual(Object.keys(r.facets), ['layer', 'assetType', 'system', 'platform', 'environment', 'database', 'schema', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm']);
-    assert.deepStrictEqual(r.pendingFacets, ['domain', 'owner', 'tag']);
+    assert.deepStrictEqual(r.pendingFacets, [], 'domain, owner and tag are live since MM1');
     const orders = r.results.find((x) => x.id === 'obj:shop/prod/shop.orders');
     assert.deepStrictEqual([orders.platform, orders.glossaryTerms, orders.reviewState], ['file', ['Order'], undefined]);
     assert.ok(r.facets.glossaryTerm.Order === 1 && E.searchAssets(sources, 'orders', { glossaryTerms: ['Order'] }).results.every((x) => (x.glossaryTerms || []).includes('Order')));
@@ -11493,6 +11495,237 @@ async function main() {
     assert.ok(Object.keys(r.facets).indexOf('database') === Object.keys(r.facets).indexOf('environment') + 1);
     const o = E.exploreOverview(sources);
     assert.deepStrictEqual([o.counts.databases, o.counts.schemas], [5, 6]);
+  });
+
+  // ── v0.51.0: MM1 — the metadata model ──
+
+  const mm1 = {
+    async ledger(dir) {
+      const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+      const l = new AssertionLedger(dir);
+      await l.load();
+      return l;
+    },
+    tmp() { const os = require('node:os'); const fs = require('node:fs'); const p = require('node:path'); return fs.mkdtempSync(p.join(os.tmpdir(), 'autode-mm1-')); },
+    config: {
+      tags: { groups: [{ name: 'business', tags: [{ key: 'kpi' }, { key: 'tier', values: ['gold', 'silver'] }] }] },
+      properties: { properties: [{ name: 'retention_days', type: 'number' }, { name: 'source_of_truth', type: 'enum', values: ['crm', 'shop'] }] },
+      domains: { domains: [{ name: 'Sales', owners: [{ role: 'business_owner', person: 'ana' }], assets: ['obj:shop/*'], semanticModels: ['sales'], dataProducts: [{ name: 'Daily revenue', assets: ['*shop.orders', '*shop.order_items'] }] }] }
+    }
+  };
+
+  await test('v0.51.0: the metadata model — metadata and classification facts validate; tags are low stakes, owners and certification a person\'s; rules read their type and modality (STRICT is mandatory); quality expectations their DAMA dimension; domains assign by pattern and pass their owners on; the configuration polices tag values and property types', () => {
+    const { validateAssertion } = require('../dist/engine/context/assertionSchemas.js');
+    const { isLowStakesFact, stakesFor } = require('../dist/engine/decisions/decisionStore.js');
+    const M = fresh('../dist/engine/metadata/model.js');
+    const base = { subject: ['obj:shop/prod/shop.orders'], statement: 's', evidence: [{ type: 'user_edit', ref: 'x' }] };
+    for (const [predicate, value] of [['tag', { key: 'kpi' }], ['tag', { key: 'tier', value: 'gold' }], ['owner', { role: 'data_steward', person: 'ana' }], ['domain', { domain: 'Sales' }], ['certification', { status: 'verified' }], ['property', { name: 'retention_days', value: 30 }]]) assert.deepStrictEqual(validateAssertion({ ...base, kind: 'metadata', predicate, value }), [], predicate);
+    assert.ok(validateAssertion({ ...base, kind: 'metadata', predicate: 'owner', value: { role: 'boss', person: 'x' } }).length > 0);
+    assert.deepStrictEqual(validateAssertion({ ...base, kind: 'classification', predicate: 'classification', value: { classification: 'pii', strategy: 'hash' } }), []);
+    assert.deepStrictEqual([isLowStakesFact('metadata', 'tag'), isLowStakesFact('metadata', 'owner'), isLowStakesFact('classification', 'classification'), stakesFor('assertion', { kind: 'metadata', predicate: 'tag' }), stakesFor('assertion', { kind: 'metadata', predicate: 'certification' })], [true, false, false, 'low', 'high']);
+    const rule = (value, statement = 's', subject = ['obj:x']) => M.ruleOf({ value, statement, subject, predicate: 'requires' });
+    assert.deepStrictEqual([rule({ text: 'Mask email outside production', level: 'STRICT' }).ruleType, rule({ text: 'Mask email', level: 'STRICT' }).modality], ['policy', 'mandatory']);
+    assert.strictEqual(rule({ text: 'order_id must be unique', level: 'STRICT' }).ruleType, 'validation');
+    assert.strictEqual(rule({ text: 'Active customer is defined as an order in the last 90 days' }).ruleType, 'definition');
+    assert.deepStrictEqual([rule({ text: 'Fiscal year starts in April', level: 'RECOMMENDED' }, 's', ['project']).ruleType, rule({ text: 'x', level: 'RECOMMENDED' }, 's', ['project']).scope], ['guidance', 'team']);
+    assert.deepStrictEqual([rule({ text: 'x', ruleType: 'standard', modality: 'advisory' }).ruleType, rule({ text: 'x', ruleType: 'standard' }).inferred], ['standard', false], 'stated beats inferred');
+    assert.deepStrictEqual(['not_null', 'unique', 'accepted_values', 'referential', 'freshness'].map((check) => M.qualityDimension({ check })), ['completeness', 'uniqueness', 'validity', 'consistency', 'timeliness']);
+    const config = M.parseMetadataConfig(mm1.config);
+    assert.deepStrictEqual([config.tagGroups[0].tags.length, config.properties.length, config.domains[0].dataProducts[0].name, config.errors], [2, 2, 'Daily revenue', []]);
+    const meta = M.assetMetadata([], config, { id: 'obj:shop/prod/shop.orders', fqn: 'shop.orders' });
+    assert.deepStrictEqual([meta.domain, meta.owners, meta.dataProducts], [{ name: 'Sales', from: 'domains.yaml' }, [{ role: 'business_owner', person: 'ana', inheritedFrom: 'domain Sales' }], ['Daily revenue']]);
+    const facts = [{ id: 'f1', kind: 'metadata', predicate: 'owner', value: { role: 'business_owner', person: 'bo' }, status: 'active', createdBy: 'ana', validFrom: '2026-10-28' }, { id: 'f2', kind: 'metadata', predicate: 'domain', value: { domain: 'Finance' }, status: 'active', createdBy: 'ana', validFrom: '2026-10-28' }];
+    const own = M.assetMetadata(facts, config, { id: 'obj:shop/prod/shop.orders', fqn: 'shop.orders' });
+    assert.deepStrictEqual([own.domain.name, own.domain.from, own.owners.map((o) => o.person)], ['Finance', 'fact', ['bo']], 'a fact overrides the pattern; its own owner, no inheritance from another domain');
+    assert.ok(M.assetMetadata([], config, { id: 'sem:sales/orders', model: 'sales' }).domain.from === 'semantic model', 'a shared model\'s subject area is a domain');
+    assert.deepStrictEqual([M.checkMetadata(config, 'tag', { key: 'tier', value: 'bronze' }).length, M.checkMetadata(config, 'tag', { key: 'tier', value: 'gold' }).length, M.checkMetadata(config, 'property', { name: 'retention_days', value: 'thirty' }).length, M.checkMetadata(config, 'property', { name: 'nope', value: 1 }).length], [1, 0, 1, 1]);
+  });
+
+  await test('v0.51.0: recording and migration — a person sets metadata, superseding what it replaces and keeping history; removing rejects; the migration moves GOV classifications into their own kind and gives rules a type and modality, once, recorded, with governance and STRICT enforcement unchanged', async () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const R = fresh('../dist/engine/metadata/record.js');
+    const M = require('../dist/engine/metadata/model.js');
+    const gov = require('../dist/engine/governance/governance.js');
+    const { projectGraph } = require('../dist/engine/context/projection.js');
+    const dir = mm1.tmp();
+    try {
+      const ledger = await mm1.ledger(dir);
+      const config = M.parseMetadataConfig(mm1.config);
+      const set = (predicate, value) => R.setMetadata(ledger, config, { subject: 'obj:shop/prod/shop.orders', label: 'shop.orders', predicate, value, by: 'ana', channel: 'cli' });
+      const t1 = await set('tag', { key: 'tier', value: 'silver' });
+      const t2 = await set('tag', { key: 'tier', value: 'gold' });
+      assert.deepStrictEqual([ledger.get(t1.id).status, t2.supersedes, t2.trust, t2.statement], ['superseded', t1.id, 'confirmed', 'shop.orders is tagged tier=gold.']);
+      await assert.rejects(() => set('tag', { key: 'tier', value: 'bronze' }), /tier takes one of gold, silver/);
+      await set('owner', { role: 'data_steward', person: 'ana' });
+      await set('owner', { role: 'data_steward', person: 'bo' });
+      assert.strictEqual(ledger.assertions().filter((a) => a.predicate === 'owner' && a.status === 'active').length, 2, 'owners are many');
+      assert.ok(await R.removeMetadata(ledger, { subject: 'obj:shop/prod/shop.orders', predicate: 'owner', value: { role: 'data_steward', person: 'bo' }, by: 'ana', channel: 'cli' }));
+      assert.strictEqual(ledger.assertions().filter((a) => a.predicate === 'owner' && a.status === 'active').length, 1);
+      // Facts written before MM1: a GOV classification stored as a rule, and a STRICT rule.
+      const legacyCls = await ledger.assert({ kind: 'business_rule', subject: ['obj:shop/prod/shop.customers.email'], predicate: 'classification', value: { classification: 'pii', strategy: 'hash', level: 'STRICT', text: '' }, statement: 'email is pii', evidence: [{ type: 'user_edit', ref: 'x' }], trust: 'confirmed', status: 'active' });
+      const legacyRule = await ledger.assert({ kind: 'business_rule', subject: ['obj:shop/prod/shop.orders'], predicate: 'requires', value: { text: 'order_id must be unique', level: 'STRICT' }, statement: 'order_id must be unique', evidence: [{ type: 'user_edit', ref: 'x' }], trust: 'confirmed', status: 'active' });
+      assert.strictEqual(gov.governanceFacts(ledger.assertions())[0].classification, 'pii', 'read before migration');
+      assert.deepStrictEqual(await R.migrateMetadata(ledger), { classifications: 1, rules: 1 });
+      assert.deepStrictEqual(await R.migrateMetadata(ledger), { classifications: 0, rules: 0 }, 'idempotent');
+      const cls = ledger.assertions().find((a) => a.supersedes === legacyCls.id);
+      const rule = ledger.assertions().find((a) => a.supersedes === legacyRule.id);
+      assert.deepStrictEqual([cls.kind, cls.value.classification, cls.value.level, cls.trust, cls.createdBy], ['classification', 'pii', undefined, 'confirmed', 'system']);
+      assert.deepStrictEqual([rule.value.ruleType, rule.value.modality, rule.value.level], ['validation', 'mandatory', 'STRICT']);
+      assert.deepStrictEqual([gov.governanceFacts(ledger.assertions()).length, gov.governanceFacts(ledger.assertions())[0].assertionId], [1, cls.id], 'governance reads the new kind');
+      const node = projectGraph(ledger.assertions(), {}).nodes.find((n) => n.type === 'business_rule' && /unique/.test(n.ruleText));
+      assert.deepStrictEqual([node.enforcementLevel, node.metadata.ruleType, node.metadata.modality], ['STRICT', 'validation', 'mandatory']);
+      // A new classification is written as the new kind.
+      const c2 = await gov.classifyColumn(ledger, [], { table: 'shop.customers', column: 'phone', classification: 'pii', by: 'ana', channel: 'cli' });
+      assert.strictEqual(c2.kind, 'classification');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); void p; }
+  });
+
+  await test('v0.51.0: knowledge articles — Markdown with front matter citing facts; a fact used but not cited, or cited but missing, is an error; approval at a revision (refused while invalid or stale), and an edit needs approval again; superseding a cited fact makes it stale with the reason; approved articles reach the packs of tasks over what they are about, their facts in the manifest; agents propose them as decisions a person approves', async () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const A = fresh('../dist/engine/knowledge/articles.js');
+    const { buildContextPack } = fresh('../dist/engine/context/contextPack.js');
+    const w = c5a.ws();
+    try {
+      const ledger = await mm1.ledger(p.join(w.ws, '.autode', 'knowledge', 'ledger'));
+      const f = await ledger.assert({ kind: 'decision', subject: ['obj:shop/prod/shop.customers'], predicate: 'decided', value: { text: 'CRM is the golden source for email' }, statement: 'CRM is the golden source for customer email.', evidence: [{ type: 'chat_message', ref: 'c1' }], trust: 'confirmed', status: 'active' });
+      const body = `Customer email in shop is unreliable before 2021; use CRM's [fact:${f.id}].\n\nMore detail.\n`;
+      assert.throws(() => A.writeArticle(w.ws, 'Bad Name', { title: 't', about: ['x'], cites: [], body }), /not a valid article name/);
+      A.writeArticle(w.ws, 'customer-email', { title: 'Customer email: use CRM', about: ['obj:shop/prod/shop.customers'], cites: [], body, author: 'ana' });
+      assert.match(A.checkArticle(A.readArticle(w.ws, 'customer-email'), ledger.assertions()).errors[0], /is used in the text but not in cites/);
+      assert.match(A.approveArticle(w.ws, 'customer-email', { by: 'ana', channel: 'cli', assertions: ledger.assertions() }).message, /can't be approved/);
+      A.writeArticle(w.ws, 'customer-email', { title: 'Customer email: use CRM', about: ['obj:shop/prod/shop.customers'], cites: [f.id], body, author: 'ana' }, { overwrite: true });
+      assert.deepStrictEqual(A.checkArticle(A.readArticle(w.ws, 'customer-email'), ledger.assertions()), { errors: [], warnings: [], staleBecause: [] });
+      assert.ok(A.approveArticle(w.ws, 'customer-email', { by: 'ana', channel: 'cli', assertions: ledger.assertions() }).ok);
+      const approved = A.readArticle(w.ws, 'customer-email');
+      assert.deepStrictEqual([approved.state, approved.approved.by, approved.approved.revision === approved.revision], ['approved', 'ana', true]);
+      assert.ok(fs.readFileSync(approved.file, 'utf8').startsWith('---\ntitle: "Customer email: use CRM"') || fs.readFileSync(approved.file, 'utf8').startsWith('---\ntitle: '), 'front matter first');
+      // In a pack over shop.customers, with its cited fact in the manifest.
+      const graph = c5a.graph();
+      const pack = buildContextPack({ purpose: 'step', seeds: ['obj:shop/prod/shop.customers'] }, { graph, assertions: ledger.assertions(), conflicts: [], articles: A.listArticles(w.ws) });
+      assert.match(pack.text, /### Knowledge articles[^\n]*\n- \*\*Customer email: use CRM\*\* \[article:customer-email\]: Customer email in shop is unreliable before 2021/);
+      assert.deepStrictEqual([pack.manifest.knowledgeArticles, pack.manifest.assertions.some((x) => x.id === f.id)], [[`customer-email@${approved.revision}`], true]);
+      assert.ok(!/Knowledge articles/.test(buildContextPack({ purpose: 'step', seeds: ['obj:shop/prod/shop.orders'] }, { graph, assertions: ledger.assertions(), conflicts: [], articles: A.listArticles(w.ws) }).text), 'only for what it is about');
+      // Superseding the cited fact: stale, with the reason; the pack says so.
+      const g = await ledger.supersede(f.id, { kind: 'decision', subject: ['obj:shop/prod/shop.customers'], predicate: 'decided', value: { text: 'Shop is the golden source after 2024' }, statement: 'Shop is the golden source for email after 2024.', evidence: [{ type: 'chat_message', ref: 'c9' }], trust: 'confirmed', status: 'active' });
+      assert.match(A.checkArticle(approved, ledger.assertions()).staleBecause[0], new RegExp(`${f.id} was superseded by ${g.id}`));
+      assert.match(buildContextPack({ purpose: 'step', seeds: ['obj:shop/prod/shop.customers'] }, { graph, assertions: ledger.assertions(), conflicts: [], articles: A.listArticles(w.ws) }).text, /STALE: .*was superseded/);
+      // An edit after approval needs approval again.
+      fs.writeFileSync(approved.file, fs.readFileSync(approved.file, 'utf8').replace('More detail.', 'More detail, edited.'));
+      assert.strictEqual(A.readArticle(w.ws, 'customer-email').state, 'changed');
+      assert.ok(!/Knowledge articles/.test(buildContextPack({ purpose: 'step', seeds: ['obj:shop/prod/shop.customers'] }, { graph, assertions: ledger.assertions(), conflicts: [], articles: A.listArticles(w.ws) }).text), 'a changed article is not handed to agents until approved again');
+      // An agent proposes an article: validated (citations), applied by a person's approval.
+      const P = fresh('../dist/engine/decisions/proposals.js');
+      const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+      const store = new DecisionStore(w.ws);
+      const ctx = { workspaceRoot: w.ws };
+      assert.throws(() => P.propose(store, ctx, 'article', { slug: 'x', title: 'X', about: ['obj:a'], cites: ['nope'], body: 'b' }, { proposedBy: { host: 'mcp' } }), /cited fact nope doesn't exist/);
+      const dec = P.propose(store, ctx, 'article', { slug: 'golden-email', title: 'Golden email source', about: ['obj:shop/prod/shop.customers'], cites: [g.id], body: `Shop after 2024 [fact:${g.id}].` }, { proposedBy: { host: 'mcp', client: 'claude' } });
+      assert.strictEqual(dec.stakes, 'high');
+      store.resolve(dec.id, { decision: 'approved', by: 'bo', channel: 'panel' });
+      const applied = await P.applyDecision(store, dec.id, ctx);
+      assert.ok(applied.applied, applied.message);
+      assert.deepStrictEqual([A.readArticle(w.ws, 'golden-email').state, A.readArticle(w.ws, 'golden-email').approved.by, A.readArticle(w.ws, 'golden-email').author], ['approved', 'bo', 'claude']);
+    } finally { w.done(); }
+  });
+
+  await test('v0.51.0: guidance and the Explorer — a guidance rule reaches packs over its assets (and team-wide ones everywhere), at most eight; asset pages carry ownership, domain, data products, tags, properties and a person\'s certification; domain, owner and tag facets are live and KPIs are metrics tagged kpi; domains, data products and articles are context assets with their members; quality by dimension; a term\'s SKOS details; rules with type and modality', async () => {
+    const E = fresh('../dist/engine/explore/explore.js');
+    const M = require('../dist/engine/metadata/model.js');
+    const A = require('../dist/engine/knowledge/articles.js');
+    const { buildContextPack } = fresh('../dist/engine/context/contextPack.js');
+    const graph = c5a.graph();
+    const fact = (id, kind, subject, predicate, value, statement, extra = {}) => ({ id, kind, subject, predicate, value, statement, status: 'active', trust: 'confirmed', evidence: [{ type: 'user_edit', ref: 'x' }], createdBy: 'ana', createdAt: '2026-10-28', validFrom: '2026-10-28', ...extra });
+    const facts = [
+      fact('g1', 'business_rule', ['obj:shop/prod/shop.orders'], 'requires', { text: 'Use order_ts in UTC for daily cuts', ruleType: 'guidance', modality: 'advisory' }, 'Use order_ts in UTC for daily cuts'),
+      fact('g2', 'business_rule', ['project'], 'requires', { text: 'Fiscal year starts in April', ruleType: 'guidance', modality: 'advisory', scope: 'team' }, 'Fiscal year starts in April'),
+      fact('g3', 'business_rule', ['obj:crm/prod/crm.customers'], 'requires', { text: 'CRM ids are reused after deletion', ruleType: 'guidance', modality: 'advisory' }, 'CRM ids are reused after deletion'),
+      fact('m1', 'metadata', ['obj:shop/prod/shop.orders'], 'tag', { key: 'tier', value: 'gold' }, 't'),
+      fact('m2', 'metadata', ['obj:shop/prod/shop.orders'], 'certification', { status: 'verified', note: 'reviewed' }, 'c'),
+      fact('m3', 'metadata', ['obj:shop/prod/shop.orders'], 'property', { name: 'retention_days', value: 30 }, 'p'),
+      fact('m4', 'metadata', ['sem:sales/orders/total_tax'], 'tag', { key: 'kpi' }, 'k'),
+      fact('q1', 'quality_expectation', ['obj:shop/prod/shop.orders'], 'expects', { check: 'unique', columns: {} }, 'order_id is unique'),
+      fact('q2', 'quality_expectation', ['obj:shop/prod/shop.orders'], 'expects', { check: 'not_null' }, 'order_ts is never null'),
+      fact('t1', 'business_term', ['term:net-revenue'], 'defined_as', { term: 'Net revenue', definition: 'Revenue after refunds', category: 'Finance/Revenue', broader: ['Revenue'], related: ['Refund'], steward: 'ana', status: 'approved', abbreviation: 'NR' }, 'Net revenue')
+    ];
+    // Packs: guidance over the seed, team-wide guidance, not another table's.
+    const pack = buildContextPack({ purpose: 'step', seeds: ['obj:shop/prod/shop.orders'] }, { graph, assertions: facts, conflicts: [] });
+    assert.match(pack.text, /### Guidance[^\n]*\n- Use order_ts in UTC for daily cuts \[fact:g1\]\n- Fiscal year starts in April \(team-wide\) \[fact:g2\]/);
+    assert.ok(!/CRM ids are reused/.test(pack.text) && pack.manifest.assertions.some((a) => a.id === 'g1'));
+    // The Explorer.
+    const articles = [{ slug: 'orders-cuts', title: 'Daily cuts', about: ['obj:shop/prod/shop.orders'], cites: [], status: 'approved', body: 'x', file: 'f', revision: 'r', state: 'approved', errors: [] }];
+    const sources = { graph: { nodes: [...graph.nodes, { id: 'term:net-revenue', type: 'business_term', label: 'Net revenue', mappedNodeIds: [], metadata: {}, version: 1, supportedBy: ['t1'] }], edges: graph.edges }, assertions: facts, conflicts: [], semantic: c5b.index(), metadata: M.parseMetadataConfig(mm1.config), articles };
+    const t = E.getAssetContext(sources, 'shop.orders');
+    assert.deepStrictEqual([t.metadata.domain.name, t.metadata.owners[0].person, t.metadata.dataProducts, t.metadata.tags[0].value, t.metadata.properties[0].value], ['Sales', 'ana', ['Daily revenue'], 'gold', 30]);
+    assert.deepStrictEqual([t.asset.certification, t.asset.certifiedBy, t.asset.domain, t.asset.owners, t.asset.tags], ['verified', 'ana', 'Sales', ['ana'], ['tier=gold']]);
+    assert.deepStrictEqual(t.quality.map((q) => [q.dimension, q.checks.length]).sort(), [['completeness', 1], ['uniqueness', 1]]);
+    assert.deepStrictEqual(t.articles.map((a) => [a.slug, a.state]), [['orders-cuts', 'approved']]);
+    const r = E.searchAssets(sources, 'orders');
+    assert.ok(r.facets.domain.Sales > 0 && r.facets.owner.ana > 0 && r.facets.tag['tier=gold'] === 1 && r.pendingFacets.length === 0, JSON.stringify([r.facets.domain, r.facets.tag]));
+    assert.deepStrictEqual(E.searchAssets(sources, '', { assetTypes: ['metric'], tags: ['kpi'], limit: 100 }).results.map((x) => x.id), ['sem:sales/orders/total_tax'], 'KPIs');
+    const domain = E.getAssetContext(sources, 'domain:sales');
+    assert.deepStrictEqual([domain.asset.assetType, domain.asset.layer], ['domain', 'context']);
+    assert.ok(domain.contents.some((c) => c.id === 'product:sales/daily-revenue') && domain.contents.some((c) => c.id === 'obj:shop/prod/shop.orders') && !domain.contents.some((c) => c.id.startsWith('obj:crm/')), JSON.stringify(domain.contents.map((c) => c.id)));
+    assert.deepStrictEqual(E.getAssetContext(sources, 'product:sales/daily-revenue').contents.map((c) => c.id).sort(), ['obj:shop/prod/shop.order_items', 'obj:shop/prod/shop.orders']);
+    const art = E.getAssetContext(sources, 'article:orders-cuts');
+    assert.ok(art.asset.assetType === 'knowledge_article' && art.lineage.related.some((x) => x.asset.id === 'obj:shop/prod/shop.orders'));
+    const term = E.getAssetContext(sources, 'term:net-revenue');
+    assert.deepStrictEqual([term.term.category, term.term.broader, term.term.steward, term.term.abbreviation], ['Finance/Revenue', ['Revenue'], 'ana', 'NR']);
+    const ov = E.exploreOverview(sources);
+    assert.deepStrictEqual([ov.counts.domains, ov.counts.articles], [1, 1]);
+    void A;
+  });
+
+  await test('v0.51.0: on every surface — autode metadata set (a person at a terminal), show and migrate; autode articles new, check, approve and list; over MCP, metadata proposed as facts (a tag low stakes), autode_search_articles, the article and metadata-config resources; the Explorer\'s Set metadata…; the commands are contributed', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-mm1-'));
+    let client;
+    try {
+      nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), c4a.read('sources/shop.ddl'));
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'domains.yaml'), 'domains:\n  - name: Sales\n    assets: ["obj:shop/*"]\n');
+      client = await mcpSession(ws);
+      const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      await call('autode_ingest_file', { path: 'shop.sql', system: 'shop' });
+      await client.close(); client = undefined;
+      const W = ['--workspace', ws];
+      assert.strictEqual((await cli(['metadata', 'set', 'shop.orders', '--tag', 'tier=gold', ...W])).code, 4, 'a person at a terminal');
+      const set = await cli(['metadata', 'set', 'shop.orders', '--owner', 'data_steward=ana', ...W], { interactive: true, answers: ['set'] });
+      assert.ok(set.code === 0 && /ana is shop\.orders's data steward/.test(set.out), set.out + set.err);
+      assert.strictEqual((await cli(['metadata', 'set', 'shop.orders', '--tag', 'tier=gold', ...W], { interactive: true, answers: ['set'] })).code, 0);
+      const show = await cli(['metadata', 'show', 'shop.orders', ...W]);
+      assert.ok(/Domain: Sales \(domains\.yaml\)/.test(show.out) && /ana \(data steward\)/.test(show.out) && /Tags: tier=gold/.test(show.out), show.out);
+      assert.match((await cli(['metadata', 'migrate', ...W])).out, /Migrated 0 classification/);
+      assert.strictEqual((await cli(['articles', 'new', 'orders-cuts', '--title', 'Daily cuts', '--about', 'obj:shop/default/shop.orders', ...W])).code, 0);
+      assert.strictEqual((await cli(['articles', 'check', ...W])).code, 0);
+      assert.strictEqual((await cli(['articles', 'approve', 'orders-cuts', ...W])).code, 4);
+      assert.strictEqual((await cli(['articles', 'approve', 'orders-cuts', ...W], { interactive: true, answers: ['approve'] })).code, 0);
+      assert.match((await cli(['articles', 'list', ...W])).out, /orders-cuts\s+approved\s+Daily cuts/);
+      assert.match((await cli(['explore', 'search', 'orders', '--tag', 'tier=gold', '--type', 'table', ...W])).out, /shop\.orders/);
+      // MCP.
+      client = await mcpSession(ws);
+      const c2 = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const found = await c2('autode_search_articles', { about: 'obj:shop/default/shop.orders' });
+      assert.deepStrictEqual(found.articles.map((a) => [a.slug, a.state]), [['orders-cuts', 'approved']]);
+      assert.match((await client.readResource({ uri: 'autode://article/orders-cuts' })).contents[0].text, /^---\ntitle: Daily cuts/);
+      assert.deepStrictEqual(JSON.parse((await client.readResource({ uri: 'autode://metadata/config' })).contents[0].text).domains.map((d) => d.name), ['Sales']);
+      const prop = await c2('autode_propose_assertion', { assertion: { kind: 'metadata', subject: ['obj:shop/default/shop.orders'], predicate: 'tag', value: { key: 'kpi' }, statement: 'shop.orders is tagged kpi', evidence: [{ type: 'chat_message', ref: 'c1' }] } });
+      assert.ok(prop.assertion && prop.assertion.status === 'proposed', JSON.stringify(prop).slice(0, 300));
+      const ctx = await c2('autode_get_asset_context', { asset: 'shop.orders' });
+      assert.deepStrictEqual([ctx.metadata.domain.name, ctx.metadata.tags.map((t) => t.key), ctx.articles.map((a) => a.slug)], ['Sales', ['tier'], ['orders-cuts']]);
+      // The Explorer's message.
+      const { answerExplorerMessage } = fresh('../dist/core/knowledgeExplorerModel.js');
+      const { EngineWorkspace } = require('../dist/mcp/workspace.js');
+      const { exploreSources } = require('../dist/engine/explore/sources.js');
+      const eng = new EngineWorkspace({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..') });
+      const host = { workspaceRoot: () => ws, sources: async () => exploreSources(ws, await eng.contextSources(), undefined) };
+      assert.deepStrictEqual((await answerExplorerMessage({ type: 'editMetadata', id: 'shop.orders' }, host)).action, { kind: 'editMetadata', id: 'obj:shop/default/shop.orders', label: 'shop.orders' });
+      assert.strictEqual((await answerExplorerMessage({ type: 'editMetadata', id: 'domain:sales' }, host)).reply.type, 'toast');
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    const pkg = require('../package.json');
+    for (const c of ['autoDataEngineeringHub.newKnowledgeArticle', 'autoDataEngineeringHub.approveKnowledgeArticle']) assert.ok(pkg.contributes.commands.some((x) => x.command === c), c);
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
+    for (const t of ["data-act=\"meta\"", "type: 'editMetadata'", "['quality', 'Quality']", "['knowledge', 'Knowledge']", 'data-kpis', 'metaRows']) assert.ok(html.includes(t), t);
+    for (const f of ['autode-snowflake-governance', 'autode-databricks-governance']) assert.match(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'skills', f, 'SKILL.md'), 'utf8'), /AutoDE's own tags/, f);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

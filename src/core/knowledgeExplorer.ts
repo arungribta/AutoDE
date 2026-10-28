@@ -7,6 +7,8 @@ import { exploreSources } from '../engine/explore/sources';
 import { activeProblemId } from '../engine/documents/problems';
 import { ContextPackSources } from '../engine/context/contextPack';
 import { ExplorerAction, ExplorerMessage, answerExplorerMessage } from './knowledgeExplorerModel';
+import { SetMetadataInput } from '../engine/metadata/record';
+import { CERTIFICATIONS_SET, OWNER_ROLES, loadMetadataConfig } from '../engine/metadata/model';
 
 /**
  * The Knowledge Explorer (C5b; docs/context-layer-requirements.md §6.10): an
@@ -19,6 +21,10 @@ export interface KnowledgeExplorerHost {
   workspaceRoot(): string | undefined;
   /** Shows the Context Inbox in the sidebar. */
   openInbox(): void;
+  /** MM1: a person sets or removes an asset's metadata (returns the message to show). */
+  recordMetadata?(input: SetMetadataInput, remove: boolean): Promise<string>;
+  /** Who the person is. */
+  user?(): string;
 }
 
 class ExploreSourceCache {
@@ -72,6 +78,7 @@ export class KnowledgeExplorerPanel {
       case 'openInbox': this.host.openInbox(); return;
       case 'openWorkflow': await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow'); return;
       case 'copy': await vscode.env.clipboard.writeText(a.text); return;
+      case 'editMetadata': await editMetadata(this.host, this.panel, a.id, a.label); return;
       case 'save': {
         const target = await vscode.window.showSaveDialog({ filters: a.format === 'svg' ? { SVG: ['svg'] } : { PNG: ['png'] }, defaultUri: this.host.workspaceRoot() ? vscode.Uri.file(path.join(this.host.workspaceRoot()!, `knowledge-graph.${a.format}`)) : undefined });
         if (!target) return;
@@ -82,6 +89,68 @@ export class KnowledgeExplorerPanel {
       }
     }
   }
+}
+
+/**
+ * Set metadata… (MM1): VS Code's own pickers collect a tag, an owner, a
+ * domain, a certification or a property; the person's choice is recorded as
+ * a confirmed fact. Controlled tag values and property types come from the
+ * team's configuration.
+ */
+async function editMetadata(host: KnowledgeExplorerHost, panel: vscode.WebviewPanel, id: string, label: string): Promise<void> {
+  const root = host.workspaceRoot();
+  if (!root || !host.recordMetadata) return;
+  const config = loadMetadataConfig(root);
+  const what = await vscode.window.showQuickPick([
+    { label: 'Add a tag', p: 'tag' as const }, { label: 'Add an owner', p: 'owner' as const }, { label: 'Set the domain', p: 'domain' as const },
+    { label: 'Certify', p: 'certification' as const }, { label: 'Set a custom property', p: 'property' as const }, { label: 'Remove a tag', p: 'tag' as const, remove: true }, { label: 'Remove an owner', p: 'owner' as const, remove: true }
+  ], { title: `Metadata of ${label}` });
+  if (!what) return;
+  let value: Record<string, unknown> | undefined;
+  if (what.p === 'tag') {
+    const known = config.tagGroups.flatMap((g) => g.tags.map((t) => ({ label: t.key, description: `${g.name}${t.values ? `: ${t.values.join(', ')}` : ''}`, values: t.values })));
+    const pick = known.length ? await vscode.window.showQuickPick([...known, { label: 'Another tag…', description: 'key or key=value', values: undefined }], { title: 'Tag' }) : { label: 'Another tag…', values: undefined };
+    if (!pick) return;
+    if (pick.label === 'Another tag…') {
+      const raw = await vscode.window.showInputBox({ title: 'Tag', prompt: 'key or key=value (for example kpi, or tier=gold)', validateInput: (v) => (/^[A-Za-z_][A-Za-z0-9_.-]*(=.*)?$/.test(v.trim()) ? undefined : 'A key starts with a letter or _, then letters, digits, _ . -') });
+      if (!raw) return;
+      const i = raw.indexOf('=');
+      value = i < 0 ? { key: raw.trim() } : { key: raw.slice(0, i).trim(), value: raw.slice(i + 1).trim() };
+    } else if (pick.values?.length && !what.remove) {
+      const v = await vscode.window.showQuickPick(pick.values, { title: `${pick.label} =` });
+      if (!v) return;
+      value = { key: pick.label, value: v };
+    } else value = { key: pick.label };
+  } else if (what.p === 'owner') {
+    const role = await vscode.window.showQuickPick(OWNER_ROLES.map((r) => ({ label: r.replace(/_/g, ' '), r })), { title: 'Role' });
+    if (!role) return;
+    const person = await vscode.window.showInputBox({ title: `${role.label} of ${label}`, prompt: 'Who (a name or email)' });
+    if (!person?.trim()) return;
+    value = { role: role.r, person: person.trim() };
+  } else if (what.p === 'domain') {
+    const pick = await vscode.window.showQuickPick([...config.domains.map((d) => d.name), 'Another domain…'], { title: 'Domain (defined in .autode/config/domains.yaml)' });
+    if (!pick) return;
+    const name = pick === 'Another domain…' ? await vscode.window.showInputBox({ title: 'Domain name' }) : pick;
+    if (!name?.trim()) return;
+    value = { domain: name.trim() };
+  } else if (what.p === 'certification') {
+    const status = await vscode.window.showQuickPick([...CERTIFICATIONS_SET], { title: `Certify ${label}` });
+    if (!status) return;
+    const note = await vscode.window.showInputBox({ title: 'Note (optional)', prompt: 'Why' });
+    value = { status, ...(note?.trim() ? { note: note.trim() } : {}) };
+  } else {
+    if (!config.properties.length) { void vscode.window.showInformationMessage('No custom properties are defined: add them to .autode/config/properties.yaml.'); return; }
+    const def = await vscode.window.showQuickPick(config.properties.map((p) => ({ label: p.name, description: `${p.type}${p.values ? `: ${p.values.join(', ')}` : ''}`, def: p })), { title: 'Property' });
+    if (!def) return;
+    const raw = def.def.type === 'enum' ? await vscode.window.showQuickPick(def.def.values ?? [], { title: def.label }) : def.def.type === 'boolean' ? await vscode.window.showQuickPick(['true', 'false'], { title: def.label }) : await vscode.window.showInputBox({ title: def.label });
+    if (raw === undefined) return;
+    value = { name: def.label, value: def.def.type === 'number' ? Number(raw) : def.def.type === 'boolean' ? raw === 'true' : raw };
+  }
+  try {
+    const message = await host.recordMetadata({ subject: id, label, predicate: what.p, value, by: host.user?.() ?? 'user', channel: 'panel' }, !!what.remove);
+    void vscode.window.showInformationMessage(message);
+    void panel.webview.postMessage({ type: 'showAsset', id });
+  } catch (err) { void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err)); }
 }
 
 export function registerKnowledgeExplorer(context: vscode.ExtensionContext, host: KnowledgeExplorerHost): vscode.Disposable[] {

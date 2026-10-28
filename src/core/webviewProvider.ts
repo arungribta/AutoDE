@@ -1,4 +1,6 @@
 import * as path from 'node:path';
+import { SetMetadataInput, migrateMetadata, removeMetadata, setMetadata } from '../engine/metadata/record';
+import { loadMetadataConfig } from '../engine/metadata/model';
 import { buildSchemaIndex } from '../engine/grounding/sqlGrounding';
 import { Classification, GovernanceCandidate, classifyColumn, governanceCandidates, governanceFacts, sameTable } from '../engine/governance/governance';
 import * as fs from 'node:fs';
@@ -230,6 +232,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.configureContextFileManager(this.contextFileManager);
     try {
       await this.contextFileManager.initialize();
+      // MM1: classifications out of business rules, rules with a type and modality — once, recorded in the ledger.
+      const migrated = await this.migrateMetadata().catch(() => undefined);
+      if (migrated && (migrated.classifications || migrated.rules)) this.postLog(`Metadata model: migrated ${migrated.classifications} classification(s) and ${migrated.rules} rule(s); the ledger records each change.`);
       this.postContextUpdate();
     } catch (err) {
       this.postLog(`Context initialization failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -2025,6 +2030,35 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    */
   public async compactContextLedger(prune: boolean): Promise<{ assertions: number; prunedFiles: number } | undefined> {
     return this.contextFileManager?.compactLedger(prune);
+  }
+
+  /** MM1: a person sets or removes an asset's metadata from the Knowledge Explorer (recorded confirmed, through the panel's ledger). */
+  public async recordMetadata(input: SetMetadataInput, remove = false): Promise<string> {
+    if (!this.contextFileManager) throw new Error('The context layer is not initialized yet: open the AutoDE panel first.');
+    const ledger = this.contextFileManager.getLedger();
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    if (remove) {
+      const done = await removeMetadata(ledger, input);
+      await this.contextFileManager.persistCompiledGraph();
+      return done ? `Removed from ${input.label ?? input.subject}.` : `Nothing to remove.`;
+    }
+    const a = await setMetadata(ledger, loadMetadataConfig(root), input);
+    await this.contextFileManager.persistCompiledGraph();
+    this.postDecisions();
+    return a.statement;
+  }
+
+  /** MM1: the facts an article is checked against (the panel's ledger). */
+  public currentAssertions(): readonly Assertion[] {
+    return this.contextFileManager?.getLedger().assertions() ?? [];
+  }
+
+  /** MM1: the migration of classifications and rules, recorded in the ledger. */
+  public async migrateMetadata(): Promise<{ classifications: number; rules: number } | undefined> {
+    if (!this.contextFileManager) return undefined;
+    const r = await migrateMetadata(this.contextFileManager.getLedger());
+    if (r.classifications || r.rules) await this.contextFileManager.persistCompiledGraph();
+    return r;
   }
 
   /**

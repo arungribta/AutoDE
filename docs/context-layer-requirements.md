@@ -524,6 +524,8 @@ A webview panel, like the Workflow tab, where data engineers and architects expl
 
 ### 6.11 The metadata model (owner, 2026-10-28; v0.50.1 labels, MM)
 
+**Status:** the model shipped in v0.51.0 (MM1). What changed and the deliberate deviations: CHANGELOG.md 0.51.0; WHAT/WHY: requirements.md CTX-17, CTX-18; HOW: technical-design.md §5.18; usage: user-guide.md §8.8.
+
 AutoDE's knowledge layer uses the concepts and names of the industry's standards and catalogs, so nothing a data engineer or architect sees is AutoDE-only unless it has to be. The **model** is complete from MM onwards: every concept exists, every asset page has every section, and an empty section says how to fill it. The **data** fills in from evidence and imports (IMP1–IMP4); nothing requires people to fill every field before AutoDE is useful.
 
 **Where names come from**, in this order:
@@ -848,6 +850,8 @@ Acceptance:
 - The asset page, `autode explore asset` and `autode_get_asset_context` return the same content.
 
 ### Phase MM1: The metadata model
+**Status:** ✅ shipped in v0.51.0. Acceptance met by the tests named in CHANGELOG.md 0.51.0, except the Snowflake tag syntax criterion, which was dropped by the owner's direction: one-off platform changes are written by agents with platform skills as runbooks, not by engine code (decision log, 2026-10-28).
+
 Scope: §6.11.
 - **Tags:** `key=value`, with tag groups.
 - **Glossary:** SKOS-shaped (categories, related, broader and narrower terms, steward, status), and assignment to assets.

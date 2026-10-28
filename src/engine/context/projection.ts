@@ -1,4 +1,5 @@
 import { BaseNode, BusinessRuleNode, BusinessTermNode, ColumnNode, GraphEdge, Origin, TableNode } from './types';
+import { ruleOf } from '../metadata/model';
 import { Assertion, AssertionKind, Evidence, TrustTier, canonicalJson, isLive, normalizeName, strongerTrust, trustToConfidence } from './assertions';
 import { isMirrorPredicate } from './assertionSchemas';
 import { AssertionLedger, LedgerEvent, NewAssertion } from './ledger';
@@ -418,7 +419,8 @@ export function projectGraph(assertions: readonly Assertion[], options: { active
       const id = `rule:${a.id}`;
       const node: BusinessRuleNode = {
         id, type: 'business_rule', label: a.statement.slice(0, 80), ruleText: typeof v.text === 'string' ? v.text : a.statement,
-        enforcementLevel: v.level === 'STRICT' ? 'STRICT' : 'RECOMMENDED', metadata: {}, version: 1,
+        // MM1: modality (mandatory = STRICT); a rule written before MM1 reads its level.
+        enforcementLevel: ruleOf(a).modality === 'mandatory' ? 'STRICT' : 'RECOMMENDED', metadata: { ruleType: ruleOf(a).ruleType, modality: ruleOf(a).modality, scope: ruleOf(a).scope }, version: 1,
         origin: { source: a.createdBy.startsWith('user:') ? 'user' : 'derived', sourceRef: a.evidence[0]?.ref ?? a.id, specId: a.specId }
       };
       nodes.set(id, JSON.parse(JSON.stringify(node)));

@@ -122,6 +122,11 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 | `autode explore` | Overview of what AutoDE knows: objects, facts by status, systems, semantic models. |
 | `autode explore search <words> [--layer physical\|context\|semantic] [--type table,column,glossary_term,…] [--system <s>] [--platform <p>] [--environment <e>] [--all]` | Search names, aliases, synonyms, descriptions and facts (every word must match), with facet counts; exit 5 when nothing matches. |
 | `autode explore browse [<id>]` | The estate as a tree: databases with their system and environment; a database's schemas; a schema's tables; a table's columns. |
+| `autode metadata show <asset>` | Its domain, data products, owners (and which are inherited from the domain), tags, certification and custom properties. |
+| `autode metadata set <asset> --tag k[=v] \| --owner role=person \| --domain <d> \| --certify verified\|draft\|deprecated \| --property name=value` | A person sets it (interactive terminal; type `set`). Recorded as a confirmed fact; changing it keeps history. |
+| `autode metadata remove <asset> --tag k \| --owner role=person \| …` | A person removes it (the fact is rejected, kept in history). |
+| `autode metadata migrate` | Records the v0.51.0 migration: classifications out of business rules, rules with a type and modality. |
+| `autode articles list` \| `show <name>` \| `new <name> --title "…" --about <ids>` \| `check [<name>]` \| `approve <name>` | Knowledge articles: list with state and staleness, read, start a draft, check citations, approve (a person at a terminal). |
 | `autode explore semantic` | The semantic layer: each model (approved or draft) with its logical tables, metrics, relationships, verified queries and custom instructions. |
 | `autode explore asset <id or name>` | Everything known about one asset, as Markdown (the Knowledge Explorer's page); `--json` for the same JSON as `autode_get_asset_context`. |
 | `autode explore graph <id or name> [--hops 1-3]` | The graph around an asset. |

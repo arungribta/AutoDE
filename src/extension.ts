@@ -11,6 +11,7 @@ import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, regis
 import { EngineClient } from './core/engineClient';
 import { registerWorkflowView } from './core/workflowView';
 import { registerKnowledgeExplorer } from './core/knowledgeExplorer';
+import * as articles from './engine/knowledge/articles';
 import { registerSkillsView } from './core/skillsView';
 import { PortSkillPanel } from './core/portSkillView';
 import * as port from './engine/skills/port';
@@ -239,8 +240,39 @@ export function activate(context: vscode.ExtensionContext): void {
   // C5b: the Knowledge Explorer — search, asset pages, graph, facts, estate — over the engine's workspace.
   context.subscriptions.push(...registerKnowledgeExplorer(context, {
     workspaceRoot: firstFolder,
-    openInbox: () => { void vscode.commands.executeCommand(`${EXTENSION_ID}.openSidebar`).then(() => sidebarProvider.openInbox()); }
+    openInbox: () => { void vscode.commands.executeCommand(`${EXTENSION_ID}.openSidebar`).then(() => sidebarProvider.openInbox()); },
+    recordMetadata: (input, remove) => sidebarProvider.recordMetadata(input, remove),
+    user: skillActor
   }));
+  // MM1: knowledge articles — start one, approve the open one (a person, at its current revision).
+  context.subscriptions.push(
+    vscode.commands.registerCommand(`${EXTENSION_ID}.newKnowledgeArticle`, async () => {
+      const root = firstFolder(); if (!root) return;
+      const title = await vscode.window.showInputBox({ title: 'New knowledge article', prompt: 'Its title (what someone needs to know)' });
+      if (!title?.trim()) return;
+      const about = await vscode.window.showInputBox({ title: 'About', prompt: 'Asset, term or domain ids, comma-separated (find ids in the Knowledge Explorer)' });
+      if (!about?.trim()) return;
+      try {
+        const a = articles.writeArticle(root, articles.slugify(title), { title: title.trim(), about: about.split(',').map((x) => x.trim()).filter(Boolean), cites: [], author: skillActor(), body: `${title.trim()}.
+
+Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (add each id to cites).
+` });
+        await vscode.window.showTextDocument(vscode.Uri.file(a.file));
+      } catch (err) { void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err)); }
+    }),
+    vscode.commands.registerCommand(`${EXTENSION_ID}.approveKnowledgeArticle`, async () => {
+      const root = firstFolder(); const file = vscode.window.activeTextEditor?.document.uri.fsPath;
+      if (!root || !file || path.dirname(file) !== articles.articlesDir(root)) { void vscode.window.showWarningMessage('Open the knowledge article (.autode/knowledge/articles/<name>.md) to approve it.'); return; }
+      if (vscode.window.activeTextEditor?.document.isDirty) await vscode.window.activeTextEditor.document.save();
+      const slug = path.basename(file, '.md');
+      const a = articles.readArticle(root, slug);
+      if (!a) return;
+      const ok = await vscode.window.showWarningMessage(`Approve "${a.title}" at revision ${a.revision}? Agents will get it in the packs of tasks over ${a.about.join(', ')}.`, { modal: true }, 'Approve');
+      if (ok !== 'Approve') return;
+      const r = articles.approveArticle(root, slug, { by: skillActor(), channel: 'panel', assertions: sidebarProvider.currentAssertions() });
+      if (r.ok) void vscode.window.showInformationMessage(r.message); else void vscode.window.showErrorMessage(r.message);
+    })
+  );
   // Phase 5: agents reach the engine's MCP tools through an in-process client, started on first use.
   hub.setEngineFactory((clientName?: string) => {
     const root = firstFolder();

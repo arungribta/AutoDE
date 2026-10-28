@@ -48,6 +48,12 @@ export const LAYOUT = {
   connections: [AUTODE_DIR, 'config', 'connections.yaml'],
   /** Workflow templates for this workspace (PA3a), overriding or adding to the bundled ones by id. */
   workflows: [AUTODE_DIR, 'config', 'workflows'],
+  /** MM1 (§6.11): controlled tag groups, custom property definitions, domains with their owners, data products and asset patterns. */
+  tagGroups: [AUTODE_DIR, 'config', 'tags.yaml'],
+  customProperties: [AUTODE_DIR, 'config', 'properties.yaml'],
+  domains: [AUTODE_DIR, 'config', 'domains.yaml'],
+  /** MM1: knowledge articles (Markdown with front matter) that cite facts. */
+  articles: [AUTODE_DIR, 'knowledge', 'articles'],
   /** Which decision kinds may be approved by MCP elicitation (PA3c). */
   approvals: [AUTODE_DIR, 'config', 'approvals.yaml'],
   decisions: [AUTODE_DIR, 'decisions'],

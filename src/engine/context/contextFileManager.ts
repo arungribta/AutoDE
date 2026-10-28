@@ -17,6 +17,7 @@ import { isLive } from './assertions';
 import { knowledgeSkills } from '../skills/port';
 import { loadSemanticLayer, semanticLayerFiles, semanticPaths } from '../semantic/store';
 import type { SemanticLayerIndex } from '../semantic/layer';
+import { listArticles } from '../knowledge/articles';
 import { activeProblemId } from '../documents/problems';
 import { isMirror } from './projection';
 import type { Origin } from './types';
@@ -933,7 +934,8 @@ export class ContextFileManager {
       runtimeFacts: [...this.runtimeFacts.values()],
       catalogRevisions: mergeWatermarks(catalogWatermarks(snapshot.nodes), this.catalog.watermarks()),
       catalog: this.catalog,
-      semantic: this.semanticLayer()
+      semantic: this.semanticLayer(),
+      articles: listArticles(this.root)
     };
   }
 

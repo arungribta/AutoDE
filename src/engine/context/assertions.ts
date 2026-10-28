@@ -22,11 +22,13 @@ export type AssertionKind =
   | 'assumption'           // something taken as true without evidence; must be visible
   | 'constraint'           // non-functional: latency, volume, cost, compliance
   | 'naming_convention'
-  | 'verified_query';      // a reviewed SQL query (the graph's `verified_query` nodes)
+  | 'verified_query'       // a reviewed SQL query (the graph's `verified_query` nodes)
+  | 'classification'       // MM1: a column's (or table's) sensitivity / compliance classification, apart from rules
+  | 'metadata';            // MM1: catalog metadata on an asset — predicates tag, owner, domain, certification, property
 
 export const ASSERTION_KINDS: readonly AssertionKind[] = [
   'schema_fact', 'data_fact', 'key', 'grain', 'relationship', 'business_term', 'metric', 'business_rule',
-  'quality_expectation', 'decision', 'assumption', 'constraint', 'naming_convention', 'verified_query'
+  'quality_expectation', 'decision', 'assumption', 'constraint', 'naming_convention', 'verified_query', 'classification', 'metadata'
 ];
 
 export type AssertionStatus = 'proposed' | 'active' | 'rejected' | 'superseded' | 'needs_review';

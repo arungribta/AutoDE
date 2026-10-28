@@ -6,6 +6,8 @@ import { parseEstate } from '../context/estate';
 import { loadConnectionsConfig } from '../platform/connectionsConfig';
 import { connectionStatus, readReadiness } from '../platform/connectionReadiness';
 import { loadSemanticLayer, semanticPaths } from '../semantic/store';
+import { loadMetadataConfig } from '../metadata/model';
+import { listArticles } from '../knowledge/articles';
 import { layoutPath } from '../workspaceLayout';
 import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, browseAssets, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, searchAssets, semanticOverview } from './explore';
 import { TrustTier } from '../context/assertions';
@@ -55,7 +57,9 @@ export function exploreSources(workspaceRoot: string, context: ContextPackSource
     conflicts: context.conflicts,
     ...(context.catalog ? { catalog: context.catalog as ExploreSources['catalog'] } : {}),
     semantic: loadSemanticLayer(workspaceRoot, { problemId, includeDrafts: true }),
-    artifacts: artifactUses(workspaceRoot)
+    artifacts: artifactUses(workspaceRoot),
+    metadata: loadMetadataConfig(workspaceRoot),
+    articles: context.articles ?? listArticles(workspaceRoot)
   };
 }
 
@@ -112,7 +116,7 @@ export function estateView(workspaceRoot: string, sources: ExploreSources): Esta
 /** A request from any surface; the reply is plain JSON. */
 export type ExploreRequest =
   | { type: 'overview' }
-  | { type: 'search'; query: string; layers?: Layer[]; assetTypes?: AssetType[]; systems?: string[]; platforms?: string[]; environments?: string[]; databases?: string[]; schemas?: string[]; certifications?: Certification[]; statuses?: string[]; reviewStates?: string[]; classifications?: string[]; glossaryTerms?: string[]; limit?: number; offset?: number }
+  | { type: 'search'; query: string; layers?: Layer[]; assetTypes?: AssetType[]; systems?: string[]; platforms?: string[]; environments?: string[]; databases?: string[]; schemas?: string[]; domains?: string[]; owners?: string[]; tags?: string[]; certifications?: Certification[]; statuses?: string[]; reviewStates?: string[]; classifications?: string[]; glossaryTerms?: string[]; limit?: number; offset?: number }
   | { type: 'asset'; id: string }
   | { type: 'graph'; id: string; hops?: number; edgeTypes?: string[]; includeColumns?: boolean; cap?: number }
   | { type: 'landscape'; system?: string; schema?: string; model?: string; includeColumns?: boolean; proposed?: boolean; semantic?: boolean; cap?: number }

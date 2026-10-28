@@ -7,6 +7,8 @@ import { GraphView, TextMatch, expandNeighborhood, resolveText } from './retriev
 import { ContextGap, DEFAULT_MIN_TRUST, describeGap, detectRelationshipGaps } from './contextGaps';
 import { CatalogLookup, selectSeedHits } from './catalog';
 import { SemanticLayerIndex, definitionsFor, physicalRef } from '../semantic/layer';
+import { Article, articleSummary, articlesAbout } from '../knowledge/articles';
+import { ruleOf } from '../metadata/model';
 
 /**
  * Task-scoped context packs (C3, v0.30.0; docs/context-layer-requirements.md
@@ -45,6 +47,8 @@ export interface ContextPackSources {
   knowledgeSkills?: ReadonlyArray<{ id: string; name: string; description: string; text: string }>;
   /** The approved semantic layer (C5b): definitions for the pack's tables. */
   semantic?: SemanticLayerIndex;
+  /** Knowledge articles (MM1): approved ones about the pack's assets are included. */
+  articles?: readonly Article[];
 }
 
 export interface PackManifest {
@@ -71,6 +75,8 @@ export interface PackManifest {
   knowledgeSkills?: string[];
   /** Approved semantic models (`name@revision`) whose definitions the pack included (C5b). */
   semanticModels?: string[];
+  /** Knowledge articles (`slug@revision`) the pack included (MM1). */
+  knowledgeArticles?: string[];
 }
 
 export interface ContextPack {
@@ -208,7 +214,8 @@ export function buildContextPack(request: ContextPackRequest, input: ContextPack
     warnings: result.warnings,
     ...(fromCatalog && fromCatalog.promoted.length > 0 ? { promoted: fromCatalog.promoted.filter((id) => result.nodeIds.includes(id)) } : {}),
     ...(usedKnowledge.length ? { knowledgeSkills: usedKnowledge } : {}),
-    ...(result.semanticModels?.length ? { semanticModels: result.semanticModels } : {})
+    ...(result.semanticModels?.length ? { semanticModels: result.semanticModels } : {}),
+    ...(result.knowledgeArticles?.length ? { knowledgeArticles: result.knowledgeArticles } : {})
   };
   const packId = 'pack-' + createHash('sha256').update(canonicalJson({ purpose, seeds, query: request.query, stepId: request.stepId, text })).digest('hex').slice(0, 20);
   return { text, manifest: { packId, ...manifestCore } };
@@ -247,7 +254,7 @@ function catalogSeeds(query: string, sources: ContextPackSources): { seeds: stri
   return { seeds, promoted, gaps, invisible, graph: { nodes: [...sources.graph.nodes, ...extra.nodes], edges: [...sources.graph.edges, ...extra.edges] } };
 }
 
-interface Rendered { lines: string[]; nodeIds: string[]; extraAssertions: string[]; truncated: Record<string, number>; warnings: string[]; semanticModels?: string[] }
+interface Rendered { lines: string[]; nodeIds: string[]; extraAssertions: string[]; truncated: Record<string, number>; warnings: string[]; semanticModels?: string[]; knowledgeArticles?: string[] }
 
 /**
  * No seeds: the project overview — exactly what `buildContextPrompt()`
@@ -434,6 +441,32 @@ function renderSeeded(seeds: string[], purpose: PackPurpose, budget: number, sou
     }
   }
 
+  // ── Guidance (MM1, §6.11): advisory rules of type guidance about these assets, or team-wide; at most eight ──
+  const guidance: string[] = [];
+  for (const a of sources.assertions) {
+    if (a.kind !== 'business_rule' || !isLive(a.status) || isMirror(a) || a.predicate === 'classification') continue;
+    const r = ruleOf(a);
+    if (r.ruleType !== 'guidance' || !(r.scope === 'team' || a.subject.some((s) => scope.has(s)))) continue;
+    if (guidance.length >= 8) { truncated.guidance = (truncated.guidance ?? 0) + 1; continue; }
+    guidance.push(`- ${r.text}${r.scope === 'team' ? ' (team-wide)' : ''} [fact:${a.id}]`);
+    extra.push(a.id);
+  }
+  if (guidance.length) { const block = ['### Guidance (follow it unless the task says otherwise)', ...guidance]; if (fits(block)) push(block); else truncated.guidance = guidance.length; }
+
+  // ── Knowledge articles (MM1): approved write-ups about these assets, cited; stale ones say so ──
+  let knowledgeArticles: string[] | undefined;
+  if (sources.articles?.length) {
+    const about = articlesAbout(sources.articles, scope, sources.assertions);
+    const block = ['### Knowledge articles (reviewed; cite as [article:<slug>])'];
+    const used: string[] = [];
+    for (const { article, stale } of about) {
+      const line = `- **${article.title}** [article:${article.slug}]${stale.length ? ` — STALE: ${stale.join('; ')}` : ''}: ${articleSummary(article)}`;
+      if (!fits([...block, line])) { truncated.articles = (truncated.articles ?? 0) + 1; continue; }
+      block.push(line); used.push(`${article.slug}@${article.revision}`); extra.push(...article.cites);
+    }
+    if (used.length) { push(block); knowledgeArticles = used; }
+  }
+
   // ── Terms, metrics and verified queries reached from the seeds ──
   const defs = byScore([...scope].filter((id) => {
     const n = idx.nodes.get(id);
@@ -466,7 +499,7 @@ function renderSeeded(seeds: string[], purpose: PackPurpose, budget: number, sou
 
   const dropped = Object.entries(truncated).filter(([, n]) => n > 0);
   if (dropped.length > 0) lines.push(`_Not shown (token budget): ${dropped.map(([k, n]) => `${n} ${k}`).join(', ')}._`);
-  return { lines, nodeIds: [...new Set(nodeIds)], extraAssertions: [...new Set(extra)], truncated, warnings, ...(semanticModels ? { semanticModels } : {}) };
+  return { lines, nodeIds: [...new Set(nodeIds)], extraAssertions: [...new Set(extra)], truncated, warnings, ...(semanticModels ? { semanticModels } : {}), ...(knowledgeArticles ? { knowledgeArticles } : {}) };
 }
 
 const KNOWLEDGE_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'when', 'use', 'are', 'its', 'each', 'any', 'skill', 'data', 'how', 'what', 'which', 'all']);
@@ -516,6 +549,7 @@ export function renderPackManifest(pack: ContextPack, title: string): string {
   if (tr.length) L.push(`- **Left out:** ${tr.map(([k, n]) => `${n} ${k}`).join(', ')}`);
   if (m.gaps.length) L.push(`- **Context gaps:** ${m.gaps.map(describeGap).join(' ')}`);
   if (m.knowledgeSkills?.length) L.push(`- **Team knowledge:** ${m.knowledgeSkills.map((s) => `\`${s}\``).join(', ')}`);
+  if (m.knowledgeArticles?.length) L.push(`- **Knowledge articles:** ${m.knowledgeArticles.map((s) => `\`${s}\``).join(', ')}`);
   if (m.semanticModels?.length) L.push(`- **Semantic layer:** ${m.semanticModels.map((s) => `\`${s}\``).join(', ')}`);
   L.push('', '## Context as sent', '', '```markdown', pack.text, '```');
   return L.join('\n') + '\n';

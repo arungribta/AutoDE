@@ -27,6 +27,7 @@ Written by AutoDE from Snowflake's public documentation (access control, masking
 - **Masking policies** are written once in a `governance` schema and attached to columns, or to a tag (tag-based masking, so a newly tagged column is masked without a new runbook). Use `IS_ROLE_IN_SESSION('<role>')` for who may see clear values.
 - **Row access policies** restrict rows by a column (country, business unit) through a mapping table of role to allowed values. Attach one with `ADD ROW ACCESS POLICY … ON (column)`.
 - **Tags** classify columns (`pii = 'email'`) so audits and policies can find them.
+- **AutoDE's own tags** (`key=value`, from its metadata model): read them with `autode_get_asset_context` (or `autode_search_assets`, facet tag), and apply them as they are recorded: create each tag once in the `governance` schema (`CREATE TAG IF NOT EXISTS`), then `ALTER TABLE … SET TAG` or `ALTER TABLE … MODIFY COLUMN … SET TAG`; a tag without a value is set to `''`. Don't invent tags that AutoDE doesn't record; propose them as facts instead.
 
 Classification: `GRANT` and the policy statements are changes. `REVOKE`, `DROP` and `CREATE OR REPLACE` are destructive and need a rollback (the grant that restores access). Policies are created with `IF NOT EXISTS`. Changing a policy body later is `ALTER MASKING POLICY … SET BODY`, which takes effect at once.
 

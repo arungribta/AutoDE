@@ -6,6 +6,49 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.51.0
+
+- **MM1: the metadata model** (context-layer §6.11; CTX-17, CTX-18), using the names of the standards and catalogs. Before building, a challenge list was reviewed with the owner.
+  - **Facts:**
+    - the new kind `metadata`: tags `{key, value}`, owners `{role, person}` (business owner, technical owner, data steward), domain, certification by a person (verified, draft, deprecated) and custom properties;
+    - **classification** as its own kind;
+    - business terms gain SKOS links (category, broader, narrower, related), a steward, a status, an abbreviation and examples;
+    - rules gain a **type** (definition, validation, policy, standard, guidance; OMG SBVR) and a **modality** (mandatory, advisory);
+    - quality expectations gain checks (`pattern`, `referential`) and a **DAMA dimension**.
+
+    Tags are low stakes (an agent may confirm one after asking); the rest is a person's. A person's change supersedes the fact it replaces, so history is kept.
+  - **Migration**, recorded and idempotent: GOV's classifications (stored as rules) move to the classification kind, and earlier rules gain a type and modality (STRICT → mandatory; the type comes from the wording). The panel runs it on load; the CLI runs `autode metadata migrate`. Governance and STRICT enforcement are unchanged.
+  - **Team structure** in `.autode/config/`:
+    - `tags.yaml`: tag groups, with controlled values;
+    - `properties.yaml`: typed custom properties;
+    - `domains.yaml`: domains with owners, asset patterns, semantic models and data products.
+
+    An asset's owners default to its domain's for roles it doesn't name.
+  - **Knowledge articles** (`.autode/knowledge/articles/*.md`): Markdown with front matter.
+    - They cite facts and never copy them: a `[fact:…]` used but not cited, or a citation that doesn't exist, is an error.
+    - They are approved by a person at a revision; an edit makes them *changed*.
+    - When a cited fact is superseded, rejected or sent to review, the article is *stale*, with the reason.
+    - Decision kind `article`: agents propose with `autode_propose_article`, and a person approves.
+  - **Packs:**
+    - **Guidance** rules over the task's assets, plus team-wide ones (at most 8);
+    - approved **knowledge articles** about the task's assets, marked STALE when needed, recorded as `knowledgeArticles`; their cited facts join the manifest.
+  - **The Knowledge Explorer:**
+    - the **Domain**, **Owner** and **Tag** facets are live;
+    - **domains**, **data products** and **knowledge articles** are context-layer assets with pages and members;
+    - the Overview shows domain, data products, owners (marking inherited ones), tags, certification and properties, each with an empty state that says how to fill it;
+    - *Set metadata…* (VS Code's pickers, recorded as the person's);
+    - new *Quality* (by dimension) and *Knowledge* (articles) tabs;
+    - rules with type and modality, glossary terms with their SKOS details, and a *KPIs* button (metrics tagged `kpi`).
+  - **CLI:** `autode metadata show|set|remove|migrate` and `autode articles list|show|new|check|approve` (setting and approving are a person's, at an interactive terminal); `explore search --domain/--owner/--tag`. **MCP:** `autode_search_articles`, `autode_propose_article`, metadata facts through `autode_propose_assertion`, and the resources `autode://article/{slug}` and `autode://metadata/config`. **VS Code:** *New Knowledge Article…*, *Approve Knowledge Article*.
+- **Changed direction mid-phase (owner):** the Snowflake and Unity tag renderers I wrote were removed. One-off platform changes are runbooks written by agents with the platform skills, and the two governance skills now say how to apply AutoDE's tags. Reading platform metadata, pipeline code and deliverable translations stay deterministic (decision log).
+- **Deviations:**
+  - The acceptance criterion "tags round-trip with Snowflake tag syntax (golden)" is dropped, by the decision above.
+  - A rule's type, for rules written before v0.51.0, is inferred from its wording. It's recorded, and a person can correct it.
+  - Glossary categories are fields of terms, not assets of their own.
+  - The agents that draft articles and keep metadata current are MM2.
+- **What I checked:** migration on GOV-era facts (idempotent, governance unchanged); supersession and removal; domain patterns and inheritance; article citations, staleness, re-approval and packs; guidance in packs; facets, KPIs and domain members; every surface end to end. **What I didn't:** the Explorer's *Set metadata…* pickers in VS Code itself (manual-verification Part 48), and large `domains.yaml` files against the large estate.
+- **Measured:** 400 tests (5 new: the model and its vocabularies; recording and migration; knowledge articles and their proposals; guidance and the Explorer; every surface; the tool-list tests include the article tools). Lint: 0 errors, 21 warnings. Eval unchanged.
+
 ## 0.50.3
 
 - **Identity across databases, schemas, systems and environments** (context-layer §6.4a; CTX-19), after the owner asked how same-named tables are told apart. The question exposed a real bug: semantic base tables were matched on schema and table only, so a model over `RETAIL.SALES.ORDERS` also matched `ARCHIVE.SALES.ORDERS`, the dev copy, and the same name in another account.

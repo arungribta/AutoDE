@@ -337,13 +337,15 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_extract_metadata` | Read a schema's tables, columns, keys and views, and optionally sampled column profiles. |
 | `autode_explain_sql` | Dry-run a statement: the platform compiles it and returns the plan without running it. |
 | `autode_execute_query` | Run one read-only statement, with at most 10 000 rows (100 by default). |
-| `autode_propose_assertion` | Propose a fact; a person confirms it in the Context Inbox, or you confirm a low-stakes one with `autode_review_assertion` after asking ([Proposing changes](#proposing-changes)). |
+| `autode_propose_assertion` | Propose a fact (including catalog metadata: kind `metadata`, predicate `tag`, `owner`, `domain`, `certification` or `property`; the team's tag groups, properties and domains are in `autode://metadata/config`); a person confirms it in the Context Inbox, or you confirm a low-stakes one with `autode_review_assertion` after asking ([Proposing changes](#proposing-changes)). |
 | `autode_review_assertion` / `autode_verify_assertion` | Confirm or reject a low-stakes fact; verify a fact against data. |
 | `autode_semantic_list` / `autode_semantic_check` / `autode_semantic_draft` | The semantic layer: shared models and composites with their status; check a model or composite; draft a shared model from AutoDE's facts (nothing written). |
 | `autode_semantic_resolve` | Resolve one of the active problem's composites (deterministic; refused on a collision or redefinition). `autode_check_grounding` also checks SQL against the approved semantic layer, and `autode_record_artifact` refuses SQL that joins or measures differently from it in a governed problem. |
 | `autode_propose_semantic_model` | Propose a shared model or a composite; a person approves it. |
 | `autode_search_assets` | Search everything AutoDE knows (objects, columns, terms, semantic elements, relationships, verified queries, facts, the estate catalog), with facets; each result names its layer (physical, context, semantic), and `layers` filters by it. The resource `autode://explore/semantic` lists each semantic model's tables, metrics, relationships, verified queries and instructions. |
 | `autode_get_asset_context` | Everything known about one asset: schema, meaning, relationships, governance, facts with evidence, decisions in scope, what uses it. Read it before deciding about the asset. Also the resource `autode://asset/{id}`. |
+| `autode_search_articles` | Knowledge articles about an asset or by words, with their state, whether stale, and opening paragraph; read one as `autode://article/<slug>`. |
+| `autode_propose_article` | Propose a knowledge article that cites facts; a person approves it. |
 | `autode_browse_assets` | The estate as a tree: databases, then schemas, tables and columns, with ids and child counts. |
 | `autode_explore_graph` | The graph around an asset, one to three hops; with no asset, the landscape of a system, schema or semantic model with every known relationship. |
 | `autode_capture_coverage` | The completeness checklist for the active problem: per table and metric, what is known and missing, and the action for each. |

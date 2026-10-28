@@ -27,6 +27,11 @@ import { newCompositeText } from '../engine/semantic/editorState';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
 import { renderAssetMarkdown, renderGraph, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
 import type { AssetContext, AssetType, ExploreOverview, GraphSlice, Layer, SearchResult, SemanticOverview } from '../engine/explore/explore';
+import { getAssetContext, resolveAsset } from '../engine/explore/explore';
+import { MetadataPredicate, migrateMetadata, removeMetadata, setMetadata } from '../engine/metadata/record';
+import { loadMetadataConfig } from '../engine/metadata/model';
+import { AssertionLedger } from '../engine/context/ledger';
+import { Article, approveArticle, checkArticle, listArticles, readArticle, writeArticle } from '../engine/knowledge/articles';
 import { problemTableIds } from '../engine/context/capture';
 import { createSubjectResolver } from '../engine/context/projection';
 import { EngineWorkspace } from '../mcp/workspace';
@@ -216,6 +221,16 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
   explore asset <id|name>      Everything known about one asset: schema, meaning, relationships, governance, facts, decisions, used by
   explore graph [<id|name>] [--hops 1-3] [--system <s>] [--model <m>] [--columns]   The graph around an asset; with no asset, the landscape: tables and every relationship between them
 
+Metadata (MM1; setting it is a person's: interactive terminal):
+  metadata show <asset>        Domain, data products, owners, tags, certification, custom properties
+  metadata set <asset> --tag k[=v] | --owner role=person | --domain <d> | --certify verified|draft|deprecated | --property name=value   (terminal)
+  metadata remove <asset> --tag k | --owner role=person | …   (terminal)
+  metadata migrate             Record the MM1 migration: classifications out of business rules; rules gain a type and modality
+  articles list                Knowledge articles with their state (draft, approved, changed, deprecated) and whether stale
+  articles new <slug> --title "<title>" --about <ids>   Start an article (a draft)
+  articles check [<slug>]      Citations and staleness against the facts
+  articles show <slug> | articles approve <slug>   (approve: terminal)
+
 Capture coverage:
   coverage                     What a complete picture of the problem needs, per table and metric: known, proposed, assumed, missing, and the action for each
   capture candidates [--connection <id>] [--record]   Keys, foreign keys, grain, change columns and personal data from the data, each probed
@@ -344,6 +359,13 @@ const OPTIONS = {
   layer: { type: 'string' },
   model: { type: 'string' },
   columns: { type: 'boolean' },
+  tag: { type: 'string' },
+  owner: { type: 'string' },
+  domain: { type: 'string' },
+  certify: { type: 'string' },
+  title: { type: 'string' },
+  about: { type: 'string' },
+  property: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -409,6 +431,8 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'capture': return await cmdCapture(ctx, rest);
       case 'semantic': return await cmdSemantic(ctx, rest);
       case 'explore': return await cmdExplore(ctx, rest);
+      case 'metadata': return await cmdMetadata(ctx, rest);
+      case 'articles': return await cmdArticles(ctx, rest);
       case 'workflow': return await cmdWorkflow(ctx, rest);
       case 'pack': return await cmdPack(ctx, rest);
       case 'vocabulary': return await cmdVocabulary(ctx, rest);
@@ -1394,6 +1418,117 @@ async function cmdCapture(ctx: Ctx, rest: string[]): Promise<number> {
   } finally { cfm.dispose(); session.dispose(); }
 }
 
+/** MM1 (§6.11): an asset's metadata — show it; a person sets or removes it at a terminal; migrate the facts written before MM1. */
+async function cmdMetadata(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'show', ...words] = rest;
+  const ref = words.join(' ');
+  const cfm = await openContext(ctx.workspaceRoot, (m) => ctx.io.err(m));
+  try {
+    if (sub === 'migrate') {
+      const r = await migrateMetadata(cfm.getLedger());
+      await cfm.persistCompiledGraph();
+      emit(ctx, { ok: true, ...r }, `Migrated ${r.classifications} classification(s) out of business rules and gave ${r.rules} rule(s) a type and modality. Each is a supersession by system, so the history shows it.`);
+      return EXIT.OK;
+    }
+    const problemId = singleProblem(ctx);
+    const ws = workspace(ctx, problemId);
+    const sources = exploreSources(ctx.workspaceRoot, await ws.contextSources(), problemId);
+    if (!ref) throw new CliError(EXIT.USAGE, `metadata ${sub} <asset id or name>`);
+    const found = resolveAsset(sources, ref);
+    const node = found?.node;
+    if (!node) throw new CliError(EXIT.NOT_FOUND, `No asset "${ref}" (autode explore search <words>).`);
+    const label = (node as { fqn?: string }).fqn || node.label;
+    if (sub === 'show') {
+      const c = getAssetContext(sources, node.id)!;
+      const m = c.metadata;
+      const lines = [`${label}  [${node.id}]`,
+        `  Domain: ${m?.domain ? `${m.domain.name} (${m.domain.from})` : 'none'}${m?.dataProducts.length ? `; data products: ${m.dataProducts.join(', ')}` : ''}`,
+        `  Owners: ${m?.owners.length ? m.owners.map((o) => `${o.person} (${o.role.replace(/_/g, ' ')}${o.inheritedFrom ? `, from ${o.inheritedFrom}` : ''})`).join(', ') : 'none'}`,
+        `  Tags: ${m?.tags.length ? m.tags.map((t) => (t.value !== undefined ? `${t.key}=${t.value}` : t.key)).join(', ') : 'none'}`,
+        `  Certification: ${c.asset.certification ?? 'none'}${c.asset.certifiedBy ? ` (by ${c.asset.certifiedBy})` : m?.certification ? '' : ' (derived from evidence)'}`,
+        `  Properties: ${m?.properties.length ? m.properties.map((p) => `${p.name}=${JSON.stringify(p.value)}`).join(', ') : 'none'}`];
+      emit(ctx, { ok: true, asset: c.asset, metadata: m ?? null }, lines.join('\n'));
+      return EXIT.OK;
+    }
+    if (sub !== 'set' && sub !== 'remove') throw new CliError(EXIT.USAGE, 'metadata show|set|remove <asset> [--tag k[=v]] [--owner role=person] [--domain d] [--certify verified|draft|deprecated] [--property name=value] | metadata migrate');
+    const pair = (v: string) => { const i = v.indexOf('='); return i < 0 ? [v.trim(), undefined] as const : [v.slice(0, i).trim(), v.slice(i + 1).trim()] as const; };
+    let input: { predicate: MetadataPredicate; value: Record<string, unknown> } | undefined;
+    if (ctx.values.tag) { const [k, v] = pair(ctx.values.tag); input = { predicate: 'tag', value: { key: k, ...(v !== undefined ? { value: v } : {}) } }; }
+    else if (ctx.values.owner) { const [role, person] = pair(ctx.values.owner); input = { predicate: 'owner', value: { role, person } }; }
+    else if (ctx.values.domain) input = { predicate: 'domain', value: { domain: ctx.values.domain } };
+    else if (ctx.values.certify) input = { predicate: 'certification', value: { status: ctx.values.certify, ...(ctx.values.note ? { note: ctx.values.note } : {}) } };
+    else if (ctx.values.property) {
+      const [name, raw] = pair(ctx.values.property);
+      const def = sources.metadata?.properties.find((p) => p.name === name);
+      const value = def?.type === 'number' ? Number(raw) : def?.type === 'boolean' ? raw === 'true' : raw;
+      input = { predicate: 'property', value: { name, value } };
+    }
+    if (!input) throw new CliError(EXIT.USAGE, 'Name what to set: --tag k[=v], --owner role=person (business_owner, technical_owner, data_steward), --domain <name>, --certify verified|draft|deprecated, --property name=value.');
+    requirePerson(ctx, 'Setting metadata', 'Set it in the Knowledge Explorer (Set metadata…), or in a terminal; an agent proposes it as a fact (autode_propose_assertion, kind metadata) for you to confirm.');
+    const verb = sub === 'set' ? 'set' : 'remove';
+    if ((await ctx.io.prompt(`${verb === 'set' ? 'Set' : 'Remove'} ${input.predicate} ${JSON.stringify(input.value)} on ${label}. Type ${verb} to record it: `)).trim().toLowerCase() !== verb) { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+    try {
+      if (sub === 'remove') {
+        const done = await removeMetadata(cfm.getLedger(), { subject: node.id, label, ...input, by: actorOf(ctx), channel: 'cli' });
+        emit(ctx, { ok: done }, done ? `✓ Removed from ${label}.` : `Nothing to remove: ${label} has no such ${input.predicate}.`);
+        return done ? EXIT.OK : EXIT.NOT_FOUND;
+      }
+      const a = await setMetadata(cfm.getLedger(), sources.metadata ?? loadMetadataConfig(ctx.workspaceRoot), { subject: node.id, label, ...input, by: actorOf(ctx), channel: 'cli', ...(ctx.values.note ? { note: ctx.values.note } : {}) });
+      emit(ctx, { ok: true, fact: a.id, statement: a.statement }, `✓ ${a.statement} (fact ${a.id}, confirmed)`);
+      return EXIT.OK;
+    } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+  } finally { cfm.dispose(); }
+}
+
+/** MM1: knowledge articles — list, show, start one, check them against the ledger, and (a person) approve. */
+async function cmdArticles(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list', slug] = rest;
+  const ws = ctx.workspaceRoot;
+  const ledger = new AssertionLedger(layoutPath(ws, 'ledger'));
+  if (fs.existsSync(layoutPath(ws, 'ledger'))) await ledger.load();
+  const facts = ledger.assertions();
+  const line = (a: Article) => { const c = checkArticle(a, facts); return `  ${a.slug.padEnd(32)} ${a.state}${c.staleBecause.length ? ', STALE' : ''}${c.errors.length ? `, ${c.errors.length} error(s)` : ''}  ${a.title}  (about ${a.about.join(', ')})`; };
+  if (sub === 'list') {
+    const all = listArticles(ws);
+    emit(ctx, { ok: true, articles: all.map((a) => ({ slug: a.slug, title: a.title, state: a.state, about: a.about, stale: checkArticle(a, facts).staleBecause })) }, all.length ? ['Knowledge articles:', ...all.map(line)].join('\n') : 'No knowledge articles yet: autode articles new <slug> --title "…" --about <asset>.');
+    return EXIT.OK;
+  }
+  if (!slug && sub !== 'check') throw new CliError(EXIT.USAGE, `articles ${sub} <slug>`);
+  if (sub === 'new') {
+    const title = ctx.values.title;
+    const about = (ctx.values.about ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!title || !about.length) throw new CliError(EXIT.USAGE, 'articles new <slug> --title "<title>" --about <asset, term or domain ids, comma-separated> (then edit the file and cite facts as [fact:<id>])');
+    try {
+      const a = writeArticle(ws, slug, { title, about, cites: [], author: actorOf(ctx), body: `${title}.\n\nWrite what the facts can't say here, and cite the facts it rests on as [fact:<id>] (add each id to cites).\n` });
+      emit(ctx, { ok: true, file: rel(ctx, a.file) }, `Wrote ${rel(ctx, a.file)} (draft). Edit it, then autode articles check ${slug}, and a person approves it: autode articles approve ${slug}.`);
+      return EXIT.OK;
+    } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+  }
+  if (sub === 'check') {
+    const list = slug ? [readArticle(ws, slug)].filter((a): a is Article => !!a) : listArticles(ws);
+    if (slug && !list.length) throw new CliError(EXIT.NOT_FOUND, `No article ${slug}.`);
+    const results = list.map((a) => ({ slug: a.slug, errors: [...a.errors, ...checkArticle(a, facts).errors], stale: checkArticle(a, facts).staleBecause, warnings: checkArticle(a, facts).warnings }));
+    const bad = results.filter((r) => r.errors.length || r.stale.length).length;
+    emit(ctx, { ok: bad === 0, results }, results.map((r) => [`${r.errors.length || r.stale.length ? '✗' : '✓'} ${r.slug}`, ...r.errors.map((e) => `    ✗ ${e}`), ...r.stale.map((e) => `    stale: ${e}`), ...r.warnings.map((e) => `    ! ${e}`)].join('\n')).join('\n') || 'No articles.');
+    return bad ? EXIT.FAILED : EXIT.OK;
+  }
+  const a = readArticle(ws, slug);
+  if (!a) throw new CliError(EXIT.NOT_FOUND, `No article ${slug} (autode articles list).`);
+  if (sub === 'show') {
+    const c = checkArticle(a, facts);
+    emit(ctx, { ok: true, article: { ...a, check: c } }, [line(a), ...c.staleBecause.map((s) => `  stale: ${s}`), '', a.body].join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'approve') {
+    requirePerson(ctx, 'Approving a knowledge article', 'Approve it in VS Code (AutoDE: Approve Knowledge Article), or here in a terminal.');
+    if ((await ctx.io.prompt(`Approve "${a.title}" at revision ${a.revision}? Type approve: `)).trim().toLowerCase() !== 'approve') { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+    const r = approveArticle(ws, slug, { by: actorOf(ctx), channel: 'cli', assertions: facts });
+    emit(ctx, { ok: r.ok }, r.ok ? `✓ ${r.message}` : r.message);
+    return r.ok ? EXIT.OK : EXIT.FAILED;
+  }
+  throw new CliError(EXIT.USAGE, 'articles list | show <slug> | new <slug> --title "<title>" --about <ids> | check [<slug>] | approve <slug>');
+}
+
 /** C5b: the Knowledge Explorer in a terminal — the same engine answers as the VS Code Explorer and the MCP tools. */
 async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
   const [sub = 'overview', ...words] = rest;
@@ -1409,7 +1544,7 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
   }
   if (sub === 'search') {
     const types = list(ctx.values.type ?? ctx.values.kind);
-    const r = ask({ type: 'search', query: words.join(' '), ...(list(ctx.values.layer) ? { layers: list(ctx.values.layer) as Layer[] } : {}), ...(types ? { assetTypes: types as AssetType[] } : {}), ...(ctx.values.system ? { systems: [ctx.values.system] } : {}), ...(ctx.values.platform ? { platforms: [ctx.values.platform] } : {}), ...(ctx.values.environment ? { environments: [ctx.values.environment] } : {}), limit: ctx.values.all ? 1000 : 25 }).result as SearchResult;
+    const r = ask({ type: 'search', query: words.join(' '), ...(list(ctx.values.layer) ? { layers: list(ctx.values.layer) as Layer[] } : {}), ...(types ? { assetTypes: types as AssetType[] } : {}), ...(ctx.values.system ? { systems: [ctx.values.system] } : {}), ...(ctx.values.platform ? { platforms: [ctx.values.platform] } : {}), ...(ctx.values.domain ? { domains: [ctx.values.domain] } : {}), ...(ctx.values.owner ? { owners: [ctx.values.owner] } : {}), ...(ctx.values.tag ? { tags: [ctx.values.tag] } : {}), ...(ctx.values.environment ? { environments: [ctx.values.environment] } : {}), limit: ctx.values.all ? 1000 : 25 }).result as SearchResult;
     emit(ctx, { ok: true, ...r }, renderSearch(r));
     return r.total ? EXIT.OK : EXIT.NOT_FOUND;
   }

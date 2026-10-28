@@ -1,9 +1,12 @@
+import * as fs from 'node:fs';
 import { EngineTool, ToolAnnotations } from './tools';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
 import { ExploreSources } from '../engine/explore/explore';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
 import { computeRevision } from '../engine/context/contextStore';
+import { articleSummary, checkArticle, readArticle } from '../engine/knowledge/articles';
+import { loadMetadataConfig } from '../engine/metadata/model';
 
 /**
  * The Knowledge Explorer over MCP (C5b; docs/context-layer-requirements.md
@@ -14,9 +17,9 @@ import { computeRevision } from '../engine/context/contextStore';
 
 const read = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const strings = { type: 'array', items: { type: 'string' } };
-const ASSET_TYPES = { type: 'array', items: { enum: ['database', 'schema', 'table', 'view', 'column', 'glossary_term', 'rule', 'verified_query', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric', 'filter', 'relationship', 'custom_instruction', 'knowledge_fact'] } };
+const ASSET_TYPES = { type: 'array', items: { enum: ['database', 'schema', 'domain', 'data_product', 'knowledge_article', 'table', 'view', 'column', 'glossary_term', 'rule', 'verified_query', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric', 'filter', 'relationship', 'custom_instruction', 'knowledge_fact'] } };
 const LAYERS = { type: 'array', items: { enum: ['physical', 'context', 'semantic'] } };
-const CERTIFICATIONS = { type: 'array', items: { enum: ['verified', 'documented', 'unverified', 'draft'] } };
+const CERTIFICATIONS = { type: 'array', items: { enum: ['verified', 'documented', 'unverified', 'draft', 'deprecated'] } };
 
 export async function workspaceExploreSources(ws: EngineWorkspace): Promise<ExploreSources> {
   return exploreSources(ws.options.workspaceRoot, await ws.contextSources(), ws.activeProblemId());
@@ -33,10 +36,22 @@ export function exploreTools(): EngineTool[] {
       description: 'Search everything AutoDE knows — tables, views, columns, glossary terms, rules, verified queries, semantic models (logical tables, dimensions, time dimensions, facts, metrics, filters), knowledge facts, and tables in the estate catalog beyond the working set — by name, alias, synonym and description. Each result names its layer: physical (what exists), context (what it means and what is known: glossary, rules, knowledge facts) or semantic (how it is measured: models, metrics, relationships, verified queries). Every word must match; otherwise the results are related ones from the customer\'s vocabulary, flagged approximate. An empty query lists everything. Returns ranked results with ids, and facet counts: layer, asset type, system, platform, environment, certification (verified, documented, unverified, draft), status, review state (knowledge facts), classification, glossary term; domain, owner and tag are in pendingFacets until they have data. Filter by any facet. Then read one with autode_get_asset_context.',
       inputSchema: {
         type: 'object', additionalProperties: false, required: ['query'],
-        properties: { query: { type: 'string' }, layers: LAYERS, assetTypes: ASSET_TYPES, systems: strings, platforms: strings, environments: strings, databases: strings, schemas: strings, certifications: CERTIFICATIONS, statuses: strings, reviewStates: strings, classifications: strings, glossaryTerms: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
+        properties: { query: { type: 'string' }, layers: LAYERS, assetTypes: ASSET_TYPES, systems: strings, platforms: strings, environments: strings, databases: strings, schemas: strings, domains: strings, owners: strings, tags: strings, certifications: CERTIFICATIONS, statuses: strings, reviewStates: strings, classifications: strings, glossaryTerms: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
       },
       annotations: read('Search assets'),
       handler: async (args, ws) => (await explore(ws, { type: 'search', ...(args as { query: string }) })).result as Record<string, unknown>
+    },
+    {
+      name: 'autode_search_articles',
+      description: 'Knowledge articles: reviewed write-ups of what atomic facts can\'t say (pitfalls, history, golden sources, how to reconcile). Filter by words in the title or text, or by what they are about (an asset, term or domain id). Each comes with its state (draft, approved, changed since approved, deprecated), whether it is stale (a cited fact changed), and its opening paragraph; read the whole article as autode://article/<slug>. Only approved articles reach agents\' packs. Propose one with autode_propose_article.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { query: { type: 'string' }, about: { type: 'string' } } },
+      annotations: read('Search knowledge articles'),
+      handler: async (args, ws) => {
+        const src = await ws.contextSources();
+        const words = String(args.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+        const list = (src.articles ?? []).filter((a) => (!args.about || a.about.includes(String(args.about))) && words.every((w) => `${a.title} ${a.body}`.toLowerCase().includes(w)));
+        return { articles: list.map((a) => ({ slug: a.slug, title: a.title, state: a.state, about: a.about, cites: a.cites, stale: checkArticle(a, src.assertions).staleBecause, summary: articleSummary(a), uri: `autode://article/${a.slug}` })) };
+      }
     },
     {
       name: 'autode_browse_assets',
@@ -76,20 +91,29 @@ export function exploreTools(): EngineTool[] {
 
 /** `autode://explore/overview`, `autode://explore/estate` and `autode://asset/{id}`. */
 export const ASSET_RESOURCE_TEMPLATE = { uriTemplate: 'autode://asset/{id}', name: 'Asset context', description: 'Everything AutoDE knows about one asset (as autode_get_asset_context).', mimeType: 'application/json' };
+export const ARTICLE_RESOURCE_TEMPLATE = { uriTemplate: 'autode://article/{slug}', name: 'Knowledge article', description: 'A knowledge article, Markdown with its front matter (about, cites, status, approval).', mimeType: 'text/markdown' };
 
 export function exploreResources(): Array<{ uri: string; name: string; description: string; mimeType: string }> {
   return [
     { uri: 'autode://explore/overview', name: 'What AutoDE knows', description: 'Counts of objects, facts by status and trust, systems, semantic models.', mimeType: 'application/json' },
     { uri: 'autode://explore/estate', name: 'Estate', description: 'Systems, environments, catalogs and connection readiness.', mimeType: 'application/json' },
+    { uri: 'autode://metadata/config', name: 'Metadata model configuration', description: 'Tag groups, custom property definitions, and domains with their owners and data products (.autode/config/).', mimeType: 'application/json' },
     { uri: 'autode://explore/semantic', name: 'The semantic layer', description: 'Each semantic model with its logical tables, metrics, relationships, verified queries and custom instructions (approved and draft).', mimeType: 'application/json' }
   ];
 }
 
-export async function readExploreResource(ws: EngineWorkspace, key: string): Promise<{ text: string; revision: string } | undefined> {
+export async function readExploreResource(ws: EngineWorkspace, key: string): Promise<{ text: string; revision: string; mimeType?: string } | undefined> {
   let body: unknown;
   if (key === 'explore/overview') body = (await explore(ws, { type: 'overview' })).overview;
   else if (key === 'explore/estate') body = (await explore(ws, { type: 'estate' })).estate;
   else if (key === 'explore/semantic') body = (await explore(ws, { type: 'semantic' })).semantic;
+  else if (key === 'metadata/config') body = loadMetadataConfig(ws.options.workspaceRoot);
+  else if (key.startsWith('article/')) {
+    const a = readArticle(ws.options.workspaceRoot, decodeURIComponent(key.slice('article/'.length)));
+    if (!a) throw new EngineToolError('NOT_FOUND', `No article "${key.slice('article/'.length)}" (autode_search_articles).`);
+    const text = fs.readFileSync(a.file, 'utf8');
+    return { text, revision: computeRevision(text), mimeType: 'text/markdown' };
+  }
   else if (key.startsWith('asset/')) {
     const r = await explore(ws, { type: 'asset', id: decodeURIComponent(key.slice('asset/'.length)) });
     if (!r.context) throw new EngineToolError('NOT_FOUND', String(r.error));

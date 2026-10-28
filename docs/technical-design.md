@@ -833,6 +833,65 @@ Surfaces: request `browse`, `autode_browse_assets`, `autode explore browse`, and
 
 **Build.** `scripts/bundle.cjs` copies `WEBVIEW_LIBRARIES` (`cytoscape/dist/cytoscape.min.js`) into `dist/` and adds their licences to `THIRD-PARTY-NOTICES.md`. `.vscodeignore` ships `dist/cytoscape.min.js` and `media/explorer.html`.
 
+### 5.18 The metadata model and knowledge articles (v0.51.0; MM1)
+
+Context-layer §6.11.
+
+**Facts.**
+- `AssertionKind` gains `classification` and `metadata`. A `metadata` fact's predicate is `tag` `{key, value?, group?}`, `owner` `{role, person}`, `domain` `{domain}`, `certification` `{status, note?}` or `property` `{name, value}`; schemas are in `assertionSchemas.ts`.
+- `business_rule` gains `ruleType`, `modality`, `scope`, `domain` and `expression`. `business_term` gains `category`, `broader`, `narrower`, `related`, `steward`, `status`, `abbreviation` and `examples`. `quality_expectation` gains the checks `pattern` and `referential`, and `dimension`.
+- `isLowStakesFact(kind, predicate)` (in `decisionStore.ts`) makes tags low stakes.
+- `governance.ts` reads both classification forms, and `classifyColumn` writes the new kind.
+- The projection derives a rule node's `enforcementLevel` from `ruleOf(a).modality`, and `metadata.ruleType`, `.modality` and `.scope` too.
+
+**`src/engine/metadata/`.**
+
+`model.ts` holds:
+- the vocabularies: `OWNER_ROLES`, `CERTIFICATIONS_SET`, `RULE_TYPES`, `QUALITY_DIMENSIONS`;
+- `parseMetadataConfig` and `loadMetadataConfig`, reading `LAYOUT.tagGroups`, `.customProperties` and `.domains`;
+- `patternMatches` (`*` over the id and the fqn);
+- `metadataBySubject`;
+- `assetMetadata(facts, config, {id, fqn, model})`: facts first, then the domain from a pattern or a semantic model, owners inherited from the domain for missing roles, and data products by pattern;
+- `checkMetadata` (controlled tag values, property types);
+- `ruleOf` (stated, or inferred from the level and wording);
+- `qualityDimension`;
+- `isClassificationFact`.
+
+`record.ts` holds:
+- `setMetadata`, which supersedes the live fact with the same identity: a tag's key, an owner's role and person, a property's name, or the domain or certification;
+- `removeMetadata` (rejects);
+- `migrateMetadata`, an idempotent supersession by `system`. It turns `business_rule`/`classification` into the `classification` kind, and gives rules without a modality a `ruleType`, `modality` and `scope`. The panel runs it after initialising the context manager; the CLI runs it as `autode metadata migrate`.
+
+**Knowledge articles.** `src/engine/knowledge/articles.ts`:
+- `parseArticle` and `serializeArticle`: YAML front matter (`title`, `about`, `cites`, `status`, `author`, `domain`, `tags`, `approved {by, at, revision, channel}`), then Markdown;
+- `articleRevision`: SHA-256 over the title, about, cites and body;
+- `readArticle` and `listArticles` (state `draft`, `approved`, `changed` or `deprecated`);
+- `checkArticle`: uncited `[fact:…]` or missing citations are errors; a superseded, rejected or under-review cited fact makes the article stale; a proposed fact is a warning;
+- `writeArticle` (never overwrites without `overwrite`), `approveArticle` (refused while invalid or stale), `articlesAbout` and `articleSummary`.
+
+Decision kind `article` (`ArticlePayload`, `validateArticleProposal`). Applying it writes the article and approves it at its revision by the approver; it is superseded if the file changed since the proposal.
+
+**Packs.**
+- `ContextPackSources.articles`: `EngineWorkspace.contextSources` (the fingerprint includes the articles folder) and `ContextFileManager.getPackSources`.
+- A *Guidance* block: live `guidance` rules on the scope, and team-wide ones; at most 8; their ids go to the manifest.
+- A *Knowledge articles* block: approved articles about the scope with their opening paragraph, and STALE with the reason. `PackManifest.knowledgeArticles` holds `slug@revision`, and the cited facts join `assertions`.
+
+**Explore.**
+- `ExploreSources.metadata` and `.articles`.
+- `governanceNodes` adds `domain:<slug>`, `product:<domain>/<name>` and `article:<slug>` nodes (NodeTypes `domain`, `data_product`, `knowledge_article`; layer context).
+- `metaOf` caches `assetMetadata` per asset.
+- `AssetSummary` gains `domain`, `owners`, `tags` and `certifiedBy`; a person's certification overrides the derived one.
+- The facets `domain`, `owner` and `tag` are live, and `PENDING_FACETS` is empty.
+- `AssetContext` gains `metadata`, `quality` (by dimension), `articles` (with staleness) and `term` (the business term's value); rules carry their `ruleType`, `modality` and `scope`; domain and data-product pages list their members (`membersOf`).
+
+**Surfaces.**
+- **CLI:** `autode metadata show|set|remove|migrate` (setting and removing are a person's) and `autode articles list|show|new|check|approve`; `explore search` gains `--domain`, `--owner` and `--tag`.
+- **MCP:** `autode_search_articles`, `autode_propose_article`, `autode_propose_assertion` with kind `metadata`, and the resources `autode://article/{slug}` (Markdown) and `autode://metadata/config`.
+- **VS Code:**
+  - the Explorer's *Set metadata…* (`editMetadata` → quick picks → `WebviewProvider.recordMetadata`, channel `panel`);
+  - the *Quality* and *Knowledge* tabs, metadata rows with empty states, and *KPIs*;
+  - the commands `newKnowledgeArticle` and `approveKnowledgeArticle`.
+
 ## 6. Data Platforms
 
 ### 6.1 Design Rationale
@@ -2001,6 +2060,10 @@ src/engine/grounding/    # SQL grounding checks, manifests, reports
   manifest.ts, semanticGrounding.ts, sqlGrounding.ts
 src/engine/interview/
   specOps.ts, state.ts
+src/engine/knowledge/
+  articles.ts
+src/engine/metadata/
+  model.ts, record.ts
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters

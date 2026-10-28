@@ -17,7 +17,7 @@ import { workflowTools } from './workflowTools';
 import { agentTools } from './agentTools';
 import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, readResource } from './catalogs';
 import { semanticTools } from './semanticTools';
-import { ASSET_RESOURCE_TEMPLATE, exploreTools } from './exploreTools';
+import { ARTICLE_RESOURCE_TEMPLATE, ASSET_RESOURCE_TEMPLATE, exploreTools } from './exploreTools';
 
 /**
  * The AutoDE MCP server (docs/mcp-engine-requirements.md §3, §5; phases 3
@@ -177,7 +177,7 @@ export function createAutodeServer(options: ServerOptions): Server {
     }
   });
 
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [PRIMITIVE_RESOURCE_TEMPLATE, ASSET_RESOURCE_TEMPLATE] }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [PRIMITIVE_RESOURCE_TEMPLATE, ASSET_RESOURCE_TEMPLATE, ARTICLE_RESOURCE_TEMPLATE] }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     try {

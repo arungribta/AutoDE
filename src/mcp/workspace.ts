@@ -18,6 +18,7 @@ import { loadSkillPack } from '../engine/agents/definitions';
 import { ToolSkillState, loadToolSkillStates } from '../engine/skills/lifecycle';
 import { knowledgeSkills } from '../engine/skills/port';
 import { loadSemanticLayer, semanticLayerFiles, semanticPaths } from '../engine/semantic/store';
+import { listArticles } from '../engine/knowledge/articles';
 import { SkillDefinition } from '../engine/types';
 import { LayoutKey, layoutPath } from '../engine/workspaceLayout';
 import { EngineToolError } from './errors';
@@ -210,7 +211,7 @@ export class EngineWorkspace {
     const vocabFiles = [this.at('vocabulary')];
     const problemId = this.activeProblemId();
     const semanticFiles = [...semanticLayerFiles(this.options.workspaceRoot, problemId), semanticPaths(this.options.workspaceRoot).sidecar];
-    const key = fingerprint([ledgerDir, catalogDir, ...vocabFiles, this.at('activeProblem'), this.problemDocument('spec/business-problem') ?? '', this.at('toolSkills'), ...semanticFiles]);
+    const key = fingerprint([ledgerDir, catalogDir, ...vocabFiles, this.at('activeProblem'), this.problemDocument('spec/business-problem') ?? '', this.at('toolSkills'), this.at('articles'), ...semanticFiles]);
     if (this.cachedSources && key === this.contextKey) return this.cachedSources;
 
     const ledger = new AssertionLedger(ledgerDir);
@@ -230,7 +231,8 @@ export class EngineWorkspace {
       catalogRevisions: mergeWatermarks(catalogWatermarks(graph.nodes), catalog.watermarks()),
       catalog,
       knowledgeSkills: knowledgeSkills(this.options.workspaceRoot),
-      semantic: loadSemanticLayer(this.options.workspaceRoot, { problemId })
+      semantic: loadSemanticLayer(this.options.workspaceRoot, { problemId }),
+      articles: listArticles(this.options.workspaceRoot)
     };
     this.contextKey = key;
     return this.cachedSources;

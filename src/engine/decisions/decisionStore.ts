@@ -31,6 +31,8 @@ export type DecisionKind =
   | 'runbook'
   /** A shared semantic model or a composite, written by an agent (C5a); approving a shared model's proposal approves that revision. */
   | 'semantic_model'
+  /** A knowledge article, written by an agent (MM1); approving the proposal approves that revision. */
+  | 'article'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 
@@ -98,12 +100,17 @@ export class DecisionError extends Error {
 /** Facts that change no join, key, grain, rule or metric: an agent may accept them with its user's confirmation. */
 export const LOW_STAKES_ASSERTION_KINDS: readonly string[] = ['business_term', 'naming_convention', 'assumption'];
 
+/** A fact's stakes: low for the kinds above and for tags (MM1); owners, domains, certification, properties and classifications are a person's. */
+export function isLowStakesFact(kind: string, predicate?: string): boolean {
+  return LOW_STAKES_ASSERTION_KINDS.includes(kind) || (kind === 'metadata' && predicate === 'tag');
+}
+
 /** Stakes are defined here, once; no caller, skill or host can lower them. */
 export function stakesFor(kind: DecisionKind, proposal?: unknown): Stakes {
   if (kind === 'vocabulary') return 'low';
   if (kind === 'assertion') {
-    const k = proposal && typeof proposal === 'object' ? String((proposal as { kind?: unknown }).kind ?? '') : '';
-    return LOW_STAKES_ASSERTION_KINDS.includes(k) ? 'low' : 'high';
+    const p = (proposal && typeof proposal === 'object' ? proposal : {}) as { kind?: unknown; predicate?: unknown };
+    return isLowStakesFact(String(p.kind ?? ''), String(p.predicate ?? '')) ? 'low' : 'high';
   }
   return 'high';
 }

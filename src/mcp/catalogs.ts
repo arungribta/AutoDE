@@ -144,7 +144,7 @@ export async function readResource(ws: EngineWorkspace, uri: string): Promise<{ 
     return { uri, mimeType: 'application/yaml', text, revision };
   }
   const explored = await readExploreResource(ws, key);
-  if (explored) return { uri, mimeType: 'application/json', ...explored };
+  if (explored) return { uri, mimeType: explored.mimeType ?? 'application/json', text: explored.text, revision: explored.revision };
   const kind = /^primitives\/(.+)$/.exec(key)?.[1];
   if (kind) {
     ws.ensurePrimitives();

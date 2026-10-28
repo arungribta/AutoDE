@@ -172,7 +172,18 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - typed rules (definition, validation, policy, standard, guidance) with modality;
   - ownership roles, domains and data products, certification, custom properties, and quality dimensions.
 
-  Every concept is present on every surface; data fills in from evidence and imports. *Why:* data engineers and architects, and the tools they already use, should recognise every term, and imports and exports need a shared model. *Status:* Partly shipped in v0.50.1: standard asset types, platform, certification, status apart from review state, glossary terms as a facet, domain, owner and tags shown pending. The rest is planned for MM.
+  Every concept is present on every surface; data fills in from evidence and imports. *Why:* data engineers and architects, and the tools they already use, should recognise every term, and imports and exports need a shared model. *Status:* Shipped v0.50.1 (standard asset types, platform, certification, status apart from review state, glossary terms as a facet) and v0.51.0 (MM1):
+  - tags (`key=value`, tag groups);
+  - a SKOS-shaped glossary;
+  - classifications as their own kind;
+  - typed rules with modality, and guidance in packs;
+  - owners by role, domains and data products;
+  - certification by a person;
+  - custom properties;
+  - quality dimensions;
+  - domain, owner and tag facets.
+
+  Applying tags to platforms is a runbook an agent writes with the platform skill.
 - **CTX-18 — Three layers, and knowledge articles.**
   - Every asset belongs to one layer:
     - **physical:** what exists;
@@ -181,7 +192,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - Each surface shows and filters by layer.
   - Knowledge articles record what atomic facts can't express. They cite facts rather than copy them, link many-to-many to concepts and assets, go stale when a cited fact changes, and reach agents in their packs.
 
-  *Why:* agents and people need to know whether something is a definition to compute with, business meaning, or knowledge with evidence. Tacit knowledge (pitfalls, history, golden sources) is what makes agents useful on real estates. *Status:* layers shipped in v0.50.2; knowledge articles planned for MM, with concept links in ONT1.
+  *Why:* agents and people need to know whether something is a definition to compute with, business meaning, or knowledge with evidence. Tacit knowledge (pitfalls, history, golden sources) is what makes agents useful on real estates. *Status:* layers shipped in v0.50.2; knowledge articles in v0.51.0 (MM1): cited facts, staleness, approval at a revision, packs, proposals by agents. Concept links come with ONT1.
 - **CTX-19 — The same name in different places is never confused.**
   - Databases and schemas are physical assets within each system and environment.
   - Semantic base tables are matched on database, schema and table within the system and environment their model is bound to.

@@ -1127,6 +1127,27 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: draft over RETAIL.SALES.ORDERS, ARCHIVE.SALES.ORDERS and RETAIL.STAGING.ORDERS.
   Expect: `retail_sales_orders`, `archive_sales_orders`, `staging_orders`.
 
+## Part 48 — v0.51.0 The metadata model
+
+- [ ] **48.1 Set metadata.**
+  Do: in the Knowledge Explorer open `shop.orders` → *Set metadata…*: add an owner, a tag `tier=gold`, certify it verified; then add a second tag with the same key and another value.
+  Expect: the Overview rows show each; the second tag replaces the first (its history keeps both); the facets Owner and Tag list them.
+- [ ] **48.2 Domains.**
+  Do: add `.autode/config/domains.yaml` (user guide §8.8) with Sales over `obj:shop/*` and a data product; reopen `shop.orders` and the Sales domain.
+  Expect: the table shows domain Sales (domains.yaml), inherited owners, its data product; the domain page lists its data products and tables; the Domain facet works.
+- [ ] **48.3 Migration.**
+  Do: in a workspace classified with v0.47–v0.50, open the panel; run `autode metadata migrate` again.
+  Expect: a log line with the counts on first open; the second run migrates nothing; Governance tabs show rules with type and modality; classifications unchanged in effect (masking still required).
+- [ ] **48.4 A knowledge article.**
+  Do: *AutoDE: New Knowledge Article…* about `shop.customers`; cite a fact as `[fact:<id>]` without adding it to cites; *Approve*; fix it; approve again; run the build stage's agent and open *What the Agent Saw*.
+  Expect: the first approval is refused (not in cites); the second succeeds; the pack has *Knowledge articles* with it. Supersede the cited fact (Context Inbox): the article shows *stale*, and the pack says STALE.
+- [ ] **48.5 Guidance and KPIs.**
+  Do: record a team-wide guidance rule (`/rule` then edit it to type guidance, or from a host with `autode_propose_assertion`); tag a metric `kpi`; on the Semantic home click *KPIs*.
+  Expect: the guidance appears in every step pack; *KPIs* lists the tagged metric.
+- [ ] **48.6 In a terminal and a host.**
+  Do: `autode metadata show shop.orders`; `autode articles list`; in Claude Code ask "who owns shop.orders and what should I know about it?".
+  Expect: the CLI output; the host calls `autode_get_asset_context` (owners, domain, articles) and `autode_search_articles`.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1409,5 +1430,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 47.2 |  |  |
 | 47.3 |  |  |
 | 47.4 |  |  |
+| 48.1 |  |  |
+| 48.2 |  |  |
+| 48.3 |  |  |
+| 48.4 |  |  |
+| 48.5 |  |  |
+| 48.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.
