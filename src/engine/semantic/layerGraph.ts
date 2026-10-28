@@ -1,6 +1,6 @@
 import { BaseNode, GraphEdge, TableNode } from '../context/types';
 import { exprIdentifiers } from './checks';
-import { SemanticLayerIndex, baseMatches, semanticElementId, semanticModelId, semanticTableId } from './layer';
+import { SemanticLayerIndex, baseMatches, semanticElementId, semanticInstructionsId, semanticModelId, semanticQueryId, semanticRelationshipId, semanticTableId } from './layer';
 
 /**
  * The semantic layer as graph nodes (§6.5): models contain logical tables,
@@ -49,9 +49,30 @@ export function semanticGraph(index: SemanticLayerIndex, graph: { nodes: readonl
       if (col) edge('derives_from', id, col);
     }
   }
+  // Relationships (joins): an edge between the logical tables, and an asset of their own.
   for (const r of index.relationships) {
     const backing = meta.get(r.model)?.backing?.[`relationship:${r.name}`];
     edge('related_to', semanticTableId(r.model, r.leftTable), semanticTableId(r.model, r.rightTable), backing);
+    const id = semanticRelationshipId(r.model, r.name);
+    nodes.push({ id, type: 'semantic_relationship', label: r.name, description: `${r.leftTable} → ${r.rightTable} on ${r.columns.map((c) => `${c.left} = ${c.right}`).join(' AND ')}`, metadata: { model: r.model, leftTable: r.leftTable, rightTable: r.rightTable, columns: r.columns, joinType: r.joinType, relationshipType: r.relationshipType, approved: meta.get(r.model)?.approved ?? false }, version: 1, ...(backing?.length ? { supportedBy: backing } : {}) });
+    edge('contains', semanticModelId(r.model), id);
+    edge('uses_table', id, semanticTableId(r.model, r.leftTable));
+    edge('uses_table', id, semanticTableId(r.model, r.rightTable));
+  }
+  // Verified queries: the question, the SQL, and the logical tables it names.
+  const logicalOf = new Map<string, string[]>();
+  for (const lt of index.tables) logicalOf.set(lt.model, [...(logicalOf.get(lt.model) ?? []), lt.table.name]);
+  for (const q of index.verifiedQueries) {
+    const id = semanticQueryId(q.model, q.name);
+    nodes.push({ id, type: 'verified_query', label: q.name, description: q.question, metadata: { model: q.model, question: q.question, sql: q.sql, ...(q.verifiedBy ? { verifiedBy: q.verifiedBy } : {}), ...(q.verifiedAt ? { verifiedAt: q.verifiedAt } : {}), approved: meta.get(q.model)?.approved ?? false }, version: 1 });
+    edge('contains', semanticModelId(q.model), id);
+    const words = new Set(q.sql.toLowerCase().split(/[^a-z0-9_]+/));
+    for (const t of logicalOf.get(q.model) ?? []) if (words.has(t.toLowerCase())) edge('uses_table', id, semanticTableId(q.model, t));
+  }
+  for (const i of index.instructions) {
+    const id = semanticInstructionsId(i.model);
+    nodes.push({ id, type: 'semantic_instruction', label: `${i.model} instructions`, description: i.text, metadata: { model: i.model, text: i.text, approved: meta.get(i.model)?.approved ?? false }, version: 1 });
+    edge('contains', semanticModelId(i.model), id);
   }
   return { nodes, edges };
 }

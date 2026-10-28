@@ -6,6 +6,28 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.50.2
+
+- **Three layers** (context-layer §6.1, CTX-18), after the owner's review. I checked how the industry uses the terms now, and the owner's view held:
+  - **physical:** what exists (tables, views, columns);
+  - **context:** what it means to the business and what is known (glossary terms, and later ontology concepts; rules, knowledge facts, and later knowledge articles);
+  - **semantic:** how it is measured and queried (semantic models and everything in them).
+
+  Every asset carries `layer`, and Layer is the first facet (`layers` over MCP, `--layer` on the CLI). In the Knowledge Explorer:
+  - a layer switch in the header;
+  - layer badges, and layer-coloured fills on graph nodes;
+  - a three-layer row on the overview page.
+- **The semantic layer's home page** (the Semantic switch): each model, approved or draft, with its logical tables, metrics and their expressions, relationships, verified queries with their questions, and custom instructions. It is also available as `autode explore semantic` and the resource `autode://explore/semantic`.
+- **Relationships, verified queries and custom instructions are assets:** they can be searched, have pages (the join with its columns and type; the question, SQL and who verified it; the instructions) and appear in the graph. A physical table's *Used by* now lists the verified queries over its logical tables.
+- **Specified:**
+  - the ontology and glossary are moved into the context layer (§6.1, §6.8);
+  - tables may **represent** a concept directly, while columns reach concepts through terms;
+  - a computed **concept page** (ONT1);
+  - **knowledge articles** (MM): they cite facts rather than copy them, link many-to-many to concepts and assets, go stale when a cited fact changes, and are delivered in packs;
+  - KPI is a metric tagged `kpi`.
+- **Deviation:** I earlier proposed the glossary and ontology for the semantic layer. That is withdrawn (decision log, 2026-10-28).
+- **Measured:** 392 tests (1 new: three layers and the semantic layer's assets; the surfaces test checks `explore semantic`, `--layer` and the resource). Lint: 0 errors, 21 warnings. Eval unchanged.
+
 ## 0.50.1
 
 - **Standard vocabulary** (context-layer §6.11; CTX-17), after the owner tried the Explorer: every term a data engineer or architect sees comes from a standard or a catalog convention.

@@ -1,4 +1,4 @@
-import { ASSET_TYPE_LABELS, AssetContext, AssetSummary, ExploreOverview, GraphSlice, SearchResult } from './explore';
+import { ASSET_TYPE_LABELS, AssetContext, AssetSummary, ExploreOverview, GraphSlice, SearchResult, SemanticOverview } from './explore';
 
 /**
  * Plain-text renderings of the Explorer's answers (C5b): what `autode explore`
@@ -82,6 +82,21 @@ export function renderAssetMarkdown(c: AssetContext): string {
     for (const x of c.conflicts) L.push(`- ${x.rule}: ${x.sides.join(' vs ')}`);
   }
   return L.join('\n') + '\n';
+}
+
+/** The semantic layer at a glance: each model with its logical tables, metrics, joins, verified queries and instructions. */
+export function renderSemantic(o: SemanticOverview): string {
+  if (!o.models.length) return 'No semantic models yet: autode semantic draft <name>, or AutoDE: New Shared Semantic Model.';
+  const L: string[] = [];
+  for (const m of o.models) {
+    L.push(`${m.label}  (${m.status ?? 'draft'}${m.source ? `, ${m.source}` : ''})`);
+    L.push(`  Logical tables: ${m.logicalTables.map((t) => t.label).join(', ') || 'none'}`);
+    for (const x of m.metrics) L.push(`  Metric ${x.label} on ${x.table}: ${x.expr ?? ''}`);
+    for (const x of m.relationships) L.push(`  Relationship ${x.label}: ${x.description ?? ''}`);
+    for (const x of m.verifiedQueries) L.push(`  Verified query ${x.label}: ${x.question ?? ''}`);
+    if (m.instructions) L.push(`  Instructions: ${m.instructions.replace(/\s+/g, ' ').slice(0, 200)}`);
+  }
+  return L.join('\n');
 }
 
 export function renderGraph(g: GraphSlice): string {

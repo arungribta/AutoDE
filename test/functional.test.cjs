@@ -11269,6 +11269,9 @@ async function main() {
       assert.match((await cli(['explore', 'graph', 'shop.orders', '--workspace', ws])).out, /orders —maps to→ shop\.orders/);
       assert.match((await cli(['explore', 'graph', '--workspace', ws])).out, /11 node\(s\), 1 edge\(s\) in scope:\n {2}shop\.orders —semantic join→ shop\.customers {2}\[sales: customer_id = customer_id\]/);
       assert.strictEqual((await call('autode_explore_graph', {})).nodes.length, 11, 'the landscape over MCP');
+      assert.match((await cli(['explore', 'semantic', '--workspace', ws])).out, /^sales {2}\(approved, shared\)/);
+      assert.ok((await cli(['explore', 'search', 'orders', '--layer', 'semantic', '--workspace', ws, '--json'])).json().results.every((r) => r.layer === 'semantic'));
+      assert.ok(JSON.parse((await client.readResource({ uri: 'autode://explore/semantic' })).contents[0].text).models.some((m) => m.label === 'sales'));
       assert.strictEqual((await cli(['explore', 'asset', 'nothing-like-it', '--workspace', ws])).code, 5);
       // The Explorer's other messages.
       const ready = (await answerExplorerMessage({ type: 'ready' }, host)).reply;
@@ -11308,7 +11311,7 @@ async function main() {
     assert.deepStrictEqual([E.ASSET_TYPE_LABELS.logical_table, E.ASSET_TYPE_LABELS.semantic_fact, E.ASSET_TYPE_LABELS.knowledge_fact, E.ASSET_TYPE_LABELS.glossary_term], ['Logical table', 'Fact (semantic)', 'Knowledge fact', 'Glossary term']);
     assert.deepStrictEqual(['verified', 'confirmed', 'documented', 'assumed', 'inferred'].map(E.certificationOf), ['verified', 'verified', 'documented', 'unverified', 'unverified']);
     const r = E.searchAssets(sources, 'orders');
-    assert.deepStrictEqual(Object.keys(r.facets), ['assetType', 'system', 'platform', 'environment', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm']);
+    assert.deepStrictEqual(Object.keys(r.facets), ['layer', 'assetType', 'system', 'platform', 'environment', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm']);
     assert.deepStrictEqual(r.pendingFacets, ['domain', 'owner', 'tag']);
     const orders = r.results.find((x) => x.id === 'obj:shop/prod/shop.orders');
     assert.deepStrictEqual([orders.platform, orders.glossaryTerms, orders.reviewState], ['file', ['Order'], undefined]);
@@ -11349,6 +11352,44 @@ async function main() {
     const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
     for (const t of ['data-view="graph"', "type: 'landscape'", "'dbltap'", 'data-card-expand', 'id="lFind"', 'Asset type', 'Certification', 'Review state', 'Evidence', "':parent'"]) assert.ok(html.includes(t), t);
     assert.ok(!/kind: 'Kind'|trust: 'Trust'/.test(html), 'no AutoDE-only facet titles');
+  });
+
+  // ── v0.50.2: three layers; the semantic layer's own assets ──
+
+  await test('v0.50.2: three layers — every asset names its layer (physical, context, semantic) and Layer is the first facet; relationships, verified queries and custom instructions are semantic assets with their definitions; the semantic overview lists each model\'s tables, metrics, joins, queries and instructions; a table lists the verified queries over it', () => {
+    const E = fresh('../dist/engine/explore/explore.js');
+    const L = require('../dist/engine/semantic/layer.js');
+    const { parseSemanticModel } = require('../dist/engine/semantic/model.js');
+    const { renderSemantic } = fresh('../dist/engine/explore/render.js');
+    const text = c5a.sales + ['verified_queries:', '  - name: tax_by_channel', '    question: What is the tax by channel?', '    sql: SELECT channel, SUM(tax_amount) FROM orders GROUP BY channel', '    verified_by: ana', 'custom_instructions: Fiscal year starts in April.', ''].join('\n');
+    const parsed = parseSemanticModel(text);
+    assert.deepStrictEqual(parsed.errors, []);
+    const index = L.indexSemanticLayer([{ name: 'sales', source: 'shared', revision: 'r1', approved: true, file: 'autode-output/semantic/sales.yaml', model: parsed.model }]);
+    assert.deepStrictEqual([index.verifiedQueries.map((q) => q.name), index.instructions.map((i) => i.text)], [['tax_by_channel'], ['Fiscal year starts in April.']]);
+    const term = { id: 'term:order', type: 'business_term', label: 'Order', mappedNodeIds: ['obj:shop/prod/shop.orders'], metadata: {}, version: 1 };
+    const graph = c5a.graph();
+    const sources = { graph: { nodes: [...graph.nodes, term], edges: graph.edges }, assertions: c5a.golden(), conflicts: [], semantic: index };
+    const all = E.searchAssets(sources, '', { limit: 5000 });
+    assert.strictEqual(Object.keys(all.facets)[0], 'layer');
+    assert.ok(all.facets.layer.physical > 0 && all.facets.layer.context > 0 && all.facets.layer.semantic > 0, JSON.stringify(all.facets.layer));
+    const layerOf = (id) => all.results.find((r) => r.id === id).layer;
+    assert.deepStrictEqual(['obj:shop/prod/shop.orders', 'term:order', 'A-grain-orders', 'sem:sales/orders/total_tax', 'sem:sales#rel:orders_to_customers', 'sem:sales#vq:tax_by_channel', 'sem:sales#instructions'].map(layerOf), ['physical', 'context', 'context', 'semantic', 'semantic', 'semantic', 'semantic']);
+    assert.ok(E.searchAssets(sources, '', { layers: ['semantic'], limit: 5000 }).results.every((r) => r.layer === 'semantic'));
+    const rel = E.getAssetContext(sources, 'sem:sales#rel:orders_to_customers');
+    assert.deepStrictEqual([rel.asset.assetType, rel.meaning.definition.leftTable, rel.meaning.definition.rightTable, rel.meaning.definition.columns], ['relationship', 'orders', 'customers', [{ left: 'customer_id', right: 'customer_id' }]]);
+    assert.ok(rel.lineage.related.some((r) => r.asset.id === 'sem:sales/orders') && rel.overview.parent.id === 'sem:sales', 'it joins its logical tables, in its model');
+    const vq = E.getAssetContext(sources, 'sem:sales#vq:tax_by_channel');
+    assert.deepStrictEqual([vq.asset.assetType, vq.meaning.definition.question, vq.meaning.definition.verifiedBy], ['verified_query', 'What is the tax by channel?', 'ana']);
+    assert.ok(E.getAssetContext(sources, 'shop.orders').usedBy.queries.some((q) => q.id === 'sem:sales#vq:tax_by_channel'), 'a physical table lists the verified queries over its logical tables');
+    assert.strictEqual(E.getAssetContext(sources, 'sem:sales#instructions').meaning.definition.text, 'Fiscal year starts in April.');
+    const o = E.semanticOverview(sources);
+    const m = o.models[0];
+    assert.deepStrictEqual([m.label, m.status, m.logicalTables.map((t) => t.label), m.metrics.map((x) => [x.label, x.table, x.expr]), m.relationships.map((x) => x.label), m.verifiedQueries.map((x) => x.question), m.instructions],
+      ['sales', 'approved', ['orders', 'customers'], [['total_tax', 'orders', 'SUM(tax_amount)']], ['orders_to_customers'], ['What is the tax by channel?'], 'Fiscal year starts in April.']);
+    assert.match(renderSemantic(o), /^sales {2}\(approved, shared\)\n {2}Logical tables: orders, customers\n {2}Metric total_tax on orders: SUM\(tax_amount\)\n {2}Relationship orders_to_customers: orders → customers on customer_id = customer_id\n {2}Verified query tax_by_channel: What is the tax by channel\?\n {2}Instructions: Fiscal year starts in April\.$/);
+    assert.strictEqual(E.exploreOverview(sources).counts.relationships, 1);
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
+    for (const t of ['role="radiogroup" aria-label="Layer"', 'data-layer="semantic"', "type: 'semantic'", 'renderSemanticHome', 'Custom instructions', 'node[layer = "semantic"]']) assert.ok(html.includes(t), t);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

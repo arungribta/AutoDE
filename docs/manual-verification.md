@@ -1097,6 +1097,21 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: `autode explore graph --system shop`; `autode explore search tax --type metric`; in Claude Code ask "show me how the shop tables relate".
   Expect: the CLI lists tables and relationships with their columns; the host calls `autode_explore_graph` without an asset.
 
+## Part 46 — v0.50.2 Three layers and the semantic layer's own assets
+
+- [ ] **46.1 The layer switch.**
+  Do: in the Knowledge Explorer, click Physical, Context, Semantic, All.
+  Expect: results narrow to that layer (badges: blue physical, purple context, green semantic); Layer is the first filter; graph nodes are filled with their layer's colour.
+- [ ] **46.2 The semantic home page.**
+  Do: add a verified query and `custom_instructions` to `sales` in the Semantic Model editor, approve it, then click Semantic.
+  Expect: `sales` (approved) with its logical tables, metrics and expressions, relationships, the verified query's question and the instructions; *Open in Semantic Model editor* opens the file.
+- [ ] **46.3 Semantic assets.**
+  Do: open the relationship, the verified query, then `shop.orders` → Used by.
+  Expect: the join with its columns and type; the question, SQL and who verified it; `shop.orders` lists the verified query.
+- [ ] **46.4 In a terminal and a host.**
+  Do: `autode explore semantic`; `autode explore search orders --layer semantic`; in Claude Code ask "which verified queries exist for sales?".
+  Expect: the model listing; only semantic results; the host reads `autode://explore/semantic` or searches with `layers: ["semantic"]`.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1371,5 +1386,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 45.3 |  |  |
 | 45.4 |  |  |
 | 45.5 |  |  |
+| 46.1 |  |  |
+| 46.2 |  |  |
+| 46.3 |  |  |
+| 46.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

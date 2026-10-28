@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.50.1. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.50.2. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -319,9 +319,24 @@ Every test is a fixed probe that returns counts only, on the live connection or 
 
 *AutoDE: Open Knowledge Explorer* (also from the Workflow view's title bar, the 📊 status line under the chat, `/explore` or `/context`) opens a tab for exploring everything AutoDE knows. It only reads: changes still go through the Context Inbox, decisions and the Semantic Model editor.
 
+**Three layers.** Everything belongs to one of them, shown as a coloured badge and as the fill of graph nodes:
+
+| Layer | What it holds |
+|---|---|
+| **Physical** (blue) | What exists: tables, views, columns |
+| **Context** (purple) | What it means to the business and what is known about it: glossary terms (and, later, ontology concepts), rules, knowledge facts, and (later) knowledge articles |
+| **Semantic** (green) | How it is measured and queried: semantic models with their logical tables, dimensions, facts, metrics, filters, relationships, verified queries and custom instructions |
+
+The **layer switch** at the top (All, Physical, Context, Semantic) narrows search to one layer. **Semantic** opens the semantic layer's home page:
+- each model, approved or draft;
+- its logical tables, metrics with their expressions, relationships, verified queries with their questions, and custom instructions;
+- *Open in Semantic Model editor*.
+
+Click any of them for its page: a relationship shows the join; a verified query shows its question, SQL and who verified it. A table's *Used by* lists the verified queries over it.
+
 - **Search** (press `/`): tables, views, columns, glossary terms, rules, verified queries, semantic models and their logical tables, dimensions, facts, metrics and filters, and knowledge facts, by name, alias, synonym or description. Every word must match. If nothing does, AutoDE shows related results from your vocabulary and says so. Tables from the estate catalog that aren't loaded yet appear too, marked *catalog only*.
 - **Filters** on the left use the names catalogs use:
-  - asset type, system, platform, environment;
+  - layer, asset type, system, platform, environment;
   - certification: *verified*, *documented*, *unverified*, or *draft* for unapproved semantic models;
   - status, review state (knowledge facts), classification, glossary term.
 
@@ -354,7 +369,7 @@ Every test is a fixed probe that returns counts only, on the live connection or 
 - **Estate** view: systems and environments with their catalog tables, working set and objects you can't see; connections and whether they're ready; what feeds each system.
 - **Keyboard:** `/` to search, ↑ ↓ and Enter in the results, ← → between tabs, Alt+← and Alt+→ for back and forward.
 
-**From a terminal:** `autode explore` (overview), `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, and `autode explore graph [--system s] [--model m] [--columns]` for the landscape. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
+**From a terminal:** `autode explore` (overview), `autode explore semantic` (each model's tables, metrics, relationships, verified queries and instructions), `--layer physical|context|semantic` on search, `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, and `autode explore graph [--system s] [--model m] [--columns]` for the landscape. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
 
 The vocabulary follows the industry's standards and catalogs (context-layer specification §6.11). Tags, a full glossary, typed rules, owners, domains and certification come with the metadata model (MM, v0.51.0); lineage from the platform and impact analysis with LIN (v0.52.0); ontology concepts with ONT1 (v0.53.0).
 ---
@@ -737,7 +752,7 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](roadmap.md)):
 
-- **The metadata model** (v0.51.0): tags, a glossary with categories and related terms, classifications, typed rules (validation, policy, standard, guidance), owners and stewards, domains and data products, certification and custom properties.
+- **The metadata model** (v0.51.0): tags (a `kpi` tag marks key metrics), a glossary with categories and related terms, classifications, typed rules (validation, policy, standard, guidance), owners and stewards, domains and data products, certification and custom properties, and **knowledge articles**: reviewed write-ups of pitfalls, history and golden sources, which cite facts and reach agents in their context.
 - **Lineage and impact** (v0.52.0): table and column lineage from the platform, your mappings and AutoDE's artifacts; what a change would break.
 - **Ontology and terminology** (v0.53.0–v0.54.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
 - **AtScale import** (v0.55.0); Horizon, Collibra and Unity Catalog later.

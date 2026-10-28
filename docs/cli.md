@@ -120,7 +120,8 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 | `autode semantic check <name>` | Checks a shared model or a composite against the estate and the facts; exit 1 on an error. |
 | `autode semantic approve <name>` | A person approves a shared model (workspace-wide, at its current version) or a composite (in its problem). Needs a terminal; type `approve` (`y` for a composite in exploration mode). |
 | `autode explore` | Overview of what AutoDE knows: objects, facts by status, systems, semantic models. |
-| `autode explore search <words> [--type table,column,glossary_term,…] [--system <s>] [--platform <p>] [--environment <e>] [--all]` | Search names, aliases, synonyms, descriptions and facts (every word must match), with facet counts; exit 5 when nothing matches. |
+| `autode explore search <words> [--layer physical\|context\|semantic] [--type table,column,glossary_term,…] [--system <s>] [--platform <p>] [--environment <e>] [--all]` | Search names, aliases, synonyms, descriptions and facts (every word must match), with facet counts; exit 5 when nothing matches. |
+| `autode explore semantic` | The semantic layer: each model (approved or draft) with its logical tables, metrics, relationships, verified queries and custom instructions. |
 | `autode explore asset <id or name>` | Everything known about one asset, as Markdown (the Knowledge Explorer's page); `--json` for the same JSON as `autode_get_asset_context`. |
 | `autode explore graph <id or name> [--hops 1-3]` | The graph around an asset. |
 | `autode explore graph [--system <s>] [--model <m>] [--columns]` | The landscape: tables in scope and every relationship AutoDE knows between them (foreign keys, confirmed and proposed relationships, semantic joins), with their columns. |

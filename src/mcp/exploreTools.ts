@@ -14,7 +14,8 @@ import { computeRevision } from '../engine/context/contextStore';
 
 const read = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const strings = { type: 'array', items: { type: 'string' } };
-const ASSET_TYPES = { type: 'array', items: { enum: ['table', 'view', 'column', 'glossary_term', 'rule', 'verified_query', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric', 'filter', 'knowledge_fact'] } };
+const ASSET_TYPES = { type: 'array', items: { enum: ['table', 'view', 'column', 'glossary_term', 'rule', 'verified_query', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric', 'filter', 'relationship', 'custom_instruction', 'knowledge_fact'] } };
+const LAYERS = { type: 'array', items: { enum: ['physical', 'context', 'semantic'] } };
 const CERTIFICATIONS = { type: 'array', items: { enum: ['verified', 'documented', 'unverified', 'draft'] } };
 
 export async function workspaceExploreSources(ws: EngineWorkspace): Promise<ExploreSources> {
@@ -29,10 +30,10 @@ export function exploreTools(): EngineTool[] {
   return [
     {
       name: 'autode_search_assets',
-      description: 'Search everything AutoDE knows — tables, views, columns, glossary terms, rules, verified queries, semantic models (logical tables, dimensions, time dimensions, facts, metrics, filters), knowledge facts, and tables in the estate catalog beyond the working set — by name, alias, synonym and description. Every word must match; otherwise the results are related ones from the customer\'s vocabulary, flagged approximate. An empty query lists everything. Returns ranked results with ids, and facet counts: asset type, system, platform, environment, certification (verified, documented, unverified, draft), status, review state (knowledge facts), classification, glossary term; domain, owner and tag are in pendingFacets until they have data. Filter by any facet. Then read one with autode_get_asset_context.',
+      description: 'Search everything AutoDE knows — tables, views, columns, glossary terms, rules, verified queries, semantic models (logical tables, dimensions, time dimensions, facts, metrics, filters), knowledge facts, and tables in the estate catalog beyond the working set — by name, alias, synonym and description. Each result names its layer: physical (what exists), context (what it means and what is known: glossary, rules, knowledge facts) or semantic (how it is measured: models, metrics, relationships, verified queries). Every word must match; otherwise the results are related ones from the customer\'s vocabulary, flagged approximate. An empty query lists everything. Returns ranked results with ids, and facet counts: layer, asset type, system, platform, environment, certification (verified, documented, unverified, draft), status, review state (knowledge facts), classification, glossary term; domain, owner and tag are in pendingFacets until they have data. Filter by any facet. Then read one with autode_get_asset_context.',
       inputSchema: {
         type: 'object', additionalProperties: false, required: ['query'],
-        properties: { query: { type: 'string' }, assetTypes: ASSET_TYPES, systems: strings, platforms: strings, environments: strings, certifications: CERTIFICATIONS, statuses: strings, reviewStates: strings, classifications: strings, glossaryTerms: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
+        properties: { query: { type: 'string' }, layers: LAYERS, assetTypes: ASSET_TYPES, systems: strings, platforms: strings, environments: strings, certifications: CERTIFICATIONS, statuses: strings, reviewStates: strings, classifications: strings, glossaryTerms: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
       },
       annotations: read('Search assets'),
       handler: async (args, ws) => (await explore(ws, { type: 'search', ...(args as { query: string }) })).result as Record<string, unknown>
@@ -72,7 +73,8 @@ export const ASSET_RESOURCE_TEMPLATE = { uriTemplate: 'autode://asset/{id}', nam
 export function exploreResources(): Array<{ uri: string; name: string; description: string; mimeType: string }> {
   return [
     { uri: 'autode://explore/overview', name: 'What AutoDE knows', description: 'Counts of objects, facts by status and trust, systems, semantic models.', mimeType: 'application/json' },
-    { uri: 'autode://explore/estate', name: 'Estate', description: 'Systems, environments, catalogs and connection readiness.', mimeType: 'application/json' }
+    { uri: 'autode://explore/estate', name: 'Estate', description: 'Systems, environments, catalogs and connection readiness.', mimeType: 'application/json' },
+    { uri: 'autode://explore/semantic', name: 'The semantic layer', description: 'Each semantic model with its logical tables, metrics, relationships, verified queries and custom instructions (approved and draft).', mimeType: 'application/json' }
   ];
 }
 
@@ -80,6 +82,7 @@ export async function readExploreResource(ws: EngineWorkspace, key: string): Pro
   let body: unknown;
   if (key === 'explore/overview') body = (await explore(ws, { type: 'overview' })).overview;
   else if (key === 'explore/estate') body = (await explore(ws, { type: 'estate' })).estate;
+  else if (key === 'explore/semantic') body = (await explore(ws, { type: 'semantic' })).semantic;
   else if (key.startsWith('asset/')) {
     const r = await explore(ws, { type: 'asset', id: decodeURIComponent(key.slice('asset/'.length)) });
     if (!r.context) throw new EngineToolError('NOT_FOUND', String(r.error));

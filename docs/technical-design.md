@@ -793,6 +793,18 @@ Measured on the large-estate fixture (§10.3; about 50 000 columns): with the wh
 - Request `landscape`; `autode_explore_graph` without `asset`; `autode explore graph` without an asset.
 - The webview has one renderer, `drawGraph`, used by the asset tab and the Graph view, with a card, `expand` (adds a 1-hop slice in place and runs the layout with `fit: false`) and `findOn`.
 
+**v0.50.2.**
+- `SemanticLayerIndex` gains `verifiedQueries` and `instructions`.
+- `semanticGraph` adds nodes, each contained in its model:
+  - `semantic_relationship` (`sem:<model>#rel:<name>`; `uses_table` to both logical tables);
+  - `verified_query` (`sem:<model>#vq:<name>`; `uses_table` to the logical tables its SQL names);
+  - `semantic_instruction` (`sem:<model>#instructions`).
+- `AssetSummary.layer` comes from `LAYER_OF[assetType]`. The `layer` facet comes first, and `SearchOptions.layers` filters by it.
+- `semanticOverview(sources)` → models with their logical tables, metrics (with table and expression), relationships, verified queries and instructions.
+- Request `semantic`; resource `autode://explore/semantic`; `autode explore semantic`; `renderSemantic`.
+- A physical table's `usedBy.queries` follows `maps_to` to its logical tables.
+- The webview gains a layer radiogroup (a shortcut for the layer facet), `renderSemanticHome`, and layer fills on graph nodes.
+
 **Build.** `scripts/bundle.cjs` copies `WEBVIEW_LIBRARIES` (`cytoscape/dist/cytoscape.min.js`) into `dist/` and adds their licences to `THIRD-PARTY-NOTICES.md`. `.vscodeignore` ships `dist/cytoscape.min.js` and `media/explorer.html`.
 
 ## 6. Data Platforms

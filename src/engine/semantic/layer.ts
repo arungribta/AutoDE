@@ -46,11 +46,16 @@ export interface LayerRelationship {
   relationshipType?: string;
 }
 
+export interface LayerVerifiedQuery { model: string; name: string; question: string; sql: string; verifiedBy?: string; verifiedAt?: number; onboarding?: boolean }
+
 export interface SemanticLayerIndex {
   models: LayerModel[];
   tables: LayerTable[];
   elements: LayerElement[];
   relationships: LayerRelationship[];
+  verifiedQueries: LayerVerifiedQuery[];
+  /** Each model's `custom_instructions`. */
+  instructions: Array<{ model: string; text: string }>;
   /** Lower-cased base table name → the semantic tables over it. */
   byBaseName: Map<string, LayerTable[]>;
   /** Lower-cased metric names and synonyms → the metrics. */
@@ -61,7 +66,7 @@ export interface LoadedModel extends LayerModel { model: SemanticModel }
 
 /** Indexes approved models (drafts are kept out; `includeDrafts` keeps them, flagged, for browsing). */
 export function indexSemanticLayer(loaded: readonly LoadedModel[], options: { includeDrafts?: boolean } = {}): SemanticLayerIndex {
-  const index: SemanticLayerIndex = { models: [], tables: [], elements: [], relationships: [], byBaseName: new Map(), metricsByName: new Map() };
+  const index: SemanticLayerIndex = { models: [], tables: [], elements: [], relationships: [], verifiedQueries: [], instructions: [], byBaseName: new Map(), metricsByName: new Map() };
   const seenRel = new Set<string>();
   for (const m of loaded) {
     if (!m.approved && !options.includeDrafts) continue;
@@ -84,6 +89,12 @@ export function indexSemanticLayer(loaded: readonly LoadedModel[], options: { in
         }
       }
     }
+    for (const q of model.verified_queries ?? []) {
+      // A composite's resolution repeats its shared models' verified queries: one entry each.
+      if (index.verifiedQueries.some((x) => x.name === q.name && x.sql === q.sql)) continue;
+      index.verifiedQueries.push({ model: model.name, name: q.name, question: q.question, sql: q.sql, ...(q.verified_by ? { verifiedBy: q.verified_by } : {}), ...(q.verified_at ? { verifiedAt: q.verified_at } : {}), ...(q.use_as_onboarding_question ? { onboarding: true } : {}) });
+    }
+    if (model.custom_instructions?.trim()) index.instructions.push({ model: model.name, text: model.custom_instructions.trim() });
     for (const r of model.relationships ?? []) {
       const left = baseOf.get(r.left_table.toLowerCase());
       const right = baseOf.get(r.right_table.toLowerCase());
@@ -139,3 +150,6 @@ export function definitionsFor(index: SemanticLayerIndex, fqns: readonly string[
 export const semanticModelId = (model: string) => `sem:${model}`;
 export const semanticTableId = (model: string, table: string) => `sem:${model}/${table}`;
 export const semanticElementId = (model: string, table: string, name: string) => `sem:${model}/${table}/${name}`;
+export const semanticRelationshipId = (model: string, name: string) => `sem:${model}#rel:${name}`;
+export const semanticQueryId = (model: string, name: string) => `sem:${model}#vq:${name}`;
+export const semanticInstructionsId = (model: string) => `sem:${model}#instructions`;

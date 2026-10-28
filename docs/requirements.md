@@ -173,6 +173,15 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - ownership roles, domains and data products, certification, custom properties, and quality dimensions.
 
   Every concept is present on every surface; data fills in from evidence and imports. *Why:* data engineers and architects, and the tools they already use, should recognise every term, and imports and exports need a shared model. *Status:* Partly shipped in v0.50.1: standard asset types, platform, certification, status apart from review state, glossary terms as a facet, domain, owner and tags shown pending. The rest is planned for MM.
+- **CTX-18 — Three layers, and knowledge articles.**
+  - Every asset belongs to one layer:
+    - **physical:** what exists;
+    - **context:** what it means and what is known (ontology, glossary, knowledge, governance);
+    - **semantic:** how it is measured (semantic models and everything in them).
+  - Each surface shows and filters by layer.
+  - Knowledge articles record what atomic facts can't express. They cite facts rather than copy them, link many-to-many to concepts and assets, go stale when a cited fact changes, and reach agents in their packs.
+
+  *Why:* agents and people need to know whether something is a definition to compute with, business meaning, or knowledge with evidence. Tacit knowledge (pitfalls, history, golden sources) is what makes agents useful on real estates. *Status:* layers shipped in v0.50.2; knowledge articles planned for MM, with concept links in ONT1.
 - **CTX-16 — Definitions and metadata from the customer's tools can be imported:** AtScale (first), Snowflake Horizon, Collibra and Unity Catalog, into facts and semantic models through the usual gates. *Why:* customers already hold this knowledge, and AutoDE should use it rather than rebuild it. *Status:* Planned (IMP1; IMP2–IMP4 unscheduled).
 
 *Planned work:* semantic model — §6 (C5); the metadata model — §6.11 (MM); ontology and terminology — §6.8 (ONT1, ONT2); imports — §6.9 (IMP1–IMP4); lineage and impact — §8.5 (LIN); freshness policy and context health — §8.2, §8.4 (C6).

@@ -92,6 +92,17 @@
   .cert-unverified { color: var(--t-assumed); border-color: var(--t-assumed); border-style: dashed; }
   .cert-draft { color: var(--muted); border-style: dashed; }
   .facet.pending h3 { opacity: 0.6; }
+  .layers { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .layers button { background: none; border: none; padding: 3px 10px; cursor: pointer; color: var(--muted); font-size: 12px; }
+  .layers button + button { border-left: 1px solid var(--border); }
+  .layers button[aria-checked=true] { background: var(--active); color: var(--active-fg); }
+  .layer { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .layer-physical { color: var(--vscode-charts-blue, #3794ff); border-color: var(--vscode-charts-blue, #3794ff); }
+  .layer-context { color: var(--vscode-charts-purple, #b180d7); border-color: var(--vscode-charts-purple, #b180d7); }
+  .layer-semantic { color: var(--vscode-charts-green, #89d185); border-color: var(--vscode-charts-green, #89d185); }
+  .model-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px; background: var(--surface); }
+  .model-card h3 { margin: 0 0 6px; font-size: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .facet.pending .muted { font-size: 11px; }
   .draft { border-style: dashed; }
 
@@ -175,6 +186,12 @@
     <input id="q" type="search" placeholder="Search tables, columns, terms, metrics, facts…" aria-label="Search what AutoDE knows" autocomplete="off" spellcheck="false">
     <kbd aria-hidden="true">/</kbd>
   </div>
+  <div class="layers" role="radiogroup" aria-label="Layer">
+    <button role="radio" data-layer="" aria-checked="true" title="Every layer">All</button>
+    <button role="radio" data-layer="physical" aria-checked="false" title="What exists: tables, views, columns">Physical</button>
+    <button role="radio" data-layer="context" aria-checked="false" title="What it means and what is known: glossary, rules, knowledge facts">Context</button>
+    <button role="radio" data-layer="semantic" aria-checked="false" title="How it is measured: semantic models, metrics, relationships, verified queries">Semantic</button>
+  </div>
   <nav class="views" role="tablist" aria-label="Views">
     <button role="tab" data-view="explore" aria-selected="true">Explore</button>
     <button role="tab" data-view="graph" aria-selected="false">Graph</button>
@@ -206,11 +223,12 @@
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // Asset types and facets as catalogs and Snowflake's semantic model name them (context-layer §6.11).
-  const KIND = { table: 'Table', view: 'View', column: 'Column', glossary_term: 'Glossary term', rule: 'Rule', verified_query: 'Verified query', semantic_model: 'Semantic model', logical_table: 'Logical table', dimension: 'Dimension', time_dimension: 'Time dimension', semantic_fact: 'Fact (semantic)', metric: 'Metric', filter: 'Filter', knowledge_fact: 'Knowledge fact' };
+  const KIND = { table: 'Table', view: 'View', column: 'Column', glossary_term: 'Glossary term', rule: 'Rule', verified_query: 'Verified query', semantic_model: 'Semantic model', logical_table: 'Logical table', dimension: 'Dimension', time_dimension: 'Time dimension', semantic_fact: 'Fact (semantic)', metric: 'Metric', filter: 'Filter', relationship: 'Relationship', custom_instruction: 'Custom instructions', knowledge_fact: 'Knowledge fact' };
+  const LAYER = { physical: 'Physical', context: 'Context', semantic: 'Semantic' };
   const TRUST = ['verified', 'confirmed', 'documented', 'assumed', 'inferred'];
   const CERT = ['verified', 'documented', 'unverified', 'draft'];
-  const FACET_TITLES = { assetType: 'Asset type', system: 'System', platform: 'Platform', environment: 'Environment', domain: 'Domain', owner: 'Owner', certification: 'Certification', status: 'Status', reviewState: 'Review state', classification: 'Classification', tag: 'Tags', glossaryTerm: 'Glossary term' };
-  const FACET_PARAM = { assetType: 'assetTypes', system: 'systems', platform: 'platforms', environment: 'environments', certification: 'certifications', status: 'statuses', reviewState: 'reviewStates', classification: 'classifications', glossaryTerm: 'glossaryTerms' };
+  const FACET_TITLES = { layer: 'Layer', assetType: 'Asset type', system: 'System', platform: 'Platform', environment: 'Environment', domain: 'Domain', owner: 'Owner', certification: 'Certification', status: 'Status', reviewState: 'Review state', classification: 'Classification', tag: 'Tags', glossaryTerm: 'Glossary term' };
+  const FACET_PARAM = { layer: 'layers', assetType: 'assetTypes', system: 'systems', platform: 'platforms', environment: 'environments', certification: 'certifications', status: 'statuses', reviewState: 'reviewStates', classification: 'classifications', glossaryTerm: 'glossaryTerms' };
 
   // ── State (kept when the panel is hidden or VS Code restarts the webview) ──
   const saved = vscode.getState() || {};
@@ -235,6 +253,7 @@
   // ── Small renderers ──
   const kindBadge = (k) => `<span class="badge kind">${esc(KIND[k] || k)}</span>`;
   const trustBadge = (t) => t ? `<span class="badge trust trust-${esc(t)}" title="Evidence: ${esc(t)}">${esc(t)}</span>` : '';
+  const layerBadge = (l) => l ? `<span class="badge layer layer-${esc(l)}" title="Layer">${esc(LAYER[l] || l)}</span>` : '';
   const certBadge = (c, t) => c ? `<span class="badge cert cert-${esc(c)}" title="Certification: ${esc(c)}${t ? ` (evidence: ${esc(t)})` : ''}">${esc(c)}</span>` : '';
   const clsBadge = (c) => c && c !== 'none' ? `<span class="badge ${/pii/.test(c) ? 'pii' : ''}" title="Classification">${esc(c)}</span>` : '';
   const draftBadge = (a) => a.status === 'draft' ? '<span class="badge draft" title="Not approved at its current revision: packs and grounding do not use it yet">draft</span>' : a.status === 'approved' ? '<span class="badge cert cert-verified" title="Approved">approved</span>' : '';
@@ -277,10 +296,11 @@
     const html = Object.keys(FACET_TITLES).filter((f) => pendingSet.has(f) || Object.keys(facets[f] || {}).length).map((f) => {
       if (pendingSet.has(f)) return `<div class="facet pending"><h3>${esc(FACET_TITLES[f])}</h3><div class="muted">Arrives with the metadata model (MM, v0.51.0).</div></div>`;
       const entries = Object.entries(facets[f]).sort((a, b) => f === 'certification' ? CERT.indexOf(a[0]) - CERT.indexOf(b[0]) : b[1] - a[1]);
-      return `<div class="facet"><h3>${esc(FACET_TITLES[f])}</h3>${entries.map(([v, n]) => `<label><input type="checkbox" data-facet="${esc(f)}" value="${esc(v)}" ${(state.filters[f] || []).includes(v) ? 'checked' : ''}> ${f === 'assetType' ? esc(KIND[v] || v) : esc(v.replace(/_/g, ' '))}<span class="n">${n}</span></label>`).join('')}</div>`;
+      return `<div class="facet"><h3>${esc(FACET_TITLES[f])}</h3>${entries.map(([v, n]) => `<label><input type="checkbox" data-facet="${esc(f)}" value="${esc(v)}" ${(state.filters[f] || []).includes(v) ? 'checked' : ''}> ${f === 'assetType' ? esc(KIND[v] || v) : f === 'layer' ? esc(LAYER[v] || v) : esc(v.replace(/_/g, ' '))}<span class="n">${n}</span></label>`).join('')}</div>`;
     }).join('');
     $('#facets').innerHTML = html || '<div class="muted small">No filters for these results.</div>';
     $('#clearFilters').hidden = !Object.values(state.filters).some((v) => v && v.length);
+    syncLayerSwitch();
   }
   $('#facets').addEventListener('change', (e) => {
     const cb = e.target.closest('input[data-facet]'); if (!cb) return;
@@ -291,7 +311,7 @@
   function renderResults(r) {
     $('#resultCount').textContent = r.total ? `${r.approximate ? 'No exact match; related: ' : ''}${r.total} result${r.total === 1 ? '' : 's'}${r.fromCatalog ? ` · ${r.fromCatalog} from the estate catalog` : ''}` : (state.query ? `Nothing matches "${state.query}"` : 'Nothing known yet');
     const current = state.history[state.pos];
-    $('#results').innerHTML = state.results.map((a, i) => `<li role="option" id="r${i}" data-i="${i}" aria-selected="${current === a.id}"><div class="t">${kindBadge(a.assetType)}<span class="name">${esc(a.label)}</span>${certBadge(a.certification, a.trust)}</div><div class="s">${esc([a.fqn && a.fqn !== a.label ? a.fqn : '', where(a), a.platform || '', a.classification || '', (a.glossaryTerms || []).join(', '), a.assetType === 'knowledge_fact' ? `${a.description} · ${(a.reviewState || '').replace(/_/g, ' ')}` : ''].filter(Boolean).join(' · '))}</div></li>`).join('')
+    $('#results').innerHTML = state.results.map((a, i) => `<li role="option" id="r${i}" data-i="${i}" aria-selected="${current === a.id}"><div class="t">${layerBadge(a.layer)}${kindBadge(a.assetType)}<span class="name">${esc(a.label)}</span>${certBadge(a.certification, a.trust)}</div><div class="s">${esc([a.fqn && a.fqn !== a.label ? a.fqn : '', where(a), a.platform || '', a.classification || '', (a.glossaryTerms || []).join(', '), a.assetType === 'knowledge_fact' ? `${a.description} · ${(a.reviewState || '').replace(/_/g, ' ')}` : ''].filter(Boolean).join(' · '))}</div></li>`).join('')
       + (state.results.length < r.total ? `<li class="more"><button class="btn" id="loadMore">Show more (${r.total - state.results.length} left)</button></li>` : '');
   }
   $('#results').addEventListener('click', (e) => {
@@ -309,9 +329,20 @@
     const el = $('#r' + i); if (el) { el.scrollIntoView({ block: 'nearest' }); $('#results').setAttribute('aria-activedescendant', 'r' + i); }
   }
 
+  // ── The layer switch (§6.1): a shortcut for the Layer filter; Semantic opens the semantic layer's home page ──
+  const currentLayer = () => ((state.filters.layer || []).length === 1 ? state.filters.layer[0] : '');
+  function syncLayerSwitch() { document.querySelectorAll('.layers button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.layer === currentLayer()))); }
+  document.querySelector('.layers').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-layer]'); if (!b) return;
+    if (b.dataset.layer) state.filters.layer = [b.dataset.layer]; else delete state.filters.layer;
+    persist(); syncLayerSwitch(); offset = 0;
+    if (state.view !== 'explore') setView('explore');
+    search(); home();
+  });
+
   // ── History ──
   function go(d) { const p = state.pos + d; if (p < 0 || p >= state.history.length) return; state.pos = p; persist(); openAsset(state.history[p], false, true); }
-  const home = () => { setView('explore'); current = undefined; document.querySelectorAll('#results li[data-i]').forEach((li) => li.setAttribute('aria-selected', 'false')); renderOverview(); };
+  const home = () => { if (state.view !== 'explore') setView('explore'); current = undefined; document.querySelectorAll('#results li[data-i]').forEach((li) => li.setAttribute('aria-selected', 'false')); if (currentLayer() === 'semantic') renderSemanticHome(); else renderOverview(); };
   $('#home').addEventListener('click', home);
   document.addEventListener('keydown', (e) => { if (e.altKey && e.key === 'Home') { e.preventDefault(); home(); } });
   $('#back').addEventListener('click', () => go(-1));
@@ -320,7 +351,7 @@
 
   // ── Overview (no asset open) ──
   let overview;
-  function onOverview(body) { overview = body.overview; if (state.history[state.pos]) openAsset(state.history[state.pos], false, true); else renderOverview(); search(); setView(state.view); }
+  function onOverview(body) { overview = body.overview; if (state.history[state.pos]) openAsset(state.history[state.pos], false, true); else if (currentLayer() === 'semantic') renderSemanticHome(); else renderOverview(); search(); setView(state.view); syncLayerSwitch(); }
   function renderEmpty(message) { $('#asset').innerHTML = `<div class="empty"><span class="big">◌</span>${esc(message)}</div>`; }
   function renderOverview() {
     const o = overview; if (!o) return;
@@ -330,8 +361,10 @@
     $('#asset').innerHTML = `
       <h2 style="margin:0 0 2px">What AutoDE knows</h2><div class="muted">Search above, open the <button class="link" data-view-link="graph">Graph</button> for the whole landscape, or pick a starting point. Everything here is read-only; changes go through the Context Inbox, decisions and the Semantic Model editor.</div>
       <div class="tiles">
-        ${[[c.tables, 'Tables in the working set'], [c.catalogTables, 'Tables in the estate catalog'], [c.columns, 'Columns'], [c.terms, 'Glossary terms'], [c.facts, 'Knowledge facts'], [c.semanticModels, `Semantic models (${c.approvedSemanticModels} approved)`], [c.metrics, 'Metrics'], [o.conflicts, 'Conflicts']].map(([v, l]) => `<div class="tile"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}
+        ${[[c.tables, 'Tables in the working set'], [c.catalogTables, 'Tables in the estate catalog'], [c.columns, 'Columns'], [c.terms, 'Glossary terms'], [c.facts, 'Knowledge facts'], [c.semanticModels, `Semantic models (${c.approvedSemanticModels} approved)`], [c.metrics, 'Metrics'], [c.relationships, 'Relationships (semantic)'], [o.conflicts, 'Conflicts']].map(([v, l]) => `<div class="tile"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}
       </div>
+      <h4>Three layers</h4>
+      <div class="chips">${['physical', 'context', 'semantic'].map((l) => `<button class="btn" data-layer-link="${l}">${layerBadge(l)} ${esc({ physical: 'what exists', context: 'what it means and what is known', semantic: 'how it is measured' }[l])}</button>`).join('')}</div>
       <h4>Knowledge facts by evidence</h4>
       <div class="bar" role="img" aria-label="Knowledge facts by evidence">${TRUST.map((t) => o.facts.byTrust[t] ? `<span style="width:${(o.facts.byTrust[t] / total) * 100}%;background:var(--t-${t})" title="${t}: ${o.facts.byTrust[t]}"></span>` : '').join('')}</div>
       <div class="legend">${TRUST.filter((t) => o.facts.byTrust[t]).map((t) => `<span>${trustBadge(t)} ${o.facts.byTrust[t]}</span>`).join('')}</div>
@@ -339,6 +372,20 @@
       ${o.systems.length ? `<h4>Systems</h4><table class="grid"><tr><th>System</th><th>Environment</th><th>Tables in the working set</th></tr>${o.systems.map((s) => `<tr class="click" data-system="${esc(s.system)}"><td>${esc(s.system)}</td><td>${esc(s.environment)}</td><td>${s.tables}</td></tr>`).join('')}</table>` : ''}
       ${o.semanticModels.length ? `<h4>Semantic models</h4>${o.semanticModels.map((m) => `<div class="item">${assetLink(m)} ${draftBadge(m)}</div>`).join('')}` : '<h4>Semantic models</h4><div class="muted small">None yet: AutoDE: New Semantic Model, or autode semantic draft.</div>'}`;
     updateHistory();
+  }
+
+  // ── The semantic layer's home page ──
+  async function renderSemanticHome() {
+    const body = await ask({ type: 'semantic' });
+    const models = (body.semantic && body.semantic.models) || [];
+    if (!models.length) { $('#asset').innerHTML = '<div class="empty"><span class="big">◌</span>No semantic models yet. <em>AutoDE: New Shared Semantic Model (Draft from Knowledge)…</em> drafts one from what AutoDE knows; <code>autode semantic draft &lt;name&gt;</code> does the same in a terminal.</div>'; return; }
+    $('#asset').innerHTML = `<h2 style="margin:0 0 2px">The semantic layer</h2><div class="muted" style="margin-bottom:12px">How the business measures and queries its data: the governed metrics, joins and verified questions agents and BI tools use. Packs and the grounding check use only approved models.</div>`
+      + models.map((m) => `<div class="model-card"><h3>${assetLink(m)} ${draftBadge(m)} <span class="badge">${esc(m.source || '')}</span>${m.file ? ` <button class="btn" data-open-file="${esc(m.file)}">Open in Semantic Model editor</button>` : ''}</h3>
+        <h4>Logical tables</h4><div class="chips">${m.logicalTables.map((t) => `<button class="badge" data-asset="${esc(t.id)}">${esc(t.label)}</button>`).join('') || '<span class="muted small">None.</span>'}</div>
+        <h4>Metrics</h4>${m.metrics.length ? `<table class="grid"><thead><tr><th>Metric</th><th>Logical table</th><th>Expression</th></tr></thead><tbody>${m.metrics.map((x) => `<tr class="click" data-asset="${esc(x.id)}" tabindex="0"><td><b>${esc(x.label)}</b>${x.description ? `<div class="small muted">${esc(x.description)}</div>` : ''}</td><td>${esc(x.table || '')}</td><td class="mono">${esc(x.expr || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">None yet.</div>'}
+        <h4>Relationships</h4>${m.relationships.length ? m.relationships.map((x) => `<div class="item"><button class="link" data-asset="${esc(x.id)}">${esc(x.label)}</button> <span class="muted small">${esc(x.description || '')}</span></div>`).join('') : '<div class="muted small">None yet.</div>'}
+        <h4>Verified queries</h4>${m.verifiedQueries.length ? m.verifiedQueries.map((x) => `<div class="item"><button class="link" data-asset="${esc(x.id)}">${esc(x.label)}</button> <span class="muted small">${esc(x.question || '')}</span></div>`).join('') : '<div class="muted small">None yet.</div>'}
+        ${m.instructions ? `<h4>Custom instructions</h4><div class="small" style="white-space:pre-wrap">${esc(m.instructions)}</div>` : ''}</div>`).join('');
   }
 
   // ── Asset page ──
@@ -375,7 +422,7 @@
       <div class="asset-head">
         <h2>${esc(a.assetType === 'knowledge_fact' ? 'Knowledge fact' : a.label)}</h2>
         ${a.fqn && a.fqn !== a.label ? `<div class="fqn">${esc(a.fqn)}</div>` : ''}
-        <div class="badges">${kindBadge(a.assetType)}${a.status === 'draft' || a.status === 'approved' ? draftBadge(a) : certBadge(a.certification, a.trust)}${clsBadge(a.classification)}${a.status && a.status !== 'draft' && a.status !== 'approved' ? `<span class="badge" title="Status">${esc(a.status)}</span>` : ''}${a.reviewState ? `<span class="badge" title="Review state">${esc(a.reviewState.replace(/_/g, ' '))}</span>` : ''}${a.platform ? `<span class="badge" title="Platform">${esc(a.platform)}</span>` : ''}${a.inWorkingSet === false ? '<span class="badge" title="Known from the estate catalog; loaded into the working set when a task uses it">catalog only</span>' : ''}${c.conflicts.length ? `<span class="badge pii">${c.conflicts.length} conflict(s)</span>` : ''}</div>
+        <div class="badges">${layerBadge(a.layer)}${kindBadge(a.assetType)}${a.status === 'draft' || a.status === 'approved' ? draftBadge(a) : certBadge(a.certification, a.trust)}${clsBadge(a.classification)}${a.status && a.status !== 'draft' && a.status !== 'approved' ? `<span class="badge" title="Status">${esc(a.status)}</span>` : ''}${a.reviewState ? `<span class="badge" title="Review state">${esc(a.reviewState.replace(/_/g, ' '))}</span>` : ''}${a.platform ? `<span class="badge" title="Platform">${esc(a.platform)}</span>` : ''}${a.inWorkingSet === false ? '<span class="badge" title="Known from the estate catalog; loaded into the working set when a task uses it">catalog only</span>' : ''}${c.conflicts.length ? `<span class="badge pii">${c.conflicts.length} conflict(s)</span>` : ''}</div>
         ${a.description ? `<div class="desc">${esc(a.description)}</div>` : ''}
         ${a.assetType === 'knowledge_fact' ? `<div class="desc">${esc(a.label)}</div>` : ''}
       </div>
@@ -400,6 +447,10 @@
       const def = c.meaning.definition;
       return `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
         ${def && def.expr ? `<h4>Definition</h4><pre class="mono">${esc(def.expr)}</pre>` : ''}
+        ${def && def.question ? `<h4>Question</h4><div>${esc(def.question)}</div>` : ''}
+        ${def && def.sql ? `<h4>SQL</h4><pre class="mono">${esc(def.sql)}</pre>${def.verifiedBy ? `<div class="small muted">Verified by ${esc(def.verifiedBy)}</div>` : ''}` : ''}
+        ${def && def.leftTable ? `<h4>Join</h4><div><code>${esc(def.leftTable)}</code> → <code>${esc(def.rightTable)}</code> on ${(def.columns || []).map((x) => `<code>${esc(x.left)} = ${esc(x.right)}</code>`).join(' AND ')}${def.relationshipType ? ` · ${esc(String(def.relationshipType).replace(/_/g, '-'))}` : ''}${def.joinType ? ` · ${esc(String(def.joinType).replace(/_/g, ' '))}` : ''}</div>` : ''}
+        ${def && def.text ? `<h4>Custom instructions</h4><div style="white-space:pre-wrap">${esc(def.text)}</div>` : ''}
         ${def && def.baseTable ? `<h4>Base table</h4><code>${esc(def.baseTable)}</code>${(def.primaryKey || []).length ? ` · primary key <code>${esc(def.primaryKey.join(', '))}</code>` : ''}` : ''}
         ${c.schema && (c.schema.keys.length || c.schema.grain.length) ? `<h4>Keys and grain</h4>${[...c.schema.keys, ...c.schema.grain].map(factItem).join('')}` : ''}
         ${c.memory.length ? `<h4>Decisions and assumptions in scope</h4>${c.memory.map(factItem).join('')}` : ''}
@@ -482,6 +533,7 @@
   });
   function handleLinks(e) {
     const vl = e.target.closest('[data-view-link]'); if (vl) { setView(vl.dataset.viewLink); return; }
+    const ll = e.target.closest('[data-layer-link]'); if (ll) { document.querySelector(`.layers button[data-layer="${ll.dataset.layerLink}"]`).click(); return; }
     const a = e.target.closest('[data-asset]'); if (a) { openAsset(a.dataset.asset); return; }
     const f = e.target.closest('[data-open-file]'); if (f) { post({ type: 'open', target: { kind: 'file', path: f.dataset.openFile } }); return; }
     const o = e.target.closest('[data-open]'); if (o) { post({ type: 'open', target: { kind: o.dataset.open } }); return; }
@@ -491,13 +543,13 @@
   // ── Graphs (Cytoscape.js, bundled): the asset's neighbourhood and the landscape share one renderer ──
   const graphs = { asset: undefined, landscape: undefined };
   const css = (name, fallback) => getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;
-  const SHAPE = { table: 'round-rectangle', view: 'round-rectangle', column: 'ellipse', glossary_term: 'diamond', rule: 'triangle', verified_query: 'rhomboid', semantic_model: 'barrel', logical_table: 'round-tag', dimension: 'ellipse', time_dimension: 'ellipse', semantic_fact: 'ellipse', metric: 'hexagon', filter: 'vee' };
-  const LEGEND = '<span class="legend-line"><i></i> foreign key, relationship</span><span class="legend-line"><i class="dash"></i> proposed, or a draft model</span><span class="legend-line"><i class="dot"></i> semantic join</span><span>Border: certification (green verified, grey documented, orange unverified, dashed draft)</span>';
+  const SHAPE = { relationship: 'tag', custom_instruction: 'round-diamond', table: 'round-rectangle', view: 'round-rectangle', column: 'ellipse', glossary_term: 'diamond', rule: 'triangle', verified_query: 'rhomboid', semantic_model: 'barrel', logical_table: 'round-tag', dimension: 'ellipse', time_dimension: 'ellipse', semantic_fact: 'ellipse', metric: 'hexagon', filter: 'vee' };
+  const LEGEND = '<span>Fill: layer (blue physical, purple context, green semantic)</span><span class="legend-line"><i></i> foreign key, relationship</span><span class="legend-line"><i class="dash"></i> proposed, or a draft model</span><span class="legend-line"><i class="dot"></i> semantic join</span><span>Border: certification (green verified, grey documented, orange unverified, dashed draft)</span>';
   const HINT = '<span>Click: details · double-click: expand in place · scroll: zoom · drag: move</span>';
 
   function elementsOf(slice) {
     const parentOf = new Map(slice.nodes.filter((n) => n.parent).map((n) => [n.id, n.parent]));
-    const nodes = slice.nodes.map((n) => ({ data: Object.assign({ id: n.id, label: n.label + (slice.hidden && slice.hidden[n.id] ? `  +${slice.hidden[n.id]}` : ''), type: n.assetType, cert: n.certification || 'none', center: n.id === slice.center ? 1 : 0, summary: n }, n.parent ? { parent: n.parent } : {}) }));
+    const nodes = slice.nodes.map((n) => ({ data: Object.assign({ id: n.id, label: n.label + (slice.hidden && slice.hidden[n.id] ? `  +${slice.hidden[n.id]}` : ''), type: n.assetType, layer: n.layer || 'physical', cert: n.certification || 'none', center: n.id === slice.center ? 1 : 0, summary: n }, n.parent ? { parent: n.parent } : {}) }));
     const edges = slice.edges.filter((e) => !(e.type === 'contains' && parentOf.get(e.target) === e.source))
       .map((e) => ({ data: { id: e.id, source: e.source, target: e.target, type: e.type, label: e.type.replace(/_/g, ' ') + (e.label ? `: ${e.label}` : ''), proposed: e.proposed ? 1 : 0 } }));
     return { nodes, edges };
@@ -509,6 +561,9 @@
       { selector: 'node', style: { label: 'data(label)', color: fg, 'font-size': 10, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-wrap': 'ellipsis', 'text-max-width': 150, 'background-color': bg, 'border-width': 2, 'border-color': muted, width: 22, height: 22, shape: (el) => SHAPE[el.data('type')] || 'ellipse' } },
       ...Object.entries(cert).map(([c, col]) => ({ selector: `node[cert = "${c}"]`, style: { 'border-color': col } })),
       { selector: 'node[cert = "unverified"], node[cert = "draft"]', style: { 'border-style': 'dashed' } },
+      { selector: 'node[layer = "physical"]', style: { 'background-color': css('--vscode-charts-blue', '#3794ff'), 'background-opacity': 0.18 } },
+      { selector: 'node[layer = "context"]', style: { 'background-color': css('--vscode-charts-purple', '#b180d7'), 'background-opacity': 0.22 } },
+      { selector: 'node[layer = "semantic"]', style: { 'background-color': css('--vscode-charts-green', '#89d185'), 'background-opacity': 0.22 } },
       { selector: 'node[type = "table"], node[type = "view"]', style: { width: 36, height: 24 } },
       { selector: 'node[type = "column"], node[type = "dimension"], node[type = "time_dimension"], node[type = "semantic_fact"], node[type = "filter"]', style: { width: 12, height: 12, 'font-size': 9 } },
       { selector: ':parent', style: { shape: 'round-rectangle', 'background-color': fg, 'background-opacity': 0.05, 'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -4, padding: 10, 'border-width': 1.5, 'font-weight': 'bold' } },
@@ -551,7 +606,7 @@
     const n = node.data('summary'); const el = cardOf(which); if (!el || !n) return;
     el.dataset.which = which;
     el.innerHTML = `<button class="close" data-card-close aria-label="Close">×</button>${kindBadge(n.assetType)} ${n.status === 'draft' || n.status === 'approved' ? draftBadge(n) : certBadge(n.certification, n.trust)} ${clsBadge(n.classification)}
-      <h3>${esc(n.label)}</h3>${n.fqn && n.fqn !== n.label ? `<div class="fqn">${esc(n.fqn)}</div>` : ''}${n.description ? `<div class="muted" style="margin-top:4px">${esc(n.description.length > 200 ? n.description.slice(0, 200) + '…' : n.description)}</div>` : ''}
+      ${layerBadge(n.layer)}<h3>${esc(n.label)}</h3>${n.fqn && n.fqn !== n.label ? `<div class="fqn">${esc(n.fqn)}</div>` : ''}${n.description ? `<div class="muted" style="margin-top:4px">${esc(n.description.length > 200 ? n.description.slice(0, 200) + '…' : n.description)}</div>` : ''}
       <div class="small muted" style="margin-top:4px">${esc([where(n), n.platform || '', (n.glossaryTerms || []).join(', ')].filter(Boolean).join(' · '))}</div>
       <div class="small muted">${node.connectedEdges().length} connection(s) shown</div>
       <div class="row"><button class="btn primary" data-card-open="${esc(n.id)}">Open</button><button class="btn" data-card-expand="${esc(n.id)}" title="Add its neighbours to the canvas">Expand</button><button class="btn" data-card-focus="${esc(n.id)}">Focus</button></div>`;

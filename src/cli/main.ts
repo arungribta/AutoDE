@@ -25,8 +25,8 @@ import { draftSemanticModel } from '../engine/semantic/draft';
 import { resolveComposite } from '../engine/semantic/composite';
 import { newCompositeText } from '../engine/semantic/editorState';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
-import { renderAssetMarkdown, renderGraph, renderOverview, renderSearch } from '../engine/explore/render';
-import type { AssetContext, AssetType, ExploreOverview, GraphSlice, SearchResult } from '../engine/explore/explore';
+import { renderAssetMarkdown, renderGraph, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
+import type { AssetContext, AssetType, ExploreOverview, GraphSlice, Layer, SearchResult, SemanticOverview } from '../engine/explore/explore';
 import { problemTableIds } from '../engine/context/capture';
 import { createSubjectResolver } from '../engine/context/projection';
 import { EngineWorkspace } from '../mcp/workspace';
@@ -210,7 +210,8 @@ Semantic layer (approving is a person's: interactive terminal):
 
 Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer and MCP):
   explore                      Overview: objects, facts by status, systems, semantic models
-  explore search <words…> [--type table,column,glossary_term,…] [--system <s>] [--platform <p>] [--all]   Search names, aliases, synonyms, descriptions and facts; facet counts
+  explore search <words…> [--layer physical|context|semantic] [--type table,column,glossary_term,…] [--system <s>] [--platform <p>] [--all]   Search names, aliases, synonyms, descriptions and facts; facet counts
+  explore semantic             The semantic layer: each model's logical tables, metrics, relationships, verified queries and instructions
   explore asset <id|name>      Everything known about one asset: schema, meaning, relationships, governance, facts, decisions, used by
   explore graph [<id|name>] [--hops 1-3] [--system <s>] [--model <m>] [--columns]   The graph around an asset; with no asset, the landscape: tables and every relationship between them
 
@@ -339,6 +340,7 @@ const OPTIONS = {
   models: { type: 'string' },
   hops: { type: 'string' },
   type: { type: 'string' },
+  layer: { type: 'string' },
   model: { type: 'string' },
   columns: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
@@ -1406,9 +1408,14 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
   }
   if (sub === 'search') {
     const types = list(ctx.values.type ?? ctx.values.kind);
-    const r = ask({ type: 'search', query: words.join(' '), ...(types ? { assetTypes: types as AssetType[] } : {}), ...(ctx.values.system ? { systems: [ctx.values.system] } : {}), ...(ctx.values.platform ? { platforms: [ctx.values.platform] } : {}), ...(ctx.values.environment ? { environments: [ctx.values.environment] } : {}), limit: ctx.values.all ? 1000 : 25 }).result as SearchResult;
+    const r = ask({ type: 'search', query: words.join(' '), ...(list(ctx.values.layer) ? { layers: list(ctx.values.layer) as Layer[] } : {}), ...(types ? { assetTypes: types as AssetType[] } : {}), ...(ctx.values.system ? { systems: [ctx.values.system] } : {}), ...(ctx.values.platform ? { platforms: [ctx.values.platform] } : {}), ...(ctx.values.environment ? { environments: [ctx.values.environment] } : {}), limit: ctx.values.all ? 1000 : 25 }).result as SearchResult;
     emit(ctx, { ok: true, ...r }, renderSearch(r));
     return r.total ? EXIT.OK : EXIT.NOT_FOUND;
+  }
+  if (sub === 'semantic') {
+    const o = ask({ type: 'semantic' }).semantic as SemanticOverview;
+    emit(ctx, { ok: true, semantic: o }, renderSemantic(o));
+    return EXIT.OK;
   }
   const ref = words.join(' ');
   if (sub === 'graph' && !ref) {
@@ -1429,7 +1436,7 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, graph: r.slice }, renderGraph(r.slice as GraphSlice));
     return EXIT.OK;
   }
-  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, asset or graph.`);
+  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, semantic, asset or graph.`);
 }
 
 /** C5a: the semantic layer — shared models and the active problem's composites. */

@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.50.1 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.50.2 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -188,6 +188,12 @@ An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `bu
   - AutoDE's own facts are *knowledge facts*.
 
   Before naming a new concept, check §6.11; invent a name only for what no standard covers, and label it.
+- **Three layers** (v0.50.2, context-layer §6.1):
+  - **physical**: tables and columns;
+  - **context**: meaning (glossary, ontology) and knowledge (facts, rules, articles);
+  - **semantic**: semantic models and everything in them.
+
+  `LAYER_OF` in `explore.ts` assigns each asset type; a new asset type must be given a layer there. The ontology is context, not semantic.
 
 *Requirements CTX-8, GRD-10, UI-7; design §5.17.*
 

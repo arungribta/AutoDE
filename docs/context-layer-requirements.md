@@ -204,7 +204,24 @@ In short: capture doesn't depend on the model to find facts, decide what should 
 
 *Decided with the owner, 2026-10-27; replaces the earlier "semantic model projected from assertions". Built in phases C5a–C5d (§11); C5a (§6.1–6.5, the editor) shipped in v0.49.0. Ontology and terminology (§6.8), imports (§6.9) and the Knowledge Explorer (§6.10) were added on 2026-10-28 (§1.1).*
 
-### 6.1 Two layers
+### 6.1 Three layers (revised with the owner, 2026-10-28)
+
+The industry's usage, which the owner checked: a **semantic layer** is the governed, system-facing translation from data to agreed numbers (metrics, dimensions, joins) for BI tools and query engines. An **ontology** models the business's concepts and relationships, for comprehension rather than calculation. The **context layer** is the broader layer AI agents use. It holds business meaning (ontology, glossary), knowledge, governance, lineage, and who validated what, and it consumes the semantic layer. Vendors place the ontology inside the context layer or between the two, never inside the semantic layer. AutoDE therefore has three layers, and every asset names its layer:
+
+| Layer | Answers | Holds |
+|---|---|---|
+| **Physical** (the metadata the others rest on) | What exists? | Systems, tables, views, columns; pipelines and jobs (LIN) |
+| **Context** | What does it mean to the business, and what is known about it? | **Meaning:** ontology concepts (§6.8), glossary terms. **Knowledge:** knowledge facts, rules, decisions, assumptions, knowledge articles (§6.11). Governance; lineage (LIN). |
+| **Semantic** | How is it measured and queried? | Semantic models: logical tables, dimensions, time dimensions, facts, metrics, filters, relationships, verified queries, custom instructions |
+
+How they connect:
+- A **concept** (context) is **implemented by** logical tables and metrics (semantic).
+- Logical tables **map to** physical tables.
+- Physical tables and columns reach concepts through glossary terms; a table may also **represent** a concept directly (§6.8).
+- The context layer **consumes** the semantic layer: packs and grounding read its approved definitions.
+
+The two bullets below keep the semantic and context layers' roles. The physical layer is the context layer's foundation (the estate and its catalogs), shown apart in the Knowledge Explorer.
+
 
 - **The semantic layer** holds the governed business definitions as YAML files: what a metric means, which dimensions can slice it, how tables join for analysis, the questions it answers. They are authored (by people and agents), versioned in git, approved by a person, and deployed to the platform. It is a deliverable: what a BI tool or Cortex Analyst uses.
 - **The context layer** holds what AutoDE knows about the data, with evidence and trust: the knowledge (the facts in the ledger, the estate and its catalogs, the vocabulary, the pack's documents) and the **graph**, which links physical objects, facts and the semantic layer's elements. The context layer **uses** the semantic layer: packs and grounding read its approved definitions, so an agent can't invent a join or metric the semantic layer lacks.
@@ -280,7 +297,9 @@ Translations are deterministic and tested like primitives. Emerging cross-vendor
 - **The sidebar's context drawer** becomes one status line linking both; its controls for the older knowledge files go.
 - **CLI:** `autode semantic show | check | draft | resolve | approve`. **MCP:** read tools and a file resource; changes from agents are proposals.
 
-### 6.8 Ontology and business terminology (owner, 2026-10-28; ONT1, ONT2)
+### 6.8 Ontology and business terminology — the context layer's meaning (owner, 2026-10-28; ONT1, ONT2)
+
+*Placement revised 2026-10-28 (§6.1): the ontology and the glossary are part of the context layer, not the semantic layer; the semantic layer implements concepts as logical tables and metrics.*
 
 Meaning has three layers:
 
@@ -314,7 +333,19 @@ Example: `fibo:LoanContract` ← enterprise term "Facility" ← system term "Dea
 - Resolution prefers the most specific scope and keeps the others.
 - Legacy physical names (`cust_no`) stay vocabulary aliases. They are not terms.
 
-**One place for meaning.** A term means a concept. Columns and semantic elements reach concepts through the terms bound to them, so meaning is never stated twice and can't drift. A semantic logical table with no term may align to a concept directly; the semantic check lists such tables.
+**One place for meaning.** A term means a concept. Columns and semantic elements reach concepts through the terms bound to them, so meaning is never stated twice and can't drift.
+
+**Entity-level links.** A table (physical) or a logical table (semantic) may **represent** a concept directly, as Collibra's *represents* relation does: "`shop.customers` represents Customer". This is how estate merge finds candidates for the same entity across systems. Columns still reach concepts only through terms. A *represents* link is a fact, with evidence and trust; it is checked against the terms of the table's key columns, and a disagreement is a conflict.
+
+**Concept page (ONT1).** It is computed and nothing is stored. Every path to the concept is followed:
+- terms by scope;
+- the tables that represent it, and the columns bound through terms, per system;
+- the logical tables and metrics that implement it;
+- the facts about all of these, and the rules that apply;
+- the knowledge articles about it;
+- conflicts and gaps.
+
+On every surface: the Explorer, `autode explore concept`, and `autode_get_concept_context`.
 
 **What it is used for:**
 - Resolution returns the chain (column → alias → term → concept) as its evidence (ONT2).
@@ -415,6 +446,12 @@ A webview panel, like the Workflow tab, where data engineers and architects expl
   - Its edges are every relationship AutoDE knows: declared foreign keys, confirmed relationship facts, proposed ones (dashed) and semantic-layer joins (dotted), each labelled with its columns.
   - In every graph, a click shows a summary card, a double-click expands a node's neighbours in place, and *Find* highlights matches and dims the rest.
 
+- **Layers (v0.50.2):**
+  - Every asset carries its layer (§6.1), as a badge and as the graph node's fill colour.
+  - A layer switch in the header (All, Physical, Context, Semantic) is a shortcut for the Layer facet, the first facet.
+  - The **Semantic** switch opens the semantic layer's home page: each model with its status, logical tables, metrics, relationships, verified queries and custom instructions, with *Open in Semantic Model editor*.
+  - Relationships, verified queries and custom instructions are assets in their own right, so they can be searched and opened. A physical table's *Used by* lists the verified queries over its logical tables.
+
 **Every view has a CLI and an MCP equivalent**, so external AI agents, and data engineers without VS Code, can use the layers: search, asset context (§7.5), lineage, impact, concepts and terms, through `autode explore …` and the MCP read tools and resources (§9).
 
 ---
@@ -432,7 +469,10 @@ AutoDE's own extensions are labelled as such: the five evidence tiers on facts, 
 
 | Concept | What it is | Standard anchor | Until MM |
 |---|---|---|---|
-| **Asset type** | Table, view, column, glossary term, rule, verified query; semantic model, logical table, dimension, time dimension, fact, metric, filter; knowledge fact | Catalog asset or entity types; Snowflake semantic model names | Shipped v0.50.1 |
+| **Layer** | Physical, context, semantic (§6.1) | The 2025–26 usage of *semantic layer*, *ontology* and *context layer* | Shipped v0.50.2 |
+| **Asset type** | Table, view, column, glossary term, rule; semantic model, logical table, dimension, time dimension, fact, metric, filter, relationship, verified query, custom instructions; knowledge fact | Catalog asset or entity types; Snowflake semantic model names | Shipped v0.50.1; relationships, verified queries and instructions as assets in v0.50.2 |
+| **KPI** | A metric designated as key: a metric tagged `kpi`, not a separate type | No standard has a KPI asset type | MM (tags); a *KPIs* filter |
+| **Knowledge article** | An authored, reviewed write-up of what atomic facts can't express (pitfalls, history, golden sources, how to reconcile). Markdown with front matter, versioned in git. It **cites** facts by id and never copies them, and goes stale when a cited fact changes. It links many-to-many to concepts, assets, terms and domains (`about`), with an author, a reviewer and a status. Agents get the approved articles that cover a task's assets or concepts in their packs. | KCS knowledge articles; OpenMetadata's Knowledge Center | MM (concept links in ONT1) |
 | **System / platform / environment** | The logical source (crm); the technology (Snowflake); prod, dev | Collibra *System*; DataHub *Platform* and *Environment* | Shipped v0.50.1 |
 | **Glossary term** | Definition, synonyms, abbreviation, examples, related, broader and narrower terms, steward, status (draft, approved, deprecated); organised as glossary → category → term; assigned to assets; it *means* a concept (§6.8) | W3C **SKOS**; the glossary models of DataHub, OpenMetadata, Collibra and Atlan | Flat `business_term` facts, assigned to assets |
 | **Tag** | `key=value` labels without a definition, optionally from a controlled tag group | Snowflake object tags and Unity Catalog tags (same shape, so they import and deploy as they are); DataHub tags | None |
@@ -748,6 +788,14 @@ Scope: §6.11.
 - **Classifications** as their own concept: GOV's are migrated from `business_rule`.
 - **Rules:** typed (definition, validation, policy, standard, guidance) with modality, scope and expression. STRICT and RECOMMENDED are migrated to mandatory and advisory. Guidance rules are delivered in packs.
 - **Ownership roles, domains and data products, certification set by a person, custom properties, quality dimensions.**
+- **Knowledge articles** (the table above):
+  - files under `.autode/knowledge/articles/`;
+  - citations, with staleness when a cited fact changes;
+  - `about` links to assets, terms and domains;
+  - a draft-and-approve flow, in which a skill drafts an article from what is known and a person approves it;
+  - inclusion in packs, replacing the keyword-matched knowledge skills for knowledge about entities (skills stay for procedures);
+  - on every surface: `autode_search_articles`, `autode explore articles`.
+- **The `kpi` tag** and a *KPIs* filter.
 - **Every surface:** every Explorer facet, asset section, CLI view and MCP field.
 - **Migration:** existing facts are converted automatically and the change is recorded in the ledger.
 
@@ -755,6 +803,7 @@ Acceptance:
 - On the reference problem every concept of §6.11 appears on asset pages, with an empty section that says how to fill it.
 - GOV classifications and existing rules migrate without loss, and the ledger records each migration.
 - A guidance rule appears in the pack of every task over its assets.
+- An approved article about `shop.orders` appears in a step pack over `shop.orders`, cited by id. Superseding a fact it cites makes it stale, with the reason.
 - Tags written as `key=value` round-trip with Snowflake tag syntax (golden).
 - The domain, owner and tag facets are live.
 
@@ -772,7 +821,8 @@ Acceptance:
 Scope:
 - §6.8: the upper layer; the pack format; a FIBO pack (about 20–40 core concepts, starting with lending); onboarding a standard in the Explorer, on the CLI (`autode ontology`) and over MCP; term scope and `means` links.
 - The semantic architect role, its skills, and the `semantic-foundation` workflow template.
-- The Explorer's ontology and glossary view.
+- The Explorer's ontology and glossary view, and the **concept page** (§6.8): `autode explore concept`, `autode_get_concept_context`.
+- Concept links on knowledge articles, and *represents* links from tables.
 - The RDF parser's P6 decision record.
 - A small lending fixture beside the retail reference problem.
 
