@@ -688,9 +688,13 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](roadmap.md)):
 
-- **The Knowledge Graph window** (v0.50.0): explore objects, facts and semantic elements in a window of their own; context packs and grounding use the approved semantic layer, so an agent can't invent a join or metric it lacks.
-- **Deploying the semantic layer** (v0.51.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
-- **Merge semantics** (v0.52.0): conformed dimensions and survivorship across systems, in shared models and composites.
+- **The Knowledge Explorer** (v0.50.0): search everything AutoDE knows, open a page for any table, column, term or semantic element, and explore the graph. The same is available from `autode explore` and over MCP. Context packs and grounding use the approved semantic layer, so an agent can't invent a join or metric the layer lacks.
+- **Lineage and impact** (v0.51.0): table and column lineage from the platform, your mappings and AutoDE's artifacts; owners and domains; what a change would break.
+- **Ontology and terminology** (v0.52.0–v0.53.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
+- **AtScale import** (v0.54.0); Horizon, Collibra and Unity Catalog later.
+- **Deploying the semantic layer** (v0.55.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
+- **Merge semantics** (v0.56.0): conformed dimensions and survivorship across systems, in shared models and composites.
+- **Patterns and recommendations** (v0.57.0): SCD2, CDC merge and snapshot primitives; a recommended pipeline type with its reasons; team preferences; data contracts for the tables you build.
 
 ---
 

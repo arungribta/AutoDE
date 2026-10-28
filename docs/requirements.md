@@ -40,8 +40,8 @@ This document states what AutoDE does and why; requirements marked *Planned* or 
 | Capability area (this document) | Specified in | Phases (order: [roadmap.md](roadmap.md)) |
 |---|---|---|
 | Business problem and specification (BPS), Conversation (CHT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA3 (built-in skills, incl. the interview) | PA3 |
-| Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §5.5 capture coverage, §6 semantic layer, §7.4 exploration mode, §8 freshness and health | C4c, C5a–C5d, C6; migration track M1–M3 (not yet written) |
-| Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §10 grounding checks and metrics | C5, C6 |
+| Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §1.1 enterprise context, §5.5 capture coverage, §6 semantic layer, ontology (§6.8), imports (§6.9), Knowledge Explorer (§6.10), §7.4 exploration mode, §8 freshness and health, lineage (§8.5) | C4c, C5a–C5d, LIN, ONT1, ONT2, IMP1–IMP4, C6; migration track M1–M3 (not yet written) |
+| Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §7.5 asset context and explainability, §10 grounding checks and metrics | C5, C6 |
 | Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client (secrets passed to the server it starts) | 5 |
 | Planning and orchestration (ORC), Generation (GEN) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §3.1 and §9.2 portable architecture, §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer-requirements.md](context-layer-requirements.md) §6 semantic layer, §7.4 exploration mode | PA1, PA3, 5, 6, GOV, C4c, C5a–C5d |
 | Tool skills (SKL) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 Phases PA3, PA4, §9 Phase 6 | PA3, PA4, 6 |
@@ -49,7 +49,7 @@ This document states what AutoDE does and why; requirements marked *Planned* or 
 | Governance and security (SEC) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase GOV | GOV |
 | Non-functional (NFR) | [context-layer-requirements.md](context-layer-requirements.md) §10.2 metrics, §11 Phase C6 release evaluation | C6 |
 
-Workspace (WS), LLM providers (LLM) and user experience (UI) have no open specification; their open items are in the roadmap's backlog.
+Workspace (WS) and LLM providers (LLM) have no open specification; their open items are in the roadmap's backlog. User experience (UI): the Knowledge Explorer is specified in [context-layer-requirements.md](context-layer-requirements.md) §6.10 (C5b, LIN, ONT1); other open items are in the backlog.
 
 ## 2. Principles
 
@@ -146,14 +146,29 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **CTX-5 — Business context is registered from repository files** — glossary terms, rules (STRICT or recommended), verified queries — and edits to them take effect. *Status:* Shipped v0.8.0; since v0.36.0 edits take effect without a reload.
 - **CTX-6 — Context documents are schema-validated;** old data that fails a newer check still loads, with a warning. *Status:* Shipped v0.29.0.
 - **CTX-7 — The record can be compacted;** history is deleted only on an explicit request. *Status:* Shipped v0.29.0.
-- **CTX-8 — The context layer is visible in the UI,** read-only: layers, terms, rules, queries, relationships, conflicts. *Status:* Partial — tables, business terms, verified queries and registered sources are shown; rules, relationships, conflicts and trust are not. A Knowledge Graph window (graph, facts, estate) and a Semantic Model editor replace the sidebar drawer in C5a–C5b.
+- **CTX-8 — The context layer is visible in the UI,** read-only: layers, terms, rules, queries, relationships, conflicts. *Status:* Partial — tables, business terms, verified queries and registered sources are shown; rules, relationships, conflicts and trust are not. The Semantic Model editor shipped in v0.49.0; the Knowledge Explorer (UI-7) replaces the sidebar drawer in C5b.
 - **CTX-9 — Claims are verified against data where possible** (uniqueness, nullability, accepted values, join orphan rates, freshness), returning aggregates only. *Status:* Shipped v0.33.0 — fixed read-only templates per platform, sampled; run on a live connection, or over sample files the customer supplied when there is none. A pass raises the claim to verified; a failure sends it to review with the observed counts. On demand (a command); automatic probing of new claims is not yet on.
 - **CTX-10 — The engineer confirms, edits or rejects proposed facts in one place** (Context Inbox), alongside conflicts, plan steps waiting for context, and proposed changes. A correction replaces the fact it corrects only once confirmed; facts checkable against data can be verified from there; documented facts from one source can be confirmed together. Agents in other tools may confirm only minor facts (glossary terms, naming conventions, assumptions), after asking their user. *Status:* Shipped v0.41.0. Since v0.43.3 the same review works from a terminal (confirm, reject, edit, bulk-confirm documented facts, and conflicts), with the same rules: a person decides, and agents decide only low-stakes facts.
 - **CTX-11 — A semantic layer of governed business definitions,** kept as Snowflake semantic model YAML: shared models per subject area in the deliverables folder, and per business problem composites that use them without redefining them, resolved into deployable models. Drafted from confirmed facts, checked against the estate and the facts, approved by a person, deployed as Snowflake semantic views, Databricks metric views or dbt MetricFlow. *Why:* one definition of each metric and join across use cases, deployable where the business consumes it (P2, P8). *Status:* Partly shipped in v0.49.0 (C5a: shared models, composites and resolution, drafting from facts, checks, approval, the Semantic Model editor, `autode semantic`). Packs and grounding using it: C5b; deployment: C5c; merge semantics: C5d.
 - **CTX-13 — Capture doesn't depend on the model to find facts, decide what should be known, or be believed unchecked:** a deterministic completeness checklist per table and metric, keys and relationships found from the data and verified by probes, document facts checked against verbatim quotes with every section accounted for, and the model recorded on every fact it extracted. *Why:* model quality varies; robustness has to come from AutoDE (P2). *Status:* Shipped v0.48.0: the checklist (`autode coverage`), candidates from data (`autode capture candidates`), quote checks, section re-reads, parsed tables and phrases, corroboration, optional double reading, `/review`. The per-model benchmark is C6.
 - **CTX-12 — Freshness and health are tracked;** stale facts are labelled, and a health view summarises the layer. *Status:* Planned (C6).
+- **CTX-14 — Meaning is anchored in an industry-standard ontology and the organisation's own terminology.**
+  - A canonical ontology: a small upper layer, curated subsets of standards (FIBO first), grown per business problem, and team extensions.
+  - Business terms, each with a scope (enterprise, line of business, system, problem), linked to concepts.
+  - Columns and semantic elements reach meaning through their terms.
+  - Standards and house ontologies are onboarded through a guided step on every surface, helped by a semantic architect agent and approved by a person.
+  - Resolution, mapping, quality-rule and governance suggestions use the meaning, with the chain as evidence.
 
-*Planned work:* semantic model — §6 (C5); freshness policy and context health — §8.2, §8.4 (C6).
+  *Why:* names differ across systems and organisations; a shared meaning makes mapping, merging and impact reasoning reliable and explainable (C3, C6). *Status:* Planned (ONT1, ONT2).
+- **CTX-15 — Lineage is known at table and column level, and the impact of a change can be traced.**
+  - Lineage sources: observed on the platform, designed in mappings and specifications, generated in artifacts, and logical through the semantic layer.
+  - Owners and domains on objects.
+  - Impact lists the affected pipelines, artifacts, semantic models, reports, domains and business problems, each with the path to it, by graph traversal.
+
+  *Why:* change is the riskiest act in data engineering, and an agent must know what a change breaks (P2). *Status:* Planned (LIN). Platform metadata extraction already reads lineage, but it isn't stored.
+- **CTX-16 — Definitions and metadata from the customer's tools can be imported:** AtScale (first), Snowflake Horizon, Collibra and Unity Catalog, into facts and semantic models through the usual gates. *Why:* customers already hold this knowledge, and AutoDE should use it rather than rebuild it. *Status:* Planned (IMP1; IMP2–IMP4 unscheduled).
+
+*Planned work:* semantic model — §6 (C5); ontology and terminology — §6.8 (ONT1, ONT2); imports — §6.9 (IMP1–IMP4); lineage and impact — §8.5 (LIN); freshness policy and context health — §8.2, §8.4 (C6).
 
 ### 3.6 Context delivery and grounding (GRD)
 
@@ -167,7 +182,13 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **GRD-8 — Retrieval finds the right objects when the request's vocabulary differs from physical names** — synonyms, abbreviations, another organisation's terms. Deterministic signals first; embeddings only as an optional signal if measurement shows they're needed. *Why:* merges and legacy estates. *Status:* Shipped v0.32.0. Since v0.43.3 vocabulary can also be mined and accepted from a terminal, and proposed by an agent as a low-stakes decision. It covers abbreviations, synonyms, the customer's own vocabulary, table and column comments and glossary terms; on the reference question set 17 of 21 found, against 3 of 21 from names alone. Free paraphrases ("money customers got back") are not covered; embeddings (RET) are not scheduled, see the roadmap's decision log. Since v0.33.0 the customer's vocabulary can be captured from their documents: abbreviations are mined from names and the comments that spell them out, the LLM proposes further entries from the pack, and the engineer accepts each one. With vocabulary captured from the reference customer's glossary, 19 of 21 are found and 2 of the 4 paraphrases; the two still missed share no word with the table they mean, or rank a sibling table first.
 - **GRD-9 — Grounding and accuracy are measured on a reference problem for every release** (C7), with frozen baselines so every change shows its effect; the results become a release gate. *Status:* Shipped v0.27.0 (release gate Planned C6).
 
-*Planned work:* decision backing against the semantic model — §10.1 (C5); release metrics and ablation — §10.2, §11 Phase C6.
+- **GRD-10 — Any asset's full context is available on request, and every recommendation explains itself.**
+  - Asset context covers metadata, meaning, lineage, governance, patterns and memory, each item with its source and trust.
+  - A recommendation carries its decision, reason, evidence, and a confidence derived from the trust of its backing facts. A model never states the confidence itself.
+
+  *Why:* data engineers and external agents need to see why, not only what (C6). *Status:* Planned (C5b).
+
+*Planned work:* decision backing against the semantic model — §10.1 (C5); asset context and explainability — §7.5 (C5b); release metrics and ablation — §10.2, §11 Phase C6.
 
 ### 3.7 Planning and orchestration (ORC)
 
@@ -194,9 +215,16 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **GEN-4 — A Pipeline Specification can be generated:** a strictly validated, deterministically compiled, per-entity contract, with a design document derived from it so the two can't drift. *Status:* Shipped v0.14.0.
 - **GEN-5 — Artifacts are written to a visible folder per business problem, phase and specification version;** earlier revisions are kept; artifacts are committed as deliverables. *Status:* Shipped v0.9.0 / v0.12.0.
 - **GEN-6 — Migration programmes are supported at scale:** assessment and wave planning, rule-based mapping and generation across many objects, importing external code-converter output, and reconciliation proving the target matches the source. *Status:* Planned (M1–M3).
+- **GEN-8 — Engineering patterns, preferences and recommendations.**
+  - Patterns as primitives: SCD2, CDC merge, snapshot, watermark loads.
+  - A pipeline type (batch, micro-batch, CDC, streaming) recommended from facts, with justification.
+  - The team's preferences (prefer or avoid, scoped) rank the candidates.
+  - Data contracts for produced tables, generated from the semantic layer, governance, lineage and owners.
+
+  *Why:* enterprise-aware generation, not just syntactically correct code (P1, C3). *Status:* Planned (PAT).
 - **GEN-7 — Further generators:** DDL, orchestration (Airflow, Dagster, Prefect) and tests as dedicated agents. *Status:* Not met (DDL likely covered by M2).
 
-*Planned work:* per-dialect primitives, conformance suite, dry-run before execute, idempotent DDL — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9 Phase 6; semantic-model exports — [context-layer-requirements.md](context-layer-requirements.md) §6 (C5).
+*Planned work:* per-dialect primitives, conformance suite, dry-run before execute, idempotent DDL — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9 Phase 6; semantic-model exports — [context-layer-requirements.md](context-layer-requirements.md) §6 (C5); patterns and recommendations — §7.6 (PAT).
 
 ### 3.9 Conversation (CHT)
 
@@ -238,7 +266,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **MCP-2 — Other agents can propose changes, never make them:** facts (through the Context Inbox since v0.41.0), specification changes, Pipeline Specs, mappings, platform changes and (since v0.43.1) data-platform connections are submitted through validated proposals that become decisions (ORC-8). *Why:* agents in other tools should contribute to the same project without bypassing review. *Status:* Shipped v0.40.0. A platform change runs only after a person approved it, and only on a server started with write permission.
 - **MCP-3 — AutoDE works without VS Code:** its server and a command-line tool are installable on their own, at a stable location, with deterministic commands suitable for CI and human-only decision commands. *Why:* other hosts and pipelines must not depend on the VS Code extension being installed. *Status:* Shipped v0.42.0. One package, built from the same code the extension ships, holds the engine, the MCP server and the command line, and needs nothing but Node. The deterministic commands validate the problem's documents, compile the Pipeline Spec, check SQL against the estate, check pack contracts and probe claims (reporting only, recording nothing), and diagnose prerequisites and connections. A CI gate fails when validation fails or a consequential decision is still pending, with documented, stable exit codes. Approving or rejecting a decision needs a person at an interactive terminal who types the verb to confirm, and is refused whenever `CI` is set. The package is built as a tarball; publishing it to a registry is the owner's decision.
 
-*Planned work:* AutoDE skills in other hosts — PA3; verifying assertions, semantic-model resources — [context-layer-requirements.md](context-layer-requirements.md) §9 (C4b, C5).
+*Planned work:* AutoDE skills in other hosts — PA3; verifying assertions, semantic-model resources, asset context, lineage, impact and ontology tools for external agents — [context-layer-requirements.md](context-layer-requirements.md) §9 (C4b, C5, LIN, ONT1).
 
 ### 3.13 Governance and security (SEC)
 
@@ -257,6 +285,14 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **UI-3 — Every request shows one evolving progress indicator,** and sending is disabled while one is running. *Status:* Shipped v0.9.0.
 - **UI-4 — Controls are usable by keyboard and screen readers.** *Status:* Partial (not verified).
 - **UI-5 — A short style guide documents colour tokens and component rules.** *Status:* Not met.
+- **UI-7 — A Knowledge Explorer for data engineers and architects,** as professional and easy to use as a modern data catalog:
+  - search with facets;
+  - an asset page per object, column, term, concept and semantic element, with tabs for overview, schema, meaning, lineage, facts, governance and use;
+  - a graph explored one hop at a time;
+  - lineage and impact views;
+  - an ontology and glossary browser.
+
+  It is read-only, theme-aware, usable by keyboard, and fast on large estates. Every view has a CLI and MCP equivalent. *Why:* the context and semantic layers must be explorable to be trusted (C6). *Status:* Planned (C5b; lineage in LIN; ontology in ONT1).
 - **UI-6 — Dashboard panel.** *Status:* Parked (v0.13.0); removed in v0.45.9 (owner's choice): the Workflow view shows progress and each stage's outputs.
 
 ---

@@ -17,6 +17,40 @@ Industry direction this follows (adopt the principles, not the products):
 
 *Revised 2026-10-15:* estates larger than this are common (estate merge, legacy migration). The target above now describes a business problem's **working set**; the estate around it is handled by Phase K's per-system catalogs and tiered working-set cache, and an embedded store is adopted only if K's scale measurements require it.
 
+### 1.1 Enterprise context (owner, 2026-10-28)
+
+The owner reviewed a proposal for an "enterprise context and semantic intelligence platform" of eleven layers, consulted by every agent before it decides. AutoDE adopts the intent: agents decide from enterprise knowledge with evidence, not from prompts alone, and every capability (mapping, SQL, models, pipelines, quality, governance, impact, documentation) uses it. AutoDE does not adopt the proposal's architecture of separate repositories:
+- Most of the layers already exist here under other names.
+- The customer's enterprise tools are sources and export targets. AutoDE doesn't rebuild them (§6.9, §12).
+- A vector store stays out (§12).
+- The semantic layer stays Snowflake semantic model YAML.
+
+| Proposed layer | In AutoDE | Added by |
+|---|---|---|
+| Metadata repository | Estate, catalogs, profiles (K1, K2) | Owner and domain on objects; non-table assets where lineage names them (§8.5, LIN) |
+| Business semantics: glossary, metrics, rules | Vocabulary and `business_term` facts; the semantic layer (§6); `business_rule` facts | Terms gain a scope and a meaning (§6.8, ONT1) |
+| Ontology | — | Canonical ontology: upper layer, industry packs, extensions (§6.8, ONT1) |
+| Knowledge graph | Graph projection (§4.3) | Concept, domain, owner, pipeline and policy nodes; traversal tools (C5b, LIN, ONT1) |
+| Lineage | The adapters extract lineage edges; nothing stores them | Observed, designed, generated and logical lineage; impact analysis (§8.5, LIN) |
+| Entity resolution | `resolveText`, vocabulary, column matching with mapping precedents | Resolution through concepts, returning the evidence chain (§6.8, ONT2) |
+| Pattern library | Primitives, declarative primitives, platform skills | SCD2, CDC merge, snapshot; pipeline-type recommendation (§7.6, PAT) |
+| Governance repository | Classifications and masking (GOV) | Policies as data; applicable policies per asset (ONT2) |
+| Agent memory | `decision` facts, team-wide predicates, mapping precedents, Team Knowledge | Scoped preferences that rank candidates (§7.6, PAT) |
+| Vector retrieval | Not adopted (§12) | — |
+| Context APIs | Context packs, `autode_resolve`, assertion queries | Asset context (§7.5, C5b) |
+
+The proposal's workflow enhancements map to phases:
+
+| Enhancement | Delivered by |
+|---|---|
+| Source-to-target mapping through meaning; quality rules inferred from semantics | ONT2 |
+| SQL generation aware of semantics, governance and patterns | C5b grounding, ONT2, PAT |
+| Pipeline design recommendation | PAT |
+| Cross-domain lineage and impact analysis | LIN |
+| Data contracts and design recommendations | PAT |
+
+Its explainability shape (decision, reason, evidence, confidence) is adopted with one change: confidence is derived from the trust of the backing facts, not a number a model states (§7.5).
+
 ---
 
 ## 2. Gaps at baseline (verified against the code)
@@ -168,7 +202,7 @@ In short: capture doesn't depend on the model to find facts, decide what should 
 
 ## 6. Semantic layer
 
-*Decided with the owner, 2026-10-27; replaces the earlier "semantic model projected from assertions". Built in phases C5a–C5d (§11); C5a (§6.1–6.5, the editor) shipped in v0.49.0.*
+*Decided with the owner, 2026-10-27; replaces the earlier "semantic model projected from assertions". Built in phases C5a–C5d (§11); C5a (§6.1–6.5, the editor) shipped in v0.49.0. Ontology and terminology (§6.8), imports (§6.9) and the Knowledge Explorer (§6.10) were added on 2026-10-28 (§1.1).*
 
 ### 6.1 Two layers
 
@@ -242,9 +276,139 @@ Translations are deterministic and tested like primitives. Emerging cross-vendor
 ### 6.7 Interfaces
 
 - **Semantic Model editor:** a custom text editor on the YAML files (the file is the source of truth; undo, diffs and git come with it). It has a form view (tables, dimensions, metrics, relationships), a relationship diagram and the raw YAML. Check results are shown inline. Actions: draft from knowledge, resolve (composites), approve, deploy.
-- **Knowledge Graph window** (a webview panel like the Workflow tab): **Graph** (explore physical objects, facts and semantic elements a hop at a time; trust shown on every element; gaps shown, not hidden), **Facts** (filterable, with evidence and history; the Context Inbox stays in the sidebar as the to-do list), **Estate** (systems, environments, catalog). A semantic element opens in the Semantic Model editor.
+- **Knowledge Explorer** (renamed from "Knowledge Graph window" on 2026-10-28, when its scope grew): §6.10. A semantic element opens in the Semantic Model editor.
 - **The sidebar's context drawer** becomes one status line linking both; its controls for the older knowledge files go.
 - **CLI:** `autode semantic show | check | draft | resolve | approve`. **MCP:** read tools and a file resource; changes from agents are proposals.
+
+### 6.8 Ontology and business terminology (owner, 2026-10-28; ONT1, ONT2)
+
+Meaning has three layers:
+
+```
+canonical ontology      upper layer (always present, shipped with AutoDE)
+  ├ industry packs      derived from a standard (FIBO first), grown per business problem
+  └ extensions          the team's own concepts (ext:), including a house ontology
+        ▲  means: exact | broader | narrower | related
+business vocabulary     the organisation's terms, scoped: enterprise | line of business | system | problem
+        ▲  bound to
+semantic layer (§6.3) and the physical estate
+```
+
+Example: `fibo:LoanContract` ← enterprise term "Facility" ← system term "Deal" (scope: the legacy LOANSYS system) ← semantic table `loans` ← physical table `LOAN_APPL`. Every link carries evidence and trust, so the chain is the explanation an agent gives for what it matched.
+
+**Canonical ontology.**
+- **Upper layer.** It has eight concepts: Party, Agreement, Product, Account, Transaction, Location, Event and Document. Every industry pack places each of its concepts under one of them. This gives estates that span industries a common meeting point (C5d).
+- **Industry packs.** A pack is a curated, problem-relevant subset of a standard, never the whole standard. FIBO, for banking, is first.
+  - Each concept keeps its source IRI, its standard and the standard's pinned version, and its licence.
+  - A pack holds concepts (each under a parent concept), relations (verb, target concept, cardinality hint), identifying and notable attributes, and synonyms.
+  - It also holds hints: typical classifications and typical quality rules.
+- **Extensions.** Concepts a standard lacks go under `ext:`, optionally marked `broader` than a standard concept. Most analytical concepts are extensions. A team's house ontology is an extension pack.
+- **Light by design.** Classes, subclasses, relations with cardinality hints, and attributes. No OWL axioms and no reasoner. Packs are plain YAML (`autode: ontology-pack/1`): deterministic and diffable.
+- **Grows on demand.** When a business problem touches a concept the workspace lacks, AutoDE offers it, with its one-hop neighbourhood, from the pack's source. A pack starts small (about 20–40 core concepts per industry) and grows with use.
+- **Shared by every problem.** Importing, changing or deprecating a concept is a workspace-level decision for a person, the same as a shared semantic model change (§6.5). Concepts are deprecated, never deleted.
+
+**Business vocabulary.** These are the existing vocabulary and `business_term` facts.
+- A term gains a **scope**: the enterprise, a line of business, a named system, or one business problem.
+- A term gains **`means`** links to concepts, each with a match type.
+- Links are facts, with evidence and trust, reviewed in the Context Inbox.
+- Resolution prefers the most specific scope and keeps the others.
+- Legacy physical names (`cust_no`) stay vocabulary aliases. They are not terms.
+
+**One place for meaning.** A term means a concept. Columns and semantic elements reach concepts through the terms bound to them, so meaning is never stated twice and can't drift. A semantic logical table with no term may align to a concept directly; the semantic check lists such tables.
+
+**What it is used for:**
+- Resolution returns the chain (column → alias → term → concept) as its evidence (ONT2).
+- Column matching for mappings considers concepts (ONT2).
+- Two systems' entities that mean the same concept become correspondence candidates; a person confirms (C5d).
+- Pack hints become candidate classifications and quality rules at `documented` trust. They are never applied silently (ONT2).
+- Concepts are graph nodes, so impact and cross-domain traversal pass through meaning.
+
+The ontology never blocks a gate: a problem without a pack works as before.
+
+**Onboarding a standard (ONT1).** A guided step in the Knowledge Explorer. The same steps exist on the CLI (`autode ontology …`) and over MCP, where analysis is read-only and the import is a proposal.
+1. **Source:** a pack shipped with AutoDE, or a file or Git repository the user supplies (OWL in Turtle or RDF/XML, SKOS, or a pack). Nothing is downloaded automatically (P6). A Git source is staged with the same limits and checks as porting a skill (PA4).
+2. **Analysis:** concepts, relations, modules, version and licence. If the licence forbids redistribution, the result stays in the team's workspace only.
+3. **Scope:** the semantic architect proposes seed concepts from the problem's documents, vocabulary and estate, expanded one hop. The person adjusts them.
+4. **Placement and terms:** each concept is placed under the upper layer, and `means` links are proposed for the workspace's vocabulary.
+5. **Approval:** a person approves, as a workspace-level decision. The pack is written to `.autode/knowledge/ontology/`.
+
+Packs shipped with AutoDE live in `ontologies/`. FIBO comes first; others follow when an engagement needs them and their licence allows redistribution, which is checked when each pack is planned. Other standards are imported from the team's own copy. Parsing OWL needs an RDF parser, which requires a P6 decision record (licence, size) at ONT1. Shipped packs are converted when AutoDE is built, so at runtime the parser is needed only for files a user supplies.
+
+**The semantic architect (ONT1).**
+- A new role template, `agents/semantic-architect.md`.
+- Its skills cover:
+  - semantic modelling: drafting and refining shared models and composites, synonyms and verified queries;
+  - onboarding a standard: proposing seed concepts and their placement;
+  - term alignment: proposing `means` links with evidence.
+- The context curator keeps capturing facts, documents and vocabulary.
+- A workflow template, `semantic-foundation`, runs the role: onboard a standard → align the vocabulary → draft shared models → approve.
+
+### 6.9 Importing from semantic and catalog tools (IMP1–IMP4; owner, 2026-10-28)
+
+The customer's tools are sources and export targets; AutoDE doesn't replace them (§12). The owner's order is AtScale, Snowflake Horizon, Collibra, then Unity Catalog, starting with AtScale.
+
+- **AtScale (IMP1).** SML (Semantic Modeling Language, YAML) imports into shared models and composites:
+
+  | SML | AutoDE |
+  |---|---|
+  | Datasets | Tables |
+  | Dimensions and hierarchies | Dimensions (hierarchy levels go into descriptions; the Snowflake format has no hierarchies) |
+  | Metrics and calculated metrics | Metrics |
+  | Relationships | Relationships |
+  | Models | Composites |
+
+  Anything that doesn't translate is listed, never dropped silently. Export back to SML supports round trips. Both directions are deterministic and tested on golden files.
+- **Horizon (IMP2):**
+  - tags and classifications → governance facts;
+  - comments → documented descriptions;
+  - existing semantic views → shared models.
+
+  Lineage comes from LIN's observed lineage.
+- **Collibra (IMP3):** business assets (terms, definitions, domains, stewards) → scoped terms with owner and domain; Collibra's relations → `means` links and relationship facts.
+- **Unity Catalog (IMP4):** tags, comments, owners and metric views, imported as above.
+
+Imported items become `documented` facts or proposed semantic models, through the usual gates. An import can be run again: it supersedes only what changed, as interpretation profiles do (C4a). IMP2–IMP4 are specified when they are planned.
+
+### 6.10 Knowledge Explorer (C5b; grown by LIN and ONT1; owner, 2026-10-28)
+
+A webview panel, like the Workflow tab, where data engineers and architects explore what AutoDE knows. It should feel as professional and easy to use as a modern data catalog, inside the editor. It is read-only by default: every change goes through the existing channels (proposals, the Context Inbox, decisions, the Semantic Model editor).
+
+- **Search everywhere.** One search box across objects, columns, terms, concepts, semantic elements, facts and artifacts. It matches names, aliases, synonyms and comments (K2's retrieval). Facets: type, system, environment, domain, owner, trust, status, classification and staleness.
+- **Asset page** for every object, column, term, concept and semantic element. Its tabs:
+
+  | Tab | Shows |
+  |---|---|
+  | Overview | Description, owner, domain, system and environment, freshness |
+  | Schema | Columns, types, keys, classification, profile |
+  | Meaning | Terms, the concept chain, semantic elements |
+  | Lineage | Upstream and downstream (LIN) |
+  | Facts | Facts with evidence, trust and history |
+  | Governance | Classifications, masks, applicable policies |
+  | Used by | Business problems, artifacts, semantic models, pipelines |
+
+  Navigation: breadcrumbs, back and forward, and deep links into the Semantic Model editor, the file, or the Inbox.
+- **Graph.**
+  - Explore one hop at a time from any asset; filter by node and edge type; focus on or hide nodes.
+  - A layered layout for lineage and a force layout for the ontology.
+  - Trust is shown on every element, and gaps are shown, not hidden.
+  - A cap on visible nodes, with "+N more".
+  - Export as SVG or PNG.
+- **Lineage and impact (LIN).**
+  - Table and column level, upstream and downstream, with depth control.
+  - Each edge is labelled observed, designed or generated.
+  - Impact mode lists what a change would affect, grouped by schema, pipeline, semantic model, report, artifact and domain. The list exports as Markdown or CSV.
+- **Ontology and glossary (ONT1).** The concept tree (upper layer → industry pack → extensions), terms by scope, the term-to-concept mapping view, unmapped terms and coverage. Onboarding a standard starts here.
+- **Facts and estate.**
+  - A filterable fact table; review hands off to the Context Inbox, which stays the to-do list.
+  - Systems, environments, catalogs and connection readiness.
+- **Quality bar.**
+  - VS Code theme colours and fonts; keyboard navigation and screen-reader labels (UI-4).
+  - Virtualised lists. The engine answers queries, so the webview never holds the whole estate, and it stays within NFR-1 on the large-estate fixture.
+  - State is kept when the panel is hidden.
+  - Empty states say what to do next.
+  - A graph-rendering library, if one is used, is bundled (no CDN) and needs a P6 decision record.
+
+**Every view has a CLI and an MCP equivalent**, so external AI agents, and data engineers without VS Code, can use the layers: search, asset context (§7.5), lineage, impact, concepts and terms, through `autode explore …` and the MCP read tools and resources (§9).
 
 ---
 
@@ -282,6 +446,40 @@ When a step or the param selector needs a fact class that is absent or below the
 
 In short: a business problem can run in exploration mode, switched by a person who acknowledges the disclaimer. At a context gap an agent records its best guess as an assumption (`assumed` trust) and continues; model proposals count at once at `assumed` trust; approval checks warn; gates take one click; everything produced is labelled. Never relaxed: runbooks, production policy (exploration targets non-production only), sample-data consent, secrets, rollbacks. Switching to governed lists the assumptions, model-only facts and warned checks; governed checks don't accept `assumed`. The semantic layer's checks (§6.5) will warn in exploration mode too.
 
+### 7.5 Asset context and explainability (C5b; owner, 2026-10-28)
+
+- **Asset context.** One deterministic function returns everything AutoDE knows about an asset, each item with its source and trust:
+  - metadata;
+  - meaning: terms, concepts and semantic elements;
+  - lineage and governance;
+  - applicable patterns;
+  - memory: the decisions and preferences in scope.
+
+  It backs the Knowledge Explorer's asset page, `autode explore asset` and the MCP tool `autode_get_asset_context`. A context pack (§7.1) is budgeted and task-centred; asset context is unbudgeted and asset-centred. What an agent's prompt receives is still a pack.
+- **Explainability.** Every recommendation an agent records (a mapping, a primitive choice, a model decision, a pipeline type) carries:
+  - the decision;
+  - the reason;
+  - the evidence: ids of facts, semantic elements, concepts, patterns, policies and lineage;
+  - a confidence: the **weakest trust tier among the backing facts**, or `unbacked` when nothing backs it.
+
+  Numbers appear only where AutoDE computes them deterministically, such as column-match scores. A model's self-reported confidence is not recorded as confidence.
+- **Traceability.** The grounding manifest (§8.3) names each source with its category: semantic, metadata, pattern (primitive or skill), governance, ontology or lineage.
+
+### 7.6 Patterns, preferences and recommendations (PAT; owner, 2026-10-28)
+
+- **Patterns are primitives and skills, not code templates.** A pattern that generates code is a primitive: deterministic, versioned, with validated parameters, and grounded. Guidance is a skill.
+  - New primitives: SCD2 (hash-diff), CDC merge (with deletes), snapshot, and the `incremental_load` watermark (from the backlog).
+  - Orchestration patterns for other tools (Airflow, ADF, Fabric) wait until those become targets.
+- **Pipeline-type recommendation.** A deterministic table chooses batch, micro-batch, CDC or streaming, explained as in §7.5. Its inputs are facts:
+  - volume and change rate, from profiles;
+  - latency and freshness, from `constraint` facts;
+  - change columns and CDC availability, from the source;
+  - platform standards and governance.
+
+  A missing input is a context gap.
+- **Preferences (memory).** `decision` facts gain a scope (team, domain or problem) and a polarity (prefer or avoid), for example "prefer hash-diff SCD2" or "avoid full reloads". Primitive candidates and recommendations are ranked by them and cite them. Human feedback is already recorded as corrections and rejections in the ledger.
+- **Outgoing data contracts.** A contract for each produced table, generated from the semantic layer, governance, lineage and owners. The format is an open one (for example the Open Data Contract Standard), chosen when PAT is planned.
+
 ## 8. Context rot, freshness and causality
 
 ### 8.1 Context rot: failure modes and countermeasures
@@ -318,6 +516,33 @@ Settings (defaults in brackets): `schema_fact` re-verify after [7 days] and alwa
 
 `AutoDE: Context Health` (and the MCP resource `autode://context/health`): counts by status and trust; conflicts; `needs_review`; stale; orphaned; unresolved subjects; share of seed entities with confirmed grain/keys; open context gaps. Shown as a compact panel widget. It is part of the validation-phase artifacts.
 
+### 8.5 Lineage and impact (LIN; owner, 2026-10-28)
+
+Today the platform adapters extract lineage edges, but nothing stores them. Lineage comes from four sources, and every edge is labelled with its source:
+
+- **Observed** on the platform:
+  - Snowflake: `ACCOUNT_USAGE.ACCESS_HISTORY` (column level; needs Enterprise edition and a granted role) and `OBJECT_DEPENDENCIES`.
+  - Databricks: `system.access.table_lineage` and `system.access.column_lineage`.
+
+  These are the adapters' fixed, read-only queries in the engine, not skills: deterministic, guarded by `sqlGuard`, and testable offline on recorded results. The platform skills say when to refresh lineage and how to read it. Observed lineage is optional: without the privilege, the other sources still work, and the Knowledge Explorer says which source is missing.
+- **Designed:** approved mapping documents (column level) and Pipeline Specs (entity level). It works offline and is the guaranteed baseline.
+- **Generated:** the grounding manifests of artifacts (the primitives' lineage).
+- **Logical:** a semantic metric → its facts and dimensions → columns; a term → its concept.
+
+Lineage edges are `derives_from` assertions in the working set. Observed edges are `verified`; edges from approved designs are `confirmed`. Observed lineage for the estate beyond the working set stays in the catalog and is read on demand, as in K2.
+
+**Owner and domain.** Objects gain an owner (from the platform, an import, or a person) and a domain. A shared semantic model's subject area is a domain; objects in it inherit it unless stated otherwise. Cross-domain lineage is lineage whose ends lie in different domains.
+
+**Traversals.**
+- Upstream and downstream, depth-limited, at table or column level.
+- Impact of a proposed change: a column renamed, dropped or retyped; a table removed; a fact superseded. The result lists what is affected, each item with the path that links it:
+  - pipelines and artifacts (§8.3);
+  - semantic models, composites and verified queries;
+  - reports, where a lineage source names them;
+  - domains, and the business problems that use them.
+
+Impact uses graph traversal, never similarity. It is available on all three surfaces. A runbook proposal for a schema change includes the impact summary.
+
 ---
 
 ## 9. MCP surface additions (extends mcp-engine-requirements §5)
@@ -333,6 +558,12 @@ Settings (defaults in brackets): `schema_fact` re-verify after [7 days] and alwa
 | `autode_check_grounding` `{ content, dialect }` | Grounding check of any SQL/YAML (§10.1); lets external coding agents self-check. |
 | Prompt `autode_extract_assertions` | The extraction prompt (§5.2). |
 | Resources `autode://context/health`, `autode://semantic/model`, `autode://ledger/assertion/{id}` | Read-only views with revisions. |
+| `autode_search_assets` `{ query, facets? }` (C5b) | The Knowledge Explorer's search. |
+| `autode_get_asset_context` `{ asset }` (C5b) | Asset context (§7.5). |
+| `autode_lineage` `{ asset, direction, depth, level }`, `autode_impact` `{ change }` (LIN) | Traversals (§8.5). |
+| `autode_ontology_list`, `autode_ontology_concept`, `autode_ontology_analyze` (ONT1) | Read the canonical ontology; analyse a standard for onboarding (read-only). |
+| `autode_propose_ontology_import` (ONT1) | Proposes an onboarding, a workspace-level decision for a person. `means` links go through `autode_propose_assertion`. |
+| Resources `autode://asset/{id}`, `autode://ontology/{pack}` | Read-only views with revisions. |
 
 There is deliberately no `confirm` or `reject` tool over MCP: confirmation is a human action in the extension UI (principle P3).
 
@@ -431,17 +662,80 @@ In short:
 ### Phase C5a: Semantic layer files, composites and the editor
 **Status:** ✅ shipped in v0.49.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-11; HOW: technical-design.md §5.16; usage: [user-guide.md](user-guide.md) §15. §6 stays the specification for C5b–C5d. Acceptance met by the tests named in CHANGELOG.md 0.49.0: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; a changed shared model makes its composites stale; the reference draft matches its golden file; the checks find a missing column and a join that contradicts a key. The older semantic-layer snapshot is retired.
 
-### Phase C5b: The Knowledge Graph window; packs and grounding use the semantic layer
-Scope: §6.5 (graph, packs, grounding), §6.7 (Knowledge Graph window, the drawer becomes a status line).
-Acceptance: no agent emits a join or metric absent from the semantic layer (grounding check); packs include the task's definitions; the window's messages are driven by a test.
+### Phase C5b: The Knowledge Explorer, asset context; packs and grounding use the semantic layer
+Scope:
+- §6.5: graph, packs and grounding.
+- §6.10: the Knowledge Explorer's search, asset page (Overview, Schema, Meaning as far as the semantic layer goes, Facts, Governance, Used by), graph, facts and estate; the drawer becomes a status line.
+- §7.5: asset context, the explainability shape, and source categories in the manifest.
+- The Explorer's CLI (`autode explore search | asset`) and MCP equivalents.
+
+Acceptance:
+- No agent emits a join or metric absent from the semantic layer (grounding check).
+- Packs include the task's definitions.
+- The Explorer's messages are driven by a test.
+- Search and the asset page answer within NFR-1 on the large-estate fixture.
+- The asset page, `autode explore asset` and `autode_get_asset_context` return the same content.
+
+### Phase LIN: Lineage, ownership and impact
+Scope: §8.5, and the Explorer's Lineage tab and impact view.
+
+Acceptance:
+- On the reference problem, designed and generated lineage links every target column to its source columns.
+- Recorded Snowflake and Databricks lineage results load as observed edges.
+- The impact of renaming a source column lists the dependent mapping, artifacts, semantic elements and business problem, each with its path.
+- Owners and domains are shown and filterable.
+- A manual check against a live Snowflake account.
+
+### Phase ONT1: Canonical ontology, terminology and onboarding standards
+Scope:
+- §6.8: the upper layer; the pack format; a FIBO pack (about 20–40 core concepts, starting with lending); onboarding a standard in the Explorer, on the CLI (`autode ontology`) and over MCP; term scope and `means` links.
+- The semantic architect role, its skills, and the `semantic-foundation` workflow template.
+- The Explorer's ontology and glossary view.
+- The RDF parser's P6 decision record.
+- A small lending fixture beside the retail reference problem.
+
+Acceptance:
+- Onboarding the same source twice produces the same pack.
+- A licence that forbids redistribution keeps the pack in the workspace.
+- A `means` link goes through the Inbox.
+- Concepts appear in the graph and on asset pages.
+- The lending fixture's terms align with the expected concepts.
+
+### Phase ONT2: Reasoning through meaning
+Scope:
+- Resolution through concepts, with the evidence chain (§6.8).
+- Column matching for mappings considers concepts and classifications.
+- Quality-rule candidates from keys, grain, relationships, classifications and pack hints: not null, unique, referential integrity, accepted values, patterns.
+- Policies as data: `.autode/config/policies.yaml` maps regulation → classifications → required controls (masking, retention, access). Each asset lists its applicable policies, and a governance check runs on them.
+
+Acceptance:
+- On the reference and lending fixtures, the mapping finds pairs that names alone miss, measured against golden mappings, with recall reported before and after.
+- Quality candidates exist for every confirmed key and relationship.
+- Applicable policies are listed for every classified column.
+
+### Phase IMP1: AtScale import and export
+Scope: §6.9 (AtScale).
+Acceptance: a reference SML repository imports into shared models and composites that match golden files; constructs that don't translate are listed; exporting the imported result reproduces the SML's translatable content.
 
 ### Phase C5c: Deployment and exports
 Scope: §6.6.
 Acceptance: a resolved model deploys to Snowflake as a semantic view through a runbook (manual check); Databricks metric view and dbt MetricFlow translations match golden files.
 
 ### Phase C5d: Merge semantics
-Scope: correspondence between systems' entities, survivorship rules and conformed dimensions for estate merge, expressed in shared models and composites.
+Scope: correspondence between systems' entities (candidates from shared concepts, §6.8), survivorship rules and conformed dimensions for estate merge, expressed in shared models and composites.
 Acceptance: specified when the phase is planned.
+
+### Phase PAT: Patterns, preferences and recommendations
+Scope: §7.6.
+
+Acceptance:
+- The SCD2, CDC merge and snapshot primitives have golden snapshots per dialect.
+- The pipeline-type recommendation decides the reference cases with explanations.
+- A recorded preference changes the ranking and is cited.
+- A contract is generated for each target table of the reference problem.
+
+### Phases IMP2–IMP4: Horizon, Collibra and Unity Catalog imports
+Scope: §6.9. Specified when planned.
 
 ### Phase C6: Freshness, health and release evaluation
 Scope: §8.2, §8.4; eval report becomes part of the release checklist; the model benchmark of §5.5 (recall and precision per source type for the configured model, on demand) and corrections counted as misses.
@@ -458,6 +752,9 @@ Acceptance: every metric target in §10.2 is met in replay mode; the live-mode r
 - *(2026-10-15)* A full local mirror of a customer's catalog with periodic background sync. A per-laptop copy goes stale, differs between engineers (different sync times and grants) and so breaks reproducibility, loads the customer's warehouse once per engineer, and exports estate-wide metadata to laptops that security reviews often reject. Phase K's working-set cache with query-through and refresh-on-use replaces it. A shared, team-wide catalog cache would need a remote MCP deployment (mcp-engine §10) and is revisited only if a customer needs it.
 - *(2026-10-15)* Converting legacy code (stored procedures, BTEQ, PL/SQL, ETL-tool mappings). Mature converters exist (e.g. Snowflake SnowConvert, Databricks Lakebridge); the migration track imports their output and grounds, maps and reconciles it instead.
 - *(2026-10-15, parked)* ERP sources with cryptic physical names (SAP-style), which need the ERP's own text dictionary as aliases. Not rejected; deferred until a customer needs it.
+- *(2026-10-28)* A separate enterprise context platform with its own repositories for metadata, glossary, governance and memory (§1.1). AutoDE's ledger, estate, semantic layer and ontology are the system of record for a workspace; enterprise tools are imported (§6.9) and exported to.
+- *(2026-10-28)* Loading an industry standard in full, OWL axioms and reasoning, and numeric "relationship strength" between concepts. Cardinality and trust say what such scores would only invent.
+- *(2026-10-28)* Confidence numbers stated by a model (§7.5).
 
 ## 13. Documentation deliverables
 
