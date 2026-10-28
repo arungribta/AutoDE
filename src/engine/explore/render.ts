@@ -1,4 +1,4 @@
-import { AssetContext, AssetSummary, ExploreOverview, GraphSlice, SearchResult } from './explore';
+import { ASSET_TYPE_LABELS, AssetContext, AssetSummary, ExploreOverview, GraphSlice, SearchResult } from './explore';
 
 /**
  * Plain-text renderings of the Explorer's answers (C5b): what `autode explore`
@@ -6,13 +6,13 @@ import { AssetContext, AssetSummary, ExploreOverview, GraphSlice, SearchResult }
  * contract; these are views of it.
  */
 
-const KIND: Record<string, string> = { table: 'table', view: 'view', column: 'column', business_term: 'term', business_rule: 'rule', verified_query: 'query', metric: 'metric', semantic_model: 'semantic model', semantic_table: 'semantic table', semantic_element: 'semantic element', fact: 'fact' };
+const LABELS: Record<string, string> = ASSET_TYPE_LABELS;
 
-export function kindLabel(kind: string): string { return KIND[kind] ?? kind; }
+export function kindLabel(assetType: string): string { return LABELS[assetType] ?? assetType; }
 
 function line(a: AssetSummary): string {
-  const where = [a.system && `${a.system}${a.environment ? `/${a.environment}` : ''}`, a.trust, a.classification, a.approved === false ? 'draft' : '', a.inWorkingSet ? '' : 'catalog only'].filter(Boolean).join(', ');
-  return `${kindLabel(a.kind).padEnd(16)} ${a.fqn ?? a.label}${where ? `  (${where})` : ''}  [${a.id}]`;
+  const where = [a.system && `${a.system}${a.environment ? `/${a.environment}` : ''}`, a.certification, a.classification, a.status === 'draft' ? 'draft' : '', a.inWorkingSet ? '' : 'catalog only'].filter(Boolean).join(', ');
+  return `${kindLabel(a.assetType).padEnd(16)} ${a.fqn ?? a.label}${where ? `  (${where})` : ''}  [${a.id}]`;
 }
 
 export function renderSearch(r: SearchResult): string {
@@ -34,10 +34,10 @@ export function renderOverview(o: ExploreOverview): string {
 /** The asset page as Markdown: the same sections as the Explorer's tabs. */
 export function renderAssetMarkdown(c: AssetContext): string {
   const a = c.asset;
-  const L: string[] = [`# ${a.fqn ?? a.label}`, '', `${kindLabel(a.kind)}${a.system ? ` · ${a.system}/${a.environment ?? 'default'}` : ''}${a.trust ? ` · ${a.trust}` : ''}${a.approved === false ? ' · draft' : ''} · \`${a.id}\``];
+  const L: string[] = [`# ${a.fqn ?? a.label}`, '', `${kindLabel(a.assetType)}${a.system ? ` · ${a.system}/${a.environment ?? 'default'}` : ''}${a.certification ? ` · ${a.certification}` : ''}${a.trust ? ` (evidence: ${a.trust})` : ''}${a.status === 'draft' ? ' · draft' : ''} · \`${a.id}\``];
   if (a.description) L.push('', a.description);
   const o = c.overview;
-  if (o.parent) L.push('', `Part of ${kindLabel(o.parent.kind)} **${o.parent.fqn ?? o.parent.label}**.`);
+  if (o.parent) L.push('', `Part of ${kindLabel(o.parent.assetType)} **${o.parent.fqn ?? o.parent.label}**.`);
   if (o.aliases.length) L.push(`Also called: ${o.aliases.join(', ')}.`);
   if (o.origin) L.push(`Source: ${o.origin.source} (${o.origin.ref})${o.origin.reliability ? `, ${o.origin.reliability}` : ''}${o.origin.lastVerifiedAt ? `, verified ${o.origin.lastVerifiedAt}` : ''}.`);
   if (c.schema) {
@@ -49,12 +49,12 @@ export function renderAssetMarkdown(c: AssetContext): string {
   if (m.terms.length || m.semantic.length || m.definition) {
     L.push('', '## Meaning');
     for (const t of m.terms) L.push(`- Term **${t.label}**${t.description ? `: ${t.description}` : ''}`);
-    for (const s of m.semantic) L.push(`- ${kindLabel(s.kind)} **${s.label}**${s.model ? ` in ${s.model}` : ''}${s.expr ? `: \`${s.expr}\`` : ''}${s.approved === false ? ' (draft)' : ''}`);
+    for (const s of m.semantic) L.push(`- ${kindLabel(s.assetType)} **${s.label}**${s.model ? ` in ${s.model}` : ''}${s.expr ? `: \`${s.expr}\`` : ''}${s.status === 'draft' ? ' (draft)' : ''}`);
     if (m.definition?.expr) L.push(`- Defined as \`${String(m.definition.expr)}\`${m.definition.model ? ` in ${String(m.definition.model)}` : ''}`);
   }
   if (c.lineage.related.length) {
     L.push('', '## Relationships and lineage');
-    for (const r of c.lineage.related) L.push(`- ${r.direction === 'out' ? '→' : '←'} ${r.relation.replace(/_/g, ' ')} ${kindLabel(r.asset.kind)} **${r.asset.fqn ?? r.asset.label}**${r.trust ? ` (${r.trust})` : ''}`);
+    for (const r of c.lineage.related) L.push(`- ${r.direction === 'out' ? '→' : '←'} ${r.relation.replace(/_/g, ' ')} ${kindLabel(r.asset.assetType)} **${r.asset.fqn ?? r.asset.label}**${r.trust ? ` (${r.trust})` : ''}`);
   }
   L.push('', `_${c.lineage.note}_`);
   if (c.governance.classifications.length || c.governance.rules.length) {
@@ -74,7 +74,7 @@ export function renderAssetMarkdown(c: AssetContext): string {
   if (u.artifacts.length || u.semanticModels.length || u.queries.length) {
     L.push('', '## Used by');
     for (const x of u.artifacts) L.push(`- Artifact ${x.path}${x.warnings ? ` (${x.warnings} grounding warning(s))` : ''}`);
-    for (const x of u.semanticModels) L.push(`- Semantic model ${x.label}${x.approved === false ? ' (draft)' : ''}`);
+    for (const x of u.semanticModels) L.push(`- Semantic model ${x.label}${x.status === 'draft' ? ' (draft)' : ''}`);
     for (const x of u.queries) L.push(`- Verified query ${x.label}`);
   }
   if (c.conflicts.length) {
@@ -86,7 +86,8 @@ export function renderAssetMarkdown(c: AssetContext): string {
 
 export function renderGraph(g: GraphSlice): string {
   const label = new Map(g.nodes.map((n) => [n.id, n.fqn ?? n.label] as const));
-  const lines = g.edges.map((e) => `  ${label.get(e.source)} —${e.type.replace(/_/g, ' ')}→ ${label.get(e.target)}${e.trust ? ` (${e.trust})` : ''}`);
+  const lines = g.edges.map((e) => `  ${label.get(e.source)} —${e.type.replace(/_/g, ' ')}${e.proposed ? ' (proposed)' : ''}→ ${label.get(e.target)}${e.label ? `  [${e.label}]` : ''}${e.trust ? ` (${e.trust})` : ''}`);
   const more = Object.entries(g.hidden).map(([id, n]) => `  +${n} more around ${label.get(id) ?? id}`);
-  return [`${g.nodes.length} node(s), ${g.edges.length} edge(s) around ${label.get(g.center)}:`, ...lines, ...more].join('\n');
+  const head = g.center ? `around ${label.get(g.center) ?? g.center}` : `in scope${g.capped && g.total !== undefined ? ` (the first ${g.nodes.filter((n) => !n.parent).length} of ${g.total} tables)` : ''}`;
+  return [`${g.nodes.length} node(s), ${g.edges.length} edge(s) ${head}:`, ...lines, ...more].join('\n');
 }

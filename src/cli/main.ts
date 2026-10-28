@@ -26,7 +26,7 @@ import { resolveComposite } from '../engine/semantic/composite';
 import { newCompositeText } from '../engine/semantic/editorState';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
 import { renderAssetMarkdown, renderGraph, renderOverview, renderSearch } from '../engine/explore/render';
-import type { AssetContext, AssetKind, ExploreOverview, GraphSlice, SearchResult } from '../engine/explore/explore';
+import type { AssetContext, AssetType, ExploreOverview, GraphSlice, SearchResult } from '../engine/explore/explore';
 import { problemTableIds } from '../engine/context/capture';
 import { createSubjectResolver } from '../engine/context/projection';
 import { EngineWorkspace } from '../mcp/workspace';
@@ -210,9 +210,9 @@ Semantic layer (approving is a person's: interactive terminal):
 
 Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer and MCP):
   explore                      Overview: objects, facts by status, systems, semantic models
-  explore search <words…> [--kind table,column,…] [--system <s>] [--all]   Search names, aliases, synonyms, descriptions and facts; facet counts
+  explore search <words…> [--type table,column,glossary_term,…] [--system <s>] [--platform <p>] [--all]   Search names, aliases, synonyms, descriptions and facts; facet counts
   explore asset <id|name>      Everything known about one asset: schema, meaning, relationships, governance, facts, decisions, used by
-  explore graph <id|name> [--hops 1-3]   The graph around an asset
+  explore graph [<id|name>] [--hops 1-3] [--system <s>] [--model <m>] [--columns]   The graph around an asset; with no asset, the landscape: tables and every relationship between them
 
 Capture coverage:
   coverage                     What a complete picture of the problem needs, per table and metric: known, proposed, assumed, missing, and the action for each
@@ -338,6 +338,9 @@ const OPTIONS = {
   database: { type: 'string' },
   models: { type: 'string' },
   hops: { type: 'string' },
+  type: { type: 'string' },
+  model: { type: 'string' },
+  columns: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -1402,11 +1405,17 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
     return EXIT.OK;
   }
   if (sub === 'search') {
-    const r = ask({ type: 'search', query: words.join(' '), ...(list(ctx.values.kind) ? { kinds: list(ctx.values.kind) as AssetKind[] } : {}), ...(ctx.values.system ? { systems: [ctx.values.system] } : {}), ...(ctx.values.environment ? { environments: [ctx.values.environment] } : {}), limit: ctx.values.all ? 1000 : 25 }).result as SearchResult;
+    const types = list(ctx.values.type ?? ctx.values.kind);
+    const r = ask({ type: 'search', query: words.join(' '), ...(types ? { assetTypes: types as AssetType[] } : {}), ...(ctx.values.system ? { systems: [ctx.values.system] } : {}), ...(ctx.values.platform ? { platforms: [ctx.values.platform] } : {}), ...(ctx.values.environment ? { environments: [ctx.values.environment] } : {}), limit: ctx.values.all ? 1000 : 25 }).result as SearchResult;
     emit(ctx, { ok: true, ...r }, renderSearch(r));
     return r.total ? EXIT.OK : EXIT.NOT_FOUND;
   }
   const ref = words.join(' ');
+  if (sub === 'graph' && !ref) {
+    const r = ask({ type: 'landscape', ...(ctx.values.system ? { system: ctx.values.system } : {}), ...(ctx.values.model ? { model: ctx.values.model } : {}), ...(ctx.values.columns ? { includeColumns: true } : {}) });
+    emit(ctx, { ok: true, graph: r.slice }, renderGraph(r.slice as GraphSlice));
+    return EXIT.OK;
+  }
   if (!ref) throw new CliError(EXIT.USAGE, `explore ${sub} <id|name> (find it with autode explore search <words>).`);
   if (sub === 'asset') {
     const r = ask({ type: 'asset', id: ref });

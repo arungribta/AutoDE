@@ -1,11 +1,11 @@
 import { Assertion, TrustTier, isLive, trustRank } from '../context/assertions';
 import { Conflict } from '../context/conflicts';
-import { isMirror } from '../context/projection';
+import { createSubjectResolver, isMirror } from '../context/projection';
 import { GraphView, resolveText } from '../context/retrieval';
 import { BaseNode, BusinessRuleNode, BusinessTermNode, ColumnNode, GraphEdge, TableNode, VerifiedQueryNode } from '../context/types';
 import { CatalogEntry, CatalogLookup } from '../context/catalog';
 import { governanceFacts, sameTable } from '../governance/governance';
-import { SemanticLayerIndex } from '../semantic/layer';
+import { SemanticLayerIndex, baseMatches } from '../semantic/layer';
 import { semanticGraph } from '../semantic/layerGraph';
 
 /**
@@ -20,25 +20,58 @@ import { semanticGraph } from '../semantic/layerGraph';
  * packs and grounding use only what is approved).
  */
 
-export type AssetKind = 'table' | 'view' | 'column' | 'business_term' | 'business_rule' | 'verified_query' | 'metric' | 'semantic_model' | 'semantic_table' | 'semantic_element' | 'fact';
+/**
+ * Asset types, named as the catalogs and standards name them (v0.50.1;
+ * docs/context-layer-requirements.md §6.11): physical objects as catalogs do,
+ * semantic objects as Snowflake's semantic model does, and AutoDE's own
+ * facts as *knowledge facts* (DataHub's "assertion" is a quality check, so
+ * the word isn't reused).
+ */
+export type AssetType = 'table' | 'view' | 'column' | 'glossary_term' | 'rule' | 'verified_query' | 'semantic_model' | 'logical_table' | 'dimension' | 'time_dimension' | 'semantic_fact' | 'metric' | 'filter' | 'knowledge_fact';
+
+export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
+  table: 'Table', view: 'View', column: 'Column', glossary_term: 'Glossary term', rule: 'Rule', verified_query: 'Verified query',
+  semantic_model: 'Semantic model', logical_table: 'Logical table', dimension: 'Dimension', time_dimension: 'Time dimension', semantic_fact: 'Fact (semantic)', metric: 'Metric', filter: 'Filter',
+  knowledge_fact: 'Knowledge fact'
+};
+
+/**
+ * Certification, as catalogs show it on an asset (Atlan, OpenMetadata):
+ * derived from the evidence behind it (AutoDE's trust tiers, §4.1) or, for
+ * the semantic layer, from approval. The tier itself stays available as
+ * `trust` (shown as *Evidence*).
+ */
+export type Certification = 'verified' | 'documented' | 'unverified' | 'draft';
+
+export function certificationOf(trust: TrustTier | undefined): Certification | undefined {
+  if (!trust) return undefined;
+  return trust === 'verified' || trust === 'confirmed' ? 'verified' : trust === 'documented' ? 'documented' : 'unverified';
+}
 
 export interface AssetSummary {
   id: string;
-  kind: AssetKind;
+  assetType: AssetType;
   label: string;
   /** Tables: `db.schema.table`; columns: `<table fqn>.<column>`. */
   fqn?: string;
   description?: string;
+  /** The logical source or target system (estate, K1). */
   system?: string;
+  /** The technology it lives on (snowflake, databricks, oracle, file, semantic layer). */
+  platform?: string;
   environment?: string;
-  /** The strongest trust among the facts it is projected from (facts: their own). */
+  certification?: Certification;
+  /** Evidence: the strongest trust tier among the facts it is projected from (a knowledge fact: its own). */
   trust?: TrustTier;
+  /** Assets: active, deprecated, approved, draft, not visible. */
   status?: string;
+  /** Knowledge facts only: proposed, active, needs_review, superseded, rejected. */
+  reviewState?: string;
   classification?: string;
+  /** Glossary terms assigned to it. */
+  glossaryTerms?: string[];
   /** In the working set (graph), or known only from the estate catalog. */
   inWorkingSet: boolean;
-  /** Semantic elements: approved at the current revision, or a draft. */
-  approved?: boolean;
 }
 
 export interface ExploreSources {
@@ -73,6 +106,8 @@ interface Index {
   bySubject: Map<string, Assertion[]>;
   assertions: Map<string, Assertion>;
   classification: Map<string, { classification: string; strategy?: string; factId?: string; trust?: TrustTier }>;
+  /** Asset id → the glossary terms assigned to it. */
+  termsOf: Map<string, string[]>;
   summaries: Map<string, AssetSummary>;
 }
 
@@ -112,7 +147,13 @@ function buildIndex(sources: ExploreSources): Index {
       if (g) classification.set(colId, { classification: g.classification, ...(g.strategy ? { strategy: g.strategy } : {}), ...(g.assertionId ? { factId: g.assertionId } : {}), ...(g.trust ? { trust: g.trust } : {}) });
     }
   }
-  const idx: Index = { graph, nodes, out, in: inc, tableOf, columnsOf, bySubject, assertions: new Map(sources.assertions.map((a) => [a.id, a] as const)), classification, summaries: new Map() };
+  const termsOf = new Map<string, string[]>();
+  for (const n of graph.nodes) {
+    if (n.type !== 'business_term') continue;
+    const targets = new Set([...((n as BusinessTermNode).mappedNodeIds ?? []), ...(out.get(n.id) ?? []).filter((e) => e.type === 'maps_to').map((e) => e.target)]);
+    for (const t of targets) push(termsOf, t, n.label);
+  }
+  const idx: Index = { graph, nodes, out, in: inc, tableOf, columnsOf, bySubject, assertions: new Map(sources.assertions.map((a) => [a.id, a] as const)), classification, termsOf, summaries: new Map() };
   indexes.set(sources, idx);
   return idx;
 }
@@ -122,9 +163,31 @@ function trustOf(ids: readonly string[] | undefined, idx: Index): TrustTier | un
   return tiers.sort((a, b) => trustRank(b) - trustRank(a))[0];
 }
 
-function kindOf(n: BaseNode): AssetKind {
-  if (n.type === 'table' || n.type === 'semantic_view') return (n as TableNode).isView ? 'view' : 'table';
-  return n.type as AssetKind;
+const ELEMENT_TYPES: Record<string, AssetType> = { dimensions: 'dimension', time_dimensions: 'time_dimension', facts: 'semantic_fact', metrics: 'metric', filters: 'filter' };
+
+function assetTypeOf(n: BaseNode): AssetType {
+  switch (n.type) {
+    case 'table': case 'semantic_view': return (n as TableNode).isView ? 'view' : 'table';
+    case 'business_term': return 'glossary_term';
+    case 'business_rule': return 'rule';
+    case 'semantic_table': return 'logical_table';
+    case 'semantic_element': return ELEMENT_TYPES[String(n.metadata?.list)] ?? 'dimension';
+    default: return n.type as AssetType;
+  }
+}
+
+const PLATFORMS = /^(snowflake|databricks|oracle|postgres|postgresql|bigquery|redshift|sqlserver|mysql)\b/i;
+
+/** The technology an object lives on: its connection's platform, a platform named as its source, else a file. */
+function platformOf(n: { id: string; origin?: BaseNode['origin'] }): string | undefined {
+  if (n.id.startsWith('sem:')) return 'semantic layer';
+  const o = n.origin;
+  if (!o) return undefined;
+  const fromConnection = o.connectionId?.split(':')[0];
+  if (fromConnection) return fromConnection.toLowerCase();
+  const named = PLATFORMS.exec(o.sourceRef ?? '')?.[1];
+  if (named) return named.toLowerCase().replace('postgresql', 'postgres');
+  return o.sourceRef && /[\\/.]/.test(o.sourceRef) ? 'file' : undefined;
 }
 
 function fqnOf(n: BaseNode, idx: Index): string | undefined {
@@ -140,44 +203,64 @@ function fqnOf(n: BaseNode, idx: Index): string | undefined {
 function summarize(n: BaseNode, idx: Index): AssetSummary {
   const hit = idx.summaries.get(n.id);
   if (hit) return hit;
-  const s: AssetSummary = { id: n.id, kind: kindOf(n), label: n.label, inWorkingSet: true };
+  const s: AssetSummary = { id: n.id, assetType: assetTypeOf(n), label: n.label, inWorkingSet: true };
   const fqn = fqnOf(n, idx);
   if (fqn) s.fqn = fqn;
   if (n.description) s.description = n.description;
   if (n.origin?.system) s.system = n.origin.system;
+  const platform = platformOf(n);
+  if (platform) s.platform = platform;
   if (n.origin?.systemEnvironment) s.environment = n.origin.systemEnvironment;
   const trust = n.supportedBy?.length ? trustOf(n.supportedBy, idx) : undefined;
   if (trust) s.trust = trust;
-  if (n.status) s.status = n.status;
+  if (typeof n.metadata?.approved === 'boolean') {
+    // The semantic layer: certified by a person's approval.
+    s.status = n.metadata.approved ? 'approved' : 'draft';
+    s.certification = n.metadata.approved ? 'verified' : 'draft';
+  } else {
+    if (n.status) s.status = n.status;
+    const cert = certificationOf(trust);
+    if (cert) s.certification = cert;
+  }
   const cls = n.type === 'column' ? idx.classification.get(n.id) : undefined;
   if (cls) s.classification = cls.classification;
-  if (typeof n.metadata?.approved === 'boolean') s.approved = n.metadata.approved as boolean;
+  const terms = idx.termsOf.get(n.id);
+  if (terms?.length) s.glossaryTerms = terms;
   idx.summaries.set(n.id, s);
   return s;
 }
 
 function factSummary(a: Assertion): AssetSummary {
-  return { id: a.id, kind: 'fact', label: a.statement, trust: a.trust, status: a.status, inWorkingSet: true, description: `${a.kind} · ${a.predicate}` };
+  return { id: a.id, assetType: 'knowledge_fact', label: a.statement, trust: a.trust, certification: certificationOf(a.trust), reviewState: a.status, inWorkingSet: true, description: `${a.kind} · ${a.predicate}` };
 }
 
 function catalogSummary(e: CatalogEntry): AssetSummary {
-  return { id: e.id, kind: e.table.isView ? 'view' : 'table', label: e.table.label, fqn: e.table.fqn, ...(e.table.description ? { description: e.table.description } : {}), system: e.system, environment: e.environment, inWorkingSet: false, ...(e.visible === false ? { status: 'not visible' } : {}) };
+  const platform = platformOf({ id: e.id, origin: e.origin });
+  return { id: e.id, assetType: e.table.isView ? 'view' : 'table', label: e.table.label, fqn: e.table.fqn, ...(e.table.description ? { description: e.table.description } : {}), system: e.system, ...(platform ? { platform } : {}), environment: e.environment, inWorkingSet: false, ...(e.visible === false ? { status: 'not visible' } : {}) };
 }
 
 // ── Search ──
 
 export interface SearchOptions {
-  kinds?: AssetKind[];
+  assetTypes?: AssetType[];
   systems?: string[];
+  platforms?: string[];
   environments?: string[];
-  trust?: TrustTier[];
+  certifications?: Certification[];
   statuses?: string[];
+  reviewStates?: string[];
   classifications?: string[];
+  glossaryTerms?: string[];
   limit?: number;
   offset?: number;
 }
 
-export type Facets = Record<'kind' | 'system' | 'environment' | 'trust' | 'status' | 'classification', Record<string, number>>;
+/** Facets, in the order catalogs show them. */
+export const FACETS = ['assetType', 'system', 'platform', 'environment', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm'] as const;
+export type FacetName = typeof FACETS[number];
+export type Facets = Record<FacetName, Record<string, number>>;
+/** Facets the metadata model defines but that have no data yet (MM, v0.51.0): shown, disabled. */
+export const PENDING_FACETS: readonly FacetName[] = ['domain', 'owner', 'tag'];
 
 export interface SearchResult {
   query: string;
@@ -188,6 +271,8 @@ export interface SearchResult {
   fromCatalog: number;
   /** Nothing matched every word: these are related results from the vocabulary (abbreviations, synonyms, glossary). */
   approximate?: boolean;
+  /** Facets without data yet. */
+  pendingFacets: FacetName[];
 }
 
 const BROWSABLE = new Set(['table', 'semantic_view', 'column', 'business_term', 'business_rule', 'verified_query', 'metric', 'semantic_model', 'semantic_table', 'semantic_element']);
@@ -241,11 +326,12 @@ export function searchAssets(sources: ExploreSources, query: string, options: Se
       }
       approximate = scored.size > 0;
     }
-    for (const a of sources.assertions) {
-      if (isMirror(a) || (!isLive(a.status) && a.status !== 'proposed')) continue;
-      const score = textScore({ label: a.statement }, tokens, whole);
-      if (score > 0) add(factSummary(a), Math.max(1, score - 10));
-    }
+  }
+  // Knowledge facts (live or proposed); browsing lists them too, after the assets.
+  for (const a of sources.assertions) {
+    if (isMirror(a) || (!isLive(a.status) && a.status !== 'proposed')) continue;
+    const score = tokens.length ? textScore({ label: a.statement }, tokens, whole) : 1;
+    if (score > 0) add(factSummary(a), tokens.length ? Math.max(1, score - 10) : 0);
   }
   let fromCatalog = 0;
   if (tokens.length && sources.catalog) {
@@ -259,13 +345,19 @@ export function searchAssets(sources: ExploreSources, query: string, options: Se
   }
   // Plain comparisons, not localeCompare: browsing a large estate sorts tens of thousands of entries (NFR-1).
   const all = [...scored.values()].sort((a, b) => b.score - a.score || (a.s.label < b.s.label ? -1 : a.s.label > b.s.label ? 1 : a.s.id < b.s.id ? -1 : 1)).map((x) => x.s);
-  const facets: Facets = { kind: {}, system: {}, environment: {}, trust: {}, status: {}, classification: {} };
+  const facets = Object.fromEntries(FACETS.map((f) => [f, {}])) as Facets;
   const bump = (f: Record<string, number>, v: string | undefined) => { if (v) f[v] = (f[v] ?? 0) + 1; };
-  for (const r of all) { bump(facets.kind, r.kind); bump(facets.system, r.system); bump(facets.environment, r.environment); bump(facets.trust, r.trust); bump(facets.status, r.status); bump(facets.classification, r.classification); }
+  for (const r of all) {
+    bump(facets.assetType, r.assetType); bump(facets.system, r.system); bump(facets.platform, r.platform); bump(facets.environment, r.environment);
+    bump(facets.certification, r.certification); bump(facets.status, r.status); bump(facets.reviewState, r.reviewState); bump(facets.classification, r.classification);
+    for (const t of r.glossaryTerms ?? []) bump(facets.glossaryTerm, t);
+  }
   const keep = (v: string | undefined, allowed?: readonly string[]) => !allowed?.length || (!!v && allowed.includes(v));
-  const filtered = all.filter((r) => keep(r.kind, options.kinds) && keep(r.system, options.systems) && keep(r.environment, options.environments) && keep(r.trust, options.trust) && keep(r.status, options.statuses) && keep(r.classification, options.classifications));
+  const keepAny = (vs: readonly string[] | undefined, allowed?: readonly string[]) => !allowed?.length || (vs ?? []).some((v) => allowed.includes(v));
+  const filtered = all.filter((r) => keep(r.assetType, options.assetTypes) && keep(r.system, options.systems) && keep(r.platform, options.platforms) && keep(r.environment, options.environments)
+    && keep(r.certification, options.certifications) && keep(r.status, options.statuses) && keep(r.reviewState, options.reviewStates) && keep(r.classification, options.classifications) && keepAny(r.glossaryTerms, options.glossaryTerms));
   const offset = options.offset ?? 0;
-  return { query, total: filtered.length, results: filtered.slice(offset, offset + (options.limit ?? 50)), facets, fromCatalog, ...(approximate ? { approximate } : {}) };
+  return { query, total: filtered.length, results: filtered.slice(offset, offset + (options.limit ?? 50)), facets, fromCatalog, ...(approximate ? { approximate } : {}), pendingFacets: [...PENDING_FACETS] };
 }
 
 // ── Asset context (§7.5) ──
@@ -432,7 +524,7 @@ export function getAssetContext(sources: ExploreSources, ref: string): AssetCont
   return {
     asset, overview, ...(schema ? { schema } : {}),
     meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: [] },
-    lineage: { related, note: 'Relationships, mappings and derivations known today. Observed (platform), designed (mappings, specifications) and generated (artifacts) lineage, and impact analysis, arrive in LIN (v0.51.0).' },
+    lineage: { related, note: 'Relationships, mappings and derivations known today. Observed (platform), designed (mappings, specifications) and generated (artifacts) lineage, and impact analysis, arrive in LIN (v0.52.0).' },
     governance: { classifications, rules },
     facts, memory,
     usedBy: { artifacts, semanticModels, queries },
@@ -470,7 +562,7 @@ function catalogContext(e: CatalogEntry): AssetContext {
   return {
     asset: catalogSummary(e),
     overview: { aliases: [...(e.table.aliases ?? [])], tags: [], ...(e.origin ? { origin: { source: e.origin.source, ref: e.origin.sourceRef } } : {}), ...(e.loadedAt ? { loadedAt: e.loadedAt } : {}) },
-    schema: { columns: (e.columns ?? []).map((c) => ({ id: c.id, kind: 'column' as const, label: c.label, fqn: `${e.table.fqn}.${c.label}`, system: e.system, environment: e.environment, inWorkingSet: false, dataType: c.dataType || '', nullable: c.isNullable !== false, primaryKey: !!c.isPrimaryKey, foreignKey: !!c.isForeignKey })), keys: [], grain: [], profile: [] },
+    schema: { columns: (e.columns ?? []).map((c) => ({ id: c.id, assetType: 'column' as const, label: c.label, fqn: `${e.table.fqn}.${c.label}`, system: e.system, environment: e.environment, inWorkingSet: false, dataType: c.dataType || '', nullable: c.isNullable !== false, primaryKey: !!c.isPrimaryKey, foreignKey: !!c.isForeignKey })), keys: [], grain: [], profile: [] },
     meaning: { terms: [], semantic: [], concepts: [] },
     lineage: { related: [], note: 'Known from the estate catalog only: AutoDE loads it into the working set when a task uses it.' },
     governance: { classifications: [], rules: [] },
@@ -483,13 +575,39 @@ function catalogContext(e: CatalogEntry): AssetContext {
 
 // ── Graph neighbourhood ──
 
+/** A node of a graph view; a column names its table as `parent` when both are shown (drawn inside it). */
+export interface GraphNodeView extends AssetSummary { parent?: string }
+
+export interface GraphEdgeView {
+  id: string;
+  source: string;
+  target: string;
+  /** A graph edge type, or in the landscape: foreign_key, relationship, proposed_relationship, semantic_join. */
+  type: string;
+  /** The columns it joins on, or the model it comes from. */
+  label?: string;
+  trust?: TrustTier;
+  /** Not confirmed: a proposed relationship, or a join in a draft semantic model (drawn dashed). */
+  proposed?: boolean;
+}
+
 export interface GraphSlice {
-  center: string;
-  nodes: AssetSummary[];
-  edges: Array<{ id: string; source: string; target: string; type: string; trust?: TrustTier }>;
+  /** The asset it is centred on; absent for the landscape. */
+  center?: string;
+  nodes: GraphNodeView[];
+  edges: GraphEdgeView[];
   /** Neighbours not shown because of the cap, per node. */
   hidden: Record<string, number>;
   capped: boolean;
+  /** Landscape: tables in scope before the cap, and the scopes to choose from. */
+  total?: number;
+  scopes?: { systems: Array<{ id: string; tables: number }>; schemas: Array<{ id: string; tables: number }>; models: Array<{ id: string; status: string }> };
+}
+
+function graphNode(n: BaseNode, idx: Index, shown: ReadonlySet<string>): GraphNodeView {
+  const s = summarize(n, idx);
+  const parent = n.type === 'column' ? idx.tableOf.get(n.id) : undefined;
+  return parent && shown.has(parent) ? { ...s, parent } : s;
 }
 
 /**
@@ -525,7 +643,84 @@ export function exploreGraph(sources: ExploreSources, center: string, options: {
   }
   const edges = idx.graph.edges.filter((e) => shown.has(e.source) && shown.has(e.target) && allowed(e))
     .map((e) => ({ id: e.id, source: e.source, target: e.target, type: e.type, ...(trustOf(e.supportedBy, idx) ? { trust: trustOf(e.supportedBy, idx) } : {}) }));
-  return { center: start.id, nodes: [...shown].map((id) => summarize(idx.nodes.get(id)!, idx)), edges, hidden, capped: Object.keys(hidden).length > 0 };
+  return { center: start.id, nodes: [...shown].map((id) => graphNode(idx.nodes.get(id)!, idx, shown)), edges, hidden, capped: Object.keys(hidden).length > 0 };
+}
+
+export interface LandscapeOptions {
+  system?: string;
+  schema?: string;
+  /** A semantic model: its tables only. */
+  model?: string;
+  includeColumns?: boolean;
+  /** Proposed relationships and joins of draft models, drawn dashed (default on). */
+  proposed?: boolean;
+  /** Joins the semantic layer defines (default on). */
+  semantic?: boolean;
+  cap?: number;
+}
+
+/**
+ * The landscape (§6.10): the working set's tables, or one system, schema or
+ * semantic model's, with every relationship AutoDE knows between them —
+ * declared foreign keys, confirmed relationship facts, proposed ones, and
+ * the semantic layer's joins — lifted to the tables they join (the columns
+ * are the edge's label). Columns, when asked for, are drawn inside their
+ * tables. Capped; `total` says how many were in scope.
+ */
+export function exploreLandscape(sources: ExploreSources, options: LandscapeOptions = {}): GraphSlice {
+  const idx = buildIndex(sources);
+  const tables = idx.graph.nodes.filter((n): n is TableNode => n.type === 'table' || n.type === 'semantic_view');
+  const fqn = (t: TableNode) => t.fqn || t.label;
+  const schemaOf = (t: TableNode) => { const parts = fqn(t).split('.'); return parts.length >= 2 ? parts[parts.length - 2] : ''; };
+  const count = (keys: string[]) => [...keys.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<string, number>())].map(([id, n]) => ({ id, tables: n })).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const scopes = {
+    systems: count(tables.map((t) => t.origin?.system ?? 'unassigned')),
+    schemas: count(tables.map(schemaOf).filter(Boolean)),
+    models: (sources.semantic?.models ?? []).map((m) => ({ id: m.name, status: m.approved ? 'approved' : 'draft' }))
+  };
+  const inModel = options.model ? new Set((idx.out.get(`sem:${options.model}`) ?? []).flatMap((e) => (idx.out.get(e.target) ?? []).filter((x) => x.type === 'maps_to').map((x) => x.target))) : undefined;
+  const selected = tables
+    .filter((t) => (!options.system || (t.origin?.system ?? 'unassigned') === options.system) && (!options.schema || schemaOf(t).toLowerCase() === options.schema.toLowerCase()) && (!inModel || inModel.has(t.id)))
+    .sort((a, b) => (fqn(a) < fqn(b) ? -1 : 1));
+  const cap = options.cap ?? 250;
+  const kept = selected.slice(0, cap);
+  const ids = new Set(kept.map((t) => t.id));
+  const shown = new Set(ids);
+  if (options.includeColumns) for (const t of kept) for (const c of idx.columnsOf.get(t.id) ?? []) shown.add(c);
+  const nodes = [...shown].map((id) => graphNode(idx.nodes.get(id)!, idx, shown));
+
+  const edges = new Map<string, GraphEdgeView>();
+  const table = (id: string) => idx.tableOf.get(id) ?? id;
+  const col = (id: string) => (idx.nodes.get(id)?.type === 'column' ? idx.nodes.get(id)!.label : undefined);
+  const add = (e: GraphEdgeView) => { if (e.source !== e.target && ids.has(e.source) && ids.has(e.target) && !edges.has(`${e.type}|${e.source}|${e.target}|${e.label ?? ''}`)) edges.set(`${e.type}|${e.source}|${e.target}|${e.label ?? ''}`, e); };
+  for (const e of sources.graph.edges) {
+    if (e.type !== 'foreign_key' && e.type !== 'related_to') continue;
+    const cols = [col(e.source), col(e.target)];
+    const trust = trustOf(e.supportedBy, idx);
+    add({ id: `${e.type}:${e.id}`, source: table(e.source), target: table(e.target), type: e.type === 'foreign_key' ? 'foreign_key' : 'relationship', ...(cols[0] && cols[1] ? { label: `${cols[0]} = ${cols[1]}` } : {}), ...(trust ? { trust } : {}) });
+  }
+  if (options.proposed !== false) {
+    const resolve = createSubjectResolver(sources.graph as Parameters<typeof createSubjectResolver>[0]);
+    for (const a of sources.assertions) {
+      if (a.kind !== 'relationship' || (a.status !== 'proposed' && a.status !== 'needs_review')) continue;
+      const v = a.value as { from?: { entity: string; columns?: string[] }; to?: { entity: string; columns?: string[] }; cardinality?: string };
+      const from = v.from ? resolve(v.from.entity) : undefined;
+      const to = v.to ? resolve(v.to.entity) : undefined;
+      if (!from || !to) continue;
+      const label = (v.from?.columns ?? []).map((c, i) => `${c} = ${v.to?.columns?.[i] ?? c}`).join(', ');
+      add({ id: `proposed:${a.id}`, source: table(from), target: table(to), type: 'proposed_relationship', ...(label ? { label } : {}), trust: a.trust, proposed: true });
+    }
+  }
+  if (options.semantic !== false && sources.semantic) {
+    const approved = new Map(sources.semantic.models.map((m) => [m.name, m.approved] as const));
+    for (const r of sources.semantic.relationships) {
+      const l = kept.find((t) => baseMatches({ base: r.left }, fqn(t)));
+      const rt = kept.find((t) => baseMatches({ base: r.right }, fqn(t)));
+      if (!l || !rt) continue;
+      add({ id: `semantic:${r.model}:${r.name}`, source: l.id, target: rt.id, type: 'semantic_join', label: `${r.model}: ${r.columns.map((c) => `${c.left} = ${c.right}`).join(', ')}`, ...(approved.get(r.model) ? {} : { proposed: true }) });
+    }
+  }
+  return { nodes, edges: [...edges.values()], hidden: {}, capped: selected.length > cap, total: selected.length, scopes };
 }
 
 // ── Facts and overview ──
@@ -567,7 +762,7 @@ export function exploreOverview(sources: ExploreSources): ExploreOverview {
   for (const t of of('table')) { const k = `${t.origin?.system ?? 'unassigned'}|${t.origin?.systemEnvironment ?? 'default'}`; systems.set(k, (systems.get(k) ?? 0) + 1); }
   const models = of('semantic_model').map((n) => summarize(n, idx));
   return {
-    counts: { tables: of('table').length, columns: of('column').length, terms: of('business_term').length, rules: of('business_rule').length, queries: of('verified_query').length, facts: facts.length, catalogTables: sources.catalog?.all?.().length ?? 0, semanticModels: models.length, approvedSemanticModels: models.filter((m) => m.approved).length, metrics: of('metric').length },
+    counts: { tables: of('table').length, columns: of('column').length, terms: of('business_term').length, rules: of('business_rule').length, queries: of('verified_query').length, facts: facts.length, catalogTables: sources.catalog?.all?.().length ?? 0, semanticModels: models.length, approvedSemanticModels: models.filter((m) => m.status === 'approved').length, metrics: of('metric').length },
     facts: { byStatus, byTrust },
     conflicts: sources.conflicts.length,
     needsReview: facts.filter((a) => a.status === 'needs_review').length,

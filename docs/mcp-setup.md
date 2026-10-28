@@ -344,7 +344,7 @@ Who wrote a decision file is whoever committed it. If agents in your setup can e
 | `autode_propose_semantic_model` | Propose a shared model or a composite; a person approves it. |
 | `autode_search_assets` | Search everything AutoDE knows (objects, columns, terms, semantic elements, facts, the estate catalog), with facets. |
 | `autode_get_asset_context` | Everything known about one asset: schema, meaning, relationships, governance, facts with evidence, decisions in scope, what uses it. Read it before deciding about the asset. Also the resource `autode://asset/{id}`. |
-| `autode_explore_graph` | The graph around an asset, one to three hops. |
+| `autode_explore_graph` | The graph around an asset, one to three hops; with no asset, the landscape of a system, schema or semantic model with every known relationship. |
 | `autode_capture_coverage` | The completeness checklist for the active problem: per table and metric, what is known and missing, and the action for each. |
 | `autode_find_candidates` | Keys, grain, joins, change columns and personal data from the data (probes on a connection or the pack's samples); those that pass are recorded as proposed, verified facts. |
 | `autode_review_session` | Which of the user's messages read like facts but have no fact recorded from them. |

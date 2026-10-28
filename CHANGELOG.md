@@ -6,6 +6,27 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.50.1
+
+- **Standard vocabulary** (context-layer §6.11; CTX-17), after the owner tried the Explorer: every term a data engineer or architect sees comes from a standard or a catalog convention.
+  - **Asset types** (`assetType`, replacing `kind`) follow catalog names and, for the semantic layer, Snowflake's: logical table, dimension, time dimension, fact, metric, filter. AutoDE's own facts are *knowledge facts*.
+  - **Platform** is a new facet.
+  - **Certification** (verified, documented, unverified, draft) on assets replaces *trust* as a facet. The five tiers stay on knowledge facts, labelled *Evidence*.
+  - **Status** (an asset's lifecycle) is now apart from **review state** (a knowledge fact's).
+  - **Glossary term** is a facet and appears on assets.
+  - Domain, owner and tags are shown, disabled, until MM.
+  - The same names apply in `autode explore` (`--type`, with `--kind` still accepted; `--platform`) and in MCP (`assetTypes`, `certifications`, `platforms`, `reviewStates`, `glossaryTerms`, and `pendingFacets` in results).
+- **The Graph view** shows the landscape (`exploreLandscape`): the working set's tables, or one system, schema or semantic model's. It shows every relationship AutoDE knows, lifted to the tables and labelled with their columns: declared foreign keys, confirmed relationship facts, proposed ones (dashed), and semantic-layer joins (dotted; dashed for a draft model). Columns can be drawn inside their tables. Up to 250 tables are shown; beyond that, a scope is offered.
+  - In every graph: a click opens a summary card (*Open*, *Expand*, *Focus*), and a double-click expands a node's neighbours in place.
+  - *Find* highlights matches and dims the rest; there's a legend, and an explanation when a graph has no relationships yet.
+  - Grid layout added.
+  - An asset's Graph tab shows its columns inside it by default.
+  - Also as `autode explore graph` without an asset, and `autode_explore_graph` without `asset`.
+- An empty search now lists knowledge facts too, after the assets.
+- **The metadata model** is specified (context-layer §6.11): the standards anchors for each concept, rule types under OMG SBVR with modality, and where names come from. **MM** is a new phase, v0.51.0. Owners and domains move there from LIN, and the later phases each move one version.
+- **Deviations:** the JSON of a knowledge fact keeps the ledger's names (`trust`, `status`), shown as *Evidence* and *Review state*. Renaming them would break `autode_list_assertions` and the ledger files.
+- **Measured:** 391 tests (2 new: standard vocabulary; the landscape; the v0.50.0 tests updated to the new names, and the surfaces test checks the landscape on the CLI and MCP). Lint: 0 errors, 21 warnings. Eval unchanged.
+
 ## 0.50.0
 
 - **C5b: the Knowledge Explorer; packs and grounding use the semantic layer** (context-layer §6.5, §6.10, §7.5; CTX-8, CTX-11, GRD-10, UI-7).

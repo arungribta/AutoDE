@@ -5938,7 +5938,7 @@ async function main() {
       autode_governance_candidates: [{ tables: ['shop.customers'] }, { tables: [''] }],
       autode_capture_coverage: [{}, { x: 1 }],
       autode_semantic_list: [{}, { x: 1 }],
-      autode_search_assets: [{ query: 'orders', kinds: ['table'], trust: ['verified'] }, { query: 'orders', trust: ['certain'] }],
+      autode_search_assets: [{ query: 'orders', assetTypes: ['table'], certifications: ['verified'] }, { query: 'orders', certifications: ['certain'] }],
       autode_get_asset_context: [{ asset: 'shop.orders' }, { asset: '' }],
       autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
@@ -11150,14 +11150,14 @@ async function main() {
     const sources = { graph, assertions: golden, conflicts: [], semantic: c5b.index(), artifacts: [{ path: 'autode-output/p1/03-build/b1/stg_orders.sql', assertions: [], subjects: ['obj:shop/prod/shop.orders'], warnings: 0 }] };
     const r = E.searchAssets(sources, 'orders');
     assert.strictEqual(r.results[0].id, 'obj:shop/prod/shop.orders', JSON.stringify(r.results.slice(0, 3)));
-    assert.ok(r.facets.kind.table >= 1 && r.facets.kind.semantic_table === 1 && r.facets.kind.column > 1, JSON.stringify(r.facets.kind));
-    const cols = E.searchAssets(sources, 'orders', { kinds: ['column'] });
-    assert.ok(cols.results.every((x) => x.kind === 'column') && cols.facets.kind.table >= 1, 'facets are counted before filtering');
+    assert.ok(r.facets.assetType.table >= 1 && r.facets.assetType.logical_table === 1 && r.facets.assetType.column > 1, JSON.stringify(r.facets.assetType));
+    const cols = E.searchAssets(sources, 'orders', { assetTypes: ['column'] });
+    assert.ok(cols.results.every((x) => x.assetType === 'column') && cols.facets.assetType.table >= 1, 'facets are counted before filtering');
     const loose = E.searchAssets(sources, 'orders zzzz');
     assert.ok(loose.approximate === true && !E.searchAssets(sources, 'orders').approximate, 'every word must match; otherwise results are related ones, and say so');
     assert.ok(E.searchAssets(sources, '').total > 100, 'an empty query browses everything');
     const fact = golden.find((a) => a.id === 'A-grain-orders');
-    assert.ok(E.searchAssets(sources, fact.statement.split(' ').slice(0, 3).join(' ')).results.some((x) => x.kind === 'fact' && x.id === fact.id), 'facts are searchable');
+    assert.ok(E.searchAssets(sources, fact.statement.split(' ').slice(0, 3).join(' ')).results.some((x) => x.assetType === 'knowledge_fact' && x.id === fact.id && x.reviewState === fact.status), 'facts are searchable');
     // A table: schema, meaning (the semantic table and metrics, not every element), what uses it.
     const t = E.getAssetContext(sources, 'shop.orders');
     assert.strictEqual(t.asset.id, 'obj:shop/prod/shop.orders', 'found by its fqn');
@@ -11172,16 +11172,18 @@ async function main() {
     assert.deepStrictEqual(col.meaning.semantic.map((s) => s.id).sort(), ['sem:sales/orders/tax_amount', 'sem:sales/orders/total_tax']);
     // A semantic metric: its definition and the columns it derives from.
     const m = E.getAssetContext(sources, 'sem:sales/orders/total_tax');
-    assert.deepStrictEqual([m.asset.kind, m.asset.approved, m.meaning.definition.expr], ['metric', true, 'SUM(tax_amount)']);
+    assert.deepStrictEqual([m.asset.assetType, m.asset.status, m.asset.certification, m.meaning.definition.expr], ['metric', 'approved', 'verified', 'SUM(tax_amount)']);
     assert.ok(m.lineage.related.some((x) => x.relation === 'derives_from' && x.asset.id === 'obj:shop/prod/shop.orders.tax_amount'));
     // A fact: what it is about.
     const f = E.getAssetContext(sources, 'A-grain-orders');
-    assert.deepStrictEqual([f.asset.kind, f.facts[0].id, f.lineage.related[0].asset.id], ['fact', 'A-grain-orders', 'obj:shop/prod/shop.orders']);
+    assert.deepStrictEqual([f.asset.assetType, f.facts[0].id, f.lineage.related[0].asset.id], ['knowledge_fact', 'A-grain-orders', 'obj:shop/prod/shop.orders']);
     assert.strictEqual(E.getAssetContext(sources, 'no such thing'), undefined);
     // The graph: capped, with what's left out counted; columns only when asked.
     const g = E.exploreGraph(sources, 'shop.orders', { hops: 2, cap: 2 });
     assert.ok(g.capped && g.nodes.length === 2 && Object.values(g.hidden).reduce((a, b) => a + b, 0) > 0, JSON.stringify(g));
-    assert.ok(!E.exploreGraph(sources, 'shop.orders').nodes.some((n) => n.kind === 'column') && E.exploreGraph(sources, 'shop.orders', { includeColumns: true }).nodes.some((n) => n.kind === 'column'));
+    assert.ok(!E.exploreGraph(sources, 'shop.orders').nodes.some((n) => n.assetType === 'column'));
+    const withCols = E.exploreGraph(sources, 'shop.orders', { includeColumns: true });
+    assert.ok(withCols.nodes.filter((n) => n.assetType === 'column').every((n) => n.parent === 'obj:shop/prod/shop.orders' || n.parent === undefined) && withCols.nodes.some((n) => n.parent === 'obj:shop/prod/shop.orders'), 'columns are drawn inside their table');
     // Facts and the overview.
     const keys = E.listFacts(sources, { kinds: ['key'] });
     assert.ok(keys.rows.length > 0 && keys.rows.every((x) => x.kind === 'key') && Object.keys(keys.facets.kind).length > 1);
@@ -11213,7 +11215,7 @@ async function main() {
       const first = time(() => E.searchAssets(sources, 'customer order'));
       const again = time(() => E.searchAssets(sources, 'customer order'));
       const browse = time(() => E.searchAssets(sources, ''));
-      const id = first.r.results.find((x) => x.kind === 'table').id;
+      const id = first.r.results.find((x) => x.assetType === 'table').id;
       const asset = time(() => E.getAssetContext(sources, id));
       const graphView = time(() => E.exploreGraph(sources, id, { hops: 2 }));
       const overview = time(() => E.exploreOverview(sources));
@@ -11250,7 +11252,7 @@ async function main() {
       assert.deepStrictEqual(plain(viaPanel.body.context), plain(viaMcp), 'the Explorer and MCP');
       assert.deepStrictEqual(plain(viaCli), plain(viaMcp), 'the CLI and MCP');
       // Search, graph and resources over MCP.
-      const found = await call('autode_search_assets', { query: 'tax', kinds: ['metric'] });
+      const found = await call('autode_search_assets', { query: 'tax', assetTypes: ['metric'] });
       assert.deepStrictEqual(found.results.map((x) => x.id), ['sem:sales/orders/total_tax']);
       assert.ok((await call('autode_explore_graph', { asset: 'shop.orders' })).nodes.some((n) => n.id === 'sem:sales/orders'));
       assert.ok((await client.listResourceTemplates()).resourceTemplates.some((t) => t.uriTemplate === 'autode://asset/{id}'));
@@ -11260,10 +11262,13 @@ async function main() {
       const grounding = await call('autode_check_grounding', { content: 'SELECT * FROM shop.orders o JOIN shop.customers c ON o.order_id = c.customer_id' });
       assert.ok(grounding.semantic.checked && grounding.semantic.issues.length === 1, JSON.stringify(grounding.semantic));
       // The CLI's other views.
-      const s = await cli(['explore', 'search', 'tax', '--kind', 'metric', '--workspace', ws]);
-      assert.ok(s.code === 0 && /metric\s+total_tax/.test(s.out), s.out + s.err);
+      const s = await cli(['explore', 'search', 'tax', '--type', 'metric', '--workspace', ws]);
+      assert.ok(s.code === 0 && /Metric\s+total_tax/.test(s.out), s.out + s.err);
+      assert.strictEqual((await cli(['explore', 'search', 'tax', '--kind', 'metric', '--workspace', ws])).code, 0, '--kind still works');
       assert.match((await cli(['explore', '--workspace', ws])).out, /Semantic layer: 1 model\(s\), 1 approved, 1 metric\(s\)/);
       assert.match((await cli(['explore', 'graph', 'shop.orders', '--workspace', ws])).out, /orders —maps to→ shop\.orders/);
+      assert.match((await cli(['explore', 'graph', '--workspace', ws])).out, /11 node\(s\), 1 edge\(s\) in scope:\n {2}shop\.orders —semantic join→ shop\.customers {2}\[sales: customer_id = customer_id\]/);
+      assert.strictEqual((await call('autode_explore_graph', {})).nodes.length, 11, 'the landscape over MCP');
       assert.strictEqual((await cli(['explore', 'asset', 'nothing-like-it', '--workspace', ws])).code, 5);
       // The Explorer's other messages.
       const ready = (await answerExplorerMessage({ type: 'ready' }, host)).reply;
@@ -11288,6 +11293,62 @@ async function main() {
     const ignore = read('.vscodeignore');
     assert.ok(ignore.includes('!dist/cytoscape.min.js') && ignore.includes('!media/explorer.html'));
     assert.ok(nodeFs.existsSync(nodePath.join(__dirname, '..', 'dist', 'cytoscape.min.js')) && /^## cytoscape 3\.34\.3 — MIT/m.test(read('dist/THIRD-PARTY-NOTICES.md')));
+  });
+
+  // ── v0.50.1: standard vocabulary and the landscape graph ──
+
+  await test('v0.50.1: standard vocabulary — asset types as catalogs and Snowflake name them, certification derived from evidence or approval, platform, glossary terms on assets, status kept apart from a knowledge fact\'s review state, domain, owner and tag listed as pending facets', () => {
+    const E = fresh('../dist/engine/explore/explore.js');
+    const graph = c5a.graph();
+    const term = { id: 'term:order', type: 'business_term', label: 'Order', description: 'A customer purchase.', mappedNodeIds: ['obj:shop/prod/shop.orders'], metadata: {}, version: 1 };
+    const golden = c5a.golden();
+    const sources = { graph: { nodes: [...graph.nodes, term], edges: graph.edges }, assertions: golden, conflicts: [], semantic: c5b.index() };
+    const types = new Set(E.searchAssets(sources, '', { limit: 2000 }).results.map((r) => r.assetType));
+    for (const t of ['table', 'column', 'glossary_term', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric']) assert.ok(types.has(t), t);
+    assert.deepStrictEqual([E.ASSET_TYPE_LABELS.logical_table, E.ASSET_TYPE_LABELS.semantic_fact, E.ASSET_TYPE_LABELS.knowledge_fact, E.ASSET_TYPE_LABELS.glossary_term], ['Logical table', 'Fact (semantic)', 'Knowledge fact', 'Glossary term']);
+    assert.deepStrictEqual(['verified', 'confirmed', 'documented', 'assumed', 'inferred'].map(E.certificationOf), ['verified', 'verified', 'documented', 'unverified', 'unverified']);
+    const r = E.searchAssets(sources, 'orders');
+    assert.deepStrictEqual(Object.keys(r.facets), ['assetType', 'system', 'platform', 'environment', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm']);
+    assert.deepStrictEqual(r.pendingFacets, ['domain', 'owner', 'tag']);
+    const orders = r.results.find((x) => x.id === 'obj:shop/prod/shop.orders');
+    assert.deepStrictEqual([orders.platform, orders.glossaryTerms, orders.reviewState], ['file', ['Order'], undefined]);
+    assert.ok(r.facets.glossaryTerm.Order === 1 && E.searchAssets(sources, 'orders', { glossaryTerms: ['Order'] }).results.every((x) => (x.glossaryTerms || []).includes('Order')));
+    const logical = E.getAssetContext(sources, 'sem:sales/orders').asset;
+    assert.deepStrictEqual([logical.assetType, logical.platform, logical.status, logical.certification], ['logical_table', 'semantic layer', 'approved', 'verified']);
+    const fact = E.searchAssets(sources, '', { assetTypes: ['knowledge_fact'], limit: 500 }).results.find((x) => x.id === 'A-grain-orders');
+    assert.deepStrictEqual([fact.reviewState, fact.status, fact.certification], ['active', undefined, E.certificationOf(fact.trust)]);
+    assert.ok(!('trust' in r.facets) && !('kind' in r.facets), 'no AutoDE-only facet names');
+  });
+
+  await test('v0.50.1: the landscape — every table in scope with every relationship AutoDE knows: declared foreign keys, confirmed and proposed relationships (proposed ones flagged) and semantic joins, labelled with their columns; by system, schema or semantic model; columns inside their tables; capped with the total', () => {
+    const E = fresh('../dist/engine/explore/explore.js');
+    const { handleExploreRequest } = fresh('../dist/engine/explore/sources.js');
+    const graph = c5a.graph();
+    const fk = { id: 'fk:payments-orders', source: 'obj:shop/prod/shop.payments.order_id', target: 'obj:shop/prod/shop.orders.order_id', type: 'foreign_key' };
+    const proposed = { ...c5a.golden().find((a) => a.kind === 'relationship' && a.value.from.entity === 'shop.order_items'), id: 'P-items-orders', status: 'proposed', trust: 'inferred' };
+    const sources = { graph: { nodes: graph.nodes, edges: [...graph.edges, fk] }, assertions: [proposed], conflicts: [], semantic: c5b.index() };
+    const all = E.exploreLandscape(sources);
+    const tables = all.nodes.filter((n) => !n.parent);
+    assert.ok(tables.length >= 19 && tables.every((n) => n.assetType === 'table' || n.assetType === 'view') && !all.capped && all.total === tables.length, JSON.stringify({ n: tables.length, total: all.total }));
+    const edge = (type, from, to) => all.edges.find((e) => e.type === type && e.source === `obj:shop/prod/${from}` && e.target === `obj:shop/prod/${to}`);
+    assert.strictEqual(edge('foreign_key', 'shop.payments', 'shop.orders').label, 'order_id = order_id', 'lifted to the tables, columns as the label');
+    const p = edge('proposed_relationship', 'shop.order_items', 'shop.orders');
+    assert.deepStrictEqual([p.proposed, p.label, p.trust], [true, 'order_id = order_id', 'inferred']);
+    assert.match(edge('semantic_join', 'shop.orders', 'shop.customers').label, /^sales: customer_id = customer_id$/);
+    assert.ok(!E.exploreLandscape(sources, { proposed: false }).edges.some((e) => e.proposed) && !E.exploreLandscape(sources, { semantic: false }).edges.some((e) => e.type === 'semantic_join'));
+    assert.deepStrictEqual(all.scopes.systems.map((x) => x.id), ['crm', 'shop']);
+    assert.ok(all.scopes.schemas.some((x) => x.id === 'shop') && all.scopes.models.some((m) => m.id === 'sales' && m.status === 'approved'));
+    assert.ok(E.exploreLandscape(sources, { system: 'crm' }).nodes.every((n) => n.system === 'crm'));
+    assert.deepStrictEqual(E.exploreLandscape(sources, { model: 'sales' }).nodes.map((n) => n.id).sort(), ['obj:shop/prod/shop.customers', 'obj:shop/prod/shop.orders']);
+    const cols = E.exploreLandscape(sources, { model: 'sales', includeColumns: true });
+    assert.ok(cols.nodes.filter((n) => n.assetType === 'column').every((n) => n.parent === 'obj:shop/prod/shop.orders' || n.parent === 'obj:shop/prod/shop.customers'));
+    const capped = E.exploreLandscape(sources, { cap: 3 });
+    assert.deepStrictEqual([capped.capped, capped.nodes.length, capped.total], [true, 3, all.total]);
+    assert.deepStrictEqual(handleExploreRequest({ type: 'landscape', model: 'sales' }, sources, '.').slice.nodes.length, 2);
+    // The panel's Graph view uses it, with expand in place, a card and find on canvas.
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
+    for (const t of ['data-view="graph"', "type: 'landscape'", "'dbltap'", 'data-card-expand', 'id="lFind"', 'Asset type', 'Certification', 'Review state', 'Evidence', "':parent'"]) assert.ok(html.includes(t), t);
+    assert.ok(!/kind: 'Kind'|trust: 'Trust'/.test(html), 'no AutoDE-only facet titles');
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

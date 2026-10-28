@@ -166,9 +166,16 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - Impact lists the affected pipelines, artifacts, semantic models, reports, domains and business problems, each with the path to it, by graph traversal.
 
   *Why:* change is the riskiest act in data engineering, and an agent must know what a change breaks (P2). *Status:* Planned (LIN). Platform metadata extraction already reads lineage, but it isn't stored.
+- **CTX-17 — The knowledge layer follows industry standards.** Its concepts and names come from W3C and open specifications (SKOS, DQV, PROV, ODRL, OpenLineage, ODCS), Snowflake and Unity formats, and catalog conventions. Concepts AutoDE adds are labelled as its own: evidence tiers, assumptions. The model covers:
+  - asset types, system, platform and environment;
+  - a glossary with categories and related terms, tags (`key=value`) and classifications;
+  - typed rules (definition, validation, policy, standard, guidance) with modality;
+  - ownership roles, domains and data products, certification, custom properties, and quality dimensions.
+
+  Every concept is present on every surface; data fills in from evidence and imports. *Why:* data engineers and architects, and the tools they already use, should recognise every term, and imports and exports need a shared model. *Status:* Partly shipped in v0.50.1: standard asset types, platform, certification, status apart from review state, glossary terms as a facet, domain, owner and tags shown pending. The rest is planned for MM.
 - **CTX-16 — Definitions and metadata from the customer's tools can be imported:** AtScale (first), Snowflake Horizon, Collibra and Unity Catalog, into facts and semantic models through the usual gates. *Why:* customers already hold this knowledge, and AutoDE should use it rather than rebuild it. *Status:* Planned (IMP1; IMP2–IMP4 unscheduled).
 
-*Planned work:* semantic model — §6 (C5); ontology and terminology — §6.8 (ONT1, ONT2); imports — §6.9 (IMP1–IMP4); lineage and impact — §8.5 (LIN); freshness policy and context health — §8.2, §8.4 (C6).
+*Planned work:* semantic model — §6 (C5); the metadata model — §6.11 (MM); ontology and terminology — §6.8 (ONT1, ONT2); imports — §6.9 (IMP1–IMP4); lineage and impact — §8.5 (LIN); freshness policy and context health — §8.2, §8.4 (C6).
 
 ### 3.6 Context delivery and grounding (GRD)
 
@@ -292,7 +299,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - lineage and impact views;
   - an ontology and glossary browser.
 
-  It is read-only, theme-aware, usable by keyboard, and fast on large estates. Every view has a CLI and MCP equivalent. *Why:* the context and semantic layers must be explorable to be trusted (C6). *Status:* Shipped v0.50.0 (search, asset pages, graph, facts, estate; `autode explore`; MCP tools). The lineage and impact views come in LIN, the ontology and glossary browser in ONT1. Lists are paged rather than virtualised.
+  It is read-only, theme-aware, usable by keyboard, and fast on large estates. Every view has a CLI and MCP equivalent. *Why:* the context and semantic layers must be explorable to be trusted (C6). *Status:* Shipped v0.50.0 (search, asset pages, graph, facts, estate; `autode explore`; MCP tools). v0.50.1 added the Graph view (the landscape with every known relationship, expand in place, find on canvas) and standard labels (CTX-17). The lineage and impact views come in LIN, the ontology and glossary browser in ONT1. Lists are paged rather than virtualised.
 - **UI-6 — Dashboard panel.** *Status:* Parked (v0.13.0); removed in v0.45.9 (owner's choice): the Workflow view shows progress and each stage's outputs.
 
 ---

@@ -1079,6 +1079,24 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: `autode explore`, `autode explore search tax --kind metric`, `autode explore asset shop.orders`; in Claude Code ask "what do we know about shop.orders?".
   Expect: the CLI prints the overview, the metric and the asset page as Markdown; the host calls `autode_get_asset_context` (or reads `autode://asset/...`) and answers from it.
 
+## Part 45 — v0.50.1 Standard vocabulary and the Graph view
+
+- [ ] **45.1 Standard filters.**
+  Do: open the Knowledge Explorer and search `order`.
+  Expect: filters titled Asset type, System, Platform, Environment, Certification, Status, Review state, Classification, Glossary term; Domain, Owner and Tags greyed ("Arrives with the metadata model"). Asset types read Table, Column, Logical table, Dimension, Metric, Knowledge fact; no "Kind" or "Trust".
+- [ ] **45.2 The landscape.**
+  Do: open the Graph view; choose Scope → System → shop; tick Columns; then choose the `sales` semantic model.
+  Expect: every shop table, with dotted semantic joins between orders and customers once `sales` is approved, dashed proposed relationships if any, and solid foreign keys; columns drawn inside their tables; the footer counts relationships by kind, or says how to add them when there are none.
+- [ ] **45.3 Expand, card and find.**
+  Do: click a table; *Expand*; double-click another node; type `cust` in Find.
+  Expect: a card with type, certification and *Open*, *Expand*, *Focus*; neighbours added without losing the canvas; matches highlighted, the rest dimmed.
+- [ ] **45.4 An asset's graph.**
+  Do: open `shop.orders` → Graph.
+  Expect: its columns inside it; if it has no relationships, a note saying so with a link to the landscape.
+- [ ] **45.5 In a terminal and a host.**
+  Do: `autode explore graph --system shop`; `autode explore search tax --type metric`; in Claude Code ask "show me how the shop tables relate".
+  Expect: the CLI lists tables and relationships with their columns; the host calls `autode_explore_graph` without an asset.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1348,5 +1366,10 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 44.5 |  |  |
 | 44.6 |  |  |
 | 44.7 |  |  |
+| 45.1 |  |  |
+| 45.2 |  |  |
+| 45.3 |  |  |
+| 45.4 |  |  |
+| 45.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

@@ -14,7 +14,8 @@ import { computeRevision } from '../engine/context/contextStore';
 
 const read = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const strings = { type: 'array', items: { type: 'string' } };
-const TRUST = { type: 'array', items: { enum: ['verified', 'confirmed', 'documented', 'assumed', 'inferred'] } };
+const ASSET_TYPES = { type: 'array', items: { enum: ['table', 'view', 'column', 'glossary_term', 'rule', 'verified_query', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric', 'filter', 'knowledge_fact'] } };
+const CERTIFICATIONS = { type: 'array', items: { enum: ['verified', 'documented', 'unverified', 'draft'] } };
 
 export async function workspaceExploreSources(ws: EngineWorkspace): Promise<ExploreSources> {
   return exploreSources(ws.options.workspaceRoot, await ws.contextSources(), ws.activeProblemId());
@@ -28,10 +29,10 @@ export function exploreTools(): EngineTool[] {
   return [
     {
       name: 'autode_search_assets',
-      description: 'Search everything AutoDE knows — tables, views, columns, glossary terms, rules, verified queries, semantic models and their elements, facts, and tables in the estate catalog beyond the working set — by name, alias, synonym and description (every word must match; abbreviations and the customer\'s vocabulary count). An empty query lists everything. Returns ranked results with ids, and facet counts (kind, system, environment, trust, status, classification); filter by any facet. Then read one with autode_get_asset_context.',
+      description: 'Search everything AutoDE knows — tables, views, columns, glossary terms, rules, verified queries, semantic models (logical tables, dimensions, time dimensions, facts, metrics, filters), knowledge facts, and tables in the estate catalog beyond the working set — by name, alias, synonym and description. Every word must match; otherwise the results are related ones from the customer\'s vocabulary, flagged approximate. An empty query lists everything. Returns ranked results with ids, and facet counts: asset type, system, platform, environment, certification (verified, documented, unverified, draft), status, review state (knowledge facts), classification, glossary term; domain, owner and tag are in pendingFacets until they have data. Filter by any facet. Then read one with autode_get_asset_context.',
       inputSchema: {
         type: 'object', additionalProperties: false, required: ['query'],
-        properties: { query: { type: 'string' }, kinds: strings, systems: strings, environments: strings, trust: TRUST, statuses: strings, classifications: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
+        properties: { query: { type: 'string' }, assetTypes: ASSET_TYPES, systems: strings, platforms: strings, environments: strings, certifications: CERTIFICATIONS, statuses: strings, reviewStates: strings, classifications: strings, glossaryTerms: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
       },
       annotations: read('Search assets'),
       handler: async (args, ws) => (await explore(ws, { type: 'search', ...(args as { query: string }) })).result as Record<string, unknown>
@@ -49,10 +50,14 @@ export function exploreTools(): EngineTool[] {
     },
     {
       name: 'autode_explore_graph',
-      description: 'The graph around an asset, one to three hops out, both directions: nodes (with kind, trust, classification) and edges (contains, foreign_key, related_to, maps_to, derives_from, uses_table, constrained_by), optionally only some edge types. Columns are left out unless asked for; a hub is capped and what is left out is counted per node.',
-      inputSchema: { type: 'object', additionalProperties: false, required: ['asset'], properties: { asset: { type: 'string', minLength: 1 }, hops: { type: 'integer', minimum: 1, maximum: 3 }, edgeTypes: strings, includeColumns: { type: 'boolean' } } },
+      description: 'The graph. With an asset: its neighbourhood, one to three hops out, both directions (edges contains, foreign_key, related_to, maps_to, derives_from, uses_table, constrained_by; optionally only some types; a hub is capped and what is left out is counted per node). Without one: the landscape, the working set\'s tables (or one system, schema or semantic model\'s) with every relationship AutoDE knows between them — declared foreign keys, confirmed relationships, proposed ones and semantic-layer joins (proposed: true when not confirmed), each labelled with its columns. Columns, when asked for, name their table as parent.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { asset: { type: 'string', minLength: 1 }, hops: { type: 'integer', minimum: 1, maximum: 3 }, edgeTypes: strings, includeColumns: { type: 'boolean' }, system: { type: 'string' }, schema: { type: 'string' }, model: { type: 'string' } } },
       annotations: read('Explore the graph'),
       handler: async (args, ws) => {
+        if (!args.asset) {
+          const l = await explore(ws, { type: 'landscape', ...(args.system ? { system: String(args.system) } : {}), ...(args.schema ? { schema: String(args.schema) } : {}), ...(args.model ? { model: String(args.model) } : {}), ...(args.includeColumns ? { includeColumns: true } : {}) });
+          return l.slice as Record<string, unknown>;
+        }
         const r = await explore(ws, { type: 'graph', id: String(args.asset), ...(args.hops ? { hops: Number(args.hops) } : {}), ...(args.edgeTypes ? { edgeTypes: args.edgeTypes as string[] } : {}), ...(args.includeColumns ? { includeColumns: true } : {}) });
         if (!r.slice) throw new EngineToolError('NOT_FOUND', String(r.error));
         return r.slice as Record<string, unknown>;

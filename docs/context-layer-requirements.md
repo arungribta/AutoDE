@@ -27,7 +27,7 @@ The owner reviewed a proposal for an "enterprise context and semantic intelligen
 
 | Proposed layer | In AutoDE | Added by |
 |---|---|---|
-| Metadata repository | Estate, catalogs, profiles (K1, K2) | Owner and domain on objects; non-table assets where lineage names them (§8.5, LIN) |
+| Metadata repository | Estate, catalogs, profiles (K1, K2) | The metadata model (§6.11, MM): ownership, domains, tags, certification, custom properties; non-table assets where lineage names them (LIN) |
 | Business semantics: glossary, metrics, rules | Vocabulary and `business_term` facts; the semantic layer (§6); `business_rule` facts | Terms gain a scope and a meaning (§6.8, ONT1) |
 | Ontology | — | Canonical ontology: upper layer, industry packs, extensions (§6.8, ONT1) |
 | Knowledge graph | Graph projection (§4.3) | Concept, domain, owner, pipeline and policy nodes; traversal tools (C5b, LIN, ONT1) |
@@ -410,9 +410,68 @@ A webview panel, like the Workflow tab, where data engineers and architects expl
   - Empty states say what to do next.
   - A graph-rendering library, if one is used, is bundled (no CDN) and needs a P6 decision record.
 
+- **Graph view (v0.50.1)**, beside Facts and Estate: the **landscape**.
+  - It shows the working set's tables, or one system, schema or semantic model's, with columns folded inside their tables on request.
+  - Its edges are every relationship AutoDE knows: declared foreign keys, confirmed relationship facts, proposed ones (dashed) and semantic-layer joins (dotted), each labelled with its columns.
+  - In every graph, a click shows a summary card, a double-click expands a node's neighbours in place, and *Find* highlights matches and dims the rest.
+
 **Every view has a CLI and an MCP equivalent**, so external AI agents, and data engineers without VS Code, can use the layers: search, asset context (§7.5), lineage, impact, concepts and terms, through `autode explore …` and the MCP read tools and resources (§9).
 
 ---
+
+### 6.11 The metadata model (owner, 2026-10-28; v0.50.1 labels, MM)
+
+AutoDE's knowledge layer uses the concepts and names of the industry's standards and catalogs, so nothing a data engineer or architect sees is AutoDE-only unless it has to be. The **model** is complete from MM onwards: every concept exists, every asset page has every section, and an empty section says how to fill it. The **data** fills in from evidence and imports (IMP1–IMP4); nothing requires people to fill every field before AutoDE is useful.
+
+**Where names come from**, in this order:
+1. **W3C and open specifications** for meaning: SKOS, DQV, PROV, ODRL, OpenLineage, ODCS.
+2. **Snowflake and Unity Catalog** for formats that round-trip: tags and the semantic model.
+3. **Catalog conventions** (DataHub, OpenMetadata, Atlan, Collibra, Purview) for UI labels.
+
+AutoDE's own extensions are labelled as such: the five evidence tiers on facts, assumptions and exploration mode.
+
+| Concept | What it is | Standard anchor | Until MM |
+|---|---|---|---|
+| **Asset type** | Table, view, column, glossary term, rule, verified query; semantic model, logical table, dimension, time dimension, fact, metric, filter; knowledge fact | Catalog asset or entity types; Snowflake semantic model names | Shipped v0.50.1 |
+| **System / platform / environment** | The logical source (crm); the technology (Snowflake); prod, dev | Collibra *System*; DataHub *Platform* and *Environment* | Shipped v0.50.1 |
+| **Glossary term** | Definition, synonyms, abbreviation, examples, related, broader and narrower terms, steward, status (draft, approved, deprecated); organised as glossary → category → term; assigned to assets; it *means* a concept (§6.8) | W3C **SKOS**; the glossary models of DataHub, OpenMetadata, Collibra and Atlan | Flat `business_term` facts, assigned to assets |
+| **Tag** | `key=value` labels without a definition, optionally from a controlled tag group | Snowflake object tags and Unity Catalog tags (same shape, so they import and deploy as they are); DataHub tags | None |
+| **Classification** | Controlled sensitivity and compliance labels (PII, sensitive PII, confidential; PCI, PHI) | Purview classifications; OpenMetadata classifications; Microsoft sensitivity labels | Stored as a `business_rule` with predicate `classification` (GOV) |
+| **Rule** | Typed and with modality (below) | OMG **SBVR** | `business_rule`, `STRICT` or `RECOMMENDED` |
+| **Ownership** | Business owner, technical owner, data steward | DAMA-DMBOK roles; DataHub ownership types | None |
+| **Domain / data product** | A business area; a governed bundle of assets | DataHub, OpenMetadata and Atlan data mesh models | None; a shared semantic model's subject area is a domain |
+| **Certification** | An asset's endorsement: verified, documented, unverified, draft | Atlan and OpenMetadata certification | Shipped v0.50.1, derived from evidence (verified or confirmed → verified; documented → documented; assumed or inferred → unverified) or, for the semantic layer, from approval |
+| **Status / review state** | An asset's lifecycle (active, deprecated, approved, draft); a knowledge fact's review (proposed, active, needs review, superseded, rejected) | Catalog status; AutoDE's review | Shipped v0.50.1, kept apart |
+| **Documentation** | Description, README, links | Every catalog | Descriptions |
+| **Custom properties** | A team's own typed fields | DataHub structured properties; OpenMetadata custom properties | None |
+| **Quality check and result** | An expectation and its run results, by dimension (completeness, uniqueness, validity, consistency, timeliness, accuracy) | W3C **DQV**; **ODCS** quality; DAMA dimensions | `quality_expectation` facts and probes, without dimensions |
+| **Policy** | Access, masking, retention, usage | W3C **ODRL** | Masking (GOV); the rest in ONT2 |
+| **Lineage** | Movement and derivation | **OpenLineage** (edge names follow it) | LIN |
+| **Data contract** | What a produced dataset promises | **ODCS** | Read (C4a); produced in PAT |
+| **Provenance and evidence** | Where a fact came from; how sure AutoDE is | W3C **PROV** for provenance; the five evidence tiers are AutoDE's own (no standard ranks evidence, and grounding needs the distinction) | Shipped (C2) |
+
+**Rules.** One concept with a type, following SBVR's split between *definitional* rules (what something is) and *behavioural* rules (what must or should happen):
+
+| Rule type | Example | Checked by | Standard home |
+|---|---|---|---|
+| **Definition / derivation** | "Active customer = an order in the last 90 days" | Its expression, against the semantic layer | SBVR definitional; becomes a metric or filter once approved |
+| **Validation** (data quality) | "order_id is unique", "amount ≥ 0" | Probes and generated tests | DQV and ODCS quality, with a DAMA dimension |
+| **Policy** | "Mask email outside production", "keep 7 years" | Governance checks | ODRL (GOV, ONT2) |
+| **Standard / convention** | "Dimensions are named `dim_*`", "SCD2 for customer" | Lint-style checks | Engineering standards |
+| **Guidance** (instruction) | "Fiscal year starts in April", "prefer the CRM email over the shop email" | Not checkable; packs include it for the assets it covers | Snowflake semantic model `custom_instructions` |
+
+Every rule has the same envelope:
+- **type**;
+- **modality**: mandatory or advisory, in SBVR's terms (replacing STRICT and RECOMMENDED, with the same meaning);
+- **scope**: an asset, a domain, or team-wide;
+- a machine-checkable **expression** where one exists;
+- **owner**, **status** and **evidence**.
+
+**Labels the surfaces use** (v0.50.1):
+- **Facets:** asset type, system, platform, environment, domain, owner, certification, status, review state, classification, tags, glossary term.
+- **On a knowledge fact:** *Evidence* (its trust tier) and *Review state* (its status).
+
+Domain, owner and tags are shown, disabled, until MM gives them data. The JSON fields keep the ledger's own names where they are the ledger's (`trust`, `status` on a fact), and use the standard names elsewhere (`assetType`, `certification`, `reviewState`).
 
 ## 7. Delivery — task-scoped context packs
 
@@ -535,7 +594,7 @@ Today the platform adapters extract lineage edges, but nothing stores them. Line
 
 Lineage edges are `derives_from` assertions in the working set. Observed edges are `verified`; edges from approved designs are `confirmed`. Observed lineage for the estate beyond the working set stays in the catalog and is read on demand, as in K2.
 
-**Owner and domain.** Objects gain an owner (from the platform, an import, or a person) and a domain. A shared semantic model's subject area is a domain; objects in it inherit it unless stated otherwise. Cross-domain lineage is lineage whose ends lie in different domains.
+**Owner and domain** come from the metadata model (§6.11, MM). Cross-domain lineage is lineage whose ends lie in different domains.
 
 **Traversals.**
 - Upstream and downstream, depth-limited, at table or column level.
@@ -667,7 +726,7 @@ In short:
 **Status:** ✅ shipped in v0.49.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-11; HOW: technical-design.md §5.16; usage: [user-guide.md](user-guide.md) §15. §6 stays the specification for C5b–C5d. Acceptance met by the tests named in CHANGELOG.md 0.49.0: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; a changed shared model makes its composites stale; the reference draft matches its golden file; the checks find a missing column and a join that contradicts a key. The older semantic-layer snapshot is retired.
 
 ### Phase C5b: The Knowledge Explorer, asset context; packs and grounding use the semantic layer
-**Status:** ✅ shipped in v0.50.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-8, CTX-11, GRD-10, UI-7; HOW: technical-design.md §5.17; usage: user-guide.md §8.7, §14, §15.5. Acceptance met by the tests named in CHANGELOG.md 0.50.0.
+**Status:** ✅ shipped in v0.50.0; the Graph view (landscape) and the standard labels of §6.11 in v0.50.1. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-8, CTX-11, GRD-10, UI-7; HOW: technical-design.md §5.17; usage: user-guide.md §8.7, §14, §15.5. Acceptance met by the tests named in CHANGELOG.md 0.50.0.
 
 Scope:
 - §6.5: graph, packs and grounding.
@@ -682,14 +741,31 @@ Acceptance:
 - Search and the asset page answer within NFR-1 on the large-estate fixture.
 - The asset page, `autode explore asset` and `autode_get_asset_context` return the same content.
 
-### Phase LIN: Lineage, ownership and impact
-Scope: §8.5, and the Explorer's Lineage tab and impact view.
+### Phase MM: The metadata model
+Scope: §6.11.
+- **Tags:** `key=value`, with tag groups.
+- **Glossary:** SKOS-shaped (categories, related, broader and narrower terms, steward, status), and assignment to assets.
+- **Classifications** as their own concept: GOV's are migrated from `business_rule`.
+- **Rules:** typed (definition, validation, policy, standard, guidance) with modality, scope and expression. STRICT and RECOMMENDED are migrated to mandatory and advisory. Guidance rules are delivered in packs.
+- **Ownership roles, domains and data products, certification set by a person, custom properties, quality dimensions.**
+- **Every surface:** every Explorer facet, asset section, CLI view and MCP field.
+- **Migration:** existing facts are converted automatically and the change is recorded in the ledger.
+
+Acceptance:
+- On the reference problem every concept of §6.11 appears on asset pages, with an empty section that says how to fill it.
+- GOV classifications and existing rules migrate without loss, and the ledger records each migration.
+- A guidance rule appears in the pack of every task over its assets.
+- Tags written as `key=value` round-trip with Snowflake tag syntax (golden).
+- The domain, owner and tag facets are live.
+
+### Phase LIN: Lineage and impact
+Scope: §8.5, and the Explorer's Lineage tab and impact view. Owners and domains come from MM.
 
 Acceptance:
 - On the reference problem, designed and generated lineage links every target column to its source columns.
 - Recorded Snowflake and Databricks lineage results load as observed edges.
 - The impact of renaming a source column lists the dependent mapping, artifacts, semantic elements and business problem, each with its path.
-- Owners and domains are shown and filterable.
+- Impact groups affected assets by domain (from MM).
 - A manual check against a live Snowflake account.
 
 ### Phase ONT1: Canonical ontology, terminology and onboarding standards

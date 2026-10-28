@@ -775,6 +775,24 @@ Measured on the large-estate fixture (§10.3; about 50 000 columns): with the wh
 - **CLI:** `autode explore [overview|search|asset|graph]`.
 - **MCP:** `src/mcp/exploreTools.ts` provides `autode_search_assets`, `autode_get_asset_context` and `autode_explore_graph`, and the resources `autode://asset/{id}` (template), `autode://explore/overview` and `autode://explore/estate`. `readResource` is now async.
 
+**v0.50.1.**
+- `AssetSummary` carries:
+  - `assetType` (see `ASSET_TYPE_LABELS`; semantic elements are typed by their list);
+  - `platform`: from the connection id, a platform named in the source reference, else `file`, and `semantic layer` for `sem:` nodes;
+  - `certification` (`certificationOf(trust)`, or from approval for the semantic layer), with `trust` kept as evidence;
+  - `status` for assets and `reviewState` for knowledge facts;
+  - `glossaryTerms`, from `business_term` assignments (`mappedNodeIds`, `maps_to`).
+- `FACETS` lists the facets in catalog order, and `PENDING_FACETS` names domain, owner and tag.
+- `exploreLandscape(sources, { system, schema, model, includeColumns, proposed, semantic, cap })` returns the tables in scope and lifts edges to them:
+  - `foreign_key` and `related_to`, the latter as `relationship`;
+  - proposed or needs-review relationship facts, as `proposed_relationship` resolved with `createSubjectResolver`;
+  - the semantic layer's relationships, as `semantic_join` matched by `baseMatches` (`proposed` when the model is a draft).
+
+  Each edge is labelled with its columns. The result also carries `total`, `capped` and `scopes`.
+- Graph nodes carry `parent`, so the webview draws columns inside their tables (Cytoscape compound nodes).
+- Request `landscape`; `autode_explore_graph` without `asset`; `autode explore graph` without an asset.
+- The webview has one renderer, `drawGraph`, used by the asset tab and the Graph view, with a card, `expand` (adds a 1-hop slice in place and runs the layout with `fit: false`) and `findOn`.
+
 **Build.** `scripts/bundle.cjs` copies `WEBVIEW_LIBRARIES` (`cytoscape/dist/cytoscape.min.js`) into `dist/` and adds their licences to `THIRD-PARTY-NOTICES.md`. `.vscodeignore` ships `dist/cytoscape.min.js` and `media/explorer.html`.
 
 ## 6. Data Platforms
