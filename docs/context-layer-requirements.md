@@ -282,9 +282,33 @@ Rules (checked deterministically; a violation refuses the composite):
 - **Graph and packs.** Approved semantic elements become graph nodes linked to their physical columns and backing facts. Context packs include the definitions relevant to the task; the grounding check refuses a join or metric absent from the semantic layer.
 - **Approval and stakes.** A change to a shared model is a workspace-level decision for a person (it affects every problem that uses it; it appears in *Waiting for you*). A composite is approved within its problem's workflow. Exploration mode (§7.4) relaxes the checks, not the authority.
 
+### 6.4a Identity: databases, schemas, systems and environments (v0.50.3)
+
+The same table name exists in several databases, schemas, systems (accounts) and environments.
+
+**Physical layer.** Databases (Databricks: catalogs) and schemas are assets in a hierarchy: **system → environment → database → schema → table → column**. This is how catalogs model it (DataHub containers, OpenMetadata databases and schemas, Unity catalogs and schemas).
+- They are computed from the tables' qualified names, so nothing new is stored.
+- They have pages with their contents, facets, and a browse tree.
+- A table whose source named no database is in an `(unknown)` database, never a guessed one.
+- File ingestion's format labels (`ddl`, `csv`, `json`) for a table with no schema count as no schema.
+
+**Semantic layer.** It has no container objects: a logical table is storage-independent by design, as in Snowflake semantic views, dbt MetricFlow and Databricks metric views. Instead:
+- **Fully qualified base tables.** Matching uses the database, schema and table, compared where both sides know the part. An unknown part (DDL without a database, the `SET_DATABASE` placeholder) is not compared.
+- **Binding.** A model is bound to a **system and environment** in its sidecar (never in the YAML), because a semantic view lives in one account. Drafts record the binding of the tables they come from. A draft over several systems is left unbound, with a note. Models written before v0.50.3 are unbound, and match within any system.
+- **Ambiguity is never a guess.** When several physical tables fit, the match is ambiguous:
+  - nothing is linked;
+  - packs hand out no definitions for it;
+  - the checks name every candidate and say how to fix it (set the database, or bind the model);
+  - the Explorer shows the candidates on the logical table's page.
+- **Packs:** a physical table receives only the definitions of the semantic tables that resolve to *it*, not to another table with the same name.
+- **Grounding:** a database or schema named in SQL must match. A table in another database is not that model's table, so it isn't judged against it.
+- **Logical names** stay unique within a model: the table name, else schema_name, else database_schema_name.
+- **Environments** (C5c): a model is written once, with the production database names. Deployment maps database names per environment from the estate, so one model serves dev, test and prod and is never forked per environment.
+
 ### 6.6 Deployment and exports (C5c)
 
 - **Snowflake:** a resolved model becomes a semantic view through `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`, as a runbook step under the team's approval policy.
+- **Per environment:** the model's database names are mapped to the environment deployed to (the estate's per-environment database map, §6.4a), so `RETAIL` in the model becomes `RETAIL_DEV` in dev. The model is never copied per environment.
 - **Databricks:** a metric view (YAML) through a runbook.
 - **dbt:** MetricFlow `semantic_models` and `metrics` YAML, written as deliverables.
 
@@ -365,14 +389,13 @@ The ontology never blocks a gate: a problem without a pack works as before.
 
 Packs shipped with AutoDE live in `ontologies/`. FIBO comes first; others follow when an engagement needs them and their licence allows redistribution, which is checked when each pack is planned. Other standards are imported from the team's own copy. Parsing OWL needs an RDF parser, which requires a P6 decision record (licence, size) at ONT1. Shipped packs are converted when AutoDE is built, so at runtime the parser is needed only for files a user supplies.
 
-**The semantic architect (ONT1).**
-- A new role template, `agents/semantic-architect.md`.
-- Its skills cover:
-  - semantic modelling: drafting and refining shared models and composites, synonyms and verified queries;
-  - onboarding a standard: proposing seed concepts and their placement;
-  - term alignment: proposing `means` links with evidence.
-- The context curator keeps capturing facts, documents and vocabulary.
-- A workflow template, `semantic-foundation`, runs the role: onboard a standard → align the vocabulary → draft shared models → approve.
+**Two roles, one per layer** (revised 2026-10-28; earlier a single "semantic architect"). Like every AutoDE agent, each is a role template (`agents/<role>.md`: rules, allowed tools, skills) whose skills are its own agentic procedure. Each calls AutoDE's tools in a loop, run by the host's model (the VS Code executor or an agent host through the plugin), proposes, and leaves decisions to a person.
+- **Semantic modeler** (semantic layer; **MM**). It drafts and refines shared models and composites: metrics, joins, synonyms, verified queries, `kpi` tags. It works through `autode_semantic_draft`, `autode_semantic_check`, `autode_semantic_resolve` and `autode_propose_semantic_model`. It resolves ambiguous base tables and binds models.
+- **Knowledge engineer** (context layer):
+  - in **MM**, it structures the glossary (categories, related terms, stewards) and drafts knowledge articles from what is known, citing facts;
+  - in **ONT1**, it onboards standards (seed concepts, placement), aligns terms to concepts (`means`) and proposes *represents* links.
+- The **context curator** keeps capturing facts, documents and vocabulary from conversations and documents.
+- A workflow template, `semantic-foundation`, runs them: onboard a standard (knowledge engineer) → align the vocabulary (knowledge engineer) → draft shared models (semantic modeler) → approve (a person).
 
 ### 6.9 Importing from semantic and catalog tools (IMP1–IMP4; owner, 2026-10-28)
 
@@ -796,6 +819,7 @@ Scope: §6.11.
   - inclusion in packs, replacing the keyword-matched knowledge skills for knowledge about entities (skills stay for procedures);
   - on every surface: `autode_search_articles`, `autode explore articles`.
 - **The `kpi` tag** and a *KPIs* filter.
+- **Two agents** (§6.8): the **semantic modeler** (role template and skills for drafting, refining and binding semantic models) and the **knowledge engineer**'s first skills (glossary structure, knowledge articles).
 - **Every surface:** every Explorer facet, asset section, CLI view and MCP field.
 - **Migration:** existing facts are converted automatically and the change is recorded in the ledger.
 
@@ -820,7 +844,7 @@ Acceptance:
 ### Phase ONT1: Canonical ontology, terminology and onboarding standards
 Scope:
 - §6.8: the upper layer; the pack format; a FIBO pack (about 20–40 core concepts, starting with lending); onboarding a standard in the Explorer, on the CLI (`autode ontology`) and over MCP; term scope and `means` links.
-- The semantic architect role, its skills, and the `semantic-foundation` workflow template.
+- The knowledge engineer's ontology skills (onboarding a standard, aligning terms, *represents* links), and the `semantic-foundation` workflow template.
 - The Explorer's ontology and glossary view, and the **concept page** (§6.8): `autode explore concept`, `autode_get_concept_context`.
 - Concept links on knowledge articles, and *represents* links from tables.
 - The RDF parser's P6 decision record.

@@ -14,7 +14,7 @@ import { computeRevision } from '../engine/context/contextStore';
 
 const read = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const strings = { type: 'array', items: { type: 'string' } };
-const ASSET_TYPES = { type: 'array', items: { enum: ['table', 'view', 'column', 'glossary_term', 'rule', 'verified_query', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric', 'filter', 'relationship', 'custom_instruction', 'knowledge_fact'] } };
+const ASSET_TYPES = { type: 'array', items: { enum: ['database', 'schema', 'table', 'view', 'column', 'glossary_term', 'rule', 'verified_query', 'semantic_model', 'logical_table', 'dimension', 'time_dimension', 'semantic_fact', 'metric', 'filter', 'relationship', 'custom_instruction', 'knowledge_fact'] } };
 const LAYERS = { type: 'array', items: { enum: ['physical', 'context', 'semantic'] } };
 const CERTIFICATIONS = { type: 'array', items: { enum: ['verified', 'documented', 'unverified', 'draft'] } };
 
@@ -33,10 +33,17 @@ export function exploreTools(): EngineTool[] {
       description: 'Search everything AutoDE knows — tables, views, columns, glossary terms, rules, verified queries, semantic models (logical tables, dimensions, time dimensions, facts, metrics, filters), knowledge facts, and tables in the estate catalog beyond the working set — by name, alias, synonym and description. Each result names its layer: physical (what exists), context (what it means and what is known: glossary, rules, knowledge facts) or semantic (how it is measured: models, metrics, relationships, verified queries). Every word must match; otherwise the results are related ones from the customer\'s vocabulary, flagged approximate. An empty query lists everything. Returns ranked results with ids, and facet counts: layer, asset type, system, platform, environment, certification (verified, documented, unverified, draft), status, review state (knowledge facts), classification, glossary term; domain, owner and tag are in pendingFacets until they have data. Filter by any facet. Then read one with autode_get_asset_context.',
       inputSchema: {
         type: 'object', additionalProperties: false, required: ['query'],
-        properties: { query: { type: 'string' }, layers: LAYERS, assetTypes: ASSET_TYPES, systems: strings, platforms: strings, environments: strings, certifications: CERTIFICATIONS, statuses: strings, reviewStates: strings, classifications: strings, glossaryTerms: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
+        properties: { query: { type: 'string' }, layers: LAYERS, assetTypes: ASSET_TYPES, systems: strings, platforms: strings, environments: strings, databases: strings, schemas: strings, certifications: CERTIFICATIONS, statuses: strings, reviewStates: strings, classifications: strings, glossaryTerms: strings, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }
       },
       annotations: read('Search assets'),
       handler: async (args, ws) => (await explore(ws, { type: 'search', ...(args as { query: string }) })).result as Record<string, unknown>
+    },
+    {
+      name: 'autode_browse_assets',
+      description: 'Browse the physical estate as a tree: with no parent, its databases (Databricks: catalogs), each with its system and environment; with a database, its schemas; with a schema, its tables; with a table, its columns. Each entry has its id and how many children it has. A table whose source named no database is under "(unknown)".',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { parent: { type: 'string', minLength: 1 } } },
+      annotations: read('Browse the estate'),
+      handler: async (args, ws) => (await explore(ws, { type: 'browse', ...(args.parent ? { parent: String(args.parent) } : {}) })).level as Record<string, unknown>
     },
     {
       name: 'autode_get_asset_context',

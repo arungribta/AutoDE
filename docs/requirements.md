@@ -156,7 +156,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - A canonical ontology: a small upper layer, curated subsets of standards (FIBO first), grown per business problem, and team extensions.
   - Business terms, each with a scope (enterprise, line of business, system, problem), linked to concepts.
   - Columns and semantic elements reach meaning through their terms.
-  - Standards and house ontologies are onboarded through a guided step on every surface, helped by a semantic architect agent and approved by a person.
+  - Standards and house ontologies are onboarded through a guided step on every surface, helped by a knowledge engineer agent and approved by a person.
   - Resolution, mapping, quality-rule and governance suggestions use the meaning, with the chain as evidence.
 
   *Why:* names differ across systems and organisations; a shared meaning makes mapping, merging and impact reasoning reliable and explainable (C3, C6). *Status:* Planned (ONT1, ONT2).
@@ -182,6 +182,13 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - Knowledge articles record what atomic facts can't express. They cite facts rather than copy them, link many-to-many to concepts and assets, go stale when a cited fact changes, and reach agents in their packs.
 
   *Why:* agents and people need to know whether something is a definition to compute with, business meaning, or knowledge with evidence. Tacit knowledge (pitfalls, history, golden sources) is what makes agents useful on real estates. *Status:* layers shipped in v0.50.2; knowledge articles planned for MM, with concept links in ONT1.
+- **CTX-19 — The same name in different places is never confused.**
+  - Databases and schemas are physical assets within each system and environment.
+  - Semantic base tables are matched on database, schema and table within the system and environment their model is bound to.
+  - When several tables fit, AutoDE says so and names them instead of picking one.
+  - One semantic model serves every environment.
+
+  *Why:* estates hold the same table in prod and dev, in archives, in staging schemas and in other accounts; an agent that picks the wrong one is confidently wrong. *Status:* Shipped v0.50.3; the per-environment database map at deployment comes in C5c.
 - **CTX-16 — Definitions and metadata from the customer's tools can be imported:** AtScale (first), Snowflake Horizon, Collibra and Unity Catalog, into facts and semantic models through the usual gates. *Why:* customers already hold this knowledge, and AutoDE should use it rather than rebuild it. *Status:* Planned (IMP1; IMP2–IMP4 unscheduled).
 
 *Planned work:* semantic model — §6 (C5); the metadata model — §6.11 (MM); ontology and terminology — §6.8 (ONT1, ONT2); imports — §6.9 (IMP1–IMP4); lineage and impact — §8.5 (LIN); freshness policy and context health — §8.2, §8.4 (C6).

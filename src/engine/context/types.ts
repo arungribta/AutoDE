@@ -1,4 +1,4 @@
-export type NodeType = 'table' | 'column' | 'semantic_view' | 'business_term' | 'business_rule' | 'verified_query' | 'metric' | 'semantic_model' | 'semantic_table' | 'semantic_element' | 'semantic_relationship' | 'semantic_instruction';
+export type NodeType = 'table' | 'column' | 'semantic_view' | 'business_term' | 'business_rule' | 'verified_query' | 'metric' | 'semantic_model' | 'semantic_table' | 'semantic_element' | 'semantic_relationship' | 'semantic_instruction' | 'database' | 'schema';
 export type EdgeType = 'contains' | 'foreign_key' | 'maps_to' | 'uses_table' | 'constrained_by' | 'derives_from' | 'related_to';
 export type ContextLayer = 'industry' | 'enterprise' | 'domain' | 'system' | 'definition' | 'query' | 'artifact';
 export type NodeStatus = 'active' | 'draft' | 'deprecated';

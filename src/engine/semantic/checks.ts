@@ -4,6 +4,8 @@ import { isMirror } from '../context/projection';
 import { TableShape, knownKey, tableShapes, typeClass } from '../context/dataCandidates';
 import { DATABASE_PLACEHOLDER } from './draft';
 import { ELEMENT_LISTS, SemanticModel, SemanticTable } from './model';
+import { LayerTable, ModelBinding, knownDatabase, matchBase, physicalRef } from './layer';
+import { TableNode } from '../context/types';
 
 /**
  * Checks (C5a; docs/context-layer-requirements.md §6.5), deterministic:
@@ -36,21 +38,24 @@ export function exprIdentifiers(expr: string): string[] {
   return [...new Set(out)];
 }
 
-function physical(t: SemanticTable, shapes: readonly TableShape[]): TableShape | undefined {
+/** The physical table a logical table stands for, matched as the layer matches it (§6.4), or the candidates when several fit. */
+function physical(t: SemanticTable, shapes: readonly TableShape[], graph: GraphView, binding?: ModelBinding): { shape?: TableShape; candidates: string[] } {
   const b = t.base_table;
-  const full = `${b.database}.${b.schema}.${b.table}`.toLowerCase();
-  const short = `${b.schema}.${b.table}`.toLowerCase();
-  return shapes.find((s) => s.fqn.toLowerCase() === full) ?? shapes.find((s) => s.fqn.toLowerCase() === short || s.fqn.toLowerCase().endsWith(`.${short}`));
+  const lt = { baseName: b.table.toLowerCase(), baseSchema: b.schema.toLowerCase(), baseDatabase: knownDatabase(b.database), ...(binding ? { binding } : {}) } as LayerTable;
+  const refs = graph.nodes.filter((n) => n.type === 'table').map((n) => physicalRef(n as TableNode));
+  const m = matchBase(lt, refs);
+  return { shape: m.match ? shapes.find((s) => s.id === m.match!.id) : undefined, candidates: m.match ? [] : m.candidates.map((c) => `${c.fqn}${c.system ? ` (${c.system}/${c.environment ?? 'default'})` : ''}`) };
 }
 
 const sameCols = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.some((y) => y.toLowerCase() === x.toLowerCase()));
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 const snake = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
-export function checkSemanticModel(model: SemanticModel, input: { graph: GraphView; assertions: readonly Assertion[] }): SemanticFinding[] {
+export function checkSemanticModel(model: SemanticModel, input: { graph: GraphView; assertions: readonly Assertion[]; binding?: ModelBinding }): SemanticFinding[] {
   const findings: SemanticFinding[] = [];
   const shapes = tableShapes(input.graph);
-  const phys = new Map(model.tables.map((t) => [t.name.toLowerCase(), physical(t, shapes)] as const));
+  const matched = new Map(model.tables.map((t) => [t.name.toLowerCase(), physical(t, shapes, input.graph, input.binding)] as const));
+  const phys = new Map([...matched].map(([k, v]) => [k, v.shape] as const));
   const columnsOf = (t: string) => new Map((phys.get(t.toLowerCase())?.columns ?? []).map((c) => [c.name.toLowerCase(), c] as const));
   const elementsOf = (t: SemanticTable) => new Set(ELEMENT_LISTS.flatMap((l) => ((t[l] as Array<{ name: string }> | undefined) ?? []).map((e) => e.name.toLowerCase())));
   const tableByName = new Map(model.tables.map((t) => [t.name.toLowerCase(), t] as const));
@@ -59,7 +64,9 @@ export function checkSemanticModel(model: SemanticModel, input: { graph: GraphVi
     const p = phys.get(t.name.toLowerCase());
     const b = t.base_table;
     if (b.database === DATABASE_PLACEHOLDER) findings.push({ severity: 'warning', where: t.name, message: `base_table.database is a placeholder: set the database the table lives in before deploying` });
-    if (!p) { findings.push({ severity: 'error', where: t.name, message: `base table ${b.database}.${b.schema}.${b.table} isn't in the estate` }); continue; }
+    const ambiguous = matched.get(t.name.toLowerCase())?.candidates ?? [];
+    if (!p && ambiguous.length > 1) { findings.push({ severity: 'error', where: t.name, message: `base table ${b.database}.${b.schema}.${b.table} is ambiguous: it fits ${ambiguous.join(', ')}. Set its database${input.binding ? '' : ', or bind the model to a system'}, so it names one.` }); continue; }
+    if (!p) { findings.push({ severity: 'error', where: t.name, message: `base table ${b.database}.${b.schema}.${b.table} isn't in the estate${input.binding ? ` of ${input.binding.system}${input.binding.environment ? `/${input.binding.environment}` : ''}` : ''}` }); continue; }
     const cols = columnsOf(t.name);
     for (const k of t.primary_key?.columns ?? []) if (!cols.has(k.toLowerCase())) findings.push({ severity: 'error', where: t.name, message: `primary_key column ${k} isn't a column of ${p.fqn}` });
     for (const list of ['dimensions', 'time_dimensions', 'facts'] as const) {

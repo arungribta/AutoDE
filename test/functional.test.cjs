@@ -5864,7 +5864,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -5940,6 +5940,7 @@ async function main() {
       autode_semantic_list: [{}, { x: 1 }],
       autode_search_assets: [{ query: 'orders', assetTypes: ['table'], certifications: ['verified'] }, { query: 'orders', certifications: ['certain'] }],
       autode_get_asset_context: [{ asset: 'shop.orders' }, { asset: '' }],
+      autode_browse_assets: [{ parent: 'phys:shop/default/(unknown)' }, { parent: '' }],
       autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
       autode_semantic_draft: [{ name: 'sales' }, { name: '1bad' }],
@@ -11311,7 +11312,7 @@ async function main() {
     assert.deepStrictEqual([E.ASSET_TYPE_LABELS.logical_table, E.ASSET_TYPE_LABELS.semantic_fact, E.ASSET_TYPE_LABELS.knowledge_fact, E.ASSET_TYPE_LABELS.glossary_term], ['Logical table', 'Fact (semantic)', 'Knowledge fact', 'Glossary term']);
     assert.deepStrictEqual(['verified', 'confirmed', 'documented', 'assumed', 'inferred'].map(E.certificationOf), ['verified', 'verified', 'documented', 'unverified', 'unverified']);
     const r = E.searchAssets(sources, 'orders');
-    assert.deepStrictEqual(Object.keys(r.facets), ['layer', 'assetType', 'system', 'platform', 'environment', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm']);
+    assert.deepStrictEqual(Object.keys(r.facets), ['layer', 'assetType', 'system', 'platform', 'environment', 'database', 'schema', 'domain', 'owner', 'certification', 'status', 'reviewState', 'classification', 'tag', 'glossaryTerm']);
     assert.deepStrictEqual(r.pendingFacets, ['domain', 'owner', 'tag']);
     const orders = r.results.find((x) => x.id === 'obj:shop/prod/shop.orders');
     assert.deepStrictEqual([orders.platform, orders.glossaryTerms, orders.reviewState], ['file', ['Order'], undefined]);
@@ -11390,6 +11391,108 @@ async function main() {
     assert.strictEqual(E.exploreOverview(sources).counts.relationships, 1);
     const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
     for (const t of ['role="radiogroup" aria-label="Layer"', 'data-layer="semantic"', "type: 'semantic'", 'renderSemanticHome', 'Custom instructions', 'node[layer = "semantic"]']) assert.ok(html.includes(t), t);
+  });
+
+  // ── v0.50.3: identity on a realistic estate — databases, schemas, systems, environments ──
+
+  const realistic = {
+    graph() {
+      const fs = require('node:fs'); const p = require('node:path');
+      const { parseFile } = require('../dist/engine/context/fileIngestion.js');
+      const dir = p.join(__dirname, 'reference', 'realistic-estate');
+      const nodes = []; const edges = [];
+      for (const [f, system, environment] of [['erp_prod.sql', 'erp', 'prod'], ['erp_dev.sql', 'erp', 'dev'], ['crm_prod.sql', 'crm', 'prod'], ['legacy.sql', 'legacy', 'prod']]) {
+        const r = parseFile(fs.readFileSync(p.join(dir, f), 'utf8'), f, { system, environment });
+        nodes.push(...r.nodes); edges.push(...r.edges);
+      }
+      return { nodes, edges };
+    },
+    model(database, binding) {
+      const { parseSemanticModel } = require('../dist/engine/semantic/model.js');
+      const text = ['name: sales', 'tables:',
+        '  - name: orders', `    base_table: { database: ${database}, schema: SALES, table: ORDERS }`, '    primary_key: { columns: [ORDER_ID] }', '    dimensions:', '      - { name: customer_id, expr: CUSTOMER_ID }', '    facts:', '      - { name: amount, expr: AMOUNT }', '    metrics:', '      - { name: revenue, expr: SUM(amount) }',
+        '  - name: customers', `    base_table: { database: ${database}, schema: SALES, table: CUSTOMERS }`, '    primary_key: { columns: [CUSTOMER_ID] }', '    dimensions:', '      - { name: customer_id, expr: CUSTOMER_ID }',
+        'relationships:', '  - name: orders_to_customers', '    left_table: orders', '    right_table: customers', '    relationship_columns: [{ left_column: CUSTOMER_ID, right_column: CUSTOMER_ID }]', '    relationship_type: many_to_one', ''].join('\n');
+      return { name: 'sales', source: 'shared', revision: 'r1', approved: true, file: 'x', ...(binding ? { binding } : {}), model: parseSemanticModel(text).model };
+    }
+  };
+
+  await test('v0.50.3: identity — a logical table matches its base table on database, schema and table within the system and environment its model is bound to; several fits link none and name the candidates; an unknown database never picks one', () => {
+    const L = require('../dist/engine/semantic/layer.js');
+    const { semanticGraph } = require('../dist/engine/semantic/layerGraph.js');
+    const { checkSemanticModel } = require('../dist/engine/semantic/checks.js');
+    const graph = realistic.graph();
+    const mapsTo = (index) => Object.fromEntries(semanticGraph(index, graph).edges.filter((e) => e.type === 'maps_to').map((e) => [e.source, e.target]));
+    // Bound to erp/prod: exactly RETAIL.SALES.ORDERS there, not ARCHIVE, not dev, not crm.
+    const bound = L.indexSemanticLayer([realistic.model('RETAIL', { system: 'erp', environment: 'prod' })]);
+    assert.deepStrictEqual(mapsTo(bound), { 'sem:sales/orders': 'obj:erp/prod/retail.sales.orders', 'sem:sales/customers': 'obj:erp/prod/retail.sales.customers' });
+    // Unbound (a model written before v0.50.3): the same name in erp/prod, erp/dev and crm/prod, and legacy's sales.orders and unqualified orders, whose database (and schema) are unknown — ambiguous, nothing linked.
+    const unbound = L.indexSemanticLayer([realistic.model('RETAIL')]);
+    const g = semanticGraph(unbound, graph);
+    assert.ok(!g.edges.some((e) => e.type === 'maps_to' && e.source === 'sem:sales/orders'));
+    assert.deepStrictEqual(g.nodes.find((n) => n.id === 'sem:sales/orders').metadata.ambiguous.sort(), ['obj:crm/prod/retail.sales.orders', 'obj:erp/dev/retail.sales.orders', 'obj:erp/prod/retail.sales.orders', 'obj:legacy/prod/ddl.orders', 'obj:legacy/prod/sales.orders']);
+    // The placeholder database, bound to erp/prod: RETAIL and ARCHIVE both fit — ambiguous, never a guess.
+    const placeholder = L.indexSemanticLayer([realistic.model('SET_DATABASE', { system: 'erp', environment: 'prod' })]);
+    assert.ok(!mapsTo(placeholder)['sem:sales/orders'], 'the placeholder picks nothing');
+    const findings = checkSemanticModel(realistic.model('SET_DATABASE').model, { graph, assertions: [], binding: { system: 'erp', environment: 'prod' } });
+    assert.ok(findings.some((f) => f.severity === 'error' && f.where === 'orders' && /ambiguous: it fits RETAIL\.SALES\.ORDERS \(erp\/prod\), ARCHIVE\.SALES\.ORDERS \(erp\/prod\)\. Set its database/.test(f.message)), JSON.stringify(findings));
+    assert.ok(!checkSemanticModel(realistic.model('RETAIL').model, { graph, assertions: [], binding: { system: 'erp', environment: 'prod' } }).some((f) => f.severity === 'error'), 'bound and qualified: clean');
+    // Packs: a seed gets the definitions only of semantic tables that resolve to it.
+    const all = graph.nodes.filter((n) => n.type === 'table').map(L.physicalRef);
+    const ref = (id) => all.find((r) => r.id === id);
+    assert.deepStrictEqual(L.definitionsFor(bound, [ref('obj:erp/prod/retail.sales.orders')], all).metrics.map((m) => m.name), ['revenue']);
+    for (const other of ['obj:erp/prod/archive.sales.orders', 'obj:erp/dev/retail.sales.orders', 'obj:crm/prod/retail.sales.orders']) assert.deepStrictEqual(L.definitionsFor(bound, [ref(other)], all).tables, [], other);
+    assert.deepStrictEqual(L.definitionsFor(unbound, [ref('obj:erp/prod/retail.sales.orders')], all).tables, [], 'ambiguous: no definitions handed out');
+    // Grounding: a database named in SQL must match; ARCHIVE isn't covered, so it isn't judged.
+    const { checkSemanticGrounding } = require('../dist/engine/grounding/semanticGrounding.js');
+    const check = (sql) => checkSemanticGrounding([{ name: 'a.sql', content: sql }], bound).issues;
+    assert.strictEqual(check('SELECT * FROM RETAIL.SALES.ORDERS o JOIN RETAIL.SALES.CUSTOMERS c ON o.ORDER_ID = c.CUSTOMER_ID').length, 1);
+    assert.deepStrictEqual(check('SELECT * FROM ARCHIVE.SALES.ORDERS o JOIN RETAIL.SALES.CUSTOMERS c ON o.ORDER_ID = c.CUSTOMER_ID'), [], 'another database: not this model\'s table');
+  });
+
+  await test('v0.50.3: drafting on a realistic estate — logical names stay unique across schemas and databases; the model is bound to the system and environment its tables come from, or says why not', () => {
+    const { draftSemanticModel } = fresh('../dist/engine/semantic/draft.js');
+    const graph = realistic.graph();
+    const d = draftSemanticModel({ graph, assertions: [], tableIds: ['obj:erp/prod/retail.sales.orders', 'obj:erp/prod/archive.sales.orders', 'obj:erp/prod/retail.staging.orders'], name: 'orders' });
+    assert.deepStrictEqual(d.model.tables.map((t) => t.name).sort(), ['archive_sales_orders', 'retail_sales_orders', 'staging_orders']);
+    assert.deepStrictEqual(d.model.tables.map((t) => `${t.base_table.database}.${t.base_table.schema}.${t.base_table.table}`).sort(), ['ARCHIVE.SALES.ORDERS', 'RETAIL.SALES.ORDERS', 'RETAIL.STAGING.ORDERS']);
+    assert.deepStrictEqual(d.binding, { system: 'erp', environment: 'prod' });
+    const mixed = draftSemanticModel({ graph, assertions: [], tableIds: ['obj:erp/prod/retail.sales.orders', 'obj:crm/prod/retail.sales.orders'], name: 'mixed' });
+    assert.ok(!mixed.binding && mixed.notes.some((n) => /more than one system or environment/.test(n)));
+    assert.strictEqual(new Set(mixed.model.tables.map((t) => t.name)).size, 2, 'names unique even for the same full name in two systems');
+    // The binding is kept beside the model and read back.
+    const S = fresh('../dist/engine/semantic/store.js');
+    const w = c5a.ws();
+    try {
+      S.writeDraft(w.ws, 'orders', d.model, d.backing, d.notes, d.binding);
+      assert.deepStrictEqual(S.readShared(w.ws, 'orders').binding, { system: 'erp', environment: 'prod' });
+      assert.ok(!/binding|erp/.test(require('node:fs').readFileSync(S.readShared(w.ws, 'orders').file, 'utf8').replace(/^#.*$/m, '')), 'never in the deployable YAML');
+    } finally { w.done(); }
+  });
+
+  await test('v0.50.3: databases and schemas are physical assets — computed per system and environment, with their contents, a breadcrumb, facets and a browse tree; a table whose source named no database is under (unknown), never a guess', () => {
+    const E = fresh('../dist/engine/explore/explore.js');
+    const sources = { graph: realistic.graph(), assertions: [], conflicts: [] };
+    const root = E.browseAssets(sources);
+    assert.deepStrictEqual(root.children.map((c) => `${c.system}/${c.environment}/${c.label}:${c.children}`), ['crm/prod/RETAIL:1', 'erp/dev/RETAIL:1', 'erp/prod/ARCHIVE:1', 'erp/prod/RETAIL:2', 'legacy/prod/(unknown):2']);
+    const retail = root.children.find((c) => c.id === 'phys:erp/prod/retail');
+    assert.deepStrictEqual(E.browseAssets(sources, retail.id).children.map((c) => [c.assetType, c.label, c.children]), [['schema', 'SALES', 3], ['schema', 'STAGING', 1]]);
+    assert.deepStrictEqual(E.browseAssets(sources, 'phys:erp/prod/retail/sales').children.map((c) => c.label).sort(), ['CUSTOMERS', 'ORDERS', 'T_ORD_HDR']);
+    assert.ok(E.browseAssets(sources, 'obj:erp/prod/retail.sales.orders').children.every((c) => c.assetType === 'column'));
+    const t = E.getAssetContext(sources, 'obj:erp/prod/retail.sales.orders');
+    assert.deepStrictEqual([t.asset.database, t.asset.schema, t.overview.parent.id, t.overview.parent.label, t.overview.parent.assetType], ['RETAIL', 'SALES', 'phys:erp/prod/retail/sales', 'SALES', 'schema']);
+    const db = E.getAssetContext(sources, 'phys:erp/prod/retail');
+    assert.deepStrictEqual([db.asset.assetType, db.asset.layer, db.contents.map((c) => c.label)], ['database', 'physical', ['SALES', 'STAGING']]);
+    const legacy = E.searchAssets(sources, 'orders', { systems: ['legacy'], assetTypes: ['table'] });
+    assert.ok(legacy.results.length === 2 && legacy.results.every((r) => r.database === '(unknown)'), JSON.stringify(legacy.results.map((r) => [r.fqn, r.database])));
+    const r = E.searchAssets(sources, 'orders', { assetTypes: ['table'] });
+    const byDb = r.results.reduce((m, x) => Object.assign(m, { [x.database]: (m[x.database] || 0) + 1 }), {});
+    assert.deepStrictEqual(byDb, { RETAIL: 4, ARCHIVE: 1, '(unknown)': 2 }, 'the same name in RETAIL (erp prod sales and staging, erp dev, crm), ARCHIVE, and two legacy tables with no database');
+    assert.ok(r.facets.database.ARCHIVE >= 1 && r.facets.schema.STAGING >= 1, 'database and schema facets (counted before filtering, so columns too)');
+    assert.deepStrictEqual(E.searchAssets(sources, 'orders', { assetTypes: ['table'], databases: ['ARCHIVE'] }).results.map((x) => x.id), ['obj:erp/prod/archive.sales.orders']);
+    assert.ok(Object.keys(r.facets).indexOf('database') === Object.keys(r.facets).indexOf('environment') + 1);
+    const o = E.exploreOverview(sources);
+    assert.deepStrictEqual([o.counts.databases, o.counts.schemas], [5, 6]);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

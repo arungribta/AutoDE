@@ -6,6 +6,29 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.50.3
+
+- **Identity across databases, schemas, systems and environments** (context-layer §6.4a; CTX-19), after the owner asked how same-named tables are told apart. The question exposed a real bug: semantic base tables were matched on schema and table only, so a model over `RETAIL.SALES.ORDERS` also matched `ARCHIVE.SALES.ORDERS`, the dev copy, and the same name in another account.
+  - **Matching** (`layer.ts`: `physicalRef`, `physicalMatches`, `matchBase`) compares database, schema and table where both sides know them, within the model's **binding**. One fit links; several fits are **ambiguous**, so nothing is linked and no definitions reach packs. An unknown database (DDL without one, `SET_DATABASE`) never picks one.
+    - Used by: the graph overlay (`metadata.ambiguous` lists the candidates), the landscape's semantic joins, packs (a table receives only the definitions that resolve to it), the semantic checks (an error naming every candidate and the fix) and the grounding check (a database named in SQL must match).
+  - **Binding:** drafts record the system and environment of their tables in the sidecar (`writeDraft(…, binding)`), never in the YAML. A draft across systems stays unbound, with a note. Models written before are unbound and keep working, with ambiguity reported.
+  - **Logical names** stay unique: the table name, else schema_name, else database_schema_name. Before, two databases with the same schema and table produced a duplicate name, which Snowflake refuses.
+  - **Databases and schemas are physical assets** (catalog containers):
+    - computed from qualified names per system and environment;
+    - pages with *Contents*, and breadcrumbs (a table's parent is its schema);
+    - **Database** and **Schema** facets;
+    - a lazy **Browse** tree in the Explorer, `autode explore browse`, and `autode_browse_assets`.
+
+    Tables without a database are under `(unknown)`. Ingestion's format labels (`ddl`, `csv`, `json`) used for a missing schema count as no schema.
+- **A realistic-estate fixture** (`test/reference/realistic-estate/`): `ORDERS` in two databases and two schemas, the same full name in dev and in another system, legacy DDL with no database or schema, no foreign keys, cryptic names. Three tests use it.
+- **Specified:** one model serves every environment, with database names mapped at deployment (C5c). The "semantic architect" becomes two agents: a **semantic modeler** and a **knowledge engineer**, both in MM, with the knowledge engineer's ontology skills in ONT1.
+- **Deviations:**
+  - Composites aren't bound yet: their tables match unbound, so ambiguity is reported.
+  - An agent's proposed shared model (`autode_propose_semantic_model`) carries no binding; drafts written by AutoDE do.
+  - Unqualified names in SQL aren't resolved through the connection's default database and schema yet; they match leniently.
+- **What I checked:** the matching rules on the realistic estate (bound, unbound, placeholder, other environment, other system, missing database or schema); packs and grounding per table; logical names; the browse tree and facets. **What I didn't:** the Explorer in VS Code itself (manual-verification Part 47), and live Snowflake or Databricks names (quoted, case-sensitive identifiers are compared case-insensitively).
+- **Measured:** 395 tests (3 new on the realistic estate; the tool-list tests include `autode_browse_assets`). Lint: 0 errors, 21 warnings. Eval unchanged.
+
 ## 0.50.2
 
 - **Three layers** (context-layer §6.1, CTX-18), after the owner's review. I checked how the industry uses the terms now, and the owner's view held:

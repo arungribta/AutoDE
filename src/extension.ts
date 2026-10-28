@@ -1086,7 +1086,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!ids.length) { vscode.window.showWarningMessage('No table to draft from: the active problem\'s specification names no table AutoDE knows.'); return; }
     try {
       const d = draftSemanticModel({ graph: ctx.graph, assertions: ctx.assertions, tableIds: ids, name: name.trim() });
-      const e = semanticStore.writeDraft(ctx.workspaceRoot, name.trim(), d.model, d.backing, d.notes);
+      const e = semanticStore.writeDraft(ctx.workspaceRoot, name.trim(), d.model, d.backing, d.notes, d.binding);
       await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(e.file), EDITOR_SEMANTIC);
       if (d.notes.length) vscode.window.showInformationMessage(`Drafted from knowledge. Left out: ${d.notes.join('; ')}`);
     } catch (err) { vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err)); }

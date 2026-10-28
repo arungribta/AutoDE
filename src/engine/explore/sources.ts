@@ -7,7 +7,7 @@ import { loadConnectionsConfig } from '../platform/connectionsConfig';
 import { connectionStatus, readReadiness } from '../platform/connectionReadiness';
 import { loadSemanticLayer, semanticPaths } from '../semantic/store';
 import { layoutPath } from '../workspaceLayout';
-import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, searchAssets, semanticOverview } from './explore';
+import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, browseAssets, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, searchAssets, semanticOverview } from './explore';
 import { TrustTier } from '../context/assertions';
 
 /**
@@ -112,13 +112,14 @@ export function estateView(workspaceRoot: string, sources: ExploreSources): Esta
 /** A request from any surface; the reply is plain JSON. */
 export type ExploreRequest =
   | { type: 'overview' }
-  | { type: 'search'; query: string; layers?: Layer[]; assetTypes?: AssetType[]; systems?: string[]; platforms?: string[]; environments?: string[]; certifications?: Certification[]; statuses?: string[]; reviewStates?: string[]; classifications?: string[]; glossaryTerms?: string[]; limit?: number; offset?: number }
+  | { type: 'search'; query: string; layers?: Layer[]; assetTypes?: AssetType[]; systems?: string[]; platforms?: string[]; environments?: string[]; databases?: string[]; schemas?: string[]; certifications?: Certification[]; statuses?: string[]; reviewStates?: string[]; classifications?: string[]; glossaryTerms?: string[]; limit?: number; offset?: number }
   | { type: 'asset'; id: string }
   | { type: 'graph'; id: string; hops?: number; edgeTypes?: string[]; includeColumns?: boolean; cap?: number }
   | { type: 'landscape'; system?: string; schema?: string; model?: string; includeColumns?: boolean; proposed?: boolean; semantic?: boolean; cap?: number }
   | { type: 'facts'; kinds?: string[]; statuses?: string[]; trust?: TrustTier[]; text?: string; limit?: number; offset?: number }
   | { type: 'estate' }
-  | { type: 'semantic' };
+  | { type: 'semantic' }
+  | { type: 'browse'; parent?: string };
 
 export function handleExploreRequest(request: ExploreRequest, sources: ExploreSources, workspaceRoot: string): Record<string, unknown> {
   switch (request.type) {
@@ -139,5 +140,6 @@ export function handleExploreRequest(request: ExploreRequest, sources: ExploreSo
     case 'facts': return { type: 'facts', result: listFacts(sources, request) };
     case 'estate': return { type: 'estate', estate: estateView(workspaceRoot, sources) };
     case 'semantic': return { type: 'semantic', semantic: semanticOverview(sources) };
+    case 'browse': return { type: 'browse', level: browseAssets(sources, request.parent) };
   }
 }

@@ -1112,6 +1112,21 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: `autode explore semantic`; `autode explore search orders --layer semantic`; in Claude Code ask "which verified queries exist for sales?".
   Expect: the model listing; only semantic results; the host reads `autode://explore/semantic` or searches with `layers: ["semantic"]`.
 
+## Part 47 — v0.50.3 Identity: databases, schemas, systems, environments
+
+- [ ] **47.1 Browse.**
+  Do: ingest the four files of `test/reference/realistic-estate/` with their systems and environments (see its README); open the Explorer → Browse.
+  Expect: databases with system/environment (RETAIL twice in erp — prod and dev — ARCHIVE, RETAIL in crm, (unknown) in legacy); expanding shows schemas, tables, columns; database and schema pages list their contents.
+- [ ] **47.2 Bound and unambiguous.**
+  Do: `autode semantic draft sales --tables RETAIL.SALES.ORDERS,RETAIL.SALES.CUSTOMERS` (erp prod tables); open `.autode/semantic/shared/sales.yaml`; check the model.
+  Expect: binding erp/prod in the sidecar, not in `autode-output/semantic/sales.yaml`; no ambiguity; the logical tables link to erp/prod's tables only.
+- [ ] **47.3 Ambiguous, never guessed.**
+  Do: change a base table's database to `SET_DATABASE` and check again; open the logical table in the Explorer.
+  Expect: an error naming RETAIL.SALES.ORDERS and ARCHIVE.SALES.ORDERS; the page lists both; a step pack over RETAIL.SALES.ORDERS no longer includes the model's metrics until the database is set.
+- [ ] **47.4 Unique logical names.**
+  Do: draft over RETAIL.SALES.ORDERS, ARCHIVE.SALES.ORDERS and RETAIL.STAGING.ORDERS.
+  Expect: `retail_sales_orders`, `archive_sales_orders`, `staging_orders`.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1390,5 +1405,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 46.2 |  |  |
 | 46.3 |  |  |
 | 46.4 |  |  |
+| 47.1 |  |  |
+| 47.2 |  |  |
+| 47.3 |  |  |
+| 47.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

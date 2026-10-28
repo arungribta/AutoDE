@@ -1,6 +1,6 @@
 import { BaseNode, GraphEdge, TableNode } from '../context/types';
 import { exprIdentifiers } from './checks';
-import { SemanticLayerIndex, baseMatches, semanticElementId, semanticInstructionsId, semanticModelId, semanticQueryId, semanticRelationshipId, semanticTableId } from './layer';
+import { SemanticLayerIndex, matchBase, physicalRef, semanticElementId, semanticInstructionsId, semanticModelId, semanticQueryId, semanticRelationshipId, semanticTableId } from './layer';
 
 /**
  * The semantic layer as graph nodes (§6.5): models contain logical tables,
@@ -26,12 +26,16 @@ export function semanticGraph(index: SemanticLayerIndex, graph: { nodes: readonl
     nodes.push({ id: semanticModelId(m.name), type: 'semantic_model', label: m.name, metadata: { source: m.source, revision: m.revision, approved: m.approved, file: m.file, ...(m.problemId ? { problemId: m.problemId } : {}) }, version: 1 });
   }
   const physicalOf = new Map<string, TableNode | undefined>();
+  const refs = tables.map(physicalRef);
+  const tableById = new Map(tables.map((t) => [t.id, t] as const));
   for (const lt of index.tables) {
     const id = semanticTableId(lt.model, lt.table.name);
     const backing = meta.get(lt.model)?.backing ?? {};
-    const phys = tables.find((t) => baseMatches(lt, t.fqn || t.label));
+    // Matched on database, schema and table within the model's system; several fits link none (§6.4).
+    const m = matchBase(lt, refs);
+    const phys = m.match ? tableById.get(m.match.id) : undefined;
     physicalOf.set(id, phys);
-    nodes.push({ id, type: 'semantic_table', label: lt.table.name, ...(lt.table.description ? { description: lt.table.description } : {}), aliases: lt.table.synonyms, metadata: { model: lt.model, baseTable: `${lt.table.base_table.database}.${lt.table.base_table.schema}.${lt.table.base_table.table}`, primaryKey: lt.table.primary_key?.columns ?? [], approved: meta.get(lt.model)?.approved ?? false }, version: 1, ...(backing[lt.table.name]?.length ? { supportedBy: backing[lt.table.name] } : {}) });
+    nodes.push({ id, type: 'semantic_table', label: lt.table.name, ...(lt.table.description ? { description: lt.table.description } : {}), aliases: lt.table.synonyms, metadata: { model: lt.model, baseTable: `${lt.table.base_table.database}.${lt.table.base_table.schema}.${lt.table.base_table.table}`, primaryKey: lt.table.primary_key?.columns ?? [], approved: meta.get(lt.model)?.approved ?? false, ...(lt.binding ? { binding: lt.binding } : {}), ...(!m.match && m.candidates.length > 1 ? { ambiguous: m.candidates.map((c) => c.id) } : {}) }, version: 1, ...(backing[lt.table.name]?.length ? { supportedBy: backing[lt.table.name] } : {}) });
     edge('contains', semanticModelId(lt.model), id);
     if (phys) edge('maps_to', id, phys.id);
   }

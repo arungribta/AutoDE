@@ -1,4 +1,5 @@
 import { Assertion, isLive, trustRank } from '../context/assertions';
+import type { ModelBinding } from './layer';
 import { GraphView } from '../context/retrieval';
 import { createSubjectResolver, isMirror } from '../context/projection';
 import { TableShape, tableShapes, typeClass } from '../context/dataCandidates';
@@ -26,15 +27,34 @@ export interface DraftResult {
   backing: Record<string, string[]>;
   /** What the draft left out, and why. */
   notes: string[];
+  /** The system (and environment) the drafted tables share: the model's binding (v0.50.3). */
+  binding?: ModelBinding;
 }
 
 const trusted = (a: Assertion) => !isMirror(a) && isLive(a.status) && trustRank(a.trust) >= trustRank('confirmed');
 const snake = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
+/**
+ * Logical table names, unique within the model (Snowflake requires it): the
+ * table's name, else schema_name, else database_schema_name — for the same
+ * name in several schemas or databases (v0.50.3).
+ */
 function logicalNames(tables: readonly TableShape[]): Map<string, string> {
-  const count = new Map<string, number>();
-  for (const t of tables) count.set(t.name.toLowerCase(), (count.get(t.name.toLowerCase()) ?? 0) + 1);
-  return new Map(tables.map((t) => [t.id, snake(count.get(t.name.toLowerCase())! > 1 ? `${t.schema}_${t.name}` : t.name)]));
+  const levels = (t: TableShape) => { const parts = t.fqn.split('.'); return [t.name, `${t.schema}_${t.name}`, `${parts.length >= 3 ? parts[parts.length - 3] : 'db'}_${t.schema}_${t.name}`, t.id.replace(/^obj:/, '')].map(snake); };
+  const out = new Map<string, string>();
+  for (const t of tables) {
+    const names = levels(t);
+    out.set(t.id, names.find((n, i) => i === names.length - 1 || tables.filter((o) => levels(o)[i] === n).length === 1)!);
+  }
+  return out;
+}
+
+function bindingOf(graph: GraphView, ids: readonly string[]): ModelBinding | undefined {
+  const origins = ids.map((id) => graph.nodes.find((n) => n.id === id)?.origin);
+  const systems = new Set(origins.map((o) => o?.system));
+  if (systems.size !== 1 || [...systems][0] === undefined) return undefined;
+  const envs = new Set(origins.map((o) => o?.systemEnvironment));
+  return { system: [...systems][0]!, ...(envs.size === 1 && [...envs][0] ? { environment: [...envs][0] } : {}) };
 }
 
 function baseTable(t: TableShape, database: string | undefined): SemanticTable['base_table'] {
@@ -136,5 +156,7 @@ export function draftSemanticModel(input: { graph: GraphView; assertions: readon
       back(`${table.name}.${name}_scope`, [a.id]);
     }
   }
-  return { model: { name: snake(input.name), ...(input.description ? { description: input.description } : {}), tables: out, relationships }, backing, notes };
+  const binding = bindingOf(input.graph, tables.map((t) => t.id));
+  if (!binding && tables.length) notes.push('the tables come from more than one system or environment, so the model is not bound to one; bind it before approving (a semantic view lives in one account)');
+  return { model: { name: snake(input.name), ...(input.description ? { description: input.description } : {}), tables: out, relationships }, backing, notes, ...(binding ? { binding } : {}) };
 }

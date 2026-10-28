@@ -7,7 +7,7 @@ import { problemMode } from '../documents/problemMode';
 import { SemanticModel, parseSemanticModel, semanticRevision, serializeSemanticModel } from './model';
 import { Composite, SharedSource, isCompositeText, parseComposite, resolveComposite, serializeResolved } from './composite';
 import { SemanticFinding } from './checks';
-import { LoadedModel, SemanticLayerIndex, indexSemanticLayer } from './layer';
+import { LoadedModel, ModelBinding, SemanticLayerIndex, indexSemanticLayer } from './layer';
 
 /**
  * The semantic layer's files (C5a; docs/context-layer-requirements.md §6.2):
@@ -43,7 +43,7 @@ export function semanticPaths(workspaceRoot: string, outputDir = configuredOutpu
 
 export interface Approval { by: string; at: string; revision: string; channel: string }
 
-interface SharedMeta { model: string; approved?: Approval; backing?: Record<string, string[]>; draftedAt?: string; notes?: string[] }
+interface SharedMeta { model: string; approved?: Approval; backing?: Record<string, string[]>; draftedAt?: string; notes?: string[]; binding?: ModelBinding }
 interface CompositeMeta { problem: string; composite: string; compositeRevision?: string; resolvedFrom?: Record<string, string>; resolvedRevision?: string; approved?: Approval }
 
 function readMeta<T>(file: string): T | undefined {
@@ -70,6 +70,8 @@ export interface SharedEntry {
   status: SharedStatus;
   approved?: Approval;
   backing?: Record<string, string[]>;
+  /** The system (and environment) its base tables are in (v0.50.3). */
+  binding?: ModelBinding;
 }
 
 export function readShared(workspaceRoot: string, name: string, p = semanticPaths(workspaceRoot)): SharedEntry | undefined {
@@ -80,7 +82,7 @@ export function readShared(workspaceRoot: string, name: string, p = semanticPath
   const meta = readMeta<SharedMeta>(sharedMetaFile(p, name));
   const revision = semanticRevision(text);
   const status: SharedStatus = parsed.errors.length ? 'invalid' : !meta?.approved ? 'unapproved' : meta.approved.revision === revision ? 'approved' : 'changed';
-  return { name, file, revision, model: parsed.model, errors: parsed.errors, warnings: parsed.warnings, status, approved: meta?.approved, backing: meta?.backing };
+  return { name, file, revision, model: parsed.model, errors: parsed.errors, warnings: parsed.warnings, status, approved: meta?.approved, backing: meta?.backing, ...(meta?.binding ? { binding: meta.binding } : {}) };
 }
 
 export function listShared(workspaceRoot: string): SharedEntry[] {
@@ -168,7 +170,7 @@ export function resolveCompositeFile(workspaceRoot: string, problemId: string, n
 }
 
 /** Writes a shared model (a person's draft, or an approved proposal); with `approved`, the approval is recorded for the written revision. */
-export function writeShared(workspaceRoot: string, name: string, text: string, extra: { approved?: Omit<Approval, 'revision'>; backing?: Record<string, string[]>; notes?: string[] } = {}): SharedEntry {
+export function writeShared(workspaceRoot: string, name: string, text: string, extra: { approved?: Omit<Approval, 'revision'>; backing?: Record<string, string[]>; notes?: string[]; binding?: ModelBinding } = {}): SharedEntry {
   if (!NAME.test(name)) throw new Error(`"${name}" is not a valid model name (letters, digits, _ and -).`);
   const p = semanticPaths(workspaceRoot);
   fs.mkdirSync(p.sharedDir, { recursive: true });
@@ -178,6 +180,7 @@ export function writeShared(workspaceRoot: string, name: string, text: string, e
   const meta = readMeta<SharedMeta>(metaFile) ?? { model: name };
   writeMeta(metaFile, {
     ...meta, model: name,
+    ...(extra.binding ? { binding: extra.binding } : {}),
     ...(extra.backing ? { backing: extra.backing, draftedAt: new Date().toISOString(), notes: extra.notes } : {}),
     ...(extra.approved ? { approved: { ...extra.approved, revision: semanticRevision(text) } } : {})
   });
@@ -185,9 +188,9 @@ export function writeShared(workspaceRoot: string, name: string, text: string, e
 }
 
 /** Writes a drafted model as a new shared model (refused if one exists: a draft never overwrites). */
-export function writeDraft(workspaceRoot: string, name: string, model: SemanticModel, backing: Record<string, string[]>, notes: string[]): SharedEntry {
+export function writeDraft(workspaceRoot: string, name: string, model: SemanticModel, backing: Record<string, string[]>, notes: string[], binding?: ModelBinding): SharedEntry {
   if (readShared(workspaceRoot, name)) throw new Error(`The shared model ${name} exists: a draft never overwrites it. Open it and compare, or draft under another name.`);
-  return writeShared(workspaceRoot, name, serializeSemanticModel(model, `Drafted by AutoDE from confirmed facts and the estate. Review it, then approve it (a person).`), { backing, notes });
+  return writeShared(workspaceRoot, name, serializeSemanticModel(model, `Drafted by AutoDE from confirmed facts and the estate. Review it, then approve it (a person).`), { backing, notes, ...(binding ? { binding } : {}) });
 }
 
 export interface ApproveInput { by: string; channel: string; findings: readonly SemanticFinding[]; at?: Date }
@@ -245,7 +248,7 @@ export function loadSemanticLayer(workspaceRoot: string, options: { problemId?: 
   const loaded: LoadedModel[] = [];
   for (const s of listShared(workspaceRoot)) {
     if (!s.model) continue;
-    loaded.push({ name: s.name, source: 'shared', revision: s.revision, approved: s.status === 'approved', file: s.file, backing: s.backing, model: s.model });
+    loaded.push({ name: s.name, source: 'shared', revision: s.revision, approved: s.status === 'approved', file: s.file, backing: s.backing, ...(s.binding ? { binding: s.binding } : {}), model: s.model });
   }
   if (options.problemId) {
     for (const c of listComposites(workspaceRoot, options.problemId)) {

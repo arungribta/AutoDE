@@ -6,7 +6,7 @@ import { isMirror } from './projection';
 import { GraphView, TextMatch, expandNeighborhood, resolveText } from './retrieval';
 import { ContextGap, DEFAULT_MIN_TRUST, describeGap, detectRelationshipGaps } from './contextGaps';
 import { CatalogLookup, selectSeedHits } from './catalog';
-import { SemanticLayerIndex, definitionsFor } from '../semantic/layer';
+import { SemanticLayerIndex, definitionsFor, physicalRef } from '../semantic/layer';
 
 /**
  * Task-scoped context packs (C3, v0.30.0; docs/context-layer-requirements.md
@@ -421,7 +421,8 @@ function renderSeeded(seeds: string[], purpose: PackPurpose, budget: number, sou
   // so an agent joins and measures the way the layer says instead of inferring it ──
   let semanticModels: string[] | undefined;
   if (sources.semantic) {
-    const defs = definitionsFor(sources.semantic, [...seedTables].map((t) => tableName(idx.nodes.get(t) as TableNode)));
+    const all = sources.graph.nodes.filter((n) => n.type === 'table').map((n) => physicalRef(n as TableNode));
+    const defs = definitionsFor(sources.semantic, [...seedTables].map((t) => physicalRef(idx.nodes.get(t) as TableNode)), all);
     if (defs.tables.length) {
       const where = (model: string, table: string) => `${table} (${model})`;
       const block = ['### Semantic definitions (approved: use these, never your own)'];

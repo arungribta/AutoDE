@@ -47,7 +47,8 @@ export function semanticTools(): EngineTool[] {
           return { errors: r.errors, findings: r.model ? checkSemanticModel(r.model, src) : [], revisions: r.revisions };
         }
         const m = parseSemanticModel(text);
-        return { errors: m.errors, warnings: m.warnings, findings: m.model ? checkSemanticModel(m.model, src) : [] };
+        const binding = args.name ? readShared(ws.options.workspaceRoot, String(args.name))?.binding : undefined;
+        return { errors: m.errors, warnings: m.warnings, findings: m.model ? checkSemanticModel(m.model, { ...src, ...(binding ? { binding } : {}) }) : [] };
       }
     },
     {
@@ -62,7 +63,7 @@ export function semanticTools(): EngineTool[] {
         const ids = (args.tables as string[] | undefined)?.map((t) => resolve(t) ?? t) ?? (root ? problemTableIds({ workspaceRoot: ws.options.workspaceRoot, problemRoot: root, sources: src }) : []);
         if (!ids.length) throw new EngineToolError('NOT_FOUND', 'No table to draft from: name tables, or open a problem whose specification names tables AutoDE knows.');
         const d = draftSemanticModel({ graph: src.graph, assertions: src.assertions, tableIds: ids, name: String(args.name), description: args.description as string | undefined, database: args.database as string | undefined });
-        return { yaml: serializeSemanticModel(d.model), backing: d.backing, notes: d.notes, findings: checkSemanticModel(d.model, src), next: 'Review it with the user, then autode_propose_semantic_model (scope shared). A person approves it.' };
+        return { yaml: serializeSemanticModel(d.model), backing: d.backing, notes: d.notes, ...(d.binding ? { binding: d.binding } : {}), findings: checkSemanticModel(d.model, { ...src, ...(d.binding ? { binding: d.binding } : {}) }), next: 'Review it with the user, then autode_propose_semantic_model (scope shared). A person approves it.' };
       }
     },
     {

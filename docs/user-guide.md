@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.50.2. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.50.3. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -369,7 +369,18 @@ Click any of them for its page: a relationship shows the join; a verified query 
 - **Estate** view: systems and environments with their catalog tables, working set and objects you can't see; connections and whether they're ready; what feeds each system.
 - **Keyboard:** `/` to search, ↑ ↓ and Enter in the results, ← → between tabs, Alt+← and Alt+→ for back and forward.
 
-**From a terminal:** `autode explore` (overview), `autode explore semantic` (each model's tables, metrics, relationships, verified queries and instructions), `--layer physical|context|semantic` on search, `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, and `autode explore graph [--system s] [--model m] [--columns]` for the landscape. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
+**Browse.** The *Browse* tab beside *Filters* shows the estate as a tree:
+- databases (Databricks: catalogs), each with its system and environment;
+- under each database its schemas, then tables, then columns.
+
+Databases and schemas have pages too, with their contents. A table whose DDL named no database is under *(unknown)*: AutoDE doesn't guess. Database and Schema are filters as well.
+
+**Same name, different place.** `RETAIL.SALES.ORDERS` in prod, in dev, in an archive database and in another account are different tables.
+- A semantic model is **bound** to the system and environment it was drafted from, and its base tables are matched on database, schema and table.
+- When a base table still fits more than one table (for example, its database is the `SET_DATABASE` placeholder), the model's check says **ambiguous** and lists the candidates. The logical table's page shows them too.
+- Agents get no definitions for an ambiguous table until you set its database.
+
+**From a terminal:** `autode explore` (overview), `autode explore browse [<id>]` (the tree), `autode explore semantic` (each model's tables, metrics, relationships, verified queries and instructions), `--layer physical|context|semantic` on search, `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, and `autode explore graph [--system s] [--model m] [--columns]` for the landscape. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
 
 The vocabulary follows the industry's standards and catalogs (context-layer specification §6.11). Tags, a full glossary, typed rules, owners, domains and certification come with the metadata model (MM, v0.51.0); lineage from the platform and impact analysis with LIN (v0.52.0); ontology concepts with ONT1 (v0.53.0).
 ---

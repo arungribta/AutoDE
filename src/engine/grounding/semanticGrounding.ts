@@ -1,5 +1,5 @@
 import { Assertion, isLive } from '../context/assertions';
-import { LayerElement, LayerTable, SemanticLayerIndex } from '../semantic/layer';
+import { LayerElement, LayerTable, SemanticLayerIndex, nameRef, physicalMatches } from '../semantic/layer';
 import { GroundingArtifact } from './sqlGrounding';
 
 /**
@@ -83,11 +83,10 @@ export function checkSemanticGrounding(artifacts: readonly GroundingArtifact[], 
   const result: SemanticGroundingResult = { checked: !!index && approved.length > 0, joinsChecked: 0, joinsDefined: 0, metricsChecked: 0, metricsDefined: 0, issues: [], models: approved.map((m) => `${m.name}@${m.revision}`) };
   if (!index || !result.checked) return result;
   const known = new Set([...(options.knownMetrics ?? [])].map((m) => m.toLowerCase()));
+  // A name in SQL fits a semantic table where both know the part: database, schema, table (§6.4).
   const tablesFor = (ref: string): LayerTable[] => {
-    const parts = ref.replace(/["`[\]]/g, '').toLowerCase().split('.');
-    const name = parts[parts.length - 1];
-    const schema = parts.length >= 2 ? parts[parts.length - 2] : undefined;
-    return (index.byBaseName.get(name) ?? []).filter((t) => t.model && (!schema || t.baseSchema === schema) && approved.some((m) => m.name === t.model));
+    const r = nameRef(ref);
+    return (index.byBaseName.get(r.table) ?? []).filter((t) => physicalMatches({ ...t, binding: undefined }, r) && approved.some((m) => m.name === t.model));
   };
 
   for (const a of artifacts) {
@@ -112,7 +111,7 @@ export function checkSemanticGrounding(artifacts: readonly GroundingArtifact[], 
         if (!lRef || !rRef) continue;
         const lt = tablesFor(lRef); const rt = tablesFor(rRef);
         if (!lt.length || !rt.length) continue;
-        const lb = new Set(lt.map((t) => t.base)); const rb = new Set(rt.map((t) => t.base));
+        const lb = new Set(lt.map((t) => t.key)); const rb = new Set(rt.map((t) => t.key));
         if ([...lb].some((b) => rb.has(b))) continue; // the same table on both sides: not a relationship
         result.joinsChecked++;
         const lc = m[2].toLowerCase(); const rc = m[4].toLowerCase();

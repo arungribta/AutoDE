@@ -212,6 +212,7 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
   explore                      Overview: objects, facts by status, systems, semantic models
   explore search <words…> [--layer physical|context|semantic] [--type table,column,glossary_term,…] [--system <s>] [--platform <p>] [--all]   Search names, aliases, synonyms, descriptions and facts; facet counts
   explore semantic             The semantic layer: each model's logical tables, metrics, relationships, verified queries and instructions
+  explore browse [<id>]        The estate as a tree: databases, then a database's schemas, a schema's tables, a table's columns
   explore asset <id|name>      Everything known about one asset: schema, meaning, relationships, governance, facts, decisions, used by
   explore graph [<id|name>] [--hops 1-3] [--system <s>] [--model <m>] [--columns]   The graph around an asset; with no asset, the landscape: tables and every relationship between them
 
@@ -1412,6 +1413,12 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, ...r }, renderSearch(r));
     return r.total ? EXIT.OK : EXIT.NOT_FOUND;
   }
+  if (sub === 'browse') {
+    const level = ask({ type: 'browse', ...(words.length ? { parent: words.join(' ') } : {}) }).level as { parent?: { label: string }; children: Array<{ id: string; label: string; assetType: string; system?: string; environment?: string; children: number }>; truncated: number };
+    const lines = level.children.map((c) => `  ${c.assetType.padEnd(8)} ${c.label}${c.assetType === 'database' ? `  (${c.system}/${c.environment})` : ''}${c.children ? `  ${c.children}` : ''}  [${c.id}]`);
+    emit(ctx, { ok: true, ...level }, [level.parent ? `${level.parent.label}:` : 'Databases:', ...(lines.length ? lines : ['  nothing']), ...(level.truncated ? [`  … and ${level.truncated} more`] : [])].join('\n'));
+    return EXIT.OK;
+  }
   if (sub === 'semantic') {
     const o = ask({ type: 'semantic' }).semantic as SemanticOverview;
     emit(ctx, { ok: true, semantic: o }, renderSemantic(o));
@@ -1436,7 +1443,7 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, graph: r.slice }, renderGraph(r.slice as GraphSlice));
     return EXIT.OK;
   }
-  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, semantic, asset or graph.`);
+  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, browse, semantic, asset or graph.`);
 }
 
 /** C5a: the semantic layer — shared models and the active problem's composites. */
@@ -1484,7 +1491,7 @@ async function cmdSemantic(ctx: Ctx, rest: string[]): Promise<number> {
       }
       const s = name ? sem.readShared(ws, name) : undefined;
       if (!s) throw new CliError(EXIT.NOT_FOUND, `No shared model or composite "${name ?? ''}" (autode semantic show).`);
-      return { errors: s.errors, findings: s.model ? checkSemanticModel(s.model, sources) : [] };
+      return { errors: s.errors, findings: s.model ? checkSemanticModel(s.model, { ...sources, ...(s.binding ? { binding: s.binding } : {}) }) : [] };
     };
     if (sub === 'check') {
       if (!name) throw new CliError(EXIT.USAGE, 'semantic check <shared model or composite>.');
@@ -1501,8 +1508,8 @@ async function cmdSemantic(ctx: Ctx, rest: string[]): Promise<number> {
       if (!ids.length) throw new CliError(EXIT.NOT_FOUND, 'No table to draft from: pass --tables, or name the tables in the active problem\'s specification.');
       const d = draftSemanticModel({ graph: sources.graph, assertions: sources.assertions, tableIds: ids, name, database: ctx.values.database });
       let written: sem.SharedEntry;
-      try { written = sem.writeDraft(ws, name, d.model, d.backing, d.notes); } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
-      const findings = checkSemanticModel(d.model, sources);
+      try { written = sem.writeDraft(ws, name, d.model, d.backing, d.notes, d.binding); } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+      const findings = checkSemanticModel(d.model, { ...sources, ...(d.binding ? { binding: d.binding } : {}) });
       emit(ctx, { ok: true, file: rel(ctx, written.file), notes: d.notes, findings }, [`Drafted ${rel(ctx, written.file)}: ${d.model.tables.length} table(s), ${d.model.relationships?.length ?? 0} relationship(s).`, ...d.notes.map((n) => `  · ${n}`), ...findings.map(findingLine), `Review it, then a person approves it: autode semantic approve ${name}.`].join('\n'));
       return EXIT.OK;
     }

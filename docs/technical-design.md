@@ -805,6 +805,32 @@ Measured on the large-estate fixture (§10.3; about 50 000 columns): with the wh
 - A physical table's `usedBy.queries` follows `maps_to` to its logical tables.
 - The webview gains a layer radiogroup (a shortcut for the layer facet), `renderSemanticHome`, and layer fills on graph nodes.
 
+**v0.50.3 (identity, §6.4a).** `layer.ts`:
+- `knownDatabase`, which treats `SET_DATABASE`, `ingested_files` and empty as unknown;
+- `isFormatSchema`: ingestion's `ddl`, `csv` and `json` under an unknown database mean no schema;
+- `PhysicalRef` and `physicalRef(tableNode)`, with parts lower-cased and `''` for unknown;
+- `nameRef(sqlName)`;
+- `physicalMatches(lt, ref)`: equal where both know a part, within `lt.binding`;
+- `matchBase(lt, refs)` → `{ match?, candidates }`: one fit, or the one with a known equal database, else ambiguous;
+- `LayerTable` gains `key` (`db|?.schema.table`), `baseDatabase` and `binding`; relationships use keys;
+- `semanticTablesFor(index, ref, all?)` and `definitionsFor(index, refs, all?)`: with `all`, only the semantic tables that resolve to *this* table.
+
+Callers:
+- `layerGraph` links `maps_to` only on a unique match, and records `metadata.ambiguous`;
+- the landscape's semantic joins use `matchBase`;
+- `checkSemanticModel(model, { graph, assertions, binding? })` reports an ambiguous base table as an error that lists the candidates;
+- `semanticGrounding` compares keys and `nameRef` parts.
+
+The binding is `SharedMeta.binding` in `.autode/semantic/shared/<name>.yaml`. `DraftResult.binding` comes from the drafted tables' origins, and `writeDraft(…, binding)` records it. `logicalNames` escalates the name, then `schema_name`, then `db_schema_name`, then the id.
+
+`explore.ts`:
+- `containerGraph` adds `database` and `schema` nodes (`phys:<system>/<env>/<db>[/<schema>]`, lower-cased; labels keep the source's case) and `contains` edges;
+- `AssetSummary.database` and `.schema` come from `containersOf`;
+- `browseAssets(sources, parent?, limit)`; `AssetContext.contents` and `.ambiguousBase`;
+- the `database` and `schema` facets.
+
+Surfaces: request `browse`, `autode_browse_assets`, `autode explore browse`, and the webview's Filters/Browse tabs with a lazy tree. Fixture: `test/reference/realistic-estate/`.
+
 **Build.** `scripts/bundle.cjs` copies `WEBVIEW_LIBRARIES` (`cytoscape/dist/cytoscape.min.js`) into `dist/` and adds their licences to `THIRD-PARTY-NOTICES.md`. `.vscodeignore` ships `dist/cytoscape.min.js` and `media/explorer.html`.
 
 ## 6. Data Platforms

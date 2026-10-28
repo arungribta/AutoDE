@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.50.2 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.50.3 (2026-10-28). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -194,6 +194,10 @@ An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `bu
   - **semantic**: semantic models and everything in them.
 
   `LAYER_OF` in `explore.ts` assigns each asset type; a new asset type must be given a layer there. The ontology is context, not semantic.
+- **Identity** (v0.50.3, context-layer §6.4a): never match tables by name alone.
+  - Use `physicalRef` and `matchBase` in `semantic/layer.ts`: they compare database, schema and table where both sides know them, within the model's binding, and return the candidates when several fit.
+  - Databases and schemas are computed containers (`containerGraph` in `explore.ts`).
+  - Test identity against `test/reference/realistic-estate/`, not only the tidy reference problem.
 
 *Requirements CTX-8, GRD-10, UI-7; design §5.17.*
 

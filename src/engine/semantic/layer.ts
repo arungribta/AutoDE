@@ -1,4 +1,5 @@
 import { ELEMENT_LISTS, ElementList, SemanticModel, SemanticTable } from './model';
+import type { BaseNode, TableNode } from '../context/types';
 
 /**
  * The semantic layer as the context layer uses it (C5b;
@@ -9,6 +10,13 @@ import { ELEMENT_LISTS, ElementList, SemanticModel, SemanticTable } from './mode
  * Explorer) but never used as authority: an agent may not build on a join or
  * metric a person hasn't approved. Pure: `store.ts` loads it
  * (`loadSemanticLayer`), `layerGraph.ts` turns it into graph nodes.
+ *
+ * Identity (v0.50.3; §6.4): a logical table's base table is matched on its
+ * database, schema and table, within the system (and environment) its model
+ * is bound to. A part either side doesn't know (DDL without a database, the
+ * `SET_DATABASE` placeholder, an unbound model) is not compared, so it can't
+ * pick one of several tables: when more than one fits, the match is
+ * *ambiguous* and nothing is linked — the checks name the candidates.
  */
 
 export interface LayerModel {
@@ -20,15 +28,24 @@ export interface LayerModel {
   file: string;
   /** Element ref (`table`, `table.element`, `relationship:<name>`) → backing assertion ids, from the sidecar. */
   backing?: Record<string, string[]>;
+  /** The system (and environment) whose tables the model's base tables are (v0.50.3); absent for models written before. */
+  binding?: ModelBinding;
 }
+
+export interface ModelBinding { system: string; environment?: string }
 
 export interface LayerTable {
   model: string;
   table: SemanticTable;
-  /** `schema.table`, lower-cased: what physical tables are matched by. */
+  /** `schema.table`, lower-cased. */
   base: string;
+  /** `database.schema.table`, lower-cased, with `?` for an unknown database: the table's identity in the layer. */
+  key: string;
   baseName: string;
   baseSchema: string;
+  /** Lower-cased; '' when unknown (the placeholder). */
+  baseDatabase: string;
+  binding?: ModelBinding;
 }
 
 export interface LayerElement { model: string; table: string; list: ElementList; name: string; expr: string; synonyms: string[]; description?: string }
@@ -38,7 +55,7 @@ export interface LayerRelationship {
   name: string;
   leftTable: string;
   rightTable: string;
-  /** Base tables (`schema.table`, lower-cased) of the two sides. */
+  /** The two sides' table keys (`LayerTable.key`). */
   left: string;
   right: string;
   columns: Array<{ left: string; right: string }>;
@@ -76,8 +93,9 @@ export function indexSemanticLayer(loaded: readonly LoadedModel[], options: { in
     for (const t of model.tables) {
       const baseSchema = t.base_table.schema.toLowerCase();
       const baseName = t.base_table.table.toLowerCase();
-      const lt: LayerTable = { model: model.name, table: t, base: `${baseSchema}.${baseName}`, baseName, baseSchema };
-      baseOf.set(t.name.toLowerCase(), lt.base);
+      const baseDatabase = knownDatabase(t.base_table.database);
+      const lt: LayerTable = { model: model.name, table: t, base: `${baseSchema}.${baseName}`, key: `${baseDatabase || '?'}.${baseSchema}.${baseName}`, baseName, baseSchema, baseDatabase, ...(meta.binding ? { binding: meta.binding } : {}) };
+      baseOf.set(t.name.toLowerCase(), lt.key);
       index.tables.push(lt);
       index.byBaseName.set(baseName, [...(index.byBaseName.get(baseName) ?? []), lt]);
       for (const list of ELEMENT_LISTS) {
@@ -110,16 +128,72 @@ export function indexSemanticLayer(loaded: readonly LoadedModel[], options: { in
   return index;
 }
 
-/** Whether a graph table (by its fqn) is the base table of a semantic table. */
-export function baseMatches(lt: Pick<LayerTable, 'base'>, fqn: string): boolean {
-  const f = fqn.toLowerCase();
-  return f === lt.base || f.endsWith(`.${lt.base}`);
+/** Database names that mean "not known": the semantic draft's placeholder, and what file ingestion records for DDL without one. */
+const UNKNOWN_DATABASES = new Set(['', 'set_database', 'ingested_files']);
+
+/**
+ * File ingestion files a table with no schema under its file format's name
+ * (`ddl.orders`, with database `ingested_files`); that label is no schema.
+ */
+const FORMAT_SCHEMAS = new Set(['ddl', 'csv', 'json']);
+export function isFormatSchema(schema: string, database: string | undefined, parts: number): boolean {
+  return parts === 2 && (database ?? '').toLowerCase() === 'ingested_files' && FORMAT_SCHEMAS.has(schema.toLowerCase());
 }
 
-/** The semantic tables over a physical table (by fqn). */
-export function semanticTablesFor(index: SemanticLayerIndex, fqn: string): LayerTable[] {
-  const last = fqn.toLowerCase().split('.').pop() ?? '';
-  return (index.byBaseName.get(last) ?? []).filter((lt) => fqn.includes('.') ? baseMatches(lt, fqn) : true);
+export function knownDatabase(database: string | undefined): string {
+  const d = (database ?? '').toLowerCase();
+  return UNKNOWN_DATABASES.has(d) ? '' : d;
+}
+
+/** A physical table as the layer matches it: its parts (lower-cased; '' when unknown) and where it lives. */
+export interface PhysicalRef { id: string; fqn: string; database: string; schema: string; table: string; system?: string; environment?: string }
+
+/** A table node (or any `db.schema.table` / `schema.table` name) as a `PhysicalRef`. */
+export function physicalRef(t: Pick<BaseNode, 'id' | 'label' | 'origin'> & Partial<Pick<TableNode, 'fqn' | 'database'>>): PhysicalRef {
+  const fqn = t.fqn || t.label;
+  const parts = fqn.toLowerCase().split('.');
+  const table = parts[parts.length - 1];
+  const schema = parts.length >= 2 && !isFormatSchema(parts[parts.length - 2], t.database, parts.length) ? parts[parts.length - 2] : '';
+  const database = parts.length >= 3 ? knownDatabase(parts[parts.length - 3]) : knownDatabase(t.database);
+  return { id: t.id, fqn, database, schema, table, ...(t.origin?.system ? { system: t.origin.system } : {}), ...(t.origin?.systemEnvironment ? { environment: t.origin.systemEnvironment } : {}) };
+}
+
+/** A name in SQL (`db.schema.table`, `schema.table`, `table`) as a reference; unknown parts stay ''. */
+export function nameRef(name: string): PhysicalRef {
+  const parts = name.replace(/["`[\]]/g, '').toLowerCase().split('.');
+  return { id: name, fqn: name, table: parts[parts.length - 1], schema: parts.length >= 2 ? parts[parts.length - 2] : '', database: parts.length >= 3 ? knownDatabase(parts[parts.length - 3]) : '' };
+}
+
+/** Whether a physical table can be a semantic table's base: equal where both sides know the part. */
+export function physicalMatches(lt: Pick<LayerTable, 'baseName' | 'baseSchema' | 'baseDatabase' | 'binding'>, ref: PhysicalRef): boolean {
+  if (ref.table !== lt.baseName) return false;
+  if (ref.schema && lt.baseSchema && ref.schema !== lt.baseSchema) return false;
+  if (ref.database && lt.baseDatabase && ref.database !== lt.baseDatabase) return false;
+  if (lt.binding && ref.system && ref.system !== lt.binding.system) return false;
+  if (lt.binding?.environment && ref.environment && ref.environment !== lt.binding.environment) return false;
+  return true;
+}
+
+/**
+ * The physical table a semantic table stands for: the one candidate that
+ * fits, or — when several do — the one whose database is known and equal;
+ * otherwise none, and the candidates (ambiguous).
+ */
+export function matchBase(lt: LayerTable, refs: readonly PhysicalRef[]): { match?: PhysicalRef; candidates: PhysicalRef[] } {
+  const candidates = refs.filter((r) => physicalMatches(lt, r));
+  if (candidates.length === 1) return { match: candidates[0], candidates };
+  const exact = candidates.filter((r) => lt.baseDatabase && r.database === lt.baseDatabase && (!lt.baseSchema || r.schema === lt.baseSchema));
+  return exact.length === 1 ? { match: exact[0], candidates } : { candidates };
+}
+
+/**
+ * The semantic tables over a physical table. With `all` (the estate's
+ * tables), only those that resolve to *this* table — not to another of the
+ * same name — count.
+ */
+export function semanticTablesFor(index: SemanticLayerIndex, ref: PhysicalRef | string, all?: readonly PhysicalRef[]): LayerTable[] {
+  const r = typeof ref === 'string' ? nameRef(ref) : ref;
+  return (index.byBaseName.get(r.table) ?? []).filter((lt) => physicalMatches(lt, r) && (!all || matchBase(lt, all).match?.id === r.id));
 }
 
 export interface SemanticDefinitions {
@@ -136,10 +210,10 @@ export interface SemanticDefinitions {
  * metrics and filters, and the relationships that touch them — so a pack
  * hands the agent the approved joins instead of letting it infer one.
  */
-export function definitionsFor(index: SemanticLayerIndex, fqns: readonly string[]): SemanticDefinitions {
-  const tables = [...new Set(fqns.flatMap((f) => semanticTablesFor(index, f)))];
+export function definitionsFor(index: SemanticLayerIndex, refs: ReadonlyArray<PhysicalRef | string>, all?: readonly PhysicalRef[]): SemanticDefinitions {
+  const tables = [...new Set(refs.flatMap((f) => semanticTablesFor(index, f, all)))];
   const names = new Set(tables.map((t) => `${t.model}|${t.table.name.toLowerCase()}`));
-  const bases = new Set(tables.map((t) => t.base));
+  const bases = new Set(tables.map((t) => t.key));
   const of = (list: ElementList) => index.elements.filter((e) => e.list === list && names.has(`${e.model}|${e.table.toLowerCase()}`));
   const relationships = index.relationships.filter((r) => bases.has(r.left) || bases.has(r.right));
   const used = new Set([...tables.map((t) => t.model), ...relationships.map((r) => r.model)]);
