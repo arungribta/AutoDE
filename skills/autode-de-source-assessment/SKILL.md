@@ -1,12 +1,12 @@
 ---
 name: autode-de-source-assessment
 description: Assess the source systems of an AutoDE business problem - bring their metadata into the estate, profile keys, grain, volumes and freshness with read-only aggregate queries, propose keys, grain and relationships as facts, and draft the source context. Use it for the source-assessment stage of an AutoDE workflow.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_find_source_files, mcp__autode__autode_list_connections, mcp__autode__autode_test_connection, mcp__autode__autode_list_databases, mcp__autode__autode_list_schemas, mcp__autode__autode_extract_metadata, mcp__autode__autode_ingest_metadata, mcp__autode__autode_ingest_file, mcp__autode__autode_execute_query, mcp__autode__autode_resolve, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_assertions, mcp__autode__autode_propose_assertion, mcp__autode__autode_pack_list, mcp__autode__autode_mine_vocabulary, mcp__autode__autode_workflow_status, mcp__autode__autode_record_source_context, mcp__autode__autode_record_artifact]
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_find_source_files, mcp__autode__autode_list_connections, mcp__autode__autode_test_connection, mcp__autode__autode_list_databases, mcp__autode__autode_list_schemas, mcp__autode__autode_extract_metadata, mcp__autode__autode_ingest_metadata, mcp__autode__autode_ingest_file, mcp__autode__autode_refresh_lineage, mcp__autode__autode_platform_operations, mcp__autode__autode_platform_run, mcp__autode__autode_execute_query, mcp__autode__autode_resolve, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_assertions, mcp__autode__autode_propose_assertion, mcp__autode__autode_pack_list, mcp__autode__autode_mine_vocabulary, mcp__autode__autode_workflow_status, mcp__autode__autode_record_source_context, mcp__autode__autode_record_artifact]
 metadata:
   scope: de
   stageKinds: [source-assessment]
   platforms: [any]
-  version: 3
+  version: 4
   owner: AutoDE
   maturity: tested
 ---
@@ -21,7 +21,7 @@ metadata:
 Start with `autode_find_source_files`: sources often come as files (DDL, CSV or JSON extracts, load scripts) rather than connections, and a problem with no connection usually has them.
 
 - **Files:** ingest each DDL or data file not yet in the estate with `autode_ingest_file`, giving `system` (the suggested one: the file's schema, else its name, unless the stakeholder names it otherwise). Read the load scripts for what is loaded, from where and how often; put that in the report and the source context's description, and propose what they establish (a key a MERGE matches on, a load's grain) as facts with the script as evidence.
-- **Connected:** `autode_list_connections`; `autode_test_connection` if its readiness is unknown; `autode_list_databases` and `autode_list_schemas` to find the schemas; then `autode_ingest_metadata` with the schemas in scope (and `profile` when the connection allows it).
+- **Connected:** `autode_list_connections`; `autode_test_connection` if its readiness is unknown; `autode_list_databases` and `autode_list_schemas` to find the schemas; then `autode_ingest_metadata` with the schemas in scope (and `profile` when the connection allows it). Then `autode_refresh_lineage` on the connection: AutoDE runs the lineage operations the platform's definition names and records what the platform observed. A failed one names the privileges it needs: report that as a request for a person and go on, since observed lineage is optional. To read anything else from a platform, use the catalog's operations (`autode_platform_operations`, `autode_platform_run`) before writing SQL yourself.
 - **No access and no files:** don't guess. Record the system as *described* (step 5) with what it is, who owns it and what access is needed.
 
 Then check with `autode_resolve` that the tables the outcome needs are there.

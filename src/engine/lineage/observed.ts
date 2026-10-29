@@ -38,6 +38,27 @@ export interface RecordResult { recorded: number; unchanged: number; retired: nu
 
 const MAX_EDGES = 20_000;
 
+/**
+ * Rows in the lineage operations' result shape (upstream_object, upstream_column, downstream_object,
+ * downstream_column, entity_type, entity_id, entity_name) as edges; a row missing an end is skipped and counted.
+ */
+export function rowsToEdges(rows: ReadonlyArray<Record<string, unknown>>): { edges: ObservedEdge[]; skipped: number } {
+  const edges: ObservedEdge[] = [];
+  let skipped = 0;
+  for (const raw of rows) {
+    const r: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) if (v !== null && v !== undefined && String(v).trim() !== '') r[k.toLowerCase()] = String(v).trim();
+    const entity = r.entity_id ? { type: r.entity_type ?? 'job', id: r.entity_id, ...(r.entity_name ? { name: r.entity_name } : {}) } : undefined;
+    if (!r.upstream_object || (!r.downstream_object && !entity)) { skipped++; continue; }
+    edges.push({
+      upstream: { object: r.upstream_object, ...(r.upstream_column ? { column: r.upstream_column } : {}) },
+      ...(r.downstream_object ? { downstream: { object: r.downstream_object, ...(r.downstream_column ? { column: r.downstream_column } : {}) } } : {}),
+      ...(entity ? { entity } : {})
+    });
+  }
+  return { edges, skipped };
+}
+
 /** The id of a job, notebook or report a lineage source names. */
 export function entityNodeId(identity: Pick<ObjectIdentity, 'system' | 'environment'>, entity: { type: string; id: string }): string {
   return `job:${identity.system}/${identity.environment}/${slugifyId(entity.type)}/${entity.id}`;

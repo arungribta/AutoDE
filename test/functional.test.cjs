@@ -5864,12 +5864,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5951,6 +5951,9 @@ async function main() {
       autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
       autode_lineage: [{ asset: 'shop.orders', direction: 'downstream' }, { asset: 'shop.orders', depth: 11 }],
       autode_impact: [{ change: 'remove_table', asset: 'shop.orders' }, { change: 'truncate', asset: 'shop.orders' }],
+      autode_platform_operations: [{ platform: 'snowflake' }, { platform: '' }],
+      autode_platform_run: [{ connectionId: 'snowflake:nope', operation: 'platform.version' }, { connectionId: 'snowflake:nope' }],
+      autode_refresh_lineage: [{ connectionId: 'snowflake:nope' }, { connectionId: 'snowflake:nope', databases: ["x'; drop"] }],
       autode_record_observed_lineage: [{ connectionId: 'snowflake:nope', method: 'openlineage', edges: [{ upstream: { object: 'A.B.C' }, downstream: { object: 'A.B.D' } }] }, { connectionId: 'snowflake:nope', method: 'open lineage', edges: [] }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
       autode_semantic_draft: [{ name: 'sales' }, { name: '1bad' }],
@@ -12511,6 +12514,196 @@ async function main() {
       const s = (await client.callTool({ name: 'autode_start_problem', arguments: { problemStatement: 'Revenue from the shop orders table' } })).structuredContent;
       assert.ok(s.overlap && s.overlap.tables.includes('shop.orders') && s.overlap.noMatch === false, JSON.stringify(s));
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.54.0: POP1 — platform operations ──
+
+  await test('v0.54.0 POP1: the shipped catalog loads clean (every file against its schema, every read through the read-only guard, every recorded example bound and mapped); parameters bind by type (a hostile name or value never becomes SQL); a read whose statement writes is refused item by item; the published JSON Schemas are the code\'s', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const B = fresh('../dist/engine/platform/operations/bind.js');
+    const S = fresh('../dist/engine/platform/operations/schema.js');
+    const root = nodePath.join(__dirname, '..');
+    const c = L.loadCatalog({ resourcesRoot: root });
+    assert.deepStrictEqual(c.errors, []);
+    assert.deepStrictEqual(c.platforms.map((p) => p.item.id).sort(), ['databricks', 'oracle', 'snowflake']);
+    for (const id of ['platform.version', 'lineage.access_history', 'lineage.object_dependencies', 'lineage.column_lineage', 'lineage.table_lineage']) assert.ok(L.operationById(c, id), id);
+    assert.deepStrictEqual(L.platformById(c, 'snowflake').capabilities.lineage.operations, ['lineage.access_history', 'lineage.object_dependencies']);
+    // Binding.
+    const sf = L.platformById(c, 'snowflake').dialect; const db = L.platformById(c, 'databricks').dialect;
+    assert.strictEqual(B.identifier('RETAIL.SALES.ORDERS', sf), 'RETAIL.SALES.ORDERS', 'plain names stay unquoted, so the platform folds their case as usual');
+    assert.strictEqual(B.identifier('sales."Order Items"', sf), 'sales."Order Items"');
+    assert.strictEqual(B.identifier('sales.`odd name`', db), 'sales.`odd name`');
+    assert.strictEqual(B.identifier('a; DROP TABLE b', sf), '"a; DROP TABLE b"', 'a name that isn\'t plain is quoted as one name, never run');
+    assert.strictEqual(B.identifier('x"; DROP TABLE b; --', sf), '"x""; DROP TABLE b; --"', 'its quote character is doubled');
+    assert.throws(() => B.identifier('', sf), /empty name/);
+    assert.strictEqual(B.literal("x'); DROP TABLE t; --"), "'x''); DROP TABLE t; --'");
+    const p = [{ name: 'n', type: 'number', label: 'n', min: 1, max: 10 }, { name: 'b', type: 'boolean', label: 'b' }, { name: 's', type: 'statement', label: 's' }];
+    assert.strictEqual(B.bindTemplate('{n} {b} {s}', p, { n: 3, b: true, s: 'SELECT 1;' }, L.platformById(c, 'oracle').dialect), '3 1 SELECT 1');
+    assert.throws(() => B.bindTemplate('{n}', p, { n: '3 OR 1=1' }), /must be a number/);
+    assert.throws(() => B.bindTemplate('{n}', p, { n: 11 }), /at most 10/);
+    assert.throws(() => B.bindTemplate('{s}', p, { s: 'DROP TABLE t' }), /one read-only statement/);
+    assert.throws(() => B.bindTemplate('{x}', p, {}), /isn't a parameter/);
+    // A team file is checked item by item: a read that writes is refused; the others still load.
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-ops-'));
+    try {
+      const dir = nodePath.join(ws, '.autode', 'config', 'platform-operations');
+      nodeFs.mkdirSync(dir, { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(dir, 'bad.yaml'), ['formatVersion: 1', 'id: estate.drop_it', 'title: Not a read', 'description: Claims to read but deletes.', 'kind: read', 'area: estate', 'params: [{ name: t, type: identifier, label: Table }]', 'returns: []', 'platforms:', '  snowflake: { sql: "DELETE FROM {t}" }', ''].join('\n'));
+      nodeFs.writeFileSync(nodePath.join(dir, 'odd.yaml'), 'formatVersion: 2\nid: x\n');
+      const t = L.loadCatalog({ resourcesRoot: root, workspaceRoot: ws });
+      assert.ok(t.errors.some((e) => /bad\.yaml: snowflake: a read operation must be one read-only statement/.test(e)) && t.errors.some((e) => /odd\.yaml: .*formatVersion/.test(e)), t.errors.join('\n'));
+      assert.ok(L.operationById(t, 'lineage.access_history') && !t.operations.some((o) => o.item.id === 'estate.drop_it'));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    // The published schemas are the code's.
+    assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'docs', 'schemas', 'platform-operation.schema.json'), 'utf8')), JSON.parse(JSON.stringify(S.OPERATION_SCHEMA)));
+    assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'docs', 'schemas', 'platform.schema.json'), 'utf8')), JSON.parse(JSON.stringify(S.PLATFORM_SCHEMA)));
+    // No lineage SQL in the engine's TypeScript: it lives in the operation files.
+    for (const f of ['src/engine/lineage/record.ts', 'src/engine/lineage/observed.ts', 'src/engine/platform/adapters/SnowflakeAdapter.ts', 'src/engine/platform/adapters/DatabricksAdapter.ts']) assert.ok(!/ACCESS_HISTORY|OBJECT_DEPENDENCIES|column_lineage|table_lineage/.test(nodeFs.readFileSync(nodePath.join(root, f), 'utf8').replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, '')), f);
+  });
+
+  await test('v0.54.0 POP1: the executor — the platform\'s implementation within its version range (the version read once per connection), a platform failure is a gap with its reason, more rows than allowed are cut and said so, results are the declared columns typed; a change operation never runs (it is the runbook step to propose)', async () => {
+    const nodePath = require('node:path');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const E = fresh('../dist/engine/platform/operations/execute.js');
+    const Svc = fresh('../dist/engine/platform/operations/service.js');
+    const c = L.loadCatalog({ resourcesRoot: nodePath.join(__dirname, '..') });
+    const op = (o) => ({ formatVersion: 1, id: 'test.op', title: 'A test', description: 'For the executor test.', kind: 'read', area: 'test', params: [{ name: 'n', type: 'number', label: 'n', default: 5 }], returns: [{ name: 'count', from: 'CNT', as: 'number' }, { name: 'flag', from: 'F', as: 'yes_no' }], platforms: { snowflake: { sql: 'SELECT {n} AS cnt, \'Y\' AS f', since: '8.0' } }, ...o });
+    const seen = [];
+    const runner = { sql: async (s, max) => { seen.push([s, max]); return [{ CNT: '7', F: 'Y', EXTRA: 'dropped' }, { CNT: '8', F: 'N' }, { CNT: '9', F: 'N' }]; } };
+    let r = await E.runOperation({ operation: op(), platformId: 'snowflake', params: {}, runner, version: '8.40.1', maxRows: 2 });
+    assert.deepStrictEqual([r.ok, r.statement, r.rows, r.truncated, seen[0][1]], [true, "SELECT 5 AS cnt, 'Y' AS f", [{ count: 7, flag: true }, { count: 8, flag: false }], true, 3]);
+    r = await E.runOperation({ operation: op({ platforms: { snowflake: { sql: 'SELECT 1 AS cnt', since: '99.0' } } }), platformId: 'snowflake', params: {}, runner, version: '8.40.1' });
+    assert.ok(!r.ok && /needs 99\.0 or later; the platform is 8\.40\.1/.test(r.gap), r.gap);
+    r = await E.runOperation({ operation: op(), platformId: 'snowflake', params: {}, runner: { sql: async () => { throw new Error('Insufficient privileges to operate on database SNOWFLAKE'); } } });
+    assert.ok(!r.ok && /Insufficient privileges/.test(r.gap) && r.statement, 'a failure is a gap with what ran');
+    r = await E.runOperation({ operation: op({ platforms: { databricks: { sql: 'SELECT 1 AS cnt' } } }), platformId: 'snowflake', params: {}, runner }).catch((e) => e);
+    assert.ok(/no implementation for snowflake \(it has databricks\)/.test(r.message));
+    r = await E.runOperation({ operation: op({ kind: 'change' }), platformId: 'snowflake', params: {}, runner });
+    assert.ok(!r.ok && /runs only as a runbook step a person approves/.test(r.gap));
+    // Through the service: the version is read once per connection; a change operation is refused with its step.
+    E.forgetVersion();
+    let versionReads = 0;
+    const target = { connectionId: 'snowflake:t', platform: 'snowflake', query: async (s) => { if (/CURRENT_VERSION/.test(s)) { versionReads++; return [{ VERSION: '8.40.1' }]; } return [{ UPSTREAM_OBJECT: 'A.B.C', DOWNSTREAM_OBJECT: 'A.B.D' }]; } };
+    for (let i = 0; i < 3; i++) { const x = await Svc.runOnConnection({ catalog: c }, target, 'lineage.object_dependencies', { databases: ['A'] }); assert.ok(x.ok && x.version === '8.40.1'); }
+    assert.strictEqual(versionReads, 1, 'read once per connection');
+    const changeCat = { ...c, operations: [...c.operations, { item: op({ id: 'governance.set_tag', kind: 'change', params: [{ name: 't', type: 'identifier', label: 'Table' }], platforms: { snowflake: { sql: 'ALTER TABLE {t} SET TAG pii = {t:literal}' } } }), origin: 'shipped', file: 'x', checksum: 'x', status: 'approved' }] };
+    const err = await Svc.runOnConnection({ catalog: changeCat }, target, 'governance.set_tag', { t: 'RETAIL.SALES.ORDERS' }).catch((e) => e);
+    assert.deepStrictEqual([err.code, err.step.kind, err.step.sql], ['CHANGE', 'sql', "ALTER TABLE RETAIL.SALES.ORDERS SET TAG pii = 'RETAIL.SALES.ORDERS'"]);
+    assert.ok(/propose it as a runbook step/.test(err.message));
+    assert.deepStrictEqual(E.parseCliOutput('Warning: x\n[{"name":"a"}]'), [{ name: 'a' }]);
+    assert.deepStrictEqual(E.parseCliOutput('{"tables":[{"name":"t"}]}'), [{ name: 't' }]);
+  });
+
+  await test('v0.54.0 POP1: LIN reads lineage through the platform\'s operations — recorded Snowflake and Databricks results become the golden lineage facts; a failed operation is reported with the privileges the platform needs and retires nothing; a cut-off read retires nothing', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { refreshLineage, refreshLines } = fresh('../dist/engine/lineage/record.js');
+    const { openContext } = fresh('../dist/engine/context/estateIngest.js');
+    fresh('../dist/engine/platform/operations/execute.js').forgetVersion();
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-poplin-'));
+    try {
+      const cfm = await openContext(ws);
+      cfm.bindToSystem({ connection: 'snowflake:prod', system: 'erp', environment: 'prod', schemas: ['RETAIL.SALES'] });
+      let ah = [
+        { UPSTREAM_OBJECT: 'RETAIL.SALES.ORDERS', UPSTREAM_COLUMN: 'AMOUNT', DOWNSTREAM_OBJECT: 'RETAIL.STAGING.STG_ORDERS', DOWNSTREAM_COLUMN: 'AMOUNT', RUNS: 30 },
+        { UPSTREAM_OBJECT: 'RETAIL.STAGING.STG_ORDERS', UPSTREAM_COLUMN: 'AMOUNT', DOWNSTREAM_OBJECT: 'RETAIL.MART.FCT_ORDERS', DOWNSTREAM_COLUMN: 'NET_AMOUNT', RUNS: 30 }
+      ];
+      let depsFail = true; const ran = [];
+      const target = { connectionId: 'snowflake:prod', platform: 'snowflake', query: async (s, max) => {
+        ran.push(s);
+        if (/CURRENT_VERSION/.test(s)) return [{ VERSION: '8.40.1' }];
+        if (/OBJECT_DEPENDENCIES/.test(s)) { if (depsFail) throw new Error('SQL access control error: Insufficient privileges to operate on database SNOWFLAKE.'); return [{ UPSTREAM_OBJECT: 'RETAIL.MART.FCT_ORDERS', DOWNSTREAM_OBJECT: 'RETAIL.REPORTING.V_REVENUE' }]; }
+        return ah.slice(0, max);
+      } };
+      const root = nodePath.join(__dirname, '..');
+      let r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target });
+      assert.deepStrictEqual([r.databases, r.methods.map((m) => [m.operation, m.recorded, !!m.error])], [['RETAIL'], [['lineage.access_history', 2, false], ['lineage.object_dependencies', 0, true]]]);
+      assert.ok(ran.some((s) => /IN \('retail'\)/.test(s) && /-30,/.test(s) && /LIMIT 5001/.test(s)), 'bound: the database lower-cased, 30 days, the limit plus one to tell a cut-off read');
+      const lines = refreshLines(r).join('\n');
+      assert.ok(/✗ lineage\.object_dependencies: SQL access control error/.test(lines) && /It needs: IMPORTED PRIVILEGES on the SNOWFLAKE database/.test(lines), lines);
+      const live = () => cfm.getLedger().assertions().filter((a) => a.kind === 'lineage' && a.status === 'active').map((a) => `${a.subject[1]} -> ${a.subject[0]} [${a.value.method}]`).sort();
+      assert.deepStrictEqual(live(), [
+        'obj:erp/prod/retail.sales.orders.amount -> obj:erp/prod/retail.staging.stg_orders.amount [access_history]',
+        'obj:erp/prod/retail.staging.stg_orders.amount -> obj:erp/prod/retail.mart.fct_orders.net_amount [access_history]'
+      ]);
+      // The privilege granted: the view dependency comes in; a later failure of it retires nothing.
+      depsFail = false;
+      await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target });
+      depsFail = true;
+      await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target });
+      assert.strictEqual(live().length, 3, 'a failed read retires nothing');
+      // A cut-off read (more rows than the limit) retires nothing either; a complete one does.
+      ah = [ah[0], ah[0], ah[0]];
+      r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target, limit: 2 });
+      assert.ok(!r.methods[0].complete && live().length === 3, JSON.stringify(r.methods));
+      ah = [ah[0]];
+      await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target });
+      assert.strictEqual(live().length, 2);
+      // Databricks: its own operations, the same recorder.
+      cfm.bindToSystem({ connection: 'databricks:lake', system: 'lake', environment: 'prod', schemas: ['retail.sales'] });
+      const dbt = { connectionId: 'databricks:lake', platform: 'databricks', query: async (s) => /version\(\)/.test(s) ? [{ version: '3.5.0 abc' }] : /column_lineage/.test(s) ? [{ upstream_object: 'retail.sales.orders', upstream_column: 'amount', downstream_object: 'retail.mart.fct_orders', downstream_column: 'net_amount' }] : [{ upstream_object: 'retail.mart.fct_orders', downstream_object: null, entity_type: 'DASHBOARD_V3', entity_id: 'd-7' }] };
+      r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: dbt });
+      assert.deepStrictEqual(r.methods.map((m) => [m.operation, m.recorded]), [['lineage.column_lineage', 1], ['lineage.table_lineage', 1]]);
+      // Oracle has no lineage capability: said plainly.
+      r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: { connectionId: 'oracle:x', platform: 'oracle', query: async () => [] } });
+      assert.ok(/designed/.test(r.note), r.note);
+      cfm.dispose();
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.54.0 POP1: every surface — autode platform operations | show | run and autode lineage refresh are the MCP tools\' own handlers; a team\'s copy of an operation is a draft (listed, never run) until a person approves exactly that file as a decision, and an edit makes it a draft again', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { PlatformSession } = fresh('../dist/mcp/platform.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    fresh('../dist/engine/platform/operations/execute.js').forgetVersion();
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-ops-e2e-'));
+    nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    username: me\n    database: SALES\n');
+    const ran = [];
+    const fakeAdapter = () => ({
+      async connect() { return { connected: true, platform: 'snowflake', databaseName: 'SALES', schemaName: 'RAW', version: '9', capabilities: {} }; },
+      async disconnect() {}, dispose() {}, getConnectionId: () => 'snowflake:ACME', getCapabilities: () => ({}),
+      async executeQuery(sql) { ran.push(sql); if (/CURRENT_VERSION/.test(sql)) return { columns: ['VERSION'], rows: [{ VERSION: /team/.test(sql) ? '9.9.9' : '8.40.1' }], rowCount: 1, executionTimeMs: 1 }; return { columns: [], rows: [{ UPSTREAM_OBJECT: 'SALES.RAW.ORDERS', DOWNSTREAM_OBJECT: 'SALES.MART.V_ORDERS' }], rowCount: 1, executionTimeMs: 1 }; }
+    });
+    const platform = (o) => new PlatformSession({ ...o, allowWrite: false, log: () => {}, createManager: (log, options) => { const m = new ConnectionManager(log, options); m.registerAdapterFactory('snowflake', fakeAdapter); return m; } });
+    const W = ['--workspace', ws];
+    try {
+      let r = await cli(['platform', 'operations', ...W]);
+      assert.ok(r.code === 0 && /✓ lineage\.access_history\s+read\s+snowflake\s+shipped  — snowflake: lineage/.test(r.out), r.out);
+      r = await cli(['platform', 'show', 'lineage.access_history', ...W]);
+      assert.ok(r.code === 0 && /SNOWFLAKE\.ACCOUNT_USAGE\.ACCESS_HISTORY/.test(r.out) && /days \(number\) = 30/.test(r.out), r.out);
+      r = await cli(['platform', 'run', 'platform.version', '--connection', 'snowflake:ACME', ...W], { platform });
+      assert.ok(r.code === 0 && /^version\n8\.40\.1\n1 row\(s\)/.test(r.out), r.out + r.err);
+      r = await cli(['platform', 'run', 'lineage.object_dependencies', '--connection', 'snowflake:ACME', '--param', 'databases=SALES', ...W, '--json'], { platform });
+      assert.deepStrictEqual(r.json().rows, [{ upstream_object: 'SALES.RAW.ORDERS', downstream_object: 'SALES.MART.V_ORDERS' }]);
+      assert.strictEqual((await cli(['platform', 'run', 'lineage.object_dependencies', '--connection', 'snowflake:ACME', '--param', 'nope=1', ...W], { platform })).code, 2);
+      r = await cli(['lineage', 'refresh', '--connection', 'snowflake:ACME', '--database', 'SALES', ...W], { platform });
+      assert.ok(/✓ lineage\.object_dependencies: 1 edge\(s\), 1 new/.test(r.out), r.out + r.err);
+      // A team's copy: a draft until approved, then run in place of the shipped one; an edit makes it a draft again.
+      const dir = nodePath.join(ws, '.autode', 'config', 'platform-operations');
+      nodeFs.mkdirSync(dir, { recursive: true });
+      const shipped = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'platform-operations', 'platform', 'version.yaml'), 'utf8');
+      const file = nodePath.join(dir, 'version.yaml');
+      nodeFs.writeFileSync(file, shipped.replace('SELECT CURRENT_VERSION() AS version', "SELECT CURRENT_VERSION() AS version, 'team' AS origin"));
+      r = await cli(['platform', 'operations', ...W]);
+      assert.ok(/· platform\.version .*team \(draft: not run until approved\)/.test(r.out), r.out);
+      fresh('../dist/engine/platform/operations/execute.js').forgetVersion();
+      ran.length = 0;
+      await cli(['platform', 'run', 'platform.version', '--connection', 'snowflake:ACME', ...W], { platform });
+      assert.ok(!ran.some((s) => /team/.test(s)), 'the draft never runs');
+      r = await cli(['platform', 'propose', file, ...W, '--json']);
+      const id = r.json().decision.id;
+      assert.ok(r.code === 0 && id, r.out);
+      r = await cli(['decisions', 'approve', id, ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      ran.length = 0;
+      r = await cli(['platform', 'run', 'platform.version', '--connection', 'snowflake:ACME', ...W], { platform });
+      assert.ok(ran.some((s) => /team/.test(s)) && /9\.9\.9/.test(r.out), 'the approved team copy runs in place of the shipped one');
+      nodeFs.appendFileSync(file, '# edited\n');
+      r = await cli(['platform', 'operations', ...W, '--json']);
+      assert.ok(r.json().operations.some((o) => o.id === 'platform.version' && o.origin === 'team' && o.status === 'draft'), 'an edit makes it a draft again');
+      assert.ok(nodeFs.existsSync(nodePath.join(ws, '.autode', 'config', 'platform-approvals.json')));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

@@ -1,0 +1,37 @@
+# AutoDE platform definition (docs/specs/platform-operations.md §2.2). A team's copy in
+# .autode/config/platforms/ with the same id replaces this one once a person approves it.
+formatVersion: 1
+id: snowflake
+title: Snowflake
+category: warehouse
+transports: [sql, cli]
+access:
+  cli: { command: snow, minVersion: "3.0", install: "Install the Snowflake CLI (snow) and add a connection; the autode-snowflake-* skills say how." }
+  api: { name: Snowflake SQL API }
+versionOperation: platform.version
+dialect:
+  identifierQuote: '"'
+  unquotedCase: upper
+  booleans: ['TRUE', 'FALSE']
+capabilities:
+  estate:
+    support: supported
+    privileges: USAGE on the databases and schemas in scope; their INFORMATION_SCHEMA views.
+    note: Read by the adapter until POP2 moves the estate reads to operations.
+  profiling:
+    support: supported
+    privileges: SELECT on the tables profiled (sampled, within a query budget).
+  lineage:
+    support: supported
+    operations: [lineage.access_history, lineage.object_dependencies]
+    privileges: IMPORTED PRIVILEGES on the SNOWFLAKE database, or its GOVERNANCE_VIEWER (access history) and OBJECT_VIEWER (object dependencies) database roles. Access history needs Enterprise Edition or higher and is up to three hours behind.
+  governance.tags:
+    support: supported
+    privileges: APPLY TAG, or ownership of the objects tagged.
+    note: Changes run as runbooks (the autode-snowflake-governance skill).
+  compile.target:
+    support: supported
+  semantic.deploy:
+    support: partly
+    note: Semantic views arrive with C5c.
+objectKinds: [table, view, materialized_view, dynamic_table, external_table, stream, task, stage]

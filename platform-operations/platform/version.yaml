@@ -1,0 +1,23 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §2). Read once per connection.
+formatVersion: 1
+id: platform.version
+title: Platform version
+description: The platform's version, read once per connection so that each operation can check its version range.
+kind: read
+content: metadata
+area: platform
+params: []
+returns:
+  - { name: version, label: Version }
+platforms:
+  snowflake:
+    sql: SELECT CURRENT_VERSION() AS version
+  databricks:
+    sql: SELECT version() AS version
+  oracle:
+    sql: SELECT version AS version FROM product_component_version WHERE product LIKE 'Oracle Database%' AND ROWNUM = 1
+example:
+  platform: snowflake
+  params: {}
+  rows:
+    - { VERSION: 8.40.1 }

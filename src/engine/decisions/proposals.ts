@@ -15,6 +15,7 @@ import { credentialNeeds, draftEntry } from '../platform/connectionSetup';
 import { VocabularyProposal, mergeVocabularyFile } from '../context/vocabulary';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { checksumOf, loadCatalog, writeApproval } from '../platform/operations/load';
 
 import { WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, writeWorkflow } from '../workflows/instance';
 import { appendEvent } from '../workflows/events';
@@ -45,7 +46,10 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  */
 
 /** What can be proposed. `mapping` and `platform_change` decisions were retired in v0.45.8 (SIMP-2): mappings are drafted into the mapping document, platform changes are runbooks; their old decision files still read. */
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook' | 'semantic_model' | 'article'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook' | 'semantic_model' | 'article' | 'platform_operation'>;
+
+/** POP1: a team file under .autode/config/platform-operations/ or platforms/, by its workspace-relative path and checksum. */
+export interface PlatformFilePayload { file: string; checksum: string }
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -229,6 +233,7 @@ function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown):
   if (kind === 'connection') return { connectionId: draftEntry({ ...(payload as ConnectionDraft), fields: (payload as ConnectionDraft).fields ?? {} }).id };
   if (kind === 'semantic_model') { const s = payload as SemanticModelPayload; return { document: `semantic:${s.scope === 'shared' ? 'shared' : ctx.problemId}/${s.name}`, revision: semanticFileRevision(ctx, s) }; }
   if (kind === 'article') { const a = payload as ArticlePayload; return { document: `article:${a.slug}`, revision: readArticle(ctx.workspaceRoot, a.slug)?.revision ?? 'none' }; }
+  if (kind === 'platform_operation') { const p = payload as PlatformFilePayload; return { document: `platform:${p.file}`, revision: p.checksum }; }
   return undefined;
 }
 
@@ -243,6 +248,7 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
     case 'semantic_model': { const s = payload as SemanticModelPayload; return { title: `${s.scope === 'shared' ? 'Shared semantic model' : 'Semantic composite'} ${s.name}`, summary: s.scope === 'shared' ? 'A workspace-level change: every problem that uses this model is affected.' : 'A composite of the active problem; it is resolved once applied.' }; }
     case 'article': { const a = payload as ArticlePayload; return { title: `Knowledge article: ${a.title}`.slice(0, 160), summary: `About ${a.about.join(', ')}; cites ${a.cites.length} fact(s). Approving it gives it to agents working on what it is about.` }; }
+    case 'platform_operation': { const p = payload as PlatformFilePayload; return { title: `${/\/platforms\//.test(p.file) ? 'Platform definition' : 'Platform operation'} ${p.file}`.slice(0, 160), summary: `${p.file} at ${p.checksum}. Approving it lets AutoDE run exactly this file; an edit makes it a draft again.` }; }
   }
 }
 
@@ -294,7 +300,25 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'runbook': return validateRunbookProposal(payload as Runbook, ctx);
     case 'semantic_model': return validateSemanticModelProposal(payload as SemanticModelPayload, ctx);
     case 'article': return validateArticleProposal(payload as ArticlePayload, ctx);
+    case 'platform_operation': return validatePlatformFileProposal(payload as PlatformFilePayload, ctx);
   }
+}
+
+/** POP1: a team's operation or platform definition, under .autode/config/, that loads and passes every check at this checksum. */
+export function validatePlatformFileProposal(p: PlatformFilePayload, ctx: ProposalContext): ValidationReport {
+  const r: ValidationReport = { ok: true, errors: [], warnings: [], checks: ['the file loads: schema, read-only guard, the recorded example', 'its checksum is the one proposed'] };
+  const rel = String(p.file ?? '').replace(/\\/g, '/');
+  if (!/^\.autode\/config\/(platform-operations|platforms)\/.+\.ya?ml$/.test(rel) || rel.includes('..')) { r.errors.push(`${rel} is not a team platform file (.autode/config/platform-operations/ or .autode/config/platforms/).`); return finish(r); }
+  let text: string;
+  try { text = fs.readFileSync(path.join(ctx.workspaceRoot, rel), 'utf8'); } catch { r.errors.push(`${rel} doesn't exist.`); return finish(r); }
+  if (checksumOf(text) !== p.checksum) r.errors.push(`${rel} changed: its checksum is ${checksumOf(text)}, not ${p.checksum}. Propose it again.`);
+  const c = loadCatalog({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot });
+  const mine = c.errors.filter((e) => e.startsWith(`${rel}:`));
+  r.errors.push(...mine);
+  const loaded = [...c.operations, ...c.platforms].find((x) => x.file === rel);
+  if (!loaded && !mine.length) r.errors.push(`${rel} didn't load.`);
+  if (loaded?.overrides) r.warnings.push(`It replaces AutoDE's shipped ${'kind' in (loaded.item as object) ? 'operation' : 'platform definition'} ${(loaded.item as { id: string }).id} for this workspace.`);
+  return finish(r);
 }
 
 /** A knowledge article proposal: a valid name and front matter, every `[fact:…]` cited, every cited fact standing (§6.11). */
@@ -437,6 +461,17 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         if (!r.record) { const failed = store.markFailed(id, r.problem ?? 'not approved'); return { decision: failed, applied: false, message: `${id}: ${r.problem}` }; }
         const done = store.markApplied(id, `Approved by ${approver} for ${record.environment}; ${r.record.status === 'approved' ? 'ready to run' : 'waiting for a second approver'}.`);
         return { decision: done, applied: true, message: r.record.status === 'approved' ? `Runbook ${rb.id} approved by ${approver} (${record.environment}): run it from its Runbook tab in VS Code.` : `Runbook ${rb.id}: first approval by ${approver}; ${record.environment} needs a second approver (the Runbook tab, or autode runbook approve ${rb.id}).` };
+      }
+      case 'platform_operation': {
+        const p = store.proposal<PlatformFilePayload>(id);
+        const check = validatePlatformFileProposal(p, ctx);
+        if (!check.ok) { const failed = store.markFailed(id, check.errors.join(' ')); return { decision: failed, applied: false, message: `${id}: ${check.errors.join(' ')}` }; }
+        const c = loadCatalog({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot });
+        const loaded = [...c.operations, ...c.platforms].find((x) => x.file === p.file)!;
+        const what = c.platforms.includes(loaded as never) ? 'platforms' : 'operations';
+        writeApproval(ctx.workspaceRoot, what, (loaded.item as { id: string }).id, { checksum: p.checksum, by: approver, at: now.toISOString(), decisionId: id });
+        const done = store.markApplied(id, `Approved by ${approver} at ${p.checksum}.`);
+        return { decision: done, applied: true, message: `${p.file} approved by ${approver}: AutoDE runs it from now on; an edit makes it a draft again.` };
       }
       case 'article': {
         const a = store.proposal<ArticlePayload>(id);

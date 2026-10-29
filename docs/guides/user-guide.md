@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.53.2. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.54.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -242,7 +242,19 @@ The estate (`.autode/knowledge/estate.yaml`, *AutoDE: Open Estate*) lists the sy
 - From a terminal: `autode estate ingest <file>… [--system <id>]` and `autode estate extract --connection <id> --schema <DATABASE.SCHEMA>… [--profile]`; `autode estate show` lists systems and the working set.
 - **Re-verify Source Schema** compares the estate with the live source and reports drift.
 
-### 7.3 Large estates: the catalog and the working set
+### 7.3 Platform operations: what AutoDE runs on your platforms
+
+Every read AutoDE makes on a platform is a **platform operation**: a small file that says, for each platform, the exact statement or command, what it needs (typed parameters) and what it returns. AutoDE's own operations ship with it; your team can add or replace them. Changes to a platform are never run this way: they are runbooks a person approves (§13).
+
+- **See them:** `autode platform operations` lists every operation: what it does, read or change, its platforms, shipped or your team's, approved or draft. It also shows which platform capability uses it ("snowflake: lineage"). `autode platform show <id>` shows one in full, with its statement per platform.
+- **Run a read:** `autode platform run <id> --connection <c> --param name=value`. Values are bound safely (a name or value can never become SQL), the statement is checked as read-only, and a failure says why (a missing privilege, an older platform version) and what ran. Row values are shown only for operations that read names, or where the connection allows sample data.
+- **What each platform can do:** `platforms/snowflake.yaml`, `databricks.yaml` and `oracle.yaml` list each capability (estate, profiling, lineage, governance tags …), the operations behind it and the privileges it needs.
+- **Your team's operations:** put a file in `.autode/config/platform-operations/` (a platform definition in `.autode/config/platforms/`). A file with the same id as one of AutoDE's replaces it. It is a **draft**, listed but never run, until a person approves it: `autode platform propose <file>`, then `autode decisions approve <id>`, or the panel. Approval is for that exact content: edit the file and it is a draft again. VS Code checks these files as you type.
+- **Agents** use the same catalog: `autode_platform_operations` and `autode_platform_run`, instead of writing platform SQL themselves.
+
+**Observed lineage** (with LIN's Lineage tab, §8.7): `autode lineage refresh --connection <id>` (or *AutoDE: Refresh Observed Lineage*) runs the platform's lineage operations for the databases bound to the connection, over the last 30 days (`--days`). On Snowflake these read access history and view dependencies; on Databricks, Unity Catalog's column and table lineage, with the jobs and dashboards involved. If one fails, AutoDE says which privileges it needs, and the rest still run.
+
+### 7.4 Large estates: the catalog and the working set
 
 AutoDE keeps the whole estate in a per-system **catalog** but mirrors only the **working set**, the tables your problems use, into its knowledge (200 tables by default, `context.workingSetMaxTables`). When a task needs a catalogued table, AutoDE brings it in. Tables nobody has used for `context.evictAfterDays` leave the working set when it is full. Schema facts older than `context.schemaTtlDays` are re-checked against the source before a stage's agent uses them.
 
@@ -958,8 +970,8 @@ All settings start with `autoDataEngineeringHub.`.
 Specified and scheduled ([roadmap](../roadmap.md)):
 
 - **A simpler workspace** (v0.56.0): the Knowledge Explorer, the Workflow view and the Platform catalog in one AutoDE window, and a simpler Workflow Palette.
-- **Platform operations** (v0.54.0–v0.58.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release.
-  - AutoDE reads observed lineage from Snowflake and Databricks itself (v0.54.0), then the estate (v0.55.0), when **Redshift** also arrives, as a source through the AWS CLI.
+- **Platform operations** (the catalog since v0.54.0; more through v0.58.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release.
+  - AutoDE reads observed lineage from Snowflake and Databricks itself (since v0.54.0), then the estate (v0.55.0), when **Redshift** also arrives, as a source through the AWS CLI.
   - A **platform catalog** (v0.57.0) shows every operation AutoDE runs on your platforms and the skills and features that rely on it. There you can try reads, and edit skills (including your own copy of AutoDE's) and operations, each reviewed before use.
   - Agents can propose new operations for you to approve, and AutoDE tells you when a platform change breaks one (v0.58.0).
   - New systems are onboarded from a template, and a team can share its platform setup with other workspaces (v0.61.0).

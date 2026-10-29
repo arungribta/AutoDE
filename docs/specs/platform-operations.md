@@ -205,6 +205,8 @@ How the systems AutoDE plans for differ:
 
 ### 6.1 POP1 — the catalog and the executor (v0.54.0)
 
+**Status:** part 1 shipped in v0.54.0 (CHANGELOG.md 0.54.0; HOW: technical-design.md §6.15): the format and its schemas, the loader with item-by-item checks, the executor, platform definitions for Snowflake, Databricks and Oracle, the CLI and MCP tools, team review as decisions, and LIN's lineage operations. Part 2, v0.54.1: the five baseline items and credentials through the environment. Composition and the asynchronous pattern move to POP2. The scope below stays the specification of what remains.
+
 Scope:
 - the format with its four transports (§2.1; `sql` and `cli` implemented first, `http` and `file` specified and tested on fixtures), its JSON Schema and loader (shipped plus team overrides, validation, each example checked in `npm test`);
 - **platform definitions** (§2.2) for Snowflake, Databricks and Oracle, with the capability map; the engine reads a capability's operations from them;

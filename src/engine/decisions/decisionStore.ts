@@ -33,6 +33,8 @@ export type DecisionKind =
   | 'semantic_model'
   /** A knowledge article, written by an agent (MM1); approving the proposal approves that revision. */
   | 'article'
+  /** POP1: a team's platform operation or platform definition; approving it approves that exact file (its checksum). */
+  | 'platform_operation'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 

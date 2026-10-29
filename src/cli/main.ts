@@ -27,7 +27,11 @@ import { newCompositeText } from '../engine/semantic/editorState';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
 import { renderAssetMarkdown, renderGraph, renderImpactCsv, renderImpactMarkdown, renderLineage, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
 import { CHANGE_KINDS, ChangeKind, ImpactResult, LineageResult } from '../engine/explore/lineage';
-import { recordLineageBatch } from '../engine/lineage/record';
+import { RefreshReport, recordLineageBatch, refreshLines } from '../engine/lineage/record';
+import { platformOperationTools } from '../mcp/platformOperationTools';
+import type { OperationSummary } from '../engine/platform/operations/service';
+import type { PlatformOperation } from '../engine/platform/operations/types';
+import { checksumOf } from '../engine/platform/operations/load';
 import { problemOverlap } from '../engine/documents/problemOverlap';
 import type { ObservedEdge } from '../engine/lineage/observed';
 import type { AssetContext, AssetType, ExploreOverview, GraphSlice, Layer, SearchResult, SemanticOverview } from '../engine/explore/explore';
@@ -44,7 +48,7 @@ import { EngineToolError, redact, toEnvelope } from '../mcp/errors';
 import { PlatformSession } from '../mcp/platform';
 import { findResourcesRoot, main as mcpMain, readVersion } from '../mcp/server';
 import { Decision, DecisionError, DecisionStatus, DecisionStore, stakesFor } from '../engine/decisions/decisionStore';
-import { applyDecision } from '../engine/decisions/proposals';
+import { applyDecision, propose } from '../engine/decisions/proposals';
 import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocument } from '../engine/documents/problemDocuments';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { conformanceFailures, loadProfiles, packConformance, probeCandidates, readPackDocument, readPackFile, sampleProbeExecutor } from '../engine/context/packChecks';
@@ -235,7 +239,14 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
   explore lineage <id|name> [--direction up|down|both] [--depth 1-10] [--columns]   Where it comes from and where it goes: every edge with its sources (observed, designed, generated, logical) and trust
   explore impact <id|name> --change rename_column|drop_column|retype_column|remove_table|supersede_fact [--format md|csv] [--out <file>]   What the change would affect, each with its path, by category and domain
 
+Platform operations (POP1: every interaction with a platform, as a reviewed file):
+  platform operations [--platform p]   The catalog: each operation, read or change, its platforms, shipped or the team's, approved or draft
+  platform show <id>           One operation in full, with the statement per platform
+  platform run <id> --connection <c> [--param k=v]… [--max-rows n]   Run a read operation (a change operation prints the runbook step to propose)
+  platform propose <file>      Propose a team operation or platform definition (.autode/config/…) for a person's approval
+
 Lineage (LIN):
+  lineage refresh --connection <id> [--database <db,…>] [--days 30]   Read the platform's observed lineage through its lineage operations (read-only) into the facts
   lineage record <file.json> --connection <id> --method <name> [--complete]   Record edges observed on the platform ({"edges": [{"upstream": {"object", "column"?}, "downstream": {…}}]})
 
 Metadata (MM1; setting it is a person's: interactive terminal):
@@ -397,12 +408,14 @@ const OPTIONS = {
   change: { type: 'string' },
   format: { type: 'string' },
   method: { type: 'string' },
+  param: { type: 'string', multiple: true },
+  days: { type: 'string' },
   complete: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
 
-type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[] };
+type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output' | 'param'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[]; param?: string[] };
 
 class CliError extends Error {
   public constructor(public readonly exit: number, message: string) { super(message); }
@@ -464,6 +477,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'semantic': return await cmdSemantic(ctx, rest);
       case 'explore': return await cmdExplore(ctx, rest);
       case 'lineage': return await cmdLineage(ctx, rest);
+      case 'platform': return await cmdPlatform(ctx, rest);
       case 'metadata': return await cmdMetadata(ctx, rest);
       case 'articles': return await cmdArticles(ctx, rest);
       case 'maintenance': return await cmdMaintenance(ctx, rest);
@@ -1713,10 +1727,23 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
   throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, browse, semantic, asset, graph, lineage or impact.`);
 }
 
-/** LIN: observed lineage recorded from a file (platform reads arrive with the platform operations catalog). */
+/** LIN: observed lineage, read through the platform's lineage operations or recorded from a file. */
 async function cmdLineage(ctx: Ctx, rest: string[]): Promise<number> {
   const [sub, file] = rest;
   const log = (m: string) => ctx.io.err(m);
+  if (sub === 'refresh') {
+    if (!ctx.values.connection) throw new CliError(EXIT.USAGE, 'lineage refresh needs --connection <id> (see autode connections list).');
+    const days = ctx.values.days ? Number(ctx.values.days) : undefined;
+    if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new CliError(EXIT.USAGE, '--days is 1 to 365.');
+    const session = platformSession(ctx);
+    try {
+      const t = platformOperationTools(session).find((x) => x.name === 'autode_refresh_lineage')!;
+      const r = (await t.handler({ connectionId: ctx.values.connection, ...(ctx.values.database ? { databases: ctx.values.database.split(',').map((x) => x.trim()).filter(Boolean) } : {}), ...(days ? { days } : {}) }, workspace(ctx, ctx.values.problem)) as { result: RefreshReport }).result;
+      const failed = !!r.note || (r.methods.length > 0 && r.methods.every((m) => m.error));
+      emit(ctx, { ok: !failed, report: r }, [`Observed lineage from ${r.connectionId}${r.databases.length ? ` (${r.databases.join(', ')})` : ''}:`, ...refreshLines(r).map((l) => `  ${l}`)].join('\n'));
+      return failed ? EXIT.FAILED : EXIT.OK;
+    } finally { session.dispose(); }
+  }
   if (sub === 'record') {
     if (!file || !ctx.values.connection || !ctx.values.method) throw new CliError(EXIT.USAGE, 'lineage record <file.json> --connection <id> --method <name> [--complete].');
     const full = path.resolve(ctx.io.cwd, file);
@@ -1739,7 +1766,58 @@ async function cmdLineage(ctx: Ctx, rest: string[]): Promise<number> {
       return EXIT.OK;
     } finally { cfm.dispose(); session.dispose(); }
   }
-  throw new CliError(EXIT.USAGE, 'lineage record <file.json> --connection <id> --method <name> [--complete].');
+  throw new CliError(EXIT.USAGE, 'lineage refresh --connection <id>, or lineage record <file.json> --connection <id> --method <name> [--complete].');
+}
+
+/** POP1: the platform operations catalog; running a read; proposing a team file. The MCP tools' own handlers. */
+async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'operations', id] = rest;
+  const session = platformSession(ctx);
+  const ws = workspace(ctx, ctx.values.problem);
+  const tool = (name: string) => platformOperationTools(session).find((x) => x.name === name)!;
+  try {
+    if (sub === 'operations') {
+      const r = await tool('autode_platform_operations').handler(ctx.values.platform ? { platform: ctx.values.platform } : {}, ws) as { operations: OperationSummary[]; errors: string[] };
+      const lines = r.operations.map((o) => `  ${o.status === 'draft' ? '·' : '✓'} ${o.id.padEnd(30)} ${o.kind.padEnd(6)} ${o.platforms.join(', ').padEnd(24)} ${o.origin}${o.status === 'draft' ? ' (draft: not run until approved)' : ''}${o.usedBy.length ? `  — ${o.usedBy.join('; ')}` : ''}`);
+      emit(ctx, { ok: true, ...r }, [`${r.operations.length} operation(s):`, ...lines, ...(r.errors.length ? ['', 'Refused:', ...r.errors.map((e) => `  ✗ ${e}`)] : [])].join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'show') {
+      if (!id) throw new CliError(EXIT.USAGE, 'platform show <operation id>.');
+      let r: { operations: Array<Record<string, unknown>> };
+      try { r = await tool('autode_platform_operations').handler({ id }, ws) as typeof r; } catch (err) { throw new CliError(EXIT.NOT_FOUND, err instanceof Error ? err.message : String(err)); }
+      const o = r.operations[0] as unknown as PlatformOperation & { origin: string; status: string; file: string };
+      emit(ctx, { ok: true, ...r }, [`${o.id} — ${o.title} (${o.kind}, ${o.origin}, ${o.status}; ${o.file})`, o.description, '', 'Parameters:', ...o.params.map((p) => `  ${p.name} (${p.type})${p.default !== undefined ? ` = ${JSON.stringify(p.default)}` : ''}: ${p.label}`), 'Returns: ' + o.returns.map((x) => x.name).join(', '), ...Object.entries(o.platforms).flatMap(([pid, impl]) => ['', `${pid}${impl.since ? ` (since ${impl.since})` : ''}:`, `  ${(impl.sql ?? JSON.stringify(impl.cli ?? impl.http ?? impl.file)).trim().split('\n').join('\n  ')}`])].join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'run') {
+      if (!id || !ctx.values.connection) throw new CliError(EXIT.USAGE, 'platform run <operation id> --connection <id> [--param name=value]….');
+      const params: Record<string, unknown> = {};
+      for (const kv of ctx.values.param ?? []) { const i = kv.indexOf('='); if (i < 1) throw new CliError(EXIT.USAGE, `--param takes name=value (got "${kv}").`); params[kv.slice(0, i)] = kv.slice(i + 1); }
+      let r: Record<string, unknown>;
+      try { r = await tool('autode_platform_run').handler({ connectionId: ctx.values.connection, operation: id, params, ...(ctx.values['max-rows'] ? { maxRows: Number(ctx.values['max-rows']) } : {}) }, ws) as Record<string, unknown>; }
+      catch (err) { throw new CliError(/^No operation|draft/.test(String((err as Error).message)) ? EXIT.NOT_FOUND : EXIT.USAGE, err instanceof Error ? err.message : String(err)); }
+      if (r.change) { emit(ctx, { ok: true, ...r }, `${String(r.message)}\n\nThe step:\n${JSON.stringify(r.runbookStep, null, 2)}`); return EXIT.OK; }
+      const rows = (r.rows as Array<Record<string, unknown>>) ?? [];
+      const cols = rows[0] ? Object.keys(rows[0]) : [];
+      const text = r.ok ? [cols.join('\t'), ...rows.map((row) => cols.map((c) => String(row[c] ?? '')).join('\t')), `${rows.length} row(s)${r.truncated ? ' (more not shown)' : ''}${r.withheld ? ' — row values withheld: this connection does not allow sample data' : ''}`].join('\n') : `✗ ${String(r.gap)}${r.statement ? `\n  ${String(r.statement).split('\n').join('\n  ')}` : ''}`;
+      emit(ctx, { ok: !!r.ok, ...r }, text);
+      return r.ok ? EXIT.OK : EXIT.FAILED;
+    }
+    if (sub === 'propose') {
+      if (!id) throw new CliError(EXIT.USAGE, 'platform propose <file> (under .autode/config/platform-operations/ or .autode/config/platforms/).');
+      const full = path.resolve(ctx.io.cwd, id);
+      if (!fs.existsSync(full)) throw new CliError(EXIT.NOT_FOUND, `No file "${full}".`);
+      const file = path.relative(ctx.workspaceRoot, full).split(path.sep).join('/');
+      const store = new DecisionStore(ctx.workspaceRoot);
+      let d;
+      try { d = propose(store, { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot }, 'platform_operation', { file, checksum: checksumOf(fs.readFileSync(full, 'utf8')) }, { proposedBy: { host: 'cli', client: actorOf(ctx) } }); }
+      catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+      emit(ctx, { ok: true, decision: d }, `Proposed ${file} as ${d.id}. A person approves it: autode decisions approve ${d.id} (or the panel). Until then it is a draft and never runs.`);
+      return EXIT.OK;
+    }
+    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, or propose <file>.');
+  } finally { session.dispose(); }
 }
 
 /** C5a: the semantic layer — shared models and the active problem's composites. */

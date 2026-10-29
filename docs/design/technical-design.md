@@ -1352,6 +1352,31 @@ All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper
 
 **Webview** (`media/sidebar.html`). `setupOnboarding()` injects into every source and target card a `.onb` block: an active-connection banner, *Check prerequisites* (items with Install… / Verify / Install guide, and the install command shown before it runs), the backend line, *Use an existing …* select with *Find existing* (an Oracle alias fills the connect string), plus a save row (*Save as named connection*, *Share with the team*). Save stores the card's settings first (`saveSettings(true)` keeps the panel open) and posts `saveNamedConnection` on the `settingsSaved` ack, the same ordering Connect uses. `renderPlatformsState()` draws *Saved connections* at the top of each tab: id, AutoDE and MCP badges (the MCP note is shown), origin, resolver, and *Use* / *Use card fields*, *Re-check*, *Remove*. There is a new Oracle source card; there is no Oracle target card.
 
+### 6.15 Platform operations (v0.54.0; PLT-9, POP1)
+
+docs/specs/platform-operations.md. All in `src/engine/platform/operations/`, an allowed folder of the platform boundary.
+
+- **`types.ts`, `schema.ts`.** `PlatformOperation`, `PlatformDefinition` and their JSON Schemas (`OPERATION_SCHEMA`, `PLATFORM_SCHEMA`), written out as `docs/schemas/platform-operation.schema.json` and `platform.schema.json` (a test keeps them equal). `package.json`'s `yamlValidation` points the YAML files at them.
+- **`load.ts`.** `loadCatalog({ resourcesRoot, workspaceRoot })` reads the shipped `platforms/*.yaml` and `platform-operations/**/*.yaml` and the team's `.autode/config/platforms/` and `.autode/config/platform-operations/`.
+  - Each file goes through `checkPlatform` / `checkOperation`: Ajv against the schema; each implementation bound with `sampleValues`; a `read` statement through `checkReadOnlySql`; the example bound (`valuesFor`) and mapped (`mapRows`), every declared column found.
+  - A failing file goes to `errors` with its reasons, and the rest load.
+  - A team file's `status` is `approved` only when `.autode/config/platform-approvals.json` holds its id with the file's checksum (`checksumOf`: SHA-256 of the LF-normalised text). An approved team file replaces the shipped entry of that id; drafts are listed after.
+  - `operationById` / `platformById` return only what is in effect.
+- **`bind.ts`.** `bindTemplate(template, params, values, dialect)` replaces `{name}` by type and `{name:literal|lower|upper}` as a quoted value; `{{`/`}}` are literal braces.
+  - `identifier`: each dotted part plain (`[A-Za-z_][A-Za-z0-9_$]*`) stays unquoted; otherwise it is quoted with the dialect's `identifierQuote`, doubling it inside; control characters are refused.
+  - `literal`: single quotes doubled. `number`: finite, within `min`/`max`. `boolean`: the dialect's `booleans`. Lists are comma-joined. `statement`: `checkReadOnlySql` must pass.
+  - `valuesFor` applies defaults and refuses unknown or missing parameters (`BindError`).
+- **`map.ts`.** `mapRows(returns, rows)` finds each `from` column regardless of case and converts it (`string`, `number`, `yes_no`, `boolean`, `json`); undeclared columns are dropped.
+- **`execute.ts`.**
+  - `runOperation` refuses `change`, binds (`bindOperation`), checks the version range (`compareVersions`), re-checks the statement, and runs `runner.sql(statement, maxRows + 1)` or `runner.cli(argv)` (`parseCliOutput`: a JSON array or an object holding one, or a table). It returns `RunResult` with `gap` on failure and `truncated` when more than `maxRows` came back.
+  - `connectionVersion` runs the platform's `versionOperation` once per connection id (`versionOf` extracts `x.y[.z]`); `forgetVersion` clears it.
+  - `spawnCli` runs an argument list with no shell, a timeout and the connection's environment.
+- **`service.ts`.** `summarize(catalog)` lists operations with `usedBy` (platform: capability). `runOnConnection(scope, target, id, params)` resolves the operation in effect (a draft is `NOT_FOUND` with how to approve it), throws `OperationError('CHANGE', …, step)` for a change operation, reads the version, and runs it.
+- **Team review.** Decision kind `platform_operation` (`proposals.ts`): payload `{ file, checksum }`, high stakes. `validatePlatformFileProposal` checks the path is under `.autode/config/`, the checksum is current, and the file loads clean. Applying writes the approval (`writeApproval`). `autode platform propose <file>` proposes it.
+- **Surfaces.** `src/mcp/platformOperationTools.ts`: `autode_platform_operations`, `autode_platform_run` (`gateQueryResult` unless `content: metadata`; a change returns `runbookStep`) and `autode_refresh_lineage`. `connectionTarget(session, id)` wraps a connection's `executeQuery`. The CLI's `cmdPlatform` and `lineage refresh` call these handlers.
+- **Lineage.** `refreshLineage` (`src/engine/lineage/record.ts`) runs the definition's `capabilities.lineage.operations` with `databases` (from the estate binding), `days` and `limit + 1` (to tell a cut-off read), then `rowsToEdges` → `recordObservedLineage` with `complete: !truncated`. The method is the id without `lineage.`. A failure goes in the report, with the capability's `privileges`.
+- **Packaging.** `platform-operations/` and `platforms/` are in `.vscodeignore`'s allow list, `scripts/pack-cli.cjs`'s `CONTENT` and `SERVER_FILES` (`mcpConfig.ts`).
+
 ## 7. Agent Orchestration
 
 ### 7.1 The model services (`AgentHub`)
@@ -2196,6 +2221,8 @@ src/engine/platform/credentials/    # credential resolvers and CLI detection
   CliConfigResolver.ts, cliDetection.ts, cliRegistry.ts, databricksCfg.ts, DatabricksCli.ts, EnvVarCredentialResolver.ts, index.ts, PlatformCliDescriptor.ts, registry.ts, SnowflakeCli.ts, tnsnames.ts, types.ts
 src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
+src/engine/platform/operations/
+  bind.ts, execute.ts, load.ts, map.ts, schema.ts, service.ts, types.ts
 src/engine/runner/    # runbooks: checks, policy, the runner and its log
   hostGuard.ts, policy.ts, run.ts, runbook.ts, runLog.ts
 src/engine/semantic/
@@ -2211,7 +2238,7 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   documentApproval.ts, events.ts, instance.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, maintenanceTools.ts, platform.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, maintenanceTools.ts, platform.ts, platformOperationTools.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 ```
 <!-- /generated:source-tree -->
 

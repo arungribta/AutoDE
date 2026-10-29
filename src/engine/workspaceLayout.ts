@@ -58,6 +58,10 @@ export const LAYOUT = {
   maintenancePolicy: [AUTODE_DIR, 'config', 'maintenance.yaml'],
   /** Which decision kinds may be approved by MCP elicitation (PA3c). */
   approvals: [AUTODE_DIR, 'config', 'approvals.yaml'],
+  /** POP1: the team's platform operations and platform definitions (override shipped ones by id once approved), and their approvals. */
+  platformOperations: [AUTODE_DIR, 'config', 'platform-operations'],
+  platformDefinitions: [AUTODE_DIR, 'config', 'platforms'],
+  platformApprovals: [AUTODE_DIR, 'config', 'platform-approvals.json'],
   decisions: [AUTODE_DIR, 'decisions'],
   local: [AUTODE_DIR, 'local'],
   localConnections: [AUTODE_DIR, 'local', 'connections.yaml'],

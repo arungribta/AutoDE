@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.53.2",
+  "version": "0.54.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -134,6 +134,10 @@
       {
         "command": "autoDataEngineeringHub.syncMetadata",
         "title": "AutoDE: Sync Metadata"
+      },
+      {
+        "command": "autoDataEngineeringHub.refreshLineage",
+        "title": "AutoDE: Refresh Observed Lineage"
       },
       {
         "command": "autoDataEngineeringHub.reindex",
@@ -351,6 +355,14 @@
       {
         "fileMatch": ["**/.autode/config/workflows/*.yaml", "**/workflows/*.yaml"],
         "url": "./docs/schemas/workflow-template.schema.json"
+      },
+      {
+        "fileMatch": ["**/.autode/config/platform-operations/**/*.yaml", "**/platform-operations/**/*.yaml"],
+        "url": "./docs/schemas/platform-operation.schema.json"
+      },
+      {
+        "fileMatch": ["**/.autode/config/platforms/*.yaml", "**/platforms/*.yaml"],
+        "url": "./docs/schemas/platform.schema.json"
       }
     ],
     "customEditors": [

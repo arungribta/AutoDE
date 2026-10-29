@@ -1,0 +1,41 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.1): LIN's observed lineage on Databricks.
+formatVersion: 1
+id: lineage.table_lineage
+title: Table lineage from Unity Catalog, with the job, notebook or dashboard
+description: Each table written from another, or read by a job, notebook, pipeline, dashboard or query, over the last days, for the catalogs named. Object names and entity ids only.
+kind: read
+content: metadata
+area: lineage
+params:
+  - { name: databases, type: literal_list, label: Catalogs }
+  - { name: days, type: number, label: Days back, default: 30, min: 1, max: 365 }
+  - { name: limit, type: number, label: Row limit, default: 5000, min: 1, max: 20001 }
+returns:
+  - { name: upstream_object, label: Source table }
+  - { name: downstream_object, label: Target table }
+  - { name: entity_type, label: What moved or read it }
+  - { name: entity_id, label: Its id }
+  - { name: runs, as: number, label: Events }
+platforms:
+  databricks:
+    sql: >
+      SELECT
+        source_table_full_name AS upstream_object,
+        target_table_full_name AS downstream_object,
+        entity_type AS entity_type,
+        entity_id AS entity_id,
+        COUNT(*) AS runs
+      FROM system.access.table_lineage
+      WHERE event_time >= current_timestamp() - INTERVAL {days} DAYS
+        AND source_table_full_name IS NOT NULL
+        AND (target_table_full_name IS NOT NULL OR entity_id IS NOT NULL)
+        AND (lower(split_part(coalesce(target_table_full_name, source_table_full_name), '.', 1)) IN ({databases:lower})
+          OR lower(split_part(source_table_full_name, '.', 1)) IN ({databases:lower}))
+      GROUP BY 1, 2, 3, 4
+      ORDER BY runs DESC
+      LIMIT {limit}
+example:
+  params: { databases: [retail] }
+  rows:
+    - { upstream_object: retail.sales.orders, downstream_object: retail.mart.fct_orders, entity_type: PIPELINE, entity_id: p-42, runs: 30 }
+    - { upstream_object: retail.mart.fct_orders, downstream_object: null, entity_type: DASHBOARD_V3, entity_id: d-7, runs: 4 }

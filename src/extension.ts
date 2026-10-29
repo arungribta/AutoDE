@@ -46,6 +46,8 @@ import * as lifecycle from './engine/skills/lifecycle';
 import { LAYOUT, layoutRel } from './engine/workspaceLayout';
 import { describeMigration, migrateWorkspace } from './engine/workspaceMigration';
 import { resolveAllowedToolNames } from './engine/skills/toolAllowList';
+import { openContext } from './engine/context/estateIngest';
+import { refreshLineage, refreshLines } from './engine/lineage/record';
 
 /**
  * Resources that outlive a single command (e.g. `connectionManager` below,
@@ -889,6 +891,33 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     } catch (err) { vscode.window.showErrorMessage(`Metadata sync failed: ${err instanceof Error ? err.message : String(err)}`); }
   });
 
+  // LIN through POP1: observed lineage from the connected platform, by the lineage operations its platform definition names.
+  const refreshLineageCmd = vscode.commands.registerCommand(`${EXTENSION_ID}.refreshLineage`, async () => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const connectionId = connectionManager?.activeConnectionId();
+    const platform = connectionManager?.getActivePlatform();
+    if (!wsRoot || !connectionManager || !connectionManager.isConnected() || !connectionId || !platform) {
+      vscode.window.showErrorMessage('Connect to the platform first (Settings → Connections), or run autode lineage refresh --connection <id> in a terminal.');
+      return;
+    }
+    const days = await vscode.window.showQuickPick(['30', '7', '90', '365'], { title: `Observed lineage from ${connectionId}: how many days back?` });
+    if (!days) return;
+    const manager = connectionManager;
+    const cfm = await openContext(wsRoot);
+    try {
+      const target = { connectionId, platform, query: async (sql: string, maxRows: number) => (await manager.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>> };
+      const report = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Reading observed lineage from ${connectionId}…` }, () =>
+        refreshLineage({ workspaceRoot: wsRoot, resourcesRoot: context.extensionUri.fsPath, cfm, target, days: Number(days), actor: `user:${skillActor()}` }));
+      const lines = refreshLines(report);
+      for (const l of lines) sidebarProvider.logToChat(`Lineage: ${l}`);
+      await sidebarProvider.reloadContextLayer();
+      const failed = !!report.note || report.methods.some((m) => m.error);
+      (failed ? vscode.window.showWarningMessage : vscode.window.showInformationMessage)(`Observed lineage from ${connectionId}: ${lines.join(' · ')}`);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Observed lineage failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally { cfm.dispose(); }
+  });
+
   const reindex = vscode.commands.registerCommand(`${EXTENSION_ID}.reindex`, async () => {
     vscode.window.showInformationMessage('Context re-index triggered.');
   });
@@ -1160,7 +1189,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     openSidebar,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     copilotHandoff,
-    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, refreshLineageCmd, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, updateToolSkill, classifyPersonalData, captureCoverage, findCandidates, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,

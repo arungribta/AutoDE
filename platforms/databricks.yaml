@@ -1,0 +1,37 @@
+# AutoDE platform definition (docs/specs/platform-operations.md §2.2). A team's copy in
+# .autode/config/platforms/ with the same id replaces this one once a person approves it.
+formatVersion: 1
+id: databricks
+title: Databricks
+category: lakehouse
+transports: [sql, cli, http]
+access:
+  cli: { command: databricks, install: "Install the Databricks CLI and sign in with a profile; the autode-databricks-* skills say how." }
+  api: { name: Databricks Statement Execution API }
+versionOperation: platform.version
+dialect:
+  identifierQuote: '`'
+  unquotedCase: lower
+  booleans: ['TRUE', 'FALSE']
+capabilities:
+  estate:
+    support: supported
+    privileges: USE CATALOG and USE SCHEMA on the catalogs and schemas in scope; their information_schema.
+    note: Read by the adapter until POP2 moves the estate reads to operations.
+  profiling:
+    support: supported
+    privileges: SELECT on the tables profiled (sampled, within a query budget).
+  lineage:
+    support: supported
+    operations: [lineage.column_lineage, lineage.table_lineage]
+    privileges: The access schema of the system catalog enabled for the metastore; USE CATALOG on system, USE SCHEMA on system.access, SELECT on its table_lineage and column_lineage tables. Only Unity Catalog workloads are recorded; records are kept for a year.
+  governance.tags:
+    support: supported
+    privileges: APPLY TAG on the objects tagged.
+    note: Changes run as runbooks (the autode-databricks-governance skill).
+  compile.target:
+    support: supported
+  semantic.deploy:
+    support: partly
+    note: Metric views arrive with C5c.
+objectKinds: [table, view, materialized_view, streaming_table, metric_view, volume, function]

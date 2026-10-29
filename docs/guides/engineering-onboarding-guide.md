@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.53.2 (2026-10-29). This guide orients; it does not duplicate. Details live in [technical-design.md](../design/technical-design.md) (HOW), [requirements.md](../requirements.md) (WHAT and WHY) and [roadmap.md](../roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.54.0 (2026-10-29). This guide orients; it does not duplicate. Details live in [technical-design.md](../design/technical-design.md) (HOW), [requirements.md](../requirements.md) (WHAT and WHY) and [roadmap.md](../roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -198,6 +198,10 @@ An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `bu
   - Use `physicalRef` and `matchBase` in `semantic/layer.ts`: they compare database, schema and table where both sides know them, within the model's binding, and return the candidates when several fit.
   - Databases and schemas are computed containers (`containerGraph` in `explore.ts`).
   - Test identity against `test/reference/realistic-estate/`, not only the tidy reference problem.
+- **Platform operations** (v0.54.0, `src/engine/platform/operations/`; technical-design §6.15; CLAUDE.md): a new platform read is a YAML file in `platform-operations/` (and, for a new capability, an entry in the platform's `platforms/<id>.yaml`), never SQL in TypeScript.
+  - The loader checks it (schema, read-only guard, its recorded example), and `npm test` loads the whole catalog.
+  - Run it with `runOnConnection`, or from the CLI and MCP; never assemble platform SQL by hand.
+  - Change operations become runbook steps.
 - **Lineage** (v0.53.0, `src/engine/explore/lineage.ts`, `src/engine/lineage/`; technical-design §5.20):
   - designed, generated and logical lineage are **derived when read** from mappings, Pipeline Specs, manifests and the semantic layer, never copied into the ledger;
   - observed lineage is `lineage` facts written only by `recordObservedLineage`, which is platform-neutral;

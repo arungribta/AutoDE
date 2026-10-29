@@ -1,0 +1,44 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.1): LIN's observed lineage on Snowflake.
+formatVersion: 1
+id: lineage.access_history
+title: Column lineage from access history
+description: Each column a write (INSERT ... SELECT, CTAS, MERGE, UPDATE) produced, with the columns it came from, over the last days, for the databases named. Object and column names only.
+kind: read
+content: metadata
+area: lineage
+params:
+  - { name: databases, type: literal_list, label: Databases, description: The databases whose lineage is read (either end in one of them). }
+  - { name: days, type: number, label: Days back, default: 30, min: 1, max: 365 }
+  - { name: limit, type: number, label: Row limit, default: 5000, min: 1, max: 20001 }
+returns:
+  - { name: upstream_object, label: Source object }
+  - { name: upstream_column, label: Source column }
+  - { name: downstream_object, label: Target object }
+  - { name: downstream_column, label: Target column }
+  - { name: runs, as: number, label: Writes seen }
+platforms:
+  snowflake:
+    sql: >
+      SELECT
+        src.value:"objectName"::STRING AS upstream_object,
+        src.value:"columnName"::STRING AS upstream_column,
+        om.value:"objectName"::STRING AS downstream_object,
+        col.value:"columnName"::STRING AS downstream_column,
+        COUNT(DISTINCT ah.query_id) AS runs
+      FROM SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY ah,
+        LATERAL FLATTEN(input => ah.objects_modified) om,
+        LATERAL FLATTEN(input => om.value:"columns") col,
+        LATERAL FLATTEN(input => col.value:"directSources") src
+      WHERE ah.query_start_time >= DATEADD(day, -{days}, CURRENT_TIMESTAMP())
+        AND om.value:"objectDomain"::STRING IN ('Table', 'View', 'Materialized view', 'Dynamic table')
+        AND src.value:"objectName" IS NOT NULL
+        AND (LOWER(SPLIT_PART(om.value:"objectName"::STRING, '.', 1)) IN ({databases:lower})
+          OR LOWER(SPLIT_PART(src.value:"objectName"::STRING, '.', 1)) IN ({databases:lower}))
+      GROUP BY 1, 2, 3, 4
+      ORDER BY runs DESC
+      LIMIT {limit}
+example:
+  params: { databases: [RETAIL], days: 30, limit: 5000 }
+  rows:
+    - { UPSTREAM_OBJECT: RETAIL.SALES.ORDERS, UPSTREAM_COLUMN: AMOUNT, DOWNSTREAM_OBJECT: RETAIL.STAGING.STG_ORDERS, DOWNSTREAM_COLUMN: AMOUNT, RUNS: 30 }
+    - { UPSTREAM_OBJECT: RETAIL.STAGING.STG_ORDERS, UPSTREAM_COLUMN: AMOUNT, DOWNSTREAM_OBJECT: RETAIL.MART.FCT_ORDERS, DOWNSTREAM_COLUMN: NET_AMOUNT, RUNS: 30 }

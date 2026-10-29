@@ -323,7 +323,7 @@ function edgeView(e: LEdge): LineageEdgeView {
 
 function coverage(g: LGraph): Coverage {
   const notes: string[] = [];
-  if (!g.counts.observed) notes.push('No observed lineage: pipelines built outside AutoDE are missing. Record what the platform observed with autode_record_observed_lineage or autode lineage record (platform reads arrive with the platform operations catalog).');
+  if (!g.counts.observed) notes.push('No observed lineage: pipelines built outside AutoDE are missing. Read it from the platform: autode lineage refresh --connection <id> (AutoDE: Refresh Observed Lineage, or autode_refresh_lineage); the platform definition says which privileges it needs.');
   if (!g.counts.designed) notes.push('No designed lineage: a mapping document or a Pipeline Spec adds it (approved ones are confirmed).');
   if (!g.counts.generated) notes.push('No generated lineage: artifacts recorded with grounding manifests add it.');
   if (!g.counts.logical) notes.push('No logical lineage: a semantic model over these tables adds it.');

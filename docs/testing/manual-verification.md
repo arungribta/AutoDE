@@ -1220,6 +1220,24 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: ＋ New → *Open another folder…*.
   Expect: VS Code's folder picker, opening in a new window; this workspace is unchanged.
 
+## Part 53 — v0.54.0 Platform operations
+
+- [ ] **53.1 The catalog.**
+  Do: `autode platform operations`, then `autode platform show lineage.access_history`.
+  Expect: five operations, each ✓ shipped, with "snowflake: lineage" or "databricks: lineage" beside the lineage ones; the full statement with its parameters and defaults.
+- [ ] **53.2 A read on a live Snowflake account.**
+  Do: `autode platform run platform.version --connection <yours>`.
+  Expect: your account's version; with `--param nope=1`, a usage error naming the parameter.
+- [ ] **53.3 Lineage on a live Snowflake account** (LIN's manual check).
+  Do: bind a database with recent loads; `autode lineage refresh --connection <yours>`; open a loaded table's Lineage tab.
+  Expect: access history read (edges recorded) and view dependencies; edges marked *observed*, *verified*. With a role lacking the Account Usage grants: both fail, each naming the privileges needed.
+- [ ] **53.4 A team's operation.**
+  Do: copy `platform-operations/platform/version.yaml` into `.autode/config/platform-operations/` and change its statement; list the catalog; `autode platform propose` it; approve the decision; list again; edit the file; list again.
+  Expect: a draft (never run), then the team's copy in effect, then a draft again after the edit.
+- [ ] **53.5 In VS Code.**
+  Do: open a `platform-operations` YAML file and remove a required field.
+  Expect: VS Code flags it from the schema.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1528,5 +1546,10 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 52.2 |  |  |
 | 52.3 |  |  |
 | 52.4 |  |  |
+| 53.1 |  |  |
+| 53.2 |  |  |
+| 53.3 |  |  |
+| 53.4 |  |  |
+| 53.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

@@ -6,6 +6,49 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.54.0
+
+- **POP1, part 1: platform operations** (docs/specs/platform-operations.md; requirement PLT-9). Every interaction with a platform can now be one reviewed file run by one executor, the same way for AutoDE's code, the CLI, MCP and agents. A platform change is handled by updating files and skills, not by a release.
+  - **The format:**
+    - one YAML file per operation, in `platform-operations/` (shipped) or `.autode/config/platform-operations/` (the team's);
+    - typed parameters and a typed result, an implementation per platform with a version range, and a recorded example;
+    - four transports (`sql`, `cli`, `http`, `file`). `sql` and `cli` run; `http` and `file` are checked and tested on fixtures, and run from POP5;
+    - JSON Schemas in `docs/schemas/`, which VS Code uses to check the files as you type.
+  - **Platform definitions** (`platforms/snowflake.yaml`, `databricks.yaml`, `oracle.yaml`):
+    - category, transports, access paths (the user's CLI, the vendor's API) and the version operation;
+    - a dialect (identifier quoting, case, booleans);
+    - a **capability map**: each capability's operations and the privileges it needs, in plain language;
+    - the platform's object kinds.
+  - **Checked as they load, item by item:** the schema; every read implementation bound with sample values and passed through the read-only guard (a read whose statement writes is refused); the recorded example bound and mapped. A bad file is refused with its reasons, and the rest still load.
+  - **The executor** (`src/engine/platform/operations/`):
+    - picks the connection's platform implementation within its version range. The version is read once per connection (`platform.version`) and cached until the connection is re-tested;
+    - binds parameters by type, never as text. A plain name stays unquoted, so the platform folds its case as usual; any other name is quoted with its quote character doubled. Values are escaped literals; numbers and booleans are checked; lists are allowed. A `statement` parameter must itself be one read-only statement;
+    - checks the bound statement with the read-only guard again, runs it through the connection's CLI or API, and maps the result to the declared columns, typed;
+    - reports a platform failure as a gap with its reason and the bound statement, never as an exception, and returns more rows than allowed cut, saying so.
+  - **Change operations never run.** `autode_platform_run` and `autode platform run` return the runbook step to propose, which a person approves and AutoDE's runner runs.
+  - **Team files are reviewed as decisions** (kind `platform_operation`, high stakes):
+    - a team operation or platform definition is a draft until a person approves exactly that file;
+    - the approval records its checksum in `.autode/config/platform-approvals.json`, so an edit makes it a draft again;
+    - an approved file replaces the shipped one with the same id;
+    - drafts are listed, never run.
+  - **Every surface:**
+    - CLI: `autode platform operations | show <id> | run <id> --connection <c> --param k=v | propose <file>`;
+    - MCP: `autode_platform_operations` (the catalog and each platform's capabilities) and `autode_platform_run` (row values follow the sample-data setting unless the operation reads names only, with personal data masked);
+    - the CLI calls the MCP tools' own handlers, so both give the same answer.
+- **LIN's platform reads, through operations:**
+  - `lineage.access_history` and `lineage.object_dependencies` (Snowflake), and `lineage.column_lineage` and `lineage.table_lineage` (Databricks, with the job, notebook or dashboard), feed LIN's recorder;
+  - `autode lineage refresh --connection <id>`, `autode_refresh_lineage` and *AutoDE: Refresh Observed Lineage* run the operations the platform's definition names for `lineage`, for the databases bound to the connection;
+  - a failed operation is reported with the privileges the platform needs (from its definition), and the others still run; a failed or cut-off read retires nothing;
+  - the source assessor's skill refreshes lineage after bringing a connection in, and uses the catalog's operations before writing platform SQL.
+- **Packaging:** `platform-operations/` and `platforms/` ship in the VSIX, the `autode` package and the MCP server's stable copy (which had a fixed file list; it would otherwise have run without them).
+- **Deviations from the spec, by the owner's choices (2026-10-29):**
+  - POP1 ships in two parts. v0.54.1 moves the five baseline items (probes, reconciliation key hashes, the platform-to-dialect mapping, the dry-run `EXPLAIN`) onto the platform definitions' dialect fragments and operations, and passes credentials to CLIs through the environment;
+  - team files are reviewed as decisions, not through the skills lifecycle;
+  - probes will use dialect fragments rather than an operation per check;
+  - versions are read once per connection.
+- **Not yet:** composition (`steps`, `for_each`, version conditions) and the asynchronous submit-poll-fetch pattern come with POP2, which needs them for the estate reads and Redshift's `redshift-data`. The live Snowflake check of LIN's lineage is a manual check (Part 53).
+- Measured: 423 tests (4 new: the catalog's checks and binding, the executor, lineage through operations to golden facts, every surface with a team file's review). The architecture test passes, with no new exception. Lint: 0 errors. Eval baseline unchanged.
+
 ## 0.53.2
 
 - **＋ New works** (owner's UI test, 2026-10-28). The button called `window.confirm()`, which VS Code webviews never show, so the click did nothing. Its text also claimed the workspace would "reset to a clean state", which isn't true.

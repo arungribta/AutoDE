@@ -1,0 +1,29 @@
+# AutoDE platform definition (docs/specs/platform-operations.md §2.2). A team's copy in
+# .autode/config/platforms/ with the same id replaces this one once a person approves it.
+formatVersion: 1
+id: oracle
+title: Oracle Database
+category: warehouse
+transports: [sql]
+access:
+  cli: { command: sql, install: "Oracle SQLcl. Until POP2 moves Oracle to SQLcl, AutoDE reads it through the Node driver you install (the platform card says how)." }
+versionOperation: platform.version
+dialect:
+  identifierQuote: '"'
+  unquotedCase: upper
+  booleans: ['1', '0']
+capabilities:
+  estate:
+    support: supported
+    privileges: SELECT on the ALL_ views of the schemas in scope.
+    note: Read by the adapter until POP2 moves the estate reads to operations.
+  profiling:
+    support: supported
+    privileges: SELECT on the tables profiled (sampled).
+  lineage:
+    support: not_applicable
+    note: Oracle is a source here; its lineage is designed (mappings and specifications).
+  compile.target:
+    support: not_applicable
+    note: Oracle is supported as a source.
+objectKinds: [table, view, materialized_view]
