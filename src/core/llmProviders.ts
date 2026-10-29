@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { panelServerEntry } from './mcpConfig';
 import { ClaudeStreamParser } from './claudeStream';
 import { LlmAdapter, LlmAdapterContext, LlmCompleteOptions, LlmHistoryTurn, extractJsonText } from './llmAdapter';
-import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet } from '../engine/types';
+import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet, StepEvent } from '../engine/types';
 import { AgenticToolCall, executeAgenticTool, geminiSchema, toolSpecsForMode } from './agenticTools';
 
 const MAX_TOOL_LOOP_TURNS = 12;
@@ -16,10 +16,11 @@ interface ToolRun {
   allowed?: string[];
   audit?: ToolCallAuditEntry[];
   engine?: EngineToolSet;
+  onStep?: (e: StepEvent) => void;
 }
 
 function toolRunFrom(opts: LlmCompleteOptions): ToolRun {
-  return { mode: opts.toolExecutionMode ?? 'none', allowed: opts.allowedToolNames, audit: opts.auditSink, engine: opts.engineTools };
+  return { mode: opts.toolExecutionMode ?? 'none', allowed: opts.allowedToolNames, audit: opts.auditSink, engine: opts.engineTools, onStep: opts.onStep };
 }
 
 interface OpenAiStyleToolCall {
@@ -90,7 +91,7 @@ async function runOpenAiStyleToolLoop(
         input = call.function.arguments ?? {};
       }
       const toolCall: AgenticToolCall = { id, name: call.function.name, input };
-      const output = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, run.engine);
+      const output = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, run.engine, run.onStep);
       messages.push({ role: 'tool', tool_call_id: id, content: output });
     }
   }
@@ -151,7 +152,7 @@ class CopilotLlmAdapter implements LlmAdapter {
       if (mode === 'none') {
         return await adapter.complete(prompt, { model: opts.model, timeoutMs: 60000, systemPrompt: opts.systemPrompt, justification: opts.justification, history: opts.history });
       }
-      const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history, allowedToolNames: opts.allowedToolNames, engineTools: opts.engineTools });
+      const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history, allowedToolNames: opts.allowedToolNames, engineTools: opts.engineTools, onStep: opts.onStep });
       if (opts.auditSink) opts.auditSink.push(...result.audit);
       return result.text;
     } catch (err) {
@@ -200,7 +201,7 @@ class ClaudeLlmAdapter implements LlmAdapter {
         mcp = { configFile, allowedTools: names.map((n) => `mcp__autode__${n}`) };
       }
       // With AutoDE's server attached, read the run as it streams: progress in AutoDE's log, every tool call in the audit.
-      const stream = mcp ? new ClaudeStreamParser((line) => ctx.log(line)) : undefined;
+      const stream = mcp ? new ClaudeStreamParser(opts.onStep) : undefined;
       try {
         return await adapter.complete(prompt, {
           model: opts.model,
@@ -305,7 +306,7 @@ class AnthropicLlmAdapter implements LlmAdapter {
       messages.push({ role: 'assistant', content: blocks });
       const resultBlocks: AnthropicBlock[] = [];
       for (const tu of toolUses) {
-        const output = await executeAgenticTool({ id: tu.id ?? tu.name ?? 'tool', name: tu.name ?? '', input: tu.input ?? {} }, workspaceRoot!, audit, offered, opts.engineTools);
+        const output = await executeAgenticTool({ id: tu.id ?? tu.name ?? 'tool', name: tu.name ?? '', input: tu.input ?? {} }, workspaceRoot!, audit, offered, opts.engineTools, opts.onStep);
         resultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content: output });
       }
       messages.push({ role: 'user', content: resultBlocks });
@@ -400,7 +401,7 @@ class GeminiLlmAdapter implements LlmAdapter {
       const responseParts: GeminiPart[] = [];
       for (const p of funcCalls) {
         const call = p.functionCall!;
-        const output = await executeAgenticTool({ id: call.name, name: call.name, input: call.args ?? {} }, workspaceRoot!, audit, offered, opts.engineTools);
+        const output = await executeAgenticTool({ id: call.name, name: call.name, input: call.args ?? {} }, workspaceRoot!, audit, offered, opts.engineTools, opts.onStep);
         responseParts.push({ functionResponse: { name: call.name, response: { result: output } } });
       }
       contents.push({ role: 'user', parts: responseParts });

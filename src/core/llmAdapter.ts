@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DataAgentHubSettings, LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet } from '../engine/types';
+import { DataAgentHubSettings, LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet, StepEvent } from '../engine/types';
 
 /**
  * The provider-agnostic contract every LLM provider implements (Phase C).
@@ -65,6 +65,8 @@ export interface LlmCompleteOptions {
   engineTools?: EngineToolSet;
   /** v0.52.3: who the run is for (an agent role), recorded by AutoDE's server when the CLI calls its tools. */
   agentName?: string;
+  /** v0.52.5: each tool call as it happens, from every adapter (Claude Code's from its event stream). */
+  onStep?: (e: StepEvent) => void;
 }
 
 /**

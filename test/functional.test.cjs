@@ -12044,7 +12044,7 @@ async function main() {
     const os = require('node:os'); const fs = require('node:fs');
     const { ClaudeStreamParser } = fresh('../dist/core/claudeStream.js');
     const progress = [];
-    const p = new ClaudeStreamParser((l) => progress.push(l), () => new Date('2026-10-28T00:00:00Z'));
+    const p = new ClaudeStreamParser((e) => progress.push(e), () => new Date('2026-10-28T00:00:00Z'));
     const ev = (o) => JSON.stringify(o) + '\n';
     const stream = ev({ type: 'system', subtype: 'init' })
       + ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Looking.' }, { type: 'tool_use', id: 't1', name: 'mcp__autode__autode_search_assets', input: { query: 'refunds' } }] } })
@@ -12055,7 +12055,7 @@ async function main() {
       + JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: ' Refunds are in shop.refunds. ' });
     for (let i = 0; i < stream.length; i += 37) p.feed(stream.slice(i, i + 37)); // arrives in arbitrary chunks
     assert.deepStrictEqual(p.result(), { text: 'Refunds are in shop.refunds.' });
-    assert.deepStrictEqual(progress, ['Searched AutoDE\'s assets for "refunds"…', 'Read the file brd.md…', 'Read everything AutoDE knows about nope…']);
+    assert.deepStrictEqual(progress.map((e) => `${e.status}: ${e.text}${e.found ? ` → ${e.found}` : ''}`), ['running: Searched AutoDE\'s assets for "refunds"', 'ok: Searched AutoDE\'s assets for "refunds" → 1 results', 'running: Read the file brd.md', 'running: Read everything AutoDE knows about nope', 'ok: Read the file brd.md', 'error: Read everything AutoDE knows about nope'], 'each step as it happens (v0.52.5)');
     assert.deepStrictEqual(p.audit.map((a) => [a.tool, a.outcome, a.found ?? a.detail]), [['autode_search_assets', 'ok', '1 results'], ['autode_read_file', 'ok', undefined], ['autode_get_asset_context', 'error', 'No asset nope']]);
     assert.strictEqual(p.audit[0].sources[0].id, 'obj:shop/prod/shop.refunds', 'the same sources the in-process loop records');
     const cut = new ClaudeStreamParser();
@@ -12119,6 +12119,29 @@ async function main() {
     assert.ok(!html.includes("activeLlmModel: (getSelectedLlm() === 'claude'"), 'the shared model is no longer written from the LLM tab');
     const pkg = require('../package.json');
     assert.strictEqual(pkg.contributes.configuration.properties['autoDataEngineeringHub.llmModels'].type, 'object');
+  });
+
+  await test('v0.52.5: the chat shows each run as one activity card — AutoDE\'s own tool loop reports each call as running, then done or failed with what it found (Claude Code\'s stream gives the same events); routine engine notices go to the AutoDE Output channel, failures still reach the chat; notices are one line by what they ask of you', async () => {
+    const fs = require('node:fs');
+    const tools = withMock(createMock(), () => fresh('../dist/core/agenticTools.js'));
+    const events = []; const audit = [];
+    const engine = { specs: [{ name: 'autode_search_assets' }, { name: 'autode_get_asset_context' }], call: async (name) => name === 'autode_search_assets' ? { text: JSON.stringify({ results: [{ id: 'obj:a', assetType: 'table', fqn: 'shop.a' }, { id: 'obj:b', assetType: 'table', fqn: 'shop.b' }] }), isError: false } : { text: 'No asset nope', isError: true } };
+    await tools.executeAgenticTool({ id: 'c1', name: 'autode_search_assets', input: { query: 'orders' } }, require('node:os').tmpdir(), audit, undefined, engine, (e) => events.push(e));
+    await tools.executeAgenticTool({ id: 'c2', name: 'autode_get_asset_context', input: { asset: 'nope' } }, require('node:os').tmpdir(), audit, undefined, engine, (e) => events.push(e));
+    assert.deepStrictEqual(events.map((e) => [e.id, e.status, e.text, e.found ?? e.detail ?? null]), [
+      ['c1', 'running', 'Searched AutoDE\'s assets for "orders"', null], ['c1', 'ok', 'Searched AutoDE\'s assets for "orders"', '2 results'],
+      ['c2', 'running', 'Read everything AutoDE knows about nope', null], ['c2', 'error', 'Read everything AutoDE knows about nope', 'No asset nope']
+    ]);
+    assert.strictEqual(audit.length, 2, 'the audit (and the trace) is unchanged');
+    await tools.executeAgenticTool({ id: 'c3', name: 'autode_search_assets', input: { query: 'x' } }, require('node:os').tmpdir(), audit, undefined, engine);
+    const src = (f) => fs.readFileSync(nodePath.join(__dirname, '..', ...f.split('/')), 'utf8');
+    const panel = src('src/core/webviewProvider.ts');
+    assert.match(panel, /new ContextFileManager\(workspaceRoot, this\.graphManager, \(msg: string\) => this\.postEngineLog\(msg\)/);
+    assert.match(panel, /createOutputChannel\('AutoDE'\)/);
+    for (const t of ["onStep: (e) => this.activity(chatRun, { phase: 'step', title: 'AutoDE chat', step: e })", "this.activity(chatRun, { phase: 'end', title: 'AutoDE chat', status: 'ok', replace: true });", 'runStage(this.runHost(runId, runTitle)', "runHandoff(this.runHost(runId, role)"]) assert.ok(panel.includes(t), t);
+    assert.ok(!/[\x07\x08\x0b\x0c]/.test(panel), 'no stray control characters');
+    const html = src('media/sidebar.html');
+    for (const t of ["case 'activity': activityEvent(msg); break;", 'function activityEvent(m)', '.activity.failed', 'function noticeLevel(m)', 'prefers-reduced-motion']) assert.ok(html.includes(t), t);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

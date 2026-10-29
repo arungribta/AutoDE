@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ConfigurationManager } from './configManager';
-import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, EngineAccess, EngineToolSet } from '../engine/types';
+import { AgentHost, AgentToolRunOptions, LlmProvider, ToolCallAuditEntry, EngineAccess, EngineToolSet, StepEvent } from '../engine/types';
 import { createVscodeFileIo } from '../context/vscodeFileIo';
 import { executeToolSkillAgent } from '../agents/build/ToolSkillAgent';
 import { SpecOpsEngine } from '../engine/interview/specOps';
@@ -451,7 +451,7 @@ Message: ${message}`;
     message: string,
     schemaContext?: string,
     toolExecutionMode: ToolExecutionMode = 'read-only',
-    opts?: { history?: ChatMessage[]; priorSummary?: string; claudeSessionId?: string; engineTools?: EngineToolSet; frontDoor?: string }
+    opts?: { history?: ChatMessage[]; priorSummary?: string; claudeSessionId?: string; engineTools?: EngineToolSet; frontDoor?: string; onStep?: (e: StepEvent) => void }
   ): Promise<{ message: string; updatedSummary?: string; newClaudeSessionId?: string; actions: ToolCallAuditEntry[] }> {
     const trimmed = message.trim();
     if (!trimmed) {
@@ -517,7 +517,8 @@ Message: ${message}`;
           claudeSessionId,
           isNewClaudeSession: startingClaudeSession,
           auditSink: actions,
-          engineTools: opts?.engineTools
+          engineTools: opts?.engineTools,
+          onStep: opts?.onStep
         }
       );
       return {
@@ -634,6 +635,7 @@ Message: ${message}`;
       auditSink?: ToolCallAuditEntry[];
       /** v0.52.1: AutoDE's read-only tools for the chat (AutoDE-owned loops; Claude Code's own loop ignores them). */
       engineTools?: EngineToolSet;
+      onStep?: (e: StepEvent) => void;
     }
   ): Promise<string> {
     const settings = this.configManager.getSettings();
@@ -652,7 +654,8 @@ Message: ${message}`;
           claudeSessionId: opts?.claudeSessionId,
           isNewClaudeSession: opts?.isNewClaudeSession,
           auditSink: opts?.auditSink,
-          engineTools: opts?.engineTools
+          engineTools: opts?.engineTools,
+          onStep: opts?.onStep
         },
         this.buildLlmContext()
       );
@@ -682,7 +685,8 @@ Message: ${message}`;
         auditSink: audit,
         approvalPrompt: opts.approvalPrompt,
         engineTools: opts.engineTools,
-        agentName: opts.agentName
+        agentName: opts.agentName,
+        onStep: opts.onStep
       },
       this.buildLlmContext()
     );

@@ -90,6 +90,31 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .message.user { align-self: flex-end; background: var(--accent-subtle); border: 1px solid var(--accent-border); }
 .handoff-row { margin-top: 8px; display: flex; gap: 6px; }
+/* v0.52.5: notices (one line, by what they ask of you) and a run's activity card (updated in place). */
+.notice { display: flex; gap: 6px; align-items: baseline; font-size: 11.5px; padding: 2px 4px; color: var(--text-muted); }
+.notice-icon { flex: none; width: 1em; text-align: center; }
+.notice-warn { color: var(--vscode-editorWarning-foreground, var(--warning)); }
+.notice-action { color: var(--vscode-textLink-foreground); }
+.activity { align-self: stretch; font-size: 11.5px; border: 1px solid var(--border-soft); border-left: 3px solid var(--vscode-progressBar-background, var(--vscode-textLink-foreground)); border-radius: 4px; padding: 4px 8px; background: var(--surface-elevated); }
+.activity.done { border-left-color: var(--vscode-testing-iconPassed, var(--success)); }
+.activity.failed { border-left-color: var(--vscode-testing-iconFailed, var(--vscode-errorForeground)); }
+.activity-head { display: flex; gap: 6px; align-items: baseline; cursor: default; }
+.activity:not(.running) .activity-head { cursor: pointer; }
+.activity-title { font-weight: 600; }
+.activity-meta { flex: 1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.activity.running .activity-icon { display: inline-block; animation: activity-spin 1.2s linear infinite; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+.activity-steps { margin: 4px 0 0 4px; padding: 0; list-style: none; color: var(--text-muted); }
+.activity:not(.running):not(.open) .activity-steps { display: none; }
+.activity-steps li { margin: 2px 0; }
+.step-ok .step-icon { color: var(--vscode-testing-iconPassed, var(--success)); }
+.step-error, .step-error .step-icon { color: var(--vscode-testing-iconFailed, var(--vscode-errorForeground)); }
+.step-running { color: var(--vscode-foreground); }
+.step-found { opacity: 0.8; }
+.step-detail { margin-left: 1.4em; opacity: 0.85; }
+.step-note { font-style: italic; }
+@media (prefers-reduced-motion: reduce) { .activity.running .activity-icon { animation: none; } }
 .trace { margin-top: 8px; border-top: 1px solid var(--border-soft); padding-top: 6px; font-size: 11.5px; }
 .trace summary { cursor: pointer; opacity: 0.8; }
 .trace-row { margin: 6px 0 0; }
@@ -615,7 +640,67 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     closePalette();
     addMessage('ai', '**Specification history (git log)**\n```\n' + (text || '(no history — the spec file has not been committed yet)') + '\n```', 'AutoDE');
   }
-  function addLogEntry(message) { var div = document.createElement('div'); div.className = 'message ai'; div.style.fontSize = '11px'; div.style.opacity = '0.7'; div.innerHTML = '<div class="msg-content" style="color:var(--text-muted);">' + escapeHtml(message) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; }
+  /**
+   * v0.52.5: a notice — one compact line with an icon, by what it asks of you: something to act on (approve, review),
+   * a problem, or plain information. Distinct from AutoDE's answers and from a run's activity card.
+   */
+  function noticeLevel(m) {
+    if (/\b(fail(ed|s)?|couldn't|could not|error|refused|not ready|isn't ready)\b/i.test(m)) return 'warn';
+    if (/(waits? for (your )?approval|approve it|review it|to approve|waits for you|needs your)/i.test(m)) return 'action';
+    return 'info';
+  }
+  function addLogEntry(message) {
+    var level = noticeLevel(message);
+    var div = document.createElement('div'); div.className = 'notice notice-' + level;
+    div.innerHTML = '<span class="notice-icon">' + (level === 'warn' ? '⚠' : level === 'action' ? '●' : 'ℹ') + '</span><span class="notice-text">' + escapeHtml(message) + '</span>';
+    chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight;
+  }
+
+  /**
+   * v0.52.5: a run's activity card — one per run, updated in place. Steps show as running (⟳), then ✓ or ✗ with what they
+   * found; a timer runs in the header. When the run ends the card folds to one line (click to open), or gives way to the
+   * reply when the reply carries the same steps in its trace; a failed run stays open with the error.
+   */
+  var activityCards = {};
+  function fmtElapsed(ms) { var s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+  function activityCard(m) {
+    var c = activityCards[m.runId];
+    if (c) return c;
+    var el = document.createElement('div'); el.className = 'activity running';
+    el.innerHTML = '<div class="activity-head"><span class="activity-icon">⟳</span><span class="activity-title"></span><span class="activity-meta"></span><span class="activity-time">0:00</span></div><ol class="activity-steps"></ol>';
+    el.querySelector('.activity-title').textContent = m.title || 'AutoDE';
+    el.querySelector('.activity-head').addEventListener('click', function () { if (!el.classList.contains('running')) el.classList.toggle('open'); });
+    chatStream.appendChild(el);
+    c = { el: el, started: Date.now(), steps: {}, count: 0 };
+    c.timer = setInterval(function () { el.querySelector('.activity-time').textContent = fmtElapsed(Date.now() - c.started); }, 1000);
+    activityCards[m.runId] = c;
+    return c;
+  }
+  function activityEvent(m) {
+    if (!m || !m.runId) return;
+    var c = activityCard(m);
+    var list = c.el.querySelector('.activity-steps');
+    if (m.phase === 'step' && m.step) {
+      var li = c.steps[m.step.id];
+      if (!li) { li = document.createElement('li'); c.steps[m.step.id] = li; list.appendChild(li); c.count++; }
+      li.className = 'step-' + m.step.status;
+      li.innerHTML = '<span class="step-icon">' + (m.step.status === 'running' ? '⟳' : m.step.status === 'ok' ? '✓' : '✗') + '</span> ' + escapeHtml(m.step.text) + (m.step.found ? ' <span class="step-found">→ ' + escapeHtml(m.step.found) + '</span>' : '') + (m.step.detail ? '<div class="step-detail">' + escapeHtml(m.step.detail) + '</div>' : '');
+    } else if (m.phase === 'note' && m.text) {
+      var n = document.createElement('li'); n.className = 'step-note'; n.textContent = m.text; list.appendChild(n);
+    } else if (m.phase === 'end') {
+      clearInterval(c.timer);
+      delete activityCards[m.runId];
+      var took = fmtElapsed(Date.now() - c.started);
+      if (m.replace && m.status === 'ok') { c.el.remove(); return; }
+      c.el.classList.remove('running');
+      c.el.classList.add(m.status === 'ok' ? 'done' : 'failed');
+      if (m.status !== 'ok') c.el.classList.add('open');
+      c.el.querySelector('.activity-icon').textContent = m.status === 'ok' ? '✓' : '✗';
+      c.el.querySelector('.activity-meta').textContent = ' · ' + c.count + ' step' + (c.count === 1 ? '' : 's') + (m.summary ? ' · ' + m.summary : '');
+      c.el.querySelector('.activity-time').textContent = took;
+    }
+    chatStream.scrollTop = chatStream.scrollHeight;
+  }
 
   // ── Processing feedback (pending bubble) ──
   // One evolving "AutoDE is working" bubble per in-flight chat-initiated request,
@@ -1728,6 +1813,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   window.addEventListener('message', function (event) {
     var msg = event.data; if (!msg || !msg.type) return;
     switch (msg.type) {
+      case 'activity': activityEvent(msg); break;
       case 'logEntry': if (msg.message) { if (pendingBubble) { updatePending(msg.message); } else { addLogEntry(msg.message); } } break;
       case 'connectionStatus': {
         function renderRole(roleLabel, status, dotEl, labelEl) {

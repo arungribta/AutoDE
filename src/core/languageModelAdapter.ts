@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ToolCallAuditEntry, ToolExecutionMode, EngineToolSet } from '../engine/types';
+import { ToolCallAuditEntry, ToolExecutionMode, EngineToolSet, StepEvent } from '../engine/types';
 import { AgenticToolCall, executeAgenticTool, toolSpecsForMode } from './agenticTools';
 import { LlmHistoryTurn } from './llmAdapter';
 
@@ -227,6 +227,8 @@ export class LanguageModelAdapter {
       allowedToolNames?: string[];
       /** The run's engine tools (phase 5). */
       engineTools?: EngineToolSet;
+      /** v0.52.5: each tool call as it happens. */
+      onStep?: (e: StepEvent) => void;
       cancellationToken?: vscode.CancellationToken;
     }
   ): Promise<{ text: string; audit: ToolCallAuditEntry[] }> {
@@ -283,7 +285,7 @@ export class LanguageModelAdapter {
       const resultParts: vscode.LanguageModelToolResultPart[] = [];
       for (const call of toolCalls) {
         const toolCall: AgenticToolCall = { id: call.callId, name: call.name, input: (call.input ?? {}) as Record<string, unknown> };
-        const outcome = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, opts.engineTools);
+        const outcome = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, opts.engineTools, opts.onStep);
         resultParts.push(new vscode.LanguageModelToolResultPart(call.callId, [new vscode.LanguageModelTextPart(outcome)]));
       }
       messages.push(vscode.LanguageModelChatMessage.User(resultParts));

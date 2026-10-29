@@ -1,4 +1,4 @@
-import { ToolCallAuditEntry } from '../engine/types';
+import { StepEvent, ToolCallAuditEntry } from '../engine/types';
 import { stepText, toolResultSummary } from '../engine/agents/answerTrace';
 
 /**
@@ -35,7 +35,8 @@ export class ClaudeStreamParser {
   private final: { text?: string; error?: string } | undefined;
   public readonly audit: ToolCallAuditEntry[] = [];
 
-  constructor(private readonly onProgress: (line: string) => void = () => undefined, private readonly now: () => Date = () => new Date()) {}
+  /** `onStep` hears each tool call as `running`, then `ok` or `error` (v0.52.5: the chat's activity card, the same as AutoDE's own loop gives). */
+  constructor(private readonly onStep: (e: StepEvent) => void = () => undefined, private readonly now: () => Date = () => new Date()) {}
 
   public feed(chunk: string): void {
     this.buffer += chunk;
@@ -66,7 +67,7 @@ export class ClaudeStreamParser {
         const raw = (c.input && typeof c.input === 'object' ? c.input : {}) as Record<string, unknown>;
         const [name, input] = BUILT_IN[c.name] ? BUILT_IN[c.name](raw) : [c.name.replace(AUTODE_MCP, ''), raw];
         this.pending.set(c.id, { name, input, at: this.now().toISOString() });
-        this.onProgress(`${stepText(name, input)}…`);
+        this.onStep({ id: c.id, tool: name, text: stepText(name, input), status: 'running' });
       }
     } else if (ev.type === 'user') {
       for (const c of content) {
@@ -76,7 +77,9 @@ export class ClaudeStreamParser {
         this.pending.delete(c.tool_use_id);
         const body = typeof c.content === 'string' ? c.content : Array.isArray(c.content) ? (c.content as Array<{ type?: string; text?: string }>).filter((x) => x.type === 'text').map((x) => x.text ?? '').join('\n') : '';
         const isError = c.is_error === true;
-        this.audit.push({ tool: p.name, input: p.input, outcome: isError ? 'error' : 'ok', ...(isError ? { detail: body.slice(0, 500) } : toolResultSummary(p.name, body)), at: p.at });
+        const entry: ToolCallAuditEntry = { tool: p.name, input: p.input, outcome: isError ? 'error' : 'ok', ...(isError ? { detail: body.slice(0, 500) } : toolResultSummary(p.name, body)), at: p.at };
+        this.audit.push(entry);
+        this.onStep({ id: c.tool_use_id, tool: p.name, text: stepText(p.name, p.input), status: isError ? 'error' : 'ok', ...(entry.found ? { found: entry.found } : {}), ...(isError && entry.detail ? { detail: entry.detail.slice(0, 200) } : {}) });
       }
     } else if (ev.type === 'result') {
       if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) this.final = { error: typeof ev.result === 'string' && ev.result ? ev.result : ev.subtype || 'Claude Code reported an error' };

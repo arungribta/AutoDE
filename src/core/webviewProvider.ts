@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
 import { sanitizeModels } from './llmModelChoice';
-import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext, ToolCallAuditEntry, TraceSource } from '../engine/types';
+import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext, StepEvent, ToolCallAuditEntry, TraceSource } from '../engine/types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from '../engine/interview/specOps';
 import { SkillRegistry, interviewSkills } from '../engine/skills/skillRegistry';
@@ -600,6 +600,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             // v0.52.1: the chat answers from AutoDE's read-only tools, and names the agent for work (it never starts one).
             const engine = this.hub.createEngine('chat (VS Code)');
             const roles = this.agentRoles();
+            // v0.52.5: the turn's tool calls show live in an activity card, which gives way to the reply (its trace has the same steps).
+            const chatRun = this.newRunId();
             let result: Awaited<ReturnType<DataAgentHubHub['chat']>>;
             try {
               const chatTools = engine?.listTools ? chatToolNames(await engine.listTools()) : [];
@@ -609,9 +611,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
                 priorSummary: priorMeta?.summary,
                 claudeSessionId: priorMeta?.claudeSessionId,
                 engineTools,
-                frontDoor: chatFrontDoorPrompt(roles, engineTools ? chatTools : [])
+                frontDoor: chatFrontDoorPrompt(roles, engineTools ? chatTools : []),
+                onStep: (e) => this.activity(chatRun, { phase: 'step', title: 'AutoDE chat', step: e })
               });
+            } catch (err) {
+              this.activity(chatRun, { phase: 'end', title: 'AutoDE chat', status: 'error', summary: err instanceof Error ? err.message : String(err) });
+              throw err;
             } finally { await engine?.dispose(); }
+            this.activity(chatRun, { phase: 'end', title: 'AutoDE chat', status: 'ok', replace: true });
             const parsed = parseHandoff(result.message, roles);
             result = { ...result, message: parsed.text };
             const handoff = parsed.handoff ? handoffFor(this.workspaceRoot?.fsPath ?? '', this.workflowScope()?.problemId, parsed.handoff.role, parsed.handoff.task) : undefined;
@@ -1464,7 +1471,33 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private postLog(message: string): void {
+    this.output().appendLine(`[${new Date().toISOString().slice(11, 19)}] ${message}`);
     this.view?.webview.postMessage({ type: 'logEntry', message });
+  }
+
+  /** v0.52.5: AutoDE's Output channel: everything the panel logs, and the engine's routine notices, which stay out of the chat. */
+  private outputChannel: vscode.OutputChannel | undefined;
+  private output(): vscode.OutputChannel {
+    if (!this.outputChannel) { this.outputChannel = vscode.window.createOutputChannel('AutoDE'); this.context.subscriptions.push(this.outputChannel); }
+    return this.outputChannel;
+  }
+
+  /** v0.52.5: the context engine's log — routine notices ("Loaded…", "Compiled graph persisted…") go to the Output channel only; failures also reach the chat. */
+  private postEngineLog(message: string): void {
+    if (/\b(fail(ed|s)?|could not|couldn't|error|invalid|refused)\b/i.test(message)) { this.postLog(message); return; }
+    this.output().appendLine(`[${new Date().toISOString().slice(11, 19)}] ${message}`);
+  }
+
+  /**
+   * v0.52.5: a run's activity card in the chat — one card per run (a stage, a handed-over task, a maintenance item, a chat turn
+   * that uses tools), updated in place: its steps as they run and finish, notes, and how it ended. Never kept in the transcript
+   * (a reply's trace is). `replace`: the card goes away when the run's reply arrives (it carries the same steps in its trace).
+   */
+  private newRunId(): string { return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
+  private activity(runId: string, ev: { phase: 'step' | 'note' | 'end'; title: string; step?: StepEvent; text?: string; status?: 'ok' | 'error'; summary?: string; replace?: boolean }): void {
+    if (ev.step) this.output().appendLine(`[${new Date().toISOString().slice(11, 19)}] ${ev.title}: ${ev.step.status === 'running' ? '…' : ev.step.status === 'ok' ? '✓' : '✗'} ${ev.step.text}${ev.step.found ? ` → ${ev.step.found}` : ''}${ev.step.detail ? ` (${ev.step.detail})` : ''}`);
+    else if (ev.text || ev.summary) this.output().appendLine(`[${new Date().toISOString().slice(11, 19)}] ${ev.title}: ${ev.text ?? ev.summary}`);
+    this.view?.webview.postMessage({ type: 'activity', runId, ...ev });
   }
 
   /** Lets `extension.ts`'s command handlers (e.g. `testConnection`) surface progress/results into the chat log, not just a native VS Code notification the webview never sees. */
@@ -1810,9 +1843,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       this.postMessage('chatResponse', { message: h.stage ? `That is the **${h.stage.title}** stage's work (${role}). It runs from its stage, so it is grounded in the stage's inputs and approved at its gate.` : `That is workflow stage work for the ${role}, and this problem has no open stage for it. Open the Workflow to plan or re-open one.`, handoff: h });
       return;
     }
-    this.postMessage('chatResponse', { message: `Handing over to the **${role}**…` });
+    const runId = this.newRunId();
+    this.activity(runId, { phase: 'note', title: role, text: task.length > 140 ? `${task.slice(0, 137)}…` : task });
     const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${role} is working`, cancellable: false },
-      () => runHandoff(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, role, task));
+      () => runHandoff(this.runHost(runId, role), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, role, task));
+    this.activity(runId, { phase: 'end', title: role, status: r.ok ? 'ok' : 'error', ...(r.ok ? { replace: true } : { summary: r.message.split('\n')[0] }) });
     await this.afterAgentRun();
     const reply = r.ok ? `${r.message}\n\n_What the ${role} proposed waits for you: the Context Inbox, or Waiting for you._` : r.message;
     this.postMessage('chatResponse', { message: reply, error: !r.ok, citations: this.citationsFor(reply), trace: this.traceFor({ answeredBy: role, via, audit: r.audit ?? [], reply }) });
@@ -1827,7 +1862,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private executorHost(): ExecutorHost {
-    return { createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) };
+    return this.runHost();
+  }
+
+  /** The executor's host for one run: its steps and notes go to the run's activity card (v0.52.5). */
+  private runHost(runId?: string, title = 'AutoDE'): ExecutorHost {
+    return {
+      createEngine: (n) => this.hub.createEngine(n),
+      runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, runId ? { ...o, onStep: (e) => this.activity(runId, { phase: 'step', title, step: e }) } : o),
+      activeProvider: () => this.hub.activeProvider(),
+      log: (l) => (runId ? this.activity(runId, { phase: 'note', title, text: l }) : this.postLog(l))
+    };
   }
 
   /** MM2: a person starts the agent an item names (one click from Waiting for you or the Explorer). */
@@ -1843,8 +1888,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
     if (!item) { void vscode.window.showInformationMessage(key ? 'That item is resolved or dismissed already.' : 'Nothing to maintain.'); return; }
     const chosen = item;
+    const maintRun = this.newRunId();
+    this.activity(maintRun, { phase: 'note', title: `${chosen.agent} · maintenance`, text: chosen.title });
     const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${chosen.agent} is on "${chosen.title}"`, cancellable: false },
-      () => runMaintenance(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, chosen));
+      () => runMaintenance(this.runHost(maintRun, `${chosen.agent} · maintenance`), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, chosen));
+    this.activity(maintRun, { phase: 'end', title: `${chosen.agent} · maintenance`, status: r.ok ? 'ok' : 'error', summary: r.ok ? 'Proposed; waits for your approval' : r.message.split('\n')[0] });
     this.postLog(r.message);
     await this.afterAgentRun();
     if (r.ok) void vscode.window.showInformationMessage(`The ${chosen.agent} finished: what it proposed waits for you (the Context Inbox, or Waiting for you).`);
@@ -1918,7 +1966,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
     noteDraftRun(root, item.key, item.agent);
     this.postLog(`Maintenance (policy draft): the ${item.agent} drafts a proposal for "${item.title}".`);
-    const r = await runMaintenance(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, item);
+    const draftRun = this.newRunId();
+    const r = await runMaintenance(this.runHost(draftRun, `${item.agent} · draft`), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, item);
+    this.activity(draftRun, { phase: 'end', title: `${item.agent} · draft`, status: r.ok ? 'ok' : 'error', summary: r.ok ? 'Drafted; waits for your approval' : r.message.split('\n')[0] });
     this.postLog(r.message);
     await this.afterAgentRun();
     this.postDecisions();
@@ -2474,15 +2524,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         const r = reopenStage(rctx, stage, { kind: 'person', name: by }, reason, 'panel');
         this.postLog(`Stage ${stage} re-opened${r.stale.length ? `; now stale: ${r.stale.join(', ')}` : ''}.`);
       } else if (action === 'run' && stage) {
-        this.postLog(`Running the agent for stage ${stage}…`);
+        const runId = this.newRunId();
+        const runTitle = `Stage ${stage}`;
+        this.activity(runId, { phase: 'note', title: runTitle, text: 'Starting the stage\'s agent…' });
         // Refresh on use (K2): tables the agent will work with that are past their refresh age, before it starts.
         try {
           const fr = await this.contextFileManager?.refreshWorkingSet();
-          if (fr?.fetched) this.postLog(`Refreshed ${fr.fetched} table(s) past their refresh age before the run.`);
+          if (fr?.fetched) this.activity(runId, { phase: 'note', title: runTitle, text: `Refreshed ${fr.fetched} table(s) past their refresh age.` });
         } catch (err) { this.postLog(`The refresh before the run failed; the agent works with what AutoDE has: ${err instanceof Error ? err.message : String(err)}`); }
         const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: running ${stage}`, cancellable: false },
-          () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
-            { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
+          () => runStage(this.runHost(runId, runTitle), { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
+        this.activity(runId, { phase: 'end', title: runTitle, status: r.ok ? 'ok' : 'error', summary: r.ok ? `${r.outputs.length} deliverable(s) recorded` : r.message.split('\n')[0] });
         this.postLog(r.ok ? `${r.message}${r.outputs.length ? ` Recorded: ${r.outputs.join(', ')}.` : ''}` : r.message);
         await this.afterAgentRun();
         if (r.ok) void this.draftAtStageBoundary();
@@ -3074,7 +3126,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
     const activeSpecId = this.contextFileManager.getActiveSpecId();
     this.contextFileManager.dispose();
-    this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postLog(msg), this.createContextValidator(), watchKnowledge);
+    this.contextFileManager = new ContextFileManager(workspaceRoot, this.graphManager, (msg: string) => this.postEngineLog(msg), this.createContextValidator(), watchKnowledge);
     this.configureContextFileManager(this.contextFileManager);
     this.contextFileManager.setActiveSpecId(activeSpecId);
     await this.contextFileManager.initialize();

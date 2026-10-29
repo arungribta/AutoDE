@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.52.4. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.52.5. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -772,6 +772,15 @@ The chat in the panel is for questions and changes about the active problem: "wh
 - **Work** that one of AutoDE's agents does (fix the sales model, write an article, place glossary terms, read a document for facts) isn't done by the chat. It says which agent does it and shows **Run it**. The agent proposes, and you approve as usual. Work that belongs to a workflow stage (a model, a mapping, pipelines) shows **Open stage** instead: it runs from its stage, grounded in the stage's inputs and approved at its gate.
 - **`@<agent> <task>`** at the start of a message hands that one message to the agent directly, for example `@knowledge-engineer write an article on why orders has two customer ids`. The agents you can address this way are `semantic-modeler`, `knowledge-engineer` and `context-curator`; a stage agent's name opens its stage.
 - With Claude Code as the panel's model, all of this works the same (since v0.52.3): AutoDE starts Claude Code with AutoDE's own tools attached, keeping Claude Code's model, instructions and agent loop. Its steps appear live in AutoDE's log and in *How this was answered*.
+
+**Watching a run** (v0.52.5). When an agent works (a stage, *Run it*, a maintenance item) or the chat looks things up, one card in the chat shows it, updated as it goes:
+- each step appears as running (⟳), then ✓ or ✗ with what it found;
+- a timer runs in the header;
+- the left edge is blue while running, green when done, red if it failed.
+
+When the run ends, the card folds to one line; click it to see the steps. A chat answer replaces its card, since the answer's *How this was answered* has the same steps.
+
+Other messages are one line each: ⚠ a problem, ● something for you to do, ℹ information. Routine background notices go to the **AutoDE** Output channel (View → Output → AutoDE), which also keeps every run's steps.
 
 **How this was answered** (v0.52.2). Expand the line under any reply to see:
 - who answered (the chat or an agent) and with which model;

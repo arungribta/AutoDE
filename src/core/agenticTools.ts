@@ -1,9 +1,9 @@
-import { toolResultSummary } from '../engine/agents/answerTrace';
+import { stepText, toolResultSummary } from '../engine/agents/answerTrace';
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { exec as execCb } from 'node:child_process';
-import { EngineToolSet, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
+import { EngineToolSet, StepEvent, ToolCallAuditEntry, ToolExecutionMode } from '../engine/types';
 export { resolveAllowedToolNames } from '../engine/skills/toolAllowList';
 
 /**
@@ -197,7 +197,30 @@ function searchFiles(root: string, startDir: string, pattern: string): string {
  * Executes one tool call against the sandboxed workspace, prompting for approval
  * on writes/commands. Shared by every provider's tool-calling loop.
  */
+/**
+ * v0.52.5: one tool call, reported as it happens — `running` before, then `ok` or `error` with what it
+ * found — so the chat's activity card shows the same live steps for every model (Claude Code's come from
+ * its event stream). Built from the same audit entry the reply's trace uses.
+ */
 export async function executeAgenticTool(
+  call: AgenticToolCall,
+  workspaceRoot: string,
+  audit: ToolCallAuditEntry[],
+  offered?: ReadonlySet<string>,
+  engine?: EngineToolSet,
+  onStep?: (e: StepEvent) => void
+): Promise<string> {
+  const id = call.id || `${call.name}-${Date.now()}`;
+  const text = stepText(call.name, call.input ?? {});
+  onStep?.({ id, tool: call.name, text, status: 'running' });
+  const before = audit.length;
+  const out = await runAgenticTool(call, workspaceRoot, audit, offered, engine);
+  const e = audit.length > before ? audit[audit.length - 1] : undefined;
+  onStep?.({ id, tool: call.name, text, status: e && (e.outcome === 'ok' || e.outcome === 'approved') ? 'ok' : 'error', ...(e?.found ? { found: e.found } : {}), ...(e && e.outcome !== 'ok' && e.outcome !== 'approved' && e.detail ? { detail: e.detail.slice(0, 200) } : {}) });
+  return out;
+}
+
+async function runAgenticTool(
   call: AgenticToolCall,
   workspaceRoot: string,
   audit: ToolCallAuditEntry[],

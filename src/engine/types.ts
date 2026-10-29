@@ -661,6 +661,9 @@ export interface ToolCallAuditEntry {
   proposed?: string;
 }
 
+/** v0.52.5: one step of a run as it happens, for the chat's activity card (the same for every model). */
+export interface StepEvent { id: string; tool: string; text: string; status: 'running' | 'ok' | 'error'; found?: string; detail?: string }
+
 /** A fact, article, asset or semantic model an answer rests on (v0.52.2). */
 export interface TraceSource { kind: 'fact' | 'article' | 'asset' | 'semantic_model'; id: string; label: string; trust?: string }
 
@@ -760,6 +763,8 @@ export interface AgentToolRunOptions {
   engineTools?: EngineToolSet;
   /** v0.52.3: the agent role the run is for (recorded by AutoDE's server when Claude Code calls its tools). */
   agentName?: string;
+  /** v0.52.5: each tool call as it happens (the chat's activity card). */
+  onStep?: (e: StepEvent) => void;
 }
 
 export interface AgentExecutionContext {

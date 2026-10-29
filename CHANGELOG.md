@@ -6,6 +6,21 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.52.5
+
+- **The chat shows runs as activity cards** (owner: each update came as a new entry in the same style, hard to tell apart from answers). Before, every progress line was its own chat message.
+  - **One card per run** (a stage, *Run it* or `@agent`, a maintenance item, a chat turn that uses tools), updated in place:
+    - each step appears as running (⟳), then ✓ or ✗ with what it found or why it failed;
+    - a timer runs in the header;
+    - the left edge is blue while running, green when done, red on failure, in VS Code's theme colours.
+  - **When a run ends,** its card folds to one line (*"✓ Stage build · 9 steps · 2 deliverable(s) recorded · 1:12"*); click to open it. A chat turn's card gives way to the reply, whose *How this was answered* has the same steps. A failed run stays open, with the error under its step.
+  - **The same on every model:** AutoDE's own tool loop now reports each call as it happens (`executeAgenticTool`'s `onStep`), and Claude Code's event stream reports the same events.
+- **Notices are one line, by what they ask of you:** ⚠ problems, ● something to act on (approve, review), ℹ information. They are styled apart from AutoDE's answers.
+- **Routine engine notices leave the chat** ("Loaded compiled graph…", "Compiled graph persisted…", working-set promotions): they go to a new **AutoDE** Output channel, which also records everything the panel logs and every run's steps. Engine failures still reach the chat.
+- Activity cards aren't kept in the transcript (a reply's trace is).
+- **Next:** a Stop button on a running card (v0.52.6, roadmap).
+- Measured: 409 tests (1 new: step events from AutoDE's own loop, the panel's routing and rendering). The v0.52.3 stream-parser test now checks each step's running and finished events.
+
 ## 0.52.4
 
 - **Fixed: Run agent on Claude Code failed with `spawn ENAMETOOLONG`** (owner's report on the build stage). v0.52.3 passed the agent's instructions (role, skills, stage brief: tens of thousands of characters) to Claude Code as a command-line argument, past Windows' 32,767-character command-line limit. They now go in a temporary file (`--append-system-prompt-file`), removed after the run, for chat too. Verified with the real CLI and 62,000 characters of instructions. v0.52.3's check had used a one-line prompt, which is why it missed this.
