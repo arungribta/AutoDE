@@ -3,7 +3,7 @@ import type { GraphView, TextMatch } from './retrieval';
 import { isMirror } from './projection';
 
 /**
- * Context gaps (C3, v0.30.0; docs/context-layer-requirements.md §7.3): a
+ * Context gaps (C3, v0.30.0; docs/specs/context-layer.md §7.3): a
  * fact a step or request needs that the context layer does not have at the
  * required trust. Principle C3 — the agent asks; it does not guess.
  *

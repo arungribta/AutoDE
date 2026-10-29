@@ -1,4 +1,4 @@
-# Expected semantic model after the scripted conversation (docs/context-layer-requirements.md §6 shape).
+# Expected semantic model after the scripted conversation (docs/specs/context-layer.md §6 shape).
 # Scored from Phase C5 on.
 specId: retail-orders
 entities:

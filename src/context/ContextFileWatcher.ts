@@ -4,7 +4,7 @@ import { AUTODE_DIR } from '../engine/workspaceLayout';
 
 /**
  * Recursive watcher over every `.autode/**` YAML/JSON file (v0.25.0,
- * docs/mcp-engine-requirements.md §8). `ContextFileManager`'s own watcher
+ * docs/specs/mcp-engine.md §8). `ContextFileManager`'s own watcher
  * only ever covered the top-level `.autode/*` business-context files, so
  * a change to a business problem's `spec/` or `context/` files — made by any
  * other process — went unnoticed and the cached copy went stale. This one

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Regenerates the parts of docs/technical-design.md that are facts about the
+ * Regenerates the parts of docs/design/technical-design.md that are facts about the
  * code — the settings table (§10.5, from package.json) and the source tree
  * (§12, from src/) — between `<!-- generated:<name> -->` markers — and the
- * skill catalog in docs/skills.md (v0.45.5, from skills/ and agents/; needs
+ * skill catalog in docs/guides/skills.md (v0.45.5, from skills/ and agents/; needs
  * `npm run compile` first, since it uses the engine's catalog).
  *
  *   node scripts/docs-generate.cjs          rewrite the sections
@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const DOC = path.join(root, 'docs', 'technical-design.md');
+const DOC = path.join(root, 'docs', 'design', 'technical-design.md');
 
 /** One line per source folder: what lives there. A folder missing here is listed without a note. */
 const FOLDER_NOTES = {
@@ -89,15 +89,15 @@ function render(doc) {
   let out = doc;
   for (const [name, gen] of Object.entries(SECTIONS)) {
     const re = new RegExp(`(<!-- generated:${name} -->)[\\s\\S]*?(<!-- /generated:${name} -->)`);
-    if (!re.test(out)) throw new Error(`docs/technical-design.md has no <!-- generated:${name} --> section`);
+    if (!re.test(out)) throw new Error(`docs/design/technical-design.md has no <!-- generated:${name} --> section`);
     out = out.replace(re, (_m, open, close) => `${open}${nl}${gen().replace(/\n/g, nl)}${nl}${close}`);
   }
   return out;
 }
 
-const SKILLS_DOC = path.join(root, 'docs', 'skills.md');
+const SKILLS_DOC = path.join(root, 'docs', 'guides', 'skills.md');
 
-/** docs/skills.md: a fixed introduction and the catalog of bundled and external skills (no workspace's own skills, no detection). */
+/** docs/guides/skills.md: a fixed introduction and the catalog of bundled and external skills (no workspace's own skills, no detection). */
 function skillsDoc() {
   const { skillCatalog, renderCatalogMarkdown } = require(path.join(root, 'dist', 'engine', 'agents', 'skillCatalog.js'));
   const none = path.join(root, 'dist', '.no-workspace');

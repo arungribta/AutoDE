@@ -6,7 +6,7 @@ import { loadToolSkill, loadToolSkillsFromDirectory } from './toolSkills';
 
 /**
  * Tool-skill lifecycle, provenance, review and trust tiers (Phase S2 of
- * docs/mcp-engine-requirements.md §9.1).
+ * docs/specs/mcp-engine.md §9.1).
  *
  * AutoDE owns one sidecar per imported skill, `<skill>/.autode-skill.json`, and
  * never modifies the foreign `SKILL.md`. Trust belongs to *content*: every

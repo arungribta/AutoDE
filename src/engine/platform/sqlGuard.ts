@@ -1,6 +1,6 @@
 /**
  * Lexical classification of SQL for the MCP server's read-only mode
- * (docs/mcp-engine-requirements.md §5.3, phase 4): strips comments, string
+ * (docs/specs/mcp-engine.md §5.3, phase 4): strips comments, string
  * literals and quoted identifiers, splits statements on the semicolons that
  * remain, and looks at the words left over.
  *
@@ -15,7 +15,7 @@
  *
  * This is a guard, not a security boundary: functions with side effects
  * (some `SYSTEM$…` functions, procedures behind views) are invisible to it. A
- * read-only platform role is the boundary; docs/mcp-setup.md says so.
+ * read-only platform role is the boundary; docs/guides/mcp-setup.md says so.
  */
 
 /** Statements whose results describe objects, not data: returned whatever the sample-data setting says. */

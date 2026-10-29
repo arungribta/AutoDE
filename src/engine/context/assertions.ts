@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 /**
  * Assertions — the unit of context (context-layer Phase C2, v0.29.0;
- * docs/context-layer-requirements.md §4.1). One claim about one subject,
+ * docs/specs/context-layer.md §4.1). One claim about one subject,
  * with provenance, trust, status and validity. The context graph is a
  * projection of the active assertions (see `projection.ts`); the ledger
  * (`ledger.ts`) is the system of record.

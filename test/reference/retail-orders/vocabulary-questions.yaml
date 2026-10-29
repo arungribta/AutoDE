@@ -1,4 +1,4 @@
-# Vocabulary-mismatch question set (Phase K2, docs/context-layer-requirements.md §11 Phase K item 12).
+# Vocabulary-mismatch question set (Phase K2, docs/specs/context-layer.md §11 Phase K item 12).
 #
 # Each question names a table in words that differ from its physical name. Run over the estate
 # fixture: shop (prod and dev), crm and the legacy EDW dictionary export, with the acquired CRM

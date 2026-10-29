@@ -1,7 +1,7 @@
 import type { ColumnMetadata, QueryResult, SchemaSnapshot } from './types';
 
 /**
- * Sample-data consent and redaction (docs/mcp-engine-requirements.md phase 4).
+ * Sample-data consent and redaction (docs/specs/mcp-engine.md phase 4).
  *
  * Row values — query results, profile minimums and maximums, query text from
  * the platform's history — reach a language model only when the connection's

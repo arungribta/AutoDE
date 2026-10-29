@@ -1,7 +1,7 @@
 import { ToolExecutionMode } from '../types';
 
 /**
- * Which AutoDE tools a tool-executing skill may use (v0.28.0 — docs/mcp-engine-requirements.md
+ * Which AutoDE tools a tool-executing skill may use (v0.28.0 — docs/specs/mcp-engine.md
  * Phase S1). Pure logic, in the engine so the MCP server can apply the same rules when it
  * exposes skills (Phase S2/3). The tool *implementations* live in `src/core/agenticTools.ts`;
  * a functional test keeps these names in step with that catalog.

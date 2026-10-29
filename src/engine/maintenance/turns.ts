@@ -5,7 +5,7 @@ import { UnrecordedStatement, dismissedStatements, unrecordedStatements } from '
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * Chat turns recorded for review (MM2; docs/context-layer-requirements.md
+ * Chat turns recorded for review (MM2; docs/specs/context-layer.md
  * §5.6). In Claude Code, AutoDE's plugin hook records each message the user
  * submits: it runs no model, it only makes sure the turn can't be forgotten.
  * A turn that reads like a fact (the C4c cues) is *unreviewed* until a fact

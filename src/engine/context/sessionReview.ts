@@ -4,7 +4,7 @@ import { Assertion } from './assertions';
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * The conversation, reviewed (C4c; docs/context-layer-requirements.md §5.5
+ * The conversation, reviewed (C4c; docs/specs/context-layer.md §5.5
  * item 4). The raw message stays as evidence; at the end of a session AutoDE
  * lists what the user said that reads like a fact but has no fact citing it,
  * for the user to record or dismiss. Deterministic: fixed cues, no model, so

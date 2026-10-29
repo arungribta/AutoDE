@@ -1,7 +1,7 @@
 import { BaseNode, ColumnNode, GraphEdge, TableNode } from '../context/types';
 
 /**
- * Deterministic grounding checks for generated SQL (v0.27.0 — docs/context-layer-requirements.md
+ * Deterministic grounding checks for generated SQL (v0.27.0 — docs/specs/context-layer.md
  * §10.1 items 1 and 3). Answers two questions about an artifact, without any LLM:
  *
  * 1. **Identifier resolution** — does every table it reads from, and every

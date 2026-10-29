@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bundles AutoDE's two entry points with esbuild (docs/mcp-engine-requirements.md
+ * Bundles AutoDE's two entry points with esbuild (docs/specs/mcp-engine.md
  * §3 D1/D2, phase 3; §3.1 D7, phase PA2):
  *   dist/extension.js   — the VS Code extension (external: vscode)
  *   dist/autode.js      — the `autode` CLI, `autode mcp` included (no externals; any Node ≥ 18)
@@ -68,7 +68,7 @@ const WEBVIEW_LIBRARIES = [['cytoscape', 'dist/cytoscape.min.js']];
 
 /** The phase-3 server path, still in users' MCP configurations: the same server as `autode mcp`. */
 const MCP_SHIM = `#!/usr/bin/env node
-// AutoDE MCP server. The server is \`autode mcp\` in autode.js (docs/mcp-setup.md); this path stays for existing configurations.
+// AutoDE MCP server. The server is \`autode mcp\` in autode.js (docs/guides/mcp-setup.md); this path stays for existing configurations.
 require('./autode.js').main(['mcp', ...process.argv.slice(2)]).catch((err) => { process.stderr.write('autode: ' + (err && err.message ? err.message : String(err)) + '\\n'); process.exit(1); });
 `;
 

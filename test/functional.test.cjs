@@ -3605,7 +3605,7 @@ async function main() {
     assert.ok(legacyLine && legacyLine.includes('_(file-derived, not live-verified)_'), 'a file-derived table must be explicitly flagged, not silently presented as equally solid');
   });
 
-  // ── v0.25.0: spec state synchronization (docs/mcp-engine-requirements.md §8) ──
+  // ── v0.25.0: spec state synchronization (docs/specs/mcp-engine.md §8) ──
   // An in-memory vscode.workspace.fs; `store` doubles as "another process"
   // editing files behind a manager's back.
   function revisionFsMock() {
@@ -3743,7 +3743,7 @@ async function main() {
     assert.deepStrictEqual(seen.sort(), ['/ws/.autode/problems/p1/context/source-context.yaml', '/ws/.autode/problems/p1/spec/business-problem.yaml']);
   });
 
-  // ── v0.26.0: engine boundary (docs/mcp-engine-requirements.md §4) ──
+  // ── v0.26.0: engine boundary (docs/specs/mcp-engine.md §4) ──
   await test('v0.26.0: every dist/engine module loads in plain Node with no vscode module available', () => {
     const nodeFs = require('node:fs');
     const nodePath = require('node:path');
@@ -3806,7 +3806,7 @@ async function main() {
     }
   });
 
-  // ── v0.27.0: grounding checks + eval harness (docs/context-layer-requirements.md §10) ──
+  // ── v0.27.0: grounding checks + eval harness (docs/specs/context-layer.md §10) ──
   function groundingIndex() {
     const { buildSchemaIndex } = require('../dist/engine/grounding/sqlGrounding.js');
     const nodes = [];
@@ -9398,7 +9398,7 @@ async function main() {
       assert.ok(C.probeInstaller(inst, fake('1.20.0', 0)).ok);
       assert.ok(/not installed|isn't installed/.test(C.probeInstaller(inst, () => ({ code: null, stdout: '', stderr: '', error: 'spawn databricks ENOENT' })).reason));
       // The generated page lists the references with their licences.
-      const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'docs', 'skills.md'), 'utf8');
+      const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'docs', 'guides', 'skills.md'), 'utf8');
       assert.ok(page.includes('`autode-de-mapping`') && page.includes('[`databricks-dabs`]') && page.includes('Databricks License') && /Redistributable/.test(page));
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
@@ -9746,7 +9746,7 @@ async function main() {
       const r = A.assignmentFor(scope, 'bi', []);
       assert.ok(!r.assignment && /No AutoDE skill does bi-migration stages yet/.test(r.reason), JSON.stringify(r));
       assert.ok(A.assignmentFor(scope, 'quality', []).assignment, 'a stage with a skill still gets its agent');
-      const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'docs', 'engineering-onboarding-guide.md'), 'utf8');
+      const page = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'docs', 'guides', 'engineering-onboarding-guide.md'), 'utf8');
       for (const c of ['**Business problem**', '**Specification**', '**Pack**', '**Estate and facts**', '**Workflow**', '**Approvals**', '**Mapping**', '**Model**', '**Pipeline Spec**', '**Artifacts**', '**Runbook**', '**Agents and skills**', '#### Internal', '#### Being simplified', '### 4.12 Runbooks and the runner']) assert.ok(page.includes(c), c);
       const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'workflow.html'), 'utf8');
       assert.ok(html.includes('manual</span>'));

@@ -3,7 +3,7 @@ import { AssertionLedger, NewAssertion } from './ledger';
 import { validateAssertion } from './assertionSchemas';
 
 /**
- * Facts from conversation (docs/context-layer-requirements.md §5.2, Phase
+ * Facts from conversation (docs/specs/context-layer.md §5.2, Phase
  * C4b). After each engineer turn in chat or the interview, the configured
  * model proposes the facts the turn states — the only LLM step. Everything
  * around it is deterministic: validation, subject resolution, dedup, and

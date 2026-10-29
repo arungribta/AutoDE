@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Generated large estate (Phase K2; docs/context-layer-requirements.md §11 Phase K, "Fixtures").
+ * Generated large estate (Phase K2; docs/specs/context-layer.md §11 Phase K, "Fixtures").
  *
  * Deterministic: the same seed always yields the same DDL. Four systems in the shapes AutoDE's
  * engagements meet — a readable order-management system, an ERP, a legacy EDW with cryptic

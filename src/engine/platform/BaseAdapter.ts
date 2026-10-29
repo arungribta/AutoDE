@@ -305,7 +305,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
   // ── Column Profiling (tier 2, Phase K2) ──
 
   /**
-   * Profiles columns within limits (docs/context-layer-requirements.md §11
+   * Profiles columns within limits (docs/specs/context-layer.md §11
    * Phase K, item 4): one sampled query per table where the platform has
    * `profileTable`, otherwise one query per column; at most `concurrency`
    * in flight and never more than `queryBudget` queries in one run. What the

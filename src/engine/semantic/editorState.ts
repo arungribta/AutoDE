@@ -10,7 +10,7 @@ import { layoutPath } from '../workspaceLayout';
 
 /**
  * What the Semantic Model editor shows and does (C5a;
- * docs/context-layer-requirements.md §6.7), without VS Code: the state of a
+ * docs/specs/context-layer.md §6.7), without VS Code: the state of a
  * file (a shared model, a composite or a resolved model), and the edits its
  * form makes to the YAML. The file stays the source of truth; every edit is a
  * new text, applied as an ordinary (undoable) document edit.

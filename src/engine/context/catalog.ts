@@ -5,7 +5,7 @@ import { DEFAULT_ENVIRONMENT, catalogWatermarks, edgeId, parseObjectId, slugifyI
 
 /**
  * Per-system catalogs and the working-set cache (Phase K2;
- * docs/context-layer-requirements.md §11 Phase K, items 4, 5, 8, 12).
+ * docs/specs/context-layer.md §11 Phase K, items 4, 5, 8, 12).
  *
  * The catalog holds what AutoDE knows about the estate's physical objects, in
  * tiers, incrementally — never a mirror of the whole estate:

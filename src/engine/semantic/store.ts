@@ -10,7 +10,7 @@ import { SemanticFinding } from './checks';
 import { LoadedModel, ModelBinding, SemanticLayerIndex, indexSemanticLayer } from './layer';
 
 /**
- * The semantic layer's files (C5a; docs/context-layer-requirements.md §6.2):
+ * The semantic layer's files (C5a; docs/specs/context-layer.md §6.2):
  * shared models in `<artifactDirectory>/semantic/<subject>.yaml`, each
  * problem's composites in `<artifactDirectory>/<problem>/semantic/<name>.yaml`
  * with their resolved `<name>.resolved.yaml`, and AutoDE's metadata — the

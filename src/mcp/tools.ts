@@ -15,8 +15,8 @@ import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
 
 /**
- * The MCP tools (docs/mcp-engine-requirements.md §5.1, §5.2;
- * context-layer-requirements.md §9 — the read-only part shipped with phase 3).
+ * The MCP tools (docs/specs/mcp-engine.md §5.1, §5.2;
+ * context-layer.md §9 — the read-only part shipped with phase 3).
  * Every tool is read-only and deterministic: no LLM calls (D5), no writes.
  * Inputs are validated against `inputSchema` before a handler runs.
  */

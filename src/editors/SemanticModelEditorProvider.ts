@@ -10,7 +10,7 @@ import { layoutPath } from '../engine/workspaceLayout';
 import { activeProblemId } from '../engine/documents/problems';
 
 /**
- * The Semantic Model editor (C5a; docs/context-layer-requirements.md §6.7):
+ * The Semantic Model editor (C5a; docs/specs/context-layer.md §6.7):
  * a custom text editor on the semantic layer's YAML — shared models,
  * composites and resolved models. The file is the source of truth: the form
  * and the YAML view change it through ordinary document edits (undo, diffs

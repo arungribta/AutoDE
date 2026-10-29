@@ -29,7 +29,7 @@ module.exports = {
   },
   overrides: [
     {
-      // Engine layer (v0.26.0, docs/mcp-engine-requirements.md §4.4): runs in the
+      // Engine layer (v0.26.0, docs/specs/mcp-engine.md §4.4): runs in the
       // extension host today and in the standalone MCP server from Phase 3, so it
       // must never depend on the VS Code API — not even for types.
       files: ['src/engine/**/*.ts', 'src/mcp/**/*.ts', 'src/cli/**/*.ts'],

@@ -1,4 +1,4 @@
-# AutoDE workflow template: estate merge (consolidation). docs/workflow-templates.md §4.
+# AutoDE workflow template: estate merge (consolidation). docs/specs/workflow-templates.md §4.
 # Basis: master data consolidation practice (profiling, standardisation, matching, survivorship)
 # and conformed dimensions. Reconciliation of every source against the merged result is mandatory.
 id: estate-merge

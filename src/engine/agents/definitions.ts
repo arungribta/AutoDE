@@ -6,7 +6,7 @@ import { parseSkillMarkdown } from '../skills/toolSkills';
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * AutoDE's agents and skills as definitions (PA3b, docs/mcp-engine-requirements.md
+ * AutoDE's agents and skills as definitions (PA3b, docs/specs/mcp-engine.md
  * §9.2 PA3 §3–4):
  * - a **role template** (`agents/<role>.md`, Markdown with a small frontmatter:
  *   name, description, tools, skills) says who does a stage — reviewed, bundled,

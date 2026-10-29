@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Stages and packs the standalone `autode` package (docs/mcp-engine-requirements.md
+ * Stages and packs the standalone `autode` package (docs/specs/mcp-engine.md
  * §3.1 D7, phase PA2): the engine, `autode mcp`, the CLI and the bundled
  * resources, laid out like the extension so the same dist/autode.js finds them.
  * It has no dependencies — dist/autode.js is self-contained.
@@ -60,7 +60,7 @@ function stage(outDir = path.join(root, 'dist', 'package')) {
   }
   // The package README is the CLI reference; its links point at the repository.
   const repo = (ext.repository && ext.repository.url ? ext.repository.url : '').replace(/\.git$/, '');
-  const readme = fs.readFileSync(path.join(root, 'docs', 'cli.md'), 'utf8')
+  const readme = fs.readFileSync(path.join(root, 'docs', 'guides', 'cli.md'), 'utf8')
     .replace(/\]\((?!https?:|#)([^)]+)\)/g, (_m, link) => `](${repo}/blob/master/docs/${link})`);
   fs.writeFileSync(path.join(outDir, 'README.md'), readme);
   const pkg = {

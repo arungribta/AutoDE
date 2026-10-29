@@ -4,7 +4,7 @@ import { AssertionLedger, LedgerEvent } from './ledger';
 import { isMirror } from './projection';
 
 /**
- * Conflict detection (C2, v0.29.0; docs/context-layer-requirements.md §8.1).
+ * Conflict detection (C2, v0.29.0; docs/specs/context-layer.md §8.1).
  * Deterministic. Considers every assertion that is `active`, `proposed` or
  * `needs_review`; superseded and rejected ones can't conflict.
  *

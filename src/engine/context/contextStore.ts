@@ -3,7 +3,7 @@ import { promises as fsp } from 'node:fs';
 
 /**
  * Compare-and-swap persistence for `.autode` files (v0.25.0, moved into
- * the engine layer in v0.26.0 — docs/mcp-engine-requirements.md §4.3/§8).
+ * the engine layer in v0.26.0 — docs/specs/mcp-engine.md §4.3/§8).
  *
  * A *revision* is the SHA-256 of a file's bytes; `undefined` means the file
  * is absent. A write states the revision it expects to replace and is

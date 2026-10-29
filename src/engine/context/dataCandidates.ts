@@ -6,7 +6,7 @@ import { ProbeExecutor, ProbeResult, ProbeSpec, ValueShape } from './probes';
 import { isMirror } from './projection';
 
 /**
- * The data before any model (C4c; docs/context-layer-requirements.md §5.5
+ * The data before any model (C4c; docs/specs/context-layer.md §5.5
  * item 2). Candidate keys, foreign keys, grain, change columns and personal
  * data by value shape are found deterministically from the estate, then
  * checked by the fixed, aggregate-only probes. A candidate that passes is

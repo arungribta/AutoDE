@@ -21,7 +21,7 @@ import { maintenanceTools } from './maintenanceTools';
 import { ARTICLE_RESOURCE_TEMPLATE, ASSET_RESOURCE_TEMPLATE, exploreTools } from './exploreTools';
 
 /**
- * The AutoDE MCP server (docs/mcp-engine-requirements.md §3, §5; phases 3
+ * The AutoDE MCP server (docs/specs/mcp-engine.md §3, §5; phases 3
  * and 4): the engine's registry, Pipeline Spec, prompts, resources, the
  * read-only context-layer tools and the data-platform tools over stdio.
  * Deterministic — no LLM calls (D5). It writes only proposals (decisions),

@@ -4,7 +4,7 @@ import { parseYaml } from '../context/Yaml';
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * The metadata model (MM1; docs/context-layer-requirements.md §6.11): tags,
+ * The metadata model (MM1; docs/specs/context-layer.md §6.11): tags,
  * ownership, domains and data products, certification, custom properties,
  * typed rules and quality dimensions — the concepts and names of the
  * standards and catalogs. Per-asset metadata is facts in the ledger (kind

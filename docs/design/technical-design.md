@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-10-15
 **Version:** 0.31.0
-**Scope:** HOW AutoDE is built — architecture, modules, data formats, algorithms and design trade-offs. What AutoDE must do and why: [requirements.md](requirements.md) and the forward specifications. Order and status: [roadmap.md](roadmap.md). Release history (moved out of this document on 2026-10-15): [CHANGELOG.md](../CHANGELOG.md). Document map: [README.md](README.md).
+**Scope:** HOW AutoDE is built — architecture, modules, data formats, algorithms and design trade-offs. What AutoDE must do and why: [requirements.md](../requirements.md) and the forward specifications. Order and status: [roadmap.md](../roadmap.md). Release history (moved out of this document on 2026-10-15): [CHANGELOG.md](../../CHANGELOG.md). Document map: [README.md](../README.md).
 
 > Restructured on 2026-10-15: sections 1, 2, 5, 7, 10.1–10.2, 11 and 12 were rewritten against the code at v0.30.0; the others were carried over with paths updated for the v0.26.0 move to `src/engine/`, and some still describe their version's design in narrative form. The historical phase list (old §10) was removed — release history is in CHANGELOG.md. Where this document and the code disagree, the code and the latest CHANGELOG entry win; corrections are tracked in the roadmap.
 
@@ -35,7 +35,7 @@
 
 ### 1.1 What this document covers
 
-How AutoDE is built: its processes and layers, where state lives, and how each capability in [requirements.md](requirements.md) is implemented. Requirement IDs (`GRD-4`, `ORC-3` …) and principles (P1–P9, C1–C9) are defined there and only referenced here.
+How AutoDE is built: its processes and layers, where state lives, and how each capability in [requirements.md](../requirements.md) is implemented. Requirement IDs (`GRD-4`, `ORC-3` …) and principles (P1–P9, C1–C9) are defined there and only referenced here.
 
 ### 1.2 Design principles (implementation level)
 
@@ -85,11 +85,11 @@ The product principles are in requirements.md §2. These are the implementation 
 │  Pipeline Spec, context tools, interview and skill prompts, resources │
 └───────────────────────────────────────────────────────────────────────┘
         ▲ Claude Code · VS Code agent mode · Cursor (configured by hand,
-          docs/mcp-setup.md). Planned: the extension becomes a client of
+          docs/guides/mcp-setup.md). Planned: the extension becomes a client of
           the same server and registers it (phase 5).
 ```
 
-**Direction from v0.40.0 (PA1 shipped in v0.40.0: §7.7; the rest planned).** C4b (v0.41.0, §5.14) is built on it. The portable architecture of [mcp-engine-requirements.md §3.1](mcp-engine-requirements.md) changes this picture phase by phase:
+**Direction from v0.40.0 (PA1 shipped in v0.40.0: §7.7; the rest planned).** C4b (v0.41.0, §5.14) is built on it. The portable architecture of [mcp-engine.md §3.1](../specs/mcp-engine.md) changes this picture phase by phase:
 - PA1 adds a decision store and proposal tools to the engine and the MCP server;
 - PA2 ships the engine on its own with a CLI;
 - phase 5 makes the extension a client of it;
@@ -1588,7 +1588,7 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
     - `toolsForTier()` takes the stage kind: on a `plan` stage, `autode_propose_workflow` is exempt from `HUB_ONLY`.
     - Role templates `agents/business-analyst.md` and `agents/planner.md`, and the skill `skills/autode-core-workflow-planning`.
     - The Workflow view shows `StageView.brief`.
-- **Platform skills** (v0.45.11; SKL-8, ORC-10; guide: [platform-skills.md](platform-skills.md)):
+- **Platform skills** (v0.45.11; SKL-8, ORC-10; guide: [platform-skills.md](../guides/platform-skills.md)):
   - **Skills:** `skills/autode-{snowflake,databricks}-{ingestion,pipelines,governance,performance,deployment}`, `skills/autode-dbt-project` (scope `dbt`, platforms snowflake and databricks) and `skills/autode-de-reconciliation`. Each ends with a worked example on the reference problem, in fenced blocks labelled by kind:
     - ` ```sql ` (optionally with a file name);
     - ` ```yaml runbook `;
@@ -1633,7 +1633,7 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - Assignments also carry `externalSkills`: catalog references for the kind and platform, `installed` when found in `hostSkillDirs()`. The installed ones are listed in the text.
   - `skillCatalog()` (`src/engine/agents/skillCatalog.ts`) merges the pack, the workspace's tool skills (`loadToolSkillStates`), the interview packs and `externalCatalog()`. The latter is `skills/external.yaml` with `.autode/config/external-skills.yaml` merged by id; each entry is validated (a source, a described licence, an own-words summary, a known availability, an installer when installable, no "importable" without a licence allowing it).
   - `probeInstaller()` runs the version command and the probe through an injectable `Runner` (`spawnRunner`: no shell, 15 s timeout).
-  - `renderCatalogMarkdown()` is used by `scripts/docs-generate.cjs` for `docs/skills.md`.
+  - `renderCatalogMarkdown()` is used by `scripts/docs-generate.cjs` for `docs/guides/skills.md`.
   - **Surfaces:** `autode skills list | show | check | install` (`src/cli/main.ts`; install needs a TTY and a typed `install`, and is judged by detection afterwards); `autode_skills_list` (`src/mcp/agentTools.ts`); the Skills view (`src/core/skillsView.ts`: `autoDataEngineeringHubSkills`, Install in the AutoDE terminal after a probe and a modal).
   - **Plugin clean-up:** `pruneSkills()` in `src/engine/agents/plugin.ts` removes what `.autode-installed.json` lists that is no longer shipped, and `LEGACY_SKILLS` folders whose `SKILL.md` names `mcp__autode__`, then writes the manifest.
 - **The pipeline engineer** (v0.45.4):
@@ -2126,8 +2126,8 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
   - `credentialNeeds()` gives the resolver's source and the `AUTODE_*` variables with whether each is set.
 
   It then checks `validateConnectionDraft()` (extracted from `saveConnection()`, which now calls it), tests, asks for the typed confirmation, and calls `saveConnection()`. `--resolver vscode` is refused outside the extension.
-- **Exit codes** (`EXIT`): 0 ok, 1 failed, 2 usage, 3 pending high-stakes decision, 4 refused, 5 not found, 6 platform, 70 internal. `EngineToolError` codes map onto them in `fail()`. The reference is docs/cli.md.
-- **Package** (`scripts/pack-cli.cjs`): `stage()` builds `dist/package/` from `dist/autode.js`, the shim, the notices, `skills/*.json`, `primitive-definitions/`, the 64 px icon and LICENSE. The README is docs/cli.md with its relative links rewritten to the repository. It writes a `package.json` with name `autode`, the extension's version, `bin.autode`, `engines.node >= 18` and no dependencies. `pack()` runs `npm pack --json --pack-destination`. `npm run package:cli` = production bundle, stage, pack. The layout mirrors the extension's, so `findResourcesRoot()` works unchanged. Tests check the file list, that no file references `vscode`, the size budget (tarball < 600 KB, unpacked < 2 MB; 282 KB and 1.27 MB at v0.42.0 with development bundles), and that `autode mcp` from the staged package lists the same tools, prompts and resources and gives the same tool results as `dist/mcp-server.js`. Nothing is published.
+- **Exit codes** (`EXIT`): 0 ok, 1 failed, 2 usage, 3 pending high-stakes decision, 4 refused, 5 not found, 6 platform, 70 internal. `EngineToolError` codes map onto them in `fail()`. The reference is docs/guides/cli.md.
+- **Package** (`scripts/pack-cli.cjs`): `stage()` builds `dist/package/` from `dist/autode.js`, the shim, the notices, `skills/*.json`, `primitive-definitions/`, the 64 px icon and LICENSE. The README is docs/guides/cli.md with its relative links rewritten to the repository. It writes a `package.json` with name `autode`, the extension's version, `bin.autode`, `engines.node >= 18` and no dependencies. `pack()` runs `npm pack --json --pack-destination`. `npm run package:cli` = production bundle, stage, pack. The layout mirrors the extension's, so `findResourcesRoot()` works unchanged. Tests check the file list, that no file references `vscode`, the size budget (tarball < 600 KB, unpacked < 2 MB; 282 KB and 1.27 MB at v0.42.0 with development bundles), and that `autode mcp` from the staged package lists the same tools, prompts and resources and gives the same tool results as `dist/mcp-server.js`. Nothing is published.
 - **Configure MCP** (`src/core/mcpConfig.ts`, command `autoDataEngineeringHub.configureMcpClaudeCode`): `chooseMcpEntry()` scans `PATH` (with `PATHEXT` on Windows; no process is spawned). An installed `autode` gives `autode mcp --workspace .` (`cmd /c autode …` on Windows, because native clients can't start npm's `.cmd` shim). Otherwise it uses `node <extension>/dist/autode.js mcp`, or VS Code's executable with `ELECTRON_RUN_AS_NODE=1` when there is no Node. `mergeMcpJson()` keeps other servers and keys. The command shows the command line in a modal and writes only on confirmation. At activation, `hintStaleMcpJson()` offers *Update .mcp.json* when the entry runs a bundle from another `auto-data-engineering-hub-<version>` folder; it never writes.
 
 ### 10.9 The extension as an MCP client; agent mode; stable server copy (v0.43.0; MCP-1, SKL-2)

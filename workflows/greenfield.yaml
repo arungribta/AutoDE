@@ -1,4 +1,4 @@
-# AutoDE workflow template: greenfield (docs/workflow-templates.md §2).
+# AutoDE workflow template: greenfield (docs/specs/workflow-templates.md §2).
 # Basis: the Kimball Lifecycle. The planning stage's output is the workflow for one problem;
 # this is the catalogue it starts from. Copy to .autode/config/workflows/ to change it.
 id: greenfield

@@ -7,7 +7,7 @@ import { governanceFacts, sameTable } from '../governance/governance';
 import { SemanticElement, SemanticModel, SemanticNamedExpr, SemanticRelationship, SemanticTable } from './model';
 
 /**
- * Draft from knowledge (C5a; docs/context-layer-requirements.md §6.5):
+ * Draft from knowledge (C5a; docs/specs/context-layer.md §6.5):
  * semantic elements from what AutoDE knows, deterministically — tables and
  * primary keys from declared keys and key facts, relationships from declared
  * foreign keys and relationship facts (direction and type from cardinality),

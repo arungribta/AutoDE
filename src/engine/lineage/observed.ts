@@ -3,7 +3,7 @@ import { ObjectIdentity, objectId, parseObjectId, slugifyId } from '../context/e
 import { AssertionLedger, LedgerEvent } from '../context/ledger';
 
 /**
- * Observed lineage (LIN, docs/context-layer-requirements.md §8.5), platform
+ * Observed lineage (LIN, docs/specs/context-layer.md §8.5), platform
  * neutral. The engine knows no platform's lineage views: edges read from a
  * platform (by its operations, once the platform operations catalog lands),
  * a vendor's lineage API or OpenLineage events come in as a batch, and are

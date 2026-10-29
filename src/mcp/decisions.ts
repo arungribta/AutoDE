@@ -23,7 +23,7 @@ import { combineProbeExecutors } from '../engine/context/probes';
 import { ASSERTION_KINDS } from '../engine/context/assertions';
 
 /**
- * Phase PA1 tools (docs/mcp-engine-requirements.md §9.2): agents propose
+ * Phase PA1 tools (docs/specs/mcp-engine.md §9.2): agents propose
  * changes, never make them. A proposal is validated, then becomes a pending
  * decision in `.autode/decisions/`. Low-stakes decisions may be resolved here
  * (the tool is destructive, so the host asks its user); high-stakes ones only

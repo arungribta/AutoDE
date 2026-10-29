@@ -1,5 +1,5 @@
 # AutoDE workflow template: modernization (previously brownfield; legacy migration).
-# docs/workflow-templates.md §3. Basis: Snowflake's migration guides, Databricks' EDW migration
+# docs/specs/workflow-templates.md §3. Basis: Snowflake's migration guides, Databricks' EDW migration
 # guide, Practical Data Migration (BCS). Reconciliation against the legacy system is mandatory.
 id: modernization
 version: 1

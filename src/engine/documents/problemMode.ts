@@ -8,7 +8,7 @@ import { parseBusinessProblemSpec, readProblemDocument } from './problemDocument
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * Exploration mode (C4c; docs/context-layer-requirements.md §7.4): most
+ * Exploration mode (C4c; docs/specs/context-layer.md §7.4): most
  * AutoDE work is exploration, a proof of concept or a proof of value. A
  * business problem in exploration mode proceeds on the model's recorded
  * assumptions instead of pausing, takes model proposals at `assumed` trust,

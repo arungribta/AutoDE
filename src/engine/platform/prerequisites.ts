@@ -9,7 +9,7 @@ import { DRIVERS, DriverId, driverStatus, installCommand } from './driverStore';
 
 /**
  * What each data platform needs on the engineer's machine, and how to get it
- * (docs/mcp-engine-requirements.md §9.1 Phase DRV1). AutoDE moderates: it
+ * (docs/specs/mcp-engine.md §9.1 Phase DRV1). AutoDE moderates: it
  * detects, explains, gives the exact install step and verifies; the install
  * itself runs only when the user asks. Phase DRV2's onboarding UI renders
  * this model.

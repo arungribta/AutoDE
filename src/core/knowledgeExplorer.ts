@@ -11,7 +11,7 @@ import { SetMetadataInput } from '../engine/metadata/record';
 import { CERTIFICATIONS_SET, OWNER_ROLES, loadMetadataConfig } from '../engine/metadata/model';
 
 /**
- * The Knowledge Explorer (C5b; docs/context-layer-requirements.md §6.10): an
+ * The Knowledge Explorer (C5b; docs/specs/context-layer.md §6.10): an
  * editor tab for exploring what AutoDE knows — search, asset pages, the graph,
  * facts and the estate. It reads through the engine's workspace, the same one
  * the CLI and the MCP server read, so every surface shows the same thing.

@@ -6,7 +6,7 @@ import { layoutPath, layoutRel } from '../../engine/workspaceLayout';
 /**
  * Runs an imported Claude Agent Skill (`SKILL.md` + resources) with real tool
  * access (Phase D; one path for every provider since v0.28.0 — Phase S1 of
- * docs/mcp-engine-requirements.md).
+ * docs/specs/mcp-engine.md).
  *
  * The run goes through `context.runWithTools`, i.e. the configured provider's own
  * tool loop (`getLlmAdapter(provider).complete` with a tool mode), so a skill works

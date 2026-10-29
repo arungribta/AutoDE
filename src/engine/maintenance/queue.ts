@@ -22,7 +22,7 @@ import { loadMaintenanceConfig, readMaintenanceState } from './policy';
 import { unreviewedTurns } from './turns';
 
 /**
- * The maintenance queue (MM2; docs/context-layer-requirements.md §5.6):
+ * The maintenance queue (MM2; docs/specs/context-layer.md §5.6):
  * deterministic rules decide that something needs attention, name the agent
  * suited to it, and a person decides. The queue is computed from the state
  * the rules look at — the ledger, the semantic layer, the articles, the packs,

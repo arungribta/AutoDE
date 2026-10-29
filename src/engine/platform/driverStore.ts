@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { createRequire } from 'node:module';
 
 /**
- * Drivers the user installs with AutoDE's guidance (docs/mcp-engine-requirements.md
+ * Drivers the user installs with AutoDE's guidance (docs/specs/mcp-engine.md
  * §9.1 Phase DRV1). AutoDE never downloads, bundles or hosts a driver. It knows
  * which package a platform needs, which versions it supports and how to check
  * an installation, and it hands the user the exact `npm` command. The command

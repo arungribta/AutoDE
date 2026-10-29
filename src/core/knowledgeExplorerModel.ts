@@ -5,7 +5,7 @@ import { renderAssetMarkdown, renderImpactCsv, renderImpactMarkdown } from '../e
 import type { ChangeKind, ImpactResult } from '../engine/explore/lineage';
 
 /**
- * The Knowledge Explorer's messages (C5b; docs/context-layer-requirements.md
+ * The Knowledge Explorer's messages (C5b; docs/specs/context-layer.md
  * §6.10), without VS Code: the webview asks, this answers from the engine's
  * explore functions — the same ones `autode explore` and the MCP tools use —
  * or tells the host what to open. Read-only: every change goes through the

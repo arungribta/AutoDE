@@ -5,7 +5,7 @@ import { layoutPath } from '../workspaceLayout';
 import { ARTIFACTS, Artifact, EXTERNAL_ARTIFACTS, Gate, STAGE_KINDS, StageKind } from './stageKinds';
 
 /**
- * Workflow templates (PA3a; docs/workflow-templates.md): stage catalogues per
+ * Workflow templates (PA3a; docs/specs/workflow-templates.md): stage catalogues per
  * category of engagement. Bundled in `workflows/*.yaml`; a workspace overrides
  * or adds templates by id in `.autode/config/workflows/`. The language is
  * deliberately small: inclusion, `when`, `after` (optionally "(approved)"),

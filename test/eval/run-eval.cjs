@@ -1,6 +1,6 @@
 'use strict';
 /**
- * AutoDE evaluation harness (v0.27.0 — docs/context-layer-requirements.md §10, Phase C1).
+ * AutoDE evaluation harness (v0.27.0 — docs/specs/context-layer.md §10, Phase C1).
  *
  *   npm run eval                                  offline: no LLM, deterministic, runs anywhere
  *   npm run eval -- --mode replay --provider openai   answer LLM calls from a recorded cassette
@@ -526,7 +526,7 @@ function renderReport(r) {
   L.push(`- **System under test:** ${r.sut}`);
   L.push(`- **Mode:** ${r.mode}${r.provider ? ` (provider: ${r.provider})` : ' (no LLM — deterministic fallbacks only)'}`);
   L.push(`- **Generated:** ${r.generatedAt}`, '');
-  L.push('Targets are from `docs/context-layer-requirements.md` §10.2. This report measures; the release gate on these numbers arrives with Phase C6.', '');
+  L.push('Targets are from `docs/specs/context-layer.md` §10.2. This report measures; the release gate on these numbers arrives with Phase C6.', '');
   L.push('## Summary', '', '| Metric | Target | Result |', '|---|---|---|');
   for (const [m, t, v] of summaryRows(r)) L.push(`| ${m} | ${t} | ${v} |`);
 

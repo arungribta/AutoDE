@@ -11,7 +11,7 @@ import { Article, articleSummary, articlesAbout } from '../knowledge/articles';
 import { ruleOf } from '../metadata/model';
 
 /**
- * Task-scoped context packs (C3, v0.30.0; docs/context-layer-requirements.md
+ * Task-scoped context packs (C3, v0.30.0; docs/specs/context-layer.md
  * §7.1). Replaces the one global dump every LLM call used to receive: each
  * call gets the context relevant to *its* task, within a token budget, and a
  * `PackManifest` records exactly what was included.

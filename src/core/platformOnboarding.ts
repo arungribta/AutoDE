@@ -13,7 +13,7 @@ import { listSnowflakeConnectionNames, snowflakeConnectionsTomlPath } from '../e
 import { readTnsNames } from '../engine/platform/credentials/tnsnames';
 
 /**
- * Platform onboarding in the settings cards (docs/mcp-engine-requirements.md
+ * Platform onboarding in the settings cards (docs/specs/mcp-engine.md
  * §9.1 Phase DRV2). Each platform card shows its prerequisites (DRV1 model),
  * the backend it will use, existing CLI connections or tnsnames aliases, and
  * saves the card as a **named connection** in `.autode/config/connections.yaml`

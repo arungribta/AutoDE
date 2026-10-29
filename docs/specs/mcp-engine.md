@@ -1,7 +1,7 @@
 # AutoDE — MCP Engine & Portable Skill Registry: Requirements Specification
 
-**Status:** In progress — order and status of every phase: [roadmap.md](roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion:** [context-layer-requirements.md](context-layer-requirements.md) · **Document map:** [README.md](README.md)
-**Kind:** phase specification — WHAT and WHY for planned work, plus the implementation contract the coding agent builds against. When a phase ships, its WHAT/WHY moves into [requirements.md](requirements.md), its HOW into [technical-design.md](technical-design.md), and its section here shrinks to a pointer.
+**Status:** In progress — order and status of every phase: [roadmap.md](../roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion:** [context-layer.md](context-layer.md) · **Document map:** [README.md](../README.md)
+**Kind:** phase specification — WHAT and WHY for planned work, plus the implementation contract the coding agent builds against. When a phase ships, its WHAT/WHY moves into [requirements.md](../requirements.md), its HOW into [technical-design.md](../design/technical-design.md), and its section here shrinks to a pointer.
 **Audience:** the coding agent (Claude Code, Gemini, Copilot) implementing this, and the reviewers approving each phase.
 
 ---
@@ -11,7 +11,7 @@
 1. Implement **one phase at a time** (§9), in order. Each phase is one minor version bump and ends with the acceptance criteria for that phase passing.
 2. Before changing a file, read it. Every file and symbol named here exists at the baseline commit; if one does not, stop and report it rather than guessing.
 3. Keep `npm test` and `npm run lint` green at the end of every phase. Add tests for every new behavior.
-4. Follow existing repo conventions (see [README.md](README.md) and the per-phase workflow in [roadmap.md](roadmap.md)): a `CHANGELOG.md` entry per phase, the affected requirements updated in `docs/requirements.md` (WHAT/WHY, by ID), comment density and naming as in the surrounding code.
+4. Follow existing repo conventions (see [README.md](../README.md) and the per-phase workflow in [roadmap.md](../roadmap.md)): a `CHANGELOG.md` entry per phase, the affected requirements updated in `docs/requirements.md` (WHAT/WHY, by ID), comment density and naming as in the surrounding code.
 5. Anything listed in §10 (Rejected approaches) is out of scope. Do not implement it even if it seems helpful.
 6. Where this document says **MUST**, it is a requirement; **SHOULD** is a strong default you may deviate from only with a written reason in the phase's changelog entry.
 
@@ -35,7 +35,7 @@ Business problem (interview, skills/*.json)
 
 Non-negotiable principles (every phase MUST preserve them):
 
-Defined in [requirements.md §2.1](requirements.md) (P1–P9), which is canonical: P1 the LLM selects and parameterises, never freehands where a primitive exists; P2 the catalog is governed at design time; P3 approval gates enforced by the orchestrator; P4 LLM-agnostic; P5 credentials are pointers; P6 small footprint, offline, no automatic downloads (AutoDE moderates installs the user starts; DRV1), new dependencies need a recorded decision; P7 platform CLIs are optional accelerators; P8 portable by standards (skills over deterministic tools via MCP; the host supplies the model); P9 people decide, machines are deterministic (§3.1).
+Defined in [requirements.md §2.1](../requirements.md) (P1–P9), which is canonical: P1 the LLM selects and parameterises, never freehands where a primitive exists; P2 the catalog is governed at design time; P3 approval gates enforced by the orchestrator; P4 LLM-agnostic; P5 credentials are pointers; P6 small footprint, offline, no automatic downloads (AutoDE moderates installs the user starts; DRV1), new dependencies need a recorded decision; P7 platform CLIs are optional accelerators; P8 portable by standards (skills over deterministic tools via MCP; the host supplies the model); P9 people decide, machines are deterministic (§3.1).
 
 ---
 
@@ -45,7 +45,7 @@ Defined in [requirements.md §2.1](requirements.md) (P1–P9), which is canonica
 2. **In-memory spec caches go stale.** `SpecManager`, `PipelineSpecManager`, `SourceContextManager`, `TargetContextManager` (and the other context managers) load YAML once in `initialize()` and serve from memory. The only `.autode` watcher (`ContextFileManager.ts:110`) uses the non-recursive glob `.autode/*.{yaml,yml,json}`, so `spec/` and `context/` subfolders are unwatched. If any other process (Claude Code, Copilot, `git pull`, an MCP tool) edits a spec, the extension keeps the old copy and can overwrite the newer file on its next save.
 3. **Platform access is coupled to VS Code.** `src/dqm/ConnectionManager.ts`, `dqm/types.ts`, `BaseAdapter.ts`, `adapters/SnowflakeAdapter.ts`, `credentials/index.ts`, `credentials/VsCodeSecretStorageResolver.ts` import `vscode`, so the adapters cannot run outside the extension host.
 4. **Packaging (verify):** the build is plain `tsc` and `.vscodeignore` excludes `node_modules/**`, so a packaged VSIX likely ships without `ajv` and `yaml`. Confirm with `npx vsce ls`. Phase 3's bundling fixes this regardless.
-5. **Version drift:** `package.json` says `0.13.0` while `docs/technical-design.md` is at v0.24.0. Phase 1 MUST align `package.json` to the documented version before bumping.
+5. **Version drift:** `package.json` says `0.13.0` while `docs/design/technical-design.md` is at v0.24.0. Phase 1 MUST align `package.json` to the documented version before bumping.
 
 ---
 
@@ -210,7 +210,7 @@ There is deliberately no vendor-named tool (`execute_snowflake_query` etc.); the
 
 ### 5.5 Resources (read-only)
 
-`autode://spec/business-problem`, `autode://spec/pipeline`, `autode://context/source`, `autode://context/target`, `autode://context/mapping`, `autode://context/semantic-layer`, `autode://primitives/{kind}`. Each resource includes its `revision`, so a client that later edits the file can detect conflicts. The server SHOULD emit `notifications/resources/updated` when a watched file changes. Context-layer tools, prompts and resources (ledger, context packs, semantic model, grounding checks) are specified in context-layer-requirements.md §9 and follow the same contract (§5.6).
+`autode://spec/business-problem`, `autode://spec/pipeline`, `autode://context/source`, `autode://context/target`, `autode://context/mapping`, `autode://context/semantic-layer`, `autode://primitives/{kind}`. Each resource includes its `revision`, so a client that later edits the file can detect conflicts. The server SHOULD emit `notifications/resources/updated` when a watched file changes. Context-layer tools, prompts and resources (ledger, context packs, semantic model, grounding checks) are specified in context-layer.md §9 and follow the same contract (§5.6).
 
 ### 5.6 Result and error contract
 
@@ -268,7 +268,7 @@ A thin typed wrapper (`searchPrimitives()`, `compileTransform()`, `compilePipeli
 
 - **Copilot / VS Code agent mode:** register the server with `vscode.lm.registerMcpServerDefinitionProvider` and the matching `contributes.mcpServerDefinitionProviders` entry. Raise `engines.vscode` to the minimum version that provides this API, and feature-detect at runtime so older hosts degrade gracefully.
 - **Claude Code / other clients:** new command `AutoDE: Configure MCP for Claude Code` that merges an `autode` entry into the workspace `.mcp.json` (create if missing; never drop other entries; show the diff and ask before writing). Because the extension install path changes on every update, on activation copy `dist/mcp-server.js` to a stable location under `context.globalStorageUri` (only when the version changed) and point the config there. Use `node` if it is on `PATH`, else the VS Code executable with `ELECTRON_RUN_AS_NODE=1` in the entry's `env`.
-- Add `docs/mcp-setup.md` with copy-paste configs for Claude Code, VS Code (`.vscode/mcp.json`) and Cursor.
+- Add `docs/guides/mcp-setup.md` with copy-paste configs for Claude Code, VS Code (`.vscode/mcp.json`) and Cursor.
 
 ---
 
@@ -289,7 +289,7 @@ Until this phase ships, the MCP server MUST NOT be given write access to `.autod
 
 ### 9.0 Combined roadmap
 
-The order, version and status of every phase — this spec's, the context-layer spec's, and the carried-forward ones — live in one place: [roadmap.md](roadmap.md). Implement in that order; each phase is one minor version. Phase identifiers: `1`–`6` (this spec), `C1`–`C6`, `C4a`/`C4b` and `K1`/`K2` (context-layer spec §11), `S1`–`S3`, `DRV1`/`DRV2` and `GOV` (§9.1 below). `DRV` and `GOV` were called D and G until 2026-10-15; they were renamed because those letters also name older, unrelated work (the v0.9.0 tool-skills "Phase D", and an unbuilt "Phase G" context-memory item).
+The order, version and status of every phase — this spec's, the context-layer spec's, and the carried-forward ones — live in one place: [roadmap.md](../roadmap.md). Implement in that order; each phase is one minor version. Phase identifiers: `1`–`6` (this spec), `C1`–`C6`, `C4a`/`C4b` and `K1`/`K2` (context-layer spec §11), `S1`–`S3`, `DRV1`/`DRV2` and `GOV` (§9.1 below). `DRV` and `GOV` were called D and G until 2026-10-15; they were renamed because those letters also name older, unrelated work (the v0.9.0 tool-skills "Phase D", and an unbuilt "Phase G" context-memory item).
 
 ### 9.1 Carried-forward phases (S1, S2, DRV1/DRV2, GOV, S3)
 
@@ -329,12 +329,12 @@ In short: AutoDE keeps a sidecar per imported skill (status, version, provenance
 **Principle: AutoDE moderates, it does not distribute.** AutoDE bundles, hosts and downloads no driver. For each platform it knows the **prerequisites** (a platform CLI, a driver package, a client library). For each one it can detect it, say why it is needed, give the exact install step, and verify the result. The install runs only when the user clicks, as a visible command in an AutoDE terminal, using the user's own tools. For npm packages this is `npm` with the user's own `.npmrc`, so internal registries (Artifactory, Nexus), proxies, registry authentication and lockfile integrity work exactly as they do for the user's other projects. P6 holds by construction: nothing heavy or native enters AutoDE's package, and nothing downloads unless the user starts it.
 
 ##### Phase DRV1 (v0.38.0): prerequisites, moderated install, Oracle as a source
-**Status:** ✅ shipped in v0.38.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md PLT-1, PLT-7; HOW: technical-design.md §6.13; setup: [mcp-setup.md](mcp-setup.md) (Oracle). The full specification text is in git (this file at commit 77d02c3).
+**Status:** ✅ shipped in v0.38.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md PLT-1, PLT-7; HOW: technical-design.md §6.13; setup: [mcp-setup.md](../guides/mcp-setup.md) (Oracle). The full specification text is in git (this file at commit 77d02c3).
 
 In short: a prerequisite model per platform (CLI, driver, client library: detect, why, install step, verify), the driver store (`~/.autode/drivers` or the `driversDirectory` setting, shared with the MCP server), an `npm install --ignore-scripts` command run in a visible AutoDE terminal only on the user's click, a verification record bound to the lockfile, and Oracle 12.1+ in Thin mode as a source: tnsnames aliases or Easy Connect, ALL_* metadata with primary and foreign keys, Oracle probes and q-quote-aware read-only guard, in `connections.yaml`, the MCP tools and the extension's connection flow.
 
 ##### Phase DRV2 (v0.39.0): platform onboarding in the settings cards
-**Status:** ✅ shipped in v0.39.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md PLT-7, PLT-8; HOW: technical-design.md §6.14; setup: [mcp-setup.md](mcp-setup.md) (Data platforms). The full specification text is in git (this file at v0.38.0).
+**Status:** ✅ shipped in v0.39.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md PLT-7, PLT-8; HOW: technical-design.md §6.14; setup: [mcp-setup.md](../guides/mcp-setup.md) (Data platforms). The full specification text is in git (this file at v0.38.0).
 
 In short: no separate "Data Platforms" tab (decided with the owner, 2026-10-18). Each platform card in the Source and Target tabs shows its prerequisites with Install / Verify, the backend it will use with that backend's caveat, and the existing CLI connections, Databricks profiles or tnsnames aliases. **Save as named connection** connects first and writes only if the check passes: shared fields to `.autode/config/connections.yaml`, personal ones to the gitignored `.autode/local/connections.yaml`, and secrets to VS Code's secret storage under the new `resolver: vscode`, which an MCP server reads from same-named env variables. A **Saved connections** list per tab shows readiness for AutoDE and for MCP clients separately (per machine, bound to the entry), with Use, Re-check and Remove. Connect resolves a named connection through the credential resolvers, as the MCP server does. There is an Oracle source card; Oracle as a target is not offered. The existing Snowflake and Databricks flows are unchanged.
 
@@ -363,17 +363,17 @@ Acceptance:
 - Plan execution, connection test, source assessment and primitive preview work manually exactly as at v0.25.0.
 
 ### Phase 3: MCP server — registry, spec, prompts, resources
-**Status:** ✅ shipped in v0.35.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, NFR-5; HOW: technical-design.md §10.6, §10.7; setup: [mcp-setup.md](mcp-setup.md). The full specification text is in git (this file at v0.34.0).
+**Status:** ✅ shipped in v0.35.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, NFR-5; HOW: technical-design.md §10.6, §10.7; setup: [mcp-setup.md](../guides/mcp-setup.md). The full specification text is in git (this file at v0.34.0).
 
 In short: `dist/mcp-server.js`, bundled with esbuild and runnable in plain Node, exposes §5.1 and §5.2 as tools, §5.4 prompts and §5.5 resources, plus the read-only context tools of context-layer §9 (`autode_resolve`, `autode_get_context_pack`, `autode_list_assertions`, `autode_check_grounding`), under the §5.6 error contract with redaction. The extension is bundled the same way and the package ships no `node_modules/`. Contract tests run the bundle over stdio; golden snapshots pin every Tier-1 primitive's output per dialect.
 
 ### Phase 4: MCP server — data platform
-**Status:** ✅ shipped in v0.37.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, SEC-5; HOW: technical-design.md §6.12, §10.6; setup: [mcp-setup.md](mcp-setup.md) (Data platforms). The full specification text is in git (this file at v0.36.0).
+**Status:** ✅ shipped in v0.37.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, SEC-5; HOW: technical-design.md §6.12, §10.6; setup: [mcp-setup.md](../guides/mcp-setup.md) (Data platforms). The full specification text is in git (this file at v0.36.0).
 
 In short: the §5.3 tools over connections defined in `.autode/config/connections.yaml` (pointers and non-secret settings; secrets from env vars or the platform CLI's configuration, §6). `autode_execute_query` runs one statement, read-only unless the server is started with `--allow-write`, behind a lexical guard that reads the SQL under two quoting conventions. Row values — query results, profile minimums and maximums, query-history text — reach a prompt only when the connection's `allowSampleDataInPrompts` is on; personal-data columns are masked when it is. The live acceptance checks (Snowflake CLI and key-pair, Databricks PAT, a machine without CLIs) are in manual-verification.md Part 14.
 
 ### Phase 5: Extension as an MCP client; exposure to other agents
-**Status:** ✅ shipped in v0.43.0, **restructured** (roadmap decision log 2026-10-20). What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, SKL-2; HOW: technical-design.md §10.9; usage: [mcp-setup.md](mcp-setup.md). The full specification text is in git (this file at commit bc10a2c).
+**Status:** ✅ shipped in v0.43.0, **restructured** (roadmap decision log 2026-10-20). What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-1, SKL-2; HOW: technical-design.md §10.9; usage: [mcp-setup.md](../guides/mcp-setup.md). The full specification text is in git (this file at commit bc10a2c).
 
 In short: VS Code's agent mode lists AutoDE's tools with no configuration (MCP server definition provider, feature-detected; `resolver: vscode` secrets added only when VS Code starts the server). `.mcp.json` survives extension updates through the installed `autode` or a stable copy in global storage. The extension reaches the engine through an in-process `EngineClient` (MCP over an in-memory transport); imported tool skills get the engine's tools within their `allowed-tools`, mode and trust tier, and PA3's in-process executor uses the same client. Not done, by decision: the lint ban on engine value imports, panel approvals through the MCP tools, rerouting the built-in agents, and a supervised child process. §7 below describes the original plan.
 
@@ -390,12 +390,12 @@ Acceptance: the conformance suite runs in `npm test`; a deliberately broken prim
 *Added 2026-10-18 for §3.1. Order and versions: roadmap.md. Phase 5 (below) belongs to the same direction.*
 
 #### Phase PA1: Decision store and proposal tools
-**Status:** ✅ shipped in v0.40.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md ORC-8, MCP-2, P9; HOW: technical-design.md §7.7; usage: [mcp-setup.md](mcp-setup.md) (Proposing changes). The full specification text is in git (this file at commit 437e7e6).
+**Status:** ✅ shipped in v0.40.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md ORC-8, MCP-2, P9; HOW: technical-design.md §7.7; usage: [mcp-setup.md](../guides/mcp-setup.md) (Proposing changes). The full specification text is in git (this file at commit 437e7e6).
 
 In short: proposals are validated and become decisions in `.autode/decisions/`. Stakes are defined in the engine and recomputed on every resolution. High-stakes decisions are resolved only in the panel or through a committed decision file; low-stakes ones also through the proposing agent. Approved decisions are applied by engine code, and a decision whose document changed meanwhile is superseded. `autode_execute_query` no longer runs writes: a platform change is proposed, approved and then applied by an `--allow-write` server. The panel's approvals are recorded as decisions. *Changed in v0.41.0 (C4b):* facts go through the ledger's own gate (proposed, then confirmed in the Context Inbox) rather than decision files; decisions remain the gate for documents, mappings and platform changes.
 
 #### Phase PA2: The engine on its own — `autode` package and CLI
-**Status:** ✅ shipped in v0.42.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-3, P9; HOW: technical-design.md §10.8; usage: [cli.md](cli.md) (commands, exit codes) and [mcp-setup.md](mcp-setup.md) (per-host set-up). The full specification text is in git (this file at commit fd73fff).
+**Status:** ✅ shipped in v0.42.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md MCP-3, P9; HOW: technical-design.md §10.8; usage: [cli.md](../guides/cli.md) (commands, exit codes) and [mcp-setup.md](../guides/mcp-setup.md) (per-host set-up). The full specification text is in git (this file at commit fd73fff).
 
 In short: one `autode` package (engine, `autode mcp`, CLI, bundled resources; no runtime dependency) that the VSIX ships as the same `dist/autode.js`. The deterministic commands are `validate`, `compile`, `grounding`, `conformance`, `probe` (report only), `doctor` and `check` (the CI gate). The `decisions` commands are human only (interactive terminal, refused with `CI` set). Exit codes are stable. `AutoDE: Configure MCP for Claude Code` prefers the installed `autode mcp`. The skills pack joins the package in PA3. Publishing to a registry remains the owner's step.
 
@@ -583,7 +583,7 @@ Everything that changes a data platform runs through one deterministic runner. A
 
 ##### 8b. Platform skills and vendor skills (shipped v0.45.11; owner, 2026-10-22; naming and the catalog shipped in v0.45.5)
 
-**Status:** ✅ shipped in v0.45.11. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md SKL-8, ORC-10; HOW: technical-design.md §7.9 (Platform skills); usage: [platform-skills.md](platform-skills.md). The full specification text is in git (this file at commit 74fee3c).
+**Status:** ✅ shipped in v0.45.11. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md SKL-8, ORC-10; HOW: technical-design.md §7.9 (Platform skills); usage: [platform-skills.md](../guides/platform-skills.md). The full specification text is in git (this file at commit 74fee3c).
 
 In short: twelve AutoDE skills (Snowflake and Databricks ingestion, pipelines, governance, performance, deployment; dbt; reconciliation), each with a worked example on the reference problem that `npm test` checks against the estate, the platform's dialect and the runbook checks. They are chosen by stage kind and target platform (dbt also by the transformation tool). Vendor skills are referenced, never copied: named when installed, listed with a person's install step when not. The plugin's guard hook blocks platform-changing `snow`/`databricks` commands in hosts with hooks; elsewhere it is a convention.
 
@@ -672,4 +672,4 @@ PA4 (port a skill) follows PA3c, by the owner's decision of 2026-10-21. GOV, C5,
 
 ## 11. Documentation deliverables
 
-PA2 adds a CLI reference and per-host set-up; PA3 and PA4 add a skills authoring guide (skills, tools, proposals). Per phase: a `CHANGELOG.md` entry, the affected requirements in `docs/requirements.md` updated by ID (WHAT/WHY only), the HOW in `docs/technical-design.md`, and onboarding-guide updates for the new `src/engine/` / `src/mcp/` layout. Phase 3 adds `docs/mcp-setup.md`. Phase 6 adds a "How to onboard a new primitive" section covering the conformance requirements.
+PA2 adds a CLI reference and per-host set-up; PA3 and PA4 add a skills authoring guide (skills, tools, proposals). Per phase: a `CHANGELOG.md` entry, the affected requirements in `docs/requirements.md` updated by ID (WHAT/WHY only), the HOW in `docs/design/technical-design.md`, and onboarding-guide updates for the new `src/engine/` / `src/mcp/` layout. Phase 3 adds `docs/guides/mcp-setup.md`. Phase 6 adds a "How to onboard a new primitive" section covering the conformance requirements.

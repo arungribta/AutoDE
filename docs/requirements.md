@@ -1,6 +1,6 @@
 # AutoDE — Requirements
 
-**What AutoDE must do, and why.** This document is authoritative for shipped behaviour and for the product-wide principles. It does not say how anything is built: that is [technical-design.md](technical-design.md). Planned work is specified in [mcp-engine-requirements.md](mcp-engine-requirements.md) and [context-layer-requirements.md](context-layer-requirements.md); order and status are in [roadmap.md](roadmap.md); release history is in [CHANGELOG.md](../CHANGELOG.md). Document map: [README.md](README.md).
+**What AutoDE must do, and why.** This document is authoritative for shipped behaviour and for the product-wide principles. It does not say how anything is built: that is [technical-design.md](design/technical-design.md). Planned work is specified in [mcp-engine.md](specs/mcp-engine.md) and [context-layer.md](specs/context-layer.md); order and status are in [roadmap.md](roadmap.md); release history is in [CHANGELOG.md](../CHANGELOG.md). Document map: [README.md](README.md).
 
 Last updated: 2026-10-15 (rewritten as WHAT/WHY only; the previous version, with its implementation detail and per-version narratives, is at commit `fc16b0d` — Appendix A maps every old section to its new home).
 
@@ -35,21 +35,31 @@ AutoDE is a VS Code extension that takes a data-engineering business problem fro
 
 ### 1.1 Where planned work is specified
 
-This document states what AutoDE does and why; requirements marked *Planned* or *Partial* are completed by phases specified in two companion documents. They hold the detail — design contracts, acceptance criteria, rejected alternatives — and are not repeated here. Each capability section below ends with a *Planned work* line pointing to them. When a phase ships, its WHAT/WHY moves into this document and its specification shrinks to a pointer ([README.md](README.md)).
+This document is the root of AutoDE's requirements: it states what AutoDE does and why, and every specification hangs from it. Requirements marked *Planned* or *Partial* are completed by phases specified in the documents under [specs/](specs/):
+
+| Specification | Covers |
+|---|---|
+| [mcp-engine.md](specs/mcp-engine.md) | The MCP server and engine boundary, the portable architecture (skills, tools, decisions, the standalone package), platform access, governance |
+| [context-layer.md](specs/context-layer.md) | The ledger, context packs, grounding, estate catalogs, business-problem documents, the semantic layer, the metadata model, lineage, the ontology, imports |
+| [platform-operations.md](specs/platform-operations.md) | Platform operations: every interaction with a platform as a reviewed file run by one executor; the operations and skills catalog (POP1–POP5) |
+| [ui-simplification.md](specs/ui-simplification.md) | UI2: one AutoDE window, the whole journey of a problem in view, a smaller palette |
+| [workflow-templates.md](specs/workflow-templates.md) | Stage kinds and the greenfield, modernization and estate-merge templates |
+
+The table below maps each capability area to them. They hold the detail — design contracts, acceptance criteria, rejected alternatives — and are not repeated here. Each capability section below ends with a *Planned work* line pointing to them. When a phase ships, its WHAT/WHY moves into this document and its specification shrinks to a pointer ([README.md](README.md)).
 
 | Capability area (this document) | Specified in | Phases (order: [roadmap.md](roadmap.md)) |
 |---|---|---|
-| Business problem and specification (BPS), Conversation (CHT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA3 (built-in skills, incl. the interview) | PA3 |
-| Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §1.1 enterprise context, §5.5 capture coverage, §6 semantic layer, ontology (§6.8), imports (§6.9), Knowledge Explorer (§6.10), §7.4 exploration mode, §8 freshness and health, lineage (§8.5) | C4c, C5a–C5d, LIN, ONT1, ONT2, IMP1–IMP4, C6; migration track M1–M3 (not yet written) |
-| Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §7.5 asset context and explainability, §10 grounding checks and metrics | C5, C6 |
-| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client (secrets passed to the server it starts); [platform-operations.md](platform-operations.md) platform operations and their catalog (PLT-9) | 5, POP1–POP5 |
-| Planning and orchestration (ORC), Generation (GEN) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §3.1 and §9.2 portable architecture, §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer-requirements.md](context-layer-requirements.md) §6 semantic layer, §7.4 exploration mode | PA1, PA3, 5, 6, GOV, C4c, C5a–C5d |
-| Tool skills (SKL) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 Phases PA3, PA4, §9 Phase 6 | PA3, PA4, 6 |
-| Interoperability with other agents (MCP) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §3.1 and §9.2 portable architecture, §7 extension as client; [context-layer-requirements.md](context-layer-requirements.md) §9 context-layer tools | PA1, PA2, 5, PA3, C4b, C5 |
-| Governance and security (SEC) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.1 Phase GOV | GOV |
-| Non-functional (NFR) | [context-layer-requirements.md](context-layer-requirements.md) §10.2 metrics, §11 Phase C6 release evaluation | C6 |
+| Business problem and specification (BPS), Conversation (CHT) | [mcp-engine.md](specs/mcp-engine.md) §9.2 PA3 (built-in skills, incl. the interview) | PA3 |
+| Source and target context (STC), Context layer (CTX) | [context-layer.md](specs/context-layer.md) §1.1 enterprise context, §5.5 capture coverage, §6 semantic layer, ontology (§6.8), imports (§6.9), Knowledge Explorer (§6.10), §7.4 exploration mode, §8 freshness and health, lineage (§8.5) | C4c, C5a–C5d, LIN, ONT1, ONT2, IMP1–IMP4, C6; migration track M1–M3 (not yet written) |
+| Context delivery and grounding (GRD) | [context-layer.md](specs/context-layer.md) §7.5 asset context and explainability, §10 grounding checks and metrics | C5, C6 |
+| Data platforms and credentials (PLT) | [mcp-engine.md](specs/mcp-engine.md) §7 extension as MCP client (secrets passed to the server it starts); [platform-operations.md](specs/platform-operations.md) platform operations and their catalog (PLT-9) | 5, POP1–POP5 |
+| Planning and orchestration (ORC), Generation (GEN) | [mcp-engine.md](specs/mcp-engine.md) §3.1 and §9.2 portable architecture, §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer.md](specs/context-layer.md) §6 semantic layer, §7.4 exploration mode | PA1, PA3, 5, 6, GOV, C4c, C5a–C5d |
+| Tool skills (SKL) | [mcp-engine.md](specs/mcp-engine.md) §9.2 Phases PA3, PA4, §9 Phase 6 | PA3, PA4, 6 |
+| Interoperability with other agents (MCP) | [mcp-engine.md](specs/mcp-engine.md) §3.1 and §9.2 portable architecture, §7 extension as client; [context-layer.md](specs/context-layer.md) §9 context-layer tools | PA1, PA2, 5, PA3, C4b, C5 |
+| Governance and security (SEC) | [mcp-engine.md](specs/mcp-engine.md) §9.1 Phase GOV | GOV |
+| Non-functional (NFR) | [context-layer.md](specs/context-layer.md) §10.2 metrics, §11 Phase C6 release evaluation | C6 |
 
-Workspace (WS) and LLM providers (LLM) have no open specification; their open items are in the roadmap's backlog. User experience (UI): the Knowledge Explorer is specified in [context-layer-requirements.md](context-layer-requirements.md) §6.10 (C5b, LIN, ONT1); other open items are in the backlog.
+Workspace (WS) and LLM providers (LLM) have no open specification; their open items are in the roadmap's backlog. User experience (UI): the Knowledge Explorer is specified in [context-layer.md](specs/context-layer.md) §6.10 (C5b, LIN, ONT1); one window, the journey view and the palette in [ui-simplification.md](specs/ui-simplification.md) (UI2); the Platform catalog in [platform-operations.md](specs/platform-operations.md) §6.3 (POP4); other open items are in the backlog.
 
 ## 2. Principles
 
@@ -113,7 +123,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   *Why:* knowledge is per workspace, and a person must know whether a new problem extends the same estate or needs its own (owner, 2026-10-28). *Status:* Shipped v0.53.2.
 - **BPS-10 — The specification states intent and scope; detailed clauses stay with their source documents** and are referenced, not copied. *Why:* a specification that copies a contract drifts from it. *Status:* Partial v0.33.0 — a specification drafted while the problem has a pack records the ids of the contract clauses it rests on and is drafted with them in view; the specification's own fields are not yet restructured around references.
 
-*Planned work:* an interview that survives a reload (roadmap backlog); the interview as an AutoDE skill — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA3. Document facts: [context-layer-requirements.md](context-layer-requirements.md) §5.2, §5.4 (C4b).
+*Planned work:* an interview that survives a reload (roadmap backlog); the interview as an AutoDE skill — [mcp-engine.md](specs/mcp-engine.md) §9.2 PA3. Document facts: [context-layer.md](specs/context-layer.md) §5.2, §5.4 (C4b).
 
 ### 3.3 Source and target context (STC)
 
@@ -128,7 +138,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **STC-9 — Live-verified and file-derived facts are never blended silently;** the difference is shown to the user and to the model. An explicit re-verify reports what appeared and disappeared without deleting anything on its own. *Status:* Shipped v0.24.0.
 - **STC-10 — An estate is modelled as systems, environments and locations.** Several source systems and a target coexist; identically named tables in different systems stay distinct; roles (source, target, both) belong to a system or schema, so in-place modernisation and dev/test/prod are expressible. The estate is recorded in the repository and editable; a connection or imported file not yet assigned gets a system named after it. *Why:* estate merge and migration. *Status:* Shipped v0.31.0. Since v0.43.2 the estate can be filled without VS Code, from schema files or a connection's schemas, by an engineer in a terminal or by an agent. It's recorded exactly as the panel records it, and since it's observed metadata it needs no approval.
 
-*Planned work:* semantic model — [context-layer-requirements.md](context-layer-requirements.md) §6 (C5); legacy migration assessment and mapping — migration track M1–M3 (to be specified).
+*Planned work:* semantic model — [context-layer.md](specs/context-layer.md) §6 (C5); legacy migration assessment and mapping — migration track M1–M3 (to be specified).
 
 ### 3.4 Data platforms and credentials (PLT)
 
@@ -151,9 +161,9 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - Drift (a renamed view, an unread object kind) is noticed and raised.
   - Every kind of system AutoDE works with (warehouses, lakehouses, semantic platforms, catalogs) is described by a platform definition and its capability map. The catalog shows, per system and connection, what AutoDE can do, what is missing (a privilege, an edition) and what relies on it. New systems are onboarded from a template.
 
-  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0, with Redshift as a source), POP4 (v0.57.0), POP3 (v0.58.0), POP5 (v0.61.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
+  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](specs/platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0, with Redshift as a source), POP4 (v0.57.0), POP3 (v0.58.0), POP5 (v0.61.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
 
-*Planned work:* secrets kept in VS Code's secret store reach an MCP server only when the extension starts it — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5); Oracle as a target — roadmap backlog.
+*Planned work:* secrets kept in VS Code's secret store reach an MCP server only when the extension starts it — [mcp-engine.md](specs/mcp-engine.md) §7 (phase 5); Oracle as a target — roadmap backlog.
 
 ### 3.5 Context layer (CTX)
 
@@ -261,7 +271,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **ORC-7 — Long-running actions show progress, and completion is confirmed** with the next actions offered. *Status:* Shipped v0.9.0 / v0.10.0.
 - **ORC-8 — Every AI-proposed change is a decision with stakes,** validated before anyone sees it, and applied only after it is resolved. Consequential decisions (specifications, mappings, models, plans, generated artifacts, platform changes) are resolved only by a person, in the panel, an interactive terminal or a reviewed decision file; minor ones may be accepted through the agent that proposed them, with its user's confirmation. Every resolution records who proposed it (host, skill, model where known), who decided, and how (P3, P9). *Why:* approval must hold whichever host or skill made the proposal. *Status:* Shipped v0.40.0 for facts, specification and Pipeline Spec revisions, mappings and platform changes; the panel's specification and Pipeline Spec approvals are recorded as decisions. Resolution channels today: the panel, a reviewed decision file, and, for minor decisions, the proposing agent. The terminal channel comes with the command-line tool (MCP-3). A specification or Pipeline Spec change approved outside the panel becomes the draft; its lifecycle approval stays in the panel.
 
-*Planned work:* the extension reaches the engine through MCP — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5).
+*Planned work:* the extension reaches the engine through MCP — [mcp-engine.md](specs/mcp-engine.md) §7 (phase 5).
 
 - **ORC-11 — A business problem can run in exploration mode,** for exploration and proofs of concept: gaps are filled by the model's recorded assumptions instead of pausing, checks warn instead of refusing, and gates take one click, under a disclaimer the person acknowledges. Platform safety never relaxes (runbooks, production policy, sample-data consent, secrets). Switching to governed lists everything assumed. *Why:* most AutoDE work is exploration; it must move fast without passing as grounded (P2). *Status:* Shipped v0.48.0 (`autode problems mode`, the panel's Business Problem card). Completeness is listed, not yet blocking, in governed mode.
 - **ORC-10 — Everything that changes a data platform runs through one runner: an agent writes the runbook, the engine checks it, a person approves it, deterministic code runs it.** Each step is classified read, change or destructive by the engine, CLI commands are allowlisted, destructive steps carry a rollback, approvals follow the team's policy per environment (production needs a named approver and never runs unattended), and every action is logged in a tamper-evident run log. A wizard in VS Code makes approving and running a runbook a matter of reviewing and clicking, for engineers and non-engineers alike. *Why:* execution should be easy without letting a model decide what runs (P5, P7, P9). *Status:* Shipped v0.45.6; since v0.45.8 the only way to change a platform (the single-statement platform change and the server's `--allow-write` are gone). Runbooks (`autode_propose_runbook`), the engine's classification and allowlist, the policy in `.autode/config/approvals.yaml` (an unlisted connection counts as production), the Runbook tab, `autode runbook list | show | approve`, and a hash-chained run log. The interactive terminal runner is in the backlog. Since v0.45.11, in agent hosts with hooks (Claude Code; Cortex Code through the plugin folder), AutoDE's plugin blocks platform-changing `snow` and `databricks` commands the host's agent tries to run, and points it to a runbook. Where a host has no hooks, this is a convention stated in the skills, not a guarantee. Runbook checks also flag the other platform's SQL, and treat `VACUUM` as destructive.
@@ -283,7 +293,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   *Why:* enterprise-aware generation, not just syntactically correct code (P1, C3). *Status:* Planned (PAT).
 - **GEN-7 — Further generators:** DDL, orchestration (Airflow, Dagster, Prefect) and tests as dedicated agents. *Status:* Not met (DDL likely covered by M2).
 
-*Planned work:* per-dialect primitives, conformance suite, dry-run before execute, idempotent DDL — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9 Phase 6; semantic-model exports — [context-layer-requirements.md](context-layer-requirements.md) §6 (C5); patterns and recommendations — §7.6 (PAT).
+*Planned work:* per-dialect primitives, conformance suite, dry-run before execute, idempotent DDL — [mcp-engine.md](specs/mcp-engine.md) §9 Phase 6; semantic-model exports — [context-layer.md](specs/context-layer.md) §6 (C5); patterns and recommendations — §7.6 (PAT).
 
 ### 3.9 Conversation (CHT)
 
@@ -323,7 +333,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **SKL-9 — One catalog shows every skill AutoDE has or works with:** its own (named `autode-<scope>-<capability>`, each declaring the stage kinds and platforms it serves, its version and maturity), the team's imported ones with their review state, and the vendor and community skills it works with, listed by reference with their licence and whether they are installed, never copied. Installing an external skill uses the vendor's own command, checked first and run only when a person confirms. *Why:* a team and a reviewer must see at a glance what AutoDE can do, and vendor licences must be respected (P2, P6). *Status:* Shipped v0.45.5.
 - **SKL-7 — A data engineer ports a skill through a guided step in the panel, without code:** from a folder, a Git repository or a dbt package; AutoDE analyses it, reports what it can do, what it needs and which of its actions will need approval, and publishes it only after review. Updates are shown as differences and need review again. *Why:* new capability should come from the skills ecosystem without engineering work, and without weakening review (P2). *Status:* Shipped v0.46.0. A wizard in the panel (and `autode skills analyze | import | update | review | publish` in a terminal; `autode_skills_analyze` in agent hosts, read only) takes a skill from a Git repository, a folder or a dbt package. Nothing is copied before the person imports it. The capability report says what the skill is (knowledge or procedure), what it reads, which of its changes become decisions, whether it writes or runs commands, what it needs, its licence (a licence that forbids copying refuses the import) and its overlaps; a model can propose a reading the person accepts or rejects. Published and reviewed, a knowledge skill joins the context packs whose question it matches, and a skill that declares stage kinds joins those stages' assignments. Not yet: a dry run on a sample workspace.
 
-*Planned work:* built-in skills, the Port-a-skill step (with Git and vendor import, update diffs, starter library, authoring guidance) — [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 Phases PA3, PA4.
+*Planned work:* built-in skills, the Port-a-skill step (with Git and vendor import, update diffs, starter library, authoring guidance) — [mcp-engine.md](specs/mcp-engine.md) §9.2 Phases PA3, PA4.
 
 ### 3.12 Interoperability with other agents (MCP)
 
@@ -332,7 +342,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **MCP-2 — Other agents can propose changes, never make them:** facts (through the Context Inbox since v0.41.0), specification changes, Pipeline Specs, mappings, platform changes and (since v0.43.1) data-platform connections are submitted through validated proposals that become decisions (ORC-8). *Why:* agents in other tools should contribute to the same project without bypassing review. *Status:* Shipped v0.40.0. A platform change runs only after a person approved it, and only on a server started with write permission.
 - **MCP-3 — AutoDE works without VS Code:** its server and a command-line tool are installable on their own, at a stable location, with deterministic commands suitable for CI and human-only decision commands. *Why:* other hosts and pipelines must not depend on the VS Code extension being installed. *Status:* Shipped v0.42.0. One package, built from the same code the extension ships, holds the engine, the MCP server and the command line, and needs nothing but Node. The deterministic commands validate the problem's documents, compile the Pipeline Spec, check SQL against the estate, check pack contracts and probe claims (reporting only, recording nothing), and diagnose prerequisites and connections. A CI gate fails when validation fails or a consequential decision is still pending, with documented, stable exit codes. Approving or rejecting a decision needs a person at an interactive terminal who types the verb to confirm, and is refused whenever `CI` is set. The package is built as a tarball; publishing it to a registry is the owner's decision.
 
-*Planned work:* AutoDE skills in other hosts — PA3; verifying assertions, semantic-model resources, asset context, lineage, impact and ontology tools for external agents — [context-layer-requirements.md](context-layer-requirements.md) §9 (C4b, C5, LIN, ONT1).
+*Planned work:* AutoDE skills in other hosts — PA3; verifying assertions, semantic-model resources, asset context, lineage, impact and ontology tools for external agents — [context-layer.md](specs/context-layer.md) §9 (C4b, C5, LIN, ONT1).
 
 ### 3.13 Governance and security (SEC)
 
@@ -365,7 +375,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - The Workflow Palette shows where you are and one clear next step, with the rest a click away.
   - The panel, the CLI and MCP show the same journey.
 
-  *Why:* the owner found the palette crowded and confusing in testing, and several separate panels are hard to find, and the steps before a workflow template is chosen weren't visible (owner, 2026-10-28/29). *Status:* Specified ([ui-simplification.md](ui-simplification.md)); planned UI2, v0.56.0.
+  *Why:* the owner found the palette crowded and confusing in testing, and several separate panels are hard to find, and the steps before a workflow template is chosen weren't visible (owner, 2026-10-28/29). *Status:* Specified ([ui-simplification.md](specs/ui-simplification.md)); planned UI2, v0.56.0.
 - **UI-6 — Dashboard panel.** *Status:* Parked (v0.13.0); removed in v0.45.9 (owner's choice): the Workflow view shows progress and each stage's outputs.
 
 ---
@@ -382,13 +392,13 @@ Product-wide; every capability and phase preserves them. The forward specs refer
 - **NFR-8 — Scale:** a business problem's working set (about 200 tables, 5 000 columns, 1 000 facts) stays responsive in memory; larger estates are handled by K's catalogs and cache, with any storage change decided from measurements. *Status:* Shipped v0.32.0 — the working set is held in memory; the estate around it lives in per-system catalogs, and objects enter the working set when a task uses them and leave it when unused. Measured at about 2 000 tables and 50 000 columns; no database is needed at that size (decision in the roadmap).
 - **NFR-9 — Every behaviour change is covered by automated tests,** and every release is evaluated on the reference problem. *Status:* Shipped (241 tests and eval at v0.30.0).
 
-*Planned work:* release evaluation across providers — [context-layer-requirements.md](context-layer-requirements.md) §10.2, §11 Phase C6.
+*Planned work:* release evaluation across providers — [context-layer.md](specs/context-layer.md) §10.2, §11 Phase C6.
 
 ---
 
 ## Appendix A — Where the previous sections went (2026-10-15)
 
-The previous document (commit `fc16b0d`) mixed requirements with implementation detail and per-version narratives. Every section is accounted for below. "→ design" means the HOW content now lives in [technical-design.md](technical-design.md) (moved and brought up to date on 2026-10-15); "→ history" means it is release history, already in [CHANGELOG.md](../CHANGELOG.md).
+The previous document (commit `fc16b0d`) mixed requirements with implementation detail and per-version narratives. Every section is accounted for below. "→ design" means the HOW content now lives in [technical-design.md](design/technical-design.md) (moved and brought up to date on 2026-10-15); "→ history" means it is release history, already in [CHANGELOG.md](../CHANGELOG.md).
 
 | Previous section | Now |
 |---|---|

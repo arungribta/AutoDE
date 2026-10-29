@@ -949,7 +949,7 @@ export class ContextFileManager {
   private semanticCache: { key: string; index: SemanticLayerIndex } | undefined;
 
   /**
-   * A task-scoped context pack (C3, v0.30.0; docs/context-layer-requirements.md
+   * A task-scoped context pack (C3, v0.30.0; docs/specs/context-layer.md
    * §7.1) — what every LLM call should receive instead of the global dump.
    * Recorded for "What the agent saw" when `title` is given.
    */

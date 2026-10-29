@@ -3,7 +3,7 @@ import { LayerElement, LayerTable, SemanticLayerIndex, nameRef, physicalMatches 
 import { GroundingArtifact } from './sqlGrounding';
 
 /**
- * The semantic grounding check (C5b; docs/context-layer-requirements.md §6.5,
+ * The semantic grounding check (C5b; docs/specs/context-layer.md §6.5,
  * principle C3): agents don't infer joins or metrics the semantic layer
  * defines. On generated SQL, without a model:
  *

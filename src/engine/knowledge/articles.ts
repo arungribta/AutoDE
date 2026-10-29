@@ -6,7 +6,7 @@ import { parseYaml, stringifyYaml } from '../context/Yaml';
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * Knowledge articles (MM1; docs/context-layer-requirements.md §6.11): what
+ * Knowledge articles (MM1; docs/specs/context-layer.md §6.11): what
  * atomic facts can't express — pitfalls, history, golden sources, how to
  * reconcile — written up, reviewed and approved. Markdown with front matter
  * under `.autode/knowledge/articles/<slug>.md`, versioned in git.

@@ -2,7 +2,7 @@
 
 Release history of AutoDE, newest first. Each entry records what changed in that version, including deliberate deviations from the specification it implemented.
 
-Where things are documented: requirements (WHAT and WHY) in [docs/requirements.md](docs/requirements.md) and the forward specifications, design (HOW) in [docs/technical-design.md](docs/technical-design.md), order and status in [docs/roadmap.md](docs/roadmap.md). See [docs/README.md](docs/README.md).
+Where things are documented: requirements (WHAT and WHY) in [docs/requirements.md](docs/requirements.md) and the forward specifications, design (HOW) in [docs/technical-design.md](docs/design/technical-design.md), order and status in [docs/roadmap.md](docs/roadmap.md). See [docs/README.md](docs/README.md).
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
@@ -403,7 +403,7 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 ## 0.46.0
 
-- **PA4: port a skill** (mcp-engine §9.2; SKL-5, SKL-7). A data engineer brings a skill written for any agent into AutoDE without code, from a Git repository, a folder or a dbt package. Guide: [docs/skills-authoring.md](docs/skills-authoring.md).
+- **PA4: port a skill** (mcp-engine §9.2; SKL-5, SKL-7). A data engineer brings a skill written for any agent into AutoDE without code, from a Git repository, a folder or a dbt package. Guide: [docs/skills-authoring.md](docs/guides/skills-authoring.md).
   - **Staging.** A Git repository is cloned shallow without checkout into a temporary folder. Its file list is checked before anything is checked out: at most 2,000 files and 30 MB (5 MB per file), no path that leaves the repository, no symbolic links, no submodules. The commit is recorded. A folder is walked with the same checks. Nothing reaches the workspace before import.
   - **Analysis** (deterministic): frontmatter; declared tools and the AutoDE tools they map to, and those with no counterpart; AutoDE engine tools and other MCP servers it names; the CLIs its instructions run, with AutoDE's install guide where there is one (Snowflake and Databricks CLIs); scripts and resources; the licence (a non-redistributable one, such as the Databricks License, refuses the import; an unrecognised one is a warning); overlaps with imported and AutoDE skills; and its kind, *knowledge* or *procedure*.
   - **The model's proposal.** Where a model is configured, the panel can ask it for the kind, a tool mapping and prerequisites. It stays a proposal until the person accepts it (as proposed or with the other kind) or rejects it.
@@ -445,7 +445,7 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 ## 0.45.14
 
-- **Code audit follow-ups** (owner, 2026-10-26: all five recommendations accepted; the sixth item, the interview decision note, stands). Details: [docs/code-audit-2026-10.md](docs/code-audit-2026-10.md).
+- **Code audit follow-ups** (owner, 2026-10-26: all five recommendations accepted; the sixth item, the interview decision note, stands). Details: [docs/code-audit-2026-10.md](docs/design/code-audit-2026-10.md).
   - **One way to make the build stage's Pipeline Spec.** In VS Code the build stage offers Run agent (the pipeline engineer, AutoDE's compiler, grounding manifests), the same as agent hosts, and no separate Produce.
     - **Removed:** the one-shot LLM synthesis behind Produce (`AgentHub.synthesizePipelineSpec`, `src/agents/pipelineSpecSynthesis.ts`), its command *AutoDE: Generate Pipeline Spec*, and its two tests.
     - **Attachments:** they reach the build through the business-problem pack (v0.45.12), so nothing is lost.
@@ -459,7 +459,7 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
   - **Deliberate deviation:** the audit suggested refreshing inside `autode_workflow_next`. That tool is read-only, and MCP's context is read-only by design, so the refresh is a separate records tool the orchestrator calls first.
   - **Third pass:** two more methods orphaned by the removal (`PipelineSpecManager.hasApprovedSpec`, `getSpecDir`) and four unused imports went too.
   - **Measured:** 366 tests: 2 new (one path for the build stage, with the mapping stage's Produce kept; the refresh tool, the orchestrator step and the catalog check); 2 removed with the synthesis; 1 trimmed. Lint 0 errors, 22 warnings. Eval unchanged.
-- **Code audit: dead code removed, stranded code listed for decision** ([docs/code-audit-2026-10.md](docs/code-audit-2026-10.md)). Every module was checked for reachability from the extension, the CLI and the MCP server, and every export for references, with the TypeScript language service; panel messages, commands, settings and layout entries were checked against their uses.
+- **Code audit: dead code removed, stranded code listed for decision** ([docs/code-audit-2026-10.md](docs/design/code-audit-2026-10.md)). Every module was checked for reachability from the extension, the CLI and the MCP server, and every export for references, with the TypeScript language service; panel messages, commands, settings and layout entries were checked against their uses.
   - **Removed:**
     - three dead modules: the `copilotAdapter` and `GraphPersistence` re-export shims, and `platformDialect`;
     - 18 unused exports, among them the types SIMP-4 left behind and the `ContextPackProvider` interface of the removed plan run;
@@ -547,7 +547,7 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
   - `autode-dbt-project`;
   - `autode-de-reconciliation`.
 
-  They work with no vendor skill installed. See [docs/platform-skills.md](docs/platform-skills.md) (new).
+  They work with no vendor skill installed. See [docs/platform-skills.md](docs/guides/platform-skills.md) (new).
 - **Every skill is tested by its worked example.** Each `SKILL.md` ends with an example on the reference problem (retail orders). `test/platformSkillCheck.cjs` checks it:
   - its SQL resolves against the reference estate;
   - it carries no other platform's dialect;

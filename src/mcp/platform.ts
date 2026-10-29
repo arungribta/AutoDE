@@ -8,7 +8,7 @@ import { EngineTool, ToolAnnotations } from './tools';
 import { governanceFacts } from '../engine/governance/governance';
 
 /**
- * The data-platform tools (docs/mcp-engine-requirements.md §5.3, §6; phase 4).
+ * The data-platform tools (docs/specs/mcp-engine.md §5.3, §6; phase 4).
  *
  * Connections come from `.autode/config/connections.yaml`, the personal
  * `.autode/local/connections.yaml` and the `AUTODE_*` environment

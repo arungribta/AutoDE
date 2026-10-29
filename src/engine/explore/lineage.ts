@@ -5,7 +5,7 @@ import { isReportEntity } from '../lineage/observed';
 import { AssetSummary, ExploreSources, articleId, exploreIndexView } from './explore';
 
 /**
- * Lineage and impact (LIN; docs/context-layer-requirements.md §8.5).
+ * Lineage and impact (LIN; docs/specs/context-layer.md §8.5).
  *
  * One graph from four sources, each edge labelled with every source that
  * backs it:

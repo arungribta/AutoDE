@@ -3,7 +3,7 @@ import { ConnectionInfo, PlatformCapabilities, PlatformMetadataQueries, QueryOpt
 import { resolveConnectString } from '../credentials/tnsnames';
 
 /**
- * Oracle Database as a source (docs/mcp-engine-requirements.md §9.1 Phase DRV1).
+ * Oracle Database as a source (docs/specs/mcp-engine.md §9.1 Phase DRV1).
  *
  * Runs on `node-oracledb` ≥ 6 in **Thin mode** (pure JavaScript; Oracle 12.1
  * and later), which the user installs with AutoDE's guidance

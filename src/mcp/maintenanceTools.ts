@@ -11,7 +11,7 @@ import { dismissStatements } from '../engine/context/sessionReview';
 import { listTurns } from '../engine/maintenance/turns';
 
 /**
- * Knowledge maintenance over MCP (MM2; docs/context-layer-requirements.md
+ * Knowledge maintenance over MCP (MM2; docs/specs/context-layer.md
  * §5.6): the queue a host agent picks items up from, the work order for one,
  * the person-triggered workspace scan, and the curator's dismissal of chat
  * turns that state no fact. Dismissing an item stays a person's act (the CLI,

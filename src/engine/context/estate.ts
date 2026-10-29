@@ -2,7 +2,7 @@ import { BaseNode, GraphEdge, Origin, TableNode } from './types';
 import { parseYaml, stringifyYaml } from './Yaml';
 
 /**
- * Estate identity (Phase K1, v0.31.0; docs/context-layer-requirements.md
+ * Estate identity (Phase K1, v0.31.0; docs/specs/context-layer.md
  * §11 Phase K items 1–3, 10). An estate is a set of *systems* (logical
  * sources and targets: "Shop OMS", "CRM", "EDW target"), each in one or more
  * *environments* (dev, test, prod). Every physical object gets an id that

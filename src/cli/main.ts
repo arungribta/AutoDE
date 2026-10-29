@@ -85,8 +85,8 @@ import { interviewSkills } from '../engine/skills/skillRegistry';
 import { loadSkillPack } from '../engine/agents/definitions';
 
 /**
- * The `autode` command line (docs/mcp-engine-requirements.md §9.2, PA2;
- * reference: docs/cli.md). Deterministic commands read the workspace and
+ * The `autode` command line (docs/specs/mcp-engine.md §9.2, PA2;
+ * reference: docs/guides/cli.md). Deterministic commands read the workspace and
  * report; the CLI holds no model credentials and calls no LLM (§3.1).
  * Only `decisions approve | reject` change AutoDE's state, and only from an
  * interactive terminal with `CI` unset (D6). `autode mcp` is the MCP server.
@@ -95,7 +95,7 @@ import { loadSkillPack } from '../engine/agents/definitions';
  * the CLI and the server can't disagree.
  */
 
-/** Stable exit codes (docs/cli.md). A validation failure outranks a pending decision. */
+/** Stable exit codes (docs/guides/cli.md). A validation failure outranks a pending decision. */
 export const EXIT = {
   OK: 0,
   /** A check or validation failed; findings are printed. */
@@ -2042,7 +2042,7 @@ function connectionsList(ctx: Ctx): number {
     const missing = r.needs.variables.filter((v) => !v.set).map((v) => v.name);
     return `${r.status.autode === 'ready' ? '✓' : '·'} ${r.id}  ${r.role}, ${r.credentials.resolver}${r.credentials.ref ? `:${r.credentials.ref}` : ''}, ${r.origin} — ${r.status.autode}${r.status.checkedAt ? ` at ${r.status.checkedAt}` : ''}`
       + `\n    ${r.needs.summary}${missing.length ? ` Not set here: ${missing.join(', ')}.` : ''}`;
-  }) : [`No connections. Add one with \`autode connections add\`, or write ${config.file} (docs/mcp-setup.md).`];
+  }) : [`No connections. Add one with \`autode connections add\`, or write ${config.file} (docs/guides/mcp-setup.md).`];
   emit(ctx, { ok: config.errors.length === 0, file: config.file, localFile: config.localFile, connections: rows, configErrors: config.errors }, [...lines, ...config.errors.map((e) => `✗ ${e}`)].join('\n'));
   return config.errors.length ? EXIT.FAILED : EXIT.OK;
 }
@@ -2093,7 +2093,7 @@ function parseSet(values: readonly string[] | undefined): Record<string, string>
 }
 
 async function connectionsAdd(ctx: Ctx): Promise<number> {
-  requirePerson(ctx, 'connections add', `Write ${'.autode/config/connections.yaml'} instead (docs/mcp-setup.md), or have an agent propose it (autode_propose_connection) for a person to approve.`);
+  requirePerson(ctx, 'connections add', `Write ${'.autode/config/connections.yaml'} instead (docs/guides/mcp-setup.md), or have an agent propose it (autode_propose_connection) for a person to approve.`);
   const v = ctx.values;
   const env = ctx.io.env;
   const platform = (v.platform ?? await ask(ctx, `Platform (${PLATFORMS.join(', ')})`, { choices: PLATFORMS, required: true })) as (typeof PLATFORMS)[number];

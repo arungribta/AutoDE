@@ -1,4 +1,4 @@
-# Expected context after the scripted conversation (docs/context-layer-requirements.md §4.1 shape).
+# Expected context after the scripted conversation (docs/specs/context-layer.md §4.1 shape).
 # Scored from Phase C4 on; recorded here from C1 so the target is fixed before the system changes.
 # `status`/`trust` are the expected end state; schema facts from the DDL are implied and not listed.
 assertions:

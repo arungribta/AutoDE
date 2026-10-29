@@ -3,7 +3,7 @@ import type { BaseNode, TableNode } from '../context/types';
 
 /**
  * The semantic layer as the context layer uses it (C5b;
- * docs/context-layer-requirements.md §6.5): the **approved** definitions — shared
+ * docs/specs/context-layer.md §6.5): the **approved** definitions — shared
  * models approved at their current revision, and the active problem's
  * composites approved at their current resolution — indexed for packs, the
  * grounding check and the graph. Drafts are listed (for the Knowledge

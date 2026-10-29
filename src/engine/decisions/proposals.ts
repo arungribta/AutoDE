@@ -38,7 +38,7 @@ import {
 import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, ValidationReport } from './decisionStore';
 
 /**
- * Proposals (docs/mcp-engine-requirements.md §9.2 Phase PA1): validate what
+ * Proposals (docs/specs/mcp-engine.md §9.2 Phase PA1): validate what
  * an agent wants to change, turn it into a decision, and — only once a person
  * approved it — apply it with deterministic code. Shared by the MCP server's
  * proposal tools, the extension and (PA2) the CLI.

@@ -1,5 +1,5 @@
 /**
- * The stage kinds (PA3a, docs/workflow-templates.md §1): fixed in the engine.
+ * The stage kinds (PA3a, docs/specs/workflow-templates.md §1): fixed in the engine.
  * A template or a planner names stages freely but must use one of these kinds;
  * the kind decides who may do the stage, the most an agent may do there, what
  * the stage consumes and produces, and its default gates. This is also what

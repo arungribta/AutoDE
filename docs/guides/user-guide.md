@@ -535,7 +535,7 @@ Each problem gets a workflow from a template:
 - **Modernization:** moving a legacy system to a new platform (it can import a code converter's output, such as SnowConvert or Lakebridge; AutoDE doesn't convert code itself).
 - **Estate merge:** consolidating several systems into one (matching, survivorship, conformed dimensions).
 
-A team can add its own in `.autode/config/workflows/`. Details: [workflow-templates.md](workflow-templates.md).
+A team can add its own in `.autode/config/workflows/`. Details: [workflow-templates.md](../specs/workflow-templates.md).
 
 ### 9.2 Planning
 
@@ -955,7 +955,7 @@ All settings start with `autoDataEngineeringHub.`.
 
 ## 22. Coming next
 
-Specified and scheduled ([roadmap](roadmap.md)):
+Specified and scheduled ([roadmap](../roadmap.md)):
 
 - **A simpler workspace** (v0.56.0): the Knowledge Explorer, the Workflow view and the Platform catalog in one AutoDE window, and a simpler Workflow Palette.
 - **Platform operations** (v0.54.0–v0.58.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release.
@@ -983,4 +983,4 @@ Specified and scheduled ([roadmap](roadmap.md)):
 | Approval is refused | The checks failed: the message lists why (for a build, for example, an unmasked sensitive column). |
 | A runbook step is refused | Its command isn't allowlisted, it carries a credential flag, or a destructive step lacks a rollback. `autode runbook show <id>` explains each step. |
 | An agent host doesn't see AutoDE | Run `/mcp` (Claude Code) and check `autode` is connected; see [mcp-setup.md](mcp-setup.md#troubleshooting). |
-| Something else | `autode doctor`; the panel's log in chat; VS Code's Output view (*AutoDE: Tool Skills*, *autoDE:language-models*); [manual-verification.md](manual-verification.md) shows what each feature should do. |
+| Something else | `autode doctor`; the panel's log in chat; VS Code's Output view (*AutoDE: Tool Skills*, *autoDE:language-models*); [manual-verification.md](../testing/manual-verification.md) shows what each feature should do. |

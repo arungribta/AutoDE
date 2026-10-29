@@ -19,7 +19,7 @@ import { EXPLORATION_LABEL, explorationHeader, isExploration } from '../document
  *
  * SQL that joins or measures in a way the approved semantic layer doesn't
  * define is refused in a governed problem and only warned about in an
- * exploration one (C5b; docs/context-layer-requirements.md §6.5).
+ * exploration one (C5b; docs/specs/context-layer.md §6.5).
  */
 
 const PHASE_OF: Record<StageKind, string> = {

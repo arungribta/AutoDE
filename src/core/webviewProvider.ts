@@ -223,7 +223,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
     this.workspaceRoot = workspaceRoot;
     this.activeProblemManager = new ActiveProblemManager(workspaceRoot, (msg: string) => this.postLog(msg));
-    // v0.25.0 (docs/mcp-engine-requirements.md §8): keep every cached spec/context
+    // v0.25.0 (docs/specs/mcp-engine.md §8): keep every cached spec/context
     // document in step with the file on disk when another process edits it, and
     // never silently overwrite such an edit from a stale in-memory copy.
     setRevisionConflictHandler((conflict) => { void this.handleRevisionConflict(conflict); });
@@ -1643,7 +1643,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.postDecisions();
   }
 
-  // ── Decisions (Phase PA1: docs/mcp-engine-requirements.md §9.2) ──────────
+  // ── Decisions (Phase PA1: docs/specs/mcp-engine.md §9.2) ──────────
 
   private decisionStore(): DecisionStore | undefined {
     const root = this.workspaceRoot?.fsPath;

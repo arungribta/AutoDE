@@ -5,7 +5,7 @@ import { createUlidFactory } from '../context/assertions';
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * Decisions (docs/mcp-engine-requirements.md §3.1 D6, §9.2 Phase PA1;
+ * Decisions (docs/specs/mcp-engine.md §3.1 D6, §9.2 Phase PA1;
  * requirements ORC-8, P9). An AI-proposed change to AutoDE's state is never
  * written directly: it becomes a decision that a person resolves, and only an
  * approved decision is applied, by deterministic engine code.
@@ -131,7 +131,7 @@ export interface NewDecision {
   problemId?: string;
 }
 
-const HEADER = '# AutoDE decision (docs/mcp-engine-requirements.md §9.2 PA1).\n# To resolve it here: set resolution.decision to approved or rejected, fill resolution.by, and commit.\n# AutoDE applies an approved decision; never edit the other fields.\n';
+const HEADER = '# AutoDE decision (docs/specs/mcp-engine.md §9.2 PA1).\n# To resolve it here: set resolution.decision to approved or rejected, fill resolution.by, and commit.\n# AutoDE applies an approved decision; never edit the other fields.\n';
 const ID_RE = /^dec-[0-9A-Z]{26}$/;
 
 function writeAtomic(file: string, text: string): void {

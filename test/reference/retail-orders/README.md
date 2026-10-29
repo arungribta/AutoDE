@@ -1,6 +1,6 @@
 # Reference problem: retail-orders
 
-A business problem of realistic size that AutoDE is measured against. It exists to show, with numbers, how grounded AutoDE's output is, and to show each roadmap phase improving those numbers. Specified in `docs/context-layer-requirements.md` §10.
+A business problem of realistic size that AutoDE is measured against. It exists to show, with numbers, how grounded AutoDE's output is, and to show each roadmap phase improving those numbers. Specified in `docs/specs/context-layer.md` §10.
 
 ## Run it
 

@@ -704,7 +704,7 @@ export interface ChatMessage {
 }
 
 /**
- * What an agent needs from whatever is hosting it (v0.26.0, docs/mcp-engine-requirements.md
+ * What an agent needs from whatever is hosting it (v0.26.0, docs/specs/mcp-engine.md
  * §7.4) — so agents ask the host instead of calling VS Code APIs directly. The extension
  * implements it in `AgentHub`; a headless host would supply its own.
  */

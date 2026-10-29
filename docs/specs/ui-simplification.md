@@ -1,6 +1,6 @@
 # UI2: one window, and the whole journey in view
 
-**Status:** specified 2026-10-29 (owner); phase **UI2**, v0.56.0 (roadmap), before POP4 so the Platform catalog is built into the new window. Requirement: UI-8 in [requirements.md](requirements.md). **Agreed design:** the clickable mock-up on the design canvas (owner's private artifact, *Workflow journey mock-up*, https://claude.ai/artifact/4FzrLXkrZE7bQNVJhoGsj2), approved by the owner on 2026-10-29. The owner plans more simplification in this round; further parts are added here as they are agreed.
+**Status:** specified 2026-10-29 (owner); phase **UI2**, v0.56.0 (roadmap), before POP4 so the Platform catalog is built into the new window. Requirement: UI-8 in [requirements.md](../requirements.md). **Agreed design:** the clickable mock-up on the design canvas (owner's private artifact, *Workflow journey mock-up*, https://claude.ai/artifact/4FzrLXkrZE7bQNVJhoGsj2), approved by the owner on 2026-10-29. The owner plans more simplification in this round; further parts are added here as they are agreed.
 
 ## 1. Need
 

@@ -4,7 +4,7 @@ import { parseYaml } from '../context/Yaml';
 import { layoutPath } from '../workspaceLayout';
 
 /**
- * Who acts on knowledge maintenance (MM2; docs/context-layer-requirements.md
+ * Who acts on knowledge maintenance (MM2; docs/specs/context-layer.md
  * §5.6), from `.autode/config/maintenance.yaml`:
  *
  *   policy: suggest      # suggest (default) | draft | off

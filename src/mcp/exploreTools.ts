@@ -10,7 +10,7 @@ import { articleSummary, checkArticle, readArticle } from '../engine/knowledge/a
 import { loadMetadataConfig } from '../engine/metadata/model';
 
 /**
- * The Knowledge Explorer over MCP (C5b; docs/context-layer-requirements.md
+ * The Knowledge Explorer over MCP (C5b; docs/specs/context-layer.md
  * §6.10, §7.5, §9): the same answers the VS Code Explorer and `autode
  * explore` give, so an external agent can search what AutoDE knows, read an
  * asset's full context and walk the graph. Read-only.

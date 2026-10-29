@@ -7,7 +7,7 @@ import type { BusinessProblemSpec } from '../types';
 
 /**
  * What must be known — a deterministic checklist (C4c;
- * docs/context-layer-requirements.md §5.5 item 1). From the specification and
+ * docs/specs/context-layer.md §5.5 item 1). From the specification and
  * the estate, AutoDE lists what a complete picture of the problem needs: per
  * table in scope its key, grain, change column, load pattern, personal-data
  * classification, relationships to the other tables in scope and a business

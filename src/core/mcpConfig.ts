@@ -73,7 +73,7 @@ export function chooseMcpEntry(options: { extensionPath: string; env?: NodeJS.Pr
   const source = options.stableBundle ? 'stable' : 'extension';
   const why = options.stableBundle
     ? 'autode is not installed, so this runs AutoDE\'s own copy of the server in VS Code\'s global storage, which AutoDE refreshes when the extension updates.'
-    : 'autode is not installed (npm install -g autode-<version>.tgz, see docs/cli.md), so this points at the extension\'s own copy, whose folder changes with every update; run the command again after updating, or install autode.';
+    : 'autode is not installed (npm install -g autode-<version>.tgz, see docs/guides/cli.md), so this points at the extension\'s own copy, whose folder changes with every update; run the command again after updating, or install autode.';
   if (findOnPath('node', env, platform)) return { entry: { command: 'node', args: [bundle, ...serverArgs] }, source, note: why };
   return { entry: { command: options.execPath ?? process.execPath, args: [bundle, ...serverArgs], env: { ELECTRON_RUN_AS_NODE: '1' } }, source, note: `${why} Node.js isn't on PATH, so VS Code's own runtime runs it.` };
 }

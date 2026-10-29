@@ -16,14 +16,14 @@ AutoDE is a data engineering workspace for VS Code. It takes a business problem 
 4. Connect your source and target platforms and **Save as named connection**.
 5. **＋ New** business problem, and describe the work.
 
-**Read the [user guide](docs/user-guide.md)**: setup, a first problem end to end, and every feature in detail.
+**Read the [user guide](docs/guides/user-guide.md)**: setup, a first problem end to end, and every feature in detail.
 
 ## Documentation
 
 | For | Read |
 |---|---|
-| Data engineers using AutoDE | [User guide](docs/user-guide.md), [CLI](docs/cli.md), [agent hosts and MCP](docs/mcp-setup.md), [writing and porting skills](docs/skills-authoring.md) |
-| Engineers maintaining AutoDE | [Engineering onboarding guide](docs/engineering-onboarding-guide.md), [technical design](docs/technical-design.md) |
+| Data engineers using AutoDE | [User guide](docs/guides/user-guide.md), [CLI](docs/guides/cli.md), [agent hosts and MCP](docs/guides/mcp-setup.md), [writing and porting skills](docs/guides/skills-authoring.md) |
+| Engineers maintaining AutoDE | [Engineering onboarding guide](docs/guides/engineering-onboarding-guide.md), [technical design](docs/design/technical-design.md) |
 | What and why, what's next | [Requirements](docs/requirements.md), [roadmap](docs/roadmap.md), [changelog](CHANGELOG.md) |
 
 [docs/README.md](docs/README.md) lists every document and which question it answers.
@@ -39,7 +39,7 @@ npm test               # the functional suite
 npm run package:cli    # the autode CLI tarball, in dist/
 ```
 
-Open the folder in VS Code and press F5 to run the extension in a development host. See the [engineering onboarding guide](docs/engineering-onboarding-guide.md) before changing code.
+Open the folder in VS Code and press F5 to run the extension in a development host. See the [engineering onboarding guide](docs/guides/engineering-onboarding-guide.md) before changing code.
 
 ## License
 

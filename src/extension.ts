@@ -825,14 +825,14 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
   });
 
-  // Phase C4a (docs/context-layer-requirements.md §11): the business-problem pack.
+  // Phase C4a (docs/specs/context-layer.md §11): the business-problem pack.
   const addPackDocument = vscode.commands.registerCommand(`${EXTENSION_ID}.addPackDocument`, () => sidebarProvider.runAddPackDocument());
   const applyPack = vscode.commands.registerCommand(`${EXTENSION_ID}.applyPack`, () => sidebarProvider.runApplyPack());
   const runConformance = vscode.commands.registerCommand(`${EXTENSION_ID}.runConformance`, () => sidebarProvider.runConformanceCheck());
   const verifyClaims = vscode.commands.registerCommand(`${EXTENSION_ID}.verifyClaims`, () => sidebarProvider.runVerifyClaims());
   const proposeVocabulary = vscode.commands.registerCommand(`${EXTENSION_ID}.proposeVocabulary`, () => sidebarProvider.runProposeVocabulary());
 
-  // C3 (v0.30.0, docs/context-layer-requirements.md §7.1): the exact context a
+  // C3 (v0.30.0, docs/specs/context-layer.md §7.1): the exact context a
   // plan step, chat reply or spec call was given, with its manifest.
   const whatTheAgentSaw = vscode.commands.registerCommand(`${EXTENSION_ID}.whatTheAgentSaw`, async () => {
     const packs = sidebarProvider.getRecentContextPacks();
@@ -856,7 +856,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
   });
 
-  // C2 (v0.29.0, docs/context-layer-requirements.md §4.2): snapshot the assertion
+  // C2 (v0.29.0, docs/specs/context-layer.md §4.2): snapshot the assertion
   // ledger. History is kept unless the user explicitly picks the prune option.
   const compactContextLedger = vscode.commands.registerCommand(`${EXTENSION_ID}.compactContextLedger`, async () => {
     const choice = await vscode.window.showQuickPick(

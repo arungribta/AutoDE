@@ -3,7 +3,7 @@ import Ajv, { ErrorObject } from 'ajv';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
 
 /**
- * Shared semantic models (C5a; docs/context-layer-requirements.md §6.3):
+ * Shared semantic models (C5a; docs/specs/context-layer.md §6.3):
  * Snowflake's semantic model YAML — the format of
  * `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` and Cortex Analyst — as AutoDE's
  * native format. A shared model stays deployable as is: unknown keys are

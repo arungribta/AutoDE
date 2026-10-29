@@ -269,7 +269,7 @@ Read README.md and summarise it in three bullet points.
   Do: in the repo, `node dist/mcp-server.js --workspace <scratch workspace>`.
   Expect: stderr "autode MCP server 0.35.0 — workspace …", then it waits. Ctrl+C stops it.
 - [ ] **12.2 Claude Code can use it.**
-  Do: configure it as in [mcp-setup.md](mcp-setup.md) for the scratch workspace from Part 10, start Claude Code there, and run `/mcp`.
+  Do: configure it as in [mcp-setup.md](../guides/mcp-setup.md) for the scratch workspace from Part 10, start Claude Code there, and run `/mcp`.
   Expect: `autode` connected, 11 tools. Asking "Use AutoDE to find a deduplication primitive and compile it for Snowflake for RAW.ORDERS by ORDER_ID, latest UPDATED_AT" calls search → describe → compile and returns the SQL.
 - [ ] **12.3 Context and grounding over MCP.**
   Do: ask Claude Code "Use autode_check_grounding on: SELECT discount FROM shop.orders".
@@ -301,7 +301,7 @@ Read README.md and summarise it in three bullet points.
 
 ## Part 14 — v0.37.0 MCP data-platform tools, read-only guard, sample-data consent
 
-Needs real accounts. Use a role that can only read. Configure the server as in [mcp-setup.md](mcp-setup.md) (Data platforms) for a scratch workspace, and keep the client's MCP log open.
+Needs real accounts. Use a role that can only read. Configure the server as in [mcp-setup.md](../guides/mcp-setup.md) (Data platforms) for a scratch workspace, and keep the client's MCP log open.
 
 - [ ] **14.1 Snowflake through a CLI connection.**
   Do: add `{ platform: snowflake, credentials: { resolver: cli, ref: <your connection> } }` to `.autode/config/connections.yaml`; start the server with `--allow-cli`. In Claude Code: "list AutoDE connections", then list databases and schemas, "extract metadata for <DB>.<SCHEMA>", "explain SELECT * FROM <table>", "run SELECT COUNT(*) FROM <table>".

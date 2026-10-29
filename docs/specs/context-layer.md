@@ -1,6 +1,6 @@
 # AutoDE — Context Layer, Semantic Model & Grounding: Requirements Specification
 
-**Status:** In progress — order and status: [roadmap.md](roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion to:** [mcp-engine-requirements.md](mcp-engine-requirements.md) · **Document map:** [README.md](README.md) (read §0 and §1 there first; its implementation rules and principles P1–P9 apply here unchanged)
+**Status:** In progress — order and status: [roadmap.md](../roadmap.md) · **Baseline:** v0.24.0 (`6f09e62`) · **Companion to:** [mcp-engine.md](mcp-engine.md) · **Document map:** [README.md](../README.md) (read §0 and §1 there first; its implementation rules and principles P1–P9 apply here unchanged)
 **Audience:** the coding agent implementing this, and the reviewers approving each phase.
 
 ---
@@ -70,7 +70,7 @@ Its explainability shape (decision, reason, evidence, confidence) is adopted wit
 
 ## 3. Context principles (in addition to P1–P9)
 
-Defined in [requirements.md §2.2](requirements.md) (C1–C9), which is canonical: C1 assertions, not blobs; C2 nothing silently overwritten; C3 agents don't infer what the context layer defines; C4 explicit, ordered trust; C5 deliver less but the right context; C6 every artifact explainable; C7 grounding measured; C8 deterministic core, LLM at the edges; C9 sources referenced, never copied.
+Defined in [requirements.md §2.2](../requirements.md) (C1–C9), which is canonical: C1 assertions, not blobs; C2 nothing silently overwritten; C3 agents don't infer what the context layer defines; C4 explicit, ordered trust; C5 deliver less but the right context; C6 every artifact explainable; C7 grounding measured; C8 deterministic core, LLM at the edges; C9 sources referenced, never copied.
 
 ---
 
@@ -133,7 +133,7 @@ Each `kind` has an Ajv schema for `value` in `src/engine/context/assertionSchema
 - Append-only JSON Lines under `.autode/knowledge/ledger/` with one file per writer session: `<yyyy-mm-dd>.<sessionUlid>.jsonl`. Appending to separate files keeps git merges conflict-free when a team shares a workspace.
 - Event types: `asserted`, `confirmed`, `rejected`, `superseded`, `verified`, `verification_failed`, `flagged_needs_review`. Every event carries `id`, `assertionId`, `at`, `actor`, and `causedBy` (the event or evidence id that triggered it). `causedBy` is what makes causality traceable (§8).
 - Folding all events gives the current assertion set. Compaction: an `AutoDE: Compact Context Ledger` command writes `.autode/knowledge/ledger/snapshot.json` plus the events after it. It never deletes history unless the user explicitly runs it with `--prune`.
-- All writes go through `ContextStore` (mcp-engine-requirements §4.3).
+- All writes go through `ContextStore` (mcp-engine §4.3).
 
 ### 4.3 Projections (derived, rebuildable, never hand-edited)
 
@@ -196,7 +196,7 @@ A new panel section listing `proposed`, `needs_review` and conflicting assertion
 
 ### 5.5 Capture coverage and verification (C4c; owner, 2026-10-27)
 
-**Status:** ✅ shipped in v0.48.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-13; HOW: technical-design.md §5.15; usage: [user-guide.md](user-guide.md) §8.5–8.6. The full specification text is in git (this file at v0.47.0).
+**Status:** ✅ shipped in v0.48.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-13; HOW: technical-design.md §5.15; usage: [user-guide.md](../guides/user-guide.md) §8.5–8.6. The full specification text is in git (this file at v0.47.0).
 
 In short: capture doesn't depend on the model to find facts, decide what should be known, or be believed unchecked. A deterministic completeness checklist per table and metric, each missing item with its action; keys, grain, foreign keys, change columns and personal data found from the data and checked by probes; document facts checked against verbatim quotes, every section accounted for, tables and fixed phrases parsed without a model, agreement across sources; the model recorded on each fact, with optional double reading; an end-of-session review of chat. The model benchmark (recall and precision per source type, on the reference problem) and corrections counted as misses are part of C6.
 
@@ -613,7 +613,7 @@ When a step or the param selector needs a fact class that is absent or below the
 
 ### 7.4 Exploration mode (per business problem; owner, 2026-10-27)
 
-**Status:** ✅ shipped in v0.48.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md ORC-11; HOW: technical-design.md §5.15; usage: [user-guide.md](user-guide.md) §5.4. The full specification text is in git (this file at v0.47.0).
+**Status:** ✅ shipped in v0.48.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md ORC-11; HOW: technical-design.md §5.15; usage: [user-guide.md](../guides/user-guide.md) §5.4. The full specification text is in git (this file at v0.47.0).
 
 In short: a business problem can run in exploration mode, switched by a person who acknowledges the disclaimer. At a context gap an agent records its best guess as an assumption (`assumed` trust) and continues; model proposals count at once at `assumed` trust; approval checks warn; gates take one click; everything produced is labelled. Never relaxed: runbooks, production policy (exploration targets non-production only), sample-data consent, secrets, rollbacks. Switching to governed lists the assumptions, model-only facts and warned checks; governed checks don't accept `assumed`. The semantic layer's checks (§6.5) will warn in exploration mode too.
 
@@ -722,7 +722,7 @@ Impact uses graph traversal, never similarity. It is available on all three surf
 
 ---
 
-## 9. MCP surface additions (extends mcp-engine-requirements §5)
+## 9. MCP surface additions (extends mcp-engine §5)
 
 | Tool / resource | Purpose |
 |-----------------|---------|
@@ -794,7 +794,7 @@ Harness (`npm run eval`):
 
 ## 11. Phases and acceptance criteria
 
-These phases interleave with the MCP phases; the combined order and status are in [roadmap.md](roadmap.md). Each is one minor version.
+These phases interleave with the MCP phases; the combined order and status are in [roadmap.md](../roadmap.md). Each is one minor version.
 
 ### Phase C1: Reference problem, harness and baseline
 Scope: §10.3 (fixtures, replay harness, metrics computation), with grounding checks §10.1 items 1 and 3 run *post hoc* on baseline output.
@@ -822,7 +822,7 @@ Added 2026-10-15 (after C3), because estate merge and legacy migration/modernisa
 In short: a business problem is whatever the customer has — a paragraph, a document or a set of them. AutoDE registers them in a pack with a role, an authority and a version; reads house-format structured documents through an interpretation profile the LLM proposes once and the engineer confirms (then applied deterministically, so a new version supersedes exactly the changed clauses); reads free text into proposed facts with section-level provenance; records contract clauses as expectations, never as observed facts; checks each source system against a contract clause by clause; verifies claims with fixed, aggregate-only probes on a live connection or on customer-supplied samples; asks the interviewer only what discovery and probes did not settle; and captures the customer's vocabulary for retrieval.
 
 ### Phase C4b: Chat extraction, Context Inbox, tool-action memory
-**Status:** ✅ shipped in v0.41.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CHT-5, CTX-10, GRD-3, CTX-1; HOW: technical-design.md §5.14; usage: [mcp-setup.md](mcp-setup.md). The full specification text is in git (this file at v0.40.0).
+**Status:** ✅ shipped in v0.41.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CHT-5, CTX-10, GRD-3, CTX-1; HOW: technical-design.md §5.14; usage: [mcp-setup.md](../guides/mcp-setup.md). The full specification text is in git (this file at v0.40.0).
 
 In short:
 - After each chat and interview turn, the configured model proposes the facts the turn states, in the background. Validation, subject resolution, dedup and **correction linking** are deterministic: a later, different value for the same single-valued fact supersedes the earlier one once confirmed.
@@ -837,7 +837,7 @@ In short:
 **Status:** ✅ shipped in v0.48.0 (§5.5, §7.4). Acceptance met by the tests named in CHANGELOG.md 0.48.0: the checklist on the reference problem lists every table and metric in scope with an action for each missing item; candidate keys and foreign keys come from the reference samples without a model and are verified by probes; an unsupported quote is dropped and a skipped section read again; an exploration problem continues past a gap with a recorded assumption, a governed one stops and asks, and switching lists the assumption; platform runbooks, production policy, sample-data consent and secrets behave the same in both modes.
 
 ### Phase C5a: Semantic layer files, composites and the editor
-**Status:** ✅ shipped in v0.49.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-11; HOW: technical-design.md §5.16; usage: [user-guide.md](user-guide.md) §15. §6 stays the specification for C5b–C5d. Acceptance met by the tests named in CHANGELOG.md 0.49.0: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; a changed shared model makes its composites stale; the reference draft matches its golden file; the checks find a missing column and a join that contradicts a key. The older semantic-layer snapshot is retired.
+**Status:** ✅ shipped in v0.49.0. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-11; HOW: technical-design.md §5.16; usage: [user-guide.md](../guides/user-guide.md) §15. §6 stays the specification for C5b–C5d. Acceptance met by the tests named in CHANGELOG.md 0.49.0: shared models validate as Snowflake semantic model YAML; a composite resolves byte-identically twice; redefining a shared expression, key or join is refused; a collision is named; a changed shared model makes its composites stale; the reference draft matches its golden file; the checks find a missing column and a join that contradicts a key. The older semantic-layer snapshot is retired.
 
 ### Phase C5b: The Knowledge Explorer, asset context; packs and grounding use the semantic layer
 **Status:** ✅ shipped in v0.50.0; the Graph view (landscape) and the standard labels of §6.11 in v0.50.1. What changed and the deliberate deviations: CHANGELOG.md; WHAT/WHY: requirements.md CTX-8, CTX-11, GRD-10, UI-7; HOW: technical-design.md §5.17; usage: user-guide.md §8.7, §14, §15.5. Acceptance met by the tests named in CHANGELOG.md 0.50.0.
@@ -977,4 +977,4 @@ Acceptance: every metric target in §10.2 is met in replay mode; the live-mode r
 
 ## 13. Documentation deliverables
 
-Same conventions as mcp-engine-requirements §11. Update the affected requirements in `docs/requirements.md` (WHAT/WHY, by ID) and add a "Context layer" chapter in the onboarding guide covering the assertion lifecycle (proposed → active → superseded), trust tiers, and how to read a grounding manifest.
+Same conventions as mcp-engine §11. Update the affected requirements in `docs/requirements.md` (WHAT/WHY, by ID) and add a "Context layer" chapter in the onboarding guide covering the assertion lifecycle (proposed → active → superseded), trust tiers, and how to read a grounding manifest.

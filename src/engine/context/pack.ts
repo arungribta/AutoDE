@@ -4,7 +4,7 @@ import { slugifyId } from './estate';
 import { TrustTier } from './assertions';
 
 /**
- * The business-problem pack (Phase C4a, item 1; docs/context-layer-requirements.md
+ * The business-problem pack (Phase C4a, item 1; docs/specs/context-layer.md
  * §11 Phase C4a). A business problem is whatever the customer has — a
  * paragraph, a document, or a set of them — so the pack records which
  * documents describe this problem, what each one *is* and how far it can be

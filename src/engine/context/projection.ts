@@ -5,7 +5,7 @@ import { isMirrorPredicate } from './assertionSchemas';
 import { AssertionLedger, LedgerEvent, NewAssertion } from './ledger';
 
 /**
- * Graph ⇄ ledger (C2, v0.29.0; docs/context-layer-requirements.md §4.3).
+ * Graph ⇄ ledger (C2, v0.29.0; docs/specs/context-layer.md §4.3).
  *
  * - **Migration / sync** (`syncGraphToLedger`): every node and edge the
  *   existing producers put in the graph (live discovery, file ingestion,

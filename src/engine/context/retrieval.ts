@@ -3,7 +3,7 @@ import { normalizeName } from './assertions';
 
 /**
  * Deterministic retrieval primitives (C3, v0.30.0;
- * docs/context-layer-requirements.md §7.1): resolving free text to graph
+ * docs/specs/context-layer.md §7.1): resolving free text to graph
  * nodes, and neighbourhood expansion. No LLM, no embeddings — lexical,
  * alias and graph matching only (§12).
  */

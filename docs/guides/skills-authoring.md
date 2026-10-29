@@ -4,14 +4,14 @@
 
 A **skill** is a folder with a `SKILL.md` file: a short YAML header and Markdown instructions, plus any scripts or reference files it uses. This is the [Agent Skills](https://agentskills.io) format that Claude, Cortex Code, the Copilot CLI and others read, so a skill you write for AutoDE also works in those agents, and theirs work in AutoDE.
 
-AutoDE's own skills live in [`skills/`](../skills) and are described in [skills.md](skills.md) and [platform-skills.md](platform-skills.md). This guide is about **your team's skills**: the ones you import into a workspace.
+AutoDE's own skills live in [`skills/`](../../skills) and are described in [skills.md](skills.md) and [platform-skills.md](platform-skills.md). This guide is about **your team's skills**: the ones you import into a workspace.
 
 ## Two kinds of skill
 
 | | Knowledge | Procedure |
 |---|---|---|
 | What it is | Guidance an agent reads: conventions, rules, reference | Steps an agent carries out with tools |
-| Example | [team-sql-conventions](../examples/skills/team-sql-conventions/SKILL.md) | [table-freshness-check](../examples/skills/table-freshness-check/SKILL.md) |
+| Example | [team-sql-conventions](../../examples/skills/team-sql-conventions/SKILL.md) | [table-freshness-check](../../examples/skills/table-freshness-check/SKILL.md) |
 | How AutoDE uses it | Joins the context packs whose question it matches (a quarter of the pack's budget at most, two skills at most), so every agent working on that question sees it | Runs from *AutoDE: Run Tool Skill*, or joins a stage's assignment if it declares stage kinds |
 | Review before publishing | Recommended | Required, if it has scripts or tools that write or run commands |
 
@@ -38,7 +38,7 @@ metadata:
 - **`description`**: what it does and when to use it. Hosts decide when to use a skill from this sentence, and AutoDE matches knowledge skills to a pack's question by it, so name the things people ask about ("naming", "incremental loads", "freshness").
 - **`allowed-tools`**: only for a procedure: the tools it needs, for example `Read, Bash(snow:*)`. AutoDE gives a skill only the tools it declares, and only where AutoDE runs it (see *The limit* below).
 - **`license`**: say it, so your team knows whether they may share the skill.
-- **`metadata.stageKinds`**: the stage kinds it helps with (`specify`, `source-assessment`, `mapping`, `modelling`, `build`, `deploy`, `reconcile`, `document` and the others in [workflow-templates.md](workflow-templates.md)). Published and reviewed, it then joins the assignment of every such stage, next to AutoDE's own skills. It adds instructions, never tools: the stage's permission tier still decides what the agent may do.
+- **`metadata.stageKinds`**: the stage kinds it helps with (`specify`, `source-assessment`, `mapping`, `modelling`, `build`, `deploy`, `reconcile`, `document` and the others in [workflow-templates.md](../specs/workflow-templates.md)). Published and reviewed, it then joins the assignment of every such stage, next to AutoDE's own skills. It adds instructions, never tools: the stage's permission tier still decides what the agent may do.
 
 Write instructions as you would for a new colleague: what to do, in what order, what to check, what never to do. Keep secrets out: a skill is copied into the workspace and usually into Git.
 

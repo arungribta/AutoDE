@@ -51,7 +51,7 @@ None of these skills runs a platform command. Each writes a **runbook**: one SQL
 - a person approves the runbook under the team's policy (production needs a named approver);
 - AutoDE's runner runs it step by step, with dry runs and a hash-chained log.
 
-See the runner in [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA3 §8a. The skills add to the engine's checks:
+See the runner in [mcp-engine.md](../specs/mcp-engine.md) §9.2 PA3 §8a. The skills add to the engine's checks:
 - **Dialect:** a runbook step whose SQL carries another platform's constructs (`OPTIMIZE` on Snowflake, `TARGET_LAG` on Databricks …) gets a warning before anyone approves it.
 - **`VACUUM` is destructive:** it deletes the files that time travel and a restore need, so its step needs a rollback or a stated reason.
 - **The allowlist** adds `snow dbt list | deploy | execute`, `databricks pipelines list-pipelines | get | start-update` and `databricks bundle summary`. A team adds its own commands under `runbooks.allowCommands` in `.autode/config/approvals.yaml`.
@@ -102,7 +102,7 @@ Each skill's `SKILL.md` ends with a worked example on the reference problem (ret
 
 `npm test` runs the check, together with broken copies of the examples it must reject. Run it on its own after `npm run compile` with `node test/platformSkillCheck.cjs`.
 
-The check proves the examples are consistent with the estate and with AutoDE's engine. It doesn't run them on a live platform: that is [manual-verification.md](manual-verification.md) Part 36.
+The check proves the examples are consistent with the estate and with AutoDE's engine. It doesn't run them on a live platform: that is [manual-verification.md](../testing/manual-verification.md) Part 36.
 
 ## Changing a skill
 

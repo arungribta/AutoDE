@@ -4,7 +4,7 @@ import { BaseNode, GraphEdge, TableNode } from './types';
 import { createSubjectResolver } from './projection';
 
 /**
- * Verification probes (Phase C4a, item 8; docs/context-layer-requirements.md
+ * Verification probes (Phase C4a, item 8; docs/specs/context-layer.md
  * §5.3): read-only checks that turn a claim ("member_id is unique") into
  * evidence. Generated from **fixed templates per check and dialect** — never
  * written by an LLM — and returning **aggregates only** (counts, rates,

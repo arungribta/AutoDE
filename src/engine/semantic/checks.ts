@@ -8,7 +8,7 @@ import { LayerTable, ModelBinding, knownDatabase, matchBase, physicalRef } from 
 import { TableNode } from '../context/types';
 
 /**
- * Checks (C5a; docs/context-layer-requirements.md §6.5), deterministic:
+ * Checks (C5a; docs/specs/context-layer.md §6.5), deterministic:
  * against the estate — every base table and column exists, expressions use
  * known columns and elements, types fit — and against the knowledge — a
  * relationship that contradicts a known key, a primary key no fact supports,

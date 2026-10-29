@@ -14,7 +14,7 @@ import type { MappingContext } from '../types';
 import type { PipelineSpec } from '../pipelineSpec/types';
 
 /**
- * Exploring what AutoDE knows (C5b; docs/context-layer-requirements.md §6.10,
+ * Exploring what AutoDE knows (C5b; docs/specs/context-layer.md §6.10,
  * §7.5): search with facets, the asset context of any object, column, term,
  * fact or semantic element, a graph neighbourhood, a fact table and an
  * overview. One deterministic implementation behind the Knowledge Explorer,
@@ -27,7 +27,7 @@ import type { PipelineSpec } from '../pipelineSpec/types';
 
 /**
  * Asset types, named as the catalogs and standards name them (v0.50.1;
- * docs/context-layer-requirements.md §6.11): physical objects as catalogs do,
+ * docs/specs/context-layer.md §6.11): physical objects as catalogs do,
  * semantic objects as Snowflake's semantic model does, and AutoDE's own
  * facts as *knowledge facts* (DataHub's "assertion" is a quality check, so
  * the word isn't reused).

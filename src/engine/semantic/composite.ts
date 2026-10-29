@@ -4,7 +4,7 @@ import { parseYaml } from '../context/Yaml';
 import { SemanticModel, SemanticNamedExpr, SemanticRelationship, SemanticTable, VerifiedQuery, findElement, serializeSemanticModel, tableElements, validateSemanticModel } from './model';
 
 /**
- * Composites (C5a; docs/context-layer-requirements.md §6.4): a use case
+ * Composites (C5a; docs/specs/context-layer.md §6.4): a use case
  * composes shared models AtScale-style in a small AutoDE file. It narrows
  * what it uses, adds its own metrics, filters and verified queries, and
  * changes descriptions and synonyms — never a shared element's expression,

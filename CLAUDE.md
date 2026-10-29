@@ -4,7 +4,7 @@ Read [docs/README.md](docs/README.md) first: it maps every document (requirement
 
 ## Platform-specific work belongs in skills and platform operations, not in engine code
 
-AutoDE stays platform-neutral, so that a platform change (a new object kind, a renamed view, a new CLI command) is handled by updating data and skills, never by releasing new code. Owner's decision, 2026-10-28; the MM1 decision log, and [docs/platform-operations.md](docs/platform-operations.md).
+AutoDE stays platform-neutral, so that a platform change (a new object kind, a renamed view, a new CLI command) is handled by updating data and skills, never by releasing new code. Owner's decision, 2026-10-28; the MM1 decision log, and [docs/specs/platform-operations.md](docs/specs/platform-operations.md).
 
 - **Every interaction with a platform is a platform operation:** a YAML file per interaction (read the estate, sample, read lineage, set a tag, grant, dry run), with typed parameters and a SQL or CLI template per platform. One platform-neutral executor runs them. Deterministic code calls an operation by its id; agents call the same operations through AutoDE's tools; changes run only as approved runbooks. Write new platform interactions as operation files.
 - **Platform knowledge and judgement live in skills** (`skills/autode-<platform>-*`): which operations to use, platform feature choices, idiomatic platform code, troubleshooting. Skills refer to operations by id rather than carrying their own SQL.

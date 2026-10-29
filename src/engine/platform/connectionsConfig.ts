@@ -337,7 +337,7 @@ export interface SavedConnection {
   credentialsLocal?: boolean;
 }
 
-const TEAM_HEADER = ' Data-platform connections AutoDE and its MCP server can use (docs/mcp-setup.md).\n Committed: pointers and non-secret settings only. Personal fields live in\n .autode/local/connections.yaml; secrets in env vars, the platform CLI\'s\n configuration or VS Code\'s secret storage.';
+const TEAM_HEADER = ' Data-platform connections AutoDE and its MCP server can use (docs/guides/mcp-setup.md).\n Committed: pointers and non-secret settings only. Personal fields live in\n .autode/local/connections.yaml; secrets in env vars, the platform CLI\'s\n configuration or VS Code\'s secret storage.';
 const LOCAL_HEADER = ' This engineer\'s connection fields (not committed): merged by id into\n .autode/config/connections.yaml. No secrets here either.';
 
 function loadDoc(file: string, header: string): Document {

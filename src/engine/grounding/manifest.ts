@@ -8,7 +8,7 @@ import { SemanticGroundingResult, checkSemanticGrounding, describeSemanticIssues
 import type { SemanticLayerIndex } from '../semantic/layer';
 
 /**
- * Grounding manifests and checks (C3, v0.30.0; docs/context-layer-requirements.md
+ * Grounding manifests and checks (C3, v0.30.0; docs/specs/context-layer.md
  * §8.3, §10.1). Every written artifact gets `<file>.grounding.json`: what it
  * was generated from (spec revision, step, agent, primitive, context pack),
  * which assertions justified each decision, and the results of the

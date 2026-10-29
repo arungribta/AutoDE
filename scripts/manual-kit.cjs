@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * The manual-verification kit (docs/manual-verification.md, Part 0 and Parts 36 on):
+ * The manual-verification kit (docs/testing/manual-verification.md, Part 0 and Parts 36 on):
  *   npm run manual:kit -- [--out <folder>] [--force]
  *
  * 1. Builds a ready workspace from the reference problem (retail orders): the sources, the pack's
@@ -242,7 +242,7 @@ function report(kitDir, env, results) {
   for (const r of results) for (const id of r.id.split(' / ')) byId.set(id, r);
   const needs = (n) => n.split('|').some((p) => (p === 'snowflake' && env.snow) || (p === 'databricks' && env.databricks) || (p === 'claude' && env.claude) || (p === 'cortex' && env.cortex) || p === 'you');
   const L = [];
-  L.push('# Manual verification kit', '', `Made ${new Date().toISOString()} from AutoDE ${require(path.join(ROOT, 'package.json')).version}. Checks: docs/manual-verification.md, Parts 36 on.`, '');
+  L.push('# Manual verification kit', '', `Made ${new Date().toISOString()} from AutoDE ${require(path.join(ROOT, 'package.json')).version}. Checks: docs/testing/manual-verification.md, Parts 36 on.`, '');
   L.push('## Start here', '', '1. In the AutoDE repo, press F5 (Run Extension). In the new window, File → Open Folder… this folder.',
     '2. Open the AutoDE panel and choose an LLM provider (`/settings`).',
     '3. Claude Code: in this folder, open Claude Code (the VS Code extension, or `claude` in a terminal). The plugin\'s agents, skills, commands and guard hook are installed in `.claude/`, and `.mcp.json` wires AutoDE\'s MCP server.',

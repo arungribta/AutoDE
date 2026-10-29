@@ -6,7 +6,7 @@ import { PlatformSession } from '../mcp/platform';
 import { EngineAccess, EngineToolSet, ToolExecutionMode } from '../engine/types';
 
 /**
- * The extension's client of the AutoDE engine (docs/mcp-engine-requirements.md
+ * The extension's client of the AutoDE engine (docs/specs/mcp-engine.md
  * §7.2, phase 5): the same MCP server other hosts start with `autode mcp`,
  * connected over an in-memory transport — the same protocol, tool list,
  * validation and error envelope, without a child process to manage. It starts

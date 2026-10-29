@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.53.2 (2026-10-29). This guide orients; it does not duplicate. Details live in [technical-design.md](technical-design.md) (HOW), [requirements.md](requirements.md) (WHAT and WHY) and [roadmap.md](roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.53.2 (2026-10-29). This guide orients; it does not duplicate. Details live in [technical-design.md](../design/technical-design.md) (HOW), [requirements.md](../requirements.md) (WHAT and WHY) and [roadmap.md](../roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -41,17 +41,17 @@ Things that surprise newcomers:
 
 | You want to know… | Read | Notes |
 |---|---|---|
-| What AutoDE must do, and why | [requirements.md](requirements.md) | Requirement IDs (`GRD-4`, `SKL-5` …) with status. Principles P1–P9 and C1–C9 are binding. §1.1 maps each capability area to where its planned work is specified. |
-| What planned phases will build | [mcp-engine-requirements.md](mcp-engine-requirements.md), [context-layer-requirements.md](context-layer-requirements.md) | Phase specifications with acceptance criteria. A shipped phase shrinks to a pointer. |
-| What is next, and what was decided | [roadmap.md](roadmap.md) | Phase order and status, backlog, decision log. Wins over any plan text elsewhere. |
-| How it is built | [technical-design.md](technical-design.md) | Modules, formats, algorithms. §10.5 (settings) and §12 (source tree) are generated from the code. |
-| What changed in each version | [CHANGELOG.md](../CHANGELOG.md) | Includes every deliberate deviation from a spec. |
-| How to check a release by hand | [manual-verification.md](manual-verification.md) | F5 checklists per version. |
+| What AutoDE must do, and why | [requirements.md](../requirements.md) | Requirement IDs (`GRD-4`, `SKL-5` …) with status. Principles P1–P9 and C1–C9 are binding. §1.1 maps each capability area to where its planned work is specified. |
+| What planned phases will build | [mcp-engine.md](../specs/mcp-engine.md), [context-layer.md](../specs/context-layer.md) | Phase specifications with acceptance criteria. A shipped phase shrinks to a pointer. |
+| What is next, and what was decided | [roadmap.md](../roadmap.md) | Phase order and status, backlog, decision log. Wins over any plan text elsewhere. |
+| How it is built | [technical-design.md](../design/technical-design.md) | Modules, formats, algorithms. §10.5 (settings) and §12 (source tree) are generated from the code. |
+| What changed in each version | [CHANGELOG.md](../../CHANGELOG.md) | Includes every deliberate deviation from a spec. |
+| How to check a release by hand | [manual-verification.md](../testing/manual-verification.md) | F5 checklists per version. |
 | How other agents use AutoDE | [mcp-setup.md](mcp-setup.md) | Claude Code, Codex, VS Code, Cursor, Cline. |
 | The `autode` command line | [cli.md](cli.md) | CI gate, decisions from a terminal, exit codes. |
-| How AutoDE is measured | [test/reference/retail-orders/README.md](../test/reference/retail-orders/README.md) | The reference problem and `npm run eval`. |
+| How AutoDE is measured | [test/reference/retail-orders/README.md](../../test/reference/retail-orders/README.md) | The reference problem and `npm run eval`. |
 
-The doc map with precedence rules is [README.md](README.md). **Rule of thumb:** requirements say *what*, the design says *how*, the roadmap says *when*, the changelog says *what changed*. Don't put a file path in requirements.md, and don't restate a requirement in the design.
+The doc map with precedence rules is [README.md](../README.md). **Rule of thumb:** requirements say *what*, the design says *how*, the roadmap says *when*, the changelog says *what changed*. Don't put a file path in requirements.md, and don't restate a requirement in the design.
 
 ## 3. Architecture at a glance
 
@@ -95,9 +95,9 @@ Three ideas carry most of the design:
 2. **The ledger is the system of record for context.** Facts are append-only *assertions* with status and trust; the graph the agents read is a projection of them, rebuilt, never edited in place. See §4.4 and technical-design §5.3.
 3. **Packs, not dumps.** Each LLM call gets a task-scoped *context pack* within a token budget, and every generated artifact gets a *manifest* of what it rested on. See technical-design §5.5–5.7.
 
-**Workflows (since v0.44.0).** Each business problem has a planned workflow, kept in `.autode/problems/<id>/workflow.yaml`. It's drafted from a template in `workflows/*.yaml` (greenfield, modernization, estate merge; see [workflow-templates.md](workflow-templates.md)) and approved by a person. The engine's runtime (`src/engine/workflows/`) is the hub: it says which stage is ready, which waits and why, and which is stale. Document-backed stages read their approval from their documents, so the panel, CLI and MCP agree. See technical-design §7.8. In VS Code the **Workflow view** shows it: a tree in AutoDE's activity bar, a Workflow editor tab with the stage board, detail, decisions and history, and a status-bar item. Everything is recorded with who did it in `workflow-events.jsonl`.
+**Workflows (since v0.44.0).** Each business problem has a planned workflow, kept in `.autode/problems/<id>/workflow.yaml`. It's drafted from a template in `workflows/*.yaml` (greenfield, modernization, estate merge; see [workflow-templates.md](../specs/workflow-templates.md)) and approved by a person. The engine's runtime (`src/engine/workflows/`) is the hub: it says which stage is ready, which waits and why, and which is stale. Document-backed stages read their approval from their documents, so the panel, CLI and MCP agree. See technical-design §7.8. In VS Code the **Workflow view** shows it: a tree in AutoDE's activity bar, a Workflow editor tab with the stage board, detail, decisions and history, and a status-bar item. Everything is recorded with who did it in `workflow-events.jsonl`.
 
-**Where the architecture is going (from v0.40.0).** AutoDE is moving to a portable architecture ([mcp-engine-requirements.md §3.1](mcp-engine-requirements.md), phases PA1–PA4 and phase 5 in the [roadmap](roadmap.md)):
+**Where the architecture is going (from v0.40.0).** AutoDE is moving to a portable architecture ([mcp-engine.md §3.1](../specs/mcp-engine.md), phases PA1–PA4 and phase 5 in the [roadmap](../roadmap.md)):
 - every AI capability becomes a standard agent skill (`SKILL.md`);
 - the engine offers deterministic tools;
 - a change to AutoDE's state becomes a validated **proposal** that a person approves as a **decision**;
@@ -306,7 +306,7 @@ npm install
 npm run compile        # tsc to dist/** + esbuild bundles (dist/extension.js, dist/autode.js) + the mcp-server.js shim
 node dist/autode.js --help   # the CLI; npm run package:cli builds the autode tarball in dist/
 ```
-Press **F5** ("Run Extension (Development Host)"); it compiles first. In the new window, open a scratch workspace — the reference problem's files in `test/reference/retail-orders/` make a good one ([manual-verification.md](manual-verification.md) Part 0). Commands run from the Command Palette *of the Development Host window*. Log lines appear in the panel's chat stream; tool-skill transitions also go to the `AutoDE: Tool Skills` output channel.
+Press **F5** ("Run Extension (Development Host)"); it compiles first. In the new window, open a scratch workspace — the reference problem's files in `test/reference/retail-orders/` make a good one ([manual-verification.md](../testing/manual-verification.md) Part 0). Commands run from the Command Palette *of the Development Host window*. Log lines appear in the panel's chat stream; tool-skill transitions also go to the `AutoDE: Tool Skills` output channel.
 
 ### 7.2 Checks
 | Command | What it does | When |
@@ -328,7 +328,7 @@ The checklist the project follows for every phase:
 1. Read the phase spec; verify every named file and symbol against the code; state the plan, including where you'd deviate and why.
 2. Implement with tests for each acceptance criterion.
 3. `rm -rf dist`, `npm test`, `npm run lint`, `npm run eval` (freeze a baseline under `test/reference/retail-orders/baselines/` when the phase moves a metric).
-4. Documents: CHANGELOG entry (with deviations); requirements by ID (status, WHAT/WHY only); technical design (HOW; `npm run docs:generate`); the phase's spec section shrunk to a pointer; roadmap ✅ and decision-log entries; this guide and [manual-verification.md](manual-verification.md) for anything a newcomer or a tester needs to know.
+4. Documents: CHANGELOG entry (with deviations); requirements by ID (status, WHAT/WHY only); technical design (HOW; `npm run docs:generate`); the phase's spec section shrunk to a pointer; roadmap ✅ and decision-log entries; this guide and [manual-verification.md](../testing/manual-verification.md) for anything a newcomer or a tester needs to know.
 5. Bump the version in `package.json` (once) and `package-lock.json` (twice) by hand — `npm version` reformats `package.json`.
 6. Commit and push.
 
@@ -399,7 +399,7 @@ Open items worth knowing before you change things. The roadmap's backlog is the 
 | Day | Do | You'll understand |
 |---|---|---|
 | 1 | Read §1–§4 of this guide and requirements.md §1–§2. Build, run `npm test`, F5 into a scratch workspace. | What AutoDE is and the rules it lives by. |
-| 2 | Run [manual-verification.md](manual-verification.md) Parts 1, 5 and 6 with Copilot or an API provider; watch `.autode/` fill. | The interview, the ledger, packs. |
+| 2 | Run [manual-verification.md](../testing/manual-verification.md) Parts 1, 5 and 6 with Copilot or an API provider; watch `.autode/` fill. | The interview, the ledger, packs. |
 | 3 | Read `src/engine/workflows/runtime.ts`, `src/engine/agents/assignment.ts`, then `src/core/agentExecutor.ts`. Run Parts 24–26. | The workflow, assignments and gates. |
 | 4 | Read the context-layer core (§6 items 5–8) beside technical-design §5. Run `npm run eval` and read the report. | Grounding, and how AutoDE is measured. |
 | 5 | Read the roadmap and the next phase's spec. Pick a small backlog item or a test gap and ship it through §7.4. | The way the project works. |

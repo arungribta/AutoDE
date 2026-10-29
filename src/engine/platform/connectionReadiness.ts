@@ -6,7 +6,7 @@ import { ConnectionEntry, envStandInVariables } from './connectionsConfig';
 
 /**
  * Whether a named connection has passed its connectivity check on this
- * machine (docs/mcp-engine-requirements.md §9.1 Phase DRV2). Readiness depends
+ * machine (docs/specs/mcp-engine.md §9.1 Phase DRV2). Readiness depends
  * on this machine's drivers, CLIs and credentials, so it lives in
  * `.autode/local/connection-readiness.json`, never in the committed file, and
  * it is bound to a hash of the entry: editing the entry clears it.

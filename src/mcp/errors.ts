@@ -1,5 +1,5 @@
 /**
- * The MCP result and error contract (docs/mcp-engine-requirements.md §5.6).
+ * The MCP result and error contract (docs/specs/mcp-engine.md §5.6).
  * Every failure a tool reports is one `EngineErrorEnvelope`; raw platform
  * output goes into `details` (truncated), never into the message, and every
  * string leaving the server passes through `redact()`.

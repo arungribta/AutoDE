@@ -3,7 +3,7 @@ import { Assertion, AssertionKind, ASSERTION_KINDS } from './assertions';
 
 /**
  * Per-kind JSON Schemas for `Assertion.value` (C2,
- * docs/context-layer-requirements.md §4.1). Graph mirrors — assertions whose
+ * docs/specs/context-layer.md §4.1). Graph mirrors — assertions whose
  * predicate is `node` / `edge`, produced by migrating the graph into the
  * ledger — carry the node or edge itself and are checked by shape only.
  */

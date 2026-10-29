@@ -11,7 +11,7 @@ import { parseComposite, resolveComposite } from '../engine/semantic/composite';
 import { listComposites, listShared, readShared, resolveCompositeFile, sharedLoader } from '../engine/semantic/store';
 
 /**
- * The semantic layer over MCP (C5a; docs/context-layer-requirements.md
+ * The semantic layer over MCP (C5a; docs/specs/context-layer.md
  * §6.7): read tools, resolution (deterministic, derived), and — in
  * decisions.ts — `autode_propose_semantic_model`: an agent's change to a
  * shared model or a composite is a proposal a person approves.
