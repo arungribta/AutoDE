@@ -56,7 +56,7 @@ for (const file of sources(path.join(ROOT, 'src'))) {
 }
 
 console.log('Platform boundary (CLAUDE.md)...\n');
-const rule = 'Platform-specific work belongs in skills and runbooks (CLAUDE.md, "Platform-specific work belongs in skills, not in engine code"). Move it to a skill, or into an allowed folder (' + ALLOWED.join(', ') + '). Never raise the baseline to make this pass.';
+const rule = 'Platform-specific work belongs in skills and runbooks (CLAUDE.md, "Platform-specific work belongs in skills and platform operations, not in engine code"). Move it into a platform operation file or a skill, or into an allowed folder (' + ALLOWED.join(', ') + '). Never raise the baseline to make this pass.';
 
 test('platform statements and CLI commands appear only in the allowed folders, or where the baseline records why', () => {
   const over = Object.entries(found).filter(([f, c]) => c.statements > ((BASELINE.files[f] || {}).statements || 0))
@@ -82,7 +82,7 @@ test('every baseline entry says why, and none is stale (a fixed file\'s entry is
 
 test('the rule is written where every coding agent reads it', () => {
   const md = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
-  assert.ok(/Platform-specific work belongs in skills, not in engine code/.test(md) && md.includes('test/architecture.test.cjs'));
+  assert.ok(/Platform-specific work belongs in skills and platform operations, not in engine code/.test(md) && md.includes('test/architecture.test.cjs'));
 });
 
 const passed = results.filter(Boolean).length;
