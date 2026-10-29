@@ -171,7 +171,15 @@
   .legend-line i.dot { border-top-style: dotted; }
   .graph-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
   .graph-tools label { display: inline-flex; align-items: center; gap: 4px; }
-  #cy, #lcy { flex: 1; min-height: 0; }
+  #cy, #lcy, #lincy { flex: 1; min-height: 0; }
+  .lin-wrap { height: 420px; }
+  .src { font-size: 10px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); margin-right: 3px; white-space: nowrap; }
+  .src-observed { border-color: var(--vscode-testing-iconPassed, #2ea043); }
+  .src-designed { border-color: var(--vscode-charts-blue, #3794ff); }
+  .src-generated { border-color: var(--vscode-charts-purple, #b180d7); }
+  .src-logical { border-color: var(--vscode-charts-green, #89d185); }
+  .impact-path { font-size: 11px; color: var(--muted); }
+  .impact-cat { margin-top: 10px; }
   .graph-foot { padding: 4px 8px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
 
   /* Facts and estate views */
@@ -246,8 +254,8 @@
   // ── State (kept when the panel is hidden or VS Code restarts the webview) ──
   const saved = vscode.getState() || {};
   const filters = Object.fromEntries(Object.entries(saved.filters || {}).filter(([k]) => FACET_PARAM[k]));
-  const state = { view: saved.view || 'explore', query: saved.query || '', filters, history: saved.history || [], pos: saved.pos != null ? saved.pos : -1, tab: saved.tab || 'overview', results: [], total: 0, selected: -1, graph: Object.assign({ hops: 1, columns: true, layout: 'cose', types: [] }, saved.graph || {}), landscape: Object.assign({ scope: '', columns: false, proposed: true, semantic: true, layout: 'cose' }, saved.landscape || {}), factsFilter: saved.factsFilter || {} };
-  const persist = () => vscode.setState({ view: state.view, query: state.query, filters: state.filters, history: state.history.slice(-50), pos: Math.min(state.pos, 49), tab: state.tab, graph: state.graph, landscape: state.landscape, factsFilter: state.factsFilter });
+  const state = { view: saved.view || 'explore', query: saved.query || '', filters, history: saved.history || [], pos: saved.pos != null ? saved.pos : -1, tab: saved.tab || 'overview', results: [], total: 0, selected: -1, graph: Object.assign({ hops: 1, columns: true, layout: 'cose', types: [] }, saved.graph || {}), landscape: Object.assign({ scope: '', columns: false, proposed: true, semantic: true, layout: 'cose' }, saved.landscape || {}), factsFilter: saved.factsFilter || {}, lineage: Object.assign({ direction: 'both', depth: 3, level: '', view: 'graph', change: 'rename_column' }, saved.lineage || {}) };
+  const persist = () => vscode.setState({ view: state.view, query: state.query, filters: state.filters, history: state.history.slice(-50), pos: Math.min(state.pos, 49), tab: state.tab, graph: state.graph, landscape: state.landscape, factsFilter: state.factsFilter, lineage: state.lineage });
 
   // ── Requests to the engine ──
   let nextId = 1; const pending = new Map();
@@ -447,7 +455,7 @@
     if (t === 'contents') return c.contents ? c.contents.length : 0;
     if (t === 'schema') return c.schema ? c.schema.columns.length : 0;
     if (t === 'meaning') return c.meaning.terms.length + c.meaning.semantic.length;
-    if (t === 'lineage') return c.lineage.related.length;
+    if (t === 'lineage') return c.lineage.summary ? c.lineage.summary.upstream + c.lineage.summary.downstream : c.lineage.related.length;
     if (t === 'facts') return c.facts.length;
     if (t === 'governance') return c.governance.classifications.length + c.governance.rules.length;
     if (t === 'quality') return (c.quality || []).reduce((n, q) => n + q.checks.length, 0);
@@ -482,6 +490,7 @@
       <div role="tablist" class="tabs" aria-label="Asset sections">${tabs.map(([t, l]) => `<button role="tab" data-tab="${t}" aria-selected="${state.tab === t}" id="tab-${t}">${esc(l)}${count(tabCount(t, c))}</button>`).join('')}</div>
       <div role="tabpanel" id="tabpanel" aria-labelledby="tab-${state.tab}">${renderTab(state.tab, c)}</div>`;
     if (state.tab === 'graph') loadGraph();
+    if (state.tab === 'lineage') loadLineage();
   }
   const factItem = (f) => `<div class="item"><div>${f.about ? `<span class="badge">${esc(f.about)}</span> ` : ''}<button class="link" data-asset="${esc(f.id)}">${esc(f.statement)}</button> ${trustBadge(f.trust)} <span class="badge" title="Review state">${esc(f.status.replace(/_/g, ' '))}</span></div><div class="ev">${esc(f.kind)} · ${esc(f.predicate)} · ${esc(f.createdBy)} · ${esc((f.validFrom || '').slice(0, 10))}${f.evidence.length ? ' · ' + f.evidence.map((e) => esc(e.type + ' ' + e.ref) + (e.excerpt ? ` — “${esc(e.excerpt)}”` : '')).join('; ') : ''}${f.verification ? ` · probe ${esc(f.verification.result)} ${esc(f.verification.at.slice(0, 10))}` : ''}${f.supersedes ? ` · supersedes <button class="link" data-asset="${esc(f.supersedes)}">${esc(f.supersedes.slice(0, 10))}…</button>` : ''}</div></div>`;
   /** The metadata model's rows (MM1): what is set, and where it isn't, how to set it. */
@@ -540,10 +549,17 @@
         <div class="note small">Packs and the grounding check use only <b>approved</b> semantic definitions. Ontology concepts and scoped terminology arrive in ONT1.</div>`;
     }
     if (t === 'lineage') {
-      const rel = c.lineage.related;
-      const up = rel.filter((r) => r.direction === 'out'); const down = rel.filter((r) => r.direction === 'in');
-      const rows = (list) => list.length ? `<table class="grid"><tbody>${list.map((r) => `<tr class="click" data-asset="${esc(r.asset.id)}" tabindex="0"><td>${esc(r.relation.replace(/_/g, ' '))}</td><td>${kindBadge(r.asset.assetType)} <b>${esc(r.asset.fqn || r.asset.label)}</b></td><td>${trustBadge(r.trust)}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">None known.</div>';
-      return `<div class="note small">${esc(c.lineage.note)}</div><h4>From this asset</h4>${rows(up)}<h4>To this asset</h4>${rows(down)}`;
+      const L = state.lineage;
+      const column = c.asset.assetType === 'column';
+      const changes = column ? [['rename_column', 'Rename this column'], ['drop_column', 'Drop this column'], ['retype_column', 'Change its type']] : c.asset.layer === 'physical' ? [['remove_table', 'Remove this table']] : c.asset.assetType === 'knowledge_fact' ? [['supersede_fact', 'Supersede this fact']] : [];
+      return `<div class="graph-tools">
+          <label>Direction <select id="linDir">${[['both', 'Both'], ['upstream', 'Upstream'], ['downstream', 'Downstream']].map(([v, l]) => `<option value="${v}" ${L.direction === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label>Depth <select id="linDepth">${[1, 2, 3, 5, 10].map((d) => `<option ${L.depth === d ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+          <label>Level <select id="linLevel"><option value="" ${!L.level ? 'selected' : ''}>Auto</option><option value="table" ${L.level === 'table' ? 'selected' : ''}>Table</option><option value="column" ${L.level === 'column' ? 'selected' : ''}>Column</option></select></label>
+          <label>Show <select id="linView"><option value="graph" ${L.view === 'graph' ? 'selected' : ''}>Graph</option><option value="table" ${L.view === 'table' ? 'selected' : ''}>Table</option></select></label>
+          <span style="flex:1"></span>
+          ${changes.length ? `<label>Impact of <select id="linChange">${changes.map(([v, l]) => `<option value="${v}" ${L.change === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label><button class="btn primary" id="linImpact">Analyse impact</button>` : ''}
+        </div><div id="linBody"><div class="empty">Loading lineage…</div></div><div id="linImpactBody"></div>`;
     }
     if (t === 'facts') return c.facts.length ? c.facts.map(factItem).join('') : empty('No facts recorded about it yet.');
     if (t === 'governance') {
@@ -592,6 +608,9 @@
     if (act && act.dataset.act === 'meta') { post({ type: 'editMetadata', id: current.asset.id }); return; }
     const mt = e.target.closest('[data-maint]'); if (mt) { post({ type: 'maintenance', key: mt.dataset.key, act: mt.dataset.maint }); return; }
     if (e.target.closest('.gcard')) return;
+    if (e.target.id === 'linImpact') { loadImpact(); return; }
+    const ie = e.target.closest('[data-impact-export]'); if (ie) { post({ type: 'exportImpact', id: current.asset.id, change: state.lineage.change, format: ie.dataset.impactExport }); return; }
+    if (e.target.id === 'linFit' && graphs.lineage) { graphs.lineage.fit(undefined, 30); return; }
     if (e.target.id === 'gFit' && graphs.asset) { graphs.asset.fit(undefined, 30); return; }
     if (e.target.id === 'gPng' && graphs.asset) { exportPng(graphs.asset); return; }
     if (e.target.id === 'gSvg' && graphs.asset) { post({ type: 'exportGraph', format: 'svg', data: toSvg(graphs.asset) }); return; }
@@ -605,6 +624,11 @@
   $('#asset').addEventListener('input', (e) => { if (e.target.id === 'gFind') findOn('asset', e.target.value); });
   $('#asset').addEventListener('change', (e) => {
     if (e.target.id === 'gFind') return;
+    if (e.target.id === 'linDir' || e.target.id === 'linDepth' || e.target.id === 'linLevel' || e.target.id === 'linView') {
+      const L = state.lineage; if (e.target.id === 'linDir') L.direction = e.target.value; else if (e.target.id === 'linDepth') L.depth = Number(e.target.value); else if (e.target.id === 'linLevel') L.level = e.target.value; else L.view = e.target.value;
+      persist(); loadLineage(); return;
+    }
+    if (e.target.id === 'linChange') { state.lineage.change = e.target.value; persist(); return; }
     if (e.target.id === 'gHops') state.graph.hops = Number(e.target.value);
     else if (e.target.id === 'gLayout') state.graph.layout = e.target.value;
     else if (e.target.id === 'gCols') state.graph.columns = e.target.checked;
@@ -623,7 +647,7 @@
   }
 
   // ── Graphs (Cytoscape.js, bundled): the asset's neighbourhood and the landscape share one renderer ──
-  const graphs = { asset: undefined, landscape: undefined };
+  const graphs = { asset: undefined, landscape: undefined, lineage: undefined };
   const css = (name, fallback) => getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;
   const SHAPE = { domain: 'star', data_product: 'pentagon', knowledge_article: 'round-rectangle', database: 'round-octagon', schema: 'cut-rectangle', relationship: 'tag', custom_instruction: 'round-diamond', table: 'round-rectangle', view: 'round-rectangle', column: 'ellipse', glossary_term: 'diamond', rule: 'triangle', verified_query: 'rhomboid', semantic_model: 'barrel', logical_table: 'round-tag', dimension: 'ellipse', time_dimension: 'ellipse', semantic_fact: 'ellipse', metric: 'hexagon', filter: 'vee' };
   const LEGEND = '<span>Fill: layer (blue physical, purple context, green semantic)</span><span class="legend-line"><i></i> foreign key, relationship</span><span class="legend-line"><i class="dash"></i> proposed, or a draft model</span><span class="legend-line"><i class="dot"></i> semantic join</span><span>Border: certification (green verified, grey documented, orange unverified, dashed draft)</span>';
@@ -742,6 +766,74 @@
     const lonely = s.edges.filter((e) => e.type !== 'contains').length === 0;
     $('#gFoot').innerHTML = `<span>${s.nodes.length} node(s), ${s.edges.length} edge(s)</span>${hidden ? `<span>${hidden} more not drawn (cap): expand a node to go further</span>` : ''}${LEGEND}${HINT}`
       + (lonely ? `<span>Nothing links it to other assets yet: no foreign keys, confirmed or proposed relationships, or semantic joins. <button class="link" data-view-link="graph">See the whole landscape</button></span>` : '');
+  }
+
+  // ── Lineage and impact (LIN) ──
+  const SOURCE_TITLE = { observed: 'Observed on the platform (verified)', designed: 'Designed: a mapping document or Pipeline Spec', generated: 'Generated: an artifact\'s grounding manifest', logical: 'Logical: the semantic layer' };
+  const srcBadges = (list) => list.map((x) => `<span class="src src-${esc(x)}" title="${esc(SOURCE_TITLE[x] || x)}">${esc(x)}</span>`).join('');
+  const NODE_KIND = { planned: 'planned', external: 'outside the working set', artifact: 'artifact', job: 'job', report: 'report' };
+  const linName = (n) => n ? (n.fqn || n.label) : '';
+  /** Deterministic layered positions: one column per hop, upstream on the left. */
+  function layered(nodes) {
+    const by = new Map();
+    for (const n of nodes) { const k = n.depth; if (!by.has(k)) by.set(k, []); by.get(k).push(n); }
+    const pos = {};
+    for (const [d, list] of by) list.sort((a, b) => linName(a).localeCompare(linName(b))).forEach((n, i) => { pos[n.id] = { x: d * 240, y: (i - (list.length - 1) / 2) * 56 }; });
+    return pos;
+  }
+  async function loadLineage() {
+    const L = state.lineage; const id = current.asset.id;
+    const body = await ask({ type: 'lineage', id, direction: L.direction, depth: L.depth, ...(L.level ? { level: L.level } : {}) });
+    const host = $('#linBody'); if (!host || !current || current.asset.id !== id) return;
+    if (!body.result) { host.innerHTML = `<div class="empty">${esc(body.error || 'No lineage.')}</div>`; return; }
+    const r = body.result;
+    const byId = new Map(r.nodes.map((n) => [n.id, n]));
+    const counts = Object.entries(r.coverage.counts).map(([k, v]) => `<span class="src src-${esc(k)}" title="${esc(SOURCE_TITLE[k])}">${esc(k)} ${v}</span>`).join('');
+    const notes = r.coverage.notes.length ? `<div class="note small">${r.coverage.notes.map((n) => `<div>${esc(n)}</div>`).join('')}</div>` : '';
+    if (!r.edges.length) {
+      host.innerHTML = `<div class="empty">No ${esc(r.level)}-level lineage ${r.direction === 'both' ? 'to or from' : r.direction === 'upstream' ? 'into' : 'out of'} ${esc(linName(r.asset))} yet.${r.level === 'table' && current.asset.assetType !== 'column' ? ' Try the column level.' : ''}</div><div class="small muted">In the workspace: ${counts}</div>${notes}`;
+      return;
+    }
+    const nodeCell = (nid) => { const n = byId.get(nid); const k = n && NODE_KIND[n.kind]; return `${n && (n.inWorkingSet || n.kind === 'asset') ? `<button class="link" data-asset="${esc(nid)}">${esc(linName(n))}</button>` : `<b>${esc(linName(n) || nid)}</b>`}${k ? ` <span class="badge" title="${esc(n.note || k)}">${esc(k)}</span>` : ''}`; };
+    const via = (e) => [...new Set(e.evidence.filter((x) => x.via).map((x) => x.via.label))].join(', ');
+    const table = `<table class="grid"><thead><tr><th>From</th><th>To</th><th>Sources</th><th>Evidence</th><th>Through</th></tr></thead><tbody>${r.edges.map((e) => `<tr><td>${nodeCell(e.from)}</td><td>${nodeCell(e.to)}</td><td>${srcBadges(e.sources)}</td><td>${trustBadge(e.trust)}${e.draft ? ' <span class="badge" title="Only drafts back it">draft</span>' : ''}</td><td class="small">${esc(via(e))}</td></tr>`).join('')}</tbody></table>`;
+    const head = `<div class="small muted" style="margin:6px 0">${r.nodes.length - 1} asset(s), ${r.edges.length} edge(s) at ${esc(r.level)} level${r.truncated ? `, ${r.truncated} more not shown (cap)` : ''} · in the workspace: ${counts}</div>`;
+    if (state.lineage.view === 'table') { host.innerHTML = head + table + notes; return; }
+    host.innerHTML = head + `<div class="graph-wrap lin-wrap"><div class="graph-tools"><span class="muted">Upstream ← → downstream</span><span style="flex:1"></span><button class="btn" id="linFit">Fit</button></div><div id="lincy" role="img" aria-label="Lineage of ${esc(linName(r.asset))}"></div><div class="gcard" id="linCard" hidden></div><div class="graph-foot"><span>Border: green observed, blue designed, purple generated, light green logical; dashed: only drafts back it</span><span>Click a node for details</span></div></div>` + notes;
+    if (typeof cytoscape !== 'function') { $('#lincy').innerHTML = '<div class="empty">The graph library did not load.</div>'; return; }
+    if (graphs.lineage) { graphs.lineage.destroy(); graphs.lineage = undefined; }
+    const pos = layered(r.nodes);
+    const colour = { observed: css('--vscode-testing-iconPassed', '#2ea043'), designed: css('--vscode-charts-blue', '#3794ff'), generated: css('--vscode-charts-purple', '#b180d7'), logical: css('--vscode-charts-green', '#89d185') };
+    const els = [
+      ...r.nodes.map((n) => ({ data: { id: n.id, label: linName(n) + (NODE_KIND[n.kind] ? ` (${NODE_KIND[n.kind]})` : ''), type: n.assetType || (n.kind === 'artifact' ? 'verified_query' : n.kind === 'job' || n.kind === 'report' ? 'rule' : 'table'), layer: n.layer || 'physical', cert: n.kind === 'planned' || n.kind === 'external' ? 'draft' : 'none', center: n.depth === 0 ? 1 : 0, summary: Object.assign({ assetType: n.assetType || n.kind }, n) }, position: pos[n.id] })),
+      ...r.edges.map((e, i) => ({ data: { id: 'le' + i, source: e.from, target: e.to, type: 'lineage', label: e.sources.join(', ') + (via(e) ? ` · ${via(e)}` : ''), colour: colour[e.sources[0]] || css('--vscode-descriptionForeground', '#999'), draft: e.draft ? 1 : 0 } }))
+    ];
+    const g = cytoscape({ container: $('#lincy'), elements: els, style: graphStyle().concat([
+      { selector: 'edge[type = "lineage"]', style: { 'line-color': 'data(colour)', 'target-arrow-color': 'data(colour)', width: 2, 'curve-style': 'bezier' } },
+      { selector: 'edge[draft = 1]', style: { 'line-style': 'dashed', opacity: 0.6 } }
+    ]), layout: { name: 'preset', fit: true, padding: 30 }, wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 3 });
+    graphs.lineage = g;
+    g.on('tap', 'node', (ev) => { const n = ev.target.data('summary'); const el = $('#linCard'); if (!el) return; el.innerHTML = `<button class="close" data-card-close aria-label="Close">×</button><h3>${esc(linName(n))}</h3><div class="small muted">${esc([NODE_KIND[n.kind] || n.assetType || '', n.system ? n.system + (n.environment ? '/' + n.environment : '') : '', n.domain || '', n.note || ''].filter(Boolean).join(' · '))}</div>${n.inWorkingSet ? `<div class="row"><button class="btn primary" data-card-open="${esc(n.id)}">Open</button></div>` : ''}`; el.hidden = false; });
+    g.on('mouseover', 'edge', (ev) => ev.target.addClass('hover'));
+    g.on('mouseout', 'edge', (ev) => ev.target.removeClass('hover'));
+  }
+  const CATEGORY = { schema: 'Schema', mapping: 'Mappings', pipeline: 'Pipelines', semantic: 'Semantic models', report: 'Reports', artifact: 'Artifacts', knowledge: 'Knowledge articles' };
+  async function loadImpact() {
+    const id = current.asset.id; const change = state.lineage.change;
+    const host = $('#linImpactBody'); if (!host) return;
+    host.innerHTML = '<div class="empty">Analysing…</div>';
+    const body = await ask({ type: 'impact', id, change });
+    if (!body.result) { host.innerHTML = `<div class="empty">${esc(body.error || 'No impact.')}</div>`; return; }
+    const r = body.result;
+    const groups = Object.keys(CATEGORY).map((c) => [c, r.items.filter((i) => i.category === c)]).filter(([, l]) => l.length);
+    host.innerHTML = `<h4>Impact: ${esc(change.replace(/_/g, ' '))} ${esc(linName(r.asset))}</h4>
+      <div class="small">${esc(r.effect)} ${r.items.length} affected item(s)${r.crossDomain ? ' · <span class="badge pii">crosses domains</span>' : ''}</div>
+      <div class="row" style="margin:6px 0"><button class="btn" data-impact-export="md">Export Markdown</button><button class="btn" data-impact-export="csv">Export CSV</button><button class="btn" data-impact-export="copy">Copy as Markdown</button></div>
+      ${r.items.length ? '' : '<div class="empty">Nothing in AutoDE\'s lineage depends on it. That rests on the sources below: observed lineage counts pipelines AutoDE didn\'t design.</div>'}
+      ${groups.map(([c, list]) => `<div class="impact-cat"><b>${esc(CATEGORY[c])}</b> (${list.length})${list.map((i) => `<div class="item">${i.id.startsWith('obj:') || i.id.startsWith('sem:') ? `<button class="link" data-asset="${esc(i.id)}">${esc(i.label)}</button>` : `<b>${esc(i.label)}</b>`} ${i.certainty === 'possible' ? '<span class="badge" title="Only table-level lineage links it">possible</span>' : ''}${i.draft ? ' <span class="badge">draft</span>' : ''}${i.domain ? ` <span class="badge" title="Domain">${esc(i.domain)}</span>` : ''} ${srcBadges(i.sources)}<div class="impact-path">${esc(i.path.map((x) => x.label).join(' → '))}</div></div>`).join('')}</div>`).join('')}
+      ${r.byDomain.length > 1 ? `<h4>By domain</h4>${r.byDomain.map((d) => `<div class="small">${esc(d.domain)}: ${d.count}</div>`).join('')}` : ''}
+      ${r.problems.length ? `<h4>Business problems</h4>${r.problems.map((x) => `<div class="small"><b>${esc(x.id)}</b>${x.statement ? ': ' + esc(x.statement) : ''}</div>`).join('')}` : ''}
+      ${r.coverage.notes.length ? `<div class="note small">${r.coverage.notes.map((n) => `<div>${esc(n)}</div>`).join('')}</div>` : ''}`;
   }
 
   // ── The Graph view: the landscape ──

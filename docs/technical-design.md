@@ -949,6 +949,61 @@ Under `draft`, the panel calls `draftAtStageBoundary` after a successful stage r
 
 **Agents.** `agents/semantic-modeler.md` and `agents/knowledge-engineer.md` belong to no stage kind: they work items, and later a `semantic-foundation` workflow (ONT1). Their skills have `stageKinds: []`.
 
+### 5.20 Lineage and impact (v0.53.0; CTX-15, LIN)
+
+Context-layer §8.5. One deterministic graph, `buildGraph(sources)` in `src/engine/explore/lineage.ts`, cached per `ExploreSources` (WeakMap). It is built from the Explorer's index (`exploreIndexView`: the projected graph plus the semantic overlay, summaries and `resolveAsset`), so names and identities resolve exactly as on asset pages.
+
+**Sources and where they are read:**
+
+| Source | Read from | Level | Trust |
+|---|---|---|---|
+| observed | live `lineage` facts (`value.source: observed`) | as recorded | the fact's (`verified`) |
+| designed | `ExploreSources.designs`: each problem's `mapping-context.yaml` and `spec/pipeline.yaml` (`problemDesigns` in `sources.ts`); `lineage` facts with `source: stated` | mapping: column (and table); spec: table, through each step's `params.targetObject` | approved → `confirmed`; otherwise `inferred`, `draft` |
+| generated | `ArtifactUse` (grounding manifests): `subjects` (table level), subjects of `assertions` that are columns (column level) | both | `documented` |
+| logical | the semantic overlay's edges: `derives_from` element → column, `maps_to` logical → physical table, `uses_table` verified query → logical table | column, table | approved model → `confirmed`, draft → `inferred` |
+
+Edges run upstream → downstream (`from`, `to`), keyed `level|from|to`, and carry every `EdgeEvidence` (source, trust, draft, label, ref, and `via`: the mapping, pipeline, job or report the edge passes through). Column edges roll up to table edges (`rollup: true`), merged with a table edge of their own when one exists.
+
+**Ends AutoDE doesn't hold:**
+- `planned:<problem>/<last name part>` for targets a design plans. Keyed on the last part, so a mapping's `fct_orders` and a spec's `ANALYTICS.MARTS.fct_orders` are one target in a problem; its columns are `planned:…/<table>.<column>`.
+- `ext:<name>` for a design's source that fits no table, or several. The note lists the candidates: never guessed.
+- `artifact:<path>`, and `job:<system>/<environment>/<type>/<id>` (`entityNodeId`) for a platform's job, notebook or dashboard.
+- Observed ends outside the working set keep their object id, labelled *outside the working set* or *in the estate catalog*.
+`displayName` gives every node a name that reads on its own (fqn, else parent + label).
+
+**Traversals.**
+- `lineageOf(sources, ref, { direction, depth ≤ 10, level, cap ≤ 2000 })`: breadth-first with a visited set (cycles end), depth signed (upstream negative). From a table at column level, it starts from all its columns.
+- `impactOf(sources, { kind, asset })`:
+  - Column changes walk column edges (`direct`). Then they walk table edges from the column's table and from every table a direct hit lands in (`possible`). The first hop is only over table edges of their own (not roll-ups), and paths are prefixed with the path to the hit.
+  - `remove_table` walks both levels as `direct`. `supersede_fact` lists the manifests, semantic nodes (`supportedBy`) and articles (`cites`) resting on the fact.
+  - Each item's `via` carriers become mapping, pipeline and report items.
+  - A possible table whose own columns are direct items is dropped, and so are the changed asset and its table.
+  - Domains come from `summarize` (MM1); a column falls back to its table's.
+  - Problems come from planned nodes, carriers, artifact paths (`problems/<id>/`) and semantic models' `problemId`.
+- `lineageSummary` gives an asset page's one-hop counts (added by `handleExploreRequest`'s `asset` case, which avoids an import cycle with `explore.ts`).
+- `coverage` notes which sources have no edges and how to add them.
+
+**Observed lineage** (`src/engine/lineage/observed.ts`, platform-neutral).
+- `recordObservedLineage(ledger, batch, identity)` turns each `ObservedEdge` into a `lineage` fact:
+  - kind `lineage`, predicate `derives_from`, subject `[downstream, upstream]`;
+  - `value { upstream, downstream, level, source: 'observed', method, connection, scope: system/environment, entity? }`;
+  - trust `verified`, evidence `introspection` `<connection>:<method>`.
+- Object ids come from `objectId` under the connection's estate identity (`recordLineageBatch` in `record.ts` resolves it), so ids match extraction.
+- It is idempotent: an edge's key is method, ends and entity, and an unchanged value appends nothing.
+- A `complete` batch rejects the live facts it covers (same scope and method, inside its databases) that it no longer contains, with the reason.
+- Unqualified names and self-loops are skipped and reported. At most 20,000 edges per batch.
+- Projection (`projection.ts`) adds a `derives_from` edge `lin:<id>` when both ends are graph nodes. `buildGraph` skips `lin:` edges and reads the facts directly.
+- No adapter reads lineage (the old `QUERY_HISTORY` read was removed). Platform reads become platform operations that produce `ObservedBatch`es.
+
+**Surfaces.** `ExploreRequest` has `lineage` and `impact` (`sources.ts`).
+- CLI: `autode explore lineage | impact` and `autode lineage record <file.json> --connection --method [--complete]` (`src/cli/main.ts`).
+- MCP: `autode_lineage`, `autode_impact` (`exploreTools.ts`) and `autode_record_observed_lineage` (`workspaceTools.ts`, answers under `result`).
+- Renderers in `render.ts`: `renderLineage`, `renderImpactMarkdown`, `renderImpactCsv` (CRLF, quoted cells).
+- The Explorer's Lineage tab (`media/explorer.html`):
+  - `loadLineage` draws a Cytoscape `preset` layout, one column per hop (`layered`), edges coloured by their first source; or it shows the edge table.
+  - `loadImpact` groups items by category.
+  - *Export* posts `exportImpact`, which the host answers with `saveText` or `copy` (`knowledgeExplorerModel.ts`).
+
 ## 6. Data Platforms
 
 ### 6.1 Design Rationale
@@ -2111,7 +2166,7 @@ src/engine/decisions/
 src/engine/documents/
   problemDocuments.ts, problemMode.ts, problems.ts, problemSlug.ts
 src/engine/explore/
-  explore.ts, render.ts, sources.ts
+  explore.ts, lineage.ts, render.ts, sources.ts
 src/engine/governance/
   governance.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
@@ -2120,6 +2175,8 @@ src/engine/interview/
   specOps.ts, state.ts
 src/engine/knowledge/
   articles.ts
+src/engine/lineage/
+  observed.ts, record.ts
 src/engine/maintenance/
   brief.ts, policy.ts, queue.ts, scan.ts, turns.ts
 src/engine/metadata/

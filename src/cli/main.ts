@@ -25,7 +25,10 @@ import { draftSemanticModel } from '../engine/semantic/draft';
 import { resolveComposite } from '../engine/semantic/composite';
 import { newCompositeText } from '../engine/semantic/editorState';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
-import { renderAssetMarkdown, renderGraph, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
+import { renderAssetMarkdown, renderGraph, renderImpactCsv, renderImpactMarkdown, renderLineage, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
+import { CHANGE_KINDS, ChangeKind, ImpactResult, LineageResult } from '../engine/explore/lineage';
+import { recordLineageBatch } from '../engine/lineage/record';
+import type { ObservedEdge } from '../engine/lineage/observed';
 import type { AssetContext, AssetType, ExploreOverview, GraphSlice, Layer, SearchResult, SemanticOverview } from '../engine/explore/explore';
 import { getAssetContext, resolveAsset } from '../engine/explore/explore';
 import { MetadataPredicate, migrateMetadata, removeMetadata, setMetadata } from '../engine/metadata/record';
@@ -228,6 +231,11 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
   explore browse [<id>]        The estate as a tree: databases, then a database's schemas, a schema's tables, a table's columns
   explore asset <id|name>      Everything known about one asset: schema, meaning, relationships, governance, facts, decisions, used by
   explore graph [<id|name>] [--hops 1-3] [--system <s>] [--model <m>] [--columns]   The graph around an asset; with no asset, the landscape: tables and every relationship between them
+  explore lineage <id|name> [--direction up|down|both] [--depth 1-10] [--columns]   Where it comes from and where it goes: every edge with its sources (observed, designed, generated, logical) and trust
+  explore impact <id|name> --change rename_column|drop_column|retype_column|remove_table|supersede_fact [--format md|csv] [--out <file>]   What the change would affect, each with its path, by category and domain
+
+Lineage (LIN):
+  lineage record <file.json> --connection <id> --method <name> [--complete]   Record edges observed on the platform ({"edges": [{"upstream": {"object", "column"?}, "downstream": {…}}]})
 
 Metadata (MM1; setting it is a person's: interactive terminal):
   metadata show <asset>        Domain, data products, owners, tags, certification, custom properties
@@ -383,6 +391,12 @@ const OPTIONS = {
   title: { type: 'string' },
   about: { type: 'string' },
   property: { type: 'string' },
+  direction: { type: 'string' },
+  depth: { type: 'string' },
+  change: { type: 'string' },
+  format: { type: 'string' },
+  method: { type: 'string' },
+  complete: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -448,6 +462,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'capture': return await cmdCapture(ctx, rest);
       case 'semantic': return await cmdSemantic(ctx, rest);
       case 'explore': return await cmdExplore(ctx, rest);
+      case 'lineage': return await cmdLineage(ctx, rest);
       case 'metadata': return await cmdMetadata(ctx, rest);
       case 'articles': return await cmdArticles(ctx, rest);
       case 'maintenance': return await cmdMaintenance(ctx, rest);
@@ -1667,7 +1682,61 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, graph: r.slice }, renderGraph(r.slice as GraphSlice));
     return EXIT.OK;
   }
-  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, browse, semantic, asset or graph.`);
+  if (sub === 'lineage') {
+    const dir = ctx.values.direction;
+    if (dir && !['up', 'down', 'both', 'upstream', 'downstream'].includes(dir)) throw new CliError(EXIT.USAGE, '--direction is up, down or both.');
+    const direction = dir === 'up' || dir === 'upstream' ? 'upstream' : dir === 'down' || dir === 'downstream' ? 'downstream' : 'both';
+    const r = ask({ type: 'lineage', id: ref, direction, ...(ctx.values.depth ? { depth: Number(ctx.values.depth) } : {}), ...(ctx.values.columns ? { level: 'column' } : {}) });
+    if (!r.result) throw new CliError(EXIT.NOT_FOUND, String(r.error));
+    emit(ctx, { ok: true, lineage: r.result }, renderLineage(r.result as LineageResult));
+    return EXIT.OK;
+  }
+  if (sub === 'impact') {
+    const change = ctx.values.change as ChangeKind | undefined;
+    if (!change || !CHANGE_KINDS.includes(change)) throw new CliError(EXIT.USAGE, `explore impact <asset> --change ${CHANGE_KINDS.join('|')}.`);
+    const format = ctx.values.format ?? 'md';
+    if (format !== 'md' && format !== 'csv') throw new CliError(EXIT.USAGE, '--format is md or csv.');
+    const r = ask({ type: 'impact', change, id: ref });
+    if (!r.result) throw new CliError(/^No /.test(String(r.error)) ? EXIT.NOT_FOUND : EXIT.USAGE, String(r.error));
+    const result = r.result as ImpactResult;
+    const text = format === 'csv' ? renderImpactCsv(result) : renderImpactMarkdown(result);
+    if (ctx.values.out) {
+      const file = path.resolve(ctx.io.cwd, ctx.values.out);
+      fs.writeFileSync(file, text);
+      emit(ctx, { ok: true, impact: result, file: rel(ctx, file) }, `${result.items.length} affected item(s); wrote ${rel(ctx, file)}.`);
+    } else emit(ctx, { ok: true, impact: result }, text.trimEnd());
+    return EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, browse, semantic, asset, graph, lineage or impact.`);
+}
+
+/** LIN: observed lineage recorded from a file (platform reads arrive with the platform operations catalog). */
+async function cmdLineage(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub, file] = rest;
+  const log = (m: string) => ctx.io.err(m);
+  if (sub === 'record') {
+    if (!file || !ctx.values.connection || !ctx.values.method) throw new CliError(EXIT.USAGE, 'lineage record <file.json> --connection <id> --method <name> [--complete].');
+    const full = path.resolve(ctx.io.cwd, file);
+    if (!fs.existsSync(full)) throw new CliError(EXIT.NOT_FOUND, `No file "${full}".`);
+    let edges: ObservedEdge[];
+    try {
+      const doc = JSON.parse(fs.readFileSync(full, 'utf8')) as { edges?: ObservedEdge[] } | ObservedEdge[];
+      edges = Array.isArray(doc) ? doc : doc.edges ?? [];
+    } catch (err) { throw new CliError(EXIT.USAGE, `${file}: not JSON (${err instanceof Error ? err.message : String(err)}).`); }
+    if (!edges.length || edges.some((e) => !e?.upstream?.object || (!e.downstream?.object && !e.entity?.id))) throw new CliError(EXIT.USAGE, `${file}: each edge needs upstream.object and downstream.object (or entity.id).`);
+    const session = platformSession(ctx);
+    const cfm = await openContext(ctx.workspaceRoot, log);
+    try {
+      const entry = session.entry(ctx.values.connection);
+      let r;
+      try {
+        r = await recordLineageBatch(cfm, { connectionId: entry.id, method: ctx.values.method, complete: ctx.values.complete === true, edges, ...(ctx.values.database ? { databases: ctx.values.database.split(',').map((x) => x.trim()).filter(Boolean) } : {}) }, actorOf(ctx));
+      } catch (err) { throw new CliError(EXIT.USAGE, err instanceof Error ? err.message : String(err)); }
+      emit(ctx, { ok: true, ...r }, `${r.recorded} edge(s) recorded, ${r.unchanged} unchanged, ${r.retired} retired (${r.system}/${r.environment})${r.skipped.length ? `; skipped: ${r.skipped.map((x) => `#${x.edge + 1} ${x.reason}`).join('; ')}` : ''}.`);
+      return EXIT.OK;
+    } finally { cfm.dispose(); session.dispose(); }
+  }
+  throw new CliError(EXIT.USAGE, 'lineage record <file.json> --connection <id> --method <name> [--complete].');
 }
 
 /** C5a: the semantic layer — shared models and the active problem's composites. */

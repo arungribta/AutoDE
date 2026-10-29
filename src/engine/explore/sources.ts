@@ -10,7 +10,10 @@ import { loadSemanticLayer, semanticPaths } from '../semantic/store';
 import { loadMetadataConfig } from '../metadata/model';
 import { listArticles } from '../knowledge/articles';
 import { layoutPath } from '../workspaceLayout';
-import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, browseAssets, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, searchAssets, semanticOverview } from './explore';
+import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, ProblemDesign, browseAssets, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, searchAssets, semanticOverview } from './explore';
+import { ChangeKind, LineageRequest, impactOf, lineageOf, lineageSummary } from './lineage';
+import { listProblems } from '../documents/problems';
+import { parseMappingContext, parsePipelineSpecDocument, readProblemDocument } from '../documents/problemDocuments';
 import { TrustTier } from '../context/assertions';
 
 /**
@@ -61,8 +64,22 @@ export function exploreSources(workspaceRoot: string, context: ContextPackSource
     artifacts: artifactUses(workspaceRoot),
     metadata: loadMetadataConfig(workspaceRoot),
     articles: context.articles ?? listArticles(workspaceRoot),
-    maintenance: (() => { try { return openMaintenanceItems({ workspaceRoot, problemId, sources: context }); } catch { return []; } })()
+    maintenance: (() => { try { return openMaintenanceItems({ workspaceRoot, problemId, sources: context }); } catch { return []; } })(),
+    designs: problemDesigns(workspaceRoot)
   };
+}
+
+/** Every business problem's mapping document and Pipeline Spec (LIN's designed lineage); unreadable ones are skipped. */
+export function problemDesigns(workspaceRoot: string): ProblemDesign[] {
+  const out: ProblemDesign[] = [];
+  for (const p of listProblems(workspaceRoot)) {
+    const root = layoutPath(workspaceRoot, 'problems', p.id);
+    const d: ProblemDesign = { problemId: p.id, ...(p.problemStatement ? { statement: p.problemStatement } : {}) };
+    try { const t = readProblemDocument(root, 'mappingContext'); if (t) d.mapping = parseMappingContext(t); } catch { /* not readable */ }
+    try { const t = readProblemDocument(root, 'pipelineSpec'); if (t) { const s = parsePipelineSpecDocument(t); d.pipeline = { status: s.status, version: s.version, entities: s.entities }; } } catch { /* not readable */ }
+    if (d.mapping || d.pipeline) out.push(d);
+  }
+  return out;
 }
 
 export interface EstateView {
@@ -125,7 +142,9 @@ export type ExploreRequest =
   | { type: 'facts'; kinds?: string[]; statuses?: string[]; trust?: TrustTier[]; text?: string; limit?: number; offset?: number }
   | { type: 'estate' }
   | { type: 'semantic' }
-  | { type: 'browse'; parent?: string };
+  | { type: 'browse'; parent?: string }
+  | ({ type: 'lineage'; id: string } & LineageRequest)
+  | { type: 'impact'; change: ChangeKind; id: string; cap?: number };
 
 export function handleExploreRequest(request: ExploreRequest, sources: ExploreSources, workspaceRoot: string): Record<string, unknown> {
   switch (request.type) {
@@ -136,7 +155,16 @@ export function handleExploreRequest(request: ExploreRequest, sources: ExploreSo
     }
     case 'asset': {
       const context = getAssetContext(sources, request.id);
-      return context ? { type: 'asset', context } : { type: 'asset', error: `No asset "${request.id}" (search for it first).` };
+      return context ? { type: 'asset', context: { ...context, lineage: { ...context.lineage, summary: lineageSummary(sources, context.asset.id) } } } : { type: 'asset', error: `No asset "${request.id}" (search for it first).` };
+    }
+    case 'lineage': {
+      const { id, ...options } = request;
+      const result = lineageOf(sources, id, options);
+      return result ? { type: 'lineage', result } : { type: 'lineage', error: `No asset "${id}" (search for it first).` };
+    }
+    case 'impact': {
+      const result = impactOf(sources, { kind: request.change, asset: request.id }, { cap: request.cap });
+      return 'error' in result ? { type: 'impact', error: result.error } : { type: 'impact', result };
     }
     case 'graph': {
       const slice = exploreGraph(sources, request.id, request);

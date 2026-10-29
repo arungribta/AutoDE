@@ -5,6 +5,8 @@ import { PlatformSession } from './platform';
 import { listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
 import { ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
 import { findSourceFiles } from '../engine/context/sourceFiles';
+import { recordLineageBatch } from '../engine/lineage/record';
+import type { ObservedEdge } from '../engine/lineage/observed';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { BusinessPackManager } from '../engine/context/businessPackManager';
@@ -287,6 +289,43 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
         const cfm = await openContext(ws.options.workspaceRoot);
         try {
           return { result: await ingestConnection(cfm, manager, entry.id, { schemas: args.schemas as string[], system: args.system as string | undefined, environment: args.environment as string | undefined, profile: args.profile === true }) as unknown as Record<string, unknown> };
+        } finally { cfm.dispose(); }
+      }
+    },
+    {
+      name: 'autode_record_observed_lineage',
+      description: 'Record lineage edges observed on a platform for a connection (from its lineage API, OpenLineage events, a scheduler\'s run graph, or rows you were given): each upstream object (and column) with its downstream object (and column), or the job, notebook or report (entity) that read it. Names are fully qualified as the platform gives them; AutoDE resolves them in the connection\'s estate system and environment. Recorded as verified lineage facts under the method you name. Set complete only when the read covered everything for the databases named: edges of that method not in it are then retired.',
+      inputSchema: {
+        type: 'object', required: ['connectionId', 'method', 'edges'], additionalProperties: false,
+        properties: {
+          connectionId: { type: 'string', minLength: 1 },
+          method: { type: 'string', pattern: '^[A-Za-z0-9_-]+$', description: 'Where the edges came from, e.g. openlineage, lineage_api.' },
+          complete: { type: 'boolean', description: 'Default false (nothing is retired).' },
+          databases: { type: 'array', items: { type: 'string', pattern: '^[A-Za-z0-9_$-]+$' } },
+          edges: {
+            type: 'array', minItems: 1, maxItems: 20000,
+            items: {
+              type: 'object', required: ['upstream'], additionalProperties: false,
+              properties: {
+                upstream: { type: 'object', required: ['object'], additionalProperties: false, properties: { object: { type: 'string', minLength: 1 }, column: { type: 'string' } } },
+                downstream: { type: 'object', required: ['object'], additionalProperties: false, properties: { object: { type: 'string', minLength: 1 }, column: { type: 'string' } } },
+                entity: { type: 'object', required: ['type', 'id'], additionalProperties: false, properties: { type: { type: 'string' }, id: { type: 'string' }, name: { type: 'string' } } }
+              }
+            }
+          }
+        }
+      },
+      annotations: recordsOnly('Record observed lineage', true),
+      handler: async (args, ws: EngineWorkspace) => {
+        const entry = session.entry(String(args.connectionId));
+        const cfm = await openContext(ws.options.workspaceRoot);
+        try {
+          const edges = args.edges as ObservedEdge[];
+          if (edges.some((e) => !e.downstream && !e.entity)) throw new EngineToolError('VALIDATION_FAILED', 'Each edge needs a downstream object or the entity that read the upstream one.');
+          return { result: await recordLineageBatch(cfm, { connectionId: entry.id, method: String(args.method), complete: args.complete === true, edges, ...(args.databases ? { databases: args.databases as string[] } : {}) }, 'mcp') as unknown as Record<string, unknown> };
+        } catch (err) {
+          if (err instanceof EngineToolError) throw err;
+          throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
         } finally { cfm.dispose(); }
       }
     }

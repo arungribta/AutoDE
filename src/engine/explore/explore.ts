@@ -10,6 +10,8 @@ import { PhysicalRef, SemanticLayerIndex, isFormatSchema, knownDatabase, matchBa
 import { semanticGraph } from '../semantic/layerGraph';
 import { AssetMetadata, MetadataConfig, assetMetadata, metadataBySubject, patternMatches, qualityDimension } from '../metadata/model';
 import { Article, checkArticle } from '../knowledge/articles';
+import type { MappingContext } from '../types';
+import type { PipelineSpec } from '../pipelineSpec/types';
 
 /**
  * Exploring what AutoDE knows (C5b; docs/context-layer-requirements.md §6.10,
@@ -120,6 +122,16 @@ export interface ExploreSources {
   articles?: readonly Article[];
   /** Open knowledge-maintenance items (MM2): an asset page lists those that concern it. */
   maintenance?: readonly MaintenanceItem[];
+  /** LIN: each business problem's mapping document and Pipeline Spec, the designed lineage. */
+  designs?: readonly ProblemDesign[];
+}
+
+/** A business problem's designs (LIN, §8.5): designed lineage is read from them, never copied. */
+export interface ProblemDesign {
+  problemId: string;
+  statement?: string;
+  mapping?: MappingContext;
+  pipeline?: Pick<PipelineSpec, 'status' | 'version' | 'entities'>;
 }
 
 export interface ArtifactUse {
@@ -539,8 +551,8 @@ export interface AssetContext {
   schema?: { columns: Array<AssetSummary & { dataType: string; nullable: boolean; primaryKey: boolean; foreignKey: boolean; strategy?: string }>; keys: FactRow[]; grain: FactRow[]; profile: FactRow[] };
   /** Business meaning: glossary terms, semantic elements over it, and (for semantic elements) their definition. */
   meaning: { terms: AssetSummary[]; semantic: Array<AssetSummary & { expr?: string; model?: string }>; definition?: Record<string, unknown>; concepts: AssetSummary[] };
-  /** Relationships and derivations known today; observed, designed and generated lineage arrive in LIN. */
-  lineage: { related: RelatedAsset[]; note: string };
+  /** Relationships and derivations next to it; with the lineage summary (LIN) when asked through the request handler. */
+  lineage: { related: RelatedAsset[]; note: string; summary?: { upstream: number; downstream: number; sources: string[] } };
   governance: { classifications: Array<{ column: string; classification: string; strategy?: string; factId?: string; trust?: TrustTier }>; rules: Array<{ id: string; text: string; enforcement: string; ruleType?: string; modality?: string; scope?: string }> };
   /** MM1 (§6.11): owners (with role, and whether inherited from the domain), domain, data products, tags, custom properties, certification. */
   metadata?: AssetMetadata;
@@ -592,6 +604,34 @@ export function resolveAsset(sources: ExploreSources, ref: string): { node?: Bas
   const tables = hits.filter((n) => n.type === 'table' || n.type === 'semantic_view');
   const pick = hits.length === 1 ? hits[0] : tables.length === 1 ? tables[0] : undefined;
   return pick ? { node: pick } : undefined;
+}
+
+/** What the lineage engine (LIN) reads from the Explorer's index: the graph with the semantic overlay, and summaries. */
+export interface ExploreIndexView {
+  nodes: ReadonlyMap<string, BaseNode>;
+  edges: readonly GraphEdge[];
+  tableOf: ReadonlyMap<string, string>;
+  columnsOf: ReadonlyMap<string, readonly string[]>;
+  /** A graph node's or catalog entry's summary. */
+  summarize(id: string): AssetSummary | undefined;
+  /** An asset by id, name or fqn, as `resolveAsset` finds it. */
+  resolve(ref: string): string | undefined;
+  assertion(id: string): Assertion | undefined;
+}
+
+export function exploreIndexView(sources: ExploreSources): ExploreIndexView {
+  const idx = buildIndex(sources);
+  return {
+    nodes: idx.nodes, edges: idx.graph.edges, tableOf: idx.tableOf, columnsOf: idx.columnsOf,
+    summarize: (id) => {
+      const n = idx.nodes.get(id);
+      if (n) return summarize(n, idx);
+      const e = sources.catalog?.get(id);
+      return e ? catalogSummary(e) : undefined;
+    },
+    resolve: (ref) => { const f = resolveAsset(sources, ref); return f?.node?.id ?? f?.entry?.id ?? f?.fact?.id; },
+    assertion: (id) => idx.assertions.get(id)
+  };
 }
 
 /**
@@ -704,7 +744,7 @@ export function getAssetContext(sources: ExploreSources, ref: string): AssetCont
     asset, overview, ...(schema ? { schema } : {}), ...(contents ? { contents } : {}), ...(ambiguousBase?.length ? { ambiguousBase } : {}),
     ...(metadata ? { metadata } : {}), ...(quality.length ? { quality } : {}), ...(articles.length ? { articles } : {}), ...(maintenance.length ? { maintenance } : {}), ...(termFact ? { term: { ...(termFact.value as Record<string, unknown>) } } : {}),
     meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: [] },
-    lineage: { related, note: 'Relationships, mappings and derivations known today. Observed (platform), designed (mappings, specifications) and generated (artifacts) lineage, and impact analysis, arrive in LIN (v0.53.0).' },
+    lineage: { related, note: 'Relationships and derivations next to it. Its full lineage (observed, designed, generated and logical) and the impact of a change: the lineage and impact views.' },
     governance: { classifications, rules },
     facts, memory,
     usedBy: { artifacts, semanticModels, queries },

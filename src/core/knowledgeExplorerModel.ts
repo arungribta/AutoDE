@@ -1,7 +1,8 @@
 import * as path from 'node:path';
 import { ExploreSources, AssetContext } from '../engine/explore/explore';
 import { ExploreRequest, handleExploreRequest } from '../engine/explore/sources';
-import { renderAssetMarkdown } from '../engine/explore/render';
+import { renderAssetMarkdown, renderImpactCsv, renderImpactMarkdown } from '../engine/explore/render';
+import type { ChangeKind, ImpactResult } from '../engine/explore/lineage';
 
 /**
  * The Knowledge Explorer's messages (C5b; docs/context-layer-requirements.md
@@ -24,7 +25,8 @@ export type ExplorerMessage =
   | { type: 'copyMarkdown'; id: string }
   | { type: 'exportGraph'; format: 'svg' | 'png'; data: string }
   | { type: 'editMetadata'; id: string }
-  | { type: 'maintenance'; key: string; act: 'work' | 'dismiss' };
+  | { type: 'maintenance'; key: string; act: 'work' | 'dismiss' }
+  | { type: 'exportImpact'; id: string; change: ChangeKind; format: 'md' | 'csv' | 'copy' };
 
 export type OpenTarget =
   | { kind: 'file'; path: string }
@@ -39,7 +41,8 @@ export type ExplorerAction =
   | { kind: 'copy'; text: string }
   | { kind: 'save'; format: 'svg' | 'png'; data: string }
   | { kind: 'editMetadata'; id: string; label: string }
-  | { kind: 'maintenance'; key: string; act: 'work' | 'dismiss' };
+  | { kind: 'maintenance'; key: string; act: 'work' | 'dismiss' }
+  | { kind: 'saveText'; name: string; format: 'md' | 'csv'; text: string };
 
 export interface ExplorerAnswer {
   /** Posted back to the webview. */
@@ -86,6 +89,16 @@ export async function answerExplorerMessage(msg: ExplorerMessage, host: Explorer
   }
   // MM2: a maintenance item on an asset page — the host starts its agent, or a person dismisses it.
   if (msg.type === 'maintenance') return typeof msg.key === 'string' && (msg.act === 'work' || msg.act === 'dismiss') ? { action: { kind: 'maintenance', key: msg.key, act: msg.act } } : { reply: { type: 'toast', message: 'Unknown maintenance action.' } };
+  // LIN: the impact list as Markdown or CSV, saved by the host or copied.
+  if (msg.type === 'exportImpact') {
+    const sources = await host.sources();
+    const body = sources ? handleExploreRequest({ type: 'impact', id: msg.id, change: msg.change }, sources, root) : undefined;
+    const r = body?.result as ImpactResult | undefined;
+    if (!r) return { reply: { type: 'toast', message: String(body?.error ?? 'Nothing to export.') } };
+    if (msg.format === 'copy') return { action: { kind: 'copy', text: renderImpactMarkdown(r) }, reply: { type: 'toast', message: 'Copied as Markdown.' } };
+    const name = `impact-${msg.change.replace(/_/g, '-')}-${(r.asset.fqn ?? r.asset.label).replace(/[^A-Za-z0-9_.-]+/g, '_')}.${msg.format}`;
+    return { action: { kind: 'saveText', name, format: msg.format, text: msg.format === 'csv' ? renderImpactCsv(r) : renderImpactMarkdown(r) } };
+  }
   if (msg.type === 'exportGraph') {
     if (!/^data:image\/(svg\+xml|png)[;,]/.test(msg.data) && !msg.data.startsWith('<svg')) return { reply: { type: 'toast', message: 'Nothing to export.' } };
     return { action: { kind: 'save', format: msg.format, data: msg.data } };

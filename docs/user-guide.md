@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.52.6. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.53.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -345,7 +345,7 @@ Click any of them for its page: a relationship shows the join; a verified query 
   - **Overview:** where the asset came from, when it was captured and verified, keys and grain, decisions and assumptions in scope (including team-wide ones), conflicts.
   - **Schema:** columns with type, key, nullability, classification and certification.
   - **Meaning:** glossary terms, and the logical tables, metrics and other semantic elements built on it.
-  - **Lineage:** relationships, mappings and derivations known so far.
+  - **Lineage:** where it comes from and where it goes, and the impact of a change (below).
   - **Facts:** each knowledge fact with its evidence tier, review state, sources and history.
   - **Governance:** classifications and masking, and the rules that name it.
   - **Used by:** artifacts whose manifests rest on it, semantic models, verified queries.
@@ -369,6 +369,37 @@ Click any of them for its page: a relationship shows the join; a verified query 
 - **Estate** view: systems and environments with their catalog tables, working set and objects you can't see; connections and whether they're ready; what feeds each system.
 - **Keyboard:** `/` to search, ↑ ↓ and Enter in the results, ← → between tabs, Alt+← and Alt+→ for back and forward.
 
+**Lineage and impact.** An asset's **Lineage** tab shows what feeds it and what it feeds, from four sources:
+
+| Source | Where AutoDE reads it | Evidence |
+|---|---|---|
+| **Observed** | what the platform saw happen, recorded as facts | verified |
+| **Designed** | each business problem's mapping document (column to column) and Pipeline Spec (table to table, through its staging tables) | confirmed once approved; a draft is marked *draft* |
+| **Generated** | what each artifact's grounding manifest rests on | documented |
+| **Logical** | semantic elements from the columns their expressions use; logical tables from their physical tables | confirmed when the model is approved |
+
+- Choose **Direction** (upstream, downstream or both), **Depth** (1 to 10 hops), **Level** (table or column) and **Show**: a graph with upstream on the left, or a table. Each edge names its sources and its evidence. It also names the mapping, pipeline, job or dashboard the edge passes through.
+- Some ends are marked:
+  - *planned*: a target your design plans that doesn't exist yet;
+  - *outside the working set*: an object AutoDE doesn't hold.
+
+  A design that names a table ambiguously (`ORDERS`, where several fit) keeps the name and lists the candidates: AutoDE never picks one.
+- Notes under the view say which sources have nothing yet and how to add them.
+- **Analyse impact** works on a column (rename, drop, change its type), a table (remove it) or a fact (supersede it).
+  - It lists what the change would affect, by category: schema, mappings, pipelines, semantic models, reports, artifacts and knowledge articles.
+  - Each item shows the path from your change. *Possible* means only table-level lineage links it, so check it.
+  - You also see the domains (and whether the change crosses them) and the business problems involved.
+  - Export it as Markdown or CSV, or copy it.
+- **Observed lineage** comes from the platform. Until AutoDE reads it itself, record what you have, for example an export of Snowflake's `ACCESS_HISTORY` or Databricks' lineage tables:
+
+  ```
+  autode lineage record lineage.json --connection <id> --method access_history
+  ```
+
+  - The file is `{"edges": [{"upstream": {"object": "DB.SCHEMA.TABLE", "column": "C"}, "downstream": {"object": "…", "column": "…"}}]}`.
+  - A job or dashboard goes in `entity` (`{"type", "id", "name"}`).
+  - Add `--complete` only when the file is everything for those databases: edges missing from it are then retired, with the reason.
+
 **Browse.** The *Browse* tab beside *Filters* shows the estate as a tree:
 - databases (Databricks: catalogs), each with its system and environment;
 - under each database its schemas, then tables, then columns.
@@ -380,7 +411,7 @@ Databases and schemas have pages too, with their contents. A table whose DDL nam
 - When a base table still fits more than one table (for example, its database is the `SET_DATABASE` placeholder), the model's check says **ambiguous** and lists the candidates. The logical table's page shows them too.
 - Agents get no definitions for an ambiguous table until you set its database.
 
-**From a terminal:** `autode explore` (overview), `autode explore browse [<id>]` (the tree), `autode explore semantic` (each model's tables, metrics, relationships, verified queries and instructions), `--layer physical|context|semantic` on search, `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, and `autode explore graph [--system s] [--model m] [--columns]` for the landscape. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph` and the `autode://asset/{id}` resource.
+**From a terminal:** `autode explore` (overview), `autode explore browse [<id>]` (the tree), `autode explore semantic` (each model's tables, metrics, relationships, verified queries and instructions), `--layer physical|context|semantic` on search, `autode explore search <words> [--type table,column,glossary_term] [--system s] [--platform p]`, `autode explore asset <id or name>` (the asset page as Markdown), `autode explore graph <id or name> [--hops 2]`, `autode explore graph [--system s] [--model m] [--columns]` for the landscape, `autode explore lineage <asset> [--direction up|down|both] [--depth n] [--columns]`, and `autode explore impact <asset> --change rename_column|drop_column|retype_column|remove_table|supersede_fact [--format md|csv] [--out file]`. Add `--json` for the same data the panel uses. **For agents:** `autode_search_assets`, `autode_get_asset_context`, `autode_explore_graph`, `autode_lineage`, `autode_impact`, `autode_record_observed_lineage` and the `autode://asset/{id}` resource.
 
 ### 8.8 Metadata: owners, domains, tags, certification, articles
 

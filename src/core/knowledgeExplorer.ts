@@ -80,6 +80,13 @@ export class KnowledgeExplorerPanel {
       case 'copy': await vscode.env.clipboard.writeText(a.text); return;
       case 'editMetadata': await editMetadata(this.host, this.panel, a.id, a.label); return;
       case 'maintenance': await vscode.commands.executeCommand(a.act === 'work' ? 'autoDataEngineeringHub.workOnMaintenanceItem' : 'autoDataEngineeringHub.dismissMaintenanceItem', a.key); return;
+      case 'saveText': {
+        const target = await vscode.window.showSaveDialog({ filters: a.format === 'csv' ? { CSV: ['csv'] } : { Markdown: ['md'] }, defaultUri: this.host.workspaceRoot() ? vscode.Uri.file(path.join(this.host.workspaceRoot()!, a.name)) : undefined });
+        if (!target) return;
+        await vscode.workspace.fs.writeFile(target, Buffer.from(a.text, 'utf8'));
+        void vscode.window.showInformationMessage(`Saved ${path.basename(target.fsPath)}.`);
+        return;
+      }
       case 'save': {
         const target = await vscode.window.showSaveDialog({ filters: a.format === 'svg' ? { SVG: ['svg'] } : { PNG: ['png'] }, defaultUri: this.host.workspaceRoot() ? vscode.Uri.file(path.join(this.host.workspaceRoot()!, `knowledge-graph.${a.format}`)) : undefined });
         if (!target) return;

@@ -24,11 +24,12 @@ export type AssertionKind =
   | 'naming_convention'
   | 'verified_query'       // a reviewed SQL query (the graph's `verified_query` nodes)
   | 'classification'       // MM1: a column's (or table's) sensitivity / compliance classification, apart from rules
-  | 'metadata';            // MM1: catalog metadata on an asset — predicates tag, owner, domain, certification, property
+  | 'metadata'             // MM1: catalog metadata on an asset — predicates tag, owner, domain, certification, property
+  | 'lineage';             // LIN: an object or column derives from another (predicate derives_from), observed on a platform or stated
 
 export const ASSERTION_KINDS: readonly AssertionKind[] = [
   'schema_fact', 'data_fact', 'key', 'grain', 'relationship', 'business_term', 'metric', 'business_rule',
-  'quality_expectation', 'decision', 'assumption', 'constraint', 'naming_convention', 'verified_query', 'classification', 'metadata'
+  'quality_expectation', 'decision', 'assumption', 'constraint', 'naming_convention', 'verified_query', 'classification', 'metadata', 'lineage'
 ];
 
 export type AssertionStatus = 'proposed' | 'active' | 'rejected' | 'superseded' | 'needs_review';

@@ -1,4 +1,5 @@
 import { ASSET_TYPE_LABELS, AssetContext, AssetSummary, ExploreOverview, GraphSlice, SearchResult, SemanticOverview } from './explore';
+import type { ImpactCategory, ImpactResult, LineageNodeView, LineageResult } from './lineage';
 
 /**
  * Plain-text renderings of the Explorer's answers (C5b): what `autode explore`
@@ -57,6 +58,7 @@ export function renderAssetMarkdown(c: AssetContext): string {
     for (const r of c.lineage.related) L.push(`- ${r.direction === 'out' ? '→' : '←'} ${r.relation.replace(/_/g, ' ')} ${kindLabel(r.asset.assetType)} **${r.asset.fqn ?? r.asset.label}**${r.trust ? ` (${r.trust})` : ''}`);
   }
   L.push('', `_${c.lineage.note}_`);
+  if (c.lineage.summary) L.push(`Lineage: ${c.lineage.summary.upstream} upstream, ${c.lineage.summary.downstream} downstream${c.lineage.summary.sources.length ? ` (${c.lineage.summary.sources.join(', ')})` : ''} — autode explore lineage ${c.asset.id}`);
   if (c.governance.classifications.length || c.governance.rules.length) {
     L.push('', '## Governance');
     for (const g of c.governance.classifications) L.push(`- ${g.column}: ${g.classification}${g.strategy ? `, masked by ${g.strategy}` : ''}${g.trust ? ` (${g.trust})` : ''}`);
@@ -105,4 +107,58 @@ export function renderGraph(g: GraphSlice): string {
   const more = Object.entries(g.hidden).map(([id, n]) => `  +${n} more around ${label.get(id) ?? id}`);
   const head = g.center ? `around ${label.get(g.center) ?? g.center}` : `in scope${g.capped && g.total !== undefined ? ` (the first ${g.nodes.filter((n) => !n.parent).length} of ${g.total} tables)` : ''}`;
   return [`${g.nodes.length} node(s), ${g.edges.length} edge(s) ${head}:`, ...lines, ...more].join('\n');
+}
+
+const nodeName = (n: Pick<LineageNodeView, 'fqn' | 'label'>) => n.fqn ?? n.label;
+const KIND_NOTE: Record<string, string> = { planned: 'planned', external: 'outside the working set', artifact: 'artifact', job: 'job', report: 'report', asset: '' };
+
+/** Lineage as text: each edge with its sources and trust; then what is missing (LIN). */
+export function renderLineage(r: LineageResult): string {
+  const byId = new Map(r.nodes.map((n) => [n.id, n] as const));
+  const name = (id: string) => { const n = byId.get(id); return n ? `${nodeName(n)}${KIND_NOTE[n.kind] ? ` (${KIND_NOTE[n.kind]})` : ''}` : id; };
+  const lines = r.edges.map((e) => `  ${name(e.from)} → ${name(e.to)}  [${e.sources.join(', ')}; ${e.trust}${e.draft ? ', draft' : ''}${e.evidence.some((x) => x.via) ? `; via ${[...new Set(e.evidence.filter((x) => x.via).map((x) => x.via!.label))].join(', ')}` : ''}]`);
+  const counts = Object.entries(r.coverage.counts).map(([k, v]) => `${k} ${v}`).join(', ');
+  return [
+    `${r.direction === 'both' ? 'Upstream and downstream' : r.direction === 'upstream' ? 'Upstream' : 'Downstream'} of ${nodeName(r.asset)}, ${r.level} level, ${r.depth} hop(s): ${r.nodes.length - 1} asset(s), ${r.edges.length} edge(s).`,
+    ...(lines.length ? lines : ['  No lineage found.']),
+    ...(r.truncated ? [`  +${r.truncated} more not shown (cap)`] : []),
+    '', `Sources in the workspace: ${counts}.`, ...r.coverage.notes.map((n) => `  · ${n}`)
+  ].join('\n');
+}
+
+const CATEGORY_LABEL: Record<ImpactCategory, string> = { schema: 'Schema', mapping: 'Mappings', pipeline: 'Pipelines', semantic: 'Semantic models', report: 'Reports', artifact: 'Artifacts', knowledge: 'Knowledge articles' };
+
+/** The impact of a change as Markdown: by category, each item with its path; by domain; the business problems (LIN). */
+export function renderImpactMarkdown(r: ImpactResult): string {
+  const L: string[] = [`# Impact: ${r.change.kind.replace(/_/g, ' ')} ${nodeName(r.asset)}`, '', r.effect, ''];
+  if (!r.items.length) L.push('Nothing in AutoDE\'s lineage depends on it.');
+  for (const c of Object.keys(CATEGORY_LABEL) as ImpactCategory[]) {
+    const items = r.items.filter((i) => i.category === c);
+    if (!items.length) continue;
+    L.push(`## ${CATEGORY_LABEL[c]} (${items.length})`);
+    for (const i of items) L.push(`- **${i.label}**${i.certainty === 'possible' ? ' — possible (table-level lineage only)' : ''}${i.draft ? ' — draft' : ''}${i.domain ? ` — ${i.domain}` : ''}  \n  ${i.path.map((p) => p.label).join(' → ')}${i.sources.length ? ` _(${i.sources.join(', ')})_` : ''}`);
+    L.push('');
+  }
+  if (r.byDomain.length) {
+    L.push(`## By domain${r.crossDomain ? ' (crosses domains)' : ''}`);
+    for (const d of r.byDomain) L.push(`- ${d.domain}: ${d.count} (${d.categories.map((c) => CATEGORY_LABEL[c].toLowerCase()).join(', ')})`);
+    L.push('');
+  }
+  if (r.problems.length) {
+    L.push('## Business problems');
+    for (const p of r.problems) L.push(`- ${p.id}${p.statement ? `: ${p.statement}` : ''}`);
+    L.push('');
+  }
+  if (r.truncated) L.push(`_${r.truncated} more not listed (cap)._`, '');
+  if (r.coverage.notes.length) { L.push('## What this rests on'); for (const n of r.coverage.notes) L.push(`- ${n}`); }
+  return L.join('\n').trimEnd() + '\n';
+}
+
+const csvCell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+
+/** The impact list as CSV, one row per affected item. */
+export function renderImpactCsv(r: ImpactResult): string {
+  const rows = [['category', 'asset', 'id', 'certainty', 'draft', 'domain', 'problem', 'sources', 'path']];
+  for (const i of r.items) rows.push([i.category, i.label, i.id, i.certainty, i.draft ? 'yes' : 'no', i.domain ?? '', i.problemId ?? '', i.sources.join(' '), i.path.map((p) => p.label).join(' > ')]);
+  return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }

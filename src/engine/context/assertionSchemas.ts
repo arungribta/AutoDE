@@ -103,6 +103,16 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
       { required: ['status'], properties: { status: { enum: ['verified', 'draft', 'deprecated'] }, note: { type: 'string' } } },
       { required: ['name', 'value'], properties: { name: { type: 'string', minLength: 1 }, value: {} } }
     ]
+  },
+  // LIN (§8.5): subject [downstream, upstream]. Ends are object ids (a column's id at column level); `entity` names the job, notebook or report that moved the data.
+  lineage: {
+    type: 'object',
+    required: ['upstream', 'downstream', 'level'],
+    properties: {
+      upstream: { type: 'string', minLength: 1 }, downstream: { type: 'string', minLength: 1 }, level: { enum: ['table', 'column'] },
+      source: { enum: ['observed', 'stated'] }, method: { type: 'string' }, connection: { type: 'string' }, scope: { type: 'string' },
+      entity: { type: 'object', required: ['type', 'id'], properties: { type: { type: 'string' }, id: { type: 'string' }, name: { type: 'string' } } }
+    }
   }
 };
 

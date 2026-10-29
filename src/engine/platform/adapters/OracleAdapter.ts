@@ -130,7 +130,6 @@ export class OracleAdapter extends BaseDataSourceAdapter {
       supportsQueryExecution: true,
       supportsDdlGeneration: false,
       supportsColumnProfiling: true,
-      supportsLineageExtraction: false,
       supportsChangeDataCapture: false,
       supportsStreaming: false,
       maxQueryTimeoutMs: 300000,

@@ -149,7 +149,6 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
       supportsQueryExecution: true,
       supportsDdlGeneration: true,
       supportsColumnProfiling: true,
-      supportsLineageExtraction: false,  // Requires Unity Catalog lineage (separate feature)
       supportsChangeDataCapture: true,   // via Delta CDF
       supportsStreaming: true,           // via Structured Streaming
       maxQueryTimeoutMs: 600000,

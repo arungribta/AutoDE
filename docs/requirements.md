@@ -165,7 +165,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - Owners and domains on objects.
   - Impact lists the affected pipelines, artifacts, semantic models, reports, domains and business problems, each with the path to it, by graph traversal.
 
-  *Why:* change is the riskiest act in data engineering, and an agent must know what a change breaks (P2). *Status:* Planned (LIN). Platform metadata extraction already reads lineage, but it isn't stored.
+  *Why:* change is the riskiest act in data engineering, and an agent must know what a change breaks (P2). *Status:* Shipped v0.53.0 (LIN): designed, generated and logical lineage; observed lineage recorded as verified facts; impact by category and domain on every surface. Reading lineage from the platforms themselves comes with the platform operations catalog (owner, 2026-10-28); until then observed edges are recorded from what an agent or a person brings.
 - **CTX-17 — The knowledge layer follows industry standards.** Its concepts and names come from W3C and open specifications (SKOS, DQV, PROV, ODRL, OpenLineage, ODCS), Snowflake and Unity formats, and catalog conventions. Concepts AutoDE adds are labelled as its own: evidence tiers, assumptions. The model covers:
   - asset types, system, platform and environment;
   - a glossary with categories and related terms, tags (`key=value`) and classifications;
@@ -335,7 +335,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - lineage and impact views;
   - an ontology and glossary browser.
 
-  It is read-only, theme-aware, usable by keyboard, and fast on large estates. Every view has a CLI and MCP equivalent. *Why:* the context and semantic layers must be explorable to be trusted (C6). *Status:* Shipped v0.50.0 (search, asset pages, graph, facts, estate; `autode explore`; MCP tools). v0.50.1 added the Graph view (the landscape with every known relationship, expand in place, find on canvas) and standard labels (CTX-17). The lineage and impact views come in LIN, the ontology and glossary browser in ONT1. Lists are paged rather than virtualised.
+  It is read-only, theme-aware, usable by keyboard, and fast on large estates. Every view has a CLI and MCP equivalent. *Why:* the context and semantic layers must be explorable to be trusted (C6). *Status:* Shipped v0.50.0 (search, asset pages, graph, facts, estate; `autode explore`; MCP tools). v0.50.1 added the Graph view (the landscape with every known relationship, expand in place, find on canvas) and standard labels (CTX-17). v0.53.0 added the lineage and impact views (the Lineage tab, impact with Markdown and CSV export). The ontology and glossary browser comes in ONT1. Lists are paged rather than virtualised.
 - **UI-6 — Dashboard panel.** *Status:* Parked (v0.13.0); removed in v0.45.9 (owner's choice): the Workflow view shows progress and each stage's outputs.
 
 ---

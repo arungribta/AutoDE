@@ -82,7 +82,6 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
   /**
    * Extracts every schema in `options.schemaFilter` (`SCHEMA` or
    * `DATABASE.SCHEMA`), or the connected one when none is given (Phase K1).
-   * Account-wide lineage is read once.
    */
   async extractMetadata(options?: ExtractOptions): Promise<SchemaSnapshot> {
     const scopes: Array<string | undefined> = options?.schemaFilter && options.schemaFilter.length > 0 ? [...options.schemaFilter] : [undefined];
@@ -91,11 +90,9 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     for (let i = 0; i < scopes.length; i++) {
       if (options?.signal?.aborted) break;
       if (scopes[i]) this.log(`[${this.platform}] Schema ${scopes[i]} (${i + 1}/${scopes.length})`);
-      // Query-through for a few tables (Phase K2) never reads account-wide lineage.
-      parts.push(await this.extractScope(this.getMetadataQueries(scopes[i], tables), options, i === 0 && !tables));
+      parts.push(await this.extractScope(this.getMetadataQueries(scopes[i], tables), options));
     }
     if (parts.length === 1) return parts[0];
-    const lineage = parts.flatMap((p) => p.lineage ?? []);
     const reports = parts.map((p) => p.profiling).filter((r): r is ProfilingReport => !!r);
     return {
       ...(reports.length ? { profiling: { queries: reports.reduce((n, r) => n + r.queries, 0), budget: reports[0].budget, profiledTables: reports.reduce((n, r) => n + r.profiledTables, 0), skippedTables: reports.reduce((n, r) => n + r.skippedTables, 0) } } : {}),
@@ -104,12 +101,11 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
       extractedAt: parts[0]?.extractedAt ?? new Date().toISOString(),
       tables: parts.flatMap((p) => p.tables),
       views: parts.flatMap((p) => p.views),
-      foreignKeys: parts.flatMap((p) => p.foreignKeys),
-      lineage: lineage.length > 0 ? lineage : undefined
+      foreignKeys: parts.flatMap((p) => p.foreignKeys)
     };
   }
 
-  private async extractScope(queries: PlatformMetadataQueries, options: ExtractOptions | undefined, withLineage: boolean): Promise<SchemaSnapshot> {
+  private async extractScope(queries: PlatformMetadataQueries, options: ExtractOptions | undefined): Promise<SchemaSnapshot> {
     const startTime = new Date().toISOString();
 
     this.log(`[${this.platform}] Extracting metadata...`);
@@ -202,19 +198,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
       profiling = await this.profileTables(tables, queries, options);
     }
 
-    // 9. Optional: extract lineage
-    let lineage: import('./types').LineageEdge[] | undefined;
-    if (withLineage && queries.extractLineage && this.getCapabilities().supportsLineageExtraction) {
-      try {
-        const lineageResult = await this.executeQuery(queries.extractLineage, {
-          timeoutMs: 60000,
-          signal: options?.signal
-        });
-        lineage = this.assembleLineage(lineageResult);
-      } catch (err) {
-        this.log(`[${this.platform}] Lineage extraction failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    // Lineage is not read here: platform skills carry the lineage queries (LIN, src/engine/lineage/observed.ts).
 
     this.log(`[${this.platform}] Metadata extraction complete: ${tables.length} tables, ${views.length} views, ${foreignKeys.length} FKs`);
 
@@ -225,7 +209,6 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
       tables,
       views,
       foreignKeys,
-      lineage,
       ...(profiling ? { profiling } : {})
     };
   }
@@ -316,15 +299,6 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
       targetSchema: String(r['target_schema'] ?? r['pk_schema'] ?? r['TARGET_SCHEMA'] ?? ''),
       targetTable: String(r['target_table'] ?? r['pk_table'] ?? r['TARGET_TABLE'] ?? ''),
       targetColumn: String(r['target_column'] ?? r['pk_column'] ?? r['TARGET_COLUMN'] ?? '')
-    }));
-  }
-
-  private assembleLineage(lineageResult: QueryResult): import('./types').LineageEdge[] {
-    return (lineageResult.rows as Array<Record<string, unknown>>).map((r) => ({
-      sourceFqn: String(r['source_fqn'] ?? r['SOURCE_FQN'] ?? ''),
-      targetFqn: String(r['target_fqn'] ?? r['TARGET_FQN'] ?? ''),
-      transformDescription: r['transform'] ? String(r['transform']) : undefined,
-      queryText: r['query_text'] ? String(r['query_text']) : undefined
     }));
   }
 

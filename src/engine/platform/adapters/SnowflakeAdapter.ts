@@ -30,8 +30,8 @@ import { getCliDescriptor } from '../credentials/cliRegistry';
  *   directly over `fetch()` — the always-available fallback, with the caveats
  *   documented on `SnowflakeRestBackend`.
  *
- * Metadata extraction uses INFORMATION_SCHEMA views. Lineage extraction uses
- * ACCOUNT_USAGE.QUERY_HISTORY (requires elevated permissions).
+ * Metadata extraction uses INFORMATION_SCHEMA views. Lineage is read by the
+ * autode-snowflake-lineage skill's queries, not here (LIN).
  */
 export class SnowflakeAdapter extends BaseDataSourceAdapter {
   private backend: ExecutionBackend | null = null;
@@ -203,7 +203,6 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
       supportsQueryExecution: true,
       supportsDdlGeneration: true,
       supportsColumnProfiling: true,
-      supportsLineageExtraction: true,  // via ACCOUNT_USAGE
       supportsChangeDataCapture: true,  // via streams
       supportsStreaming: true,          // via Snowpipe
       maxQueryTimeoutMs: 300000,
@@ -288,19 +287,7 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
 
       profileTable: (fqn: string, cols: string[], sampleRows: number) => `
         SELECT COUNT(*) AS row_count${cols.map((c, i) => `, COUNT(DISTINCT ${c}) AS d_${i}, COUNT(*) - COUNT(${c}) AS n_${i}`).join('')}
-        FROM ${fqn} SAMPLE (${Math.max(1, Math.floor(sampleRows))} ROWS)`,
-
-      extractLineage: `
-        SELECT
-          query_text,
-          start_time,
-          database_name,
-          schema_name
-        FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
-        WHERE query_type IN ('CREATE_TABLE_AS_SELECT', 'INSERT', 'MERGE', 'COPY')
-          AND start_time >= DATEADD(day, -30, CURRENT_DATE())
-        ORDER BY start_time DESC
-        LIMIT 1000`
+        FROM ${fqn} SAMPLE (${Math.max(1, Math.floor(sampleRows))} ROWS)`
     };
   }
 

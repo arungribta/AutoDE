@@ -1169,6 +1169,27 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: set `policy: draft` with `runsPerDay: 1`; run a stage's agent in the panel; run another.
   Expect: after the first stage, the next item's agent runs on its own (log line); after the second, nothing more that day. With `policy: off`, no items.
 
+## Part 50 — v0.53.0 Lineage and impact
+
+- [ ] **50.1 Designed lineage.**
+  Do: in the retail-orders kit, approve the mapping stage; open `shop.orders` in the Knowledge Explorer, Lineage tab, level Column.
+  Expect: each mapped column leads to its target column, marked *planned*, with *designed* and *confirmed*; the graph runs left to right; *Show: Table* lists the same edges with the mapping under *Through*.
+- [ ] **50.2 Drafts and specs.**
+  Do: record a Pipeline Spec (build stage) without approving it; look at `shop.orders` at table level.
+  Expect: `shop.orders → stg_… → fct_orders` with *draft*; dashed edges in the graph.
+- [ ] **50.3 Impact.**
+  Do: on the column `shop.orders.tax_amount`, *Analyse impact* with *Rename this column*; export CSV and Markdown.
+  Expect: the mapping, the planned target columns, any semantic element over the column, the artifacts and the business problem, each with its path; the pipeline as *possible*; both files open with the same items.
+- [ ] **50.4 Observed lineage.**
+  Do: export rows from `SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY` (or write a small file) as `{"edges": [...]}`; `autode lineage record lineage.json --connection <id> --method access_history`; run it again.
+  Expect: the first run records the edges under the connection's system; the second records 0 (unchanged); the Lineage tab shows them as *observed*, *verified*.
+- [ ] **50.5 Messy names.**
+  Do: in the realistic-estate kit, write a mapping whose source is just `ORDERS`; open its target's lineage.
+  Expect: the source is *outside the working set* with "ambiguous: N tables fit" listing them; no table is chosen.
+- [ ] **50.6 Other surfaces.**
+  Do: `autode explore lineage shop.orders --direction down`, `autode explore impact shop.orders.tax_amount --change drop_column`; in Claude Code, ask for the impact of dropping that column.
+  Expect: the same items as the Explorer; the agent calls `autode_impact`.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1463,5 +1484,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 49.4 |  |  |
 | 49.5 |  |  |
 | 49.6 |  |  |
+| 50.1 |  |  |
+| 50.2 |  |  |
+| 50.3 |  |  |
+| 50.4 |  |  |
+| 50.5 |  |  |
+| 50.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

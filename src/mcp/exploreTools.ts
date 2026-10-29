@@ -4,6 +4,7 @@ import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
 import { ExploreSources } from '../engine/explore/explore';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
+import type { ChangeKind } from '../engine/explore/lineage';
 import { computeRevision } from '../engine/context/contextStore';
 import { articleSummary, checkArticle, readArticle } from '../engine/knowledge/articles';
 import { loadMetadataConfig } from '../engine/metadata/model';
@@ -84,6 +85,28 @@ export function exploreTools(): EngineTool[] {
         const r = await explore(ws, { type: 'graph', id: String(args.asset), ...(args.hops ? { hops: Number(args.hops) } : {}), ...(args.edgeTypes ? { edgeTypes: args.edgeTypes as string[] } : {}), ...(args.includeColumns ? { includeColumns: true } : {}) });
         if (!r.slice) throw new EngineToolError('NOT_FOUND', String(r.error));
         return r.slice as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_lineage',
+      description: 'Lineage of an asset (table, view, column, semantic element, planned target), upstream, downstream or both, at table or column level, up to 10 hops. Every edge says which sources back it — observed (the platform, verified), designed (mapping documents and Pipeline Specs; drafts flagged), generated (artifacts\' grounding manifests) and logical (the semantic layer) — with its trust and the mapping, pipeline, job or report it passes through. Ends AutoDE doesn\'t hold are kept by name (planned targets, objects outside the working set). coverage says which sources have no data and how to get them, including failed observed-lineage refreshes.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['asset'], properties: { asset: { type: 'string', minLength: 1 }, direction: { enum: ['upstream', 'downstream', 'both'] }, depth: { type: 'integer', minimum: 1, maximum: 10 }, level: { enum: ['table', 'column'] } } },
+      annotations: read('Lineage of an asset'),
+      handler: async (args, ws) => {
+        const r = await explore(ws, { type: 'lineage', id: String(args.asset), ...(args.direction ? { direction: args.direction as 'upstream' | 'downstream' | 'both' } : {}), ...(args.depth ? { depth: Number(args.depth) } : {}), ...(args.level ? { level: args.level as 'table' | 'column' } : {}) });
+        if (!r.result) throw new EngineToolError('NOT_FOUND', String(r.error));
+        return r.result as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_impact',
+      description: 'What a change would affect, by graph traversal over lineage (never similarity): a column renamed, dropped or retyped, a table removed, or a fact superseded. Each affected item has its path from the changed asset, its sources, and whether it is direct (column-level lineage or the fact itself) or possible (only table-level lineage links it). Grouped by category (schema, mapping, pipeline, semantic, report, artifact, knowledge) and by domain, with the business problems that use something affected and whether the change crosses domains. Read-only: changing anything is a runbook or a proposal.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['change', 'asset'], properties: { change: { enum: ['rename_column', 'drop_column', 'retype_column', 'remove_table', 'supersede_fact'] }, asset: { type: 'string', minLength: 1, description: 'The column or table (id, name or fully qualified name), or the fact id for supersede_fact.' } } },
+      annotations: read('Impact of a change'),
+      handler: async (args, ws) => {
+        const r = await explore(ws, { type: 'impact', change: args.change as ChangeKind, id: String(args.asset) });
+        if (!r.result) throw new EngineToolError(/^No /.test(String(r.error)) ? 'NOT_FOUND' : 'VALIDATION_FAILED', String(r.error));
+        return r.result as Record<string, unknown>;
       }
     }
   ];

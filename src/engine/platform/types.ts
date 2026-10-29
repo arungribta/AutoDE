@@ -11,7 +11,6 @@ export interface PlatformCapabilities {
   readonly supportsQueryExecution: boolean;
   readonly supportsDdlGeneration: boolean;
   readonly supportsColumnProfiling: boolean;
-  readonly supportsLineageExtraction: boolean;
   readonly supportsChangeDataCapture: boolean;
   readonly supportsStreaming: boolean;
   readonly maxQueryTimeoutMs: number;
@@ -78,7 +77,6 @@ export interface SchemaSnapshot {
   readonly tables: TableMetadata[];
   readonly views: ViewMetadata[];
   readonly foreignKeys: ForeignKeyMetadata[];
-  readonly lineage?: LineageEdge[];
   readonly profiling?: ProfilingReport;
 }
 
@@ -138,14 +136,6 @@ export interface ForeignKeyMetadata {
   readonly targetColumn: string;
 }
 
-export interface LineageEdge {
-  readonly sourceFqn: string;
-  readonly sourceColumn?: string;
-  readonly targetFqn: string;
-  readonly targetColumn?: string;
-  readonly transformDescription?: string;
-  readonly queryText?: string;
-}
 
 // ── Platform-Specific Metadata Queries ──
 export interface PlatformMetadataQueries {
@@ -163,7 +153,6 @@ export interface PlatformMetadataQueries {
   readonly listPrimaryKeys?: string;
   /** Phase K2: `table_schema`, `table_name`, `last_altered` for the scope's tables (filtered like listTables). */
   readonly lastAltered?: string;
-  readonly extractLineage?: string;
 }
 
 // ── Adapter Interface ──

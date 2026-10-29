@@ -429,6 +429,11 @@ export function projectGraph(assertions: readonly Assertion[], options: { active
       const id = `rel:${a.id}`;
       edges.set(id, { id, source: a.subject[0], target: a.subject[1], type: 'related_to', weight: 0.9 });
       addSupport(`edge:${id}`, a);
+    } else if (a.kind === 'lineage' && a.subject.length >= 2 && nodes.has(a.subject[0]) && nodes.has(a.subject[1])) {
+      // LIN: downstream derives_from upstream, as the semantic layer's elements derive from their columns.
+      const id = `lin:${a.id}`;
+      edges.set(id, { id, source: a.subject[0], target: a.subject[1], type: 'derives_from', weight: 0.9 });
+      addSupport(`edge:${id}`, a);
     }
   }
 

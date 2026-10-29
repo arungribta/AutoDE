@@ -4975,7 +4975,7 @@ async function main() {
     }
   });
 
-  await test('v0.31.0: extractMetadata() extracts every schema in schemaFilter (lineage once) and ConnectionManager applies the estate binding\'s schemas and identity', async () => {
+  await test('v0.31.0: extractMetadata() extracts every schema in schemaFilter (no lineage: v0.53.0) and ConnectionManager applies the estate binding\'s schemas and identity', async () => {
     const { SnowflakeAdapter } = require('../dist/engine/platform/adapters/SnowflakeAdapter.js');
     const adapter = new SnowflakeAdapter({ account: 'acme', username: 'u', database: 'SALES' }, () => {});
     const seen = [];
@@ -4987,10 +4987,10 @@ async function main() {
       if (/INFORMATION_SCHEMA\.COLUMNS/i.test(sql)) return { columns: [], rows: [{ TABLE_CATALOG: 'SALES', TABLE_SCHEMA: m[1], TABLE_NAME: `T_${m[1]}`, COLUMN_NAME: 'ID', DATA_TYPE: 'NUMBER', IS_NULLABLE: 'NO', ORDINAL_POSITION: 1 }], rowCount: 1, executionTimeMs: 0 };
       return { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
     };
-    adapter.getCapabilities = () => ({ supportsColumnProfiling: false, supportsLineageExtraction: true });
+    adapter.getCapabilities = () => ({ supportsColumnProfiling: false });
     const snap = await adapter.extractMetadata({ schemaFilter: ['PUBLIC', 'SALES.FINANCE'] });
     assert.deepStrictEqual(snap.tables.map((t) => t.fqn).sort(), ['SALES.FINANCE.T_FINANCE', 'SALES.PUBLIC.T_PUBLIC']);
-    assert.strictEqual(seen.filter((q) => /QUERY_HISTORY/i.test(q)).length, 1, 'account-wide lineage is read once');
+    assert.ok(!seen.some((q) => /QUERY_HISTORY|ACCESS_HISTORY/i.test(q)), 'extraction reads no lineage (v0.53.0: the platform skills\' queries do, on a refresh)');
 
     const { ConnectionManager } = require('../dist/engine/platform/ConnectionManager.js');
     const cm = new ConnectionManager(() => {});
@@ -5326,7 +5326,7 @@ async function main() {
     assert.ok(/lower\(table_name\) IN \('orders'\)/.test(db.getMetadataQueries('main.sales', ['ORDERS']).listTables));
     const seen = [];
     sf.executeQuery = async (sql) => { seen.push(sql); return { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 }; };
-    sf.getCapabilities = () => ({ supportsColumnProfiling: false, supportsLineageExtraction: true });
+    sf.getCapabilities = () => ({ supportsColumnProfiling: false });
     await sf.extractMetadata({ schemaFilter: ['PUBLIC'], tableFilter: ['ORDERS'] });
     assert.ok(!seen.some((s) => /QUERY_HISTORY/i.test(s)), 'no lineage on query-through');
     const { ConnectionManager } = require('../dist/engine/platform/ConnectionManager.js');
@@ -5864,12 +5864,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5949,6 +5949,9 @@ async function main() {
       autode_work_order: [{ role: 'knowledge-engineer', task: 'Write an article' }, { role: 'knowledge-engineer' }],
       autode_propose_article: [{ article: { slug: 'customer-ids', title: 'Customer IDs', about: ['obj:shop/prod/shop.customers'], cites: [], body: 'Text.' } }, { article: { slug: 'Bad Slug', title: 't', about: [], cites: [], body: 'x' } }],
       autode_explore_graph: [{ asset: 'shop.orders', hops: 2 }, { asset: 'shop.orders', hops: 9 }],
+      autode_lineage: [{ asset: 'shop.orders', direction: 'downstream' }, { asset: 'shop.orders', depth: 11 }],
+      autode_impact: [{ change: 'remove_table', asset: 'shop.orders' }, { change: 'truncate', asset: 'shop.orders' }],
+      autode_record_observed_lineage: [{ connectionId: 'snowflake:nope', method: 'openlineage', edges: [{ upstream: { object: 'A.B.C' }, downstream: { object: 'A.B.D' } }] }, { connectionId: 'snowflake:nope', method: 'open lineage', edges: [] }],
       autode_semantic_check: [{ name: 'sales' }, { name: '' }],
       autode_semantic_draft: [{ name: 'sales' }, { name: '1bad' }],
       autode_semantic_resolve: [{ name: 'revenue' }, { name: '' }],
@@ -6344,11 +6347,10 @@ async function main() {
     assert.deepStrictEqual(meta.rows, [{ name: 'ORDERS' }], 'SHOW / DESCRIBE / EXPLAIN describe objects and pass');
     const snap = { platform: 'snowflake', extractedAt: 't', views: [], foreignKeys: [], tables: [{ schema: 'S', name: 'C', fqn: 'D.S.C', type: 'TABLE', columns: [
       { name: 'email', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 1, profile: { distinctCount: 9, nullCount: 0, minValue: 'a@b.io', maxValue: 'z@y.io' } },
-      { name: 'amount', dataType: 'NUMBER', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2, profile: { distinctCount: 5, minValue: '1.5', maxValue: '99.5' } }] }],
-      lineage: [{ sourceFqn: 'a', targetFqn: 'b', queryText: "INSERT INTO b SELECT * FROM a WHERE email = 'q@r.io'" }] };
+      { name: 'amount', dataType: 'NUMBER', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2, profile: { distinctCount: 5, minValue: '1.5', maxValue: '99.5' } }] }] };
     const stripped = S.sanitizeSnapshot(snap, false);
     assert.deepStrictEqual(stripped.tables[0].columns.map((c) => c.profile), [{ distinctCount: 9, nullCount: 0 }, { distinctCount: 5 }]);
-    assert.ok(!/q@r\.io|a@b\.io|99\.5/.test(JSON.stringify(stripped)) && stripped.lineage[0].sourceFqn === 'a');
+    assert.ok(!/a@b\.io|99\.5/.test(JSON.stringify(stripped)));
     const masked = S.sanitizeSnapshot(snap, true);
     assert.deepStrictEqual([masked.tables[0].columns[0].profile.minValue, masked.tables[0].columns[1].profile.maxValue], [S.MASK, '99.5']);
     assert.ok(snap.tables[0].columns[0].profile.minValue === 'a@b.io', 'the input snapshot is not mutated');
@@ -6433,7 +6435,7 @@ async function main() {
       },
       async extractMetadata(o) {
         executed.push({ extract: o });
-        return { platform: 'snowflake', extractedAt: 't', views: [], foreignKeys: [], lineage: [{ sourceFqn: 'a', targetFqn: 'b', queryText: "WHERE email='q@r.io'" }], tables: [{ schema: 'S', name: 'CUSTOMERS', fqn: 'D.S.CUSTOMERS', type: 'TABLE', columns: [
+        return { platform: 'snowflake', extractedAt: 't', views: [], foreignKeys: [], tables: [{ schema: 'S', name: 'CUSTOMERS', fqn: 'D.S.CUSTOMERS', type: 'TABLE', columns: [
           { name: 'email', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 1, profile: { distinctCount: 3, minValue: 'a@b.io', maxValue: 'z@y.io' } }] }] };
       }
     });
@@ -6570,7 +6572,6 @@ async function main() {
       async connect() { return { connected: true, platform: 'snowflake', databaseName: 'D', schemaName: 'S', version: '9', capabilities: this.getCapabilities() }; }
       async extractMetadata() {
         return { platform: 'snowflake', connectionId: this.getConnectionId(), extractedAt: 't', views: [], foreignKeys: [],
-          lineage: [{ sourceFqn: 'D.S.RAW', targetFqn: 'D.S.CUSTOMERS', queryText: "INSERT INTO CUSTOMERS SELECT * FROM RAW WHERE EMAIL='zz-sample-1@corp.example'" }],
           tables: [{ schema: 'S', name: 'CUSTOMERS', fqn: 'D.S.CUSTOMERS', type: 'TABLE', columns: [
             { name: 'EMAIL', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 1, profile: { distinctCount: 2, nullCount: 0, minValue: 'zz-sample-2@corp.example', maxValue: 'zz-sample-3@corp.example' } },
             { name: 'TIER', dataType: 'TEXT', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2, profile: { distinctCount: 2, nullCount: 0, minValue: 'ZZSAMPLEGOLD', maxValue: 'ZZSAMPLESILVER' } }] }] };
@@ -8013,7 +8014,7 @@ async function main() {
     nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
     nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    username: me\n    database: SALES\n');
     const asked = [];
-    const snapshot = (schema) => ({ platform: 'snowflake', connectionId: 'snowflake:ACME', extractedAt: 't', views: [], foreignKeys: [], lineage: [], tables: [{ schema, name: 'ORDERS', fqn: `SALES.${schema}.ORDERS`, type: 'TABLE', columns: [{ name: 'ORDER_ID', dataType: 'NUMBER', isNullable: false, isPrimaryKey: true, isForeignKey: false, ordinalPosition: 1 }, { name: 'AMOUNT', dataType: 'NUMBER(12,2)', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2 }] }] });
+    const snapshot = (schema) => ({ platform: 'snowflake', connectionId: 'snowflake:ACME', extractedAt: 't', views: [], foreignKeys: [], tables: [{ schema, name: 'ORDERS', fqn: `SALES.${schema}.ORDERS`, type: 'TABLE', columns: [{ name: 'ORDER_ID', dataType: 'NUMBER', isNullable: false, isPrimaryKey: true, isForeignKey: false, ordinalPosition: 1 }, { name: 'AMOUNT', dataType: 'NUMBER(12,2)', isNullable: true, isPrimaryKey: false, isForeignKey: false, ordinalPosition: 2 }] }] });
     const fakeAdapter = () => ({
       async connect() { return { connected: true, platform: 'snowflake', databaseName: 'SALES', schemaName: 'RAW', version: '9', capabilities: {} }; },
       async disconnect() {}, dispose() {}, getConnectionId: () => 'snowflake:ACME', getCapabilities: () => ({}),
@@ -12154,6 +12155,227 @@ async function main() {
     const lm = src('src/core/languageModelAdapter.ts');
     assert.ok(!lm.includes("selectChatModels({ vendor: 'copilot' })"), 'not only the Copilot vendor');
     assert.ok(lm.includes('candidates = copilotFirst(await vscode.lm.selectChatModels());') && lm.includes('models.find((m) => m.id === familyOrId.trim()) ?? pickPreferred(models, familyOrId)'));
+  });
+
+  // ── v0.53.0: LIN — lineage (observed, designed, generated, logical) and impact ──
+
+  const lin = {
+    /** The retail-orders reference estate, a reporting table in another domain, and the problem's designs. */
+    sources(extra = {}) {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path');
+      const { parseFile } = require('../dist/engine/context/fileIngestion.js');
+      const { parseSemanticModel } = require('../dist/engine/semantic/model.js');
+      const L = require('../dist/engine/semantic/layer.js');
+      const nodes = []; const edges = [];
+      for (const f of ['shop.ddl', 'crm.ddl']) {
+        const r = parseFile(nodeFs.readFileSync(nodePath.join(__dirname, 'reference', 'retail-orders', 'sources', f), 'utf8'), f, { system: f.replace('.ddl', ''), environment: 'prod' });
+        nodes.push(...r.nodes); edges.push(...r.edges);
+      }
+      const rep = parseFile('CREATE TABLE reporting.tax_daily (\n  order_date DATE,\n  tax_total DECIMAL(12,2)\n);\n', 'reporting.sql', { system: 'shop', environment: 'prod' });
+      nodes.push(...rep.nodes); edges.push(...rep.edges);
+      const model = parseSemanticModel(['name: sales', 'tables:', '  - name: orders', '    base_table: { database: shop, schema: shop, table: orders }', '    dimensions:', '      - { name: channel, expr: channel }', '    metrics:', '      - { name: total_tax, expr: SUM(tax_amount) }', ''].join('\n')).model;
+      const fact = (id, kind, subject, predicate, value) => ({ id, kind, subject, predicate, value, statement: id, status: 'active', trust: 'confirmed', evidence: [], validFrom: '2026-10-01', createdBy: 'user:t', createdAt: '2026-10-01' });
+      const columns = [['order_id', 'order_id'], ['customer_id', 'customer_key'], ['order_ts', 'order_date'], ['status', 'order_status'], ['tax_amount', 'tax'], ['shipping_amount + tax_amount', 'charges']];
+      return {
+        graph: { nodes, edges }, conflicts: [],
+        assertions: [
+          fact('D-sales', 'metadata', ['obj:shop/prod/shop.orders'], 'domain', { domain: 'sales' }),
+          fact('D-fin', 'metadata', ['obj:shop/prod/reporting.tax_daily'], 'domain', { domain: 'finance' }),
+          fact('K-tax', 'quality_expectation', ['obj:shop/prod/shop.orders.tax_amount'], 'not_null', { check: 'not_null' }),
+          ...(extra.assertions ?? [])
+        ],
+        semantic: L.indexSemanticLayer([{ name: 'sales', source: 'shared', revision: 'r1', approved: true, file: 'x', model }]),
+        designs: [{ problemId: 'retail-orders', statement: 'Net revenue by channel', mapping: { specId: 'retail-orders', specVersion: 1, status: 'approved', mappings: [{ id: 'm1', sourceEntityId: 'shop.orders', sourceFqn: 'shop.orders', targetName: 'fct_orders', columns: columns.map(([sourceColumn, targetColumn]) => ({ sourceColumn, targetColumn })) }] },
+          pipeline: { status: 'draft', version: 1, entities: [{ name: 'fct_orders', source: { object: 'shop.orders', type: 'table' }, transforms: [{ kind: 'rename_cast', params: { sourceObject: 'shop.orders', targetObject: 'stg_shop_orders' } }], target: { object: 'ANALYTICS.MARTS.fct_orders', materialization: 'table' } }] } }],
+        artifacts: [{ path: '.autode/problems/retail-orders/deliverables/build/sql/fct_orders.sql', assertions: ['K-tax'], subjects: ['shop.orders'], warnings: 0 }],
+        lineageRefresh: extra.lineageRefresh
+      };
+    }
+  };
+
+  await test('v0.53.0 LIN: recorded Snowflake and Databricks lineage results load as verified observed edges — idempotent, retired only when a complete read no longer has them, dev and prod apart, a job or dashboard as the entity; no adapter reads lineage (platform reads arrive as platform operations)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const O = fresh('../dist/engine/lineage/observed.js');
+    const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+    const root = nodePath.join(__dirname, '..');
+    for (const f of ['SnowflakeAdapter', 'DatabricksAdapter', '../BaseAdapter']) assert.ok(!/ACCESS_HISTORY|QUERY_HISTORY|column_lineage|table_lineage|extractLineage/i.test(nodeFs.readFileSync(nodePath.join(root, 'src', 'engine', 'platform', 'adapters', `${f}.ts`), 'utf8')), `${f} reads no lineage`);
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-lin-'));
+    try {
+      const ledger = new AssertionLedger(dir);
+      await ledger.load();
+      // Recorded from Snowflake's ACCESS_HISTORY (column level, upper-case names).
+      const ah = [
+        { upstream: { object: 'RETAIL.SALES.ORDERS', column: 'AMOUNT' }, downstream: { object: 'RETAIL.STAGING.STG_ORDERS', column: 'AMOUNT' } },
+        { upstream: { object: '"RETAIL"."STAGING"."STG_ORDERS"', column: 'AMOUNT' }, downstream: { object: 'RETAIL.MART.FCT_ORDERS', column: 'NET_AMOUNT' } }
+      ];
+      const record = (edges, { env = 'prod', complete = true } = {}) => O.recordObservedLineage(ledger, { connectionId: `snowflake:${env}`, method: 'access_history', complete, edges, windowDays: 30, databases: ['RETAIL'] }, { system: 'erp', environment: env });
+      let r = await record(ah);
+      assert.deepStrictEqual([r.recorded, r.retired, r.skipped], [2, 0, []]);
+      const live = () => ledger.assertions().filter((a) => a.kind === 'lineage' && a.status === 'active');
+      assert.deepStrictEqual(live().map((a) => [a.subject[0], a.subject[1], a.trust, a.value.level]).sort(), [
+        ['obj:erp/prod/retail.mart.fct_orders.net_amount', 'obj:erp/prod/retail.staging.stg_orders.amount', 'verified', 'column'],
+        ['obj:erp/prod/retail.staging.stg_orders.amount', 'obj:erp/prod/retail.sales.orders.amount', 'verified', 'column']
+      ]);
+      r = await record(ah);
+      assert.deepStrictEqual([r.recorded, r.unchanged, live().length], [0, 2, 2], 'the same read appends nothing');
+      await record(ah, { env: 'dev' });
+      assert.strictEqual(live().length, 4, 'the same account\'s dev environment is kept apart');
+      r = await record([ah[0]], { complete: false });
+      assert.deepStrictEqual([r.retired, live().length], [0, 4], 'a partial read retires nothing');
+      r = await record([ah[0]]);
+      assert.deepStrictEqual([r.retired, live().length], [1, 3]);
+      const gone = ledger.assertions().find((a) => a.kind === 'lineage' && a.status === 'rejected');
+      assert.ok(gone && /Not observed by access_history in the last 30 days/.test(gone.reviewReason ?? '') && gone.subject[0].includes('/prod/'), JSON.stringify(gone));
+      r = await record([{ upstream: { object: 'ORDERS' }, downstream: { object: 'RETAIL.MART.X' } }, { upstream: { object: 'A.B' }, downstream: { object: 'A.B' } }], { complete: false });
+      assert.deepStrictEqual(r.skipped.map((x) => x.reason), ['upstream "ORDERS" is not a qualified object name', 'an object that derives from itself']);
+      await assert.rejects(() => O.recordObservedLineage(ledger, { connectionId: 'c', method: 'open lineage', complete: false, edges: [] }, { system: 's', environment: 'e' }), /must be a short name/);
+      // Recorded from Databricks' system tables: the pipeline that loads a table, and a dashboard that only reads it.
+      const d = await O.recordObservedLineage(ledger, { connectionId: 'databricks:lake', method: 'table_lineage', complete: true, edges: [
+        { upstream: { object: 'retail.sales.orders' }, downstream: { object: 'retail.mart.fct_orders' }, entity: { type: 'PIPELINE', id: 'p-42' } },
+        { upstream: { object: 'retail.mart.fct_orders' }, entity: { type: 'DASHBOARD_V3', id: 'd-7', name: 'Revenue' } }
+      ] }, { system: 'lake', environment: 'prod' });
+      assert.strictEqual(d.recorded, 2);
+      const dash = ledger.assertions().find((a) => a.kind === 'lineage' && a.value.entity?.id === 'd-7');
+      assert.deepStrictEqual([dash.subject[0], dash.value.level, /is read by DASHBOARD_V3 Revenue/.test(dash.statement)], ['job:lake/prod/dashboard-v3/d-7', 'table', true]);
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('v0.53.0 LIN: on the reference problem, designed and generated lineage link every target column to its source columns; edges carry every source with its trust, drafts flagged, planned targets kept by name; cycles end; coverage says what is missing', () => {
+    const { lineageOf } = fresh('../dist/engine/explore/lineage.js');
+    const sources = lin.sources();
+    for (const [target, from] of [['fct_orders.order_id', ['shop.orders.order_id']], ['fct_orders.customer_key', ['shop.orders.customer_id']], ['fct_orders.order_date', ['shop.orders.order_ts']], ['fct_orders.order_status', ['shop.orders.status']], ['fct_orders.tax', ['shop.orders.tax_amount']], ['fct_orders.charges', ['shop.orders.shipping_amount', 'shop.orders.tax_amount']]]) {
+      const r = lineageOf(sources, `planned:retail-orders/${target}`, { direction: 'upstream' });
+      assert.ok(r, target);
+      const up = r.edges.map((e) => r.nodes.find((n) => n.id === e.from).fqn ?? r.nodes.find((n) => n.id === e.from).label).sort();
+      assert.deepStrictEqual(up, from, `${target} ← ${up.join(', ')}`);
+      assert.ok(r.edges.every((e) => e.sources.includes('designed') && e.trust === 'confirmed' && !e.draft), 'from the approved mapping');
+    }
+    const t = lineageOf(sources, 'shop.orders', { direction: 'downstream', depth: 3 });
+    const by = (label) => t.edges.find((e) => (t.nodes.find((n) => n.id === e.to).fqn ?? t.nodes.find((n) => n.id === e.to).label) === label);
+    assert.deepStrictEqual(by('fct_orders').sources, ['designed']);
+    assert.ok(by('stg_shop_orders').draft && by('stg_shop_orders').evidence[0].via.label === 'pipeline fct_orders', 'the draft spec is flagged');
+    assert.deepStrictEqual(t.nodes.find((n) => n.id === 'planned:retail-orders/fct_orders').kind, 'planned', 'the spec\'s ANALYTICS.MARTS.fct_orders and the mapping\'s fct_orders are one target');
+    assert.ok(by('.autode/problems/retail-orders/deliverables/build/sql/fct_orders.sql').sources.includes('generated'));
+    assert.ok(by('orders').sources.includes('logical'));
+    assert.ok(t.coverage.notes.some((n) => /No observed lineage/.test(n)) && t.coverage.counts.designed > 0);
+    // A loop (a MERGE into itself, a staging round trip) ends.
+    const loop = lin.sources({ assertions: [
+      { id: 'L1', kind: 'lineage', subject: ['obj:shop/prod/reporting.tax_daily', 'obj:shop/prod/shop.orders'], predicate: 'derives_from', value: { upstream: 'obj:shop/prod/shop.orders', downstream: 'obj:shop/prod/reporting.tax_daily', level: 'table', source: 'observed', method: 'access_history', connection: 'c', scope: 'shop/prod' }, statement: 'x', status: 'active', trust: 'verified', evidence: [], validFrom: 't', createdBy: 'system', createdAt: 't' },
+      { id: 'L2', kind: 'lineage', subject: ['obj:shop/prod/shop.orders', 'obj:shop/prod/reporting.tax_daily'], predicate: 'derives_from', value: { upstream: 'obj:shop/prod/reporting.tax_daily', downstream: 'obj:shop/prod/shop.orders', level: 'table', source: 'observed', method: 'access_history', connection: 'c', scope: 'shop/prod' }, statement: 'x', status: 'active', trust: 'verified', evidence: [], validFrom: 't', createdBy: 'system', createdAt: 't' }
+    ] });
+    const l = lineageOf(loop, 'shop.orders', { direction: 'both', depth: 10 });
+    assert.ok(l && l.nodes.filter((n) => n.id === 'obj:shop/prod/reporting.tax_daily').length === 1);
+  });
+
+  await test('v0.53.0 LIN: the impact of renaming a source column lists the dependent mapping, planned columns, semantic elements, artifacts and the business problem, each with its path; grouped by domain (MM), crossing domains through observed lineage; table-level-only links are "possible"; Markdown and CSV', () => {
+    const { impactOf } = fresh('../dist/engine/explore/lineage.js');
+    const R = fresh('../dist/engine/explore/render.js');
+    const observed = { id: 'OBS1', kind: 'lineage', subject: ['obj:shop/prod/reporting.tax_daily.tax_total', 'obj:shop/prod/shop.orders.tax_amount'], predicate: 'derives_from', value: { upstream: 'obj:shop/prod/shop.orders.tax_amount', downstream: 'obj:shop/prod/reporting.tax_daily.tax_total', level: 'column', source: 'observed', method: 'access_history', connection: 'snowflake:prod', scope: 'shop/prod' }, statement: 'observed', status: 'active', trust: 'verified', evidence: [], validFrom: 't', createdBy: 'system', createdAt: 't' };
+    const r = impactOf(lin.sources({ assertions: [observed] }), { kind: 'rename_column', asset: 'shop.orders.tax_amount' });
+    assert.ok(!r.error, r.error);
+    const find = (label) => r.items.find((i) => i.label === label);
+    const mapping = find('mapping shop.orders → fct_orders');
+    assert.deepStrictEqual([mapping.category, mapping.certainty, mapping.problemId], ['mapping', 'direct', 'retail-orders']);
+    for (const label of ['fct_orders.tax', 'fct_orders.charges']) assert.deepStrictEqual([find(label).category, find(label).certainty, find(label).path.map((x) => x.label)], ['schema', 'direct', ['shop.orders.tax_amount', label]]);
+    assert.deepStrictEqual([find('orders.total_tax').category, find('orders.total_tax').sources], ['semantic', ['logical']]);
+    const art = find('.autode/problems/retail-orders/deliverables/build/sql/fct_orders.sql');
+    assert.deepStrictEqual([art.category, art.certainty], ['artifact', 'direct'], 'its manifest rests on a fact about the column');
+    assert.deepStrictEqual([find('pipeline fct_orders').certainty, find('pipeline fct_orders').draft], ['possible', true], 'the spec names the table, not the column');
+    assert.ok(!find('fct_orders'), 'a planned table whose columns are listed is not listed again');
+    assert.deepStrictEqual(r.problems.map((x) => x.id), ['retail-orders']);
+    const fin = find('reporting.tax_daily.tax_total');
+    assert.deepStrictEqual([fin.domain, fin.sources, fin.certainty], ['finance', ['observed'], 'direct']);
+    assert.ok(r.crossDomain && r.byDomain.some((d) => d.domain === 'finance') && r.asset.domain === 'sales', JSON.stringify(r.byDomain));
+    const md = R.renderImpactMarkdown(r);
+    assert.ok(/^# Impact: rename column shop\.orders\.tax_amount/.test(md) && /## Mappings \(1\)/.test(md) && /crosses domains/.test(md) && /retail-orders: Net revenue by channel/.test(md), md);
+    const csv = R.renderImpactCsv(r).split('\r\n');
+    assert.strictEqual(csv[0], 'category,asset,id,certainty,draft,domain,problem,sources,path');
+    assert.ok(csv.some((l) => /^schema,reporting\.tax_daily\.tax_total,.*,direct,no,finance,/.test(l)), csv.join('\n'));
+    // Wrong change kinds and unknown assets are refused with what to do.
+    assert.ok(/needs a column/.test(impactOf(lin.sources(), { kind: 'drop_column', asset: 'shop.orders' }).error));
+    assert.ok(/No asset/.test(impactOf(lin.sources(), { kind: 'remove_table', asset: 'nope.nothing' }).error));
+    const removed = impactOf(lin.sources(), { kind: 'remove_table', asset: 'shop.orders' });
+    assert.ok(removed.items.every((i) => i.certainty === 'direct') && removed.items.some((i) => i.label === 'pipeline fct_orders'));
+    const sup = impactOf(lin.sources(), { kind: 'supersede_fact', asset: 'K-tax' });
+    assert.deepStrictEqual(sup.items.map((i) => [i.category, i.label]), [['artifact', '.autode/problems/retail-orders/deliverables/build/sql/fct_orders.sql']]);
+  });
+
+  await test('v0.53.0 LIN: every surface — autode lineage record from a file under the connection\'s estate system, autode explore lineage and impact (CSV to a file), autode_lineage, autode_impact and autode_record_observed_lineage over MCP; coverage says what is missing', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { PlatformSession } = fresh('../dist/mcp/platform.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const { BaseDataSourceAdapter } = fresh('../dist/engine/platform/BaseAdapter.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-lin-e2e-'));
+    nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    username: me\n    database: SALES\n');
+    const col = (name, i) => ({ name, dataType: 'NUMBER', isNullable: true, isPrimaryKey: i === 1, isForeignKey: false, ordinalPosition: i });
+    const snapshot = { platform: 'snowflake', connectionId: 'snowflake:ACME', extractedAt: 't', views: [], foreignKeys: [], tables: [{ schema: 'RAW', name: 'ORDERS', fqn: 'SALES.RAW.ORDERS', type: 'TABLE', columns: [col('ORDER_ID', 1), col('AMOUNT', 2)] }, { schema: 'MART', name: 'FCT_ORDERS', fqn: 'SALES.MART.FCT_ORDERS', type: 'TABLE', columns: [col('ORDER_ID', 1), col('NET_AMOUNT', 2)] }] };
+    const fakeAdapter = () => ({
+      async connect() { return { connected: true, platform: 'snowflake', databaseName: 'SALES', schemaName: 'RAW', version: '9', capabilities: {} }; },
+      async disconnect() {}, dispose() {}, getConnectionId: () => 'snowflake:ACME', getCapabilities: () => ({}),
+      async extractMetadata() { return snapshot; },
+      snapshotToGraph: (x, identity) => BaseDataSourceAdapter.prototype.snapshotToGraph.call({}, x, identity)
+    });
+    const platform = (o) => new PlatformSession({ ...o, allowWrite: false, log: () => {}, createManager: (log, options) => { const m = new ConnectionManager(log, options); m.registerAdapterFactory('snowflake', fakeAdapter); return m; } });
+    const W = ['--workspace', ws];
+    let client;
+    try {
+      assert.strictEqual((await cli(['estate', 'extract', '--connection', 'snowflake:ACME', '--schema', 'SALES.RAW', '--schema', 'SALES.MART', '--system', 'sales', ...W], { platform })).code, 0);
+      let r = await cli(['explore', 'lineage', 'SALES.RAW.ORDERS', ...W]);
+      assert.ok(r.code === 0 && /No lineage found/.test(r.out) && /No observed lineage: pipelines built outside AutoDE are missing/.test(r.out) && /No designed lineage/.test(r.out), r.out);
+      const file = nodePath.join(ws, 'lineage.json');
+      nodeFs.writeFileSync(file, JSON.stringify({ edges: [{ upstream: { object: 'SALES.RAW.ORDERS', column: 'AMOUNT' }, downstream: { object: 'SALES.MART.FCT_ORDERS', column: 'NET_AMOUNT' } }, { upstream: { object: 'ORDERS' }, downstream: { object: 'SALES.MART.X' } }] }));
+      assert.strictEqual((await cli(['lineage', 'record', file, '--connection', 'snowflake:ACME', ...W])).code, 2, '--method is needed');
+      r = await cli(['lineage', 'record', file, '--connection', 'snowflake:ACME', '--method', 'access_history', ...W]);
+      assert.ok(r.code === 0 && /1 edge\(s\) recorded, 0 unchanged, 0 retired \(sales\/default\); skipped: #2 upstream "ORDERS" is not a qualified object name/.test(r.out), r.out + r.err);
+      r = await cli(['explore', 'lineage', 'SALES.RAW.ORDERS.AMOUNT', '--direction', 'down', ...W]);
+      assert.ok(r.code === 0 && /SALES\.RAW\.ORDERS\.AMOUNT → SALES\.MART\.FCT_ORDERS\.NET_AMOUNT\s+\[observed; verified/i.test(r.out), r.out + r.err);
+      r = await cli(['explore', 'impact', 'SALES.RAW.ORDERS.AMOUNT', '--change', 'rename_column', '--format', 'csv', '--out', nodePath.join(ws, 'impact.csv'), ...W]);
+      assert.strictEqual(r.code, 0, r.out + r.err);
+      assert.ok(/^schema,SALES\.MART\.FCT_ORDERS\.NET_AMOUNT,obj:sales\/default\/sales\.mart\.fct_orders\.net_amount,direct/im.test(nodeFs.readFileSync(nodePath.join(ws, 'impact.csv'), 'utf8')));
+      assert.strictEqual((await cli(['explore', 'impact', 'SALES.RAW.ORDERS', '--change', 'rename_column', ...W])).code, 2, 'a table cannot be renamed as a column');
+      assert.strictEqual((await cli(['explore', 'impact', 'SALES.RAW.ORDERS', ...W])).code, 2, '--change is needed');
+      // Over MCP: the same answers, and edges an agent read from the platform.
+      const { createAutodeServer } = fresh('../dist/mcp/server.js');
+      const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+      const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+      const server = createAutodeServer({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..'), version: 't', platform: platform({ workspaceRoot: ws, allowCli: false }), log: () => {} });
+      const [x, y] = InMemoryTransport.createLinkedPair();
+      await server.connect(x);
+      client = new Client({ name: 't', version: '1' });
+      await client.connect(y);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const rec = await call('autode_record_observed_lineage', { connectionId: 'snowflake:ACME', method: 'openlineage', edges: [{ upstream: { object: 'SALES.MART.FCT_ORDERS' }, entity: { type: 'DASHBOARD', id: 'rev-1', name: 'Revenue' } }] });
+      assert.deepStrictEqual([rec.result.recorded, rec.result.system], [1, 'sales'], JSON.stringify(rec));
+      const imp = await call('autode_impact', { change: 'drop_column', asset: 'SALES.RAW.ORDERS.AMOUNT' });
+      assert.deepStrictEqual(imp.items.map((i) => [i.category, i.label, i.certainty]).sort(), [['report', 'Revenue', 'possible'], ['schema', 'SALES.MART.FCT_ORDERS.NET_AMOUNT', 'direct']], JSON.stringify(imp.items));
+      assert.ok(/SALES\.RAW\.ORDERS\.AMOUNT → SALES\.MART\.FCT_ORDERS\.NET_AMOUNT/.test(imp.items.find((i) => i.label === 'Revenue').path.map((p) => p.label).join(' → ')), 'the path starts at the changed column');
+      const lg = await call('autode_lineage', { asset: 'SALES.MART.FCT_ORDERS', direction: 'upstream' });
+      assert.deepStrictEqual(lg.edges.map((e) => e.sources), [['observed']]);
+      const bad = await client.callTool({ name: 'autode_impact', arguments: { change: 'rename_column', asset: 'nothing.here' } });
+      assert.ok(bad.isError, 'an unknown asset is an error');
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.53.0 LIN: on the realistic estate a design that names ORDERS is never guessed onto one of seven same-named tables (kept by name, ambiguity named); the full name, or the mapping\'s own source id, links exactly one; dev\'s observed lineage never reaches prod\'s impact', () => {
+    const { lineageOf, impactOf } = fresh('../dist/engine/explore/lineage.js');
+    const graph = realistic.graph();
+    const obs = (env, up, down) => ({ id: `O-${env}`, kind: 'lineage', subject: [down, up], predicate: 'derives_from', value: { upstream: up, downstream: down, level: 'column', source: 'observed', method: 'access_history', connection: `snowflake:${env}`, scope: `erp/${env}` }, statement: 'o', status: 'active', trust: 'verified', evidence: [], validFrom: 't', createdBy: 'system', createdAt: 't' });
+    const mapping = (id, sourceFqn, sourceEntityId = sourceFqn) => ({ id, sourceEntityId, sourceFqn, targetName: `fct_${id}`, columns: [{ sourceColumn: 'AMOUNT', targetColumn: 'net_amount' }] });
+    const sources = {
+      graph, conflicts: [],
+      assertions: [obs('dev', 'obj:erp/dev/retail.sales.orders.amount', 'obj:erp/dev/retail.sales.customers.country')],
+      designs: [{ problemId: 'p1', mapping: { specId: 's', specVersion: 1, status: 'approved', mappings: [mapping('bare', 'ORDERS'), mapping('full', 'ARCHIVE.SALES.ORDERS', 'x'), mapping('byid', 'whatever', 'obj:erp/prod/retail.sales.orders')] } }]
+    };
+    const bare = lineageOf(sources, 'planned:p1/fct_bare', { direction: 'upstream' });
+    const src = bare.nodes.find((n) => n.depth === -1);
+    assert.deepStrictEqual([src.id, src.kind], ['ext:orders', 'external']);
+    assert.ok(/ambiguous: 7 tables fit/.test(src.note), src.note);
+    assert.strictEqual(lineageOf(sources, 'planned:p1/fct_full', { direction: 'upstream' }).nodes.find((n) => n.depth === -1).id, 'obj:erp/prod/archive.sales.orders');
+    const prod = impactOf(sources, { kind: 'drop_column', asset: 'obj:erp/prod/retail.sales.orders.amount' });
+    assert.deepStrictEqual(prod.items.map((i) => i.id).sort(), ['mapping:p1/byid', 'planned:p1/fct_byid.net_amount'], 'only the mapping that names this table; nothing observed in dev');
+    const dev = impactOf(sources, { kind: 'drop_column', asset: 'obj:erp/dev/retail.sales.orders.amount' });
+    assert.deepStrictEqual(dev.items.map((i) => [i.id, i.sources]), [['obj:erp/dev/retail.sales.customers.country', ['observed']]]);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

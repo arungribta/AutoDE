@@ -470,7 +470,7 @@ Imported items become `documented` facts or proposed semantic models, through th
 
 ### 6.10 Knowledge Explorer (C5b; grown by LIN and ONT1; owner, 2026-10-28)
 
-**Status:** the views listed for C5b shipped in v0.50.0 (CHANGELOG.md 0.50.0; HOW: technical-design.md §5.17; usage: user-guide.md §8.7). Lineage and impact (LIN) and the ontology and glossary view (ONT1) are still to come; the text below stays their specification.
+**Status:** the views listed for C5b shipped in v0.50.0 (CHANGELOG.md 0.50.0; HOW: technical-design.md §5.17; usage: user-guide.md §8.7). Lineage and impact shipped in v0.53.0 (LIN; technical-design.md §5.20). The ontology and glossary view (ONT1) is still to come; the text below stays its specification.
 
 A webview panel, like the Workflow tab, where data engineers and architects explore what AutoDE knows. It should feel as professional and easy to use as a modern data catalog, inside the editor. It is read-only by default: every change goes through the existing channels (proposals, the Context Inbox, decisions, the Semantic Model editor).
 
@@ -691,7 +691,11 @@ Settings (defaults in brackets): `schema_fact` re-verify after [7 days] and alwa
 
 ### 8.5 Lineage and impact (LIN; owner, 2026-10-28)
 
-Today the platform adapters extract lineage edges, but nothing stores them. Lineage comes from four sources, and every edge is labelled with its source:
+**Status:** shipped in v0.53.0 (CHANGELOG.md 0.53.0; HOW: technical-design.md §5.20; usage: user-guide.md §8.7). Two decisions changed the design below (roadmap decision log, 2026-10-28):
+- Designed, generated and logical lineage are read from their documents when asked, not copied into the ledger. Only observed lineage is stored as facts.
+- Observed lineage is not read by adapter code. Platform reads become operations in the platform operations catalog. Until then, edges are recorded through `autode_record_observed_lineage` and `autode lineage record`. The live Snowflake check waits for them.
+
+The text below stays the specification of what remains. Lineage comes from four sources, and every edge is labelled with its source:
 
 - **Observed** on the platform:
   - Snowflake: `ACCOUNT_USAGE.ACCESS_HISTORY` (column level; needs Enterprise edition and a granted role) and `OBJECT_DEPENDENCIES`.
@@ -898,14 +902,7 @@ Acceptance:
 - Under `suggest`, no model is called. Under `draft`, the named agent drafts a proposal within the budget, and nothing is approved without a person.
 
 ### Phase LIN: Lineage and impact
-Scope: §8.5, and the Explorer's Lineage tab and impact view. Owners and domains come from MM1.
-
-Acceptance:
-- On the reference problem, designed and generated lineage links every target column to its source columns.
-- Recorded Snowflake and Databricks lineage results load as observed edges.
-- The impact of renaming a source column lists the dependent mapping, artifacts, semantic elements and business problem, each with its path.
-- Impact groups affected assets by domain (from MM).
-- A manual check against a live Snowflake account.
+Shipped in v0.53.0 (CHANGELOG.md 0.53.0; technical-design.md §5.20). Still open: the platform reads, written as platform operations (Snowflake `ACCESS_HISTORY` and `OBJECT_DEPENDENCIES`, Databricks `system.access` lineage), and the manual check against a live Snowflake account.
 
 ### Phase ONT1: Canonical ontology, terminology and onboarding standards
 Scope:

@@ -141,7 +141,6 @@ export function sanitizeSnapshot(snapshot: SchemaSnapshot, allowSampleData: bool
   };
   return {
     ...snapshot,
-    tables: snapshot.tables.map((t) => ({ ...t, columns: t.columns.map(column) })),
-    ...(snapshot.lineage ? { lineage: allowSampleData ? snapshot.lineage : snapshot.lineage.map((e) => ({ ...e, queryText: undefined })) } : {})
+    tables: snapshot.tables.map((t) => ({ ...t, columns: t.columns.map(column) }))
   };
 }

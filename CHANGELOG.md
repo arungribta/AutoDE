@@ -6,6 +6,33 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.53.0
+
+- **LIN: lineage and impact** (context-layer §8.5; requirements CTX-15). One lineage graph from four sources; every edge says which sources back it, with their trust.
+  - **Designed:** every business problem's mapping document (column level; a source column given as an expression links each column it names) and Pipeline Spec (entity level, through its staging objects). It is read from the documents, so it can't drift. Approved designs are `confirmed`; drafts are flagged. A planned target is kept by name: a mapping's `fct_orders` and a spec's `ANALYTICS.MARTS.fct_orders` are one target in the problem.
+  - **Generated:** what each artifact's grounding manifest rests on. A fact about a column links at column level; a named table, at table level.
+  - **Logical:** semantic elements from the columns their expressions use, logical tables from their physical tables, verified queries from their logical tables.
+  - **Observed:** a new `lineage` fact kind (predicate `derives_from`, subject `[downstream, upstream]`). Edges come in as `verified` facts under the connection's estate system and environment, through `autode_record_observed_lineage` or `autode lineage record <file.json>`. Recording is idempotent. Only a complete batch retires an edge it no longer contains, with the reason (never deleted), and only within its connection, method and databases. Dev and prod stay apart. A job, notebook or dashboard can be an edge's entity or its reader. Observed facts also project into the graph as `derives_from` edges.
+  - **Names are never guessed.** A design that names `ORDERS` on the realistic estate, where seven tables fit, keeps the source by name and says it is ambiguous. An end AutoDE doesn't hold is kept and labelled (*planned*, *outside the working set*).
+- **Traversals** (`src/engine/explore/lineage.ts`): upstream, downstream or both, at table or column level, up to 10 hops. They are cycle-guarded and capped, with what is left out counted. Coverage notes say which sources have no data and how to get them.
+- **Impact** of a change: a column renamed, dropped or retyped, a table removed, a fact superseded. It is graph traversal, never similarity.
+  - Each affected item has its path from the changed asset, its sources, and whether it is *direct* (column lineage, or the fact itself) or *possible* (only table-level lineage links it).
+  - The table walk also starts from every table a direct hit lands in, so a dashboard reading `fct_orders` counts when `fct_orders.net_amount` is hit.
+  - Results are grouped by category (schema, mapping, pipeline, semantic, report, artifact, knowledge) and by domain (from MM; a column takes its table's domain). Each result names the business problems involved and whether the change crosses domains. It exports as Markdown or CSV.
+- **Every surface:**
+  - The Explorer's **Lineage** tab: direction, depth, level, a left-to-right layered graph (edges coloured by source, dashed when only drafts back them) or a table, and **Analyse impact** with export.
+  - The CLI: `autode explore lineage <asset> [--direction up|down|both] [--depth n] [--columns]` and `autode explore impact <asset> --change <kind> [--format md|csv] [--out file]`.
+  - MCP: `autode_lineage` and `autode_impact`.
+  - Asset pages show a lineage summary (upstream and downstream counts, with their sources).
+- **Removed:** the adapters' built-in lineage read. Snowflake read `QUERY_HISTORY`, which returns no source or target, so every edge came back empty. It ran on every extraction, and its result was never stored. `SchemaSnapshot.lineage`, `LineageEdge`, `supportsLineageExtraction` and `extractLineage` are gone.
+- **Deviations from the spec:**
+  - Designed, generated and logical lineage are derived when read from their documents, not copied into the ledger as `derives_from` facts (owner, 2026-10-28: the documents stay the single source of truth). Only observed lineage is in the ledger.
+  - **Platform lineage reads are not in this version** (owner, 2026-10-28). Platform interactions move to a declarative platform operations catalog, built first. The Snowflake reads (`ACCESS_HISTORY`, `OBJECT_DEPENDENCIES`) and Databricks reads (`system.access.table_lineage`, `column_lineage`) will be operation files feeding this recorder. Until then, observed edges are recorded from what an agent or a person brings. The acceptance item "recorded Snowflake and Databricks lineage results load as observed edges" is met through the recorder. The live Snowflake check waits for the operations.
+  - *"A runbook proposal for a schema change includes the impact summary"*: AutoDE has no schema-change runbook yet. `autode_impact` is there for one to call.
+  - Reports appear when a lineage source names them (an entity of type dashboard, report or query). Ontology concepts in logical lineage wait for ONT1.
+- **Next:** v0.53.1, *+ New* in the workflow palette (it used `window.confirm()`, which VS Code webviews don't show). The Stop button (v0.52.7) is still to come.
+- Measured: 415 tests (5 new; 8 older ones updated for the removed adapter lineage and the new tools). Lint: 0 errors. Eval baseline unchanged.
+
 ## 0.52.6
 
 - **The model lists match what the tools offer** (owner: Opus 5.5 was missing; VS Code's list differed from VS Code's own picker).
