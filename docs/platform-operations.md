@@ -127,12 +127,23 @@ AutoDE talks to very different systems, so an implementation names its **transpo
 
 Binding, the guard (`read` must not change anything: for `http`, only `GET` or a declared read-only `POST` such as a search), mapping and partial failures work the same for all four.
 
+**How a statement reaches the platform: CLI or API, never a bundled driver** (owner, 2026-10-29; consistent with PLT-2):
+- **Access paths.** `sql` says *what* to run. The connection's **access path** says *how*: the platform's **CLI** (`snow sql`, the Databricks CLI, the AWS CLI's `redshift-data`, Oracle's SQLcl) or its **API** (the Snowflake SQL API, the Databricks Statement Execution API).
+- **The CLI is the user's.** It is installed on the user's machine and is never bundled in AutoDE's package or the VSIX. When it is missing, AutoDE says so and suggests how to install it: the platform's skill holds the install and setup steps, and a command runs only on request (as for drivers today, PLT-7).
+- **A CLI-free path where the vendor offers one.** A platform definition declares the CLI path and, where the vendor has one, an API path. AutoDE prefers the CLI and falls back to the API, for locked-down machines where nothing may be installed and for CI. A platform with neither available is *not connected*, with the reason.
+- **Authentication belongs to the CLI.** A connection names a CLI profile (`snow` connection, Databricks profile, AWS profile, SQLcl connection), so AutoDE never holds a secret. For API paths, authentication is a **small fixed set of generic methods**, coded once: a bearer token, OAuth client credentials, Snowflake key-pair. AWS request signing is not among them: Redshift goes through the AWS CLI.
+- **No browser in the loop.** The MCP server, CI and agent hosts run the CLI non-interactively. Every call has a timeout. A profile that needs a browser sign-in (SSO) is reported as such, and the skill recommends a non-interactive profile (key-pair, token, service principal).
+- **Asynchronous statements.** Most statement APIs submit, then poll, then fetch pages. The `cli` and `http` transports have this pattern built in, coded once: operations declare it (`async: submit_poll_fetch` with the fields to follow) rather than loop.
+- **CLI versions drift too.** Operations always ask for machine-readable output (`--output json`, SQLcl's JSON format). The CLI's version is detected like the platform's, and an operation can declare a CLI version range. A changed output shape is drift (POP3), never an empty result.
+- **Skills guide, the executor runs.** A platform skill holds the knowledge: installing the CLI, setting up its profile, testing it, troubleshooting. The call itself always goes through the executor, so reads stay repeatable and the CLI works without a model.
+- **Read-mostly.** AutoDE mostly reads. A CLI read must be on the command allowlist; an API read must be a `GET`, or a statement that passes the read-only guard (also applied to SQL inside an API request body). Row values follow the sample-data consent. Writes are rare and run only as approved runbooks, through the same CLIs (`snow`, `databricks bundle`).
+
 ### 2.2 Platform definitions
 
 **One platform definition per system** (`platforms/<id>.yaml` shipped, `.autode/config/platforms/` the team's, overriding by id) describes what the system is and what AutoDE can do with it. It is form-friendly like operations, and validated by `docs/schemas/platform.schema.json`.
 
 - **category:** `warehouse`, `lakehouse`, `semantic`, `catalog` (later `orchestration`, `bi`);
-- **transports** it supports, its **connection fields and auth modes**, which refer to the connection machinery: credentials are only ever references;
+- **transports** it supports, its **access paths** (the CLI with its minimum version and how to detect it; the API where the vendor has one), and its **connection fields**: a CLI profile name, or for an API one of the generic sign-in methods. Credentials are only ever references;
 - the **version detection** operation;
 - the **capability map:** for each AutoDE capability (`estate`, `profiling`, `lineage`, `governance.tags`, `governance.policies`, `semantic.import`, `semantic.export`, `semantic.deploy`, `knowledge.import`, `knowledge.export`, `compile.target` …):
   - the operations that implement it;
@@ -148,12 +159,12 @@ How the systems AutoDE plans for differ:
 
 | System | Category | Transports | What AutoDE uses it for | Writes back (always runbooks) |
 |---|---|---|---|---|
-| Snowflake (with Horizon) | warehouse | `sql`, `cli` | estate, profiling, lineage, governance import (IMP2), compile target, deployment | DDL, grants, tags, policies |
-| Databricks | lakehouse | `sql`, `http`, `cli` | estate, lineage, Unity Catalog import (IMP4), compile target, deployment (bundles) | grants, tags, bundles |
-| Redshift | warehouse | `sql` (driver), `http` (Data API) | estate, profiling; no native column lineage, so lineage is designed only; compile target once its dialect exists | DDL, grants |
+| Snowflake (with Horizon) | warehouse | `sql` through `snow` or the SQL API; `cli` | estate, profiling, lineage, governance import (IMP2), compile target, deployment | DDL, grants, tags, policies |
+| Databricks | lakehouse | `sql` through the Databricks CLI or the Statement Execution API; `http`; `cli` | estate, lineage, Unity Catalog import (IMP4), compile target, deployment (bundles) | grants, tags, bundles |
+| Redshift | warehouse | `sql` through the AWS CLI (`redshift-data`) | estate, profiling; no native column lineage, so lineage is designed only; compile target once its dialect exists | DDL, grants |
 | AtScale | semantic | `file` (SML in Git), `http` | semantic import and export (IMP1) | the exported model as a reviewed file change or API call |
 | Collibra | catalog | `http` | glossary, domains, owners and lineage import (IMP3) | certified knowledge pushed back |
-| Oracle | warehouse (source) | `sql` (driver) | estate, profiling | none (a source) |
+| Oracle | warehouse (source) | `sql` through SQLcl (JSON output) | estate, profiling | none (a source) |
 
 ## 3. How operations run
 
@@ -221,6 +232,7 @@ The adapters (`SnowflakeAdapter`, `DatabricksAdapter`, `OracleAdapter`) still ca
 Scope:
 - operations `estate.list_tables`, `estate.list_columns`, `estate.list_primary_keys`, `estate.list_foreign_keys`, `estate.list_views`, `estate.last_altered`, `estate.profile_table` for each platform, with version ranges and recorded examples;
 - `BaseDataSourceAdapter.extractMetadata` calls them by id. The adapters keep only connection, authentication and execution (the allowed machinery);
+- **access through CLI or API only** (§2.1): Snowflake and Databricks keep their CLI and API paths; **Oracle moves from the Node driver to SQLcl** (JSON output), and the driver path (the drivers folder, PLT-7's driver install) is removed. The async pattern and the generic sign-in methods live in the executor;
 - a read the account can't do (an edition, a privilege) is reported per operation, and the rest of the extraction continues;
 - **new object kinds:** an operation can read objects the snapshot didn't know (for example Snowflake dynamic tables, Databricks metric views). They come into the estate as their declared kind, not dropped.
 
@@ -229,6 +241,7 @@ Acceptance:
 - **Extensible:** a team operation file adding an object kind brings those objects into the estate with no code change (test with a fixture kind).
 - **Resilient:** a failing operation (fixture: a missing privilege) leaves the other reads' results and reports the gap in the ingest result and the Estate view.
 - **Boundary:** the architecture baseline lists no platform SQL in the adapters.
+- **Oracle through SQLcl:** on recorded SQLcl output, Oracle's estate matches what the driver gave (golden test); with SQLcl missing, the skill's install steps are shown.
 
 ### 6.3 POP4 — the operations and skills catalog (v0.57.0)
 
@@ -337,13 +350,13 @@ Acceptance:
 ### 6.5 POP5 — onboarding new systems, and sharing them (v0.61.0)
 
 Scope:
-- **A new system from a template:** the steps are category, transports, connection fields, version detection, starter operations for the category's capabilities, then skills. It counts only once its recorded examples pass and a conformance run on a real connection is reviewed.
-- **Redshift first,** as the proof: a full SQL platform with a driver, `SVV_` and `STL_` system views, and no native column lineage. AtScale (`file`, `http`) and Collibra (`http`) then arrive through IMP1 and IMP3 on the same model, as platform definitions and operations, not special cases.
+- **A new system from a template:** the steps are category, transports, access paths (CLI, API), connection fields, version detection, starter operations for the category's capabilities, then skills. It counts only once its recorded examples pass and a conformance run on a real connection is reviewed.
+- **Redshift first,** as the proof: a full SQL platform reached through the AWS CLI (`redshift-data`, asynchronous), with `SVV_` and `STL_` system views and no native column lineage. AtScale (`file`, `http`) and Collibra (`http`) then arrive through IMP1 and IMP3 on the same model, as platform definitions and operations, not special cases.
 - **The `http` and `file` transports** run against live systems (fixtures from POP1).
 - **Packs:** export a team's platform definitions, operations and skills as a pack for other workspaces; import one with the same review as a ported skill (PA4).
 
-**What still needs code, said plainly in the wizard:**
-- a new transport or driver, once per protocol, in the allowed folders: a Redshift driver, OAuth for an API, a Git reader;
+**What still needs code, said plainly in the wizard** (rare, and never per platform):
+- a new generic sign-in method for API paths, beyond the fixed set (§2.1);
 - a new compile dialect (pipeline SQL for Redshift), which is transform machinery driven by primitive definitions. The catalog shows and links dialect coverage; it doesn't create it.
 
 Everything above that (what to read, how to map it, what to write) is files.
@@ -354,7 +367,8 @@ Everything above that (what to read, how to map it, what to write) is files.
 - no per-vendor screens: if a system needs its own layout, the model is missing a field.
 
 Acceptance:
-- **Onboarded without code:** Redshift's estate and profiling work from its platform definition and operations, over the existing driver machinery; the architecture test passes with no new exception.
+- **Onboarded without code:** Redshift's estate and profiling work from its platform definition, operations and skill, through the user's AWS CLI; the architecture test passes with no new exception.
+- **Guided:** with the CLI missing, AutoDE says so and shows the skill's install and profile steps; with a browser-only profile, it says so instead of hanging.
 - **Honest:** a template whose transport isn't available says which code is needed and stops; nothing half-onboarded runs.
 - **Shareable:** a pack exported from one workspace and imported into another gives the same catalog after review.
 
