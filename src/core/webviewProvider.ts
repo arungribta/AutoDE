@@ -92,6 +92,7 @@ import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engi
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
 import { ExecutorHost, runHandoff, runMaintenance, runStage } from './agentExecutor';
 import { RunStoppedError } from './llmAdapter';
+import { knowledgeLine, problemOverlap, workspaceKnowledge } from '../engine/documents/problemOverlap';
 import { RoleTemplate, loadRoles } from '../engine/agents/definitions';
 import { chatFrontDoorPrompt, chatToolNames, handoffFor, parseHandoff, parseMention } from '../engine/agents/chatFrontDoor';
 import { AnswerTrace, buildAnswerTrace } from '../engine/agents/answerTrace';
@@ -439,11 +440,36 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const slug = generateProblemSlug(problemStatement, existing.map((p) => p.id));
     await this.activeProblemManager.setActiveProblemId(slug);
     await this.activateProblem(slug);
+    // v0.53.2: what the new problem builds on in this workspace, or that nothing matches.
+    const root = this.workspaceRoot?.fsPath;
+    if (root && this.contextFileManager) {
+      try { this.postLog(problemOverlap(root, problemStatement, this.contextFileManager.getPackSources()).message); } catch { /* the check is a courtesy */ }
+    }
     if (this.pendingExploration && this.problemRoot) {
       setProblemMode(this.problemRoot.fsPath, 'exploration', { by: this.pendingExploration, channel: 'panel', acknowledged: true });
       this.pendingExploration = undefined;
       this.postProblemMode();
     }
+  }
+
+  /**
+   * v0.53.2: + New. A VS Code dialog (a webview can't show `confirm()`) says what the new problem shares: knowledge is per
+   * workspace, and a different estate belongs in its own folder. Then the chat is archived, no problem is active, and the
+   * chat asks for the new problem; the first statement makes it (ensureActiveProblem), and says what it builds on.
+   */
+  private async startNewBusinessProblem(): Promise<void> {
+    const root = this.workspaceRoot?.fsPath;
+    const known = root && this.contextFileManager ? knowledgeLine(workspaceKnowledge(root, this.contextFileManager.getPackSources())) : 'nothing yet';
+    const choice = await vscode.window.showInformationMessage('Start a new business problem?', {
+      modal: true,
+      detail: `The current chat is archived, not discarded. The new problem shares this workspace's knowledge: ${known}. If it is about a different estate, open another folder as its own workspace instead, so the two don't mix.`
+    }, 'Start new problem', 'Open another folder…');
+    if (choice === 'Open another folder…') { await vscode.commands.executeCommand('vscode.openFolder', undefined, { forceNewWindow: true }); return; }
+    if (choice !== 'Start new problem') return;
+    await this.activeProblemManager?.clearActiveProblem();
+    await this.activateProblem(undefined);
+    await this.startNewChat();
+    this.postMessage('chatResponse', { message: `**Describe the new business problem**: what the business needs, in its words.\n\nIt shares this workspace's knowledge: ${known}. If it is about a different estate, open another folder as its own workspace (*File → Open Folder…*).` });
   }
 
   /** C4c: the active problem's mode, for the panel's banner. */
@@ -859,10 +885,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'startNewBusinessProblem': {
-          await this.activeProblemManager?.clearActiveProblem();
-          await this.activateProblem(undefined);
-          await this.startNewChat();
-          this.postLog('Started a new business problem. Describe it in the chat to begin.');
+          await this.startNewBusinessProblem();
           break;
         }
         case 'listBusinessProblems': {

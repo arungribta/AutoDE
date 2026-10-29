@@ -1205,6 +1205,21 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: ask a question that makes the chat look things up; stop it.
   Expect: "You stopped this reply…", not an error; the card shows the steps it took.
 
+## Part 52 — v0.53.2 ＋ New
+
+- [ ] **52.1 The dialog.**
+  Do: in a workspace with an estate, click **＋ New** in the workflow palette.
+  Expect: a VS Code dialog with the workspace's systems, tables, facts and semantic models; *Start new problem* and *Open another folder…*.
+- [ ] **52.2 Start.**
+  Do: choose *Start new problem*.
+  Expect: the old chat is in Chat History; the chat asks you to describe the problem; no problem is active.
+- [ ] **52.3 What it builds on.**
+  Do: describe a problem that names tables you have, then (+ New again) one about something else entirely.
+  Expect: the first gets a line "This problem builds on … systems …; tables …"; the second "Nothing in this workspace matches the problem yet …".
+- [ ] **52.4 Another folder.**
+  Do: ＋ New → *Open another folder…*.
+  Expect: VS Code's folder picker, opening in a new window; this workspace is unchanged.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1509,5 +1524,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 51.2 |  |  |
 | 51.3 |  |  |
 | 51.4 |  |  |
+| 52.1 |  |  |
+| 52.2 |  |  |
+| 52.3 |  |  |
+| 52.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

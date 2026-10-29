@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.53.1. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.53.2. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -140,7 +140,12 @@ A quick tour, which the rest of the guide explains in detail.
 
 ### 5.1 Starting and switching
 
-- **New:** **＋ New** in the panel, `autode problems new "<statement>"`, or `autode_start_problem` from an agent host. A folder is created under `.autode/problems/<id>/`, named from the statement.
+- **New:** **＋ New** in the panel, `autode problems new "<statement>"`, or `autode_start_problem` from an agent host.
+  - In the panel, a dialog says what the new problem will share. Every problem in a workspace shares its estate, facts and semantic layer. If the new problem is about a different estate, choose *Open another folder…*: a separate workspace keeps the two apart. Nothing is ever wiped.
+  - *Start new problem* archives the chat, and the chat asks you to describe the problem.
+  - Once you describe it, AutoDE says what it builds on (systems, tables, glossary terms, semantic models it names), or that nothing in the workspace matches it. The CLI and agents get the same line.
+
+  A folder is created under `.autode/problems/<id>/`, named from the statement.
 - **Switch:** **⇄ Switch** in the panel, or `autode problems use <id>`. The active problem is per person (`.autode/local/active-problem.json`), so teammates can work on different problems in the same repository.
 
 ### 5.2 The requirements interview

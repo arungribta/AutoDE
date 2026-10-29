@@ -6,6 +6,16 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.53.2
+
+- **＋ New works** (owner's UI test, 2026-10-28). The button called `window.confirm()`, which VS Code webviews never show, so the click did nothing. Its text also claimed the workspace would "reset to a clean state", which isn't true.
+  - **A VS Code dialog** asks instead. It says what the new problem shares: this workspace's systems, tables, facts and semantic models, counted. A different estate belongs in another folder as its own workspace: *Open another folder…* opens one in a new window.
+  - *Start new problem* archives the chat (never discards it) and leaves no problem active. The chat then asks for the problem, repeating what it shares.
+  - **Once described,** the first statement creates the problem as before. A line in the chat says what it builds on: the systems, tables, glossary terms and metrics it names (the same deterministic resolver context packs use), and the semantic models over those tables. When the workspace holds knowledge and the statement names none of it, the line says so, and that another estate belongs in its own workspace.
+  - **Same on every surface:** `autode problems new` prints the line (and `overlap` in `--json`); `autode_start_problem` returns `overlap`, with `noMatch` for an agent to tell the user.
+  - **Knowledge stays per workspace** (owner, 2026-10-28): nothing is wiped. `src/engine/documents/problemOverlap.ts` (`workspaceKnowledge`, `knowledgeLine`, `problemOverlap`).
+- Measured: 419 tests (2 new: what a statement builds on, or that nothing matches, and an empty workspace; the dialog's wiring, no `confirm()` call in the panel, and the CLI and MCP outputs). Lint: 0 errors.
+
 ## 0.53.1
 
 - **Stop a run from its activity card** (owner, 2026-10-28). Every running card (a stage, *Run it*, `@agent`, a maintenance item, a draft at a stage boundary, a chat turn) has a **Stop** button. The VS Code progress notification's *Cancel* does the same.

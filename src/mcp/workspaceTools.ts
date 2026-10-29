@@ -6,6 +6,7 @@ import { listProblems, setActiveProblem, startProblem } from '../engine/document
 import { ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
 import { findSourceFiles } from '../engine/context/sourceFiles';
 import { recordLineageBatch } from '../engine/lineage/record';
+import { problemOverlap } from '../engine/documents/problemOverlap';
 import type { ObservedEdge } from '../engine/lineage/observed';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -171,14 +172,15 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
     },
     {
       name: 'autode_start_problem',
-      description: 'Start a business problem from its problem statement: a folder, a first DRAFT specification holding only the statement, made the active problem. Nothing is approved; refine it with autode_propose_spec_change (the interview prompts help) and a person approves it.',
+      description: 'Start a business problem from its problem statement: a folder, a first DRAFT specification holding only the statement, made the active problem. Nothing is approved; refine it with autode_propose_spec_change (the interview prompts help) and a person approves it. Knowledge is shared per workspace: overlap says which systems, tables, terms and semantic models the statement names here, or noMatch when the workspace holds knowledge and none of it matches (then tell the user: a different estate belongs in its own workspace folder).',
       inputSchema: { type: 'object', required: ['problemStatement'], additionalProperties: false, properties: { problemStatement: { type: 'string', minLength: 10, description: 'What the business needs, in the user\'s words.' } } },
       annotations: recordsOnly('Start a business problem', false),
       handler: async (args, ws) => {
         const { id, spec } = startProblem(ws.options.workspaceRoot, String(args.problemStatement));
         // v0.45.12: the interview starts with the problem, on disk, so any surface continues it.
         startInterview(layoutPath(ws.options.workspaceRoot, 'problems', id), spec.problemStatement, ws.interviewSkills());
-        return { id, specId: spec.id, status: spec.status, active: true, next: 'Interview the user: autode_interview_state shows what is open; record each question and answer with autode_interview_record_answer (the interview skills, or prompts autode_interview_*, say what to ask). Then propose the specification with autode_propose_spec_change.' };
+        const overlap = problemOverlap(ws.options.workspaceRoot, spec.problemStatement, await ws.contextSources());
+        return { id, specId: spec.id, status: spec.status, active: true, overlap, next: 'Interview the user: autode_interview_state shows what is open; record each question and answer with autode_interview_record_answer (the interview skills, or prompts autode_interview_*, say what to ask). Then propose the specification with autode_propose_spec_change.' };
       }
     },
     {

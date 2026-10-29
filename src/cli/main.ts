@@ -28,6 +28,7 @@ import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/
 import { renderAssetMarkdown, renderGraph, renderImpactCsv, renderImpactMarkdown, renderLineage, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
 import { CHANGE_KINDS, ChangeKind, ImpactResult, LineageResult } from '../engine/explore/lineage';
 import { recordLineageBatch } from '../engine/lineage/record';
+import { problemOverlap } from '../engine/documents/problemOverlap';
 import type { ObservedEdge } from '../engine/lineage/observed';
 import type { AssetContext, AssetType, ExploreOverview, GraphSlice, Layer, SearchResult, SemanticOverview } from '../engine/explore/explore';
 import { getAssetContext, resolveAsset } from '../engine/explore/explore';
@@ -847,7 +848,9 @@ async function cmdProblems(ctx: Ctx, rest: string[]): Promise<number> {
     const problemRoot = layoutPath(ctx.workspaceRoot, 'problems', id);
     startInterview(problemRoot, spec.problemStatement, interviewParts(ctx));
     if (ctx.values.exploration) setProblemMode(problemRoot, 'exploration', { by: (ctx.values.by ?? safeUsername()).trim(), channel: 'cli', acknowledged: true });
-    emit(ctx, { ok: true, id, specId: spec.id, active: true, mode: problemMode(problemRoot) }, `Started ${id} (active${ctx.values.exploration ? ', exploration mode' : ''}). Its first draft specification holds the statement; the interview follows (AutoDE panel, an AutoDE skill in your agent, or \`autode interview\`), then approval.`);
+    // v0.53.2: what the problem builds on in this workspace (knowledge is shared per workspace), or that nothing matches.
+    const overlap = problemOverlap(ctx.workspaceRoot, statement, await workspace(ctx, id).contextSources());
+    emit(ctx, { ok: true, id, specId: spec.id, active: true, mode: problemMode(problemRoot), overlap }, `Started ${id} (active${ctx.values.exploration ? ', exploration mode' : ''}). Its first draft specification holds the statement; the interview follows (AutoDE panel, an AutoDE skill in your agent, or \`autode interview\`), then approval.\n${overlap.message}`);
     return EXIT.OK;
   }
   if (sub === 'mode' || sub === 'hardening') {

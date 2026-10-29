@@ -1060,7 +1060,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var newBtn = paletteProblems.querySelector('#paletteNewProblemBtn');
     if (newBtn) {
       newBtn.onclick = function () {
-        if (!confirm('Start a new business problem? The current chat will be archived and the workspace will reset to a clean state.')) { return; }
+        // v0.53.2: VS Code asks (a webview can't show confirm()), saying what the new problem shares.
         post('startNewBusinessProblem');
       };
     }

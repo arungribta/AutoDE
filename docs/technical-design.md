@@ -943,6 +943,7 @@ Under `draft`, the panel calls `draftAtStageBoundary` after a successful stage r
 - `executeAgenticTool` adds `toolResultSummary` to the audit entry of each successful AutoDE tool call: `found` (the first array's length in words), `sources` (facts, articles, assets and semantic models found by walking the JSON), and `proposed`.
 - `buildAnswerTrace` turns the audit, the reply's citations (with trust, from the ledger) and the latest context pack's manifest into the trace. `stepText` words each step; `uncitedStatements` counts sentences of six words or more, excluding questions and lead-ins, that cite no fact.
 - Activity (v0.52.5): every adapter reports tool calls through `LlmCompleteOptions.onStep` (`StepEvent`: running, then ok or error with `found` or `detail`). `executeAgenticTool` emits them for AutoDE's own loops; `ClaudeStreamParser` for Claude Code. The panel tags each run (`newRunId`) and posts `activity` messages (`step`, `note`, `end`, with `replace` when the reply's trace carries the steps); the webview keeps one card per run. `postEngineLog` sends the context engine's routine notices to the **AutoDE** Output channel and failures to the chat.
+- ＋ New (v0.53.2): `startNewBusinessProblem` shows a modal (`workspaceKnowledge` + `knowledgeLine` from `src/engine/documents/problemOverlap.ts`) with *Start new problem* or *Open another folder…* (`vscode.openFolder`, new window). Then it clears the active problem, archives the chat and posts the prompt. `ensureActiveProblem` posts `problemOverlap(...).message` once the first statement creates the problem; the CLI's `problems new` and `autode_start_problem` return the same `overlap`.
 - Stop (v0.53.1): `newRunId` registers an `AbortController` per run (`runs`), dropped at the run's `end`. The card's Stop and the progress notification's Cancel call `stopRun`. `runHost` puts the signal on `ExecutorHost.signal` and into `runAgentWithTools`; the chat passes it to `hub.chat`.
   - `LlmCompleteOptions.signal`: the fetch-based loops call `throwIfStopped` before each model call and tool call, and `fetchWithTimeout` aborts on it. Copilot and Claude Code get a `CancellationToken` from it (`tokenFor`). `endProcessTree` (`claudeCodeAdapter.ts`) runs `taskkill /T` on Windows.
   - A stop surfaces as `RunStoppedError`; `agentHub` re-throws it unwrapped.
@@ -2168,7 +2169,7 @@ src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, 
 src/engine/decisions/
   decisionStore.ts, proposals.ts
 src/engine/documents/
-  problemDocuments.ts, problemMode.ts, problems.ts, problemSlug.ts
+  problemDocuments.ts, problemMode.ts, problemOverlap.ts, problems.ts, problemSlug.ts
 src/engine/explore/
   explore.ts, lineage.ts, render.ts, sources.ts
 src/engine/governance/

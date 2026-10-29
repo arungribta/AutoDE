@@ -12460,6 +12460,59 @@ async function main() {
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
+  // ── v0.53.2: + New — a VS Code dialog; what a new problem shares and builds on ──
+
+  await test('v0.53.2: a new problem and its workspace — what the workspace shares (systems, tables, facts, semantic models), what a statement builds on (systems, tables, terms, models it names, by the deterministic resolver), and a plain "nothing matches" with the way to keep another estate apart; an empty workspace says so', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+    const O = fresh('../dist/engine/documents/problemOverlap.js');
+    const { parseFile } = require('../dist/engine/context/fileIngestion.js');
+    const nodes = []; const edges = [];
+    for (const f of ['shop.ddl', 'crm.ddl']) {
+      const r = parseFile(nodeFs.readFileSync(nodePath.join(__dirname, 'reference', 'retail-orders', 'sources', f), 'utf8'), f, { system: f.replace('.ddl', ''), environment: 'prod' });
+      nodes.push(...r.nodes); edges.push(...r.edges);
+    }
+    nodes.push({ id: 'term:net-revenue', type: 'business_term', label: 'net revenue', version: 1, metadata: {} });
+    const fact = { id: 'F1', kind: 'grain', subject: ['obj:shop/prod/shop.orders'], predicate: 'grain', value: ['order_id'], statement: 'one row per order', status: 'active', trust: 'confirmed', evidence: [], validFrom: 't', createdBy: 'user:t', createdAt: 't' };
+    const sources = { graph: { nodes, edges }, assertions: [fact] };
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-overlap-'));
+    try {
+      const k = O.workspaceKnowledge(ws, sources);
+      assert.deepStrictEqual([k.systems, k.facts, k.semanticModels], [['crm', 'shop'], 1, []]);
+      assert.ok(k.tables > 5 && /^2 systems \(crm, shop\), \d+ tables, 1 fact, 0 semantic models$/.test(O.knowledgeLine(k)), O.knowledgeLine(k));
+      const hit = O.problemOverlap(ws, 'Daily net revenue by channel from shop.orders and the refunds', sources);
+      assert.ok(!hit.noMatch && hit.systems.includes('shop') && hit.tables.includes('shop.orders') && hit.tables.includes('shop.refunds') && hit.terms.includes('net revenue'), JSON.stringify(hit));
+      assert.ok(/^This problem builds on what the workspace already knows: systems shop; tables .*shop\.orders/.test(hit.message), hit.message);
+      const miss = O.problemOverlap(ws, 'Claims triage for the policy administration platform', sources);
+      assert.ok(miss.noMatch && /Nothing in this workspace matches the problem yet \(it holds 2 systems/.test(miss.message) && /open another folder as its own workspace/.test(miss.message), miss.message);
+      const empty = O.problemOverlap(ws, 'Anything at all', { graph: { nodes: [], edges: [] }, assertions: [] });
+      assert.ok(!empty.noMatch && /no knowledge yet/.test(empty.message) && O.knowledgeLine(O.workspaceKnowledge(ws, { graph: { nodes: [], edges: [] }, assertions: [] })) === 'nothing yet: this workspace is empty');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.53.2: + New asks in a VS Code dialog (the webview\'s confirm() never showed), offers another folder for a different estate, archives the chat and asks for the problem; autode problems new and autode_start_problem say what the problem builds on', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const src = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', ...f.split('/')), 'utf8');
+    const html = src('media/sidebar.html');
+    assert.ok(!/confirm\(\s*['"]/.test(html), 'no window.confirm() call in the panel: VS Code webviews never show it');
+    assert.ok(html.includes("post('startNewBusinessProblem');"));
+    const panel = src('src/core/webviewProvider.ts');
+    for (const t of ["case 'startNewBusinessProblem': {\n          await this.startNewBusinessProblem();", "'Start new problem', 'Open another folder…'", "executeCommand('vscode.openFolder', undefined, { forceNewWindow: true })", '**Describe the new business problem**', 'problemOverlap(root, problemStatement, this.contextFileManager.getPackSources()).message']) assert.ok(panel.replace(/\r\n/g, '\n').includes(t), t);
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-new-'));
+    let client;
+    try {
+      nodeFs.writeFileSync(nodePath.join(ws, 'shop.sql'), 'CREATE TABLE shop.orders (\n  order_id INT NOT NULL,\n  amount NUMBER(12,2)\n);\n');
+      const W = ['--workspace', ws];
+      assert.strictEqual((await cli(['estate', 'ingest', nodePath.join(ws, 'shop.sql'), '--system', 'shop', ...W])).code, 0);
+      let r = await cli(['problems', 'new', 'Daily order amounts from shop orders', ...W]);
+      assert.ok(r.code === 0 && /This problem builds on what the workspace already knows: systems shop; tables shop\.orders/.test(r.out), r.out + r.err);
+      r = await cli(['problems', 'new', 'Claims triage for the policy administration platform', ...W, '--json']);
+      assert.ok(r.code === 0 && r.json().overlap.noMatch === true, r.out);
+      client = await mcpSession(ws);
+      const s = (await client.callTool({ name: 'autode_start_problem', arguments: { problemStatement: 'Revenue from the shop orders table' } })).structuredContent;
+      assert.ok(s.overlap && s.overlap.tables.includes('shop.orders') && s.overlap.noMatch === false, JSON.stringify(s));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));
