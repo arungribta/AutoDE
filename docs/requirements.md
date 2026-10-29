@@ -145,7 +145,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - Drift (a renamed view, an unread object kind) is noticed and raised.
   - Every kind of system AutoDE works with (warehouses, lakehouses, semantic platforms, catalogs) is described by a platform definition and its capability map. The catalog shows, per system and connection, what AutoDE can do, what is missing (a privilege, an edition) and what relies on it. New systems are onboarded from a template.
 
-  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0), POP4 (v0.57.0), POP3 (v0.58.0), POP5 (v0.61.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
+  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0, with Redshift as a source), POP4 (v0.57.0), POP3 (v0.58.0), POP5 (v0.61.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
 
 *Planned work:* secrets kept in VS Code's secret store reach an MCP server only when the extension starts it — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5); Oracle as a target — roadmap backlog.
 

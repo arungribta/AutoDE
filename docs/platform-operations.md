@@ -1,6 +1,6 @@
 # Platform operations: one catalog for every interaction with a platform
 
-**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the adapters' metadata extraction (v0.55.0); **POP4** the operations and skills catalog in the UI (v0.57.0, after the UI2 simplification); **POP3** agent-proposed operations and drift detection (v0.58.0); **POP5** onboarding new systems and sharing them (v0.61.0, before the AtScale import). Requirement: PLT-9 in [requirements.md](requirements.md). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
+**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the adapters' metadata extraction, and Redshift onboarded (v0.55.0); **POP4** the operations and skills catalog in the UI (v0.57.0, after the UI2 simplification); **POP3** agent-proposed operations and drift detection (v0.58.0); **POP5** onboarding new systems and sharing them (v0.61.0, before the AtScale import). Requirement: PLT-9 in [requirements.md](requirements.md). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
 
 ## 1. Need and intent
 
@@ -225,7 +225,7 @@ Acceptance:
 - **Boundary:** the architecture test's baseline loses the TO MOVE entries.
 - **Lineage:** on a recorded fixture of each platform, the lineage operations' facts match a golden set; a failed read retires nothing. LIN's live Snowflake check passes.
 
-### 6.2 POP2 — the adapters' metadata extraction (v0.55.0)
+### 6.2 POP2 — the adapters' metadata extraction, and Redshift (v0.55.0)
 
 The adapters (`SnowflakeAdapter`, `DatabricksAdapter`, `OracleAdapter`) still carry the estate reads as code: tables, columns, keys, views, profiling and last-altered times. POP2 moves them to operations, so the estate itself stays current with the platforms.
 
@@ -234,6 +234,11 @@ Scope:
 - `BaseDataSourceAdapter.extractMetadata` calls them by id. The adapters keep only connection, authentication and execution (the allowed machinery);
 - **access through CLI or API only** (§2.1): Snowflake and Databricks keep their CLI and API paths; **Oracle moves from the Node driver to SQLcl** (JSON output), and the driver path (the drivers folder, PLT-7's driver install) is removed. The async pattern and the generic sign-in methods live in the executor;
 - a read the account can't do (an edition, a privilege) is reported per operation, and the rest of the extraction continues;
+- **Redshift onboarded** (owner, 2026-10-29), as the proof that a platform is added by files:
+  - a platform definition (category `warehouse`, access through the AWS CLI's `redshift-data`, asynchronous: `execute-statement`, `describe-statement`, `get-statement-result`, paged);
+  - its estate and profiling operations (`SVV_TABLE_INFO`, `SVV_COLUMNS`, `SVV_ALL_TABLES` and the like, with version ranges and recorded examples);
+  - an `autode-redshift-*` skill: installing the AWS CLI, an AWS profile with a non-interactive sign-in, choosing a cluster or Serverless workgroup and database, the privileges needed, troubleshooting;
+  - Redshift as a **source** only: no compile dialect yet, so it isn't offered as a build target; lineage is designed only, since Redshift has no native column lineage. Its capability map says so;
 - **new object kinds:** an operation can read objects the snapshot didn't know (for example Snowflake dynamic tables, Databricks metric views). They come into the estate as their declared kind, not dropped.
 
 Acceptance:
@@ -241,6 +246,7 @@ Acceptance:
 - **Extensible:** a team operation file adding an object kind brings those objects into the estate with no code change (test with a fixture kind).
 - **Resilient:** a failing operation (fixture: a missing privilege) leaves the other reads' results and reports the gap in the ingest result and the Estate view.
 - **Boundary:** the architecture baseline lists no platform SQL in the adapters.
+- **Redshift without code:** on recorded `redshift-data` output (including a paged result and a failed statement), Redshift's estate comes in through its platform definition, operations and skill only; the architecture test passes with no new exception. With the AWS CLI missing, the skill's install steps are shown.
 - **Oracle through SQLcl:** on recorded SQLcl output, Oracle's estate matches what the driver gave (golden test); with SQLcl missing, the skill's install steps are shown.
 
 ### 6.3 POP4 — the operations and skills catalog (v0.57.0)
@@ -351,7 +357,7 @@ Acceptance:
 
 Scope:
 - **A new system from a template:** the steps are category, transports, access paths (CLI, API), connection fields, version detection, starter operations for the category's capabilities, then skills. It counts only once its recorded examples pass and a conformance run on a real connection is reviewed.
-- **Redshift first,** as the proof: a full SQL platform reached through the AWS CLI (`redshift-data`, asynchronous), with `SVV_` and `STL_` system views and no native column lineage. AtScale (`file`, `http`) and Collibra (`http`) then arrive through IMP1 and IMP3 on the same model, as platform definitions and operations, not special cases.
+- **Redshift is already onboarded in POP2,** by hand; the template reproduces it as its first check. AtScale (`file`, `http`) and Collibra (`http`) then arrive through IMP1 and IMP3 on the same model, as platform definitions and operations, not special cases.
 - **The `http` and `file` transports** run against live systems (fixtures from POP1).
 - **Packs:** export a team's platform definitions, operations and skills as a pack for other workspaces; import one with the same review as a ported skill (PA4).
 
@@ -367,7 +373,7 @@ Everything above that (what to read, how to map it, what to write) is files.
 - no per-vendor screens: if a system needs its own layout, the model is missing a field.
 
 Acceptance:
-- **Onboarded without code:** Redshift's estate and profiling work from its platform definition, operations and skill, through the user's AWS CLI; the architecture test passes with no new exception.
+- **The template reproduces Redshift:** running it with Redshift's answers gives POP2's platform definition and operations.
 - **Guided:** with the CLI missing, AutoDE says so and shows the skill's install and profile steps; with a browser-only profile, it says so instead of hanging.
 - **Honest:** a template whose transport isn't available says which code is needed and stops; nothing half-onboarded runs.
 - **Shareable:** a pack exported from one workspace and imported into another gives the same catalog after review.
