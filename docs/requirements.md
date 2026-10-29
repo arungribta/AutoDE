@@ -361,9 +361,11 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   It is read-only, theme-aware, usable by keyboard, and fast on large estates. Every view has a CLI and MCP equivalent. *Why:* the context and semantic layers must be explorable to be trusted (C6). *Status:* Shipped v0.50.0 (search, asset pages, graph, facts, estate; `autode explore`; MCP tools). v0.50.1 added the Graph view (the landscape with every known relationship, expand in place, find on canvas) and standard labels (CTX-17). v0.53.0 added the lineage and impact views (the Lineage tab, impact with Markdown and CSV export). The ontology and glossary browser comes in ONT1. Lists are paged rather than virtualised.
 - **UI-8 — One AutoDE window, simple to follow.**
   - The Knowledge Explorer, the Workflow view and the Platform catalog are tabs of one window, each its own view.
-  - The Workflow Palette shows one clear next step, with the rest a click away.
+  - The whole journey of a problem is in view from its first statement: the problem, discovery, the specification, the workflow plan, then the chosen template's stages, previewed before they are chosen. Each step says who acts, offers one action, and shows why it is there and what happened.
+  - The Workflow Palette shows where you are and one clear next step, with the rest a click away.
+  - The panel, the CLI and MCP show the same journey.
 
-  *Why:* the owner found the palette crowded and confusing in testing, and several separate panels are hard to find (owner, 2026-10-29). *Status:* Planned (UI2, v0.56.0).
+  *Why:* the owner found the palette crowded and confusing in testing, and several separate panels are hard to find, and the steps before a workflow template is chosen weren't visible (owner, 2026-10-28/29). *Status:* Specified ([ui-simplification.md](ui-simplification.md)); planned UI2, v0.56.0.
 - **UI-6 — Dashboard panel.** *Status:* Parked (v0.13.0); removed in v0.45.9 (owner's choice): the Workflow view shows progress and each stage's outputs.
 
 ---
