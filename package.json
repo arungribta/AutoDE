@@ -812,7 +812,7 @@
     "mcp": "node dist/autode.js mcp",
     "package:cli": "tsc -p ./ && node scripts/bundle.cjs --production && node scripts/pack-cli.cjs --pack",
     "docs:generate": "node scripts/docs-generate.cjs",
-    "test": "npm run compile && node test/functional.test.cjs",
+    "test": "npm run compile && node test/functional.test.cjs && node test/architecture.test.cjs",
     "eval": "npm run compile && node test/eval/run-eval.cjs",
     "lint": "eslint src --ext .ts",
     "manual:kit": "node scripts/manual-kit.cjs"
