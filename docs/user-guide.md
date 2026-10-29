@@ -481,7 +481,7 @@ An asset's owners default to its domain's owners for any role it doesn't name. D
 
 Applying tags to Snowflake or Databricks is a platform change: an agent with the platform's governance skill writes it as a runbook, and you approve it.
 
-The semantic modeler and knowledge engineer agents, and knowledge maintenance, are in §8.9; lineage from the platform and impact analysis with LIN (v0.53.0); ontology concepts with ONT1 (v0.54.0).
+The semantic modeler and knowledge engineer agents, and knowledge maintenance, are in §8.9; lineage from the platform and impact analysis with LIN (v0.53.0); ontology concepts with ONT1 (v0.55.0).
 ### 8.9 Keeping the layers current
 
 Knowledge arrives while you work: you mention in chat that `order_id` is unique, or a document you attached for the interview defines churn. And one change ripples: a corrected metric no longer matches the semantic model, and an article cites a fact that was replaced. AutoDE notices these without a model and raises **maintenance items**. Each item says what happened, what to do, and which agent is suited to it. You decide.
@@ -946,14 +946,12 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](roadmap.md)):
 
-- **The metadata model** (v0.51.0): tags (a `kpi` tag marks key metrics), a glossary with categories and related terms, classifications, typed rules (validation, policy, standard, guidance), owners and stewards, domains and data products, certification and custom properties, and **knowledge articles**: reviewed write-ups of pitfalls, history and golden sources, which cite facts and reach agents in their context.
-- **Agents that keep the layers current** (v0.52.0): a semantic modeler and a knowledge engineer. Whatever you say in chat, and every document you bring for any purpose, is read for knowledge. When a fact changes, AutoDE lists what it affects (a semantic model, an article) and which agent can draft the update. By default it only suggests; you approve every change.
-- **Lineage and impact** (v0.53.0): table and column lineage from the platform, your mappings and AutoDE's artifacts; what a change would break.
-- **Ontology and terminology** (v0.54.0–v0.55.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
-- **AtScale import** (v0.56.0); Horizon, Collibra and Unity Catalog later.
-- **Deploying the semantic layer** (v0.57.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
-- **Merge semantics** (v0.58.0): conformed dimensions and survivorship across systems, in shared models and composites.
-- **Patterns and recommendations** (v0.59.0): SCD2, CDC merge and snapshot primitives; a recommended pipeline type with its reasons; team preferences; data contracts for the tables you build.
+- **Platform operations** (v0.54.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release. With it, AutoDE reads observed lineage from Snowflake and Databricks itself.
+- **Ontology and terminology** (v0.55.0–v0.56.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
+- **AtScale import** (v0.57.0); Horizon, Collibra and Unity Catalog later.
+- **Deploying the semantic layer** (v0.58.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
+- **Merge semantics** (v0.59.0): conformed dimensions and survivorship across systems, in shared models and composites.
+- **Patterns and recommendations** (v0.60.0): SCD2, CDC merge and snapshot primitives; a recommended pipeline type with its reasons; team preferences; data contracts for the tables you build.
 
 ---
 

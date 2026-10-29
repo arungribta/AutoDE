@@ -1,6 +1,6 @@
 # Platform operations: one catalog for every interaction with a platform
 
-**Status:** specified 2026-10-28 (owner); to be built as phase **POP1** before LIN's platform lineage reads, by the owner's choice (option a). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
+**Status:** specified 2026-10-28 (owner); to be built as phase **POP1** (v0.54.0, roadmap) before LIN's platform lineage reads, by the owner's choice (option a). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
 
 ## 1. Why
 
