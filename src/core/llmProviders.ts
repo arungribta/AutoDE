@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { panelServerEntry } from './mcpConfig';
 import { ClaudeStreamParser } from './claudeStream';
-import { LlmAdapter, LlmAdapterContext, LlmCompleteOptions, LlmHistoryTurn, extractJsonText } from './llmAdapter';
+import { LlmAdapter, LlmAdapterContext, LlmCompleteOptions, LlmHistoryTurn, RunStoppedError, extractJsonText, throwIfStopped } from './llmAdapter';
 import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet, StepEvent } from '../engine/types';
 import { AgenticToolCall, executeAgenticTool, geminiSchema, toolSpecsForMode } from './agenticTools';
 
@@ -17,10 +17,21 @@ interface ToolRun {
   audit?: ToolCallAuditEntry[];
   engine?: EngineToolSet;
   onStep?: (e: StepEvent) => void;
+  /** v0.53.1: a person's Stop. */
+  signal?: AbortSignal;
 }
 
 function toolRunFrom(opts: LlmCompleteOptions): ToolRun {
-  return { mode: opts.toolExecutionMode ?? 'none', allowed: opts.allowedToolNames, audit: opts.auditSink, engine: opts.engineTools, onStep: opts.onStep };
+  return { mode: opts.toolExecutionMode ?? 'none', allowed: opts.allowedToolNames, audit: opts.auditSink, engine: opts.engineTools, onStep: opts.onStep, signal: opts.signal };
+}
+
+/** v0.53.1: a VS Code cancellation token that follows a run's Stop (Copilot's request, Claude Code's process). */
+function tokenFor(signal?: AbortSignal): { token?: vscode.CancellationToken; dispose(): void } {
+  if (!signal) return { dispose: () => undefined };
+  const source = new vscode.CancellationTokenSource();
+  const cancel = () => source.cancel();
+  if (signal.aborted) source.cancel(); else signal.addEventListener('abort', cancel, { once: true });
+  return { token: source.token, dispose: () => { signal.removeEventListener('abort', cancel); source.dispose(); } };
 }
 
 interface OpenAiStyleToolCall {
@@ -75,6 +86,7 @@ async function runOpenAiStyleToolLoop(
   const offered = new Set(toolSpecs.map((t) => t.name));
 
   for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
+    throwIfStopped(run.signal);
     const message = await sendChat(messages, tools);
     const toolCalls = message.tool_calls ?? [];
     if (toolCalls.length === 0) {
@@ -91,6 +103,7 @@ async function runOpenAiStyleToolLoop(
         input = call.function.arguments ?? {};
       }
       const toolCall: AgenticToolCall = { id, name: call.function.name, input };
+      throwIfStopped(run.signal);
       const output = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, run.engine, run.onStep);
       messages.push({ role: 'tool', tool_call_id: id, content: output });
     }
@@ -108,15 +121,21 @@ async function runOpenAiStyleToolLoop(
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 45000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // v0.53.1: the run's Stop (init.signal) aborts the request too.
+  const stop = init.signal;
+  const onStop = () => controller.abort();
+  if (stop?.aborted) controller.abort(); else stop?.addEventListener('abort', onStop, { once: true });
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (err) {
+    if (stop?.aborted) throw new RunStoppedError();
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error(`Request to ${url} timed out after ${Math.round(timeoutMs / 1000)}s.`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
+    stop?.removeEventListener('abort', onStop);
   }
 }
 
@@ -149,13 +168,17 @@ class CopilotLlmAdapter implements LlmAdapter {
         throw new Error(info.error || 'GitHub Copilot is not available through the VS Code Language Model API.');
       }
       const mode = opts.toolExecutionMode ?? 'none';
-      if (mode === 'none') {
-        return await adapter.complete(prompt, { model: opts.model, timeoutMs: 60000, systemPrompt: opts.systemPrompt, justification: opts.justification, history: opts.history });
-      }
-      const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history, allowedToolNames: opts.allowedToolNames, engineTools: opts.engineTools, onStep: opts.onStep });
-      if (opts.auditSink) opts.auditSink.push(...result.audit);
-      return result.text;
+      const stop = tokenFor(opts.signal);
+      try {
+        if (mode === 'none') {
+          return await adapter.complete(prompt, { model: opts.model, timeoutMs: 60000, systemPrompt: opts.systemPrompt, justification: opts.justification, history: opts.history, cancellationToken: stop.token });
+        }
+        const result = await adapter.completeWithTools(prompt, { model: opts.model, systemPrompt: opts.systemPrompt, justification: opts.justification, mode, workspaceRoot: ctx.getWorkspaceRoot(), history: opts.history, allowedToolNames: opts.allowedToolNames, engineTools: opts.engineTools, onStep: opts.onStep, cancellationToken: stop.token });
+        if (opts.auditSink) opts.auditSink.push(...result.audit);
+        return result.text;
+      } finally { stop.dispose(); }
     } catch (err) {
+      if (opts.signal?.aborted) throw new RunStoppedError();
       const message = err instanceof Error ? err.message : String(err);
       ctx.log(`GitHub Copilot request failed: ${message}`);
       throw new Error(message);
@@ -202,6 +225,7 @@ class ClaudeLlmAdapter implements LlmAdapter {
       }
       // With AutoDE's server attached, read the run as it streams: progress in AutoDE's log, every tool call in the audit.
       const stream = mcp ? new ClaudeStreamParser(opts.onStep) : undefined;
+      const stop = tokenFor(opts.signal);
       try {
         return await adapter.complete(prompt, {
           model: opts.model,
@@ -213,13 +237,16 @@ class ClaudeLlmAdapter implements LlmAdapter {
           allowedTools: opts.allowedToolNames,
           // AutoDE's hooks (the turn hook) skip runs AutoDE itself started: their prompts aren't the user's words.
           env: { AUTODE_PANEL_RUN: '1' },
+          cancellationToken: stop.token,
           ...(mcp ? { mcp, stream } : {})
         });
       } finally {
+        stop.dispose();
         if (stream && opts.auditSink) opts.auditSink.push(...stream.audit);
         if (mcp) { try { fs.rmSync(mcp.configFile, { force: true }); } catch { /* temp file */ } }
       }
     } catch (err) {
+      if (opts.signal?.aborted) throw new RunStoppedError();
       const message = err instanceof Error ? err.message : String(err);
       ctx.log(`Claude Code request failed: ${message}`);
       throw new Error(message);
@@ -241,7 +268,7 @@ class OpenAiLlmAdapter implements LlmAdapter {
     }
     return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, toolRunFrom(opts), ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
       const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
+        method: 'POST', signal: opts.signal,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ model: opts.model, temperature: 0, messages, ...(tools.length > 0 ? { tools } : {}) })
       });
@@ -284,8 +311,9 @@ class AnthropicLlmAdapter implements LlmAdapter {
     const audit: ToolCallAuditEntry[] = opts.auditSink ?? [];
 
     for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
+      throwIfStopped(opts.signal);
       const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
+        method: 'POST', signal: opts.signal,
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
           model: opts.model, max_tokens: 4096, temperature: 0, system: opts.systemPrompt, messages,
@@ -333,7 +361,7 @@ class AzureOpenAiLlmAdapter implements LlmAdapter {
     }
     return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, toolRunFrom(opts), ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
       const response = await fetchWithTimeout(url, {
-        method: 'POST',
+        method: 'POST', signal: opts.signal,
         headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
         body: JSON.stringify({ model: opts.model, temperature: 0, messages, ...(tools.length > 0 ? { tools } : {}) })
       });
@@ -376,8 +404,9 @@ class GeminiLlmAdapter implements LlmAdapter {
     const audit: ToolCallAuditEntry[] = opts.auditSink ?? [];
 
     for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
+      throwIfStopped(opts.signal);
       const response = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${apiKey}`, {
-        method: 'POST',
+        method: 'POST', signal: opts.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: opts.systemPrompt }] },
@@ -401,6 +430,7 @@ class GeminiLlmAdapter implements LlmAdapter {
       const responseParts: GeminiPart[] = [];
       for (const p of funcCalls) {
         const call = p.functionCall!;
+        throwIfStopped(opts.signal);
         const output = await executeAgenticTool({ id: call.name, name: call.name, input: call.args ?? {} }, workspaceRoot!, audit, offered, opts.engineTools, opts.onStep);
         responseParts.push({ functionResponse: { name: call.name, response: { result: output } } });
       }
@@ -424,7 +454,7 @@ class OllamaLlmAdapter implements LlmAdapter {
     const mode = opts.toolExecutionMode ?? 'none';
     if (mode === 'none') {
       const response = await fetchWithTimeout('http://localhost:11434/api/chat', {
-        method: 'POST',
+        method: 'POST', signal: opts.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: opts.model,
@@ -446,7 +476,7 @@ class OllamaLlmAdapter implements LlmAdapter {
 
     return runOpenAiStyleToolLoop(opts.systemPrompt, prompt, toolRunFrom(opts), ctx.getWorkspaceRoot(), opts.history, async (messages, tools) => {
       const response = await fetchWithTimeout('http://localhost:11434/api/chat', {
-        method: 'POST',
+        method: 'POST', signal: opts.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: opts.model, stream: false, messages, ...(tools.length > 0 ? { tools } : {}) })
       });

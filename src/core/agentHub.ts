@@ -29,7 +29,7 @@ export function foldActionEntries(history: readonly ChatMessage[]): ChatMessage[
   }
   return out;
 }
-import { LlmAdapterContext, LlmHistoryTurn, extractJsonText } from './llmAdapter';
+import { LlmAdapterContext, LlmHistoryTurn, RunStoppedError, extractJsonText } from './llmAdapter';
 import { getLlmAdapter } from './llmProviders';
 import { contextWindowForModel, windowHistoryToBudget, RESERVED_PROMPT_TOKENS, RESERVED_RESPONSE_TOKENS } from './tokenBudget';
 import {
@@ -451,7 +451,7 @@ Message: ${message}`;
     message: string,
     schemaContext?: string,
     toolExecutionMode: ToolExecutionMode = 'read-only',
-    opts?: { history?: ChatMessage[]; priorSummary?: string; claudeSessionId?: string; engineTools?: EngineToolSet; frontDoor?: string; onStep?: (e: StepEvent) => void }
+    opts?: { history?: ChatMessage[]; priorSummary?: string; claudeSessionId?: string; engineTools?: EngineToolSet; frontDoor?: string; onStep?: (e: StepEvent) => void; signal?: AbortSignal }
   ): Promise<{ message: string; updatedSummary?: string; newClaudeSessionId?: string; actions: ToolCallAuditEntry[] }> {
     const trimmed = message.trim();
     if (!trimmed) {
@@ -518,7 +518,8 @@ Message: ${message}`;
           isNewClaudeSession: startingClaudeSession,
           auditSink: actions,
           engineTools: opts?.engineTools,
-          onStep: opts?.onStep
+          onStep: opts?.onStep,
+          signal: opts?.signal
         }
       );
       return {
@@ -528,6 +529,7 @@ Message: ${message}`;
         actions
       };
     } catch (error) {
+      if (error instanceof RunStoppedError) throw error;
       const message = error instanceof Error ? error.message : 'Unknown error during chat.';
       this.log(`Chat failed: ${message}`);
       throw new Error(message);
@@ -636,6 +638,7 @@ Message: ${message}`;
       /** v0.52.1: AutoDE's read-only tools for the chat (AutoDE-owned loops; Claude Code's own loop ignores them). */
       engineTools?: EngineToolSet;
       onStep?: (e: StepEvent) => void;
+      signal?: AbortSignal;
     }
   ): Promise<string> {
     const settings = this.configManager.getSettings();
@@ -655,11 +658,13 @@ Message: ${message}`;
           isNewClaudeSession: opts?.isNewClaudeSession,
           auditSink: opts?.auditSink,
           engineTools: opts?.engineTools,
-          onStep: opts?.onStep
+          onStep: opts?.onStep,
+          signal: opts?.signal
         },
         this.buildLlmContext()
       );
     } catch (error) {
+      if (error instanceof RunStoppedError || opts?.signal?.aborted) throw new RunStoppedError();
       const message = error instanceof Error ? error.message : 'The selected LLM provider is unavailable.';
       throw new Error(`LLM request failed: ${message}`);
     }
@@ -686,10 +691,11 @@ Message: ${message}`;
         approvalPrompt: opts.approvalPrompt,
         engineTools: opts.engineTools,
         agentName: opts.agentName,
-        onStep: opts.onStep
+        onStep: opts.onStep,
+        signal: opts.signal
       },
       this.buildLlmContext()
-    );
+    ).catch((err) => { throw opts.signal?.aborted ? new RunStoppedError() : err; });
     return { text, audit, provider };
   }
 

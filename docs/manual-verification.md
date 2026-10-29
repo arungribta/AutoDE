@@ -1190,6 +1190,21 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: `autode explore lineage shop.orders --direction down`, `autode explore impact shop.orders.tax_amount --change drop_column`; in Claude Code, ask for the impact of dropping that column.
   Expect: the same items as the Explorer; the agent calls `autode_impact`.
 
+## Part 51 — v0.53.1 Stop a run
+
+- [ ] **51.1 A stage.**
+  Do: run the documentation stage's agent; click **Stop** on its card after its first step.
+  Expect: the card says *Stopping…*, then ends as stopped (■) with its steps. The stage is still in progress; the notice names what was recorded before the stop, and those files are there.
+- [ ] **51.2 Claude Code.**
+  Do: with Claude Code as the panel's model, run a stage and stop it; open Task Manager.
+  Expect: no `claude` or AutoDE MCP server process is left running.
+- [ ] **51.3 Cancel in the notification.**
+  Do: run a maintenance item; click *Cancel* on the progress notification.
+  Expect: the same stopped card; "Anything it proposed before the stop waits for you".
+- [ ] **51.4 A chat reply.**
+  Do: ask a question that makes the chat look things up; stop it.
+  Expect: "You stopped this reply…", not an error; the card shows the steps it took.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1490,5 +1505,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 50.4 |  |  |
 | 50.5 |  |  |
 | 50.6 |  |  |
+| 51.1 |  |  |
+| 51.2 |  |  |
+| 51.3 |  |  |
+| 51.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

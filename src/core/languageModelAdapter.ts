@@ -286,6 +286,8 @@ export class LanguageModelAdapter {
       messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
       const resultParts: vscode.LanguageModelToolResultPart[] = [];
       for (const call of toolCalls) {
+        // v0.53.1: a Stop between tool calls ends the run here (the request itself is cancelled by the token).
+        if (opts.cancellationToken?.isCancellationRequested) throw new Error('Stopped by you.');
         const toolCall: AgenticToolCall = { id: call.callId, name: call.name, input: (call.input ?? {}) as Record<string, unknown> };
         const outcome = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, opts.engineTools, opts.onStep);
         resultParts.push(new vscode.LanguageModelToolResultPart(call.callId, [new vscode.LanguageModelTextPart(outcome)]));

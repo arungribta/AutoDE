@@ -765,6 +765,8 @@ export interface AgentToolRunOptions {
   agentName?: string;
   /** v0.52.5: each tool call as it happens (the chat's activity card). */
   onStep?: (e: StepEvent) => void;
+  /** v0.53.1: a person's Stop: the run ends before its next model call or tool call. */
+  signal?: AbortSignal;
 }
 
 export interface AgentExecutionContext {

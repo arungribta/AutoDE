@@ -1,6 +1,6 @@
 import { ClaudeStreamParser } from './claudeStream';
 import * as vscode from 'vscode';
-import { spawn, spawnSync } from 'child_process';
+import { ChildProcess, spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -111,6 +111,18 @@ function extensionBinaryPath(): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * v0.53.1: ends the CLI and what it started. On Windows `kill()` ends only the CLI's own process, leaving
+ * children such as AutoDE's MCP server running; `taskkill /T` ends the tree.
+ */
+function endProcessTree(child: ChildProcess): void {
+  if (process.platform === 'win32' && child.pid) {
+    const r = spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+    if (!r.error && r.status === 0) return;
+  }
+  child.kill();
 }
 
 export class ClaudeCodeAdapter {
@@ -319,12 +331,12 @@ export class ClaudeCodeAdapter {
       };
 
       const timer = setTimeout(() => {
-        child.kill();
+        endProcessTree(child);
         done(() => reject(new Error(`Claude Code call timed out after ${Math.round(timeoutMs / 1000)}s`)));
       }, timeoutMs);
 
       const sub = cancellationToken?.onCancellationRequested(() => {
-        child.kill();
+        endProcessTree(child);
         done(() => reject(new Error('Claude Code call was cancelled')));
       });
 

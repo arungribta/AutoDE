@@ -12378,6 +12378,88 @@ async function main() {
     assert.deepStrictEqual(dev.items.map((i) => [i.id, i.sources]), [['obj:erp/dev/retail.sales.customers.country', ['observed']]]);
   });
 
+  // ── v0.53.1: Stop a run from its activity card ──
+
+  await test('v0.53.1: Stop — AutoDE\'s own tool loop ends before its next tool call and its next model call, and a Stop aborts a request in flight; it ends as RunStoppedError ("Stopped by you."), never as a failure', async () => {
+    const mock = createMock();
+    const { getLlmAdapter } = withMock(mock, () => fresh('../dist/core/llmProviders.js'));
+    const { RunStoppedError } = withMock(mock, () => require('../dist/core/llmAdapter.js'));
+    const origFetch = global.fetch;
+    const ctx = { getSettings: () => ({}), getLlmApiKey: async () => 'sk-test', getExtensionContext: () => undefined, getWorkspaceRoot: () => require('node:os').tmpdir(), log: () => {} };
+    try {
+      // Two tool calls in one turn: the Stop comes during the first; the second never runs, and nothing more is asked of the model.
+      let turns = 0; const called = [];
+      global.fetch = async () => { turns++; return { ok: true, json: async () => ({ choices: [{ message: { content: '', tool_calls: [{ id: 'a', function: { name: 'autode_search_assets', arguments: '{"query":"orders"}' } }, { id: 'b', function: { name: 'autode_search_assets', arguments: '{"query":"refunds"}' } }] } }] }) }; };
+      const stop = new AbortController();
+      const engineTools = { specs: [{ name: 'autode_search_assets', description: 'search', parameters: { type: 'object', properties: { query: { type: 'string' } } } }], call: async (name, input) => { called.push(input.query); stop.abort(); return { text: '{"results":[]}', isError: false }; } };
+      const steps = [];
+      const run = getLlmAdapter('openai').complete('find them', { model: 'gpt-4o-mini', systemPrompt: 'sys', toolExecutionMode: 'read-only', engineTools, signal: stop.signal, onStep: (e) => steps.push(`${e.id}:${e.status}`) }, ctx);
+      await assert.rejects(run, (err) => err instanceof RunStoppedError && err.message === 'Stopped by you.');
+      assert.deepStrictEqual([turns, called, steps], [1, ['orders'], ['a:running', 'a:ok']]);
+      // A Stop while the request is in flight aborts it.
+      const inFlight = new AbortController();
+      global.fetch = (url, init) => new Promise((_resolve, reject) => { init.signal.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; reject(e); }); setTimeout(() => inFlight.abort(), 10); });
+      await assert.rejects(getLlmAdapter('anthropic').complete('x', { model: 'claude-x', systemPrompt: 'sys', signal: inFlight.signal }, ctx), (err) => err instanceof RunStoppedError);
+      // Already stopped: no request at all.
+      let asked = false; global.fetch = async () => { asked = true; return { ok: true, json: async () => ({}) }; };
+      const gone = new AbortController(); gone.abort();
+      await assert.rejects(getLlmAdapter('openai').complete('x', { model: 'm', systemPrompt: 's', toolExecutionMode: 'read-only', engineTools, signal: gone.signal }, ctx), (err) => err instanceof RunStoppedError);
+      assert.strictEqual(asked, false);
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('v0.53.1: Stop — a stopped stage is never handed in: it stays in progress, what the agent recorded before the stop is kept and named; a stopped handed-over task or maintenance item says what it proposed waits for you; Copilot and Claude Code get a cancellation from the same Stop (Claude Code\'s process tree is ended)', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-stop-'));
+    try {
+      const { id, prob } = await docsOnly(ws, cli);
+      const { EngineClient } = fresh('../dist/core/engineClient.js');
+      const { runStage, runHandoff } = fresh('../dist/core/agentExecutor.js');
+      const scope = { workspaceRoot: ws, resourcesRoot: wfRes(), problemId: id };
+      let stop = new AbortController();
+      let throwOnStop = true;
+      const host = {
+        get signal() { return stop.signal; },
+        createEngine: (n) => new EngineClient({ workspaceRoot: ws, resourcesRoot: wfRes(), version: 't', log: () => {}, clientName: n }),
+        activeProvider: () => 'copilot',
+        log: () => {},
+        runAgentWithTools: async (prompt, opts) => {
+          assert.strictEqual(opts.signal, stop.signal, 'the run\'s signal reaches the model\'s loop');
+          if (opts.engineTools.specs.some((s) => s.name === 'autode_record_artifact')) await opts.engineTools.call('autode_record_artifact', { stage: 'document', path: 'runbook.md', content: '# Runbook (half done)\n' });
+          stop.abort();
+          if (throwOnStop) { const e = new Error('Stopped by you.'); e.name = 'RunStoppedError'; throw e; }
+          return { text: 'partial', audit: [], provider: 'copilot' };
+        }
+      };
+      let r = await runStage(host, scope, 'document');
+      assert.ok(!r.ok && r.stopped && r.outputs.length === 1 && r.outputs[0].endsWith('document/runbook.md'), JSON.stringify(r));
+      assert.ok(/You stopped the documenter\. document wasn't handed in and stays in progress\. It recorded .*runbook\.md before the stop/.test(r.message), r.message);
+      const { readWorkflow } = fresh('../dist/engine/workflows/instance.js');
+      const stage = () => readWorkflow(prob).stages.find((s) => s.id === 'document');
+      assert.strictEqual(stage().record.status, 'in-progress');
+      const events = fresh('../dist/engine/workflows/events.js').readEvents(prob, { stage: 'document' });
+      assert.ok(!events.some((e) => e.type === 'handed-in' || e.type === 'done'), 'never handed in');
+      assert.ok(nodeFs.existsSync(nodePath.join(ws, r.outputs[0])), 'what was recorded stays');
+      // A Stop that lands as the model answers: still not handed in.
+      stop = new AbortController(); throwOnStop = false;
+      r = await runStage(host, scope, 'document');
+      assert.ok(r.stopped && stage().record.status === 'in-progress', JSON.stringify(r));
+      // A task handed to an agent from the chat.
+      stop = new AbortController(); throwOnStop = true;
+      const h = await runHandoff(host, scope, 'knowledge-engineer', 'Write an article on order ids');
+      assert.ok(!h.ok && h.stopped && /You stopped the knowledge-engineer\. Anything it proposed before the stop waits for you/.test(h.message), JSON.stringify(h));
+      // The panel and the adapters carry the same Stop.
+      const src = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', ...f.split('/')), 'utf8');
+      const panel = src('src/core/webviewProvider.ts');
+      for (const t of ["case 'stopRun':", 'this.stopRun(message.runId)', "signal: this.runSignal(chatRun)", 'runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, runId ? { ...o, signal,', "status: r.ok ? 'ok' : r.stopped ? 'stopped' : 'error'", 'token.onCancellationRequested(() => this.stopRun(runId))', "this.activity(chatRun, { phase: 'start', title: 'AutoDE chat' });"]) assert.ok(panel.includes(t), t);
+      const providers = src('src/core/llmProviders.ts');
+      assert.ok((providers.match(/cancellationToken: stop\.token/g) || []).length >= 3, 'Copilot (both paths) and Claude Code are cancelled by the Stop');
+      assert.ok(/function endProcessTree[\s\S]*taskkill[\s\S]*'\/T'/.test(src('src/core/claudeCodeAdapter.ts')), 'Claude Code\'s process tree is ended on Windows');
+      const html = src('media/sidebar.html');
+      for (const t of ['class="activity-stop"', "vscode.postMessage({ type: 'stopRun', runId: m.runId })", '.activity.stopped', "m.status === 'stopped' ? '■'"]) assert.ok(html.includes(t), t);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));

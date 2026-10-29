@@ -67,6 +67,18 @@ export interface LlmCompleteOptions {
   agentName?: string;
   /** v0.52.5: each tool call as it happens, from every adapter (Claude Code's from its event stream). */
   onStep?: (e: StepEvent) => void;
+  /** v0.53.1: a person's Stop. AutoDE's own loops stop before the next model call or tool call; Copilot's request and Claude Code's process are cancelled. */
+  signal?: AbortSignal;
+}
+
+/** v0.53.1: what a run stopped by a person throws, from every adapter. */
+export class RunStoppedError extends Error {
+  public constructor() { super('Stopped by you.'); this.name = 'RunStoppedError'; }
+}
+
+/** Throws `RunStoppedError` when the run's signal says Stop: called before each model call and each tool call. */
+export function throwIfStopped(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new RunStoppedError();
 }
 
 /**

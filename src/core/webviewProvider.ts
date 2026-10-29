@@ -91,6 +91,7 @@ import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/fact
 import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
 import { ExecutorHost, runHandoff, runMaintenance, runStage } from './agentExecutor';
+import { RunStoppedError } from './llmAdapter';
 import { RoleTemplate, loadRoles } from '../engine/agents/definitions';
 import { chatFrontDoorPrompt, chatToolNames, handoffFor, parseHandoff, parseMention } from '../engine/agents/chatFrontDoor';
 import { AnswerTrace, buildAnswerTrace } from '../engine/agents/answerTrace';
@@ -602,6 +603,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             const roles = this.agentRoles();
             // v0.52.5: the turn's tool calls show live in an activity card, which gives way to the reply (its trace has the same steps).
             const chatRun = this.newRunId();
+            this.activity(chatRun, { phase: 'start', title: 'AutoDE chat' });
             let result: Awaited<ReturnType<DataAgentHubHub['chat']>>;
             try {
               const chatTools = engine?.listTools ? chatToolNames(await engine.listTools()) : [];
@@ -612,11 +614,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
                 claudeSessionId: priorMeta?.claudeSessionId,
                 engineTools,
                 frontDoor: chatFrontDoorPrompt(roles, engineTools ? chatTools : []),
-                onStep: (e) => this.activity(chatRun, { phase: 'step', title: 'AutoDE chat', step: e })
+                onStep: (e) => this.activity(chatRun, { phase: 'step', title: 'AutoDE chat', step: e }),
+                signal: this.runSignal(chatRun)
               });
             } catch (err) {
-              this.activity(chatRun, { phase: 'end', title: 'AutoDE chat', status: 'error', summary: err instanceof Error ? err.message : String(err) });
-              throw err;
+              const stopped = err instanceof RunStoppedError || !!this.runSignal(chatRun)?.aborted;
+              this.activity(chatRun, { phase: 'end', title: 'AutoDE chat', status: stopped ? 'stopped' : 'error', summary: stopped ? 'Stopped by you' : err instanceof Error ? err.message : String(err) });
+              throw stopped ? new RunStoppedError() : err;
             } finally { await engine?.dispose(); }
             this.activity(chatRun, { phase: 'end', title: 'AutoDE chat', status: 'ok', replace: true });
             const parsed = parseHandoff(result.message, roles);
@@ -637,9 +641,16 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             this.postMessage('chatResponse', { message: result.message, citations: this.citationsFor(result.message), actions: turnActions, trace, ...(handoff ? { handoff } : {}) });
             scheduleExtraction();
           } catch (err) {
+            // v0.53.1: a stopped reply isn't an error: say so, and what it already did stays.
+            if (err instanceof RunStoppedError) { this.postMessage('chatResponse', { message: 'You stopped this reply. Anything AutoDE recorded or proposed during it stays (the Context Inbox, or Waiting for you).' }); break; }
             const errMsg = err instanceof Error ? err.message : String(err);
             this.postMessage('chatResponse', { message: errMsg, error: true });
           }
+          break;
+        }
+        case 'stopRun': {
+          // v0.53.1: Stop on a run's activity card.
+          if (typeof message.runId === 'string') this.stopRun(message.runId);
           break;
         }
         case 'runHandoff': {
@@ -1493,8 +1504,23 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    * that uses tools), updated in place: its steps as they run and finish, notes, and how it ended. Never kept in the transcript
    * (a reply's trace is). `replace`: the card goes away when the run's reply arrives (it carries the same steps in its trace).
    */
-  private newRunId(): string { return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
-  private activity(runId: string, ev: { phase: 'step' | 'note' | 'end'; title: string; step?: StepEvent; text?: string; status?: 'ok' | 'error'; summary?: string; replace?: boolean }): void {
+  private newRunId(): string {
+    const id = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    this.runs.set(id, new AbortController());
+    return id;
+  }
+  /** v0.53.1: each running run's Stop, by its card's id; dropped when the run ends. */
+  private readonly runs = new Map<string, AbortController>();
+  private runSignal(runId: string): AbortSignal | undefined { return this.runs.get(runId)?.signal; }
+  /** v0.53.1: a person clicked Stop on a card. The run's loop ends at its next model or tool call; Claude Code's process is ended. */
+  private stopRun(runId: string): void {
+    const c = this.runs.get(runId);
+    if (!c || c.signal.aborted) return;
+    c.abort();
+    this.output().appendLine(`[${new Date().toISOString().slice(11, 19)}] Stop requested for ${runId}.`);
+  }
+  private activity(runId: string, ev: { phase: 'start' | 'step' | 'note' | 'end'; title: string; step?: StepEvent; text?: string; status?: 'ok' | 'error' | 'stopped'; summary?: string; replace?: boolean }): void {
+    if (ev.phase === 'end') this.runs.delete(runId);
     if (ev.step) this.output().appendLine(`[${new Date().toISOString().slice(11, 19)}] ${ev.title}: ${ev.step.status === 'running' ? '…' : ev.step.status === 'ok' ? '✓' : '✗'} ${ev.step.text}${ev.step.found ? ` → ${ev.step.found}` : ''}${ev.step.detail ? ` (${ev.step.detail})` : ''}`);
     else if (ev.text || ev.summary) this.output().appendLine(`[${new Date().toISOString().slice(11, 19)}] ${ev.title}: ${ev.text ?? ev.summary}`);
     this.view?.webview.postMessage({ type: 'activity', runId, ...ev });
@@ -1845,12 +1871,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     }
     const runId = this.newRunId();
     this.activity(runId, { phase: 'note', title: role, text: task.length > 140 ? `${task.slice(0, 137)}…` : task });
-    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${role} is working`, cancellable: false },
-      () => runHandoff(this.runHost(runId, role), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, role, task));
-    this.activity(runId, { phase: 'end', title: role, status: r.ok ? 'ok' : 'error', ...(r.ok ? { replace: true } : { summary: r.message.split('\n')[0] }) });
+    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${role} is working`, cancellable: true },
+      (_p, token) => { token.onCancellationRequested(() => this.stopRun(runId)); return runHandoff(this.runHost(runId, role), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, role, task); });
+    this.activity(runId, { phase: 'end', title: role, status: r.ok ? 'ok' : r.stopped ? 'stopped' : 'error', ...(r.ok ? { replace: true } : { summary: r.stopped ? 'Stopped by you' : r.message.split('\n')[0] }) });
     await this.afterAgentRun();
     const reply = r.ok ? `${r.message}\n\n_What the ${role} proposed waits for you: the Context Inbox, or Waiting for you._` : r.message;
-    this.postMessage('chatResponse', { message: reply, error: !r.ok, citations: this.citationsFor(reply), trace: this.traceFor({ answeredBy: role, via, audit: r.audit ?? [], reply }) });
+    this.postMessage('chatResponse', { message: reply, error: !r.ok && !r.stopped, citations: this.citationsFor(reply), trace: this.traceFor({ answeredBy: role, via, audit: r.audit ?? [], reply }) });
     this.postDecisions();
   }
 
@@ -1867,9 +1893,11 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
 
   /** The executor's host for one run: its steps and notes go to the run's activity card (v0.52.5). */
   private runHost(runId?: string, title = 'AutoDE'): ExecutorHost {
+    const signal = runId ? this.runSignal(runId) : undefined;
     return {
+      signal,
       createEngine: (n) => this.hub.createEngine(n),
-      runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, runId ? { ...o, onStep: (e) => this.activity(runId, { phase: 'step', title, step: e }) } : o),
+      runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, runId ? { ...o, signal, onStep: (e) => this.activity(runId, { phase: 'step', title, step: e }) } : o),
       activeProvider: () => this.hub.activeProvider(),
       log: (l) => (runId ? this.activity(runId, { phase: 'note', title, text: l }) : this.postLog(l))
     };
@@ -1890,12 +1918,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const chosen = item;
     const maintRun = this.newRunId();
     this.activity(maintRun, { phase: 'note', title: `${chosen.agent} · maintenance`, text: chosen.title });
-    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${chosen.agent} is on "${chosen.title}"`, cancellable: false },
-      () => runMaintenance(this.runHost(maintRun, `${chosen.agent} · maintenance`), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, chosen));
-    this.activity(maintRun, { phase: 'end', title: `${chosen.agent} · maintenance`, status: r.ok ? 'ok' : 'error', summary: r.ok ? 'Proposed; waits for your approval' : r.message.split('\n')[0] });
+    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${chosen.agent} is on "${chosen.title}"`, cancellable: true },
+      (_p, token) => { token.onCancellationRequested(() => this.stopRun(maintRun)); return runMaintenance(this.runHost(maintRun, `${chosen.agent} · maintenance`), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, chosen); });
+    this.activity(maintRun, { phase: 'end', title: `${chosen.agent} · maintenance`, status: r.ok ? 'ok' : r.stopped ? 'stopped' : 'error', summary: r.ok ? 'Proposed; waits for your approval' : r.stopped ? 'Stopped by you; what it proposed waits for you' : r.message.split('\n')[0] });
     this.postLog(r.message);
     await this.afterAgentRun();
     if (r.ok) void vscode.window.showInformationMessage(`The ${chosen.agent} finished: what it proposed waits for you (the Context Inbox, or Waiting for you).`);
+    else if (r.stopped) void vscode.window.showInformationMessage(r.message.split('\n')[0]);
     else void vscode.window.showWarningMessage(r.message.split('\n')[0]);
     this.postDecisions();
   }
@@ -1968,7 +1997,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.postLog(`Maintenance (policy draft): the ${item.agent} drafts a proposal for "${item.title}".`);
     const draftRun = this.newRunId();
     const r = await runMaintenance(this.runHost(draftRun, `${item.agent} · draft`), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, item);
-    this.activity(draftRun, { phase: 'end', title: `${item.agent} · draft`, status: r.ok ? 'ok' : 'error', summary: r.ok ? 'Drafted; waits for your approval' : r.message.split('\n')[0] });
+    this.activity(draftRun, { phase: 'end', title: `${item.agent} · draft`, status: r.ok ? 'ok' : r.stopped ? 'stopped' : 'error', summary: r.ok ? 'Drafted; waits for your approval' : r.stopped ? 'Stopped by you' : r.message.split('\n')[0] });
     this.postLog(r.message);
     await this.afterAgentRun();
     this.postDecisions();
@@ -2532,13 +2561,14 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           const fr = await this.contextFileManager?.refreshWorkingSet();
           if (fr?.fetched) this.activity(runId, { phase: 'note', title: runTitle, text: `Refreshed ${fr.fetched} table(s) past their refresh age.` });
         } catch (err) { this.postLog(`The refresh before the run failed; the agent works with what AutoDE has: ${err instanceof Error ? err.message : String(err)}`); }
-        const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: running ${stage}`, cancellable: false },
-          () => runStage(this.runHost(runId, runTitle), { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
-        this.activity(runId, { phase: 'end', title: runTitle, status: r.ok ? 'ok' : 'error', summary: r.ok ? `${r.outputs.length} deliverable(s) recorded` : r.message.split('\n')[0] });
+        const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: running ${stage}`, cancellable: true },
+          (_p, token) => { token.onCancellationRequested(() => this.stopRun(runId)); return runStage(this.runHost(runId, runTitle), { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage); });
+        this.activity(runId, { phase: 'end', title: runTitle, status: r.ok ? 'ok' : r.stopped ? 'stopped' : 'error', summary: r.ok ? `${r.outputs.length} deliverable(s) recorded` : r.stopped ? `Stopped by you; not handed in${r.outputs.length ? `; recorded before the stop: ${r.outputs.join(', ')}` : '; nothing recorded'}` : r.message.split('\n')[0] });
         this.postLog(r.ok ? `${r.message}${r.outputs.length ? ` Recorded: ${r.outputs.join(', ')}.` : ''}` : r.message);
         await this.afterAgentRun();
         if (r.ok) void this.draftAtStageBoundary();
-        if (!r.ok) void vscode.window.showWarningMessage(r.message.split('\n')[0]);
+        if (r.stopped) void vscode.window.showInformationMessage(r.message.split('\n')[0]);
+        else if (!r.ok) void vscode.window.showWarningMessage(r.message.split('\n')[0]);
         this.postDecisions();
       } else if ((action === 'approve-document' || action === 'produce' || action === 'open-document') && stage) {
         const s = readWorkflow(rctx.problemRoot)?.stages.find((x) => x.id === stage);

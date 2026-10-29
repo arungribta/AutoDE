@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.53.0. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.53.1. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -808,6 +808,12 @@ The chat in the panel is for questions and changes about the active problem: "wh
 - each step appears as running (⟳), then ✓ or ✗ with what it found;
 - a timer runs in the header;
 - the left edge is blue while running, green when done, red if it failed.
+
+**Stopping a run** (v0.53.1). A running card has a **Stop** button; the progress notification's *Cancel* does the same.
+- The run ends at its next step, whichever model you use. A step already running finishes first. With Claude Code, its process is ended.
+- A stopped stage is **not** handed in: it stays in progress. Anything the agent recorded before the stop stays as it is, and the card names it, for you to review. Run the stage again, or finish it yourself.
+- A stopped task or maintenance item: anything it proposed before the stop waits for you in the Context Inbox or *Waiting for you*. Nothing is rolled back.
+- The card ends as stopped (■, amber edge) and stays open with its steps.
 
 When the run ends, the card folds to one line; click it to see the steps. A chat answer replaces its card, since the answer's *How this was answered* has the same steps.
 

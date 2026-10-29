@@ -98,6 +98,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .activity { align-self: stretch; font-size: 11.5px; border: 1px solid var(--border-soft); border-left: 3px solid var(--vscode-progressBar-background, var(--vscode-textLink-foreground)); border-radius: 4px; padding: 4px 8px; background: var(--surface-elevated); }
 .activity.done { border-left-color: var(--vscode-testing-iconPassed, var(--success)); }
 .activity.failed { border-left-color: var(--vscode-testing-iconFailed, var(--vscode-errorForeground)); }
+.activity.stopped { border-left-color: var(--vscode-editorWarning-foreground, var(--text-muted)); }
+.activity-stop { font-size: 11px; padding: 0 6px; border: 1px solid var(--border-soft); border-radius: 3px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.activity-stop:hover { border-color: var(--vscode-focusBorder); }
+.activity-stop:disabled { opacity: 0.6; cursor: default; }
+.activity:not(.running) .activity-stop { display: none; }
 .activity-head { display: flex; gap: 6px; align-items: baseline; cursor: default; }
 .activity:not(.running) .activity-head { cursor: pointer; }
 .activity-title { font-weight: 600; }
@@ -667,8 +672,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var c = activityCards[m.runId];
     if (c) return c;
     var el = document.createElement('div'); el.className = 'activity running';
-    el.innerHTML = '<div class="activity-head"><span class="activity-icon">⟳</span><span class="activity-title"></span><span class="activity-meta"></span><span class="activity-time">0:00</span></div><ol class="activity-steps"></ol>';
+    el.innerHTML = '<div class="activity-head"><span class="activity-icon">⟳</span><span class="activity-title"></span><span class="activity-meta"></span><span class="activity-time">0:00</span><button type="button" class="activity-stop" title="Stop this run: it ends at its next step; what it already recorded stays">Stop</button></div><ol class="activity-steps"></ol>';
     el.querySelector('.activity-title').textContent = m.title || 'AutoDE';
+    // v0.53.1: Stop ends the run at its next step (Claude Code's process at once); the card says how it ended.
+    var stopBtn = el.querySelector('.activity-stop');
+    stopBtn.addEventListener('click', function (e) { e.stopPropagation(); stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; vscode.postMessage({ type: 'stopRun', runId: m.runId }); });
     el.querySelector('.activity-head').addEventListener('click', function () { if (!el.classList.contains('running')) el.classList.toggle('open'); });
     chatStream.appendChild(el);
     c = { el: el, started: Date.now(), steps: {}, count: 0 };
@@ -693,9 +701,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       var took = fmtElapsed(Date.now() - c.started);
       if (m.replace && m.status === 'ok') { c.el.remove(); return; }
       c.el.classList.remove('running');
-      c.el.classList.add(m.status === 'ok' ? 'done' : 'failed');
+      c.el.classList.add(m.status === 'ok' ? 'done' : m.status === 'stopped' ? 'stopped' : 'failed');
       if (m.status !== 'ok') c.el.classList.add('open');
-      c.el.querySelector('.activity-icon').textContent = m.status === 'ok' ? '✓' : '✗';
+      c.el.querySelector('.activity-icon').textContent = m.status === 'ok' ? '✓' : m.status === 'stopped' ? '■' : '✗';
       c.el.querySelector('.activity-meta').textContent = ' · ' + c.count + ' step' + (c.count === 1 ? '' : 's') + (m.summary ? ' · ' + m.summary : '');
       c.el.querySelector('.activity-time').textContent = took;
     }

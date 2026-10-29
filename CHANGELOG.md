@@ -6,6 +6,20 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.53.1
+
+- **Stop a run from its activity card** (owner, 2026-10-28). Every running card (a stage, *Run it*, `@agent`, a maintenance item, a draft at a stage boundary, a chat turn) has a **Stop** button. The VS Code progress notification's *Cancel* does the same.
+  - **One cancellation, every model.** The panel keeps an `AbortController` per run; its signal goes into the run's options (`AgentToolRunOptions.signal`, `LlmCompleteOptions.signal`).
+    - AutoDE's own loops (OpenAI, Azure OpenAI, Ollama, Anthropic, Gemini) stop before their next model call and before each tool call, and a request in flight is aborted.
+    - Copilot's request and Claude Code's process are cancelled through their existing cancellation tokens. On Windows the whole Claude Code process tree is ended (`taskkill /T`), including AutoDE's MCP server it started. A timeout ends the tree too.
+    - A tool call that is already running finishes; nothing is interrupted halfway.
+  - **A stopped stage is never handed in.** It stays in progress. What the agent recorded before the stop stays as recorded, a draft for you to review, and the card and the notice name it. Nothing is rolled back.
+  - **A stopped task or maintenance item** says that anything it proposed before the stop waits for you (the Context Inbox, or *Waiting for you*). A proposal already made stays pending for a person.
+  - **A stopped chat reply** says so, isn't shown as an error, and keeps what the turn already recorded.
+  - The card ends as **stopped** (■, an amber edge) and stays open with its steps. A stop is a stopped result (`RunStoppedError`, "Stopped by you."), never reported as a failure.
+- **Numbering:** the Stop button was planned as v0.52.7. It ships as v0.53.1 after v0.53.0, and the *+ New* fix moves to v0.53.2.
+- Measured: 417 tests (2 new: the loop stops between tool calls and aborts a request in flight; a stopped stage isn't handed in and keeps what it recorded, a stopped task says what waits, and the panel, Copilot and Claude Code carry the same Stop). Lint: 0 errors.
+
 ## 0.53.0
 
 - **LIN: lineage and impact** (context-layer §8.5; requirements CTX-15). One lineage graph from four sources; every edge says which sources back it, with their trust.

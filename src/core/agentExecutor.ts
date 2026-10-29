@@ -32,11 +32,14 @@ export interface ExecutorHost {
   runAgentWithTools(prompt: string, opts: AgentToolRunOptions): Promise<{ text: string; audit: ToolCallAuditEntry[]; provider: LlmProvider }>;
   activeProvider(): LlmProvider;
   log(line: string): void;
+  /** v0.53.1: the run's Stop (a person's click on its card); passed to the model's loop. */
+  signal?: AbortSignal;
 }
 
 export interface StageRunScope { workspaceRoot: string; resourcesRoot: string; problemId: string }
 
-export interface StageRunResult { ok: boolean; message: string; outputs: string[]; decisionId?: string; summary?: string }
+/** `stopped` (v0.53.1): a person stopped the run; the stage was not handed in, and `outputs` is what was recorded before the stop. */
+export interface StageRunResult { ok: boolean; message: string; outputs: string[]; decisionId?: string; summary?: string; stopped?: boolean }
 
 /** The stage's context gaps, from the engine's context pack: the same ones `autode_workflow_next` puts in a host's assignment (exported for its test). */
 export async function stageGaps(engine: EngineAccess, problemRoot: string, kind: StageKind, title: string): Promise<StageGap[]> {
@@ -65,20 +68,24 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   const engine = host.createEngine(`${role} (VS Code)`);
   if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).', outputs: [] };
   const who: Actor = { kind: 'agent', name: role, host: 'VS Code' };
+  let since = now().toISOString();
+  const recordedSince = () => [...new Set(readEvents(problemRoot, { stage: stageId }).filter((e) => e.type === 'recorded' && e.at >= since).flatMap((e) => e.files ?? []))];
   try {
     const a: Assignment = assignmentFor(scope, stageId, await engine.listTools(), { gaps: await stageGaps(engine, problemRoot, stage.kind, stage.title) }).assignment!;
     if (stage.record.status !== 'in-progress' && stage.record.status !== 'awaiting-approval') {
       const started = startStage(ctx, stageId, who, 'panel');
       if (started.warning) host.log(started.warning);
     }
-    const since = now().toISOString();
+    since = now().toISOString();
     const mode = a.fileMode === 'full' ? 'full' : 'read-only';
     host.log(`${role}: ${a.stage.title} — tier ${a.tier}, ${a.engineTools.length} AutoDE tools.`);
     const { text } = await host.runAgentWithTools(
       `Do the "${a.stage.title}" stage now. Record each deliverable with autode_record_artifact (stage "${a.stage.id}"). Then reply with a short summary for the person who approves the stage: what you recorded and what is missing or uncertain.`,
-      { systemPrompt: a.text, agentName: role, toolExecutionMode: mode, engineTools: await engine.toolSetNamed(a.engineTools), justification: `AutoDE ${role}: ${a.stage.title}`, approvalPrompt: mode === 'full' ? `Allow AutoDE's ${role} to write files in this workspace for the "${a.stage.title}" stage?` : undefined }
+      { systemPrompt: a.text, agentName: role, toolExecutionMode: mode, engineTools: await engine.toolSetNamed(a.engineTools), justification: `AutoDE ${role}: ${a.stage.title}`, approvalPrompt: mode === 'full' ? `Allow AutoDE's ${role} to write files in this workspace for the "${a.stage.title}" stage?` : undefined, signal: host.signal }
     );
-    const outputs = [...new Set(readEvents(problemRoot, { stage: stageId }).filter((e) => e.type === 'recorded' && e.at >= since).flatMap((e) => e.files ?? []))];
+    // A Stop that came as the model answered: still never handed in.
+    if (host.signal?.aborted) return stoppedStage(stageId, role, recordedSince());
+    const outputs = recordedSince();
     const summary = text.trim().slice(0, 4000) || `${role} recorded ${outputs.length} file(s).`;
     if (!outputs.length) return { ok: false, message: `${role} finished without recording a deliverable, so ${stageId} wasn't handed in. Its reply:\n${summary}`, outputs, summary };
     if (isDocumentStage(a.stage.kind)) {
@@ -91,6 +98,7 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
     const done = completeStage(ctx, stageId, { outputs, summary, who, channel: 'panel' });
     return { ok: true, message: done.message, outputs, decisionId: done.decisionId, summary };
   } catch (err) {
+    if (host.signal?.aborted) return stoppedStage(stageId, role, recordedSince());
     const message = err instanceof WorkflowError || err instanceof Error ? err.message : String(err);
     return { ok: false, message: `${role} couldn't finish ${stageId}: ${message}`, outputs: [] };
   } finally {
@@ -99,13 +107,25 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
 }
 
 /**
+ * v0.53.1: a stopped stage is never handed in. It stays in progress; what the agent recorded before the stop stays
+ * as it is (a draft until a person approves it), and nothing is rolled back.
+ */
+function stoppedStage(stageId: string, role: string, outputs: string[]): StageRunResult {
+  const recorded = outputs.length ? `It recorded ${outputs.join(', ')} before the stop; ${outputs.length === 1 ? 'it stays' : 'they stay'} as recorded, for you to review.` : 'It recorded nothing before the stop.';
+  return { ok: false, stopped: true, outputs, message: `You stopped the ${role}. ${stageId} wasn't handed in and stays in progress. ${recorded} Run it again or work on it yourself.` };
+}
+
+/** v0.53.1: how a stopped maintenance or handed-over run ends: what it proposed before the stop waits for a person. */
+const STOPPED_PROPOSALS = 'Anything it proposed before the stop waits for you (the Context Inbox, or Waiting for you); nothing was rolled back.';
+
+/**
  * A knowledge-maintenance item, worked by the role it names (MM2; §5.6): the
  * work order `autode_maintenance_next` gives a host agent, run with the
  * panel's model at the propose tier. A person starts it (policy `suggest`),
  * or AutoDE does at a stage boundary within the budget (`draft`). The agent
  * proposes; nothing is approved here.
  */
-export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, item: MaintenanceItem): Promise<{ ok: boolean; message: string }> {
+export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, item: MaintenanceItem): Promise<{ ok: boolean; message: string; stopped?: boolean }> {
   const engine = host.createEngine(`${item.agent} (VS Code)`);
   if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).' };
   try {
@@ -114,10 +134,12 @@ export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunSco
     host.log(`${a.assignment.role}: ${item.title} — ${a.assignment.engineTools.length} AutoDE tools.`);
     const { text } = await host.runAgentWithTools(
       'Work on this maintenance item now. Propose what it needs; then reply with a short summary for the person who approves it: what you proposed, where it is approved, and anything uncertain.',
-      { systemPrompt: a.assignment.text, agentName: a.assignment.role, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(a.assignment.engineTools), justification: `AutoDE ${a.assignment.role}: ${item.title}` }
+      { systemPrompt: a.assignment.text, agentName: a.assignment.role, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(a.assignment.engineTools), justification: `AutoDE ${a.assignment.role}: ${item.title}`, signal: host.signal }
     );
+    if (host.signal?.aborted) return { ok: false, stopped: true, message: `You stopped the ${item.agent}. ${STOPPED_PROPOSALS}` };
     return { ok: true, message: text.trim().slice(0, 4000) || `${a.assignment.role} finished.` };
   } catch (err) {
+    if (host.signal?.aborted) return { ok: false, stopped: true, message: `You stopped the ${item.agent}. ${STOPPED_PROPOSALS}` };
     return { ok: false, message: `${item.agent} couldn't finish: ${err instanceof Error ? err.message : String(err)}` };
   } finally {
     await engine.dispose();
@@ -130,16 +152,18 @@ export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunSco
  * person (Run it, or an `@agent` message); the agent proposes, nothing is
  * approved here. Stage work never comes here: it goes through its stage.
  */
-export async function runHandoff(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, role: string, task: string): Promise<{ ok: boolean; message: string; audit?: ToolCallAuditEntry[] }> {
+export async function runHandoff(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, role: string, task: string): Promise<{ ok: boolean; message: string; audit?: ToolCallAuditEntry[]; stopped?: boolean }> {
   const engine = host.createEngine(`${role} (VS Code)`);
   if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).' };
   try {
     const w = workOrder(scope.resourcesRoot, scope.workspaceRoot, role, { title: `Task from the chat: ${task.slice(0, 80)}`, body: `## The task\n${task}`, closing: 'Reply with what you found or proposed and where a person approves it.' }, await engine.listTools());
     if (!w.order) return { ok: false, message: w.reason ?? `No agent ${role}.` };
     host.log(`${role}: ${task.slice(0, 80)} — ${w.order.engineTools.length} AutoDE tools.`);
-    const { text, audit } = await host.runAgentWithTools(task, { systemPrompt: w.order.text, agentName: role, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(w.order.engineTools), justification: `AutoDE ${role}: ${task.slice(0, 80)}` });
+    const { text, audit } = await host.runAgentWithTools(task, { systemPrompt: w.order.text, agentName: role, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(w.order.engineTools), justification: `AutoDE ${role}: ${task.slice(0, 80)}`, signal: host.signal });
+    if (host.signal?.aborted) return { ok: false, stopped: true, message: `You stopped the ${role}. ${STOPPED_PROPOSALS}`, audit };
     return { ok: true, message: text.trim().slice(0, 6000) || `${role} finished.`, audit };
   } catch (err) {
+    if (host.signal?.aborted) return { ok: false, stopped: true, message: `You stopped the ${role}. ${STOPPED_PROPOSALS}` };
     return { ok: false, message: `${role} couldn't finish: ${err instanceof Error ? err.message : String(err)}` };
   } finally {
     await engine.dispose();
