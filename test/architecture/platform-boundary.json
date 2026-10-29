@@ -1,0 +1,62 @@
+{
+  "about": "Exceptions to the platform boundary (CLAUDE.md), recorded 2026-10-28 when the rule was introduced. Counts are platform statements/commands and platform-name branches outside src/engine/platform/, src/engine/runner/ and src/engine/transforms/. Never raise a count to pass the test; lower counts as code moves. Entries marked TO MOVE are platform logic in the wrong folder, kept for now.",
+  "files": {
+    "src/cli/main.ts": {
+      "branches": 10,
+      "why": "Interface: which connection, adapter or prerequisite to use for the platform the user named (selection, not platform behaviour)."
+    },
+    "src/core/agentHub.ts": {
+      "branches": 2,
+      "why": "Interface: chooses the platform adapter for the panel's legacy connection (selection, not platform behaviour)."
+    },
+    "src/core/platformOnboarding.ts": {
+      "statements": 1,
+      "branches": 9,
+      "why": "Interface: the settings cards' onboarding text and checks per platform (install and sign-in guidance shown to a person)."
+    },
+    "src/core/webviewProvider.ts": {
+      "statements": 1,
+      "branches": 10,
+      "why": "Interface: the panel's connection cards and settings per platform (selection, not platform behaviour)."
+    },
+    "src/engine/agents/definitions.ts": {
+      "branches": 3,
+      "why": "Validates that a platform skill declares its platform (the skill registry; keeps platform knowledge in skills)."
+    },
+    "src/engine/agents/reconcilePlan.ts": {
+      "branches": 4,
+      "why": "TO MOVE: reconciliation aggregates per platform (HASH_AGG, xxhash64) are a repeatable deliverable; they belong in src/engine/transforms/ as a dialect table."
+    },
+    "src/engine/context/fileIngestion.ts": {
+      "statements": 1,
+      "branches": 1,
+      "why": "Estate read: recognises dictionary exports (Oracle ALL_TAB_COLUMNS, Teradata, INFORMATION_SCHEMA) in files the user ingests."
+    },
+    "src/engine/context/probes.ts": {
+      "branches": 6,
+      "why": "TO MOVE: probe SQL per dialect (sampling, regex, booleans) is an estate read; it belongs in src/engine/platform/ beside the adapters."
+    },
+    "src/extension.ts": {
+      "branches": 9,
+      "why": "Interface: commands that pick a connection or adapter by platform (selection, not platform behaviour)."
+    },
+    "src/mcp/decisions.ts": {
+      "statements": 1,
+      "branches": 6,
+      "why": "TO MOVE: maps a connection's platform to its probe dialect (twice); one platformDialect() in src/engine/platform/ should serve every caller."
+    },
+    "src/mcp/platform.ts": {
+      "branches": 7,
+      "why": "Interface: the MCP platform tools pick the adapter and connection by platform (selection, not platform behaviour)."
+    },
+    "src/mcp/runnerHost.ts": {
+      "branches": 2,
+      "why": "TO MOVE: the dry-run EXPLAIN syntax per platform is a safety check; it belongs in src/engine/runner/ or the adapters."
+    },
+    "src/mcp/workspaceTools.ts": {
+      "statements": 1,
+      "branches": 3,
+      "why": "TO MOVE: the same platform-to-dialect mapping as decisions.ts; one platformDialect() in src/engine/platform/."
+    }
+  }
+}
