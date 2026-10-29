@@ -951,11 +951,12 @@ Specified and scheduled ([roadmap](roadmap.md)):
   - AutoDE reads observed lineage from Snowflake and Databricks itself (v0.54.0), then the estate (v0.55.0).
   - A **platform catalog** (v0.57.0) shows every operation AutoDE runs on your platforms and the skills and features that rely on it. There you can try reads, and edit skills (including your own copy of AutoDE's) and operations, each reviewed before use.
   - Agents can propose new operations for you to approve, and AutoDE tells you when a platform change breaks one (v0.58.0).
+  - New systems (Redshift first) are onboarded from a template, and a team can share its platform setup with other workspaces (v0.61.0).
 - **Ontology and terminology** (v0.59.0–v0.60.0): industry standards such as FIBO as a canonical layer, with your organisation's terms mapped onto it; a guided step to onboard a standard; matching, quality rules and policies that use the meaning.
-- **AtScale import** (v0.61.0); Horizon, Collibra and Unity Catalog later.
-- **Deploying the semantic layer** (v0.62.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
-- **Merge semantics** (v0.63.0): conformed dimensions and survivorship across systems, in shared models and composites.
-- **Patterns and recommendations** (v0.64.0): SCD2, CDC merge and snapshot primitives; a recommended pipeline type with its reasons; team preferences; data contracts for the tables you build.
+- **AtScale import** (v0.62.0); Horizon, Collibra and Unity Catalog later.
+- **Deploying the semantic layer** (v0.63.0): Snowflake semantic views through a runbook, Databricks metric views, dbt MetricFlow.
+- **Merge semantics** (v0.64.0): conformed dimensions and survivorship across systems, in shared models and composites.
+- **Patterns and recommendations** (v0.65.0): SCD2, CDC merge and snapshot primitives; a recommended pipeline type with its reasons; team preferences; data contracts for the tables you build.
 
 ---
 

@@ -1,6 +1,6 @@
 # Platform operations: one catalog for every interaction with a platform
 
-**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the adapters' metadata extraction (v0.55.0); **POP4** the operations and skills catalog in the UI (v0.57.0, after the UI2 simplification); **POP3** agent-proposed operations and drift detection (v0.58.0). Requirement: PLT-9 in [requirements.md](requirements.md). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
+**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the adapters' metadata extraction (v0.55.0); **POP4** the operations and skills catalog in the UI (v0.57.0, after the UI2 simplification); **POP3** agent-proposed operations and drift detection (v0.58.0); **POP5** onboarding new systems and sharing them (v0.61.0, before the AtScale import). Requirement: PLT-9 in [requirements.md](requirements.md). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
 
 ## 1. Need and intent
 
@@ -114,6 +114,47 @@ An implementation can also be a platform CLI command, which follows the vendor's
 
 The future UI edits the same files and runs the same checks; it adds no second format.
 
+### 2.1 Transports
+
+AutoDE talks to very different systems, so an implementation names its **transport**. All four are in the format from POP1, so that later phases (AtScale, Collibra) add files, not engine code:
+
+| Transport | For | Example |
+|---|---|---|
+| `sql` | warehouses and lakehouses | Snowflake `ACCESS_HISTORY`, Redshift `SVV_TABLE_INFO` |
+| `cli` | a vendor's command-line tool, as an argument list (never a shell line), `parse: json` or `table` | `databricks tables list` |
+| `http` | REST APIs: method, path, query, JSON body template, authenticated from the connection, `parse: json` with a JSON path per result field, paging declared | Collibra's REST API, AtScale's API, the Redshift Data API |
+| `file` | files in a bound Git repository or folder: a glob and a parser (`yaml`, `json`, `csv`) | AtScale SML models |
+
+Binding, the guard (`read` must not change anything: for `http`, only `GET` or a declared read-only `POST` such as a search), mapping and partial failures work the same for all four.
+
+### 2.2 Platform definitions
+
+**One platform definition per system** (`platforms/<id>.yaml` shipped, `.autode/config/platforms/` the team's, overriding by id) describes what the system is and what AutoDE can do with it. It is form-friendly like operations, and validated by `docs/schemas/platform.schema.json`.
+
+- **category:** `warehouse`, `lakehouse`, `semantic`, `catalog` (later `orchestration`, `bi`);
+- **transports** it supports, its **connection fields and auth modes**, which refer to the connection machinery: credentials are only ever references;
+- the **version detection** operation;
+- the **capability map:** for each AutoDE capability (`estate`, `profiling`, `lineage`, `governance.tags`, `governance.policies`, `semantic.import`, `semantic.export`, `semantic.deploy`, `knowledge.import`, `knowledge.export`, `compile.target` …):
+  - the operations that implement it;
+  - the **privileges** it needs, in plain language and as a grant template;
+  - whether it is supported, partly supported (with what is missing) or not applicable;
+- the **object kinds** it has, so an unread kind is noticed (POP3);
+- its **dialect** for compiled deliverables, linking to `primitive-definitions/` (warehouses and lakehouses only);
+- its **skills and tools:** bundled and team skills, vendor skills (PA4), CLIs and MCP servers with their allowlisted commands.
+
+A **sub-platform** is a capability set within a platform, not a system of its own. **Snowflake Horizon**, for example, is Snowflake's governance capabilities (tags, policies, classification, data metric functions, lineage), read with `sql` operations on the Snowflake connection.
+
+How the systems AutoDE plans for differ:
+
+| System | Category | Transports | What AutoDE uses it for | Writes back (always runbooks) |
+|---|---|---|---|---|
+| Snowflake (with Horizon) | warehouse | `sql`, `cli` | estate, profiling, lineage, governance import (IMP2), compile target, deployment | DDL, grants, tags, policies |
+| Databricks | lakehouse | `sql`, `http`, `cli` | estate, lineage, Unity Catalog import (IMP4), compile target, deployment (bundles) | grants, tags, bundles |
+| Redshift | warehouse | `sql` (driver), `http` (Data API) | estate, profiling; no native column lineage, so lineage is designed only; compile target once its dialect exists | DDL, grants |
+| AtScale | semantic | `file` (SML in Git), `http` | semantic import and export (IMP1) | the exported model as a reviewed file change or API call |
+| Collibra | catalog | `http` | glossary, domains, owners and lineage import (IMP3) | certified knowledge pushed back |
+| Oracle | warehouse (source) | `sql` (driver) | estate, profiling | none (a source) |
+
 ## 3. How operations run
 
 **The executor** is the only platform-aware engine code here (`src/engine/platform/operations/`). It:
@@ -147,7 +188,8 @@ The future UI edits the same files and runs the same checks; it adds no second f
 ### 6.1 POP1 — the catalog and the executor (v0.54.0)
 
 Scope:
-- the format, its JSON Schema and loader (shipped plus team overrides, validation, each example checked in `npm test`);
+- the format with its four transports (§2.1; `sql` and `cli` implemented first, `http` and `file` specified and tested on fixtures), its JSON Schema and loader (shipped plus team overrides, validation, each example checked in `npm test`);
+- **platform definitions** (§2.2) for Snowflake, Databricks and Oracle, with the capability map; the engine reads a capability's operations from them;
 - the executor (binding, guard, mapping, partial failures, version ranges);
 - the tools: CLI `autode platform …` and MCP `autode_platform_operations` / `autode_platform_run`; change operations as runbook steps;
 - migration of the five **TO MOVE** entries in `test/architecture/platform-boundary.json` (probes, reconciliation aggregates, the platform-to-dialect mapping, the dry-run `EXPLAIN`). Their baseline entries are lowered as they move;
@@ -194,6 +236,33 @@ A place where anyone can see what AutoDE does on each platform and what it relie
 
 **Its own view** (owner, 2026-10-29): *Platform catalog*, a tab of the unified AutoDE window that UI2 introduces, beside the Knowledge Explorer and the Workflow view. Each keeps its own view, reachable from one place. It is also opened from the Explorer's Estate view.
 
+**Front page: the capability matrix.** Capabilities are rows; the workspace's systems are columns, grouped by category. Each cell is *supported*, *partly* (what is missing, for example a privilege) or *not applicable*, with the status on each bound connection. It answers the question people ask first: "can AutoDE read lineage from our Redshift, and what is missing?". Operations are one click deeper.
+
+**A platform's page:** the same tabs for every system, with different contents. A tab that doesn't apply to its category is hidden, not shown empty (Collibra has no primitives).
+
+| Tab | Shows |
+|---|---|
+| Overview | category, version range, connections bound and their readiness, the platform definition's origin (shipped or team) |
+| Capabilities | each capability: supported, partly or not; its operations; its status per connection; the privilege missing |
+| Operations | its operations by area and transport (the operation pages below) |
+| Skills | bundled, team and vendor skills for it, with *Customise* (below) |
+| Tools | CLIs, MCP servers and drivers: detected, installed, version, allowlisted commands |
+| Primitives and dialect | which primitives compile for it and their golden-test status (warehouses and lakehouses) |
+| Privileges | what AutoDE's role needs, per capability; *Request access* drafts a grant runbook for a person |
+| Health | last runs, gaps and drift items |
+
+**What a person can do here:**
+
+| Area | Possibilities |
+|---|---|
+| See | the capability matrix; each system's configuration, versions, object kinds and privileges; what uses each operation and skill; health and drift |
+| Update | edit operations, skills (*Customise* for AutoDE's), version ranges and capability mappings, all as reviewed drafts |
+| Link | a skill to the operations and stages it uses; a vendor tool or MCP server to a platform, with its allowlisted commands; a capability to the AutoDE features that use it; primitives to a platform's dialect (shown with what compiles and is tested) |
+| Test | try an operation; a **conformance run** per connection ("this account supports 9 of 11 capabilities; lineage needs a privilege"); run every recorded example |
+| Govern | the review queue for team and agent proposals, with diffs and who approved; privilege requests |
+| Onboard and share | POP5 (§6.5) |
+
+
 **Review the operations:**
 - every operation, shipped or the team's, filterable by platform, area (estate, lineage, governance, quality, deployment), kind (read or change) and status (ok, failing, team override, proposed);
 - for each one:
@@ -234,6 +303,7 @@ A place where anyone can see what AutoDE does on each platform and what it relie
 - MCP: `autode_platform_operations` with the same fields, and `autode_skills_list` with each skill's operations.
 
 Acceptance:
+- **Per platform:** the capability matrix and each platform's page come from its platform definition, with no platform-specific screen code. A fixture team platform appears with its own tabs; a catalog-category fixture hides the primitives tab. A conformance run on a fixture connection with a missing privilege shows *partly* and the privilege.
 - **Traceable:** for every shipped operation, the view lists the skills and engine features that use it, and for every skill its operations. An operation nothing uses is flagged. Checked against a fixture where the answers are known.
 - **Editable safely:** customising an AutoDE skill makes a team copy, the stage uses it only after it is published, and reset restores the bundled one. A later bundled change is flagged on the copy.
 - **Checked:** a skill naming an unknown operation, or carrying SQL, is flagged in the editor and by `autode skills lint <id>` (new; `skills check` already probes external installs). A change operation can't run from the view.
@@ -263,6 +333,30 @@ Acceptance:
 - **Codified:** a proposal without a passing example is refused with the reason. An approved one runs deterministically through the executor, from the CLI with no model.
 - **Noticed:** on a fixture platform version where a view is renamed, the failing operation raises one item; fixing the file closes it. An unread object kind raises one item.
 - **Never silent:** drift never turns into an empty result; the gap stays visible until it is fixed or dismissed with a reason.
+
+### 6.5 POP5 — onboarding new systems, and sharing them (v0.61.0)
+
+Scope:
+- **A new system from a template:** the steps are category, transports, connection fields, version detection, starter operations for the category's capabilities, then skills. It counts only once its recorded examples pass and a conformance run on a real connection is reviewed.
+- **Redshift first,** as the proof: a full SQL platform with a driver, `SVV_` and `STL_` system views, and no native column lineage. AtScale (`file`, `http`) and Collibra (`http`) then arrive through IMP1 and IMP3 on the same model, as platform definitions and operations, not special cases.
+- **The `http` and `file` transports** run against live systems (fixtures from POP1).
+- **Packs:** export a team's platform definitions, operations and skills as a pack for other workspaces; import one with the same review as a ported skill (PA4).
+
+**What still needs code, said plainly in the wizard:**
+- a new transport or driver, once per protocol, in the allowed folders: a Redshift driver, OAuth for an API, a Git reader;
+- a new compile dialect (pipeline SQL for Redshift), which is transform machinery driven by primitive definitions. The catalog shows and links dialect coverage; it doesn't create it.
+
+Everything above that (what to read, how to map it, what to write) is files.
+
+**Boundaries that stay:**
+- writes to Collibra, Horizon or AtScale are runbooks a person approves, never a button that pushes;
+- credentials are only references, never in a definition, an operation or the UI;
+- no per-vendor screens: if a system needs its own layout, the model is missing a field.
+
+Acceptance:
+- **Onboarded without code:** Redshift's estate and profiling work from its platform definition and operations, over the existing driver machinery; the architecture test passes with no new exception.
+- **Honest:** a template whose transport isn't available says which code is needed and stops; nothing half-onboarded runs.
+- **Shareable:** a pack exported from one workspace and imported into another gives the same catalog after review.
 
 ## 7. Open questions for POP1
 

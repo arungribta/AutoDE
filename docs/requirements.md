@@ -42,7 +42,7 @@ This document states what AutoDE does and why; requirements marked *Planned* or 
 | Business problem and specification (BPS), Conversation (CHT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 PA3 (built-in skills, incl. the interview) | PA3 |
 | Source and target context (STC), Context layer (CTX) | [context-layer-requirements.md](context-layer-requirements.md) §1.1 enterprise context, §5.5 capture coverage, §6 semantic layer, ontology (§6.8), imports (§6.9), Knowledge Explorer (§6.10), §7.4 exploration mode, §8 freshness and health, lineage (§8.5) | C4c, C5a–C5d, LIN, ONT1, ONT2, IMP1–IMP4, C6; migration track M1–M3 (not yet written) |
 | Context delivery and grounding (GRD) | [context-layer-requirements.md](context-layer-requirements.md) §7.5 asset context and explainability, §10 grounding checks and metrics | C5, C6 |
-| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client (secrets passed to the server it starts); [platform-operations.md](platform-operations.md) platform operations and their catalog (PLT-9) | 5, POP1–POP4 |
+| Data platforms and credentials (PLT) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 extension as MCP client (secrets passed to the server it starts); [platform-operations.md](platform-operations.md) platform operations and their catalog (PLT-9) | 5, POP1–POP5 |
 | Planning and orchestration (ORC), Generation (GEN) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §3.1 and §9.2 portable architecture, §7 extension as MCP client, §9 Phase 6, §9.1 Phase GOV; [context-layer-requirements.md](context-layer-requirements.md) §6 semantic layer, §7.4 exploration mode | PA1, PA3, 5, 6, GOV, C4c, C5a–C5d |
 | Tool skills (SKL) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §9.2 Phases PA3, PA4, §9 Phase 6 | PA3, PA4, 6 |
 | Interoperability with other agents (MCP) | [mcp-engine-requirements.md](mcp-engine-requirements.md) §3.1 and §9.2 portable architecture, §7 extension as client; [context-layer-requirements.md](context-layer-requirements.md) §9 context-layer tools | PA1, PA2, 5, PA3, C4b, C5 |
@@ -143,8 +143,9 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - People can see every operation, what relies on it (skills, engine features, stages), and edit the skills, technical and non-technical users alike.
   - Agents can propose operations a person approves.
   - Drift (a renamed view, an unread object kind) is noticed and raised.
+  - Every kind of system AutoDE works with (warehouses, lakehouses, semantic platforms, catalogs) is described by a platform definition and its capability map. The catalog shows, per system and connection, what AutoDE can do, what is missing (a privilege, an edition) and what relies on it. New systems are onboarded from a template.
 
-  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0), POP4 (v0.57.0), POP3 (v0.58.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
+  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0), POP4 (v0.57.0), POP3 (v0.58.0), POP5 (v0.61.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
 
 *Planned work:* secrets kept in VS Code's secret store reach an MCP server only when the extension starts it — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5); Oracle as a target — roadmap backlog.
 
