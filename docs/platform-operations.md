@@ -93,6 +93,17 @@ Scope:
 - migration of the five **TO MOVE** entries in `test/architecture/platform-boundary.json` (probes, reconciliation aggregates, the platform-to-dialect mapping, the dry-run `EXPLAIN`). Their baseline entries are lowered as they move;
 - the platform skills refer to operations by id.
 
+**Observed lineage** (agreed with the LIN session, 2026-10-28). LIN v0.53.0 ships with no platform lineage reads: the old `QUERY_HISTORY` read was removed from the Snowflake adapter, and the lineage path from the base adapter. LIN ships a platform-neutral recorder that POP1's lineage operations feed:
+- **The recorder:** `recordObservedLineage(ledger, batch, identity)` in `src/engine/lineage/observed.ts`, also exposed as `autode_record_observed_lineage` and `autode lineage record`. It writes `lineage` facts: subject `[downstream, upstream]`; value `{upstream, downstream, level, source: 'observed', method, connection, scope, entity?}`.
+  - It is idempotent.
+  - It retires edges only when a batch is complete, scoped by connection, method and databases. A partial result from a failed operation must therefore be recorded as incomplete, so nothing is retired.
+- **The operations:**
+  - Snowflake `ACCESS_HISTORY` and `OBJECT_DEPENDENCIES`;
+  - Databricks `system.access.table_lineage` and `system.access.column_lineage`.
+- **Their result mapping:** rows to `{ upstream: {object, column?}, downstream: {object, column?} }`, or `{ upstream, entity: {type, id, name?} }` for a job or query entity.
+
+These operations are part of POP1's acceptance: on a fixture of each platform, the recorded lineage facts match a golden set, and a failed read retires nothing.
+
 Later steps:
 - **POP2:** migrate the adapters' metadata extraction;
 - **POP3:** agent-proposed operations, drift detection;
