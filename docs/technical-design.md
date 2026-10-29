@@ -939,6 +939,11 @@ Under `draft`, the panel calls `draftAtStageBoundary` after a successful stage r
 - The chat never starts an agent itself: a click (*Run it*) or a mention does.
 - `autode_work_order` gives hosts the same work order.
 
+**Reply traces** (v0.52.2; CHT-8; `src/engine/agents/answerTrace.ts`).
+- `executeAgenticTool` adds `toolResultSummary` to the audit entry of each successful AutoDE tool call: `found` (the first array's length in words), `sources` (facts, articles, assets and semantic models found by walking the JSON), and `proposed`.
+- `buildAnswerTrace` turns the audit, the reply's citations (with trust, from the ledger) and the latest context pack's manifest into the trace. `stepText` words each step; `uncitedStatements` counts sentences of six words or more, excluding questions and lead-ins, that cite no fact.
+- The panel posts the trace with `chatResponse`, persists it on the transcript's `ai` message (`ChatMessage.trace`; history sent to the model uses `content` only) and redraws it on restore.
+
 **Agents.** `agents/semantic-modeler.md` and `agents/knowledge-engineer.md` belong to no stage kind: they work items, and later a `semantic-foundation` workflow (ONT1). Their skills have `stageKinds: []`.
 
 ## 6. Data Platforms
@@ -2092,7 +2097,7 @@ src/editors/    # custom editors
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
   types.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
-  artifacts.ts, assignment.ts, chatFrontDoor.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, reconcilePlan.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
+  answerTrace.ts, artifacts.ts, assignment.ts, chatFrontDoor.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, reconcilePlan.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)
   waiting.ts
 src/engine/context/    # assertions, ledger, projection, conflicts, estate ids, catalog, vocabulary, retrieval, packs, gaps, business-problem pack, profiles, contracts, conformance, probes, persistence, ingestion

@@ -6,6 +6,24 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.52.2
+
+- **How each reply was made** (CHT-8; owner: "more credibility"). Under every chat reply, and every agent run started from the chat, a collapsed **How this was answered** block shows:
+  - **who answered:** the chat, or the agent (and whether through *Run it* or an `@mention`), with the model;
+  - **the steps:** each tool call in words, with what it found ("Searched AutoDE's assets for "refunds" → 3 results") and any that failed;
+  - **the sources:** the facts the reply cites, with their trust, and the facts, articles, assets and semantic models the tools returned. Each opens in the Knowledge Explorer;
+  - **uncited statements:** how many of the reply's statements cite no fact;
+  - **what an agent proposed**, waiting for approval;
+  - **the context pack** the chat got, with *What the agent saw*.
+
+  The one-line summary reads, for example, "4 steps · 3 facts · 1 cited".
+- **Built from AutoDE's records, never from the model's account of its reasoning.** The model's own story can be written after the fact and not match what it did. There is no extra model call and no confidence score: the trust of the cited facts already says how solid an answer is. AutoDE's tool calls now record a summary of their results (`toolResultSummary`).
+- The chat now asks the model to cite facts that AutoDE's tools return as `[fact:<id>]`, as it does for facts in its context.
+- The trace is **kept with the conversation** and shown again when a chat is reopened. It is never sent to the model.
+- **Correction to v0.52.1's guidance:** the *Actions:* line under a reply lists only file writes and commands, so it never showed AutoDE's read tools. The new block does.
+- With Claude Code as the panel's model, its own loop runs the tools, and the block says its steps aren't recorded.
+- Measured: 405 tests (1 new: step wording, result summaries, sources and trust, uncited statements, the summary line, agent runs' proposals, the panel's rendering and restore).
+
 ## 0.52.1
 
 - **The chat as AutoDE's front door** (CHT-7; owner, after a team member asked whether chatting means talking to the orchestrator, and whether users should pick an agent). Until now the panel chat was neither: a general assistant with a context pack and file tools, unable to call AutoDE's own tools or reach an agent.

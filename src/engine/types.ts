@@ -650,7 +650,16 @@ export interface ToolCallAuditEntry {
   outcome: string;
   detail?: string;
   at: string;
+  /** v0.52.2: what an AutoDE tool's result held, in words ("3 results"), for the answer's trace. */
+  found?: string;
+  /** v0.52.2: the facts, articles and assets in that result. */
+  sources?: TraceSource[];
+  /** v0.52.2: what a proposal tool proposed (a decision or a fact). */
+  proposed?: string;
 }
+
+/** A fact, article, asset or semantic model an answer rests on (v0.52.2). */
+export interface TraceSource { kind: 'fact' | 'article' | 'asset' | 'semantic_model'; id: string; label: string; trust?: string }
 
 // ── Chat sessions (Phase F) ──
 
@@ -684,6 +693,8 @@ export interface ChatMessage {
   role: 'user' | 'ai' | 'log';
   content: string;
   at: string;
+  /** v0.52.2: how an AI reply was made (AnswerTrace), kept with the conversation. Never sent to the model. */
+  trace?: unknown;
 }
 
 /**

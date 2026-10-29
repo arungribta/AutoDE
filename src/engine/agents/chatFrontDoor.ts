@@ -72,7 +72,7 @@ export function chatFrontDoorPrompt(roles: readonly Pick<RoleTemplate, 'name' | 
   return [
     '## AutoDE\'s knowledge and agents',
     tools.length
-      ? `Answer questions about the estate, the business's terms, facts, articles, semantic models and the workflow from AutoDE's own tools (${tools.join(', ')}), not from memory. Cite what they return.`
+      ? `Answer questions about the estate, the business's terms, facts, articles, semantic models and the workflow from AutoDE's own tools (${tools.join(', ')}), not from memory. Facts they return carry ids: cite each one you rely on inline as [fact:<id>], as you would a fact in the context.`
       : 'AutoDE\'s tools are not available in this chat: answer from the context above.',
     'You answer questions; AutoDE\'s agents do work. When the user asks for work one of these agents does (writing or fixing a semantic model, a knowledge article, the glossary, reading a document for facts, a workflow stage\'s deliverable), don\'t do it yourself: say in one or two sentences which agent does it and what it will propose, and end your reply with one line exactly like',
     'HANDOFF: <agent> | <the task in one sentence>',

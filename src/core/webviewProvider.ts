@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
-import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext } from '../engine/types';
+import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext, ToolCallAuditEntry, TraceSource } from '../engine/types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from '../engine/interview/specOps';
 import { SkillRegistry, interviewSkills } from '../engine/skills/skillRegistry';
@@ -92,6 +92,7 @@ import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/
 import { ExecutorHost, runHandoff, runMaintenance, runStage } from './agentExecutor';
 import { RoleTemplate, loadRoles } from '../engine/agents/definitions';
 import { chatFrontDoorPrompt, chatToolNames, handoffFor, parseHandoff, parseMention } from '../engine/agents/chatFrontDoor';
+import { AnswerTrace, buildAnswerTrace } from '../engine/agents/answerTrace';
 import { MaintenanceItem, gateMaintenance, openMaintenanceItems } from '../engine/maintenance/queue';
 import { draftRunsLeft, noteDraftRun } from '../engine/maintenance/policy';
 import { dismissItem, scanWorkspace } from '../engine/maintenance/scan';
@@ -550,7 +551,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           if (/^\/review\b/i.test(chatMessage.trim())) { await this.reviewSession(chatMessage); break; }
           // v0.52.1: `@<agent> <task>` hands this one message to that agent (stage work goes to its stage).
           const mention = parseMention(chatMessage, this.agentRoles());
-          if (mention) { await this.handOff(mention.role, mention.task || chatMessage); break; }
+          if (mention) { await this.handOff(mention.role, mention.task || chatMessage, '@mention'); break; }
           const turnRef = `chat:${this.activeChatId ?? 'none'}#${priorHistory.length}`;
           const previousReply = [...priorHistory].reverse().find((m) => m.role === 'ai')?.content;
           const extractionSource: ChatTurn['source'] = this.specOpsEngine || !this.specManager?.getSpec() ? 'interview' : 'chat';
@@ -624,7 +625,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             if (turnActions.length && this.chatSessionManager && this.activeChatId) {
               this.chatSessionManager.appendMessage(this.activeChatId, { role: 'log', content: turnActions.join('; '), at: new Date().toISOString() }).catch(() => { /* best-effort */ });
             }
-            this.postMessage('chatResponse', { message: result.message, citations: this.citationsFor(result.message), actions: turnActions, ...(handoff ? { handoff } : {}) });
+            const trace = this.traceFor({ answeredBy: 'AutoDE chat', audit: result.actions, reply: result.message, withPack: true });
+            this.postMessage('chatResponse', { message: result.message, citations: this.citationsFor(result.message), actions: turnActions, trace, ...(handoff ? { handoff } : {}) });
             scheduleExtraction();
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
@@ -635,6 +637,15 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'runHandoff': {
           // v0.52.1: the person clicked Run it on a handover the chat suggested.
           if (typeof message.role === 'string' && typeof message.task === 'string') await this.handOff(message.role, message.task);
+          break;
+        }
+        case 'openInExplorer': {
+          // v0.52.2: a source in a reply's trace opens in the Knowledge Explorer.
+          if (typeof message.id === 'string') await vscode.commands.executeCommand('autoDataEngineeringHub.openKnowledgeExplorer', message.id);
+          break;
+        }
+        case 'whatTheAgentSaw': {
+          await vscode.commands.executeCommand('autoDataEngineeringHub.whatTheAgentSaw');
           break;
         }
         case 'openHandoffStage': {
@@ -1769,6 +1780,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return waitingForYou({ workspaceRoot: root, resourcesRoot: this.context.extensionPath, problemId: this.workflowScope()?.problemId, facts: ledger ? inbox(ledger).facts : [], maintenance: this.maintenanceItems() });
   }
 
+  /** v0.52.2 (CHT-8): how a reply was made — from what AutoDE recorded (tool calls, citations, the pack), never the model's own account. */
+  private traceFor(input: { answeredBy: string; via?: string; audit: readonly ToolCallAuditEntry[]; reply: string; withPack?: boolean }): AnswerTrace {
+    const ledger = this.ledger();
+    const cited: TraceSource[] = ledger ? citedFactIds(input.reply).flatMap((id) => { const a = ledger.get(id); return a ? [{ kind: 'fact' as const, id, label: a.statement, trust: a.status === 'proposed' ? 'proposed' : a.trust }] : []; }) : [];
+    const recent = input.withPack ? this.contextFileManager?.getRecentPacks()[0] : undefined;
+    return buildAnswerTrace({
+      answeredBy: input.answeredBy, via: input.via, model: this.modelLabel(), provider: this.hub.activeProvider(), audit: input.audit, reply: input.reply, cited,
+      ...(recent ? { pack: { title: recent.title, tokens: recent.pack.manifest.tokenCount, facts: recent.pack.manifest.assertions.length } } : {})
+    });
+  }
+
   /** v0.52.1: AutoDE's role templates (bundled and the team's), for the chat's handovers and @mentions. */
   private agentRoles(): RoleTemplate[] {
     try { return loadRoles(this.context.extensionPath, this.workspaceRoot?.fsPath).roles; } catch { return []; }
@@ -1778,7 +1800,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
    * v0.52.1: a task handed to an agent — by a click on Run it, or an `@agent` message. The layers' agents
    * run now with a work order (they propose; a person approves); stage roles' work opens its stage instead.
    */
-  private async handOff(role: string, task: string): Promise<void> {
+  private async handOff(role: string, task: string, via = 'Run it'): Promise<void> {
     const root = this.workspaceRoot?.fsPath;
     if (!root) return;
     const h = handoffFor(root, this.workflowScope()?.problemId, role, task);
@@ -1789,7 +1811,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.postMessage('chatResponse', { message: `Handing over to the **${role}**…` });
     const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${role} is working`, cancellable: false },
       () => runHandoff(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, role, task));
-    this.postMessage('chatResponse', { message: r.ok ? `${r.message}\n\n_What the ${role} proposed waits for you: the Context Inbox, or Waiting for you._` : r.message, error: !r.ok });
+    const reply = r.ok ? `${r.message}\n\n_What the ${role} proposed waits for you: the Context Inbox, or Waiting for you._` : r.message;
+    this.postMessage('chatResponse', { message: reply, error: !r.ok, citations: this.citationsFor(reply), trace: this.traceFor({ answeredBy: role, via, audit: r.audit ?? [], reply }) });
     this.postDecisions();
   }
 
@@ -3094,7 +3117,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       content = `[Questions] ${(payload.questions as SpecIntakeQuestion[]).map((q) => q.prompt).join(' / ')}`;
     }
     if (!content) { return; }
-    this.chatSessionManager.appendMessage(this.activeChatId, { role: 'ai', content, at: new Date().toISOString() }).catch(() => { /* best-effort */ });
+    // v0.52.2: the reply's trace is kept with it (shown again when the chat is reopened; never sent to the model).
+    this.chatSessionManager.appendMessage(this.activeChatId, { role: 'ai', content, at: new Date().toISOString(), ...(type === 'chatResponse' && payload.trace ? { trace: payload.trace } : {}) }).catch(() => { /* best-effort */ });
   }
 
   private getHtmlForSidebar(webview: vscode.Webview): string {

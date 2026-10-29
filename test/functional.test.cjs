@@ -11985,6 +11985,42 @@ async function main() {
     for (const t of ["type: 'runHandoff'", "type: 'openHandoffStage'", 'function addHandoff']) assert.ok(html.includes(t), t);
   });
 
+  await test('v0.52.2: how a reply was made — steps in words from the recorded tool calls, what each found, the facts, articles and assets consulted and cited (with trust), uncited statements counted, what an agent proposed, the context pack; built without a model; kept with the conversation, never sent to it', async () => {
+    const T = fresh('../dist/engine/agents/answerTrace.js');
+    const F1 = '01JAAAAAAAAAAAAAAAAAAAAAAA', F2 = '01JBBBBBBBBBBBBBBBBBBBBBBB';
+    assert.strictEqual(T.stepText('autode_search_assets', { query: 'refunds' }), 'Searched AutoDE\'s assets for "refunds"');
+    assert.strictEqual(T.stepText('autode_get_asset_context', { asset: 'shop.orders' }), 'Read everything AutoDE knows about shop.orders');
+    assert.strictEqual(T.stepText('autode_read_file', { path: 'brd.md' }), 'Read the file brd.md');
+    const search = T.toolResultSummary('autode_search_assets', JSON.stringify({ results: [{ id: 'obj:shop/prod/shop.refunds', assetType: 'table', fqn: 'shop.refunds', label: 'refunds' }, { id: 'sem:sales', assetType: 'semantic_model', label: 'sales' }], facets: {} }));
+    assert.deepStrictEqual([search.found, search.sources.map((x) => [x.kind, x.id, x.label])], ['2 results', [['asset', 'obj:shop/prod/shop.refunds', 'shop.refunds'], ['semantic_model', 'sem:sales', 'sales']]]);
+    const ctx = T.toolResultSummary('autode_get_asset_context', JSON.stringify({ context: { asset: { id: 'obj:shop/prod/shop.orders', assetType: 'table', fqn: 'shop.orders' }, facts: [{ id: F1, statement: 'order_id is unique', trust: 'confirmed', status: 'active' }, { id: F2, statement: 'one row per line', trust: 'documented', status: 'proposed' }], articles: [{ slug: 'cuts', title: 'Daily cuts', state: 'approved' }] } }));
+    assert.deepStrictEqual([ctx.found, ctx.sources.map((x) => `${x.kind}:${x.trust ?? ''}`)], ['its full context', ['asset:', 'fact:confirmed', 'fact:proposed', 'article:approved']]);
+    assert.strictEqual(T.toolResultSummary('autode_propose_article', JSON.stringify({ decision: { id: 'D-7' } })).proposed, 'decision D-7');
+    assert.deepStrictEqual(T.toolResultSummary('x', 'not json'), { sources: [] });
+    assert.deepStrictEqual(T.uncitedStatements(`Here is what I found in AutoDE for you. Revenue is net of refunds across every channel [fact:${F1}]. Orders have one row per order line in the shop. Do you want more?`), { statements: 2, uncited: 1 });
+    const audit = [
+      { tool: 'autode_search_assets', input: { query: 'refunds' }, outcome: 'ok', at: '', ...search },
+      { tool: 'autode_get_asset_context', input: { asset: 'shop.orders' }, outcome: 'ok', at: '', ...ctx },
+      { tool: 'autode_explore_graph', input: { asset: 'nope' }, outcome: 'error', detail: 'No asset nope', at: '' }
+    ];
+    const t = T.buildAnswerTrace({ answeredBy: 'AutoDE chat', model: 'copilot · gpt-4o', audit, reply: `order_id is unique in the shop orders table [fact:${F1}].`, cited: [{ kind: 'fact', id: F1, label: 'order_id is unique', trust: 'confirmed' }], pack: { title: 'Chat: x', tokens: 900, facts: 12 } });
+    assert.deepStrictEqual(t.steps.map((s) => [s.text, s.found, s.outcome]), [['Searched AutoDE\'s assets for "refunds"', '2 results', 'ok'], ['Read everything AutoDE knows about shop.orders', 'its full context', 'ok'], ['Walked the graph around nope', 'No asset nope', 'error']]);
+    assert.ok(!t.consulted.some((x) => x.id === F1), 'a cited fact is listed once, as cited');
+    assert.strictEqual(t.summary, '3 steps · 2 facts · 1 article(s) · 1 cited');
+    assert.deepStrictEqual([t.uncited, t.pack.facts], [0, 12]);
+    assert.match(T.buildAnswerTrace({ answeredBy: 'AutoDE chat', provider: 'claude', audit: [], reply: 'x', cited: [] }).note, /Claude Code ran its own tool loop/);
+    // The executor returns the agent run's tool calls, so a handed-over run gets its trace too.
+    const { runHandoff } = fresh('../dist/core/agentExecutor.js');
+    const engine = { listTools: async () => [{ name: 'autode_propose_article', annotations: {} }], toolSetNamed: async (n) => ({ n }), dispose: async () => {} };
+    const ran = await runHandoff({ createEngine: () => engine, activeProvider: () => 'copilot', log: () => {}, runAgentWithTools: async () => ({ text: 'Done.', audit: [{ tool: 'autode_propose_article', input: {}, outcome: 'ok', at: '', proposed: 'decision D-7' }], provider: 'copilot' }) }, { workspaceRoot: require('node:os').tmpdir(), resourcesRoot: wfRes() }, 'knowledge-engineer', 'Write it');
+    assert.deepStrictEqual(ran.audit.map((a) => a.proposed), ['decision D-7']);
+    // AutoDE's tool calls are summarised where they are recorded; the panel draws, persists and restores the trace.
+    const nodeFs = require('node:fs');
+    assert.match(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agenticTools.ts'), 'utf8'), /toolResultSummary\(call\.name, r\.text\)/);
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    for (const s of ['function addTrace', 'How this was answered', "type: 'openInExplorer'", "type: 'whatTheAgentSaw'", 'if (m.trace) { addTrace(aiDiv, m.trace); }']) assert.ok(html.includes(s), s);
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));

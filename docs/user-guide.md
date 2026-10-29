@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.52.1. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.52.2. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -772,6 +772,16 @@ The chat in the panel is for questions and changes about the active problem: "wh
 - **Work** that one of AutoDE's agents does (fix the sales model, write an article, place glossary terms, read a document for facts) isn't done by the chat. It says which agent does it and shows **Run it**. The agent proposes, and you approve as usual. Work that belongs to a workflow stage (a model, a mapping, pipelines) shows **Open stage** instead: it runs from its stage, grounded in the stage's inputs and approved at its gate.
 - **`@<agent> <task>`** at the start of a message hands that one message to the agent directly, for example `@knowledge-engineer write an article on why orders has two customer ids`. The agents you can address this way are `semantic-modeler`, `knowledge-engineer` and `context-curator`; a stage agent's name opens its stage.
 - With Claude Code as the model, ask Claude Code itself: AutoDE's plugin installs the same agents there, and it hands work to them (or you @-mention them).
+
+**How this was answered** (v0.52.2). Expand the line under any reply to see:
+- who answered (the chat or an agent) and with which model;
+- each step: what AutoDE was asked, and what it found;
+- the facts the reply cites, with their trust (verified, confirmed, documented, assumed, inferred, or proposed), and what else it consulted. Click one to open it in the Knowledge Explorer;
+- how many statements cite no fact: check those before relying on them;
+- what an agent proposed, which waits for your approval;
+- the context the chat was given (*What the agent saw*).
+
+AutoDE builds this from what it recorded, not from the model's description of its reasoning. It is kept with the chat. The *Actions:* line below a reply lists only file writes and commands.
 
 ---
 

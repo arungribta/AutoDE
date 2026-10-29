@@ -1,3 +1,4 @@
+import { toolResultSummary } from '../engine/agents/answerTrace';
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -215,7 +216,7 @@ export async function executeAgenticTool(
   if (engine && engine.specs.some((s) => s.name === call.name)) {
     try {
       const r = await engine.call(call.name, input);
-      audit.push({ tool: call.name, input, outcome: r.isError ? 'error' : 'ok', detail: r.isError ? r.text.slice(0, 500) : undefined, at });
+      audit.push({ tool: call.name, input, outcome: r.isError ? 'error' : 'ok', detail: r.isError ? r.text.slice(0, 500) : undefined, at, ...(r.isError ? {} : toolResultSummary(call.name, r.text)) });
       return r.text.slice(0, MAX_TOOL_OUTPUT_CHARS);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

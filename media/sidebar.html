@@ -90,6 +90,16 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .message.user { align-self: flex-end; background: var(--accent-subtle); border: 1px solid var(--accent-border); }
 .handoff-row { margin-top: 8px; display: flex; gap: 6px; }
+.trace { margin-top: 8px; border-top: 1px solid var(--border-soft); padding-top: 6px; font-size: 11.5px; }
+.trace summary { cursor: pointer; opacity: 0.8; }
+.trace-row { margin: 6px 0 0; }
+.trace-row ol, .trace-row ul { margin: 2px 0 0 18px; padding: 0; }
+.trace-muted { opacity: 0.7; }
+.trace-warn { color: var(--vscode-editorWarning-foreground, inherit); }
+.trace-badge { border: 1px solid var(--border-soft); border-radius: 8px; padding: 0 6px; font-size: 10.5px; }
+.trace-badge.warn { color: var(--vscode-editorWarning-foreground, inherit); }
+.trace-kind { opacity: 0.6; font-size: 10.5px; }
+.trace-link { background: none; border: none; padding: 0; color: var(--vscode-textLink-foreground); cursor: pointer; text-align: left; font: inherit; }
 .message.ai { align-self: flex-start; background: var(--surface-elevated); border: 1px solid var(--border-soft); }
 .message.pending .msg-content { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .typing-dots { display: inline-flex; gap: 3px; flex-shrink: 0; }
@@ -557,6 +567,29 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function escapeHtml(str) { return String(str).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"'); }
 
   // ── Chat ──
+  /** v0.52.2: how a reply was made — built by AutoDE from what it recorded, collapsed under the reply. */
+  function addTrace(div, t) {
+    if (!t || !t.summary) return;
+    var d = document.createElement('details'); d.className = 'trace';
+    var esc = escapeHtml;
+    var src = function (x) { return '<li><button class="trace-link" data-explore="' + esc(x.id) + '" title="Open in the Knowledge Explorer">' + esc(x.label) + '</button>' + (x.trust ? ' <span class="trace-badge">' + esc(x.trust) + '</span>' : '') + ' <span class="trace-kind">' + esc(x.kind.replace('_', ' ')) + '</span></li>'; };
+    var html = '<summary>How this was answered · ' + esc(t.summary) + '</summary>';
+    html += '<div class="trace-row"><b>Answered by</b> ' + esc(t.answeredBy) + (t.via ? ' (' + esc(t.via) + ')' : '') + (t.model ? ' · ' + esc(t.model) : '') + '</div>';
+    if (t.note) html += '<div class="trace-row trace-muted">' + esc(t.note) + '</div>';
+    if (t.steps && t.steps.length) html += '<div class="trace-row"><b>Steps</b><ol>' + t.steps.map(function (s) { return '<li>' + esc(s.text) + (s.found ? ' → ' + esc(s.found) : '') + (s.outcome !== 'ok' && s.outcome !== 'approved' ? ' <span class="trace-badge warn">' + esc(s.outcome) + '</span>' : '') + '</li>'; }).join('') + '</ol></div>';
+    else if (!t.note) html += '<div class="trace-row trace-muted">No tools were used: the answer comes from the context AutoDE gave the model.</div>';
+    if (t.cited && t.cited.length) html += '<div class="trace-row"><b>Cited</b><ul>' + t.cited.map(src).join('') + '</ul></div>';
+    if (t.consulted && t.consulted.length) html += '<div class="trace-row"><b>Consulted</b><ul>' + t.consulted.slice(0, 12).map(src).join('') + (t.consulted.length > 12 ? '<li class="trace-muted">and ' + (t.consulted.length - 12) + ' more</li>' : '') + '</ul></div>';
+    if (t.uncited && t.statements) html += '<div class="trace-row trace-warn">' + t.uncited + ' of ' + t.statements + ' statements cite no fact: check them before relying on them.</div>';
+    if (t.proposed && t.proposed.length) html += '<div class="trace-row"><b>Proposed</b> (waits for your approval)<ul>' + t.proposed.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul></div>';
+    if (t.pack) html += '<div class="trace-row"><b>Context</b> ' + esc(t.pack.title) + ' · ' + t.pack.facts + ' facts · ' + t.pack.tokens + ' tokens <button class="trace-link" data-saw="1">What the agent saw</button></div>';
+    d.innerHTML = html;
+    d.addEventListener('click', function (e) {
+      var ex = e.target.closest('[data-explore]'); if (ex) { vscode.postMessage({ type: 'openInExplorer', id: ex.getAttribute('data-explore') }); return; }
+      if (e.target.closest('[data-saw]')) vscode.postMessage({ type: 'whatTheAgentSaw' });
+    });
+    div.appendChild(d);
+  }
   /** v0.52.1: a handover the chat suggests — the person starts the agent (Run it), or opens the stage that does the work. */
   function addHandoff(div, h) {
     var row = document.createElement('div'); row.className = 'handoff-row';
@@ -630,7 +663,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     if (welcomeBlock) { welcomeBlock.style.display = 'none'; }
     transcript.forEach(function (m) {
       if (m.role === 'user') { addMessage('user', m.content, 'You'); }
-      else if (m.role === 'ai') { addMessage('ai', m.content, '🤖 AutoDE'); }
+      else if (m.role === 'ai') { var aiDiv = addMessage('ai', m.content, '🤖 AutoDE'); if (m.trace) { addTrace(aiDiv, m.trace); } }
       else { addLogEntry(m.content); }
     });
   }
@@ -1732,7 +1765,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
-      case 'chatResponse': endPending(); if (msg.message) { var replyDiv = addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE', msg.citations); if (msg.handoff) { addHandoff(replyDiv, msg.handoff); } } if (msg.actions && msg.actions.length) { addLogEntry('Actions: ' + msg.actions.join('; ')); } break;
+      case 'chatResponse': endPending(); if (msg.message) { var replyDiv = addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE', msg.citations); if (msg.trace) { addTrace(replyDiv, msg.trace); } if (msg.handoff) { addHandoff(replyDiv, msg.handoff); } } if (msg.actions && msg.actions.length) { addLogEntry('Actions: ' + msg.actions.join('; ')); } break;
       case 'sourcesList': renderSourcesList(msg.sources); break;
       case 'specQuestion': endPending(); discoveryActive = true; discoveryProgress = msg.progress || discoveryProgress; if (msg.question) { addSpecQuestion(msg.question); } renderPaletteSpec(); break;
       case 'specQuestions': endPending(); discoveryActive = true; discoveryProgress = msg.progress || discoveryProgress; if (msg.questions && msg.questions.length) { addSpecQuestionsForm(msg.questions); } renderPaletteSpec(); break;
