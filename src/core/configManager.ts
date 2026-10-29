@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { CONFIG_SECTION, SECRET_KEYS } from './extensionIdentity';
 import { DataAgentHubSettings, DataPlatformProvider, LlmProvider, SnowflakeAuthMode } from '../engine/types';
+import { modelFor, sanitizeModels } from './llmModelChoice';
 
 export class ConfigurationManager {
   public constructor(private readonly context: vscode.ExtensionContext) {}
@@ -11,6 +12,11 @@ export class ConfigurationManager {
 
   public getSettings(): DataAgentHubSettings {
     const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+    // v0.52.4: a model per provider; the active provider's is `activeLlmModel` for every caller.
+    const provider = config.get<LlmProvider>('activeLlmProvider', 'copilot');
+    const llmModels = sanitizeModels(config.get<unknown>('llmModels', {})) ?? {};
+    const legacy = config.inspect<string>('activeLlmModel');
+    const legacyValue = legacy?.workspaceFolderValue ?? legacy?.workspaceValue ?? legacy?.globalValue;
 
     return {
       extensionDisplayName: config.get<string>('extensionDisplayName', 'Auto Data Engineering Hub'),
@@ -31,7 +37,8 @@ export class ConfigurationManager {
       autoDocumentationEnabled: config.get<boolean>('autoDocumentationEnabled', true),
       telemetryEnabled: config.get<boolean>('telemetryEnabled', false),
       activeLlmProvider: config.get<LlmProvider>('activeLlmProvider', 'copilot'),
-      activeLlmModel: config.get<string>('activeLlmModel', 'gpt-4o-mini'),
+      activeLlmModel: modelFor(provider, llmModels, { value: legacyValue, explicit: legacyValue !== undefined }),
+      llmModels,
       llmEndpoint: config.get<string>('llmEndpoint', ''),
       artifactDirectory: config.get<string>('artifactDirectory', 'autode-output'),
       languageModelProgrammaticConsent: config.get<boolean>('languageModelProgrammaticConsent', false),
@@ -98,7 +105,7 @@ export class ConfigurationManager {
      ['autoDocumentationEnabled', settings.autoDocumentationEnabled],
      ['telemetryEnabled', settings.telemetryEnabled],
      ['activeLlmProvider', settings.activeLlmProvider],
-     ['activeLlmModel', settings.activeLlmModel],
+     ['llmModels', settings.llmModels],
      ['llmEndpoint', settings.llmEndpoint],
      ['artifactDirectory', settings.artifactDirectory],
      ['languageModelProgrammaticConsent', settings.languageModelProgrammaticConsent],

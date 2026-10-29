@@ -12097,6 +12097,30 @@ async function main() {
     assert.match(src('core/webviewProvider.ts'), /'Allow today', 'Not now'/);
   });
 
+  await test('v0.52.4: a model per provider — the Claude Code card no longer shows an OpenAI model, Copilot offers the models VS Code lists, an empty choice is the provider\'s own default, the old shared setting is kept only where it fits; agent instructions reach Claude Code in a file, never on the command line (spawn ENAMETOOLONG on Windows)', () => {
+    const fs = require('node:fs');
+    const M = fresh('../dist/core/llmModelChoice.js');
+    assert.strictEqual(M.modelFor('claude', {}, { value: 'gpt-4o-mini', explicit: true }), '', 'an OpenAI name never reaches Claude Code: its own default');
+    assert.strictEqual(M.modelFor('claude', { claude: 'opus' }), 'opus');
+    assert.strictEqual(M.modelFor('claude', {}, { value: 'sonnet', explicit: true }), 'sonnet', 'an old setting that fits is kept');
+    assert.strictEqual(M.modelFor('copilot', { copilot: '' }), '', 'an empty choice is a choice: Copilot\'s default');
+    assert.strictEqual(M.modelFor('copilot', {}), 'gpt-4o-mini', 'unchanged for someone who never chose');
+    assert.strictEqual(M.modelFor('anthropic', {}, { value: 'gpt-4o-mini', explicit: true }), 'claude-sonnet-5-5');
+    assert.strictEqual(M.modelFor('openai', {}, { value: 'gpt-4.1', explicit: true }), 'gpt-4.1');
+    assert.strictEqual(M.modelFor('openai', {}, { value: 'gpt-4.1', explicit: false }), 'gpt-4o-mini', 'a default value is not a person\'s choice');
+    assert.deepStrictEqual(M.sanitizeModels({ claude: ' opus ', copilot: 'x', evil: 'y', openai: 3 }), { claude: 'opus', copilot: 'x' });
+    assert.strictEqual(M.sanitizeModels([1]), undefined);
+    const src = (f) => fs.readFileSync(nodePath.join(__dirname, '..', ...f.split('/')), 'utf8');
+    const adapter = src('src/core/claudeCodeAdapter.ts');
+    assert.ok(adapter.includes("args.push('--append-system-prompt-file', promptFile);") && !adapter.includes("args.push('--append-system-prompt', "), 'instructions in a file');
+    assert.match(adapter, /finally \{\n\s+if \(promptFile\) \{ try \{ fs\.rmSync\(promptFile/);
+    const html = src('media/sidebar.html');
+    for (const t of ['<select id="copilotModel"', '<select id="claudeModel"', 'llmModels: currentModels()', "post('updateSettings', { settings: { llmModels: savedModels } })", 'copilotModels = info.models']) assert.ok(html.includes(t), t);
+    assert.ok(!html.includes("activeLlmModel: (getSelectedLlm() === 'claude'"), 'the shared model is no longer written from the LLM tab');
+    const pkg = require('../package.json');
+    assert.strictEqual(pkg.contributes.configuration.properties['autoDataEngineeringHub.llmModels'].type, 'object');
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));

@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.52.3. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.52.4. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -786,6 +786,13 @@ AutoDE builds this from what it recorded, not from the model's description of it
 ---
 
 ### 16.1 Claude Code in the panel, or AutoDE in Claude Code
+
+**Choosing the model.** In the LLM tab, each provider's card has its own model:
+- **Copilot:** the models VS Code offers through your plan, or Copilot's default;
+- **Claude Code:** Claude Code's default (the model you set in Claude Code), Opus, Sonnet, Haiku, or another model id;
+- **API providers:** type the model name.
+
+The model of the selected card is the one AutoDE uses. A choice saves as soon as you pick it.
 
 Two ways to work with Claude Code, both with AutoDE's agents and tools:
 

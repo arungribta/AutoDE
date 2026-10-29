@@ -942,6 +942,7 @@ Under `draft`, the panel calls `draftAtStageBoundary` after a successful stage r
 **Reply traces** (v0.52.2; CHT-8; `src/engine/agents/answerTrace.ts`).
 - `executeAgenticTool` adds `toolResultSummary` to the audit entry of each successful AutoDE tool call: `found` (the first array's length in words), `sources` (facts, articles, assets and semantic models found by walking the JSON), and `proposed`.
 - `buildAnswerTrace` turns the audit, the reply's citations (with trust, from the ledger) and the latest context pack's manifest into the trace. `stepText` words each step; `uncitedStatements` counts sentences of six words or more, excluding questions and lead-ins, that cite no fact.
+- LLM models (v0.52.4): `llmModels` holds a model per provider. `ConfigurationManager.getSettings` derives `activeLlmModel` for the active provider with `modelFor` (`src/core/llmModelChoice.ts`): the provider's entry, else the deprecated `activeLlmModel` when explicitly set and fitting the provider, else `PROVIDER_DEFAULT_MODEL`. Claude Code gets its instructions through `--append-system-prompt-file`, never as an argument (Windows' command-line limit).
 - Claude Code (v0.52.3): `ClaudeLlmAdapter` writes a temp MCP config with `panelServerEntry` (this extension's bundle; `AUTODE_AGENT_NAME`, `AUTODE_TOOLS`) and runs the CLI with `--output-format stream-json --verbose --mcp-config … --strict-mcp-config --allowedTools mcp__autode__…`. `ClaudeStreamParser` (`src/core/claudeStream.ts`) turns `tool_use` and `tool_result` events into progress lines and audit entries, so traces are the same on every model. The server lists only `AUTODE_TOOLS` when set. The CLI's environment carries `AUTODE_PANEL_RUN=1`, which `autode hook turn` skips.
 - The panel posts the trace with `chatResponse`, persists it on the transcript's `ai` message (`ChatMessage.trace`; history sent to the model uses `content` only) and redraws it on restore.
 
@@ -1964,7 +1965,8 @@ All settings are under `autoDataEngineeringHub.`; the table is generated from `p
 | `autoDocumentationEnabled` | boolean | `true` | Auto-generate documentation. |
 | `telemetryEnabled` | boolean | `false` | Allow telemetry (opt-in). |
 | `activeLlmProvider` | enum: `azure-openai`, `openai`, `anthropic`, `gemini`, `ollama`, `copilot`, `claude` | `"copilot"` | Active LLM provider. |
-| `activeLlmModel` | string | `"gpt-4o-mini"` | LLM model name. |
+| `activeLlmModel` | string | `"gpt-4o-mini"` | Deprecated (v0.52.4): use llmModels, a model per provider. |
+| `llmModels` | object | `{}` | The model each LLM provider uses, e.g. { "copilot": "claude-sonnet-5-5", "claude": "opus" }. |
 | `claudeCodePath` | string | `""` | Path to the Claude Code CLI ('claude' / 'claude.exe'). |
 | `llmEndpoint` | string | `""` | Custom LLM endpoint. |
 | `context.workingSetMaxTables` | number | `200` | Tables AutoDE keeps in its working set (the context graph and ledger). |
@@ -2090,7 +2092,7 @@ src/cli/    # the autode command line (no vscode; §10.8)
 src/context/    # host-side managers: specs, plans, context documents, business-problem pack, artifacts, chats, graph, watchers
   ActiveProblemManager.ts, ArtifactStalenessScanner.ts, ArtifactWriter.ts, BusinessPackManager.ts, ChatSessionManager.ts, ContextFileManager.ts, ContextFileWatcher.ts, GraphManager.ts, MappingContextManager.ts, PipelineSpecManager.ts, SourceContextManager.ts, SourceRegistry.ts, SpecManager.ts, SynthesisPipeline.ts, TargetContextManager.ts, vscodeFileIo.ts
 src/core/    # orchestrator, webview/panel providers, LLM adapters and tools, spec engine, configuration
-  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, claudeStream.ts, configManager.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, knowledgeExplorer.ts, knowledgeExplorerModel.ts, languageModelAdapter.ts, llmAdapter.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, portSkillSession.ts, portSkillView.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
+  agentExecutor.ts, agentHub.ts, agenticTools.ts, attachmentExtraction.ts, claudeCodeAdapter.ts, claudeStream.ts, configManager.ts, discoveryProgress.ts, disposables.ts, engineClient.ts, extensionIdentity.ts, implementationType.ts, keywords.ts, knowledgeExplorer.ts, knowledgeExplorerModel.ts, languageModelAdapter.ts, llmAdapter.ts, llmModelChoice.ts, llmProviders.ts, mcpConfig.ts, platformOnboarding.ts, platformPrerequisites.ts, portSkillSession.ts, portSkillView.ts, problemSlug.ts, runbookView.ts, runbookViewModel.ts, skillsView.ts, sourceContextQuestions.ts, specOpsPrompts.ts, specSynthesis.ts, targetContextQuestions.ts, tokenBudget.ts, webviewProvider.ts, webviewSecurity.ts, workflowView.ts, workflowViewModel.ts
 src/core/credentials/    # VS Code SecretStorage credential resolver
   index.ts, VsCodeSecretStorageResolver.ts
 src/editors/    # custom editors

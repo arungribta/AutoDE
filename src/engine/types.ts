@@ -538,7 +538,10 @@ export interface DataAgentHubSettings {
   autoDocumentationEnabled: boolean;
   telemetryEnabled: boolean;
   activeLlmProvider: LlmProvider;
+  /** The active provider's model (derived from `llmModels`; '' = the provider's own default). */
   activeLlmModel: string;
+  /** v0.52.4: the model chosen for each provider. */
+  llmModels?: Partial<Record<LlmProvider, string>>;
   llmEndpoint: string;
   artifactDirectory: string;
   /** Consent to use a locally-installed language model programmatically (VS Code Copilot, or the Claude Code CLI). */

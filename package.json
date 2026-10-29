@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.52.3",
+  "version": "0.52.4",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -662,7 +662,13 @@
         "autoDataEngineeringHub.activeLlmModel": {
           "type": "string",
           "default": "gpt-4o-mini",
-          "description": "LLM model name. For the 'claude' provider this is passed to 'claude --model' when it looks like a Claude model (e.g. 'sonnet', 'opus', 'claude-sonnet-4'); otherwise Claude Code's default model is used."
+          "description": "Deprecated (v0.52.4): use llmModels, a model per provider. Still honoured for a provider with no llmModels entry when the name fits it."
+        },
+        "autoDataEngineeringHub.llmModels": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "string" },
+          "description": "The model each LLM provider uses, e.g. { \"copilot\": \"claude-sonnet-5-5\", \"claude\": \"opus\" }. An empty string uses the provider's own default (Claude Code's configured model; Copilot's first model). Set from the LLM tab."
         },
         "autoDataEngineeringHub.claudeCodePath": {
           "type": "string",

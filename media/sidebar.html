@@ -450,8 +450,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     <div class="slide-panel-body" id="slideBody">
       <div class="section slide-section active" id="slideSectionLlm">
         <div class="section-title">Select LLM Provider</div>
-        <div class="card selected" data-llm="copilot"><div class="card-header"><span class="radio"></span><span class="card-title">GitHub Copilot</span><span class="card-status" id="copilotStatus">Checking...</span></div><div class="card-body"><div class="toggle-row"><input type="checkbox" id="copilotConsent" /><span>Allow programmatic use (auto-saves)</span></div><div class="btn-row"><button id="testCopilotBtn">Test</button><button id="openCopilotHandoffBtn">Handoff</button></div></div></div>
-        <div class="card" data-llm="claude"><div class="card-header"><span class="radio"></span><span class="card-title">Claude Code (CLI)</span><span class="card-status" id="claudeStatus">Not checked</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model (optional)</label><input id="claudeModel" placeholder="sonnet / opus / auto" /></div></div><div class="form-row"><div><label>CLI path (optional — auto-detected)</label><input id="claudeCodePath" placeholder="claude / C:\\path\\to\\claude.exe" /></div></div><div class="toggle-row"><input type="checkbox" id="claudeConsent" /><span>Allow programmatic use (auto-saves)</span></div><div class="btn-row"><button id="testClaudeBtn">Test</button><button id="listLmBtn">Detect</button></div></div></div>
+        <div class="card selected" data-llm="copilot"><div class="card-header"><span class="radio"></span><span class="card-title">GitHub Copilot</span><span class="card-status" id="copilotStatus">Checking...</span></div><div class="card-body"><div class="form-row"><div><label>Model</label><select id="copilotModel" title="The models VS Code offers through your Copilot plan"><option value="">Copilot's default (the first model offered)</option></select></div></div><div class="toggle-row"><input type="checkbox" id="copilotConsent" /><span>Allow programmatic use (auto-saves)</span></div><div class="btn-row"><button id="testCopilotBtn">Test</button><button id="openCopilotHandoffBtn">Handoff</button></div></div></div>
+        <div class="card" data-llm="claude"><div class="card-header"><span class="radio"></span><span class="card-title">Claude Code (CLI)</span><span class="card-status" id="claudeStatus">Not checked</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model</label><select id="claudeModel" title="What Claude Code runs; its default is the model set in Claude Code itself"><option value="">Claude Code's default (as set in Claude Code)</option><option value="opus">Opus (most capable)</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku (fastest)</option><option value="__other">Another model id…</option></select><input id="claudeModelOther" placeholder="e.g. claude-opus-5-5" style="display:none;margin-top:4px" /></div></div><div class="form-row"><div><label>CLI path (optional — auto-detected)</label><input id="claudeCodePath" placeholder="claude / C:\\path\\to\\claude.exe" /></div></div><div class="toggle-row"><input type="checkbox" id="claudeConsent" /><span>Allow programmatic use (auto-saves)</span></div><div class="btn-row"><button id="testClaudeBtn">Test</button><button id="listLmBtn">Detect</button></div></div></div>
         <div class="card" data-llm="openai"><div class="card-header"><span class="radio"></span><span class="card-title">OpenAI</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model</label><input id="openaiModel" placeholder="gpt-4o-mini" /></div><div><label>API Key</label><input id="openaiKey" type="password" placeholder="sk-..." /></div></div></div></div>
         <div class="card" data-llm="anthropic"><div class="card-header"><span class="radio"></span><span class="card-title">Anthropic</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Model</label><input id="anthropicModel" placeholder="claude-3-5-sonnet" /></div><div><label>API Key</label><input id="anthropicKey" type="password" placeholder="sk-ant-..." /></div></div></div></div>
         <div class="card" data-llm="azure-openai"><div class="card-header"><span class="radio"></span><span class="card-title">Azure OpenAI</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Endpoint</label><input id="azureEndpoint" placeholder="https://..." /></div><div><label>API Key</label><input id="azureKey" type="password" placeholder="••••" /></div></div></div></div>
@@ -1469,7 +1469,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       defaultTargetProvider: getSelectedTargetProvider(),
       defaultTargetSnowflakeAccount: $('#tgtSfAccount').value, defaultTargetSnowflakeUsername: $('#tgtSfUsername').value, defaultTargetSnowflakeWarehouse: $('#tgtSfWarehouse').value, defaultTargetSnowflakeDatabase: $('#tgtSfDatabase').value, defaultTargetSnowflakeSchema: $('#tgtSfSchema').value, defaultTargetSnowflakeRole: $('#tgtSfRole').value, defaultTargetSnowflakeAuthMode: $('#tgtSfAuthMode').value, targetSnowflakePrivateKeyPath: $('#tgtSfKeyPath').value, targetSnowflakeCliPath: $('#tgtSfCliPath').value.trim(),
       defaultTargetDatabricksWorkspaceUrl: $('#tgtDbxWorkspaceUrl').value, defaultTargetDatabricksHttpPath: $('#tgtDbxHttpPath').value, defaultTargetDatabricksCatalog: $('#tgtDbxCatalog').value, defaultTargetDatabricksSchema: $('#tgtDbxSchema').value, defaultTargetDatabricksCatalogType: $('#tgtDbxCatalogType').value, targetDatabricksCliPath: $('#tgtDbxCliPath').value.trim(),
-      activeLlmModel: (getSelectedLlm() === 'claude' && $('#claudeModel') ? $('#claudeModel').value : '') || $('#openaiModel').value || $('#anthropicModel').value || $('#geminiModel').value || $('#ollamaModel').value || 'gpt-4o-mini',
+      // v0.52.4: each provider keeps its own model; the active provider's is the one that runs.
+      llmModels: currentModels(),
       llmEndpoint: $('#azureEndpoint').value || $('#ollamaEndpoint').value || '',
       claudeCodePath: $('#claudeCodePath') ? $('#claudeCodePath').value.trim() : '',
       languageModelProgrammaticConsent: $('#copilotConsent').checked || ($('#claudeConsent') ? $('#claudeConsent').checked : false),
@@ -1911,13 +1912,45 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     if (data.defaultTargetDatabricksCatalogType) $('#tgtDbxCatalogType').value = data.defaultTargetDatabricksCatalogType;
     if (data.targetDatabricksCliPath) $('#tgtDbxCliPath').value = data.targetDatabricksCliPath;
     if ($('#tgtDbxToken')) { $('#tgtDbxToken').placeholder = data.targetDatabricksHasToken ? 'Token already saved — leave blank to keep it, or type a new one to replace it' : 'Stored in VS Code SecretStorage — never shown again'; }
-    if (data.activeLlmModel) { $('#openaiModel').value = data.activeLlmModel; $('#anthropicModel').value = data.activeLlmModel; $('#geminiModel').value = data.activeLlmModel; $('#ollamaModel').value = data.activeLlmModel; if ($('#claudeModel')) $('#claudeModel').value = data.activeLlmModel; }
+    // v0.52.4: each card shows its own provider's model (the active one's comes from activeLlmModel when it has no entry yet).
+    savedModels = Object.assign({}, data.llmModels || {});
+    if (data.activeLlmProvider && savedModels[data.activeLlmProvider] === undefined && typeof data.activeLlmModel === 'string') savedModels[data.activeLlmProvider] = data.activeLlmModel;
+    ['openai', 'anthropic', 'gemini', 'ollama'].forEach(function (p) { if (typeof savedModels[p] === 'string' && $('#' + p + 'Model')) $('#' + p + 'Model').value = savedModels[p]; });
+    setClaudeModel(savedModels.claude || '');
+    setCopilotModel(savedModels.copilot);
     if (data.llmEndpoint) { $('#azureEndpoint').value = data.llmEndpoint; $('#ollamaEndpoint').value = data.llmEndpoint; }
     if (typeof data.claudeCodePath === 'string' && $('#claudeCodePath')) { $('#claudeCodePath').value = data.claudeCodePath; }
     if (typeof data.metadataCachingDurationMinutes === 'number') $('#cacheDuration').value = data.metadataCachingDurationMinutes;
     if (typeof data.queryTimeoutSeconds === 'number') $('#queryTimeout').value = data.queryTimeoutSeconds;
   }
-  function updateCopilotStatus(info) { if (!info) return; var isClaude = info.provider === 'claude'; var statusEl = $(isClaude ? '#claudeStatus' : '#copilotStatus'); if (!statusEl) return; var label = isClaude ? 'Claude Code' : 'Copilot';
+  /** v0.52.4: the model choices per provider. */
+  var savedModels = {};
+  var copilotModels = [];
+  function claudeModelValue() { var s = $('#claudeModel'); if (!s) return ''; return s.value === '__other' ? $('#claudeModelOther').value.trim() : s.value; }
+  function setClaudeModel(v) {
+    var s = $('#claudeModel'); if (!s) return;
+    var known = ['', 'opus', 'sonnet', 'haiku'].indexOf(v) >= 0;
+    s.value = known ? v : '__other';
+    $('#claudeModelOther').style.display = known ? 'none' : '';
+    if (!known) $('#claudeModelOther').value = v;
+  }
+  function setCopilotModel(v) {
+    var s = $('#copilotModel'); if (!s) return;
+    var want = typeof v === 'string' ? v : s.value;
+    s.innerHTML = '<option value="">Copilot’s default (the first model offered)</option>' + copilotModels.map(function (m) { return '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.family || m.id) + (m.vendor && m.vendor !== 'copilot' ? ' (' + escapeHtml(m.vendor) + ')' : '') + '</option>'; }).join('');
+    // A saved choice that isn't offered now (signed out, plan changed) stays visible rather than silently changing.
+    if (want && !copilotModels.some(function (m) { return m.id === want || m.family === want; })) s.innerHTML += '<option value="' + escapeHtml(want) + '">' + escapeHtml(want) + ' (not offered now)</option>';
+    var match = copilotModels.find(function (m) { return m.id === want; }) || copilotModels.find(function (m) { return m.family === want; });
+    s.value = match ? match.id : (want || '');
+  }
+  function currentModels() { return { copilot: $('#copilotModel').value, claude: claudeModelValue(), openai: $('#openaiModel').value.trim(), anthropic: $('#anthropicModel').value.trim(), gemini: $('#geminiModel').value.trim(), ollama: $('#ollamaModel').value.trim() }; }
+  // A model choice saves as soon as it is picked (like the consent toggles); "Another model id…" saves when the id is typed.
+  function saveModels() { savedModels = currentModels(); post('updateSettings', { settings: { llmModels: savedModels } }); showToast('Model saved', 'success'); }
+  if ($('#claudeModel')) $('#claudeModel').addEventListener('change', function () { var other = this.value === '__other'; $('#claudeModelOther').style.display = other ? '' : 'none'; if (other) $('#claudeModelOther').focus(); else saveModels(); });
+  if ($('#claudeModelOther')) $('#claudeModelOther').addEventListener('change', saveModels);
+  if ($('#copilotModel')) $('#copilotModel').addEventListener('change', saveModels);
+  function updateCopilotStatus(info) {
+    if (info && info.provider !== 'claude' && info.models) { copilotModels = info.models; setCopilotModel(savedModels.copilot); } if (!info) return; var isClaude = info.provider === 'claude'; var statusEl = $(isClaude ? '#claudeStatus' : '#copilotStatus'); if (!statusEl) return; var label = isClaude ? 'Claude Code' : 'Copilot';
     if (isClaude) {
       if (info.hasAccess) { statusEl.textContent = 'Ready — ' + (info.cliSource || 'found') + (info.version ? ' (' + info.version + ')' : ''); statusEl.style.color = 'var(--success)'; providerDot.className = 'dot ok'; providerLabel.textContent = label; }
       else { statusEl.textContent = info.error ? String(info.error).slice(0, 80) : 'CLI not found'; statusEl.style.color = 'var(--warning)'; }

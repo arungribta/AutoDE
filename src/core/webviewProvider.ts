@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { ConfigurationManager } from './configManager';
 import { DataAgentHubHub } from './agentHub';
+import { sanitizeModels } from './llmModelChoice';
 import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuestion, SkillDefinition, BusinessProblemSpec, IntakeAttachment, TargetContext, SourceContext, SourceContextEntry, DataPlatformProvider, ToolExecutionMode, EntityMapping, MappingContext, ToolCallAuditEntry, TraceSource } from '../engine/types';
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from '../engine/interview/specOps';
@@ -706,7 +707,8 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
             autoDocumentationEnabled: typeof settings.autoDocumentationEnabled === 'boolean' ? settings.autoDocumentationEnabled : undefined,
             telemetryEnabled: typeof settings.telemetryEnabled === 'boolean' ? settings.telemetryEnabled : undefined,
             activeLlmProvider: settings.activeLlmProvider === 'azure-openai' || settings.activeLlmProvider === 'openai' || settings.activeLlmProvider === 'anthropic' || settings.activeLlmProvider === 'gemini' || settings.activeLlmProvider === 'ollama' || settings.activeLlmProvider === 'copilot' || settings.activeLlmProvider === 'claude' ? settings.activeLlmProvider : undefined,
-            activeLlmModel: typeof settings.activeLlmModel === 'string' ? settings.activeLlmModel : undefined,
+            // v0.52.4: each provider's own model (the shared activeLlmModel is no longer written from the LLM tab).
+            llmModels: sanitizeModels((settings as { llmModels?: unknown }).llmModels),
             llmEndpoint: typeof settings.llmEndpoint === 'string' ? settings.llmEndpoint : undefined,
             languageModelProgrammaticConsent: typeof settings.languageModelProgrammaticConsent === 'boolean' ? settings.languageModelProgrammaticConsent : undefined,
             copilotProgrammaticConsent: typeof settings.copilotProgrammaticConsent === 'boolean' ? settings.copilotProgrammaticConsent : undefined,

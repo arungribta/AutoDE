@@ -6,6 +6,18 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.52.4
+
+- **Fixed: Run agent on Claude Code failed with `spawn ENAMETOOLONG`** (owner's report on the build stage). v0.52.3 passed the agent's instructions (role, skills, stage brief: tens of thousands of characters) to Claude Code as a command-line argument, past Windows' 32,767-character command-line limit. They now go in a temporary file (`--append-system-prompt-file`), removed after the run, for chat too. Verified with the real CLI and 62,000 characters of instructions. v0.52.3's check had used a one-line prompt, which is why it missed this.
+- **A model per LLM provider** (owner: the Claude Code card showed `gpt-4o-mini`, and Copilot offered no choice though it listed 7 models). One setting, `activeLlmModel` (default `gpt-4o-mini`), served every provider, and the LLM tab copied it into every card. AutoDE ignored it for Claude Code, which silently ran its own default, but the card showed an OpenAI model.
+  - New setting `llmModels`: each provider's own model. The active provider's is what runs, everywhere AutoDE calls a model.
+  - **Copilot:** a dropdown of the models VS Code offers through your plan, or Copilot's default. A saved model that isn't offered any more stays visible, marked "not offered now", rather than silently changing.
+  - **Claude Code:** Claude Code's default (the model set in Claude Code), Opus, Sonnet, Haiku, or another model id.
+  - API providers (OpenAI, Anthropic, Gemini, Ollama) each keep their own model.
+  - A choice saves as soon as it's picked.
+  - **Nobody's setup changes on upgrade:** with no per-provider choice, the old setting is used where it fits the provider (an explicitly set Claude alias for Claude Code, a `gpt…` name for OpenAI), otherwise the model the provider used before. `activeLlmModel` is deprecated.
+- Measured: 408 tests (1 new).
+
 ## 0.52.3
 
 - **Run agent works on Claude Code** (owner: *Run agent* must work whatever the model; "the workflow should abstract away model-specific requirements"). Until now, with Claude Code as the panel's model, stage runs, *Work on it*, *Run it* and `@agent` were refused with "run AutoDE's agents in Claude Code itself".

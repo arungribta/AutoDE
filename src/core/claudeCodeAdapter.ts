@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 /**
  * Routes AutoDE's LLM calls through the locally-installed **Claude Code** CLI
@@ -223,8 +224,13 @@ export class ClaudeCodeAdapter {
     const timeoutMs = opts?.timeoutMs ?? (opts?.mcp ? 900000 : mode === 'none' ? 90000 : 180000);
     const args = ['-p', '--output-format', 'json'];
 
+    // v0.52.4: the instructions go in a file, never on the command line. An agent's assignment (role, skills, brief)
+    // runs to tens of thousands of characters, past Windows' 32,767-character command-line limit (spawn ENAMETOOLONG).
+    let promptFile: string | undefined;
     if (opts?.systemPrompt && opts.systemPrompt.trim().length > 0) {
-      args.push('--append-system-prompt', opts.systemPrompt.trim());
+      promptFile = path.join(os.tmpdir(), `autode-prompt-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.md`);
+      fs.writeFileSync(promptFile, opts.systemPrompt.trim(), 'utf8');
+      args.push('--append-system-prompt-file', promptFile);
     }
 
     const model = (opts?.model ?? '').trim();
@@ -265,7 +271,11 @@ export class ClaudeCodeAdapter {
     }
 
     if (opts?.stream) { args[2] = 'stream-json'; args.push('--verbose'); }
-    return await this.run(args, prompt, timeoutMs, opts?.cwd, opts?.cancellationToken, opts?.stream, opts?.env);
+    try {
+      return await this.run(args, prompt, timeoutMs, opts?.cwd, opts?.cancellationToken, opts?.stream, opts?.env);
+    } finally {
+      if (promptFile) { try { fs.rmSync(promptFile, { force: true }); } catch { /* a temp file */ } }
+    }
   }
 
   public async testCall(): Promise<{ ok: boolean; text?: string; error?: string }> {
