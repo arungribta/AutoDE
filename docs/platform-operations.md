@@ -1,6 +1,6 @@
 # Platform operations: one catalog for every interaction with a platform
 
-**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the adapters' metadata extraction (v0.55.0); **POP4** the operations and skills catalog in the UI (v0.56.0); **POP3** agent-proposed operations and drift detection (v0.57.0). Requirement: PLT-9 in [requirements.md](requirements.md). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
+**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the adapters' metadata extraction (v0.55.0); **POP4** the operations and skills catalog in the UI (v0.57.0, after the UI2 simplification); **POP3** agent-proposed operations and drift detection (v0.58.0). Requirement: PLT-9 in [requirements.md](requirements.md). **Rule for contributors:** [CLAUDE.md](../CLAUDE.md). **Related:** [platform-skills.md](platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
 
 ## 1. Need and intent
 
@@ -188,9 +188,11 @@ Acceptance:
 - **Resilient:** a failing operation (fixture: a missing privilege) leaves the other reads' results and reports the gap in the ingest result and the Estate view.
 - **Boundary:** the architecture baseline lists no platform SQL in the adapters.
 
-### 6.3 POP4 — the operations and skills catalog (v0.56.0)
+### 6.3 POP4 — the operations and skills catalog (v0.57.0)
 
-A place where anyone can see what AutoDE does on each platform and what it relies on, and adjust the skills behind it. It is a view in VS Code, with the same answers on the CLI and over MCP. It is the first step of the platform UI the owner plans, for technical and non-technical users alike.
+A place where anyone can see what AutoDE does on each platform and what it relies on, and adjust the skills behind it, with the same answers on the CLI and over MCP. It is the first step of the platform UI the owner plans, for technical and non-technical users alike.
+
+**Its own view** (owner, 2026-10-29): *Platform catalog*, a tab of the unified AutoDE window that UI2 introduces, beside the Knowledge Explorer and the Workflow view. Each keeps its own view, reachable from one place. It is also opened from the Explorer's Estate view.
 
 **Review the operations:**
 - every operation, shipped or the team's, filterable by platform, area (estate, lineage, governance, quality, deployment), kind (read or change) and status (ok, failing, team override, proposed);
@@ -222,8 +224,13 @@ A place where anyone can see what AutoDE does on each platform and what it relie
 
 **Edit operations** (in the same view): a form generated from the JSON Schema, with the statement per platform. Saving checks the file (schema, read-only guard for reads, binding of the example). A team change to an operation is a draft until a person approves it, as for skills.
 
+**Skills in every host** (owner, 2026-10-29):
+- **One rule:** a published team copy of a skill wins over AutoDE's bundled one. Every place AutoDE picks a skill uses it: stage assignments, the VS Code agent runs, MCP, the catalog.
+- **Claude Code** reads skills as files from its plugin folder, so `autode plugin install` writes the skills in effect (team copies in place of bundled ones).
+- `autode plugin status`, and a maintenance item, say when the installed plugin is behind: a team copy was published, or AutoDE's own version changed. Serving skills only over MCP was ruled out, because Claude Code picks a skill by reading its file.
+
 **Surfaces:**
-- the CLI: `autode platform operations [--platform p] [--uses <skill>]`, `autode platform operation <id>` (its page, with what relies on it), `autode skills show <id>` (with its operations), `autode skills customise <id>`, `autode skills reset <id>`, `autode skills lint <id>`;
+- the CLI: `autode platform operations [--platform p] [--uses <skill>]`, `autode platform operation <id>` (its page, with what relies on it), `autode skills show <id>` (with its operations), `autode skills customise <id>`, `autode skills reset <id>`, `autode skills lint <id>`, `autode plugin status`;
 - MCP: `autode_platform_operations` with the same fields, and `autode_skills_list` with each skill's operations.
 
 Acceptance:
@@ -232,8 +239,9 @@ Acceptance:
 - **Checked:** a skill naming an unknown operation, or carrying SQL, is flagged in the editor and by `autode skills lint <id>` (new; `skills check` already probes external installs). A change operation can't run from the view.
 - **For everyone:** every field has a label and a description. The view works by keyboard and screen reader (UI-4) and in VS Code's themes. Empty states say what to do next.
 - **Parity:** the CLI and MCP give the same lists and pages as the view.
+- **Every host:** after a team copy is published, `autode plugin status` reports the plugin behind; `autode plugin install` brings it up to date and Claude Code then loads the team copy.
 
-### 6.4 POP3 — agent-proposed operations and drift detection (v0.57.0)
+### 6.4 POP3 — agent-proposed operations and drift detection (v0.58.0)
 
 Scope:
 - **Proposals:**
@@ -244,7 +252,11 @@ Scope:
 - **Drift:**
   - an operation failing on a platform version outside its range, or an error that says a view or column is missing, raises a maintenance item;
   - so does a platform reporting object kinds no operation reads (from POP2's estate reads);
-  - the item names the operation, the platform version and the skill's owner. The *platform maintainer* role is suited to it, and drafts a fix to the operation file as a proposal.
+  - the item names the operation, the platform version and the skill's owner, and is for the *platform maintainer*.
+- **The platform maintainer** (a new role, owner 2026-10-29), apart from the knowledge engineer: the knowledge engineer curates business knowledge for data stewards, while this is platform knowledge that platform owners review.
+  - It works at the propose tier: it reads the catalog, tries read operations, and proposes operation files and skill edits. It never publishes.
+  - Its skills are a core skill on the operation format (recorded examples, version ranges, result mapping), plus the platform's own skills.
+  - A platform owner reviews its proposals in the catalog.
 - Proposals and drift items appear in the POP4 catalog, on the operation's page.
 
 Acceptance:
@@ -258,8 +270,8 @@ Acceptance:
 2. Whether `autode_platform_run` needs a row limit and the sample-data consent (`allowSampleDataInPrompts`) for operations that return rows, not just metadata. Proposed: yes, the same rules as `autode_execute_query`.
 3. Version detection: read the platform version once per connection and cache it, or per run.
 
-## 8. Open questions for the later phases
+## 8. Decided for the later phases (owner, 2026-10-29)
 
-4. **POP4:** whether the catalog is its own view or a section of the Knowledge Explorer. Proposed: its own view, *Platform catalog*, opened from the Explorer's Estate view and the Workflow view's title bar, because its users include platform owners who don't explore the estate.
-5. **POP4:** a customised AutoDE skill in other hosts. The Claude Code plugin ships AutoDE's skills; a team copy has to reach it too. Proposed: `autode plugin install` copies published team overrides over the bundled ones.
-6. **POP3:** the *platform maintainer* role is new: an agent template for fixing operation files, at the propose tier. Or the knowledge engineer takes it. Proposed: a new role, since its skills (platform documentation, operation format) differ.
+4. **The catalog is its own view,** a tab of the unified AutoDE window (UI2) beside the Knowledge Explorer and the Workflow view (§6.3).
+5. **A published team copy of a skill wins everywhere;** `autode plugin install` writes the skills in effect for Claude Code, and `autode plugin status` says when it is behind (§6.3).
+6. **A new platform maintainer role** at the propose tier, apart from the knowledge engineer (§6.4).

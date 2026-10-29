@@ -144,7 +144,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - Agents can propose operations a person approves.
   - Drift (a renamed view, an unread object kind) is noticed and raised.
 
-  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0), POP4 (v0.56.0), POP3 (v0.57.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
+  *Why:* platforms change every few weeks and differ by account; platform code in the engine broke silently (lineage read nothing for months) and only a release could fix it (owner, 2026-10-28). *Status:* Specified ([platform-operations.md](platform-operations.md)); planned POP1 (v0.54.0), POP2 (v0.55.0), POP4 (v0.57.0), POP3 (v0.58.0). The rule for contributors is enforced since v0.53.0 (`test/architecture.test.cjs`).
 
 *Planned work:* secrets kept in VS Code's secret store reach an MCP server only when the extension starts it — [mcp-engine-requirements.md](mcp-engine-requirements.md) §7 (phase 5); Oracle as a target — roadmap backlog.
 
@@ -347,6 +347,11 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - an ontology and glossary browser.
 
   It is read-only, theme-aware, usable by keyboard, and fast on large estates. Every view has a CLI and MCP equivalent. *Why:* the context and semantic layers must be explorable to be trusted (C6). *Status:* Shipped v0.50.0 (search, asset pages, graph, facts, estate; `autode explore`; MCP tools). v0.50.1 added the Graph view (the landscape with every known relationship, expand in place, find on canvas) and standard labels (CTX-17). v0.53.0 added the lineage and impact views (the Lineage tab, impact with Markdown and CSV export). The ontology and glossary browser comes in ONT1. Lists are paged rather than virtualised.
+- **UI-8 — One AutoDE window, simple to follow.**
+  - The Knowledge Explorer, the Workflow view and the Platform catalog are tabs of one window, each its own view.
+  - The Workflow Palette shows one clear next step, with the rest a click away.
+
+  *Why:* the owner found the palette crowded and confusing in testing, and several separate panels are hard to find (owner, 2026-10-29). *Status:* Planned (UI2, v0.56.0).
 - **UI-6 — Dashboard panel.** *Status:* Parked (v0.13.0); removed in v0.45.9 (owner's choice): the Workflow view shows progress and each stage's outputs.
 
 ---
