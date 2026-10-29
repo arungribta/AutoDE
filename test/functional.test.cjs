@@ -12144,6 +12144,18 @@ async function main() {
     for (const t of ["case 'activity': activityEvent(msg); break;", 'function activityEvent(m)', '.activity.failed', 'function noticeLevel(m)', 'prefers-reduced-motion']) assert.ok(html.includes(t), t);
   });
 
+  await test('v0.52.6: the model lists match what the tools offer — the Claude Code card lists exact versions (Opus, Sonnet, Haiku 5.5) beside the always-latest aliases, its known choices read from the dropdown itself; the VS Code list is every model VS Code offers extensions (Copilot\'s first), and a run uses the exact model picked, whatever its vendor', () => {
+    const fs = require('node:fs');
+    const src = (f) => fs.readFileSync(nodePath.join(__dirname, '..', ...f.split('/')), 'utf8');
+    const html = src('media/sidebar.html');
+    for (const t of ['<option value="claude-opus-5-5">Opus 5.5</option>', '<option value="claude-sonnet-5-5">Sonnet 5.5</option>', '<option value="claude-haiku-5-5">Haiku 5.5</option>', '<optgroup label="Always the latest">', 'Array.prototype.some.call(s.options']) assert.ok(html.includes(t), t);
+    const M = fresh('../dist/core/llmModelChoice.js');
+    for (const id of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'opus']) assert.ok(M.CLAUDE_CODE_MODEL.test(id), `${id} reaches claude --model`);
+    const lm = src('src/core/languageModelAdapter.ts');
+    assert.ok(!lm.includes("selectChatModels({ vendor: 'copilot' })"), 'not only the Copilot vendor');
+    assert.ok(lm.includes('candidates = copilotFirst(await vscode.lm.selectChatModels());') && lm.includes('models.find((m) => m.id === familyOrId.trim()) ?? pickPreferred(models, familyOrId)'));
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));

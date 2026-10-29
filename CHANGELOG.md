@@ -6,6 +6,14 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.52.6
+
+- **The model lists match what the tools offer** (owner: Opus 5.5 was missing; VS Code's list differed from VS Code's own picker).
+  - **Claude Code card:** exact versions, Opus 5.5, Sonnet 5.5 and Haiku 5.5, beside "always the latest" aliases (Opus, Sonnet, Haiku) and "Another model id…". Claude Code's CLI has no command to list models, so the list is AutoDE's own. Each id was checked against the real CLI (2.1.312). Fable 5.1 is left out: on the owner's plan Claude Code answered that it "requires usage credits"; a plan that has it can type it.
+  - **VS Code card:** every model VS Code offers extensions, not only the Copilot vendor's, so a provider added to VS Code (a key for another vendor, another extension's models) is a choice too. Copilot's come first and stay the default; other vendors are labelled. A run uses the exact model picked, whatever its vendor. A model VS Code's own chat picker shows but doesn't offer to extensions can't be listed by any extension.
+- The Stop button moves to v0.52.7.
+- Measured: 410 tests (1 new).
+
 ## 0.52.5
 
 - **The chat shows runs as activity cards** (owner: each update came as a new entry in the same style, hard to tell apart from answers). Before, every progress line was its own chat message.
@@ -18,7 +26,7 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 - **Notices are one line, by what they ask of you:** ⚠ problems, ● something to act on (approve, review), ℹ information. They are styled apart from AutoDE's answers.
 - **Routine engine notices leave the chat** ("Loaded compiled graph…", "Compiled graph persisted…", working-set promotions): they go to a new **AutoDE** Output channel, which also records everything the panel logs and every run's steps. Engine failures still reach the chat.
 - Activity cards aren't kept in the transcript (a reply's trace is).
-- **Next:** a Stop button on a running card (v0.52.6, roadmap).
+- **Next:** a Stop button on a running card (now v0.52.7, roadmap).
 - Measured: 409 tests (1 new: step events from AutoDE's own loop, the panel's routing and rendering). The v0.52.3 stream-parser test now checks each step's running and finished events.
 
 ## 0.52.4

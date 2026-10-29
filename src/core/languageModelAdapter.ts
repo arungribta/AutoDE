@@ -111,7 +111,9 @@ export class LanguageModelAdapter {
 
     let candidates: vscode.LanguageModelChat[] = [];
     try {
-      candidates = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+      // v0.52.6: every model VS Code offers extensions (Copilot's first), not only the Copilot vendor's: a key added to
+      // VS Code for another provider, or another extension's models, are choices too.
+      candidates = copilotFirst(await vscode.lm.selectChatModels());
     } catch (err) {
       info.error = err instanceof Error ? err.message : String(err);
       return { info };
@@ -311,13 +313,19 @@ export class LanguageModelAdapter {
   }
 
   private async selectModel(familyOrId: string): Promise<vscode.LanguageModelChat> {
-    const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    const chosen = pickPreferred(models, familyOrId);
+    // The exact model picked in the LLM tab (by id, whatever its vendor); else the closest match, Copilot's first.
+    const models = copilotFirst(await vscode.lm.selectChatModels());
+    const chosen = models.find((m) => m.id === familyOrId.trim()) ?? pickPreferred(models, familyOrId);
     if (chosen) {
       return chosen;
     }
     throw new Error('No Copilot language models are available.');
   }
+}
+
+/** Copilot's models first (the default when nothing is picked), then the other vendors', in VS Code's order. */
+function copilotFirst(models: readonly vscode.LanguageModelChat[]): vscode.LanguageModelChat[] {
+  return [...models.filter((m) => m.vendor === 'copilot'), ...models.filter((m) => m.vendor !== 'copilot')];
 }
 
 function pickPreferred(
