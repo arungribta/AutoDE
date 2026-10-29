@@ -157,7 +157,8 @@ async function hookCommand(args: readonly string[], io: CliIo): Promise<number> 
   let event: unknown;
   try { event = JSON.parse((await (io.readStdin ?? (async () => ''))()) || 'null'); } catch { return EXIT.OK; }
   // MM2: the turn hook records the message for review and prints nothing (on UserPromptSubmit, output would join the context); it never blocks.
-  if (args[0] === 'turn') { try { recordHookTurn(event, io.cwd); } catch { /* never in the user's way */ } return EXIT.OK; }
+  // v0.52.3: a run the AutoDE panel started (AUTODE_PANEL_RUN) carries AutoDE's own prompt, not the user's words: not a turn.
+  if (args[0] === 'turn') { try { if (!io.env.AUTODE_PANEL_RUN) recordHookTurn(event, io.cwd); } catch { /* never in the user's way */ } return EXIT.OK; }
   const v = guardHookEvent(event, io.cwd);
   if (!v.block) return EXIT.OK;
   io.err(v.reason ?? 'Blocked by AutoDE.');

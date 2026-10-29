@@ -60,8 +60,11 @@ export interface LlmCompleteOptions {
    *  what is being approved (e.g. which skill). */
   approvalPrompt?: string;
   /** The engine's MCP tools for this run (phase 5), offered next to the file tools by every AutoDE-owned
-   *  loop when the mode allows tools. Ignored by the Claude adapter, whose CLI runs its own loop. */
+   *  loop when the mode allows tools. The Claude adapter (v0.52.3) attaches AutoDE's MCP server to its
+   *  CLI instead and pre-approves exactly these tools. */
   engineTools?: EngineToolSet;
+  /** v0.52.3: who the run is for (an agent role), recorded by AutoDE's server when the CLI calls its tools. */
+  agentName?: string;
 }
 
 /**

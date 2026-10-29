@@ -8585,8 +8585,10 @@ async function main() {
           return { text: 'Recorded runbook.md. Missing: the schedule.', audit: [], provider };
         }
       };
+      // v0.52.3: Claude Code runs the stage too (AutoDE's server attached to its CLI), named after the role.
+      record = false;
       let r = await runStage(host, scope, 'document');
-      assert.ok(!r.ok && /autode plugin install --host claude/.test(r.message), r.message);
+      assert.ok(!r.ok && /without recording a deliverable/.test(r.message) && seen.opts.agentName === 'documenter', r.message);
       provider = 'copilot'; record = false;
       r = await runStage(host, scope, 'document');
       assert.ok(!r.ok && /without recording a deliverable/.test(r.message), r.message);
@@ -11973,7 +11975,7 @@ async function main() {
       const r = await runHandoff(host, { workspaceRoot: ws, resourcesRoot: wfRes() }, 'knowledge-engineer', 'Write an article on customer ids');
       assert.deepStrictEqual([r.ok, seen.mode, seen.tools], [true, 'read-only', ['autode_get_asset_context', 'autode_propose_article', 'autode_search_assets']]);
       assert.ok(/You are AutoDE's knowledge-engineer/.test(seen.system) && /## The task\nWrite an article on customer ids/.test(seen.system) && /Skill: autode-core-knowledge-articles/.test(seen.system));
-      assert.match((await runHandoff({ ...host, activeProvider: () => 'claude' }, { workspaceRoot: ws, resourcesRoot: wfRes() }, 'knowledge-engineer', 'x')).message, /@knowledge-engineer x/);
+      assert.ok((await runHandoff({ ...host, activeProvider: () => 'claude' }, { workspaceRoot: ws, resourcesRoot: wfRes() }, 'knowledge-engineer', 'x')).ok, 'Claude Code runs it too (v0.52.3)');
       // Hosts: the same work order over MCP.
       client = await mcpSession(ws);
       const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).structuredContent;
@@ -12008,7 +12010,8 @@ async function main() {
     assert.ok(!t.consulted.some((x) => x.id === F1), 'a cited fact is listed once, as cited');
     assert.strictEqual(t.summary, '3 steps · 2 facts · 1 article(s) · 1 cited');
     assert.deepStrictEqual([t.uncited, t.pack.facts], [0, 12]);
-    assert.match(T.buildAnswerTrace({ answeredBy: 'AutoDE chat', provider: 'claude', audit: [], reply: 'x', cited: [] }).note, /Claude Code ran its own tool loop/);
+    assert.match(T.buildAnswerTrace({ answeredBy: 'AutoDE chat', provider: 'claude', toolsOffered: true, audit: [], reply: 'x', cited: [] }).note, /No tool calls were recorded/);
+    assert.strictEqual(T.buildAnswerTrace({ answeredBy: 'AutoDE chat', provider: 'claude', audit: [], reply: 'x', cited: [] }).note, undefined, 'the same for every model');
     // The executor returns the agent run's tool calls, so a handed-over run gets its trace too.
     const { runHandoff } = fresh('../dist/core/agentExecutor.js');
     const engine = { listTools: async () => [{ name: 'autode_propose_article', annotations: {} }], toolSetNamed: async (n) => ({ n }), dispose: async () => {} };
@@ -12019,6 +12022,79 @@ async function main() {
     assert.match(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'agenticTools.ts'), 'utf8'), /toolResultSummary\(call\.name, r\.text\)/);
     const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
     for (const s of ['function addTrace', 'How this was answered', "type: 'openInExplorer'", "type: 'whatTheAgentSaw'", 'if (m.trace) { addTrace(aiDiv, m.trace); }']) assert.ok(html.includes(s), s);
+  });
+
+  await test('v0.52.3: Run agent works on Claude Code too — the CLI gets AutoDE\'s own server (this extension\'s bundle, on the workspace, named after the role) through a temp MCP config, only that server, and exactly the run\'s AutoDE tools pre-approved; no refusal left in the executor', () => {
+    const nodeFs = require('node:fs');
+    const os = require('node:os');
+    const { panelServerEntry } = fresh('../dist/core/mcpConfig.js');
+    const ext = nodePath.join(os.tmpdir(), 'ext');
+    const withNode = panelServerEntry({ extensionPath: ext, workspaceRoot: 'W', agentName: 'documenter', env: { PATH: nodePath.dirname(process.execPath), PATHEXT: '.EXE' }, platform: process.platform });
+    assert.deepStrictEqual(withNode, { command: 'node', args: [nodePath.join(ext, 'dist', 'autode.js'), 'mcp', '--workspace', 'W'], env: { AUTODE_AGENT_NAME: 'documenter' } }, 'the extension\'s own bundle, not an installed autode of another version');
+    const noNode = panelServerEntry({ extensionPath: ext, workspaceRoot: 'W', env: { PATH: '' }, execPath: '/vscode/code' });
+    assert.deepStrictEqual([noNode.command, noNode.env], ['/vscode/code', { ELECTRON_RUN_AS_NODE: '1' }], 'VS Code\'s own runtime when Node isn\'t on PATH');
+    const src = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', ...f.split('/')), 'utf8');
+    assert.match(src('core/claudeCodeAdapter.ts'), /'--mcp-config', opts\.mcp\.configFile, '--strict-mcp-config', '--allowedTools', \.\.\.opts\.mcp\.allowedTools/);
+    assert.match(src('core/llmProviders.ts'), /names\.map\(\(n\) => `mcp__autode__\$\{n\}`\)/);
+    assert.match(src('mcp/server.ts'), /process\.env\.AUTODE_AGENT_NAME\?\.trim\(\) \|\| ref\.server\?\.getClientVersion\(\)\?\.name/);
+    assert.ok(!/activeProvider\(\) === 'claude'/.test(src('core/agentExecutor.ts')), 'no Claude Code refusal left in the executor');
+  });
+
+  await test('v0.52.3: a Claude Code run is not a black box — its streamed events become progress lines and the same audit (and trace steps) every other model gives, built-in tools worded as AutoDE\'s; AutoDE\'s server lists only the run\'s tools; AutoDE\'s turn hook skips runs the panel started', async () => {
+    const os = require('node:os'); const fs = require('node:fs');
+    const { ClaudeStreamParser } = fresh('../dist/core/claudeStream.js');
+    const progress = [];
+    const p = new ClaudeStreamParser((l) => progress.push(l), () => new Date('2026-10-28T00:00:00Z'));
+    const ev = (o) => JSON.stringify(o) + '\n';
+    const stream = ev({ type: 'system', subtype: 'init' })
+      + ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Looking.' }, { type: 'tool_use', id: 't1', name: 'mcp__autode__autode_search_assets', input: { query: 'refunds' } }] } })
+      + ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: JSON.stringify({ results: [{ id: 'obj:shop/prod/shop.refunds', assetType: 'table', fqn: 'shop.refunds' }] }) }] }] } })
+      + ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Read', input: { file_path: 'brd.md' } }, { type: 'tool_use', id: 't3', name: 'mcp__autode__autode_get_asset_context', input: { asset: 'nope' } }] } })
+      + ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't2', content: '# BRD' }, { type: 'tool_result', tool_use_id: 't3', content: 'No asset nope', is_error: true }] } })
+      + 'not json\n'
+      + JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: ' Refunds are in shop.refunds. ' });
+    for (let i = 0; i < stream.length; i += 37) p.feed(stream.slice(i, i + 37)); // arrives in arbitrary chunks
+    assert.deepStrictEqual(p.result(), { text: 'Refunds are in shop.refunds.' });
+    assert.deepStrictEqual(progress, ['Searched AutoDE\'s assets for "refunds"…', 'Read the file brd.md…', 'Read everything AutoDE knows about nope…']);
+    assert.deepStrictEqual(p.audit.map((a) => [a.tool, a.outcome, a.found ?? a.detail]), [['autode_search_assets', 'ok', '1 results'], ['autode_read_file', 'ok', undefined], ['autode_get_asset_context', 'error', 'No asset nope']]);
+    assert.strictEqual(p.audit[0].sources[0].id, 'obj:shop/prod/shop.refunds', 'the same sources the in-process loop records');
+    const cut = new ClaudeStreamParser();
+    cut.feed(ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'x', name: 'mcp__autode__autode_workflow_status', input: {} }] } }));
+    assert.deepStrictEqual([cut.result().error, cut.audit[0].outcome], ['Claude Code ended without a result', 'error']);
+    const failed = new ClaudeStreamParser(); failed.feed(ev({ type: 'result', subtype: 'error_max_turns', is_error: true }));
+    assert.deepStrictEqual(failed.result(), { error: 'error_max_turns' });
+    // The run's tools only: AUTODE_TOOLS narrows what AutoDE's server lists (and so what the model sees).
+    const { panelServerEntry } = fresh('../dist/core/mcpConfig.js');
+    assert.deepStrictEqual(panelServerEntry({ extensionPath: 'E', workspaceRoot: 'W', agentName: 'documenter', tools: ['autode_resolve', 'autode_record_artifact'], env: { PATH: '' }, execPath: 'code' }).env, { ELECTRON_RUN_AS_NODE: '1', AUTODE_AGENT_NAME: 'documenter', AUTODE_TOOLS: 'autode_resolve,autode_record_artifact' });
+    const ws = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cl-'));
+    let client;
+    const saved = process.env.AUTODE_TOOLS;
+    try {
+      // As Claude Code starts it: the config's env goes to the server explicitly.
+      const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+      const { StdioClientTransport, getDefaultEnvironment } = require('@modelcontextprotocol/sdk/client/stdio.js');
+      client = new Client({ name: 'claude-code', version: '1' });
+      await client.connect(new StdioClientTransport({ command: process.execPath, args: [nodePath.join(__dirname, '..', 'dist', 'autode.js'), 'mcp', '--workspace', ws], env: { ...getDefaultEnvironment(), AUTODE_TOOLS: 'autode_resolve,autode_list_problems' }, stderr: 'pipe' }));
+      assert.deepStrictEqual((await client.listTools()).tools.map((t) => t.name).sort(), ['autode_list_problems', 'autode_resolve']);
+      await assert.rejects(client.callTool({ name: 'autode_workflow_status', arguments: {} }), /Unknown tool "autode_workflow_status"/, 'a tool outside the run is not callable either');
+      await client.close(); client = undefined;
+      // The turn hook skips a run the panel started (its prompt is AutoDE's, not the user's).
+      fs.mkdirSync(nodePath.join(ws, '.autode'), { recursive: true });
+      const { run } = fresh('../dist/cli/main.js');
+      const io = (env) => ({ out: () => {}, err: () => {}, env, cwd: ws, interactive: false, prompt: async () => '', readStdin: async () => JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'p', cwd: ws, prompt: 'order_id is always unique in shop.orders' }) });
+      assert.strictEqual(await run(['hook', 'turn'], io({ AUTODE_PANEL_RUN: '1' })), 0);
+      assert.strictEqual(fresh('../dist/engine/maintenance/turns.js').listTurns(ws).length, 0, 'not recorded');
+      await run(['hook', 'turn'], io({}));
+      assert.strictEqual(fresh('../dist/engine/maintenance/turns.js').listTurns(ws).length, 1, 'the user\'s own turn is');
+    } finally {
+      if (saved === undefined) delete process.env.AUTODE_TOOLS; else process.env.AUTODE_TOOLS = saved;
+      if (client) await client.close();
+      fs.rmSync(ws, { recursive: true, force: true });
+    }
+    const src = (f) => fs.readFileSync(nodePath.join(__dirname, '..', 'src', ...f.split('/')), 'utf8');
+    assert.match(src('core/llmProviders.ts'), /env: \{ AUTODE_PANEL_RUN: '1' \}/);
+    assert.match(src('core/webviewProvider.ts'), /await this\.afterAgentRun\(\);\n\s+if \(r\.ok\) void this\.draftAtStageBoundary\(\);/);
+    assert.match(src('core/webviewProvider.ts'), /'Allow today', 'Not now'/);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.52.2. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.52.3. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 
@@ -771,7 +771,7 @@ The chat in the panel is for questions and changes about the active problem: "wh
 - **Questions** are answered by the chat itself, from AutoDE's own knowledge: it searches the estate, reads an asset's full context, articles, facts, the semantic layer, the maintenance queue and the workflow (read-only), as the Knowledge Explorer would.
 - **Work** that one of AutoDE's agents does (fix the sales model, write an article, place glossary terms, read a document for facts) isn't done by the chat. It says which agent does it and shows **Run it**. The agent proposes, and you approve as usual. Work that belongs to a workflow stage (a model, a mapping, pipelines) shows **Open stage** instead: it runs from its stage, grounded in the stage's inputs and approved at its gate.
 - **`@<agent> <task>`** at the start of a message hands that one message to the agent directly, for example `@knowledge-engineer write an article on why orders has two customer ids`. The agents you can address this way are `semantic-modeler`, `knowledge-engineer` and `context-curator`; a stage agent's name opens its stage.
-- With Claude Code as the model, ask Claude Code itself: AutoDE's plugin installs the same agents there, and it hands work to them (or you @-mention them).
+- With Claude Code as the panel's model, all of this works the same (since v0.52.3): AutoDE starts Claude Code with AutoDE's own tools attached, keeping Claude Code's model, instructions and agent loop. Its steps appear live in AutoDE's log and in *How this was answered*.
 
 **How this was answered** (v0.52.2). Expand the line under any reply to see:
 - who answered (the chat or an agent) and with which model;
@@ -782,6 +782,22 @@ The chat in the panel is for questions and changes about the active problem: "wh
 - the context the chat was given (*What the agent saw*).
 
 AutoDE builds this from what it recorded, not from the model's description of its reasoning. It is kept with the chat. The *Actions:* line below a reply lists only file writes and commands.
+
+---
+
+### 16.1 Claude Code in the panel, or AutoDE in Claude Code
+
+Two ways to work with Claude Code, both with AutoDE's agents and tools:
+
+| | The AutoDE panel, Claude Code as its model | Claude Code with AutoDE's plugin |
+|---|---|---|
+| How | Pick Claude Code in AutoDE's settings | `autode plugin install --host claude`, then work in Claude Code |
+| Run agent, Work on it, Run it | Yes: AutoDE starts Claude Code for the run, with exactly the tools the stage allows | Ask Claude Code to continue the problem (the orchestrator skill) |
+| Seeing the work | Progress in AutoDE's log; steps in *How this was answered* | Every tool call live in Claude Code |
+| Questions mid-run | No: the agent finishes and reports what's missing | Yes: it's a conversation |
+| Best for | Running stages and maintenance from the Workflow view | Long working sessions, stages you want to steer as they go |
+
+Each panel run starts Claude Code fresh, and it counts against your Claude plan's usage. Under the `draft` maintenance policy, AutoDE asks before starting runs on its own. Your other MCP servers aren't attached to panel runs.
 
 ---
 

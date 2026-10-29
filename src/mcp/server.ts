@@ -117,7 +117,12 @@ export function createAutodeServer(options: ServerOptions): Server {
   const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: false, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   // The decision tools read the client's name (from `initialize`) at call time.
   const ref: { server?: Server } = {};
-  const tools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(() => ref.server?.getClientVersion()?.name, () => tools), ...agentTools(() => ref.server?.getClientVersion()?.name), ...decisionTools({ session: platform, clientName: () => ref.server?.getClientVersion()?.name }), ...semanticTools(), ...exploreTools(), ...maintenanceTools(() => tools)];
+  // v0.52.3: a run the AutoDE panel starts in Claude Code names its agent role, so the history records the role, not the CLI.
+  const clientName = () => process.env.AUTODE_AGENT_NAME?.trim() || ref.server?.getClientVersion()?.name;
+  // v0.52.3: a run the panel starts lists only its own tools (AUTODE_TOOLS); hosts get them all.
+  const only = (process.env.AUTODE_TOOLS ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const allTools: readonly EngineTool[] = [...TOOLS, ...platformTools(platform), ...workspaceTools(platform), ...workflowTools(clientName, () => allTools), ...agentTools(clientName), ...decisionTools({ session: platform, clientName }), ...semanticTools(), ...exploreTools(), ...maintenanceTools(() => allTools)];
+  const tools: readonly EngineTool[] = only.length ? allTools.filter((t) => only.includes(t.name)) : allTools;
   const server = new Server(
     { name: 'autode', title: 'AutoDE', version: options.version, icons: serverIcons(options.resourcesRoot) },
     {

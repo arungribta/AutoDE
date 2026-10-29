@@ -753,8 +753,10 @@ export interface AgentToolRunOptions {
   justification?: string;
   /** Claude Code only: the whole-run approval text (it can't approve per call). */
   approvalPrompt?: string;
-  /** Engine tools offered next to the file tools (phase 5). AutoDE-owned loops only; Claude Code's own loop ignores them. */
+  /** Engine tools offered next to the file tools (phase 5). With Claude Code (v0.52.3) they reach the CLI as AutoDE's MCP server. */
   engineTools?: EngineToolSet;
+  /** v0.52.3: the agent role the run is for (recorded by AutoDE's server when Claude Code calls its tools). */
+  agentName?: string;
 }
 
 export interface AgentExecutionContext {

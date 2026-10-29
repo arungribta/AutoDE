@@ -6,6 +6,22 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.52.3
+
+- **Run agent works on Claude Code** (owner: *Run agent* must work whatever the model; "the workflow should abstract away model-specific requirements"). Until now, with Claude Code as the panel's model, stage runs, *Work on it*, *Run it* and `@agent` were refused with "run AutoDE's agents in Claude Code itself".
+  - The panel already ran Claude Code headless (`claude -p`, its documented non-interactive mode). It now attaches **AutoDE's own MCP server** to that run: a temp config naming this extension's bundle (not an installed `autode` that may be another version), on the workspace, with `--strict-mcp-config` (only that server) and `--allowedTools` set to exactly the run's AutoDE tools.
+  - Claude Code keeps everything that makes it Claude Code: the model you choose, its own system prompt and its agent loop. Nothing is replaced or trimmed.
+  - The panel chat on Claude Code also gets AutoDE's read tools (CHT-7).
+- **Not a black box** (and the same trace on every model, owner). The run streams its events (`--output-format stream-json`). AutoDE reads them as they arrive: each tool call is a progress line in AutoDE's log, and an audit entry in the same shape AutoDE's own loop records for other models. *How this was answered* therefore shows the same steps, sources and proposals whichever model answered. Claude Code's built-in tools (Read, Grep, Glob, Edit, Write, Bash) are worded as AutoDE's own.
+- **Least privilege:** the server lists only the run's tools (`AUTODE_TOOLS`), so the model sees just what it may call, and any other tool is unknown to it. A side effect: a measured one-call run went from $0.28 to $0.05 equivalent (the full list of 90 tools was about 22,000 tokens). Hosts that start the server themselves still get every tool.
+- **The workflow history names the agent:** the server records the role (`AUTODE_AGENT_NAME`), not "Claude Code".
+- **Fixed before it shipped:** AutoDE's turn hook (v0.52.0) would have recorded the panel's own prompts as the user's chat messages in a workspace with the plugin installed. Runs the panel starts carry `AUTODE_PANEL_RUN=1`, and the turn hook skips them; the guard hook still applies.
+- After every agent run (any model), the panel re-reads the facts the run's engine appended, so the Context Inbox and packs show what the agent proposed.
+- **Under the `draft` policy with Claude Code,** AutoDE asks once a day before starting agents on its own, since they count against the Claude plan's usage.
+- **Limits of a Claude Code run:** 15 minutes and 60 turns. It can't ask you questions mid-run (headless): agents report what's missing, as on every model. Your other MCP servers aren't attached to these runs.
+- Verified with the real Claude Code CLI (2.1.312): a headless run built as the panel builds it called AutoDE's tool through the attached server, the stream was read, and the call was audited.
+- Measured: 407 tests (2 new: the server entry, flags, agent naming and no refusal; the stream parser, the tool filter over a real server and the hook skip). The v0.45.0 executor test now expects Claude Code to run the stage.
+
 ## 0.52.2
 
 - **How each reply was made** (CHT-8; owner: "more credibility"). Under every chat reply, and every agent run started from the chat, a collapsed **How this was answered** block shows:

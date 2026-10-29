@@ -51,6 +51,9 @@ export function stepText(tool: string, input: Record<string, unknown>): string {
     case 'autode_semantic_check': return `Checked the semantic model ${s(input.name) || '(given)'}`;
     case 'autode_semantic_draft': return `Drafted a semantic model ${s(input.name)}`.trim();
     case 'autode_maintenance_list': return 'Listed open maintenance items';
+    case 'autode_list_problems': return 'Listed the business problems';
+    case 'autode_workflow_next': return 'Took the next stage from the workflow';
+    case 'autode_record_artifact': return `Recorded ${s(input.path) || 'a deliverable'}`;
     case 'autode_workflow_status': return 'Read the workflow status';
     case 'autode_approvals_list': return 'Listed what waits for approval';
     case 'autode_list_decisions': return 'Listed decisions';
@@ -113,6 +116,8 @@ export interface TraceInput {
   via?: string;
   model?: string;
   provider?: string;
+  /** Whether the run had tools at all: a reply that used none gets a plain note, the same for every model. */
+  toolsOffered?: boolean;
   audit: readonly ToolCallAuditEntry[];
   reply: string;
   cited: readonly TraceSource[];
@@ -126,7 +131,8 @@ export function buildAnswerTrace(input: TraceInput): AnswerTrace {
   for (const e of input.audit) for (const x of e.sources ?? []) { const k = `${x.kind}:${x.id}`; if (!seen.has(k)) { seen.add(k); consulted.push(x); } }
   const proposed = input.audit.map((e) => e.proposed).filter((x): x is string => !!x);
   const { statements, uncited } = uncitedStatements(input.reply);
-  const note = !input.audit.length && input.provider === 'claude' ? 'Claude Code ran its own tool loop: its steps aren\'t recorded here.' : undefined;
+  // Every model's steps are recorded (Claude Code's through its event stream, v0.52.3); the note is for a run that had tools and recorded none.
+  const note = !input.audit.length && input.toolsOffered ? 'No tool calls were recorded for this reply: it comes from the context AutoDE gave the model.' : undefined;
   const facts = [...input.cited, ...consulted].filter((x) => x.kind === 'fact').length;
   const summary = [
     `${steps.length} step${steps.length === 1 ? '' : 's'}`,

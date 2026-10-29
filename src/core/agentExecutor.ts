@@ -56,10 +56,6 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
   if (!stage) return { ok: false, message: `No stage "${stageId}".`, outputs: [] };
   // A document stage awaiting approval may be run again (its draft is redone); a gate decision waits for a person.
   if (stage.record.status === 'done' || (stage.record.status === 'awaiting-approval' && (stage.record.decisionId || !isDocumentStage(stage.kind)))) return { ok: false, message: `${stageId} is ${stage.record.status === 'done' ? 'done; re-open it to change it' : 'waiting for approval'}.`, outputs: [] };
-  if (host.activeProvider() === 'claude') {
-    // Claude Code runs its own tool loop and doesn't take AutoDE's in-process tools; it gets the same assignment through the plugin.
-    return { ok: false, message: 'With Claude Code as the model, run AutoDE\'s agents in Claude Code itself: `autode plugin install --host claude`, then ask it to continue this problem (the autode-core-orchestrator skill). Or pick another model in AutoDE\'s settings.', outputs: [] };
-  }
   const probe = assignmentFor(scope, stageId, []);
   if (!probe.assignment) return { ok: false, message: probe.reason ?? `No assignment for ${stageId}.`, outputs: [] };
   // Checked before the model is called: an agent given nothing to work on can only write open questions.
@@ -80,7 +76,7 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
     host.log(`${role}: ${a.stage.title} — tier ${a.tier}, ${a.engineTools.length} AutoDE tools.`);
     const { text } = await host.runAgentWithTools(
       `Do the "${a.stage.title}" stage now. Record each deliverable with autode_record_artifact (stage "${a.stage.id}"). Then reply with a short summary for the person who approves the stage: what you recorded and what is missing or uncertain.`,
-      { systemPrompt: a.text, toolExecutionMode: mode, engineTools: await engine.toolSetNamed(a.engineTools), justification: `AutoDE ${role}: ${a.stage.title}`, approvalPrompt: mode === 'full' ? `Allow AutoDE's ${role} to write files in this workspace for the "${a.stage.title}" stage?` : undefined }
+      { systemPrompt: a.text, agentName: role, toolExecutionMode: mode, engineTools: await engine.toolSetNamed(a.engineTools), justification: `AutoDE ${role}: ${a.stage.title}`, approvalPrompt: mode === 'full' ? `Allow AutoDE's ${role} to write files in this workspace for the "${a.stage.title}" stage?` : undefined }
     );
     const outputs = [...new Set(readEvents(problemRoot, { stage: stageId }).filter((e) => e.type === 'recorded' && e.at >= since).flatMap((e) => e.files ?? []))];
     const summary = text.trim().slice(0, 4000) || `${role} recorded ${outputs.length} file(s).`;
@@ -110,7 +106,6 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
  * proposes; nothing is approved here.
  */
 export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, item: MaintenanceItem): Promise<{ ok: boolean; message: string }> {
-  if (host.activeProvider() === 'claude') return { ok: false, message: 'With Claude Code as the model, work on it in Claude Code: ask it to take the next AutoDE maintenance item (autode_maintenance_next).' };
   const engine = host.createEngine(`${item.agent} (VS Code)`);
   if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).' };
   try {
@@ -119,7 +114,7 @@ export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunSco
     host.log(`${a.assignment.role}: ${item.title} — ${a.assignment.engineTools.length} AutoDE tools.`);
     const { text } = await host.runAgentWithTools(
       'Work on this maintenance item now. Propose what it needs; then reply with a short summary for the person who approves it: what you proposed, where it is approved, and anything uncertain.',
-      { systemPrompt: a.assignment.text, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(a.assignment.engineTools), justification: `AutoDE ${a.assignment.role}: ${item.title}` }
+      { systemPrompt: a.assignment.text, agentName: a.assignment.role, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(a.assignment.engineTools), justification: `AutoDE ${a.assignment.role}: ${item.title}` }
     );
     return { ok: true, message: text.trim().slice(0, 4000) || `${a.assignment.role} finished.` };
   } catch (err) {
@@ -136,14 +131,13 @@ export async function runMaintenance(host: ExecutorHost, scope: Pick<StageRunSco
  * approved here. Stage work never comes here: it goes through its stage.
  */
 export async function runHandoff(host: ExecutorHost, scope: Pick<StageRunScope, 'workspaceRoot' | 'resourcesRoot'>, role: string, task: string): Promise<{ ok: boolean; message: string; audit?: ToolCallAuditEntry[] }> {
-  if (host.activeProvider() === 'claude') return { ok: false, message: `With Claude Code as the model, ask Claude Code itself: "@${role} ${task}" (the plugin installs AutoDE's agents there).` };
   const engine = host.createEngine(`${role} (VS Code)`);
   if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).' };
   try {
     const w = workOrder(scope.resourcesRoot, scope.workspaceRoot, role, { title: `Task from the chat: ${task.slice(0, 80)}`, body: `## The task\n${task}`, closing: 'Reply with what you found or proposed and where a person approves it.' }, await engine.listTools());
     if (!w.order) return { ok: false, message: w.reason ?? `No agent ${role}.` };
     host.log(`${role}: ${task.slice(0, 80)} — ${w.order.engineTools.length} AutoDE tools.`);
-    const { text, audit } = await host.runAgentWithTools(task, { systemPrompt: w.order.text, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(w.order.engineTools), justification: `AutoDE ${role}: ${task.slice(0, 80)}` });
+    const { text, audit } = await host.runAgentWithTools(task, { systemPrompt: w.order.text, agentName: role, toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(w.order.engineTools), justification: `AutoDE ${role}: ${task.slice(0, 80)}` });
     return { ok: true, message: text.trim().slice(0, 6000) || `${role} finished.`, audit };
   } catch (err) {
     return { ok: false, message: `${role} couldn't finish: ${err instanceof Error ? err.message : String(err)}` };

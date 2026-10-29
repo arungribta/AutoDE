@@ -1811,6 +1811,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     this.postMessage('chatResponse', { message: `Handing over to the **${role}**…` });
     const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${role} is working`, cancellable: false },
       () => runHandoff(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, role, task));
+    await this.afterAgentRun();
     const reply = r.ok ? `${r.message}\n\n_What the ${role} proposed waits for you: the Context Inbox, or Waiting for you._` : r.message;
     this.postMessage('chatResponse', { message: reply, error: !r.ok, citations: this.citationsFor(reply), trace: this.traceFor({ answeredBy: role, via, audit: r.audit ?? [], reply }) });
     this.postDecisions();
@@ -1843,6 +1844,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `AutoDE: the ${chosen.agent} is on "${chosen.title}"`, cancellable: false },
       () => runMaintenance(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, chosen));
     this.postLog(r.message);
+    await this.afterAgentRun();
     if (r.ok) void vscode.window.showInformationMessage(`The ${chosen.agent} finished: what it proposed waits for you (the Context Inbox, or Waiting for you).`);
     else void vscode.window.showWarningMessage(r.message.split('\n')[0]);
     this.postDecisions();
@@ -1886,16 +1888,37 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     return g.blocking;
   }
 
+  /**
+   * v0.52.3: after an agent run, the panel re-reads the facts the run's engine appended (its own engine client,
+   * or AutoDE's server under Claude Code: either way another workspace instance), so the Inbox and packs are current.
+   */
+  private async afterAgentRun(): Promise<void> {
+    try {
+      await this.contextFileManager?.getLedger().load();
+      await this.contextFileManager?.persistCompiledGraph();
+    } catch (err) { this.postLog(`Reloading facts after the run failed: ${err instanceof Error ? err.message : String(err)}`); }
+  }
+
+  /** v0.52.3: the day a person allowed `draft` runs on Claude Code (they use the Claude plan's allowance). */
+  private draftAllowedDay: string | undefined;
+
   /** MM2, policy `draft`: at a stage boundary AutoDE starts the agent of the next item itself, within the day's budget. */
   private async draftAtStageBoundary(): Promise<void> {
     const root = this.workspaceRoot?.fsPath;
     if (!root || draftRunsLeft(root) <= 0) return;
     const item = this.maintenanceItems().find((i) => i.agent !== 'person');
     if (!item) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (this.hub.activeProvider() === 'claude' && this.draftAllowedDay !== today) {
+      const ok = await vscode.window.showInformationMessage(`Maintenance (policy draft): let AutoDE start agents on its own today with Claude Code? They count against your Claude plan's usage. Next: the ${item.agent} on "${item.title}".`, 'Allow today', 'Not now');
+      if (ok !== 'Allow today') return;
+      this.draftAllowedDay = today;
+    }
     noteDraftRun(root, item.key, item.agent);
     this.postLog(`Maintenance (policy draft): the ${item.agent} drafts a proposal for "${item.title}".`);
     const r = await runMaintenance(this.executorHost(), { workspaceRoot: root, resourcesRoot: this.context.extensionPath }, item);
     this.postLog(r.message);
+    await this.afterAgentRun();
     this.postDecisions();
   }
 
@@ -2459,6 +2482,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           () => runStage({ createEngine: (n) => this.hub.createEngine(n), runAgentWithTools: (p, o) => this.hub.runAgentWithTools(p, o), activeProvider: () => this.hub.activeProvider(), log: (l) => this.postLog(l) },
             { workspaceRoot: scope.workspaceRoot, resourcesRoot: this.context.extensionPath, problemId: scope.problemId }, stage));
         this.postLog(r.ok ? `${r.message}${r.outputs.length ? ` Recorded: ${r.outputs.join(', ')}.` : ''}` : r.message);
+        await this.afterAgentRun();
         if (r.ok) void this.draftAtStageBoundary();
         if (!r.ok) void vscode.window.showWarningMessage(r.message.split('\n')[0]);
         this.postDecisions();

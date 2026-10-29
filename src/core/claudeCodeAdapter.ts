@@ -1,3 +1,4 @@
+import { ClaudeStreamParser } from './claudeStream';
 import * as vscode from 'vscode';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -208,11 +209,18 @@ export class ClaudeCodeAdapter {
       isNewSession?: boolean;
       /** AutoDE tool names this run may use (a skill's `allowed-tools`); narrows the CLI's `--tools` list. */
       allowedTools?: string[];
+      /** v0.52.3: AutoDE's MCP server for this run (a temp config file) and the `mcp__autode__…` tools pre-approved. */
+      mcp?: { configFile: string; allowedTools: string[] };
+      /** v0.52.3: reads streamed events (progress and tool calls) instead of the single final JSON. */
+      stream?: ClaudeStreamParser;
+      /** v0.52.3: added to the CLI's environment (AUTODE_PANEL_RUN marks AutoDE's own runs for its hooks). */
+      env?: Record<string, string>;
       cancellationToken?: vscode.CancellationToken;
     }
   ): Promise<string> {
     const mode = opts?.toolMode ?? 'none';
-    const timeoutMs = opts?.timeoutMs ?? (mode === 'none' ? 90000 : 180000);
+    // An agent's stage or maintenance run calls AutoDE's tools many times: more time and more turns than a chat reply.
+    const timeoutMs = opts?.timeoutMs ?? (opts?.mcp ? 900000 : mode === 'none' ? 90000 : 180000);
     const args = ['-p', '--output-format', 'json'];
 
     if (opts?.systemPrompt && opts.systemPrompt.trim().length > 0) {
@@ -244,14 +252,20 @@ export class ClaudeCodeAdapter {
       // NOT verified — in local testing the model described the command as text rather than
       // invoking the tool, for reasons not fully diagnosed (Windows tool-name/session quirk, or
       // model choice) — treat command execution via this path as best-effort, not guaranteed.
-      args.push('--tools', ...fullTools, '--permission-mode', 'acceptEdits', '--max-turns', '30');
+      args.push('--tools', ...fullTools, '--permission-mode', 'acceptEdits', '--max-turns', opts?.mcp ? '60' : '30');
     } else if (mode !== 'none' && readTools.length > 0) {
-      args.push('--tools', ...readTools, '--permission-mode', 'default', '--max-turns', '16');
+      args.push('--tools', ...readTools, '--permission-mode', 'default', '--max-turns', opts?.mcp ? '60' : '16');
     } else {
-      args.push('--tools', '', '--max-turns', '1');
+      args.push('--tools', '', '--max-turns', opts?.mcp ? '60' : '1');
+    }
+    if (opts?.mcp) {
+      // Only AutoDE's server (not the user's other MCP servers), and only the run's AutoDE tools: headless runs
+      // can't ask, so a tool not pre-approved here is refused, never prompted for.
+      args.push('--mcp-config', opts.mcp.configFile, '--strict-mcp-config', '--allowedTools', ...opts.mcp.allowedTools);
     }
 
-    return await this.run(args, prompt, timeoutMs, opts?.cwd, opts?.cancellationToken);
+    if (opts?.stream) { args[2] = 'stream-json'; args.push('--verbose'); }
+    return await this.run(args, prompt, timeoutMs, opts?.cwd, opts?.cancellationToken, opts?.stream, opts?.env);
   }
 
   public async testCall(): Promise<{ ok: boolean; text?: string; error?: string }> {
@@ -268,12 +282,15 @@ export class ClaudeCodeAdapter {
     stdinPrompt: string,
     timeoutMs: number,
     cwd?: string,
-    cancellationToken?: vscode.CancellationToken
+    cancellationToken?: vscode.CancellationToken,
+    stream?: ClaudeStreamParser,
+    env?: Record<string, string>
   ): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const child = spawn(this.cliPath, args, {
         cwd: cwd && fs.existsSync(cwd) ? cwd : undefined,
         windowsHide: true,
+        ...(env ? { env: { ...process.env, ...env } } : {}),
         stdio: ['pipe', 'pipe', 'pipe']
       });
 
@@ -301,7 +318,7 @@ export class ClaudeCodeAdapter {
         done(() => reject(new Error('Claude Code call was cancelled')));
       });
 
-      child.stdout.on('data', (d) => { stdout += d.toString(); });
+      child.stdout.on('data', (d) => { const t = d.toString(); if (stream) stream.feed(t); else stdout += t; });
       child.stderr.on('data', (d) => { stderr += d.toString(); });
 
       child.on('error', (err) => {
@@ -310,7 +327,7 @@ export class ClaudeCodeAdapter {
 
       child.on('close', (code) => {
         done(() => {
-          const parsed = parseResult(stdout);
+          const parsed = stream ? stream.result() : parseResult(stdout);
           if (parsed.text !== undefined) {
             resolve(parsed.text);
             return;

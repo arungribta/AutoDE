@@ -681,7 +681,8 @@ Message: ${message}`;
         allowedToolNames: opts.allowedToolNames,
         auditSink: audit,
         approvalPrompt: opts.approvalPrompt,
-        engineTools: opts.engineTools
+        engineTools: opts.engineTools,
+        agentName: opts.agentName
       },
       this.buildLlmContext()
     );

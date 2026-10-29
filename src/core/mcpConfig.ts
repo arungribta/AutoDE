@@ -31,6 +31,21 @@ export interface McpEntryChoice {
   note: string;
 }
 
+/**
+ * AutoDE's server for a headless Claude Code run started by the panel (v0.52.3): this extension's own
+ * bundle (the exact version the panel runs, not an installed `autode` that may be older), on the
+ * workspace, through Node on PATH or else VS Code's own runtime. `agentName` is the role the run is
+ * for, so the workflow's history says who recorded what.
+ */
+export function panelServerEntry(options: { extensionPath: string; workspaceRoot: string; agentName?: string; tools?: readonly string[]; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; execPath?: string }): McpServerEntry {
+  const bundle = path.join(options.extensionPath, 'dist', 'autode.js');
+  const args = [bundle, 'mcp', '--workspace', options.workspaceRoot];
+  // The run's tools only (least privilege; the model sees just what it may call).
+  const named: Record<string, string> = { ...(options.agentName ? { AUTODE_AGENT_NAME: options.agentName } : {}), ...(options.tools?.length ? { AUTODE_TOOLS: options.tools.join(',') } : {}) };
+  if (findOnPath('node', options.env ?? process.env, options.platform ?? process.platform)) return { command: 'node', args, ...(Object.keys(named).length ? { env: named } : {}) };
+  return { command: options.execPath ?? process.execPath, args, env: { ELECTRON_RUN_AS_NODE: '1', ...named } };
+}
+
 /** The `autode` executable on PATH, if any (no process is spawned). */
 export function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string | undefined {
   const dirs = (env.PATH ?? env.Path ?? '').split(platform === 'win32' ? ';' : ':').filter(Boolean);

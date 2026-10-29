@@ -1,4 +1,9 @@
 import * as vscode from 'vscode';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { panelServerEntry } from './mcpConfig';
+import { ClaudeStreamParser } from './claudeStream';
 import { LlmAdapter, LlmAdapterContext, LlmCompleteOptions, LlmHistoryTurn, extractJsonText } from './llmAdapter';
 import { LlmProvider, ToolCallAuditEntry, ToolExecutionMode, EngineToolSet } from '../engine/types';
 import { AgenticToolCall, executeAgenticTool, geminiSchema, toolSpecsForMode } from './agenticTools';
@@ -184,15 +189,35 @@ class ClaudeLlmAdapter implements LlmAdapter {
       if (!adapter) {
         throw new Error(info.error || 'Claude Code CLI is not available.');
       }
-      return await adapter.complete(prompt, {
-        model: opts.model,
-        systemPrompt: opts.systemPrompt,
-        toolMode: mode,
-        cwd: ctx.getWorkspaceRoot(),
-        sessionId: opts.claudeSessionId,
-        isNewSession: opts.isNewClaudeSession,
-        allowedTools: opts.allowedToolNames
-      });
+      // v0.52.3: AutoDE's tools reach the CLI as AutoDE's own MCP server, with exactly the run's tools pre-approved.
+      const root = ctx.getWorkspaceRoot();
+      const extensionPath = ctx.getExtensionContext()?.extensionPath;
+      const names = opts.engineTools?.specs.map((s) => s.name) ?? [];
+      let mcp: { configFile: string; allowedTools: string[] } | undefined;
+      if (names.length && root && extensionPath && mode !== 'none') {
+        const configFile = path.join(os.tmpdir(), `autode-mcp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+        fs.writeFileSync(configFile, JSON.stringify({ mcpServers: { autode: panelServerEntry({ extensionPath, workspaceRoot: root, agentName: opts.agentName, tools: names }) } }));
+        mcp = { configFile, allowedTools: names.map((n) => `mcp__autode__${n}`) };
+      }
+      // With AutoDE's server attached, read the run as it streams: progress in AutoDE's log, every tool call in the audit.
+      const stream = mcp ? new ClaudeStreamParser((line) => ctx.log(line)) : undefined;
+      try {
+        return await adapter.complete(prompt, {
+          model: opts.model,
+          systemPrompt: opts.systemPrompt,
+          toolMode: mode,
+          cwd: root,
+          sessionId: opts.claudeSessionId,
+          isNewSession: opts.isNewClaudeSession,
+          allowedTools: opts.allowedToolNames,
+          // AutoDE's hooks (the turn hook) skip runs AutoDE itself started: their prompts aren't the user's words.
+          env: { AUTODE_PANEL_RUN: '1' },
+          ...(mcp ? { mcp, stream } : {})
+        });
+      } finally {
+        if (stream && opts.auditSink) opts.auditSink.push(...stream.audit);
+        if (mcp) { try { fs.rmSync(mcp.configFile, { force: true }); } catch { /* temp file */ } }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ctx.log(`Claude Code request failed: ${message}`);
