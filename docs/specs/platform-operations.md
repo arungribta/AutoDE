@@ -205,7 +205,7 @@ How the systems AutoDE plans for differ:
 
 ### 6.1 POP1 — the catalog and the executor (v0.54.0)
 
-**Status:** part 1 shipped in v0.54.0 (CHANGELOG.md 0.54.0; HOW: technical-design.md §6.15): the format and its schemas, the loader with item-by-item checks, the executor, platform definitions for Snowflake, Databricks and Oracle, the CLI and MCP tools, team review as decisions, and LIN's lineage operations. Part 2, v0.54.1: the five baseline items and credentials through the environment. Composition and the asynchronous pattern move to POP2. The scope below stays the specification of what remains.
+**Status:** part 1 shipped in v0.54.0 (CHANGELOG.md 0.54.0; HOW: technical-design.md §6.15): the format and its schemas, the loader with item-by-item checks, the executor, platform definitions for Snowflake, Databricks and Oracle, the CLI and MCP tools, team review as decisions, and LIN's lineage operations. Part 2 shipped in v0.54.1 (CHANGELOG.md 0.54.1): the five baseline items as **dialect fragments** in the platform definitions (sampling, the regex match, booleans, distinct tuples, the key hash, and the dry run's `EXPLAIN` with Oracle's plan read-back), read by `fragmentsFor()` in `src/engine/platform/dialects.ts`, so the architecture baseline has no TO MOVE entries left; the lineage operations reorganised **one file per kind of lineage** (`lineage.columns`, `lineage.objects`) with every platform's SQL, and Oracle's view dependencies (`ALL_DEPENDENCIES`, per schema: `scopeLevel: schema`); credentials passed to CLIs through the environment (`access.cli.credentialEnv`); interim VS Code commands until POP4. **Deviation:** the dry run's `EXPLAIN` is a fragment, not an operation: an operation's `statement` parameter must be read-only, and the dry run compiles DDL and DML without running them. Composition and the asynchronous pattern move to POP2. POP1 is complete.
 
 Scope:
 - the format with its four transports (§2.1; `sql` and `cli` implemented first, `http` and `file` specified and tested on fixtures), its JSON Schema and loader (shipped plus team overrides, validation, each example checked in `npm test`);
@@ -220,8 +220,8 @@ Scope:
   - It is idempotent.
   - It retires edges only when a batch is complete, scoped by connection, method and databases. A partial result from a failed operation must therefore be recorded as incomplete, so nothing is retired.
 - **The operations:**
-  - Snowflake `ACCESS_HISTORY` and `OBJECT_DEPENDENCIES`;
-  - Databricks `system.access.table_lineage` and `system.access.column_lineage`.
+  - `lineage.columns`: Snowflake `ACCESS_HISTORY` and Databricks `system.access.column_lineage`;
+  - `lineage.objects`: Snowflake `OBJECT_DEPENDENCIES`, Databricks `system.access.table_lineage` and Oracle `ALL_DEPENDENCIES` (v0.54.1).
 - **Their result mapping:** rows to `{ upstream: {object, column?}, downstream: {object, column?} }`, or `{ upstream, entity: {type, id, name?} }` for a job or query entity.
 
 

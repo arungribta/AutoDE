@@ -15,6 +15,7 @@ import type { BaseNode, GraphEdge } from '../context/types';
 import { LAYOUT, layoutRel } from '../workspaceLayout';
 import { sanitizeSnapshot } from './sampleData';
 import { checkReadOnlySql } from './sqlGuard';
+import { fragmentsFor } from './dialects';
 
 export type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
 
@@ -248,7 +249,7 @@ export class ConnectionManager implements Disposable {
         if (!check.ok) throw new Error(`Probe refused: ${check.reason}`);
         return (await adapter.executeQuery(sql, { maxRows: 1, timeoutMs: 60000 })).rows;
       },
-      platform === 'snowflake' ? 'snowflake' : platform === 'databricks' ? 'spark_sql' : platform === 'oracle' ? 'oracle' : 'ansi',
+      fragmentsFor(platform),
       {
         sampleRows: options.sampleRows ?? 50_000,
         covers: (tableId) => {

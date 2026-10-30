@@ -1,0 +1,81 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { loadCatalog, platformById } from './operations/load';
+
+/**
+ * A platform's SQL dialect, as its platform definition states it (POP1 part 2;
+ * docs/specs/platform-operations.md §2.2). Probes, reconciliation and the dry
+ * run read these pieces instead of branching on a platform's name, so a new
+ * platform (or a changed one) is a change to its definition, not to code.
+ */
+
+export interface SqlFragments {
+  /** The platform id, or `ansi` for none. */
+  id: string;
+  /** A sampled table: `{table}` and `{n}`. */
+  sample: string;
+  /** A value matching a regular expression: `{column}` and `{pattern}` (already a quoted literal); absent = none. */
+  regexMatch?: string;
+  /** TRUE and FALSE as the platform writes them. */
+  booleans: [string, string];
+  /** `native`: COUNT(DISTINCT a, b) works; `emulated`: the caller counts distinct tuples another way. */
+  distinctTuples: 'native' | 'emulated';
+  /** An order-independent hash of a set of keys: `{keys}`; absent = none. */
+  keyHash?: string;
+  /** A statement's plan without running it: `{statement}`. */
+  explain: string;
+  /** When the plan is read by a second statement (Oracle's DBMS_XPLAN). */
+  explainResult?: string;
+}
+
+/** For a platform with no definition, or no connection: standard SQL. */
+export const ANSI: SqlFragments = { id: 'ansi', sample: '(SELECT * FROM {table} LIMIT {n}) s0', booleans: ['TRUE', 'FALSE'], distinctTuples: 'emulated', explain: 'EXPLAIN {statement}' };
+
+let registeredRoot: string | undefined;
+
+/** Where AutoDE's shipped platform definitions are (the extension, the CLI package, the MCP server set it at start). */
+export function setPlatformResourcesRoot(resourcesRoot: string): void { registeredRoot = resourcesRoot; cache.clear(); }
+
+const cache = new Map<string, SqlFragments>();
+
+/** Unset: the package this module ships in (bundled in dist/, or compiled to dist/engine/platform/), so a caller that never set it still gets the platform's dialect, not standard SQL. */
+function shippedRoot(): string | undefined {
+  for (let dir = __dirname, i = 0; i < 4; i++, dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'platforms')) && fs.existsSync(path.join(dir, 'platform-operations'))) return dir;
+  }
+  return undefined;
+}
+
+/** A platform's dialect from its definition (the team's approved copy when there is one), standard SQL for an unknown platform. */
+export function fragmentsFor(platformId: string | undefined, scope: { resourcesRoot?: string; workspaceRoot?: string } = {}): SqlFragments {
+  if (!platformId) return ANSI;
+  const resourcesRoot = scope.resourcesRoot ?? registeredRoot ?? shippedRoot();
+  const key = `${resourcesRoot ?? ''}|${scope.workspaceRoot ?? ''}|${platformId}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const d = resourcesRoot || scope.workspaceRoot ? platformById(loadCatalog({ resourcesRoot, workspaceRoot: scope.workspaceRoot }), platformId)?.dialect : undefined;
+  const f = d?.fragments ?? {};
+  const out: SqlFragments = d ? {
+    id: platformId,
+    sample: f.sample ?? ANSI.sample,
+    ...(f.regexMatch ? { regexMatch: f.regexMatch } : {}),
+    booleans: d.booleans ?? ANSI.booleans,
+    distinctTuples: f.distinctTuples === 'native' ? 'native' : 'emulated',
+    ...(f.keyHash ? { keyHash: f.keyHash } : {}),
+    explain: f.explain ?? ANSI.explain,
+    ...(f.explainResult ? { explainResult: f.explainResult } : {})
+  } : ANSI;
+  cache.set(key, out);
+  return out;
+}
+
+/** Fills a fragment's `{name}` holes with SQL the caller has already made safe (identifiers checked, literals quoted). */
+export function fill(fragment: string, values: Record<string, string>): string {
+  return fragment.replace(/\{([a-z]+)\}/g, (m, k: string) => (k in values ? values[k] : m));
+}
+
+/** The statements that show a plan without running it: one, or Oracle's two (EXPLAIN PLAN FOR, then the plan). */
+export function explainStatements(platformId: string | undefined, statement: string): string[] {
+  const f = fragmentsFor(platformId);
+  return [fill(f.explain, { statement }), ...(f.explainResult ? [f.explainResult] : [])];
+}

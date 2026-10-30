@@ -39,6 +39,11 @@ function parseSnowCliJson(stdout: string): Array<Record<string, unknown>> {
   }
 }
 
+/** An older CLI without `-x`, or one that didn't read the password from the environment. */
+function refusedEnvPassword(output: string): boolean {
+  return /no such option|unrecognized|temporary.connection|password (is )?(required|missing|empty)|incorrect username or password|authenticat/i.test(output);
+}
+
 /**
  * Executes SQL via `snow sql`, riding Snowflake's native protocol (the CLI is built
  * on the Python connector) rather than the public SQL API — Phase 3b tier 1, the
@@ -48,26 +53,32 @@ function parseSnowCliJson(stdout: string): Array<Record<string, unknown>> {
  * restrict the separate SQL API surface.
  */
 export class SnowflakeCliBackend implements ExecutionBackend {
+  /** v0.54.1: false once the CLI refused the password from its environment, so this backend passes it as `--password`. */
+  private passwordFromEnv = true;
+
   constructor(
     private readonly cliPath: string,
     private readonly spec: SnowflakeCliConnectionSpec,
-    private readonly log: (msg: string) => void
+    private readonly log: (msg: string) => void,
+    /** The variable the CLI reads the password from (the platform definition's `access.cli.credentialEnv`). */
+    private readonly passwordEnv = 'SNOWFLAKE_PASSWORD'
   ) {}
 
   /**
-   * Builds the CLI's connection args. For `adhoc`, `--password` is passed as a
-   * command-line argument — the CLI's own supported mechanism for this, not an
-   * AutoDE invention, but that means the plaintext value is briefly visible to
-   * anything on the same machine that can list process command lines (e.g. Task
-   * Manager/`ps`) for the life of this one short-lived process. It is never logged,
-   * written to disk, or included in an error message by AutoDE itself; the password
-   * still lives only in VS Code SecretStorage between runs.
+   * Builds the CLI's connection args. For `adhoc` (v0.54.1), a temporary
+   * connection (`-x`) whose password the CLI reads from its environment, so it is
+   * not on the command line where anything that lists processes could see it. An
+   * older CLI that refuses that gets `--password` instead, once, with a notice. The
+   * password is never logged, written to disk, or included in an error message by
+   * AutoDE itself; it lives only in VS Code SecretStorage (or the environment) between runs.
    */
-  private connectionArgs(): string[] {
+  connectionArgs(): string[] {
     if (this.spec.kind === 'named') {
       return ['-c', this.spec.connectionName];
     }
-    const args = ['--account', this.spec.account, '--user', this.spec.username, '--password', this.spec.password];
+    const args = this.passwordFromEnv
+      ? ['-x', '--account', this.spec.account, '--user', this.spec.username]
+      : ['--account', this.spec.account, '--user', this.spec.username, '--password', this.spec.password];
     if (this.spec.warehouse) { args.push('--warehouse', this.spec.warehouse); }
     if (this.spec.database) { args.push('--database', this.spec.database); }
     if (this.spec.schema) { args.push('--schema', this.spec.schema); }
@@ -80,11 +91,12 @@ export class SnowflakeCliBackend implements ExecutionBackend {
     const label = this.spec.kind === 'named' ? `connection "${this.spec.connectionName}"` : `account "${this.spec.account}" as "${this.spec.username}"`;
     this.log(`[snowflake:cli] Executing query via ${label} (${sql.length} chars)...`);
 
-    const result = spawnSync(
-      this.cliPath,
-      ['sql', ...this.connectionArgs(), '--format', 'JSON_EXT', '-q', sql],
-      { encoding: 'utf8', timeout: options?.timeoutMs, maxBuffer: 100 * 1024 * 1024, windowsHide: true }
-    );
+    let result = this.spawn(sql, options);
+    if (this.spec.kind === 'adhoc' && this.passwordFromEnv && result.status !== 0 && refusedEnvPassword(`${result.stderr ?? ''}${result.stdout ?? ''}`)) {
+      this.log(`[snowflake:cli] This Snowflake CLI didn't take the password from ${this.passwordEnv}; passing it as --password (visible to process listings) — update the CLI to keep it off the command line.`);
+      this.passwordFromEnv = false;
+      result = this.spawn(sql, options);
+    }
 
     if (result.error) {
       throw new Error(`Failed to run the Snowflake CLI: ${result.error.message}`);
@@ -103,6 +115,19 @@ export class SnowflakeCliBackend implements ExecutionBackend {
     const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
     const limitedRows = typeof options?.maxRows === 'number' ? rows.slice(0, options.maxRows) : rows;
     return { columns, rows: limitedRows, rowCount: limitedRows.length, executionTimeMs: Date.now() - startTime };
+  }
+
+  /** The CLI's environment: the password goes here for an ad-hoc connection, never in an argument. */
+  connectionEnv(): Record<string, string> {
+    return this.spec.kind === 'adhoc' && this.passwordFromEnv ? { [this.passwordEnv]: this.spec.password } : {};
+  }
+
+  private spawn(sql: string, options?: QueryOptions) {
+    return spawnSync(
+      this.cliPath,
+      ['sql', ...this.connectionArgs(), '--format', 'JSON_EXT', '-q', sql],
+      { encoding: 'utf8', timeout: options?.timeoutMs, maxBuffer: 100 * 1024 * 1024, windowsHide: true, env: { ...process.env, ...this.connectionEnv() } }
+    );
   }
 
   dispose(): void {

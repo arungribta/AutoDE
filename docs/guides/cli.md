@@ -157,6 +157,20 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 | `autode query --connection <id> "<sql>" [--max-rows <n>]` | Runs one read-only statement. It uses the same guard as the MCP server, so writes are refused. Row values are shown only when the connection allows sample data; otherwise you get the columns and the row count. |
 | `autode explain --connection <id> "<sql>"` | The platform's plan for a statement, which may be DDL or DML. Nothing runs. |
 
+## Platform operations
+
+Every read AutoDE makes on a platform is a platform operation: a reviewed YAML file with each platform's statement (user guide §7.3).
+
+| Command | |
+|---|---|
+| `autode platform operations [--platform <p>]` | Every operation: read or change, its platforms, shipped or your team's, approved or draft, and which capability uses it. Files refused as they load are listed with why. |
+| `autode platform show <id>` | One operation in full: its parameters with defaults, its result, and each platform's statement. |
+| `autode platform run <id> --connection <c> [--param name=value]… [--max-rows <n>]` | Runs a read. Parameters are bound by type, the statement is checked as read-only, and a failure says why and what ran. A change operation isn't run: you get the runbook step to propose. |
+| `autode platform customise <id>` | Copies one of AutoDE's operations or platform definitions into `.autode/config/` for you to change. An existing copy is kept. The copy is a draft. |
+| `autode platform propose <file>` | Proposes your team's file as a decision. A person approves exactly that content; until then it never runs. |
+| `autode lineage refresh --connection <c> [--database <d>]… [--days <n>]` | Reads observed lineage through the platform's lineage operations, for the databases (Oracle: schemas) bound to the connection, and records it. |
+| `autode lineage record <file.json> --connection <c> --method <name> [--complete]` | Records lineage you exported from elsewhere. |
+
 ## Connections
 
 Connections to Snowflake, Databricks and Oracle (Oracle as a source) are kept in `.autode/config/connections.yaml`, which is committed and shared by the team, and in your personal `.autode/local/connections.yaml`. Neither file ever holds a secret. These commands manage those files without VS Code. They write exactly what the extension's settings cards write.

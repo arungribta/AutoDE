@@ -31,7 +31,8 @@ import { RefreshReport, recordLineageBatch, refreshLines } from '../engine/linea
 import { platformOperationTools } from '../mcp/platformOperationTools';
 import type { OperationSummary } from '../engine/platform/operations/service';
 import type { PlatformOperation } from '../engine/platform/operations/types';
-import { checksumOf } from '../engine/platform/operations/load';
+import { checksumOf, customise } from '../engine/platform/operations/load';
+import { fragmentsFor, setPlatformResourcesRoot } from '../engine/platform/dialects';
 import { problemOverlap } from '../engine/documents/problemOverlap';
 import type { ObservedEdge } from '../engine/lineage/observed';
 import type { AssetContext, AssetType, ExploreOverview, GraphSlice, Layer, SearchResult, SemanticOverview } from '../engine/explore/explore';
@@ -457,6 +458,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
   const [command, ...rest] = positionals;
   if (values.help || !command) { io.out(USAGE); return command || values.help ? EXIT.OK : EXIT.USAGE; }
   const ctx: Ctx = { io, values, workspaceRoot: path.resolve(io.cwd, values.workspace ?? '.'), resourcesRoot: resourcesRoot ?? io.cwd, version, json: values.json === true };
+  setPlatformResourcesRoot(ctx.resourcesRoot);
   try {
     switch (command) {
       case 'validate': return await cmdValidate(ctx, rest);
@@ -705,7 +707,7 @@ function platformSession(ctx: Ctx): PlatformSession {
   return ctx.io.platform?.(options) ?? new PlatformSession({ ...options, allowWrite: false, env: ctx.io.env, log: (l) => ctx.io.err(redact(l)) });
 }
 
-const probeDialect = (platform: DataPlatformProvider): ProbeDialect => platform === 'databricks' ? 'spark_sql' : platform === 'oracle' ? 'oracle' : platform === 'snowflake' ? 'snowflake' : 'ansi';
+const probeDialect = (platform: DataPlatformProvider): ProbeDialect => fragmentsFor(platform);
 
 /** A read-only, aggregate-only probe executor on `--connection`, if given. */
 async function liveExecutor(ctx: Ctx, session: PlatformSession): Promise<ProbeExecutor | undefined> {
@@ -1804,6 +1806,13 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: !!r.ok, ...r }, text);
       return r.ok ? EXIT.OK : EXIT.FAILED;
     }
+    if (sub === 'customise' || sub === 'customize') {
+      if (!id) throw new CliError(EXIT.USAGE, 'platform customise <operation or platform id>.');
+      let r: ReturnType<typeof customise>;
+      try { r = customise({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot }, id); } catch (err) { throw new CliError(EXIT.NOT_FOUND, err instanceof Error ? err.message : String(err)); }
+      emit(ctx, { ok: true, ...r }, `${r.created ? 'Copied' : 'Already copied:'} ${id} to ${r.file}. Change it, then: autode platform propose ${r.file}. It is a draft and never runs until a person approves it.`);
+      return EXIT.OK;
+    }
     if (sub === 'propose') {
       if (!id) throw new CliError(EXIT.USAGE, 'platform propose <file> (under .autode/config/platform-operations/ or .autode/config/platforms/).');
       const full = path.resolve(ctx.io.cwd, id);
@@ -1816,7 +1825,7 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: true, decision: d }, `Proposed ${file} as ${d.id}. A person approves it: autode decisions approve ${d.id} (or the panel). Until then it is a draft and never runs.`);
       return EXIT.OK;
     }
-    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, or propose <file>.');
+    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, or propose <file>.');
   } finally { session.dispose(); }
 }
 

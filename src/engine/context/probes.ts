@@ -2,6 +2,7 @@ import { Assertion, Verification } from './assertions';
 import { AssertionLedger } from './ledger';
 import { BaseNode, GraphEdge, TableNode } from './types';
 import { createSubjectResolver } from './projection';
+import { ANSI, SqlFragments, fill } from '../platform/dialects';
 
 /**
  * Verification probes (Phase C4a, item 8; docs/specs/context-layer.md
@@ -93,7 +94,8 @@ export function combineProbeExecutors(executors: ReadonlyArray<ProbeExecutor | u
   };
 }
 
-export type ProbeDialect = 'snowflake' | 'spark_sql' | 'oracle' | 'ansi';
+/** POP1 part 2: a platform's dialect, from its platform definition (`fragmentsFor`); `ANSI` when there is none. */
+export type ProbeDialect = SqlFragments;
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)*$/;
 
@@ -102,20 +104,16 @@ function ident(name: string): string {
   return name;
 }
 
-function literal(v: unknown, dialect?: ProbeDialect): string {
+function literal(v: unknown, dialect: ProbeDialect = ANSI): string {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
-  // Oracle SQL has no boolean literals before 23ai.
-  if (typeof v === 'boolean') return dialect === 'oracle' ? (v ? '1' : '0') : v ? 'TRUE' : 'FALSE';
+  // As the platform writes them (Oracle before 23ai: 1 and 0).
+  if (typeof v === 'boolean') return v ? dialect.booleans[0] : dialect.booleans[1];
   return `'${String(v).replace(/'/g, "''")}'`;
 }
 
 function sampled(table: string, dialect: ProbeDialect, sampleRows: number | undefined): string {
   if (!sampleRows) return ident(table);
-  const n = Math.max(1, Math.floor(sampleRows));
-  if (dialect === 'snowflake') return `${ident(table)} SAMPLE (${n} ROWS)`;
-  if (dialect === 'spark_sql') return `${ident(table)} TABLESAMPLE (${n} ROWS)`;
-  if (dialect === 'oracle') return `(SELECT * FROM ${ident(table)} FETCH FIRST ${n} ROWS ONLY) s0`;
-  return `(SELECT * FROM ${ident(table)} LIMIT ${n}) s0`;
+  return fill(dialect.sample, { table: ident(table), n: String(Math.max(1, Math.floor(sampleRows))) });
 }
 
 /** The SQL for a probe — one row of aggregates. */
@@ -126,7 +124,7 @@ export function renderProbeSql(spec: ProbeSpec, dialect: ProbeDialect, options: 
   const anyNull = cols.map((c) => `${c} IS NULL`).join(' OR ');
   switch (spec.check) {
     case 'unique': {
-      const distinct = (dialect === 'ansi' || dialect === 'oracle') && cols.length > 1
+      const distinct = dialect.distinctTuples !== 'native' && cols.length > 1
         ? `(SELECT COUNT(*) FROM (SELECT DISTINCT ${cols.join(', ')} FROM ${from} WHERE NOT (${anyNull})) d)`
         : `COUNT(DISTINCT ${cols.join(', ')})`;
       return `SELECT COUNT(*) AS row_count, ${distinct} AS distinct_count, SUM(CASE WHEN ${anyNull} THEN 1 ELSE 0 END) AS null_count FROM ${from}`;
@@ -150,10 +148,8 @@ export function renderProbeSql(spec: ProbeSpec, dialect: ProbeDialect, options: 
       if (!spec.shape || !VALUE_SHAPES[spec.shape]) throw new Error('Probe refused: shape is email or phone.');
       const re = VALUE_SHAPES[spec.shape];
       const c = cols[0];
-      const match = dialect === 'snowflake' ? `REGEXP_LIKE(TO_VARCHAR(${c}), '${re}')`
-        : dialect === 'spark_sql' ? `CAST(${c} AS STRING) RLIKE '${re}'`
-          : dialect === 'oracle' ? `REGEXP_LIKE(TO_CHAR(${c}), '${re}')`
-            : spec.shape === 'email' ? `${c} LIKE '%_@_%._%'` : undefined;
+      const match = dialect.regexMatch ? fill(dialect.regexMatch, { column: c, pattern: `'${re}'` })
+        : spec.shape === 'email' ? `${c} LIKE '%_@_%._%'` : undefined;
       if (!match) throw new Error('Probe refused: the phone shape needs a dialect with regular expressions.');
       return `SELECT COUNT(*) AS row_count, SUM(CASE WHEN ${c} IS NOT NULL THEN 1 ELSE 0 END) AS present_count, SUM(CASE WHEN ${c} IS NOT NULL AND ${match} THEN 1 ELSE 0 END) AS match_count FROM ${from}`;
     }

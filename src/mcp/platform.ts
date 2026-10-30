@@ -3,6 +3,7 @@ import { ConnectionEntry, ConnectionsConfig, envStandInVariables, loadConnection
 import { registerBuiltInCredentialResolvers } from '../engine/platform/credentials';
 import { gateQueryResult, sanitizeSnapshot } from '../engine/platform/sampleData';
 import { checkReadOnlySql, checkSingleStatement, stripTrailingSemicolon } from '../engine/platform/sqlGuard';
+import { explainStatements } from '../engine/platform/dialects';
 import { EngineToolError } from './errors';
 import { EngineTool, ToolAnnotations } from './tools';
 import { governanceFacts } from '../engine/governance/governance';
@@ -276,11 +277,11 @@ export function platformTools(session: PlatformSession): EngineTool[] {
         if (check.firstKeyword === 'EXPLAIN') throw new EngineToolError('VALIDATION_FAILED', 'Pass the statement without EXPLAIN; the tool adds it.');
         const entry = session.entry(String(args.connectionId));
         const body = stripTrailingSemicolon(String(args.sql));
-        // Oracle writes the plan to the session's PLAN_TABLE and reads it back; the others return it directly.
+        // The platform definition's EXPLAIN; where the plan is read back separately (Oracle's PLAN_TABLE), the last statement reads it.
         const result = await run(entry.id, async (m) => {
-          if (entry.platform !== 'oracle') return m.executeQuery(`${entry.platform === 'snowflake' ? 'EXPLAIN USING TEXT' : 'EXPLAIN'} ${body}`, { maxRows: MAX_PLAN_ROWS });
-          await m.executeQuery(`EXPLAIN PLAN FOR ${body}`);
-          return m.executeQuery('SELECT plan_table_output AS "plan" FROM TABLE(DBMS_XPLAN.DISPLAY())', { maxRows: MAX_PLAN_ROWS });
+          const statements = explainStatements(entry.platform, body);
+          for (const statement of statements.slice(0, -1)) await m.executeQuery(statement);
+          return m.executeQuery(statements[statements.length - 1], { maxRows: MAX_PLAN_ROWS });
         });
         return { connectionId: entry.id, statement: check.firstKeyword, columns: result.columns, plan: result.rows };
       }

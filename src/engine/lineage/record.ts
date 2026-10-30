@@ -25,9 +25,13 @@ export interface RefreshReport {
   privileges?: string;
 }
 
-/** The databases (or catalogs) a connection's estate binding covers: the first part of each DATABASE.SCHEMA. */
-export function bindingDatabases(schemas: readonly string[] | undefined): string[] {
-  return [...new Set((schemas ?? []).map((s) => s.split('.')).filter((p) => p.length >= 2).map((p) => p[0].replace(/["`[\]]/g, '')))];
+/**
+ * What a connection's estate binding covers, at the platform's scope level: the databases (or catalogs) of each
+ * DATABASE.SCHEMA, or, where a read is scoped to schemas (Oracle's owners), the schemas.
+ */
+export function bindingDatabases(schemas: readonly string[] | undefined, level: 'database' | 'schema' = 'database'): string[] {
+  const parts = (schemas ?? []).map((s) => s.replace(/["`[\]]/g, '').split('.'));
+  return [...new Set(level === 'schema' ? parts.map((p) => p[p.length - 1]).filter(Boolean) : parts.filter((p) => p.length >= 2).map((p) => p[0]))];
 }
 
 /**
@@ -52,9 +56,10 @@ export async function refreshLineage(input: {
   const limit = Math.max(1, Math.min(20_000, input.limit ?? 5000));
   const catalog = loadCatalog({ resourcesRoot: input.resourcesRoot, workspaceRoot: input.workspaceRoot });
   const resolved = input.cfm.resolveConnection(input.target.connectionId);
-  const databases = input.databases?.length ? input.databases : bindingDatabases(resolved.schemas);
+  const definition = platformById(catalog, input.target.platform);
+  const databases = input.databases?.length ? input.databases : bindingDatabases(resolved.schemas, definition?.scopeLevel);
   const report: RefreshReport = { connectionId: input.target.connectionId, platform: input.target.platform, at: (input.now ?? new Date()).toISOString(), days, databases, methods: [] };
-  const cap = platformById(catalog, input.target.platform)?.capabilities.lineage;
+  const cap = definition?.capabilities.lineage;
   if (cap?.privileges) report.privileges = cap.privileges;
   const ops = cap?.support === 'not_applicable' ? [] : (cap?.operations ?? []);
   if (!ops.length) { report.note = cap?.note ?? `No lineage operations for ${input.target.platform}: its platform definition names none (platforms/${input.target.platform}.yaml, or a team copy).`; return report; }

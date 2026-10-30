@@ -91,7 +91,7 @@ export interface PlatformDefinition {
   category: 'warehouse' | 'lakehouse' | 'semantic' | 'catalog' | 'orchestration' | 'bi';
   transports: Array<'sql' | 'cli' | 'http' | 'file'>;
   /** How AutoDE reaches it: the CLI (installed by the user, never bundled) and the API where the vendor has one. */
-  access?: { cli?: { command: string; minVersion?: string; install?: string }; api?: { name: string } };
+  access?: { cli?: { command: string; minVersion?: string; install?: string; credentialEnv?: string }; api?: { name: string } };
   /** The operation that reads the platform's version. */
   versionOperation?: string;
   /** How names and values are written on this platform. */
@@ -104,6 +104,8 @@ export interface PlatformDefinition {
     /** v0.54.1: the dialect fragments probes and reconciliation use. */
     fragments?: Record<string, string>;
   };
+  /** What a read's `databases` parameter names here: databases (catalogs) by default, or schemas (Oracle's owners). */
+  scopeLevel?: 'database' | 'schema';
   capabilities: Record<string, PlatformCapability>;
   /** Object kinds it has, so an unread kind is noticed (POP3). */
   objectKinds?: string[];

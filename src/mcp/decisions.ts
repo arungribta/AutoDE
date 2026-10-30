@@ -8,6 +8,7 @@ import { AssertionLedger, NewAssertion } from '../engine/context/ledger';
 import { createSubjectResolver, isMirror } from '../engine/context/projection';
 import { recordChatProposals } from '../engine/context/chatExtraction';
 import { createProbeResolver, createSqlProbeExecutor, verifyAssertions, ProbeDialect } from '../engine/context/probes';
+import { fragmentsFor } from '../engine/platform/dialects';
 import { stakesFor } from '../engine/decisions/decisionStore';
 import { validateAssertionProposal } from '../engine/decisions/proposals';
 import { layoutPath } from '../engine/workspaceLayout';
@@ -233,7 +234,7 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
         let live;
         if (args.connectionId) {
           const entry = session.entry(String(args.connectionId));
-          const dialect: ProbeDialect = entry.platform === 'databricks' ? 'spark_sql' : entry.platform === 'oracle' ? 'oracle' : entry.platform === 'snowflake' ? 'snowflake' : 'ansi';
+          const dialect: ProbeDialect = fragmentsFor(entry.platform);
           const manager = await session.connect(entry);
           live = createSqlProbeExecutor(async (sql) => (await manager.executeQuery(sql, { maxRows: 10 })).rows as Array<Record<string, unknown>>, dialect);
         }
@@ -275,7 +276,7 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
         const a = ledger.get(String(args.id));
         if (!a || isMirror(a)) throw new EngineToolError('NOT_FOUND', `No fact "${String(args.id)}".`);
         const entry = session.entry(String(args.connectionId));
-        const dialect: ProbeDialect = entry.platform === 'databricks' ? 'spark_sql' : entry.platform === 'oracle' ? 'oracle' : entry.platform === 'snowflake' ? 'snowflake' : 'ansi';
+        const dialect: ProbeDialect = fragmentsFor(entry.platform);
         const manager = await session.connect(entry);
         const executor = createSqlProbeExecutor(async (sql) => (await manager.executeQuery(sql, { maxRows: 10 })).rows as Array<Record<string, unknown>>, dialect);
         const src = await ws.contextSources();

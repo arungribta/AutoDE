@@ -12,6 +12,15 @@ dialect:
   identifierQuote: '"'
   unquotedCase: upper
   booleans: ['1', '0']
+  # What probes, reconciliation and the dry run write differently here ({…} are filled by AutoDE, already made safe).
+  fragments:
+    sample: '(SELECT * FROM {table} FETCH FIRST {n} ROWS ONLY) s0'
+    regexMatch: 'REGEXP_LIKE(TO_CHAR({column}), {pattern})'
+    distinctTuples: emulated
+    explain: 'EXPLAIN PLAN FOR {statement}'
+    explainResult: 'SELECT plan_table_output AS "plan" FROM TABLE(DBMS_XPLAN.DISPLAY())'
+# What a lineage or estate read's "databases" parameter names here: Oracle's schemas (owners).
+scopeLevel: schema
 capabilities:
   estate:
     support: supported
@@ -21,8 +30,10 @@ capabilities:
     support: supported
     privileges: SELECT on the tables profiled (sampled).
   lineage:
-    support: not_applicable
-    note: Oracle is a source here; its lineage is designed (mappings and specifications).
+    support: partly
+    operations: [lineage.objects]
+    privileges: Nothing beyond the connection's own access; ALL_DEPENDENCIES shows the objects the user can see.
+    note: Views and materialized views from the objects they read. Oracle records no column lineage; that stays designed (mappings and specifications).
   compile.target:
     support: not_applicable
     note: Oracle is supported as a source.

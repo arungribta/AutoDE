@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { PlatformSession } from './platform';
 import { RunnerHost } from '../engine/runner/run';
 import { checkReadOnlySql, stripTrailingSemicolon } from '../engine/platform/sqlGuard';
+import { explainStatements } from '../engine/platform/dialects';
 
 /**
  * The runner's way to the platforms (v0.45.6): SQL through the same
@@ -19,9 +20,9 @@ export function createRunnerHost(options: { workspaceRoot: string; allowCli: boo
       if (mode === 'write') return session.executeApprovedChange(connectionId, body);
       const manager = await session.connect(entry);
       if (mode === 'explain') {
-        const r = entry.platform === 'oracle'
-          ? (await manager.executeQuery(`EXPLAIN PLAN FOR ${body}`), { rowCount: 1 })
-          : await manager.executeQuery(`${entry.platform === 'snowflake' ? 'EXPLAIN USING TEXT' : 'EXPLAIN'} ${body}`, { maxRows: 50 });
+        // The platform definition's EXPLAIN (and, where the plan is read back separately, that read).
+        let r = { rowCount: 0 };
+        for (const statement of explainStatements(entry.platform, body)) r = await manager.executeQuery(statement, { maxRows: 50 });
         return `The platform compiled it (plan: ${r.rowCount} line(s)).`;
       }
       const check = checkReadOnlySql(body);

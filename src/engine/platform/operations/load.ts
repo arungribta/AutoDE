@@ -155,3 +155,23 @@ export function operationById(catalog: Catalog, id: string): Loaded<PlatformOper
 export function platformById(catalog: Catalog, id: string): PlatformDefinition | undefined {
   return catalog.platforms.find((p) => p.item.id === id && p.status === 'approved')?.item;
 }
+
+/**
+ * v0.54.1: a team copy of a shipped operation or platform definition, to change and propose (`autode platform
+ * customise`, "AutoDE: Customise Platform Operation"). An existing copy is kept, never overwritten. The copy is a
+ * draft: it runs only once a person approves it.
+ */
+export function customise(scope: { resourcesRoot: string; workspaceRoot: string }, id: string): { file: string; created: boolean; what: 'operation' | 'platform' } {
+  const catalog = loadCatalog(scope);
+  const op = catalog.operations.find((o) => o.item.id === id && o.origin === 'shipped');
+  const pl = op ? undefined : catalog.platforms.find((p) => p.item.id === id && p.origin === 'shipped');
+  const source = op ?? pl;
+  if (!source) throw new Error(`No shipped operation or platform "${id}".`);
+  const what = op ? 'operation' : 'platform';
+  const target = layoutPath(scope.workspaceRoot, op ? 'platformOperations' : 'platformDefinitions', `${id}.yaml`);
+  const file = path.relative(scope.workspaceRoot, target).split(path.sep).join('/');
+  if (fs.existsSync(target)) return { file, created: false, what };
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.resolve(scope.workspaceRoot, source.file), target);
+  return { file, created: true, what };
+}

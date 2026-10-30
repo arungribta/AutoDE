@@ -14,6 +14,7 @@ import { PlatformSession, platformTools } from './platform';
 import { decisionTools } from './decisions';
 import { workspaceTools } from './workspaceTools';
 import { platformOperationTools } from './platformOperationTools';
+import { setPlatformResourcesRoot } from '../engine/platform/dialects';
 import { workflowTools } from './workflowTools';
 import { agentTools } from './agentTools';
 import { PRIMITIVE_RESOURCE_TEMPLATE, getPrompt, listPrompts, listResources, readResource } from './catalogs';
@@ -114,6 +115,8 @@ function protocolError(err: unknown): McpError {
 
 export function createAutodeServer(options: ServerOptions): Server {
   const ws = new EngineWorkspace({ workspaceRoot: options.workspaceRoot, resourcesRoot: options.resourcesRoot });
+  // POP1: where the shipped platform definitions are, for every platform's dialect.
+  setPlatformResourcesRoot(options.resourcesRoot);
   const log = (line: string) => (options.log ?? ((l: string) => process.stderr.write(l + '\n')))(redact(line));
   const platform = options.platform ?? new PlatformSession({ workspaceRoot: options.workspaceRoot, allowWrite: false, allowCli: options.allowCli === true, driversRoot: options.driversRoot, log });
   // The decision tools read the client's name (from `initialize`) at call time.

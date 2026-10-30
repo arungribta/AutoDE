@@ -48,6 +48,11 @@ import { describeMigration, migrateWorkspace } from './engine/workspaceMigration
 import { resolveAllowedToolNames } from './engine/skills/toolAllowList';
 import { openContext } from './engine/context/estateIngest';
 import { refreshLineage, refreshLines } from './engine/lineage/record';
+import { checksumOf, customise, loadCatalog } from './engine/platform/operations/load';
+import { summarize } from './engine/platform/operations/service';
+import { DecisionStore } from './engine/decisions/decisionStore';
+import { propose } from './engine/decisions/proposals';
+import { setPlatformResourcesRoot } from './engine/platform/dialects';
 
 /**
  * Resources that outlive a single command (e.g. `connectionManager` below,
@@ -59,6 +64,8 @@ const disposableRegistry = createDisposableRegistry();
 
 export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
+  // POP1: where the shipped platform definitions are, for every platform's dialect (probes, reconciliation, dry runs).
+  setPlatformResourcesRoot(context.extensionUri.fsPath);
   const hub = new DataAgentHubHub(configManager);
   // Tool-skill imports, reviews and lifecycle transitions (Phase S2); the durable record is each skill's sidecar.
   const skillLog = vscode.window.createOutputChannel('AutoDE: Tool Skills');
@@ -918,6 +925,55 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     } finally { cfm.dispose(); }
   });
 
+  // POP1 part 2 (v0.54.1): the platform operations catalog until its own view (POP4): browse, customise a shipped file, propose a team file.
+  const platformOperations = vscode.commands.registerCommand(`${EXTENSION_ID}.platformOperations`, async () => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const scope = { resourcesRoot: context.extensionUri.fsPath, workspaceRoot: wsRoot };
+    const catalog = loadCatalog(scope);
+    const items = [
+      ...summarize(catalog).map((o) => ({ label: `${o.status === 'draft' ? '$(circle-outline)' : '$(check)'} ${o.id}`, description: `${o.kind} · ${o.platforms.join(', ')} · ${o.origin}${o.status === 'draft' ? ' (draft)' : ''}`, detail: `${o.title}${o.usedBy.length ? ` — used by ${o.usedBy.join('; ')}` : ''}`, id: o.id, file: o.file, origin: o.origin })),
+      ...catalog.platforms.map((p) => ({ label: `$(server) ${p.item.id}`, description: `platform · ${p.origin}${p.status === 'draft' ? ' (draft)' : ''}`, detail: p.item.title, id: p.item.id, file: p.file, origin: p.origin }))
+    ];
+    if (catalog.errors.length) sidebarProvider.logToChat(`Platform operations refused: ${catalog.errors.join(' · ')}`);
+    const pick = await vscode.window.showQuickPick(items, { title: `Platform operations (${items.length})${catalog.errors.length ? ` — ${catalog.errors.length} file(s) refused, see the chat` : ''}`, matchOnDescription: true, matchOnDetail: true });
+    if (!pick) return;
+    const full = path.resolve(wsRoot ?? scope.resourcesRoot, pick.file);
+    if (pick.origin === 'team') { await vscode.window.showTextDocument(vscode.Uri.file(full)); return; }
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(full));
+    await vscode.window.showTextDocument(doc, { preview: true });
+    const choice = await vscode.window.showInformationMessage(`${pick.id} ships with AutoDE: read-only here. Customise it to change it for this workspace.`, 'Customise');
+    if (choice === 'Customise') await vscode.commands.executeCommand(`${EXTENSION_ID}.customisePlatformOperation`, pick.id);
+  });
+
+  const customisePlatformOperation = vscode.commands.registerCommand(`${EXTENSION_ID}.customisePlatformOperation`, async (id?: string) => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!wsRoot) { vscode.window.showErrorMessage('Open a workspace folder first.'); return; }
+    const scope = { resourcesRoot: context.extensionUri.fsPath, workspaceRoot: wsRoot };
+    if (!id) {
+      const catalog = loadCatalog(scope);
+      const shipped = [...catalog.operations, ...catalog.platforms].filter((x) => x.origin === 'shipped').map((x) => ({ label: x.item.id, description: x.item.title }));
+      id = (await vscode.window.showQuickPick(shipped, { title: 'Customise which operation or platform definition?' }))?.label;
+      if (!id) return;
+    }
+    try {
+      const r = customise(scope, id);
+      await vscode.window.showTextDocument(vscode.Uri.file(path.join(wsRoot, r.file)));
+      vscode.window.showInformationMessage(`${r.created ? 'Copied' : 'Already copied:'} ${id} to ${r.file}. It is a draft and never runs until approved: change it, then run "AutoDE: Propose Platform File for Approval".`);
+    } catch (err) { vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err)); }
+  });
+
+  const proposePlatformFile = vscode.commands.registerCommand(`${EXTENSION_ID}.proposePlatformFile`, async () => {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const editor = vscode.window.activeTextEditor;
+    if (!wsRoot || !editor) { vscode.window.showErrorMessage('Open the team copy (under .autode/config/platform-operations/ or .autode/config/platforms/) first.'); return; }
+    if (editor.document.isDirty) await editor.document.save();
+    const file = path.relative(wsRoot, editor.document.uri.fsPath).split(path.sep).join('/');
+    try {
+      const d = propose(new DecisionStore(wsRoot), { workspaceRoot: wsRoot, resourcesRoot: context.extensionUri.fsPath }, 'platform_operation', { file, checksum: checksumOf(editor.document.getText()) }, { proposedBy: { host: 'vscode', client: skillActor() } });
+      vscode.window.showInformationMessage(`Proposed ${file} as ${d.id}. A person approves it in Decisions; until then it is a draft and never runs.`);
+    } catch (err) { vscode.window.showErrorMessage(`Not proposed: ${err instanceof Error ? err.message : String(err)}`); }
+  });
+
   const reindex = vscode.commands.registerCommand(`${EXTENSION_ID}.reindex`, async () => {
     vscode.window.showInformationMessage('Context re-index triggered.');
   });
@@ -1189,7 +1245,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     openSidebar,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     copilotHandoff,
-    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, refreshLineageCmd, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, refreshLineageCmd, platformOperations, customisePlatformOperation, proposePlatformFile, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, updateToolSkill, classifyPersonalData, captureCoverage, findCandidates, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,

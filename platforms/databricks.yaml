@@ -6,13 +6,20 @@ title: Databricks
 category: lakehouse
 transports: [sql, cli, http]
 access:
-  cli: { command: databricks, install: "Install the Databricks CLI and sign in with a profile; the autode-databricks-* skills say how." }
+  cli: { command: databricks, credentialEnv: DATABRICKS_TOKEN, install: "Install the Databricks CLI and sign in with a profile; the autode-databricks-* skills say how." }
   api: { name: Databricks Statement Execution API }
 versionOperation: platform.version
 dialect:
   identifierQuote: '`'
   unquotedCase: lower
   booleans: ['TRUE', 'FALSE']
+  # What probes, reconciliation and the dry run write differently here ({…} are filled by AutoDE, already made safe).
+  fragments:
+    sample: '{table} TABLESAMPLE ({n} ROWS)'
+    regexMatch: 'CAST({column} AS STRING) RLIKE {pattern}'
+    distinctTuples: native
+    keyHash: 'SUM(CAST(xxhash64({keys}) AS DECIMAL(38, 0)))'
+    explain: 'EXPLAIN {statement}'
 capabilities:
   estate:
     support: supported
@@ -23,7 +30,7 @@ capabilities:
     privileges: SELECT on the tables profiled (sampled, within a query budget).
   lineage:
     support: supported
-    operations: [lineage.column_lineage, lineage.table_lineage]
+    operations: [lineage.columns, lineage.objects]
     privileges: The access schema of the system catalog enabled for the metastore; USE CATALOG on system, USE SCHEMA on system.access, SELECT on its table_lineage and column_lineage tables. Only Unity Catalog workloads are recorded; records are kept for a year.
   governance.tags:
     support: supported

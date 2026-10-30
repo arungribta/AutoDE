@@ -1,4 +1,5 @@
 import { typeClassOf } from '../grounding/sqlGrounding';
+import { fill, fragmentsFor } from '../platform/dialects';
 
 /**
  * Reconciliation plans (v0.45.11, mcp-engine §9.2 PA3 §9): read-only queries
@@ -34,15 +35,15 @@ const alias = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0
 
 function keyDistinct(platform: string | undefined, keys: readonly string[]): string {
   if (keys.length === 1) return `COUNT(DISTINCT ${keys[0]})`;
-  // Snowflake and Spark SQL count distinct tuples directly; elsewhere count distinct concatenations.
-  if (platform === 'snowflake' || platform === 'databricks') return `COUNT(DISTINCT ${keys.join(', ')})`;
+  // Where the platform counts distinct tuples directly (its definition says so), use that; elsewhere count distinct concatenations.
+  if (fragmentsFor(platform).distinctTuples === 'native') return `COUNT(DISTINCT ${keys.join(', ')})`;
   return `COUNT(DISTINCT ${keys.map((k) => `COALESCE(CAST(${k} AS VARCHAR(4000)), '~')`).join(` || '|' || `)})`;
 }
 
+/** An order-independent hash of the keys, where the platform's definition has one. */
 function keyHash(platform: string, keys: readonly string[]): string | undefined {
-  if (platform === 'snowflake') return `HASH_AGG(${keys.join(', ')})`;
-  if (platform === 'databricks') return `SUM(CAST(xxhash64(${keys.join(', ')}) AS DECIMAL(38, 0)))`;
-  return undefined;
+  const f = fragmentsFor(platform).keyHash;
+  return f ? fill(f, { keys: keys.join(', ') }) : undefined;
 }
 
 function sideQuery(side: ReconcileSide, keys: readonly string[], cols: ReadonlyArray<{ mine: string; label: string }>, hash: boolean): { sql: string; metrics: string[] } {
@@ -99,7 +100,7 @@ export function reconcilePlan(input: ReconcileInput): { plan?: ReconcilePlan; er
     );
     comparisons.push({ metric: 'missing_in_target', source: 'missing-in-target.missing_in_target', target: '0', rule: 'zero' }, { metric: 'missing_in_source', source: 'missing-in-source.missing_in_source', target: '0', rule: 'zero' });
   } else notes.push('The tables are on different connections: keys missing on either side can\'t be listed by a join. If counts differ, compare key ranges (MIN and MAX of the key) side by side, or land the source keys next to the target and reconcile there.');
-  if (!samePlatform) notes.push('No key hash: the two sides are on different platforms (or one is neither Snowflake nor Databricks), and hash functions differ between platforms.');
+  if (!samePlatform) notes.push('No key hash: the two sides are on different platforms (or their platform definition has no key hash), and hash functions differ between platforms.');
   if (cols.some((c) => input.source.columns.find((x) => x.name.toLowerCase() === c.source.toLowerCase())?.type !== input.target.columns.find((x) => x.name.toLowerCase() === c.target.toLowerCase())?.type)) {
     notes.push('Some columns change type between source and target: a sum or distinct count can differ by rounding or trimming. Take the tolerance from the quality rules (reconciliation tolerances), never pick one yourself.');
   }

@@ -18,7 +18,7 @@ export const OPERATION_SCHEMA = {
   required: ['formatVersion', 'id', 'title', 'description', 'kind', 'area', 'params', 'returns', 'platforms'],
   properties: {
     formatVersion: { const: 1, description: 'The format version of this file.' },
-    id: { type: 'string', pattern: '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$', description: 'area.name, for example lineage.access_history.' },
+    id: { type: 'string', pattern: '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$', description: 'area.name, for example lineage.columns.' },
     title: { type: 'string', minLength: 3, description: 'What it does, in a few words.' },
     description: { type: 'string', minLength: 10, description: 'What it does and what it returns, in plain language.' },
     kind: { enum: ['read', 'change'], description: 'read runs; change only becomes a runbook step a person approves.' },
@@ -89,7 +89,7 @@ export const PLATFORM_SCHEMA = {
     access: {
       type: 'object', additionalProperties: false,
       properties: {
-        cli: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' }, minVersion: version, install: { type: 'string' } } },
+        cli: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' }, minVersion: version, install: { type: 'string' }, credentialEnv: { type: 'string', pattern: '^[A-Z][A-Z0-9_]*$', description: 'The environment variable the CLI reads a password or token from: AutoDE passes the credential there, never as an argument.' } } },
         api: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string' } } }
       }
     },
@@ -103,6 +103,7 @@ export const PLATFORM_SCHEMA = {
         fragments: { type: 'object', additionalProperties: { type: 'string' } }
       }
     },
+    scopeLevel: { enum: ['database', 'schema'], description: 'What a read\'s databases parameter names here: databases or catalogs (default), or schemas (Oracle\'s owners).' },
     capabilities: {
       type: 'object',
       description: 'For each AutoDE capability: supported, partly or not applicable; its operations; the privileges it needs.',

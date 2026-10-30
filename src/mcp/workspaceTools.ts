@@ -15,6 +15,7 @@ import { DOCUMENT_ROLES, DocumentRole } from '../engine/context/pack';
 import { buildVocabulary, mineAbbreviations, parseVocabularyFile } from '../engine/context/vocabulary';
 import { conformanceFailures, packConformance, readPackDocument } from '../engine/context/packChecks';
 import { ProbeDialect, ProbeExecutor, combineProbeExecutors, createSqlProbeExecutor } from '../engine/context/probes';
+import { fragmentsFor } from '../engine/platform/dialects';
 import { layoutPath } from '../engine/workspaceLayout';
 import { CatalogEntry, CatalogFetcher } from '../engine/context/catalog';
 import { ContextFileManager } from '../engine/context/contextFileManager';
@@ -46,7 +47,7 @@ export function workspaceTools(session: PlatformSession): EngineTool[] {
     await pm.load();
     return { pm, cfm };
   };
-  const dialectOf = (platform: string): ProbeDialect => platform === 'databricks' ? 'spark_sql' : platform === 'oracle' ? 'oracle' : platform === 'snowflake' ? 'snowflake' : 'ansi';
+  const dialectOf = (platform: string): ProbeDialect => fragmentsFor(platform);
 
   return [
     {

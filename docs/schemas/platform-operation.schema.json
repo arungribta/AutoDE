@@ -24,7 +24,7 @@
     "id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
-      "description": "area.name, for example lineage.access_history."
+      "description": "area.name, for example lineage.columns."
     },
     "title": {
       "type": "string",

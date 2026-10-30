@@ -1,13 +1,14 @@
-# AutoDE platform operation (docs/specs/platform-operations.md §6.1): LIN's observed lineage on Snowflake.
+# AutoDE platform operation (docs/specs/platform-operations.md §6.1): LIN's observed column lineage.
+# One operation, an implementation per platform that records column lineage. A new platform adds its block here.
 formatVersion: 1
-id: lineage.access_history
-title: Column lineage from access history
-description: Each column a write (INSERT ... SELECT, CTAS, MERGE, UPDATE) produced, with the columns it came from, over the last days, for the databases named. Object and column names only.
+id: lineage.columns
+title: Column lineage
+description: Each column a write produced, with the columns it came from, over the last days, for the databases (Databricks catalogs) named. Object and column names only.
 kind: read
 content: metadata
 area: lineage
 params:
-  - { name: databases, type: literal_list, label: Databases, description: The databases whose lineage is read (either end in one of them). }
+  - { name: databases, type: literal_list, label: Databases or catalogs, description: The databases whose lineage is read (either end in one of them). }
   - { name: days, type: number, label: Days back, default: 30, min: 1, max: 365 }
   - { name: limit, type: number, label: Row limit, default: 5000, min: 1, max: 20001 }
 returns:
@@ -15,8 +16,9 @@ returns:
   - { name: upstream_column, label: Source column }
   - { name: downstream_object, label: Target object }
   - { name: downstream_column, label: Target column }
-  - { name: runs, as: number, label: Writes seen }
+  - { name: runs, as: number, label: Times seen }
 platforms:
+  # Snowflake: the columns each write (INSERT … SELECT, CTAS, MERGE, UPDATE) produced, from access history (Enterprise Edition).
   snowflake:
     sql: >
       SELECT
@@ -37,7 +39,26 @@ platforms:
       GROUP BY 1, 2, 3, 4
       ORDER BY runs DESC
       LIMIT {limit}
+  # Databricks: Unity Catalog's column lineage system table.
+  databricks:
+    sql: >
+      SELECT
+        source_table_full_name AS upstream_object,
+        source_column_name AS upstream_column,
+        target_table_full_name AS downstream_object,
+        target_column_name AS downstream_column,
+        COUNT(*) AS runs
+      FROM system.access.column_lineage
+      WHERE event_time >= current_timestamp() - INTERVAL {days} DAYS
+        AND source_table_full_name IS NOT NULL
+        AND target_table_full_name IS NOT NULL
+        AND (lower(split_part(target_table_full_name, '.', 1)) IN ({databases:lower})
+          OR lower(split_part(source_table_full_name, '.', 1)) IN ({databases:lower}))
+      GROUP BY 1, 2, 3, 4
+      ORDER BY runs DESC
+      LIMIT {limit}
 example:
+  platform: snowflake
   params: { databases: [RETAIL], days: 30, limit: 5000 }
   rows:
     - { UPSTREAM_OBJECT: RETAIL.SALES.ORDERS, UPSTREAM_COLUMN: AMOUNT, DOWNSTREAM_OBJECT: RETAIL.STAGING.STG_ORDERS, DOWNSTREAM_COLUMN: AMOUNT, RUNS: 30 }

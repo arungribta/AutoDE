@@ -6,6 +6,19 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.54.1
+
+- **POP1, part 2: the last platform SQL in the engine moves into the platform definitions** (docs/specs/platform-operations.md §6.1; requirement PLT-9). POP1 is complete.
+  - **Dialect fragments.** Each `platforms/*.yaml` now says how the platform samples a table, matches a regular expression, counts distinct tuples, hashes a set of keys and explains a statement (Oracle: `EXPLAIN PLAN FOR`, then the plan read from `DBMS_XPLAN`), beside its boolean literals. `fragmentsFor()` (`src/engine/platform/dialects.ts`) serves them to every caller, with standard SQL for a platform without a definition.
+  - **Moved onto them:** probe SQL (`probes.ts`), the reconciliation key hash and distinct count (`reconcilePlan.ts`), the platform-to-dialect mapping of the MCP tools (`decisions.ts`, `workspaceTools.ts`, the CLI, `ConnectionManager`), and the dry run's `EXPLAIN` (`runnerHost.ts`, `autode_explain_sql`). The SQL is what it was (the existing golden tests pass unchanged).
+  - **The architecture baseline has no TO MOVE entries left:** three files leave it, and 26 platform branches are gone. What remains is interface selection and wording.
+  - **Deviation:** the dry run's `EXPLAIN` is a dialect fragment, not an operation file as the roadmap said. An operation's `statement` parameter must be read-only, and the dry run exists to compile DDL and DML without running them.
+- **Lineage operations by kind of lineage** (owner, 2026-10-29). `lineage.columns` (Snowflake `ACCESS_HISTORY`, Databricks `system.access.column_lineage`) and `lineage.objects` (Snowflake `OBJECT_DEPENDENCIES`, Databricks `system.access.table_lineage`, Oracle `ALL_DEPENDENCIES`) replace the four per-platform files. Each holds every platform's SQL, so a new platform adds a block to each. Recorded lineage now names its method `columns` or `objects`.
+- **Oracle object lineage.** Views' dependencies on tables and views, read for the schemas bound to the connection. A platform definition's new `scopeLevel: schema` says that a read's `databases` are schemas (Oracle's owners).
+- **Credentials through the environment.** A Snowflake connection with a username and password now runs `snow sql -x --account … --user …` with the password in the CLI's environment (`SNOWFLAKE_PASSWORD`), so it no longer appears in process listings. A CLI that refuses that gets `--password` once, with a notice in the Output channel. The platform definitions record each CLI's variable (`access.cli.credentialEnv`).
+- **Until the catalog view (POP4): VS Code commands** *AutoDE: Platform Operations* (the catalog as a quick pick: status, platforms, shipped or the team's, what uses it; a shipped file opens read-only with *Customise*), *AutoDE: Customise Platform Operation* (a team draft copy, kept if it exists) and *AutoDE: Propose Platform File for Approval* (the open file as a `platform_operation` decision). On the CLI: `autode platform customise <id>`.
+- **Fixed:** `fragmentsFor` finds the shipped definitions when no entry point registered them (tests, library use), instead of falling back to standard SQL. The CLI guide gains the `autode platform` and `autode lineage` commands, which v0.54.0 left out.
+
 ## 0.54.0
 
 - **POP1, part 1: platform operations** (docs/specs/platform-operations.md; requirement PLT-9). Every interaction with a platform can now be one reviewed file run by one executor, the same way for AutoDE's code, the CLI, MCP and agents. A platform change is handled by updating files and skills, not by a release.

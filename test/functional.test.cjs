@@ -2841,12 +2841,14 @@ async function main() {
     const consented = createMock({ config: { dataPlatformCliConsent: true } });
     consented.__fs = { existsSync: (p) => p === mockPath };
     consented.__childProcess = {
-      spawnSync: (bin, args) => {
+      spawnSync: (bin, args, opts) => {
         if (bin === 'where' || bin === 'which') { return { status: 0, stdout: mockPath + '\n' }; }
         if (args[0] === '--version') { return { status: 0, stdout: '1.2.3\n' }; }
         assert.strictEqual(args[0], 'sql');
-        assert.deepStrictEqual(args.slice(1, 5), ['--account', 'ACME', '--user', 'jdoe']);
-        assert.ok(args.includes('--password'), 'password flag present');
+        // v0.54.1: a temporary connection whose password the CLI reads from its environment, not its command line.
+        assert.deepStrictEqual(args.slice(1, 6), ['-x', '--account', 'ACME', '--user', 'jdoe']);
+        assert.ok(!args.includes('--password') && !args.includes('secret-pw'), 'the password is never an argument');
+        assert.strictEqual(opts.env.SNOWFLAKE_PASSWORD, 'secret-pw');
         assert.ok(!args.includes('prod'), 'never falls back to a named connection');
         return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'RAW_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
       }
@@ -2860,6 +2862,25 @@ async function main() {
     const info = await withMock(consented, () => adapter.connect());
     assert.strictEqual(info.connected, true);
     assert.strictEqual(info.databaseName, 'RAW_DB');
+
+    // An older CLI that refuses -x: --password once, with a notice, and the password still never logged.
+    const calls = []; const logged = [];
+    const older = createMock({ config: { dataPlatformCliConsent: true } });
+    older.__fs = { existsSync: (p) => p === mockPath };
+    older.__childProcess = {
+      spawnSync: (bin, args, opts) => {
+        if (bin === 'where' || bin === 'which') { return { status: 0, stdout: mockPath + '\n' }; }
+        if (args[0] === '--version') { return { status: 0, stdout: '1.2.3\n' }; }
+        calls.push({ args, env: opts.env.SNOWFLAKE_PASSWORD });
+        if (args.includes('-x')) { return { status: 2, stderr: 'Error: No such option: -x' }; }
+        return { status: 0, stdout: JSON.stringify([{ CURRENT_DB: 'RAW_DB', CURRENT_SCHEMA: 'PUBLIC', CURRENT_VERSION: '8.1' }]) };
+      }
+    };
+    const { SnowflakeAdapter: SnowflakeAdapterOld } = freshAdapterModule(older, '../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const oldCli = new SnowflakeAdapterOld({ account: 'ACME', username: 'jdoe', password: 'secret-pw', database: 'RAW_DB', authMode: 'username-password' }, (m) => logged.push(m), { cliConsent: true });
+    assert.strictEqual((await withMock(older, () => oldCli.connect())).connected, true);
+    assert.ok(calls[0].args.includes('-x') && calls[1].args.includes('--password') && calls[1].env === undefined, JSON.stringify(calls.map((c) => c.args)));
+    assert.ok(logged.some((m) => /passing it as --password/.test(m)) && !logged.some((m) => m.includes('secret-pw')), logged.join('\n'));
 
     // Same auth mode but no password stored yet: falls through to the REST tier's
     // explicit, actionable rejection rather than a silent/bare failure.
@@ -5459,20 +5480,21 @@ async function main() {
 
   await test('v0.33.0: probes are fixed aggregate-only templates per dialect, refuse non-identifiers, and agree between live SQL and sample rows', async () => {
     const pr = require('../dist/engine/context/probes.js');
+    const pf = require('../dist/engine/platform/dialects.js').fragmentsFor;
     const spec = { check: 'unique', table: { fqn: 'CRM.PUBLIC.CUSTOMERS', id: 'obj:crm/prod/crm.customers' }, columns: ['CUST_NO'] };
-    assert.strictEqual(pr.renderProbeSql(spec, 'snowflake', { sampleRows: 1000 }), 'SELECT COUNT(*) AS row_count, COUNT(DISTINCT CUST_NO) AS distinct_count, SUM(CASE WHEN CUST_NO IS NULL THEN 1 ELSE 0 END) AS null_count FROM CRM.PUBLIC.CUSTOMERS SAMPLE (1000 ROWS)');
-    assert.ok(/TABLESAMPLE \(10 ROWS\)/.test(pr.renderProbeSql(spec, 'spark_sql', { sampleRows: 10 })));
-    assert.ok(/NOT IN \('A', 'O''B'\)/.test(pr.renderProbeSql({ ...spec, check: 'accepted_values', values: ['A', "O'B"] }, 'ansi')));
-    assert.ok(/LEFT JOIN \(SELECT DISTINCT ID FROM SHOP\.C\) t ON f\.SHOP_ID = t\.ID/.test(pr.renderProbeSql({ check: 'orphans', table: { fqn: 'CRM.C' }, columns: ['SHOP_ID'], to: { fqn: 'SHOP.C', columns: ['ID'] } }, 'snowflake')));
-    assert.throws(() => pr.renderProbeSql({ ...spec, columns: ['x; DROP TABLE y'] }, 'snowflake'), /not a plain identifier/);
+    assert.strictEqual(pr.renderProbeSql(spec, pf('snowflake'), { sampleRows: 1000 }), 'SELECT COUNT(*) AS row_count, COUNT(DISTINCT CUST_NO) AS distinct_count, SUM(CASE WHEN CUST_NO IS NULL THEN 1 ELSE 0 END) AS null_count FROM CRM.PUBLIC.CUSTOMERS SAMPLE (1000 ROWS)');
+    assert.ok(/TABLESAMPLE \(10 ROWS\)/.test(pr.renderProbeSql(spec, pf('databricks'), { sampleRows: 10 })));
+    assert.ok(/NOT IN \('A', 'O''B'\)/.test(pr.renderProbeSql({ ...spec, check: 'accepted_values', values: ['A', "O'B"] }, pf('ansi'))));
+    assert.ok(/LEFT JOIN \(SELECT DISTINCT ID FROM SHOP\.C\) t ON f\.SHOP_ID = t\.ID/.test(pr.renderProbeSql({ check: 'orphans', table: { fqn: 'CRM.C' }, columns: ['SHOP_ID'], to: { fqn: 'SHOP.C', columns: ['ID'] } }, pf('snowflake'))));
+    assert.throws(() => pr.renderProbeSql({ ...spec, columns: ['x; DROP TABLE y'] }, pf('snowflake')), /not a plain identifier/);
     for (const check of ['unique', 'not_null', 'accepted_values', 'orphans', 'freshness']) {
-      const sql = pr.renderProbeSql({ check, table: { fqn: 'T' }, columns: ['C'], values: ['A'], to: { fqn: 'U', columns: ['D'] } }, 'snowflake');
+      const sql = pr.renderProbeSql({ check, table: { fqn: 'T' }, columns: ['C'], values: ['A'], to: { fqn: 'U', columns: ['D'] } }, pf('snowflake'));
       assert.ok(/^SELECT COUNT\(\*\) AS row_count/.test(sql) && !/SELECT \*(?! FROM)/.test(sql.replace('COUNT(*)', '')), `${check} returns aggregates only`);
     }
     // The same aggregates from live SQL and from the sample agree.
     const rows = pr.parseSampleCsv(c4a.read('sources/samples/crm_customers.csv'));
     const sample = await pr.createSampleProbeExecutor(new Map([[spec.table.id, rows]])).run({ ...spec, columns: ['cust_no'] });
-    const live = await pr.createSqlProbeExecutor(async () => [{ ROW_COUNT: 4, DISTINCT_COUNT: 3, NULL_COUNT: 0 }], 'snowflake').run(spec);
+    const live = await pr.createSqlProbeExecutor(async () => [{ ROW_COUNT: 4, DISTINCT_COUNT: 3, NULL_COUNT: 0 }], pf('snowflake')).run(spec);
     assert.deepStrictEqual([sample.pass, sample.observed.duplicates, sample.source], [false, 1, 'sample']);
     assert.deepStrictEqual([live.pass, live.observed.duplicates, live.source], [false, 1, 'live']);
     const values = new Set(rows.flatMap((r) => Object.values(r)).filter((v) => v.length > 3));
@@ -10575,8 +10597,9 @@ async function main() {
     assert.deepStrictEqual(shapes, ['crm.customers.email:email', 'crm.customers.phone:phone', 'shop.customers.email:email', 'shop.customers.phone:phone']);
     // The shape probe is a fixed template that returns counts only, in every dialect with regular expressions.
     const pr = require('../dist/engine/context/probes.js');
-    for (const d of ['snowflake', 'spark_sql', 'oracle']) assert.match(pr.renderProbeSql({ check: 'shape', table: { fqn: 'crm.customers' }, columns: ['phone'], shape: 'phone' }, d), /^SELECT COUNT\(\*\) AS row_count, SUM\(.*\) AS present_count, SUM\(.*\) AS match_count FROM crm\.customers$/);
-    assert.throws(() => pr.renderProbeSql({ check: 'shape', table: { fqn: 't' }, columns: ['p'], shape: 'phone' }, 'ansi'), /regular expressions/);
+    const pf = require('../dist/engine/platform/dialects.js').fragmentsFor;
+    for (const d of ['snowflake', 'databricks', 'oracle'].map((x) => pf(x))) assert.match(pr.renderProbeSql({ check: 'shape', table: { fqn: 'crm.customers' }, columns: ['phone'], shape: 'phone' }, d), /^SELECT COUNT\(\*\) AS row_count, SUM\(.*\) AS present_count, SUM\(.*\) AS match_count FROM crm\.customers$/);
+    assert.throws(() => pr.renderProbeSql({ check: 'shape', table: { fqn: 't' }, columns: ['p'], shape: 'phone' }, pf('ansi')), /regular expressions/);
     // Recorded: those that passed, proposed but already verified; nothing twice; personal data is a person's to classify.
     const env = await c4a.ledger();
     try {
@@ -12527,8 +12550,11 @@ async function main() {
     const c = L.loadCatalog({ resourcesRoot: root });
     assert.deepStrictEqual(c.errors, []);
     assert.deepStrictEqual(c.platforms.map((p) => p.item.id).sort(), ['databricks', 'oracle', 'snowflake']);
-    for (const id of ['platform.version', 'lineage.access_history', 'lineage.object_dependencies', 'lineage.column_lineage', 'lineage.table_lineage']) assert.ok(L.operationById(c, id), id);
-    assert.deepStrictEqual(L.platformById(c, 'snowflake').capabilities.lineage.operations, ['lineage.access_history', 'lineage.object_dependencies']);
+    assert.deepStrictEqual(c.operations.map((o) => o.item.id).sort(), ['lineage.columns', 'lineage.objects', 'platform.version'], 'one operation per kind of lineage, an implementation per platform in it');
+    assert.deepStrictEqual(['snowflake', 'databricks', 'oracle'].map((id) => L.platformById(c, id).capabilities.lineage.operations), [['lineage.columns', 'lineage.objects'], ['lineage.columns', 'lineage.objects'], ['lineage.objects']]);
+    assert.deepStrictEqual(Object.keys(L.operationById(c, 'lineage.objects').item.platforms), ['snowflake', 'databricks', 'oracle']);
+    assert.deepStrictEqual([L.platformById(c, 'oracle').scopeLevel, L.platformById(c, 'snowflake').scopeLevel], ['schema', undefined]);
+    assert.deepStrictEqual([L.platformById(c, 'snowflake').access.cli.credentialEnv, L.platformById(c, 'databricks').access.cli.credentialEnv], ['SNOWFLAKE_PASSWORD', 'DATABRICKS_TOKEN']);
     // Binding.
     const sf = L.platformById(c, 'snowflake').dialect; const db = L.platformById(c, 'databricks').dialect;
     assert.strictEqual(B.identifier('RETAIL.SALES.ORDERS', sf), 'RETAIL.SALES.ORDERS', 'plain names stay unquoted, so the platform folds their case as usual');
@@ -12553,7 +12579,7 @@ async function main() {
       nodeFs.writeFileSync(nodePath.join(dir, 'odd.yaml'), 'formatVersion: 2\nid: x\n');
       const t = L.loadCatalog({ resourcesRoot: root, workspaceRoot: ws });
       assert.ok(t.errors.some((e) => /bad\.yaml: snowflake: a read operation must be one read-only statement/.test(e)) && t.errors.some((e) => /odd\.yaml: .*formatVersion/.test(e)), t.errors.join('\n'));
-      assert.ok(L.operationById(t, 'lineage.access_history') && !t.operations.some((o) => o.item.id === 'estate.drop_it'));
+      assert.ok(L.operationById(t, 'lineage.columns') && !t.operations.some((o) => o.item.id === 'estate.drop_it'));
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
     // The published schemas are the code's.
     assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'docs', 'schemas', 'platform-operation.schema.json'), 'utf8')), JSON.parse(JSON.stringify(S.OPERATION_SCHEMA)));
@@ -12585,7 +12611,7 @@ async function main() {
     E.forgetVersion();
     let versionReads = 0;
     const target = { connectionId: 'snowflake:t', platform: 'snowflake', query: async (s) => { if (/CURRENT_VERSION/.test(s)) { versionReads++; return [{ VERSION: '8.40.1' }]; } return [{ UPSTREAM_OBJECT: 'A.B.C', DOWNSTREAM_OBJECT: 'A.B.D' }]; } };
-    for (let i = 0; i < 3; i++) { const x = await Svc.runOnConnection({ catalog: c }, target, 'lineage.object_dependencies', { databases: ['A'] }); assert.ok(x.ok && x.version === '8.40.1'); }
+    for (let i = 0; i < 3; i++) { const x = await Svc.runOnConnection({ catalog: c }, target, 'lineage.objects', { databases: ['A'] }); assert.ok(x.ok && x.version === '8.40.1'); }
     assert.strictEqual(versionReads, 1, 'read once per connection');
     const changeCat = { ...c, operations: [...c.operations, { item: op({ id: 'governance.set_tag', kind: 'change', params: [{ name: 't', type: 'identifier', label: 'Table' }], platforms: { snowflake: { sql: 'ALTER TABLE {t} SET TAG pii = {t:literal}' } } }), origin: 'shipped', file: 'x', checksum: 'x', status: 'approved' }] };
     const err = await Svc.runOnConnection({ catalog: changeCat }, target, 'governance.set_tag', { t: 'RETAIL.SALES.ORDERS' }).catch((e) => e);
@@ -12617,14 +12643,14 @@ async function main() {
       } };
       const root = nodePath.join(__dirname, '..');
       let r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target });
-      assert.deepStrictEqual([r.databases, r.methods.map((m) => [m.operation, m.recorded, !!m.error])], [['RETAIL'], [['lineage.access_history', 2, false], ['lineage.object_dependencies', 0, true]]]);
+      assert.deepStrictEqual([r.databases, r.methods.map((m) => [m.operation, m.recorded, !!m.error])], [['RETAIL'], [['lineage.columns', 2, false], ['lineage.objects', 0, true]]]);
       assert.ok(ran.some((s) => /IN \('retail'\)/.test(s) && /-30,/.test(s) && /LIMIT 5001/.test(s)), 'bound: the database lower-cased, 30 days, the limit plus one to tell a cut-off read');
       const lines = refreshLines(r).join('\n');
-      assert.ok(/✗ lineage\.object_dependencies: SQL access control error/.test(lines) && /It needs: IMPORTED PRIVILEGES on the SNOWFLAKE database/.test(lines), lines);
+      assert.ok(/✗ lineage\.objects: SQL access control error/.test(lines) && /It needs: IMPORTED PRIVILEGES on the SNOWFLAKE database/.test(lines), lines);
       const live = () => cfm.getLedger().assertions().filter((a) => a.kind === 'lineage' && a.status === 'active').map((a) => `${a.subject[1]} -> ${a.subject[0]} [${a.value.method}]`).sort();
       assert.deepStrictEqual(live(), [
-        'obj:erp/prod/retail.sales.orders.amount -> obj:erp/prod/retail.staging.stg_orders.amount [access_history]',
-        'obj:erp/prod/retail.staging.stg_orders.amount -> obj:erp/prod/retail.mart.fct_orders.net_amount [access_history]'
+        'obj:erp/prod/retail.sales.orders.amount -> obj:erp/prod/retail.staging.stg_orders.amount [columns]',
+        'obj:erp/prod/retail.staging.stg_orders.amount -> obj:erp/prod/retail.mart.fct_orders.net_amount [columns]'
       ]);
       // The privilege granted: the view dependency comes in; a later failure of it retires nothing.
       depsFail = false;
@@ -12643,10 +12669,18 @@ async function main() {
       cfm.bindToSystem({ connection: 'databricks:lake', system: 'lake', environment: 'prod', schemas: ['retail.sales'] });
       const dbt = { connectionId: 'databricks:lake', platform: 'databricks', query: async (s) => /version\(\)/.test(s) ? [{ version: '3.5.0 abc' }] : /column_lineage/.test(s) ? [{ upstream_object: 'retail.sales.orders', upstream_column: 'amount', downstream_object: 'retail.mart.fct_orders', downstream_column: 'net_amount' }] : [{ upstream_object: 'retail.mart.fct_orders', downstream_object: null, entity_type: 'DASHBOARD_V3', entity_id: 'd-7' }] };
       r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: dbt });
-      assert.deepStrictEqual(r.methods.map((m) => [m.operation, m.recorded]), [['lineage.column_lineage', 1], ['lineage.table_lineage', 1]]);
-      // Oracle has no lineage capability: said plainly.
-      r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: { connectionId: 'oracle:x', platform: 'oracle', query: async () => [] } });
-      assert.ok(/designed/.test(r.note), r.note);
+      assert.deepStrictEqual(r.methods.map((m) => [m.operation, m.recorded]), [['lineage.columns', 1], ['lineage.objects', 1]]);
+      // v0.54.1 Oracle: its views' dependencies, read for the bound schemas (Oracle scopes reads to owners).
+      cfm.bindToSystem({ connection: 'oracle:hr', system: 'hr', environment: 'prod', schemas: ['HR'] });
+      const oran = [];
+      const ora = { connectionId: 'oracle:hr', platform: 'oracle', query: async (s) => { oran.push(s); return /product_component_version/.test(s) ? [{ VERSION: '19.0.0.0.0' }] : [{ UPSTREAM_OBJECT: 'HR.EMPLOYEES', DOWNSTREAM_OBJECT: 'HR.V_STAFF' }]; } };
+      r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: ora });
+      assert.deepStrictEqual([r.databases, r.methods.map((m) => [m.operation, m.recorded, !!m.error])], [['HR'], [['lineage.objects', 1, false]]], JSON.stringify(r));
+      assert.ok(oran.some((s) => /FROM all_dependencies/.test(s) && /IN \('hr'\)/.test(s) && /FETCH FIRST 5001 ROWS ONLY/.test(s)), oran.join('\n'));
+      assert.ok(cfm.getLedger().assertions().some((a) => a.kind === 'lineage' && a.status === 'active' && a.subject[0] === 'obj:hr/prod/hr.v_staff' && a.subject[1] === 'obj:hr/prod/hr.employees'), 'a table-level lineage fact');
+      // A platform with no definition (no lineage operations): said plainly.
+      r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: { connectionId: 'redshift:x', platform: 'redshift', query: async () => [] } });
+      assert.ok(/No lineage operations for redshift/.test(r.note), r.note);
       cfm.dispose();
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
@@ -12669,16 +12703,16 @@ async function main() {
     const W = ['--workspace', ws];
     try {
       let r = await cli(['platform', 'operations', ...W]);
-      assert.ok(r.code === 0 && /✓ lineage\.access_history\s+read\s+snowflake\s+shipped  — snowflake: lineage/.test(r.out), r.out);
-      r = await cli(['platform', 'show', 'lineage.access_history', ...W]);
+      assert.ok(r.code === 0 && /✓ lineage\.columns\s+read\s+snowflake, databricks\s+shipped  — databricks: lineage; snowflake: lineage/.test(r.out), r.out);
+      r = await cli(['platform', 'show', 'lineage.columns', ...W]);
       assert.ok(r.code === 0 && /SNOWFLAKE\.ACCOUNT_USAGE\.ACCESS_HISTORY/.test(r.out) && /days \(number\) = 30/.test(r.out), r.out);
       r = await cli(['platform', 'run', 'platform.version', '--connection', 'snowflake:ACME', ...W], { platform });
       assert.ok(r.code === 0 && /^version\n8\.40\.1\n1 row\(s\)/.test(r.out), r.out + r.err);
-      r = await cli(['platform', 'run', 'lineage.object_dependencies', '--connection', 'snowflake:ACME', '--param', 'databases=SALES', ...W, '--json'], { platform });
-      assert.deepStrictEqual(r.json().rows, [{ upstream_object: 'SALES.RAW.ORDERS', downstream_object: 'SALES.MART.V_ORDERS' }]);
-      assert.strictEqual((await cli(['platform', 'run', 'lineage.object_dependencies', '--connection', 'snowflake:ACME', '--param', 'nope=1', ...W], { platform })).code, 2);
+      r = await cli(['platform', 'run', 'lineage.objects', '--connection', 'snowflake:ACME', '--param', 'databases=SALES', ...W, '--json'], { platform });
+      assert.deepStrictEqual(r.json().rows, [{ upstream_object: 'SALES.RAW.ORDERS', downstream_object: 'SALES.MART.V_ORDERS', entity_type: null, entity_id: null, runs: null }]);
+      assert.strictEqual((await cli(['platform', 'run', 'lineage.objects', '--connection', 'snowflake:ACME', '--param', 'nope=1', ...W], { platform })).code, 2);
       r = await cli(['lineage', 'refresh', '--connection', 'snowflake:ACME', '--database', 'SALES', ...W], { platform });
-      assert.ok(/✓ lineage\.object_dependencies: 1 edge\(s\), 1 new/.test(r.out), r.out + r.err);
+      assert.ok(/✓ lineage\.objects: 1 edge\(s\), 1 new/.test(r.out), r.out + r.err);
       // A team's copy: a draft until approved, then run in place of the shipped one; an edit makes it a draft again.
       const dir = nodePath.join(ws, '.autode', 'config', 'platform-operations');
       nodeFs.mkdirSync(dir, { recursive: true });
@@ -12704,6 +12738,57 @@ async function main() {
       assert.ok(r.json().operations.some((o) => o.id === 'platform.version' && o.origin === 'team' && o.status === 'draft'), 'an edit makes it a draft again');
       assert.ok(nodeFs.existsSync(nodePath.join(ws, '.autode', 'config', 'platform-approvals.json')));
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.54.1 POP1 part 2: a platform\'s dialect is its definition — sampling, regular expressions, distinct tuples, the key hash and EXPLAIN come from platforms/*.yaml, standard SQL for a platform without one; a shipped file is customised as a team draft (never overwritten, never run until approved); the VS Code commands are wired', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const D = fresh('../dist/engine/platform/dialects.js');
+    const pr = require('../dist/engine/context/probes.js');
+    const [sf, db, ora, none] = ['snowflake', 'databricks', 'oracle', 'redshift'].map((x) => D.fragmentsFor(x));
+    assert.deepStrictEqual([sf.distinctTuples, db.distinctTuples, ora.distinctTuples, none.distinctTuples], ['native', 'native', 'emulated', 'emulated']);
+    assert.deepStrictEqual([none.id, none.regexMatch, none.keyHash], ['ansi', undefined, undefined], 'no definition: standard SQL, no regular expressions or key hash');
+    assert.deepStrictEqual(ora.booleans, ['1', '0']);
+    // The SQL is what it was before the fragments moved into the definitions.
+    const spec = { check: 'unique', table: { fqn: 'T' }, columns: ['A', 'B'] };
+    assert.ok(/FROM \(SELECT \* FROM T FETCH FIRST 5 ROWS ONLY\) s0$/.test(pr.renderProbeSql(spec, ora, { sampleRows: 5 })));
+    assert.ok(/FROM T SAMPLE \(5 ROWS\)$/.test(pr.renderProbeSql(spec, sf, { sampleRows: 5 })) && /FROM \(SELECT \* FROM T LIMIT 5\) s0$/.test(pr.renderProbeSql(spec, none, { sampleRows: 5 })));
+    assert.ok(/COUNT\(DISTINCT A, B\) AS distinct_count/.test(pr.renderProbeSql(spec, db)) && !/COUNT\(DISTINCT A, B\)/.test(pr.renderProbeSql(spec, ora)));
+    assert.ok(/CAST\(p AS STRING\) RLIKE '/.test(pr.renderProbeSql({ check: 'shape', table: { fqn: 't' }, columns: ['p'], shape: 'phone' }, db)));
+    const flag = (d) => pr.renderProbeSql({ check: 'accepted_values', table: { fqn: 't' }, columns: ['f'], values: [true] }, d);
+    assert.ok(/\(TRUE\)/.test(flag(sf)) && /\(1\)/.test(flag(ora)) && !/TRUE/.test(flag(ora)), flag(ora));
+    assert.strictEqual(D.fill(db.keyHash, { keys: 'a, b' }), 'SUM(CAST(xxhash64(a, b) AS DECIMAL(38, 0)))');
+    assert.deepStrictEqual(['snowflake', 'databricks', 'oracle', 'redshift'].map((x) => D.explainStatements(x, 'SELECT 1')), [
+      ['EXPLAIN USING TEXT SELECT 1'], ['EXPLAIN SELECT 1'],
+      ['EXPLAIN PLAN FOR SELECT 1', 'SELECT plan_table_output AS "plan" FROM TABLE(DBMS_XPLAN.DISPLAY())'], ['EXPLAIN SELECT 1']
+    ]);
+    // No platform branches left where these moved from.
+    for (const f of ['src/engine/context/probes.ts', 'src/engine/agents/reconcilePlan.ts', 'src/mcp/decisions.ts', 'src/mcp/workspaceTools.ts', 'src/mcp/runnerHost.ts']) {
+      assert.ok(!/=== '(snowflake|databricks|oracle|spark_sql)'/.test(nodeFs.readFileSync(nodePath.join(__dirname, '..', f), 'utf8')), f);
+    }
+    // Customise: a team draft copy, kept if it exists; listed as a draft that overrides; an unknown id is refused.
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-customise-'));
+    const W = ['--workspace', ws];
+    try {
+      let r = await cli(['platform', 'customise', 'lineage.objects', ...W]);
+      const copy = nodePath.join(ws, '.autode', 'config', 'platform-operations', 'lineage.objects.yaml');
+      assert.ok(r.code === 0 && /Copied lineage\.objects to \.autode\/config\/platform-operations\/lineage\.objects\.yaml/.test(r.out) && nodeFs.existsSync(copy), r.out + r.err);
+      nodeFs.appendFileSync(copy, '# ours\n');
+      r = await cli(['platform', 'customise', 'lineage.objects', ...W]);
+      assert.ok(/Already copied/.test(r.out) && /# ours/.test(nodeFs.readFileSync(copy, 'utf8')), 'an existing copy is never overwritten');
+      r = await cli(['platform', 'customise', 'oracle', ...W]);
+      assert.ok(r.code === 0 && nodeFs.existsSync(nodePath.join(ws, '.autode', 'config', 'platforms', 'oracle.yaml')), r.out);
+      r = await cli(['platform', 'operations', ...W, '--json']);
+      assert.ok(r.json().operations.some((o) => o.id === 'lineage.objects' && o.origin === 'team' && o.status === 'draft' && o.overrides), JSON.stringify(r.json().operations));
+      assert.strictEqual((await cli(['platform', 'customise', 'lineage.nope', ...W])).code, 5, 'not found');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    // The VS Code commands, until the catalog view (POP4).
+    const pkg = JSON.parse(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'package.json'), 'utf8'));
+    const ext = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+    for (const c of ['platformOperations', 'customisePlatformOperation', 'proposePlatformFile']) {
+      assert.ok(pkg.contributes.commands.some((x) => x.command === `autoDataEngineeringHub.${c}`), c);
+      assert.ok(ext.includes(`\`\${EXTENSION_ID}.${c}\``) && new RegExp(`refreshLineageCmd, platformOperations, customisePlatformOperation, proposePlatformFile`).test(ext), c);
+    }
+    assert.ok(/propose\(new DecisionStore\(wsRoot\)[^\n]*'platform_operation'/.test(ext), 'Propose makes a platform_operation decision');
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

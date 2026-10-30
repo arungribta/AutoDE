@@ -69,6 +69,11 @@
             },
             "install": {
               "type": "string"
+            },
+            "credentialEnv": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$",
+              "description": "The environment variable the CLI reads a password or token from: AutoDE passes the credential there, never as an argument."
             }
           }
         },
@@ -121,6 +126,13 @@
           }
         }
       }
+    },
+    "scopeLevel": {
+      "enum": [
+        "database",
+        "schema"
+      ],
+      "description": "What a read's databases parameter names here: databases or catalogs (default), or schemas (Oracle's owners)."
     },
     "capabilities": {
       "type": "object",

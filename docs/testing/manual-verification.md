@@ -1223,8 +1223,8 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 ## Part 53 — v0.54.0 Platform operations
 
 - [ ] **53.1 The catalog.**
-  Do: `autode platform operations`, then `autode platform show lineage.access_history`.
-  Expect: five operations, each ✓ shipped, with "snowflake: lineage" or "databricks: lineage" beside the lineage ones; the full statement with its parameters and defaults.
+  Do: `autode platform operations`, then `autode platform show lineage.columns`.
+  Expect: three operations (since v0.54.1: `lineage.columns`, `lineage.objects`, `platform.version`), each ✓ shipped, with the platforms whose lineage uses it beside the lineage ones; the full statement per platform with its parameters and defaults.
 - [ ] **53.2 A read on a live Snowflake account.**
   Do: `autode platform run platform.version --connection <yours>`.
   Expect: your account's version; with `--param nope=1`, a usage error naming the parameter.
@@ -1237,6 +1237,21 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 - [ ] **53.5 In VS Code.**
   Do: open a `platform-operations` YAML file and remove a required field.
   Expect: VS Code flags it from the schema.
+
+## Part 54 — v0.54.1 Platform dialects, Oracle lineage, credentials, the commands
+
+- [ ] **54.1 Probes and the dry run unchanged on a live account.**
+  Do: on a Snowflake connection, *AutoDE: Verify Claims with Probes* (or `autode probe --connection <yours>`) for a table with a key; `autode explain --connection <yours> "CREATE OR REPLACE VIEW v AS SELECT 1"`. On Oracle, `autode explain` a `SELECT`.
+  Expect: the probes run and report as before (Snowflake samples with `SAMPLE (n ROWS)`); Snowflake returns its plan; Oracle returns its plan lines from `DBMS_XPLAN`.
+- [ ] **54.2 Oracle object lineage.**
+  Do: bind an Oracle connection's schema that has views (`schemas: [HR]` in estate.yaml); `autode lineage refresh --connection <yours>`; open a view's Lineage tab.
+  Expect: `lineage.objects` read for `HR`, each view linked to the tables it reads (table level, *observed*).
+- [ ] **54.3 The password stays off the command line.**
+  Do: a Snowflake connection with username and password (Settings → Connections); run a query from the panel while watching the process list (Task Manager → Details, *Command line* column, or `Get-CimInstance Win32_Process -Filter "name like 'snow%'" | select CommandLine`).
+  Expect: `snow sql -x --account … --user …` with no password in it. With a Snowflake CLI too old for `-x`, the query still runs and the AutoDE Output channel says the password was passed as `--password`.
+- [ ] **54.4 Browse, customise, propose in VS Code.**
+  Do: *AutoDE: Platform Operations*; pick `lineage.objects`; *Customise*; change its row limit default; *AutoDE: Propose Platform File for Approval*; approve the decision; run *AutoDE: Platform Operations* again.
+  Expect: the shipped file opens read-only with *Customise*; the copy opens from `.autode/config/platform-operations/lineage.objects.yaml`; it is listed as a draft until approved, then as the team's copy in effect.
 
 ## Results
 
@@ -1551,5 +1566,9 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 53.3 |  |  |
 | 53.4 |  |  |
 | 53.5 |  |  |
+| 54.1 |  |  |
+| 54.2 |  |  |
+| 54.3 |  |  |
+| 54.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.
