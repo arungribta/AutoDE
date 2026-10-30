@@ -1,0 +1,33 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): when each table last changed, so facts about
+# a table are re-checked when it changes (refresh on use).
+formatVersion: 1
+id: estate.last_altered
+title: When tables last changed
+description: Each table's last structural or data change in one schema, as the platform records it. With tables, only those. Names and times only.
+kind: read
+content: metadata
+area: estate
+params:
+  - { name: database, type: identifier, label: Database (catalog) }
+  - { name: schema, type: literal, label: Schema }
+  - { name: tables, type: literal_list, label: Only these tables, required: false }
+returns:
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: Table }
+  - { name: last_altered, label: Last changed }
+platforms:
+  snowflake:
+    sql: >
+      SELECT table_schema, table_name, last_altered
+      FROM {database}.INFORMATION_SCHEMA.TABLES
+      WHERE table_schema = {schema:literal}[[ AND UPPER(table_name) IN ({tables:upper})]]
+  databricks:
+    sql: >
+      SELECT table_schema, table_name, last_altered
+      FROM {database}.information_schema.tables
+      WHERE table_schema = {schema:literal}[[ AND lower(table_name) IN ({tables:lower})]]
+example:
+  platform: snowflake
+  params: { database: SALES, schema: PUBLIC, tables: [ORDERS] }
+  rows:
+    - { TABLE_SCHEMA: PUBLIC, TABLE_NAME: ORDERS, LAST_ALTERED: '2026-10-29 08:00:00.000 -0700' }

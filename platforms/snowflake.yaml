@@ -23,8 +23,9 @@ dialect:
 capabilities:
   estate:
     support: supported
+    operations: [estate.list_tables, estate.list_columns, estate.list_views, estate.list_foreign_keys, estate.last_altered]
     privileges: USAGE on the databases and schemas in scope; their INFORMATION_SCHEMA views.
-    note: Read by the adapter until POP2 moves the estate reads to operations.
+    note: Databases and schemas to pick from, and profiling, are still read by the adapter. Snowflake's INFORMATION_SCHEMA has no primary-key columns.
   profiling:
     support: supported
     privileges: SELECT on the tables profiled (sampled, within a query budget).

@@ -152,7 +152,7 @@
           "sql": {
             "type": "string",
             "minLength": 1,
-            "description": "A statement; {param} binds a parameter, {param:literal} binds it as a quoted value."
+            "description": "A statement; {param} binds a parameter, {param:literal} binds it as a quoted value, and [[ … ]] is kept only when the parameters inside it have values."
           },
           "cli": {
             "type": "array",

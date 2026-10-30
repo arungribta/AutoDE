@@ -52,7 +52,7 @@ export const OPERATION_SCHEMA = {
       additionalProperties: {
         type: 'object', additionalProperties: false,
         properties: {
-          sql: { type: 'string', minLength: 1, description: 'A statement; {param} binds a parameter, {param:literal} binds it as a quoted value.' },
+          sql: { type: 'string', minLength: 1, description: 'A statement; {param} binds a parameter, {param:literal} binds it as a quoted value, and [[ … ]] is kept only when the parameters inside it have values.' },
           cli: { type: 'array', minItems: 1, items: { type: 'string' }, description: 'An argument list, never a shell line.' },
           http: {
             type: 'object', additionalProperties: false, required: ['method', 'path'],

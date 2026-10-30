@@ -131,6 +131,12 @@ export class ConnectionManager implements Disposable {
     }
 
     this.activeAdapter = factory(credentials, this.log);
+    // v0.55.1: an adapter reads its estate through the operations its platform definition names (where it names any).
+    const definition = platformDefinition(platform, { workspaceRoot: this.workspaceRoot() });
+    if (definition && this.activeAdapter instanceof BaseDataSourceAdapter && !(this.activeAdapter instanceof DefinitionAdapter)) {
+      const scope = { workspaceRoot: this.workspaceRoot() };
+      this.activeAdapter.useDefinition(definition, (id) => platformOperation(id, scope));
+    }
     const info = await this.activeAdapter.connect();
     this.log(`Connected to ${platform}: ${info.databaseName}.${info.schemaName}`);
     return info;

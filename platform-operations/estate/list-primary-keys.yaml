@@ -2,18 +2,26 @@
 formatVersion: 1
 id: estate.list_primary_keys
 title: Primary keys in a schema
-description: The columns of each declared primary key in one schema. Where the platform doesn't enforce keys (Redshift), they are what was declared, which probes can check.
+description: The columns of each declared primary key in one schema. Where the platform doesn't enforce keys (Databricks, Redshift), they are what was declared, which probes can check.
 kind: read
 content: metadata
 area: estate
 params:
-  - { name: database, type: literal, label: Database }
+  - { name: database, type: identifier, label: Database (catalog) }
   - { name: schema, type: literal, label: Schema }
 returns:
   - { name: table_schema, label: Schema }
   - { name: table_name, label: Table }
   - { name: column_name, label: Column }
 platforms:
+  # Unity Catalog's informational primary keys (v0.55.1: new; Snowflake's INFORMATION_SCHEMA has no key columns).
+  databricks:
+    sql: >
+      SELECT kcu.table_schema, kcu.table_name, kcu.column_name
+      FROM {database}.information_schema.table_constraints tc
+      JOIN {database}.information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+      WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = {schema:literal}
   # information_schema covers the connected database only.
   redshift:
     sql: >

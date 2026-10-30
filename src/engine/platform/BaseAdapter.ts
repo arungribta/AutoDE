@@ -1,6 +1,8 @@
 import { DEFAULT_ENVIRONMENT, ObjectIdentity, edgeId, objectId, originSideFor, slugifyId } from '../context/estate';
 import { DataPlatformProvider } from '../types';
 import { BaseNode, TableNode, ColumnNode, GraphEdge } from '../context/types';
+import { PlatformDefinition, PlatformOperation } from './operations/types';
+import { runOperation } from './operations/execute';
 import {
   IDataSourceAdapter,
   PlatformCapabilities,
@@ -16,6 +18,17 @@ import {
 } from './types';
 
 /** The estate's raw reads for one scope, as rows with the platform-neutral column names `assembleTables` and the others read. */
+/** Table types every platform shares; any other (a dynamic table, a metric view) is kept as the node's objectKind. */
+const STANDARD_TYPES = new Set<string>(['TABLE', 'VIEW', 'MATERIALIZED_VIEW', 'EXTERNAL', 'BASE TABLE']);
+
+/** The estate reads served by operations, by the read each one feeds. */
+const ESTATE_READS = {
+  tables: 'estate.list_tables', columns: 'estate.list_columns', views: 'estate.list_views',
+  primaryKeys: 'estate.list_primary_keys', foreignKeys: 'estate.list_foreign_keys'
+} as const;
+/** Operations of the estate capability that aren't object lists. */
+const NOT_OBJECT_LISTS = new Set<string>([...Object.values(ESTATE_READS), 'estate.table_stats', 'estate.last_altered', 'estate.list_databases', 'estate.list_schemas']);
+
 export interface EstateReads {
   tables: QueryResult;
   columns: QueryResult;
@@ -41,11 +54,86 @@ export interface EstateReads {
 export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
   protected connection: unknown = null;
 
+  /** v0.55.1: the platform definition whose estate operations read the estate (set by ConnectionManager, or by DefinitionAdapter). */
+  protected estateSource?: { definition: PlatformDefinition; operation: (id: string) => PlatformOperation | undefined };
+
   constructor(
     protected readonly platform: DataPlatformProvider,
     protected readonly credentials: Record<string, string>,
     protected readonly log: (msg: string) => void
   ) {}
+
+  /** v0.55.1: read the estate through the operations this platform definition names for `estate` (where it names any). */
+  public useDefinition(definition: PlatformDefinition, operation: (id: string) => PlatformOperation | undefined): void {
+    this.estateSource = { definition, operation };
+  }
+
+  /** The operations the definition names for the estate; none = the adapter's own queries. */
+  protected estateOperations(): string[] {
+    return this.estateSource?.definition.capabilities.estate?.operations ?? [];
+  }
+
+  /** Whether this scope's estate is read through operations (an adapter can keep its own queries for some scopes: Databricks' Hive metastore). */
+  protected estateByOperations(_scope: string | undefined): boolean {
+    return this.estateOperations().length > 0;
+  }
+
+  /** The database (catalog) and schema a read applies to where the scope doesn't say: the connection's. */
+  protected defaultScope(): { database: string; schema: string } {
+    return { database: this.credentials['database'] ?? this.credentials['catalog'] ?? '', schema: this.credentials['schema'] ?? '' };
+  }
+
+  /** `DATABASE.SCHEMA` or `SCHEMA`, completed from the connection. */
+  protected scopeParams(scope: string | undefined): { database: string; schema: string } {
+    const parts = scope ? scope.split('.') : [];
+    const d = this.defaultScope();
+    return { database: parts.length > 1 ? parts[0] : d.database, schema: parts.length ? parts[parts.length - 1] : d.schema };
+  }
+
+  /** Runs one of the definition's operations on this connection, with the parameters it declares. */
+  protected async runEstateOperation(id: string, params: Record<string, unknown>, options?: { signal?: AbortSignal }) {
+    const op = this.estateSource?.operation(id);
+    if (!this.estateSource || !op) return { ok: false as const, rows: [] as Array<Record<string, unknown>>, gap: `the operation ${id} isn't in the catalog` };
+    const declared = Object.fromEntries(Object.entries(params).filter(([k, v]) => v !== undefined && op.params.some((p) => p.name === k)));
+    const runner = { sql: async (sql: string, maxRows: number) => (await this.executeQuery(sql, { maxRows, timeoutMs: 120_000, signal: options?.signal })).rows };
+    return runOperation({ operation: op, platformId: this.estateSource.definition.id, platform: this.estateSource.definition, params: declared, runner, maxRows: 100_000 });
+  }
+
+  /** The estate's reads through operations: each a gap if it fails; extra object lists (a new kind) join the tables. */
+  private async readEstateByOperations(scope: string | undefined, tableNames: string[] | undefined, options: ExtractOptions | undefined): Promise<EstateReads> {
+    const params = { ...this.scopeParams(scope), ...(tableNames?.length ? { tables: tableNames } : {}) };
+    const listed = this.estateOperations();
+    const gaps: string[] = [];
+    const empty: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
+    const read = async (id: string): Promise<QueryResult> => {
+      if (!listed.includes(id)) return empty;
+      this.log(`[${this.platform}] ${id} (${params.database}.${params.schema})…`);
+      const r = await this.runEstateOperation(id, params, options);
+      if (!r.ok) { gaps.push(`${id}: ${r.gap}`); this.log(`[${this.platform}] ${id} not read: ${r.gap}`); return empty; }
+      return { columns: r.rows[0] ? Object.keys(r.rows[0]) : [], rows: r.rows, rowCount: r.rows.length, executionTimeMs: 0 };
+    };
+    const tables = await read(ESTATE_READS.tables);
+    // New object kinds: any other estate operation listing objects (a team file can add one) joins the tables, keeping its kind.
+    for (const id of listed.filter((x) => !NOT_OBJECT_LISTS.has(x))) tables.rows.push(...(await read(id)).rows);
+    // Row counts and sizes, where the platform keeps them apart from the table list.
+    const stats = await read('estate.table_stats');
+    if (stats.rows.length) {
+      const key = (r: Record<string, unknown>) => `${String(r.table_schema ?? '')}.${String(r.table_name ?? '')}`.toLowerCase();
+      const byTable = new Map(stats.rows.map((r) => [key(r), r]));
+      for (const t of tables.rows) {
+        const st = byTable.get(key(t));
+        if (st) { if (st.row_count !== null && st.row_count !== undefined) t.row_count = st.row_count; if (st.bytes !== null && st.bytes !== undefined) t.bytes = st.bytes; }
+      }
+    }
+    return {
+      tables,
+      columns: await read(ESTATE_READS.columns),
+      views: await read(ESTATE_READS.views),
+      primaryKeys: await read(ESTATE_READS.primaryKeys),
+      foreignKeys: await read(ESTATE_READS.foreignKeys),
+      gaps
+    };
+  }
 
   /**
    * A stable identifier for this specific connection (not just the platform
@@ -126,7 +214,8 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
    * defined by files reads them through its operations). Each read is
    * non-fatal: a failure leaves it empty and is reported as a gap.
    */
-  protected async readEstate(queries: PlatformMetadataQueries, _scope: string | undefined, options: ExtractOptions | undefined): Promise<EstateReads> {
+  protected async readEstate(queries: PlatformMetadataQueries, scope: string | undefined, options: ExtractOptions | undefined, tableNames?: string[]): Promise<EstateReads> {
+    if (this.estateByOperations(scope)) return this.readEstateByOperations(scope, tableNames, options);
     const empty: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
     const gaps: string[] = [];
     const read = async (what: string, sql: string | undefined, timeoutMs: number): Promise<QueryResult> => {
@@ -158,7 +247,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     const queries = this.getMetadataQueries(scope, tableNames);
 
     this.log(`[${this.platform}] Extracting metadata...`);
-    const reads = await this.readEstate(queries, scope, options);
+    const reads = await this.readEstate(queries, scope, options, tableNames);
     const tablesResult = reads.tables;
     const columnsResult = reads.columns;
     const fkResult = reads.foreignKeys;
@@ -374,6 +463,20 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
   /** Phase K2 refresh on use: the platform's last-altered timestamp per lower-cased fqn, for some tables of one schema. */
   async readLastAltered(scope: string | undefined, tables: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
+    if (this.estateByOperations(scope)) {
+      // v0.55.1: through the definition's estate.last_altered, where it names one.
+      if (!this.estateOperations().includes('estate.last_altered')) return out;
+      const params = this.scopeParams(scope);
+      const r = await this.runEstateOperation('estate.last_altered', { ...params, ...(tables.length ? { tables } : {}) });
+      const wanted = new Set(tables.map((t) => t.toLowerCase()));
+      for (const row of r.ok ? r.rows : []) {
+        const name = String(row.table_name ?? ''); const at = row.last_altered;
+        if (!name || at === null || at === undefined || (wanted.size && !wanted.has(name.toLowerCase()))) continue;
+        out.set(`${params.database}.${String(row.table_schema ?? '')}.${name}`.toLowerCase(), String(at));
+        out.set(`${String(row.table_schema ?? '')}.${name}`.toLowerCase(), String(at));
+      }
+      return out;
+    }
     const sql = this.getMetadataQueries(scope, tables).lastAltered;
     if (!sql) return out;
     const result = await this.executeQuery(sql, { timeoutMs: 30000 });
@@ -440,7 +543,8 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
           rowCount: table.rowCount,
           sizeBytes: table.sizeBytes,
           platform: snapshot.platform,
-          ...(table.lastAltered ? { lastAltered: table.lastAltered } : {})
+          ...(table.lastAltered ? { lastAltered: table.lastAltered } : {}),
+          ...(STANDARD_TYPES.has(table.type) ? {} : { objectKind: String(table.type).toLowerCase().replace(/[\s_]+/g, '_') })
         },
         version: 1,
         origin: sourceOrigin

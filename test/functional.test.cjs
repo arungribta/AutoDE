@@ -12119,7 +12119,7 @@ async function main() {
     }
     const src = (f) => fs.readFileSync(nodePath.join(__dirname, '..', 'src', ...f.split('/')), 'utf8');
     assert.match(src('core/llmProviders.ts'), /env: \{ AUTODE_PANEL_RUN: '1' \}/);
-    assert.match(src('core/webviewProvider.ts'), /await this\.afterAgentRun\(\);\n\s+if \(r\.ok\) void this\.draftAtStageBoundary\(\);/);
+    assert.match(src('core/webviewProvider.ts'), /await this\.afterAgentRun\(\);\r?\n\s+if \(r\.ok\) void this\.draftAtStageBoundary\(\);/);
     assert.match(src('core/webviewProvider.ts'), /'Allow today', 'Not now'/);
   });
 
@@ -13020,6 +13020,126 @@ async function main() {
     const walk = (d) => nodeFs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(nodePath.join(d, e.name)) : e.name.endsWith('.ts') ? [nodePath.join(d, e.name)] : []);
     const branches = ['engine', 'mcp', 'cli'].flatMap((d) => walk(nodePath.join(root, 'src', d))).filter((f) => /(===|!==|case)\s*'redshift'/.test(nodeFs.readFileSync(f, 'utf8')));
     assert.deepStrictEqual(branches, [], 'Redshift is defined by files: no branch on its name in the engine, MCP or CLI');
+  });
+
+  // ── v0.55.1: POP2 part 2 — Snowflake's and Databricks' estate through operations ──
+
+  /** What a Snowflake or Unity Catalog information_schema returns, by the view a statement reads (either AutoDE's old queries or the operations). */
+  function infoSchemaEstate(dialect, ran) {
+    const T = (n, type, extra = {}) => ({ table_catalog: 'SALES', table_schema: 'PUBLIC', table_name: n, table_type: type, row_count: 10, bytes: 2048, last_altered: '2026-10-29 08:00:00', comment: null, ...extra });
+    const C = (tb, c, type, pos, nullable = 'YES') => ({ table_catalog: 'SALES', table_schema: 'PUBLIC', table_name: tb, column_name: c, data_type: type, is_nullable: nullable, ordinal_position: pos, comment: null, column_default: null });
+    return async (sql) => {
+      ran.push(sql);
+      const only = /IN \(([^)]*)\)/.exec(sql);
+      const keep = (rows) => only ? rows.filter((r) => only[1].toUpperCase().includes("'" + String(r.table_name).toUpperCase() + "'")) : rows;
+      let rows = [];
+      if (/REFERENTIAL_CONSTRAINTS|constraint_column_usage/i.test(sql)) rows = [{ source_schema: 'PUBLIC', source_table: 'ORDERS', source_column: 'CUSTOMER_ID', target_schema: 'PUBLIC', target_table: 'CUSTOMERS', target_column: 'CUSTOMER_ID', constraint_name: 'FK1' }];
+      else if (/table_constraints/i.test(sql)) rows = dialect === 'databricks' ? [{ table_schema: 'PUBLIC', table_name: 'ORDERS', column_name: 'ORDER_ID' }] : [];
+      else if (/\.VIEWS/i.test(sql)) rows = [{ table_catalog: 'SALES', table_schema: 'PUBLIC', table_name: 'V_OPEN', view_definition: 'SELECT 1', comment: null }];
+      else if (/\.COLUMNS/i.test(sql)) rows = keep([C('ORDERS', 'ORDER_ID', 'NUMBER', 1, 'NO'), C('ORDERS', 'CUSTOMER_ID', 'NUMBER', 2), C('CUSTOMERS', 'CUSTOMER_ID', 'NUMBER', 1, 'NO'), C('V_OPEN', 'ORDER_ID', 'NUMBER', 1)]);
+      else if (/\.TABLES/i.test(sql) && /table_type/i.test(sql)) rows = keep([T('ORDERS', 'BASE TABLE', { comment: 'Orders' }), T('CUSTOMERS', 'BASE TABLE'), T('V_OPEN', 'VIEW')]);
+      else if (/\.TABLES/i.test(sql)) rows = keep([{ table_schema: 'PUBLIC', table_name: 'ORDERS', last_altered: '2026-10-29 08:00:00' }, { table_schema: 'PUBLIC', table_name: 'CUSTOMERS', last_altered: '2026-10-28 08:00:00' }]);
+      if (dialect === 'databricks') rows = rows.map((r) => { const { row_count, bytes, ...rest } = r; return rest; });
+      return { columns: rows[0] ? Object.keys(rows[0]) : [], rows, rowCount: rows.length, executionTimeMs: 1 };
+    };
+  }
+
+  await test('v0.55.1 POP2: Snowflake\'s and Databricks\' estate through operations gives the same estate as the adapters\' own queries, node for node; query-through still asks only for the named tables; last-altered comes from its operation; the Hive metastore keeps its own path', async () => {
+    const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    const D = fresh('../dist/engine/platform/definitions.js');
+    D.setPlatformResourcesRoot(root);
+    const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const { DatabricksAdapter } = fresh('../dist/engine/platform/adapters/DatabricksAdapter.js');
+    const strip = (snap) => ({ ...snap, extractedAt: 'x' });
+    for (const [name, make, scope, set] of [
+      ['snowflake', () => new SnowflakeAdapter({ account: 'ACME' }, () => {}), 'SALES.PUBLIC', (a) => { a.connectedDb = 'SALES'; a.connectedSchema = 'PUBLIC'; }],
+      ['databricks', () => new DatabricksAdapter({ workspaceUrl: 'adb-1' }, () => {}), 'SALES.PUBLIC', (a) => { a.connectedCatalog = 'SALES'; a.connectedSchema = 'PUBLIC'; }]
+    ]) {
+      const ranOld = []; const ranNew = [];
+      const old = make(); set(old); old.executeQuery = infoSchemaEstate(name, ranOld);
+      const neu = make(); set(neu); neu.executeQuery = infoSchemaEstate(name, ranNew);
+      neu.useDefinition(D.platformDefinition(name), (id) => D.platformOperation(id));
+      const a = strip(await old.extractMetadata({ schemaFilter: [scope] }));
+      const b = strip(await neu.extractMetadata({ schemaFilter: [scope] }));
+      if (name === 'databricks') {
+        // New with operations: Unity Catalog's declared primary keys.
+        assert.deepStrictEqual(b.tables.find((x) => x.name === 'ORDERS').columns.find((c) => c.name === 'ORDER_ID').isPrimaryKey, true);
+        b.tables.forEach((x) => x.columns.forEach((c) => { c.isPrimaryKey = false; }));
+      }
+      assert.deepStrictEqual(b, a, name + ': the same snapshot');
+      assert.deepStrictEqual(neu.snapshotToGraph(b, { system: 'erp', environment: 'prod', role: 'source' }).nodes.map((n) => n.id), old.snapshotToGraph(a, { system: 'erp', environment: 'prod', role: 'source' }).nodes.map((n) => n.id), name + ': node for node');
+      assert.ok(ranNew.every((q) => !/SHOW /i.test(q)) && ranNew.some((q) => /information_schema\.tables/i.test(q)), ranNew.join('\n'));
+      // Query-through: only the named tables, as before.
+      ranNew.length = 0;
+      const one = await neu.extractMetadata({ schemaFilter: [scope], tableFilter: ['orders'] });
+      assert.deepStrictEqual(one.tables.map((x) => x.name), ['ORDERS']);
+      assert.ok(ranNew.filter((q) => /\.(TABLES|COLUMNS)/i.test(q)).every((q) => /IN \('ORDERS'\)|IN \('orders'\)/.test(q)), ranNew.join('\n'));
+      // Refresh on use: last-altered through its operation.
+      const la = await neu.readLastAltered(scope, ['ORDERS']);
+      assert.strictEqual(la.get('public.orders'), '2026-10-29 08:00:00');
+    }
+    // The legacy Hive metastore keeps the adapter's SHOW TABLES path.
+    const hive = new DatabricksAdapter({ workspaceUrl: 'adb-1' }, () => {});
+    hive.catalogType = 'hive_metastore';
+    const ran = [];
+    hive.executeQuery = async (sql) => { ran.push(sql); return { columns: [], rows: /SHOW TABLES/.test(sql) ? [{ database: 'default', tableName: 'legacy_orders' }] : [], rowCount: 0, executionTimeMs: 1 }; };
+    hive.useDefinition(D.platformDefinition('databricks'), (id) => D.platformOperation(id));
+    const h = await hive.extractMetadata({ schemaFilter: ['hive_metastore.default'] });
+    assert.ok(ran.some((q) => /^SHOW TABLES IN hive_metastore\.default$/.test(q.trim())) && h.tables[0].name === 'legacy_orders', ran.join('\n'));
+  });
+
+  await test('v0.55.1 POP2: a new object kind comes into the estate from a team\'s operation file, with no code — approved with its platform definition, its objects arrive as their kind; an unapproved file changes nothing', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    const D = fresh('../dist/engine/platform/definitions.js');
+    D.setPlatformResourcesRoot(root);
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kind-'));
+    try {
+      const opsDir = nodePath.join(ws, '.autode', 'config', 'platform-operations');
+      const platDir = nodePath.join(ws, '.autode', 'config', 'platforms');
+      nodeFs.mkdirSync(opsDir, { recursive: true }); nodeFs.mkdirSync(platDir, { recursive: true });
+      const opText = [
+        'formatVersion: 1', 'id: estate.list_dynamic_tables', 'title: Dynamic tables', 'description: The dynamic tables of one schema.', 'kind: read', 'content: metadata', 'area: estate',
+        'params:', '  - { name: database, type: identifier, label: Database }', '  - { name: schema, type: literal, label: Schema }',
+        'returns:', '  - { name: table_catalog }', '  - { name: table_schema }', '  - { name: table_name }', '  - { name: table_type }',
+        'platforms:', '  snowflake:', "    sql: SELECT database_name AS table_catalog, schema_name AS table_schema, name AS table_name, 'DYNAMIC TABLE' AS table_type FROM {database}.INFORMATION_SCHEMA.DYNAMIC_TABLES WHERE schema_name = {schema:literal}", ''].join('\n');
+      nodeFs.writeFileSync(nodePath.join(opsDir, 'dynamic.yaml'), opText);
+      const shipped = nodeFs.readFileSync(nodePath.join(root, 'platforms', 'snowflake.yaml'), 'utf8');
+      const platText = shipped.replace('operations: [estate.list_tables, estate.list_columns,', 'operations: [estate.list_tables, estate.list_dynamic_tables, estate.list_columns,');
+      assert.notStrictEqual(platText, shipped);
+      nodeFs.writeFileSync(nodePath.join(platDir, 'snowflake.yaml'), platText);
+      const extract = async () => {
+        const mgr = new ConnectionManager(() => {}, { workspaceRoot: () => ws });
+        mgr.registerAdapterFactory('snowflake', (c, l) => {
+          const a = new SnowflakeAdapter(c, l);
+          a.connect = async () => { a.connectedDb = 'SALES'; a.connectedSchema = 'PUBLIC'; return { connected: true, platform: 'snowflake', databaseName: 'SALES', schemaName: 'PUBLIC', version: '9', capabilities: {} }; };
+          a.executeQuery = async (sql) => {
+            const base = await infoSchemaEstate('snowflake', [])(sql);
+            if (/DYNAMIC_TABLES/.test(sql)) return { columns: [], rows: [{ TABLE_CATALOG: 'SALES', TABLE_SCHEMA: 'PUBLIC', TABLE_NAME: 'DT_DAILY', TABLE_TYPE: 'DYNAMIC TABLE' }], rowCount: 1, executionTimeMs: 1 };
+            return base;
+          };
+          return a;
+        });
+        await mgr.connect('snowflake', { account: 'ACME' });
+        const snap = await mgr.extractMetadata({ schemaFilter: ['SALES.PUBLIC'] });
+        return { snap, nodes: mgr.snapshotGraph(snap).nodes };
+      };
+      let r = await extract();
+      assert.ok(!r.snap.tables.some((x) => x.name === 'DT_DAILY'), 'drafts never run');
+      for (const [what, id, file] of [['operations', 'estate.list_dynamic_tables', nodePath.join(opsDir, 'dynamic.yaml')], ['platforms', 'snowflake', nodePath.join(platDir, 'snowflake.yaml')]]) {
+        L.writeApproval(ws, what, id, { checksum: L.checksumOf(nodeFs.readFileSync(file, 'utf8')), by: 'priya', at: '2026-10-30T00:00:00Z', decisionId: 'D-1' });
+      }
+      r = await extract();
+      const dt = r.snap.tables.find((x) => x.name === 'DT_DAILY');
+      assert.ok(dt && dt.type === 'DYNAMIC TABLE', JSON.stringify(r.snap.tables.map((x) => [x.name, x.type])));
+      const node = r.nodes.find((n) => n.label === 'DT_DAILY');
+      assert.ok(node && node.type === 'table' && node.metadata.objectKind === 'dynamic_table', JSON.stringify(node));
+      assert.ok(!r.nodes.find((n) => n.label === 'ORDERS').metadata.objectKind, 'a standard kind adds nothing');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

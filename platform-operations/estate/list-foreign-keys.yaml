@@ -2,12 +2,12 @@
 formatVersion: 1
 id: estate.list_foreign_keys
 title: Foreign keys in a schema
-description: Each declared foreign-key column and the column it references, where either side is in the schema. Where the platform doesn't enforce keys (Redshift), they are what was declared.
+description: Each declared foreign-key column and the column it references, where either side is in the schema. Where the platform doesn't enforce keys (Snowflake, Databricks, Redshift), they are what was declared, which probes can check.
 kind: read
 content: metadata
 area: estate
 params:
-  - { name: database, type: literal, label: Database }
+  - { name: database, type: identifier, label: Database (catalog) }
   - { name: schema, type: literal, label: Schema }
 returns:
   - { name: constraint_name, label: Constraint }
@@ -18,6 +18,19 @@ returns:
   - { name: target_table, label: Referenced table }
   - { name: target_column, label: Referenced column }
 platforms:
+  snowflake:
+    sql: >
+      SELECT fk_schema_name AS source_schema, fk_table_name AS source_table, fk_column_name AS source_column,
+        pk_schema_name AS target_schema, pk_table_name AS target_table, pk_column_name AS target_column, constraint_name
+      FROM {database}.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+      WHERE fk_schema_name = {schema:literal} OR pk_schema_name = {schema:literal}
+  databricks:
+    sql: >
+      SELECT kcu.constraint_schema AS source_schema, kcu.table_name AS source_table, kcu.column_name AS source_column,
+        ccu.constraint_schema AS target_schema, ccu.table_name AS target_table, ccu.column_name AS target_column, kcu.constraint_name
+      FROM {database}.information_schema.key_column_usage kcu
+      JOIN {database}.information_schema.constraint_column_usage ccu ON kcu.constraint_name = ccu.constraint_name
+      WHERE kcu.constraint_schema = {schema:literal}
   # information_schema covers the connected database only. A key over several columns pairs them by position
   # only where the platform says so; here each column is listed against each referenced column.
   redshift:

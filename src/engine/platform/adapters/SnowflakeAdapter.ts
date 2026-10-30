@@ -210,6 +210,11 @@ export class SnowflakeAdapter extends BaseDataSourceAdapter {
     };
   }
 
+  /** v0.55.1: the connected database and schema, for the estate operations' scope. */
+  protected defaultScope(): { database: string; schema: string } {
+    return { database: this.connectedDb, schema: this.connectedSchema || 'PUBLIC' };
+  }
+
   getMetadataQueries(scope?: string, tables?: string[]): PlatformMetadataQueries {
     const parts = scope ? scope.split('.') : [];
     const db = parts.length > 1 ? parts[0] : this.connectedDb;

@@ -6,6 +6,17 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.55.1
+
+- **Snowflake's and Databricks' estate through platform operations** (POP2 part 2; docs/specs/platform-operations.md §6.2). Tables, columns, views, keys and last-changed times are read by `estate.list_tables`, `estate.list_columns`, `estate.list_views`, `estate.list_primary_keys`, `estate.list_foreign_keys` and the new `estate.last_altered`, each now with Snowflake, Databricks and Redshift implementations, as the platform definitions name them. A changed system view is now a file change, and a read the account can't do is a reported gap (as for Redshift since 0.55.0).
+  - **The same estate:** a golden test reads the same recorded information_schema both ways (the adapters' old queries and the operations) and gets the same snapshot, node for node.
+  - **Query-through stays cheap:** an operation template can have an optional section, `[[ … ]]`, kept only when its parameters have values; the table filter uses it.
+  - **New with operations:** Unity Catalog's declared primary keys come in for Databricks; row counts typed as numbers whatever case the platform's column names come in.
+  - **New object kinds from a file:** any other operation the definition's `estate` capability names that lists objects (for example a team's `estate.list_dynamic_tables`) brings them in as their own kind, kept on the node as `objectKind`. Approved with its definition, no code.
+  - **The machinery:** `BaseAdapter` reads the estate through its definition's operations when it names any (`useDefinition`, set by `ConnectionManager` for every adapter); each adapter only says its default scope.
+- **Still in the adapters (deviation):** the legacy Hive metastore (no information_schema: `SHOW TABLES`), the databases and schemas to pick from (`SHOW` commands), and profiling (per-column SQL). Oracle's estate stays in its adapter with Oracle's deferred work (§6.2a).
+- **Fixed:** a source-shape test failed on a working copy checked out with CRLF line endings.
+
 ## 0.55.0
 
 - **Amazon Redshift, defined by files** (POP2 part 1; docs/specs/platform-operations.md §6.2; owner, 2026-10-30: Redshift first). AutoDE reaches Redshift with no Redshift code, adapter or card written for it: everything comes from `platforms/redshift.yaml` and its operations.

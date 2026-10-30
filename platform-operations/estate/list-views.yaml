@@ -7,14 +7,28 @@ kind: read
 content: metadata
 area: estate
 params:
-  - { name: database, type: literal, label: Database }
+  - { name: database, type: identifier, label: Database (catalog) }
   - { name: schema, type: literal, label: Schema }
 returns:
   - { name: table_catalog, label: Database }
   - { name: table_schema, label: Schema }
   - { name: table_name, label: View }
   - { name: view_definition, label: Definition }
+  - { name: comment, label: Comment }
 platforms:
+  snowflake:
+    sql: >
+      SELECT table_catalog, table_schema, table_name, view_definition, comment
+      FROM {database}.INFORMATION_SCHEMA.VIEWS
+      WHERE table_schema = {schema:literal}
+      ORDER BY table_name
+  # Databricks' information_schema.views has no comment column.
+  databricks:
+    sql: >
+      SELECT table_catalog, table_schema, table_name, view_definition
+      FROM {database}.information_schema.views
+      WHERE table_schema = {schema:literal}
+      ORDER BY table_name
   # pg_views covers the connected database only (late-binding views included).
   redshift:
     sql: >
@@ -26,4 +40,4 @@ example:
   platform: redshift
   params: { database: dev, schema: sales }
   rows:
-    - { table_catalog: dev, table_schema: sales, table_name: v_open_orders, view_definition: "SELECT order_id, amount FROM sales.orders WHERE status = 'open'" }
+    - { table_catalog: dev, table_schema: sales, table_name: v_open_orders, view_definition: "SELECT order_id, amount FROM sales.orders WHERE status = 'open'", comment: null }

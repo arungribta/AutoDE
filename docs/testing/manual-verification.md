@@ -1276,6 +1276,18 @@ Needs a Redshift Serverless workgroup or provisioned cluster you can read, and t
   Do: with access keys instead of a profile (card fields), run a query while watching the process list.
   Expect: `aws redshift-data …` with no key on its command line.
 
+## Part 56 — v0.55.1 Snowflake and Databricks estate through operations
+
+- [ ] **56.1 The same estate.**
+  Do: on a Snowflake connection and a Databricks (Unity Catalog) connection already in the estate, *Re-verify Source Schema* (or `autode estate extract` again) for the same schemas.
+  Expect: no drift reported: the same tables, columns, views and keys as before 0.55.1. Databricks may add declared primary keys.
+- [ ] **56.2 A read the role can't do.**
+  Do: extract with a role that can't read `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` (Snowflake) or `information_schema.constraint_column_usage` (Databricks).
+  Expect: the tables and columns come in; the result says the foreign keys weren't read and why.
+- [ ] **56.3 A Hive metastore schema** (if your workspace has one).
+  Do: extract `hive_metastore.default`.
+  Expect: its tables listed as before (names only, through `SHOW TABLES`).
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1599,5 +1611,8 @@ Needs a Redshift Serverless workgroup or provisioned cluster you can read, and t
 | 55.4 |  |  |
 | 55.5 |  |  |
 | 55.6 |  |  |
+| 56.1 |  |  |
+| 56.2 |  |  |
+| 56.3 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

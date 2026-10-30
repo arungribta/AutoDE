@@ -83,9 +83,14 @@ export function valuesFor(params: readonly OperationParam[], given: Record<strin
   return out;
 }
 
-/** Binds `{param}` and `{param:mode}` in a template; `{{` and `}}` are literal braces. */
+/**
+ * Binds `{param}` and `{param:mode}` in a template; `{{` and `}}` are literal braces. v0.55.1: `[[ … ]]` is an
+ * optional section, kept only when every parameter named inside it has a value (an optional filter).
+ */
 export function bindTemplate(template: string, params: readonly OperationParam[], values: Record<string, unknown>, d: Dialect = {}): string {
   const byName = new Map(params.map((p) => [p.name, p] as const));
+  const named = (section: string) => [...section.matchAll(/\{([a-z][a-z0-9_]*)(?::[a-z_]+)?\}/g)].map((m) => m[1]);
+  template = template.replace(/\[\[([\s\S]*?)\]\]/g, (_m, section: string) => (named(section).every((n) => values[n] !== undefined) ? section : ''));
   return template.replace(/\{\{|\}\}|\{([a-z][a-z0-9_]*)(?::([a-z_]+))?\}/g, (m, nm: string | undefined, mode: string | undefined) => {
     if (m === '{{') return '{';
     if (m === '}}') return '}';

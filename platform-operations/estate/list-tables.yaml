@@ -3,20 +3,37 @@
 formatVersion: 1
 id: estate.list_tables
 title: Tables in a schema
-description: The tables and views of one schema, with their type and comment. Object names only.
+description: The tables and views of one schema, with their type, comment and, where the platform keeps them here, rows, size and last change. Object names only. With tables, only those (query-through on a large schema).
 kind: read
 content: metadata
 area: estate
 params:
-  - { name: database, type: literal, label: Database }
+  - { name: database, type: identifier, label: Database (catalog) }
   - { name: schema, type: literal, label: Schema }
+  - { name: tables, type: literal_list, label: Only these tables, required: false }
 returns:
   - { name: table_catalog, label: Database }
   - { name: table_schema, label: Schema }
   - { name: table_name, label: Table }
-  - { name: table_type, label: "Type (TABLE, VIEW, EXTERNAL)" }
+  - { name: table_type, label: "Type (TABLE, VIEW, EXTERNAL, or the platform's own kind)" }
+  - { name: row_count, as: number, label: Rows }
+  - { name: bytes, as: number, label: Size (bytes) }
+  - { name: last_altered, label: Last changed }
   - { name: comment, label: Comment }
 platforms:
+  snowflake:
+    sql: >
+      SELECT table_catalog, table_schema, table_name, table_type, row_count, bytes, last_altered, comment
+      FROM {database}.INFORMATION_SCHEMA.TABLES
+      WHERE table_schema = {schema:literal}[[ AND UPPER(table_name) IN ({tables:upper})]]
+      ORDER BY table_name
+  # Unity Catalog (and what it federates); the legacy Hive metastore keeps the adapter's SHOW TABLES path.
+  databricks:
+    sql: >
+      SELECT table_catalog, table_schema, table_name, table_type, last_altered, comment
+      FROM {database}.information_schema.tables
+      WHERE table_schema = {schema:literal}[[ AND lower(table_name) IN ({tables:lower})]]
+      ORDER BY table_name
   # SVV_ALL_TABLES covers local, external (Spectrum) and datashare tables of any database the user can see.
   redshift:
     sql: >
@@ -24,11 +41,11 @@ platforms:
         CASE table_type WHEN 'EXTERNAL TABLE' THEN 'EXTERNAL' WHEN 'SHARED TABLE' THEN 'TABLE' ELSE table_type END AS table_type,
         remarks AS comment
       FROM svv_all_tables
-      WHERE database_name = {database:lower} AND schema_name = {schema:lower}
+      WHERE database_name = {database:lower} AND schema_name = {schema:lower}[[ AND table_name IN ({tables:lower})]]
       ORDER BY table_name
 example:
   platform: redshift
   params: { database: dev, schema: sales }
   rows:
-    - { table_catalog: dev, table_schema: sales, table_name: orders, table_type: TABLE, comment: One row per order }
-    - { table_catalog: dev, table_schema: sales, table_name: v_open_orders, table_type: VIEW, comment: null }
+    - { table_catalog: dev, table_schema: sales, table_name: orders, table_type: TABLE, row_count: null, bytes: null, last_altered: null, comment: One row per order }
+    - { table_catalog: dev, table_schema: sales, table_name: v_open_orders, table_type: VIEW, row_count: null, bytes: null, last_altered: null, comment: null }

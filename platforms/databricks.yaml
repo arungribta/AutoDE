@@ -23,8 +23,9 @@ dialect:
 capabilities:
   estate:
     support: supported
+    operations: [estate.list_tables, estate.list_columns, estate.list_views, estate.list_primary_keys, estate.list_foreign_keys, estate.last_altered]
     privileges: USE CATALOG and USE SCHEMA on the catalogs and schemas in scope; their information_schema.
-    note: Read by the adapter until POP2 moves the estate reads to operations.
+    note: Unity Catalog. The legacy Hive metastore (no information_schema) is still read by the adapter with SHOW TABLES, as are catalogs and schemas to pick from, and profiling.
   profiling:
     support: supported
     privileges: SELECT on the tables profiled (sampled, within a query budget).

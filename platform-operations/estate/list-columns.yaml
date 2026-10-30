@@ -2,13 +2,14 @@
 formatVersion: 1
 id: estate.list_columns
 title: Columns in a schema
-description: Every column of one schema's tables and views, with its type (length or precision included), nullability, position, default and comment. Column names and types only.
+description: Every column of one schema's tables and views, with its type, nullability, position, default and comment. Column names and types only. With tables, only those tables' columns.
 kind: read
 content: metadata
 area: estate
 params:
-  - { name: database, type: literal, label: Database }
+  - { name: database, type: identifier, label: Database (catalog) }
   - { name: schema, type: literal, label: Schema }
+  - { name: tables, type: literal_list, label: Only these tables, required: false }
 returns:
   - { name: table_catalog, label: Database }
   - { name: table_schema, label: Schema }
@@ -20,6 +21,18 @@ returns:
   - { name: column_default, label: Default }
   - { name: comment, label: Comment }
 platforms:
+  snowflake:
+    sql: >
+      SELECT table_catalog, table_schema, table_name, column_name, data_type, is_nullable, ordinal_position, comment, column_default
+      FROM {database}.INFORMATION_SCHEMA.COLUMNS
+      WHERE table_schema = {schema:literal}[[ AND UPPER(table_name) IN ({tables:upper})]]
+      ORDER BY table_name, ordinal_position
+  databricks:
+    sql: >
+      SELECT table_catalog, table_schema, table_name, column_name, data_type, is_nullable, ordinal_position, comment, column_default
+      FROM {database}.information_schema.columns
+      WHERE table_schema = {schema:literal}[[ AND lower(table_name) IN ({tables:lower})]]
+      ORDER BY table_name, ordinal_position
   redshift:
     sql: >
       SELECT database_name AS table_catalog, schema_name AS table_schema, table_name, column_name,
@@ -30,7 +43,7 @@ platforms:
         END AS data_type,
         is_nullable, ordinal_position, column_default, remarks AS comment
       FROM svv_all_columns
-      WHERE database_name = {database:lower} AND schema_name = {schema:lower}
+      WHERE database_name = {database:lower} AND schema_name = {schema:lower}[[ AND table_name IN ({tables:lower})]]
       ORDER BY table_name, ordinal_position
 example:
   platform: redshift

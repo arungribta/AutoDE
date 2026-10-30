@@ -1,4 +1,4 @@
-import { BaseDataSourceAdapter, EstateReads } from '../BaseAdapter';
+import { BaseDataSourceAdapter } from '../BaseAdapter';
 import { DataPlatformProvider } from '../../types';
 import { ConnectionInfo, ExtractOptions, PlatformCapabilities, PlatformMetadataQueries, QueryOptions, QueryResult, SqlDialect } from '../types';
 import { PlatformDefinition, PlatformOperation } from '../operations/types';
@@ -18,12 +18,6 @@ import { fill, fragmentsFor } from '../dialects';
  * the other reads still run. Redshift is the first platform added this way.
  */
 
-/** The estate reads, by the operation that serves each. */
-const ESTATE_OPERATIONS = {
-  tables: 'estate.list_tables', columns: 'estate.list_columns', views: 'estate.list_views',
-  primaryKeys: 'estate.list_primary_keys', foreignKeys: 'estate.list_foreign_keys'
-} as const;
-
 export interface DefinitionAdapterOptions {
   definition: PlatformDefinition;
   /** The operation in effect with this id (shipped, or the team's approved file). */
@@ -36,8 +30,6 @@ export interface DefinitionAdapterOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const EMPTY: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
-
 export class DefinitionAdapter extends BaseDataSourceAdapter {
   private call?: CliCall;
   private version: string | undefined;
@@ -45,6 +37,7 @@ export class DefinitionAdapter extends BaseDataSourceAdapter {
   constructor(platform: DataPlatformProvider, credentials: Record<string, string>, log: (msg: string) => void, private readonly o: DefinitionAdapterOptions) {
     super(platform, credentials, log);
     this.call = o.call;
+    this.useDefinition(o.definition, o.operation);
   }
 
   private get def(): PlatformDefinition { return this.o.definition; }
@@ -104,6 +97,10 @@ export class DefinitionAdapter extends BaseDataSourceAdapter {
     return runOperation({ operation: op, platformId: this.def.id, platform: this.def, params, runner: this.runner(options), version: this.version, maxRows: 100_000 });
   }
 
+  protected defaultScope(): { database: string; schema: string } {
+    return { database: this.credentials['database'] ?? '', schema: this.credentials['schema'] ?? 'public' };
+  }
+
   async connect(): Promise<ConnectionInfo> {
     this.checkFields();
     const versionId = this.def.versionOperation;
@@ -135,17 +132,6 @@ export class DefinitionAdapter extends BaseDataSourceAdapter {
 
   translateDialect(sql: string, _targetDialect: SqlDialect): string { return sql; }
 
-  private estateOps(): string[] { return this.def.capabilities.estate?.operations ?? []; }
-
-  /** `DATABASE.SCHEMA` or `SCHEMA`; the connection's database (and schema) where the scope doesn't say. */
-  private scopeParams(scope: string | undefined): { database: string; schema: string } {
-    const parts = scope ? scope.split('.') : [];
-    return {
-      database: parts.length > 1 ? parts[0] : this.credentials['database'] ?? '',
-      schema: parts.length ? parts[parts.length - 1] : this.credentials['schema'] ?? 'public'
-    };
-  }
-
   async listDatabases(): Promise<string[]> {
     const r = await this.run('estate.list_databases', {});
     if (!r.ok) throw new Error(r.gap ?? 'the databases could not be listed');
@@ -169,53 +155,5 @@ export class DefinitionAdapter extends BaseDataSourceAdapter {
       profileColumn: (fqn, c) => `SELECT COUNT(DISTINCT ${col(c)}) AS distinct_count, COUNT(*) - COUNT(${col(c)}) AS null_count FROM ${identifier(fqn, d)}`,
       profileTable: (fqn, cols, n) => `SELECT COUNT(*) AS row_count${cols.map((c, i) => `, COUNT(DISTINCT ${col(c)}) AS d_${i}, COUNT(*) - COUNT(${col(c)}) AS n_${i}`).join('')} FROM ${sampled(fqn, n)}`
     };
-  }
-
-  protected async readEstate(_queries: PlatformMetadataQueries, scope: string | undefined, options: ExtractOptions | undefined): Promise<EstateReads> {
-    const params = this.scopeParams(scope);
-    const listed = new Set(this.estateOps());
-    const gaps: string[] = [];
-    const read = async (id: string): Promise<QueryResult> => {
-      if (!listed.has(id)) return EMPTY;
-      this.log(`[${this.platform}] ${id} (${params.database}.${params.schema})…`);
-      const r = await this.run(id, params, options);
-      if (!r.ok) { gaps.push(`${id}: ${r.gap}`); this.log(`[${this.platform}] ${id} not read: ${r.gap}`); return EMPTY; }
-      return { columns: r.rows[0] ? Object.keys(r.rows[0]) : [], rows: r.rows, rowCount: r.rows.length, executionTimeMs: 0 };
-    };
-    const tables = await read(ESTATE_OPERATIONS.tables);
-    // Row counts and sizes, where the platform keeps them apart from the table list.
-    const stats = await read('estate.table_stats');
-    if (stats.rows.length) {
-      const key = (r: Record<string, unknown>) => `${String(r.table_schema ?? '')}.${String(r.table_name ?? '')}`.toLowerCase();
-      const byTable = new Map(stats.rows.map((r) => [key(r), r]));
-      for (const t of tables.rows) {
-        const s = byTable.get(key(t));
-        if (s) { if (s.row_count !== null && s.row_count !== undefined) t.row_count = s.row_count; if (s.bytes !== null && s.bytes !== undefined) t.bytes = s.bytes; }
-      }
-    }
-    return {
-      tables,
-      columns: await read(ESTATE_OPERATIONS.columns),
-      views: await read(ESTATE_OPERATIONS.views),
-      primaryKeys: await read(ESTATE_OPERATIONS.primaryKeys),
-      foreignKeys: await read(ESTATE_OPERATIONS.foreignKeys),
-      gaps
-    };
-  }
-
-  /** Refresh on use, where the platform's estate has a last-altered operation. */
-  async readLastAltered(scope: string | undefined, tables: string[]): Promise<Map<string, string>> {
-    const out = new Map<string, string>();
-    if (!this.estateOps().includes('estate.last_altered')) return out;
-    const params = this.scopeParams(scope);
-    const r = await this.run('estate.last_altered', params);
-    const wanted = new Set(tables.map((t) => t.toLowerCase()));
-    for (const row of r.ok ? r.rows : []) {
-      const name = String(row.table_name ?? ''); const at = row.last_altered;
-      if (!name || at === null || at === undefined || (wanted.size && !wanted.has(name.toLowerCase()))) continue;
-      out.set(`${params.database}.${String(row.table_schema ?? '')}.${name}`.toLowerCase(), String(at));
-      out.set(`${String(row.table_schema ?? '')}.${name}`.toLowerCase(), String(at));
-    }
-    return out;
   }
 }

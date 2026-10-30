@@ -156,6 +156,20 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
     };
   }
 
+  /** v0.55.1: the connected catalog and schema, for the estate operations' scope. */
+  protected defaultScope(): { database: string; schema: string } {
+    return { database: this.connectedCatalog || 'main', schema: this.connectedSchema || 'default' };
+  }
+
+  /** The legacy Hive metastore has no information_schema, so its scopes keep the adapter's own SHOW TABLES path (below). */
+  protected estateByOperations(scope: string | undefined): boolean {
+    return super.estateByOperations(scope) && this.resolvedCatalogType(this.scopeParams(scope).database) !== 'hive_metastore';
+  }
+
+  private resolvedCatalogType(catalog: string): string {
+    return this.catalogType !== 'auto' ? this.catalogType : (catalog === 'hive_metastore' ? 'hive_metastore' : 'unity');
+  }
+
   getMetadataQueries(scope?: string, tables?: string[]): PlatformMetadataQueries {
     const parts = scope ? scope.split('.') : [];
     const catalog = parts.length > 1 ? parts[0] : (this.connectedCatalog || 'main');
@@ -181,7 +195,7 @@ export class DatabricksAdapter extends BaseDataSourceAdapter {
     // not a fragile heuristic. An explicit override also works as a manual escape
     // hatch for any other catalog that turns out to share the legacy catalog's
     // limitations, without AutoDE needing to know about it by name.
-    const resolvedType = this.catalogType !== 'auto' ? this.catalogType : (catalog === 'hive_metastore' ? 'hive_metastore' : 'unity');
+    const resolvedType = this.resolvedCatalogType(catalog);
     if (resolvedType === 'hive_metastore') {
       return this.getHiveMetastoreMetadataQueries(catalog, schema);
     }
