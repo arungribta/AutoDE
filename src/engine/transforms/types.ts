@@ -20,7 +20,7 @@
 export type PrimitiveKind = 'rename_cast' | 'dedup' | 'incremental_load' | 'mask' | (string & {});
 
 /** Mirrors platform/types.ts's `SqlDialect` — duplicated rather than imported to keep this module dependency-free. */
-export type SqlDialect = 'snowflake' | 'spark_sql' | 'google_sql' | 'postgres' | 'tsql' | 'ansi';
+export type SqlDialect = 'snowflake' | 'spark_sql' | 'google_sql' | 'postgres' | 'tsql' | 'redshift' | 'ansi';
 
 /** The minimal target-location info a primitive's `compile()` needs — not the full `TargetEnvironment`. */
 export interface TargetEnvironmentSummary {

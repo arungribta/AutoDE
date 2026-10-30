@@ -1,4 +1,5 @@
 import { TransformPrimitive, CompiledArtifact, TargetEnvironmentSummary, SqlDialect } from '../types';
+import { createOrReplace } from '../objectDdl';
 
 export interface DedupParams {
   sourceObject: string;
@@ -32,7 +33,15 @@ function compile(params: DedupParams, _target: TargetEnvironmentSummary, dialect
   const objectKind = params.objectKind === 'table' ? 'TABLE' : 'VIEW';
   const direction = params.orderDirection ?? 'DESC';
   const rankColumn = '__dedup_rn';
-  const content = [
+  const window = `ROW_NUMBER() OVER (PARTITION BY ${params.partitionByColumns.join(', ')} ORDER BY ${params.orderByColumn} ${direction})`;
+  // Redshift has neither EXCLUDE nor EXCEPT for SELECT *, but filters on a window function with QUALIFY.
+  const content = dialect === 'redshift' ? [
+    createOrReplace(objectKind, params.targetObject, dialect),
+    'SELECT *',
+    `FROM ${params.sourceObject}`,
+    `QUALIFY ${window} = 1;`,
+    ''
+  ].join('\n') : [
     `CREATE OR REPLACE ${objectKind} ${params.targetObject} AS`,
     'WITH ranked AS (',
     '  SELECT *,',

@@ -1,4 +1,5 @@
-import { TransformPrimitive, CompiledArtifact, TargetEnvironmentSummary } from '../types';
+import { TransformPrimitive, CompiledArtifact, TargetEnvironmentSummary, SqlDialect } from '../types';
+import { createOrReplace } from '../objectDdl';
 
 export interface RenameCastColumn {
   source: string;
@@ -63,7 +64,7 @@ function splitSourceRef(sourceObject: string): { schemaName: string; tableName: 
   return { schemaName: 'staging', tableName: sourceObject };
 }
 
-function compile(params: RenameCastParams, _target: TargetEnvironmentSummary): CompiledArtifact {
+function compile(params: RenameCastParams, _target: TargetEnvironmentSummary, dialect: SqlDialect = 'ansi'): CompiledArtifact {
   const columnCount = params.columns.length;
 
   if (params.objectKind === 'dbt_model') {
@@ -92,7 +93,7 @@ function compile(params: RenameCastParams, _target: TargetEnvironmentSummary): C
   }
 
   const objectKind = params.objectKind === 'table' ? 'TABLE' : 'VIEW';
-  const content = `CREATE OR REPLACE ${objectKind} ${params.targetObject} AS\nSELECT\n  ${selectList(params.columns, '  ')}\nFROM ${params.sourceObject};\n`;
+  const content = `${createOrReplace(objectKind, params.targetObject, dialect)}\nSELECT\n  ${selectList(params.columns, '  ')}\nFROM ${params.sourceObject};\n`;
   return {
     language: 'sql',
     content,

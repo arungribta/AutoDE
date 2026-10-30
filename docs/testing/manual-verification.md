@@ -1288,6 +1288,23 @@ Needs a Redshift Serverless workgroup or provisioned cluster you can read, and t
   Do: extract `hive_metastore.default`.
   Expect: its tables listed as before (names only, through `SHOW TABLES`).
 
+## Part 57 — v0.55.2 Redshift as a target
+
+Needs a Redshift target connection (a dev workgroup or database) with a role that can create in a schema.
+
+- [ ] **57.1 Compile and deploy.**
+  Do: on a problem whose target is the Redshift connection, compile its Pipeline Spec for `redshift` (`autode compile --dialect redshift`); have the deploy stage propose the runbook; approve it; run it.
+  Expect: views and tables created; the dedup step uses `QUALIFY`, the incremental step `MERGE`. Each step's result in the Runbook tab.
+- [ ] **57.2 What the dry run says.**
+  Do: look at the runbook's check before approving it.
+  Expect: the `CREATE` and `MERGE` steps marked as not dry-run ("not checked by the platform"); `INSERT` steps dry-run with EXPLAIN. Nothing reported as passed that wasn't checked.
+- [ ] **57.3 A failing step.**
+  Do: edit a step to name a schema that doesn't exist; propose, approve and run it.
+  Expect: the step fails with Redshift's own error, the runbook stops, the steps after it don't run.
+- [ ] **57.4 Governance.**
+  Do: `autode platform run governance.grant_select --connection redshift:<wg> --param schema=mart --param role=analyst --allow-cli`.
+  Expect: no grant is made; the output is the runbook step to propose.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1614,5 +1631,9 @@ Needs a Redshift Serverless workgroup or provisioned cluster you can read, and t
 | 56.1 |  |  |
 | 56.2 |  |  |
 | 56.3 |  |  |
+| 57.1 |  |  |
+| 57.2 |  |  |
+| 57.3 |  |  |
+| 57.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

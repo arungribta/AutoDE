@@ -38,7 +38,7 @@ export interface EngineTool {
   handler: (args: Record<string, unknown>, ws: EngineWorkspace) => Promise<Record<string, unknown>>;
 }
 
-export const SQL_DIALECTS: readonly SqlDialect[] = ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'ansi'];
+export const SQL_DIALECTS: readonly SqlDialect[] = ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'redshift', 'ansi'];
 const PACK_PURPOSES: readonly PackPurpose[] = ['interview', 'spec', 'plan', 'step', 'chat', 'qa'];
 const STATUSES: readonly AssertionStatus[] = ['proposed', 'active', 'rejected', 'superseded', 'needs_review'];
 const TRUSTS: readonly TrustTier[] = TRUST_TIERS;

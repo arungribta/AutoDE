@@ -1352,7 +1352,7 @@ All of it is filtered by `owner = '<SCHEMA>'` (the last part of the scope, upper
 
 **Webview** (`media/sidebar.html`). `setupOnboarding()` injects into every source and target card a `.onb` block: an active-connection banner, *Check prerequisites* (items with Install… / Verify / Install guide, and the install command shown before it runs), the backend line, *Use an existing …* select with *Find existing* (an Oracle alias fills the connect string), plus a save row (*Save as named connection*, *Share with the team*). Save stores the card's settings first (`saveSettings(true)` keeps the panel open) and posts `saveNamedConnection` on the `settingsSaved` ack, the same ordering Connect uses. `renderPlatformsState()` draws *Saved connections* at the top of each tab: id, AutoDE and MCP badges (the MCP note is shown), origin, resolver, and *Use* / *Use card fields*, *Re-check*, *Remove*. There is a new Oracle source card; there is no Oracle target card.
 
-### 6.15 Platform operations (v0.54.0–v0.55.1; PLT-9, POP1, POP2)
+### 6.15 Platform operations (v0.54.0–v0.55.2; PLT-9, POP1, POP2)
 
 docs/specs/platform-operations.md. All in `src/engine/platform/operations/`, an allowed folder of the platform boundary.
 
@@ -1395,6 +1395,7 @@ docs/specs/platform-operations.md. All in `src/engine/platform/operations/`, an 
   - The CLI's `connections add` offers `connectablePlatforms()`, lists the CLI's profiles with `--allow-cli`, and names each platform's own connections from `CLI_SETUP_SOURCES` (a table, not branches).
   - Skills: `SKILL_SCOPES` and `SKILL_PLATFORMS` include `redshift`; a skill whose scope is a platform must name only that platform (one rule, not a branch per platform).
 - **Every adapter's estate through operations** (v0.55.1, POP2 part 2). `BaseAdapter.useDefinition(definition, operation)` (called by `ConnectionManager.connect` for every `BaseDataSourceAdapter`, with the workspace's approved definition; `DefinitionAdapter` calls it itself). `readEstate` then runs the `estate` capability's operations (`readEstateByOperations`) when `estateByOperations(scope)` is true, with `{database, schema}` from `scopeParams(scope)` (the scope, completed by the adapter's `defaultScope()`) and `tables` for query-through; `runEstateOperation` passes only the parameters an operation declares. Any other listed estate operation (not a known read, `table_stats`, `last_altered`, `list_databases` or `list_schemas`) lists objects that join the tables; a type outside `TABLE`, `VIEW`, `MATERIALIZED_VIEW`, `EXTERNAL` and `BASE TABLE` is kept as the node's `metadata.objectKind`. `readLastAltered` runs `estate.last_altered` the same way. `DatabricksAdapter.estateByOperations` is false for a Hive metastore catalog (its `SHOW TABLES` path stays). Templates: `[[ … ]]` is an optional section, kept when every parameter named in it has a value (`bindTemplate`).
+- **Redshift as a target** (v0.55.2). `SqlDialect` gains `redshift` (`src/engine/transforms/types.ts`, `src/engine/platform/types.ts`, `SQL_DIALECTS`). `transforms/objectDdl.ts` `createOrReplace(kind, name, dialect)`: `CREATE OR REPLACE` everywhere it exists, `DROP TABLE IF EXISTS` then `CREATE TABLE … AS` for a Redshift table; used by `dedup`, `rename_cast` and `mask`. Redshift's `dedup` uses `QUALIFY ROW_NUMBER() … = 1`; `incremental_load`'s `SET` columns are unqualified; `mask` hashes with `SHA2` over `VARCHAR(65535)`. Golden snapshots `test/golden/mcp-compile/*.redshift.sql`. `dialects.ts`: the `explainCovers` fragment (first keywords EXPLAIN compiles; absent = all) and `explainCovers(platform, firstKeyword)`; `checkStep` gives a statement it doesn't cover no dry run and `checkRunbook` warns that it is not checked by the platform; `autode_explain_sql` returns `checked: false` with the reason before running anything. Approved writes go through `PlatformSession.executeApprovedChange` → `executeQuery`, which for a defined platform is the CLI statement runner.
 - **Packaging.** `platform-operations/` and `platforms/` are in `.vscodeignore`'s allow list, `scripts/pack-cli.cjs`'s `CONTENT` and `SERVER_FILES` (`mcpConfig.ts`).
 
 ## 7. Agent Orchestration
@@ -2250,7 +2251,7 @@ src/engine/semantic/
 src/engine/skills/    # interview skills, tool skills, allow-lists, tool-skill lifecycle and trust
   lifecycle.ts, port.ts, skillRegistry.ts, toolAllowList.ts, toolSkills.ts
 src/engine/transforms/    # primitive registry
-  registry.ts, types.ts
+  objectDdl.ts, registry.ts, types.ts
 src/engine/transforms/declarative/    # Tier 2 declarative primitives
   adapter.ts, lifecycle.ts, loader.ts, schema.ts, templateEngine.ts, types.ts
 src/engine/transforms/primitives/    # Tier 1 primitives

@@ -22,15 +22,15 @@ The full list, with versions and the roles that use each skill, is in [skills.md
 | `autode-databricks-governance` | platform-setup | Grants to groups (inherited from catalog and schema); column masks; row filters; tags |
 | `autode-databricks-performance` | build, platform-setup | Liquid clustering; predictive optimization or scheduled `OPTIMIZE`; `VACUUM` with a retention that keeps time travel |
 | `autode-databricks-deployment` | deploy | Bundles: dev and prod targets, `run_as` a service principal in production, validate as the dry run |
-| `autode-redshift-deployment` | platform-setup, source-assessment, target-context | Reaching Redshift (preview): the AWS CLI, the three sign-ins (Secrets Manager secret, IAM temporary credentials, AWS identity), the reads' privileges, troubleshooting. Deploying comes in 0.55.2 |
-| `autode-redshift-ingestion` | source-assessment, build | Redshift as a source (preview): the estate through its operations and what its gaps mean; moving data out with `UNLOAD` to S3 as Parquet |
-| `autode-redshift-performance` | source-assessment, modelling | Reading distribution and sort keys, skew, unsorted share and stale statistics (`performance.table_design`) into the assessment and the new design (preview) |
-| `autode-redshift-governance` | source-assessment, platform-setup | Reading privileges and masking policies (`governance.relation_privileges`, `governance.masking_policies`) into personas and personal-data rules (preview) |
-| `autode-redshift-pipelines` | source-assessment, code-conversion | Finding stored procedures, materialized views and logic-bearing views (`pipelines.*`) and what schedules them, for code conversion (preview) |
+| `autode-redshift-deployment` | platform-setup, source-assessment, target-context, deploy | Reaching Redshift: the AWS CLI, the three sign-ins, the reads' privileges, troubleshooting; deploying through runbooks (idempotent DDL, late-binding views, what the dry run can't check, a snapshot before data-losing changes) (preview) |
+| `autode-redshift-ingestion` | source-assessment, build | Redshift as a source (the estate and its gaps; `UNLOAD` to S3) and as a target (`COPY` from S3 into raw tables that mirror the estate; reloads through a staging table and `MERGE`) (preview) |
+| `autode-redshift-performance` | source-assessment, modelling, build | Reading distribution and sort keys, skew and stale statistics (`performance.table_design`); as a target, AUTO keys first and changes only on evidence (preview) |
+| `autode-redshift-governance` | source-assessment, platform-setup | Reading privileges and masking policies; as a target, roles, `governance.grant_usage`/`grant_select` and masking policies (`governance.attach_masking_policy`) as runbook steps (preview) |
+| `autode-redshift-pipelines` | source-assessment, code-conversion, build | Finding a source's procedures, materialized views and views for conversion; as a target, the `redshift` dialect (`QUALIFY`, `MERGE`), materialized views with auto refresh, the schedule outside the database (preview) |
 | `autode-dbt-project` | build | Sources with freshness; staging models compiled by AutoDE; incremental marts; data tests from the quality rules (Snowflake or Databricks) |
 | `autode-de-reconciliation` | reconcile | Source against target, read-only: counts, distinct keys, sums, ranges, null counts; key hashes on one platform; missing keys on one connection |
 
-AutoDE wrote these from the vendors' public documentation. They contain no vendor skill text. The Redshift skills name platform operations rather than carry SQL (CLAUDE.md), and are *preview* until checked on a live account: building for Redshift comes with Redshift as a target (0.55.2).
+AutoDE wrote these from the vendors' public documentation. They contain no vendor skill text. The Redshift skills name platform operations rather than carry SQL (CLAUDE.md), and are *preview* until checked on a live account.
 
 ## When a stage gets them
 

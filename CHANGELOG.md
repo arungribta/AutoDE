@@ -6,6 +6,16 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.55.2
+
+- **Amazon Redshift as a target** (docs/specs/platform-operations.md §6.2b; owner, 2026-10-30: right after POP2).
+  - **The `redshift` compile dialect** for Pipeline Specs and the Tier-1 primitives (`autode compile --dialect redshift`, `autode_compile_pipeline_spec`, `autode_compile_transform`): deduplication with `QUALIFY` (Redshift has no `SELECT * EXCLUDE`), `MERGE` with unqualified `SET` columns, masking with `SHA2` over `VARCHAR(65535)` (a plain `VARCHAR` would cut values before hashing), and a rebuilt table dropped and created (Redshift has no `CREATE OR REPLACE TABLE`). Golden snapshots for each; every other dialect's output unchanged byte for byte.
+  - **Runbooks on Redshift:** an approved step runs on the connection through the Data API; a failed statement stops the runbook with Redshift's own error.
+  - **Honest dry runs:** a platform definition can say which statements its EXPLAIN compiles (`explainCovers`; Redshift: `SELECT, WITH, INSERT, UPDATE, DELETE`). A DDL or `MERGE` step on Redshift gets no dry run and the runbook check says it is not checked by the platform; `autode_explain_sql` returns `checked: false` instead of failing or passing.
+  - **Governance changes** as operations: `governance.grant_usage`, `governance.grant_select`, `governance.attach_masking_policy`, which only ever become runbook steps.
+  - **The skills** gain their building guidance (version 2): deploying (idempotent DDL, late-binding views, snapshots before data-losing changes), landing with `COPY` (reloads through a staging table and `MERGE`, since COPY doesn't remember loaded files), pipelines (`MERGE`, materialized views with auto refresh, the schedule outside the database), keys on evidence, roles, grants and masking. Still preview until checked live (manual-verification Part 57).
+- **Deviations:** runbooks don't allow raw `aws redshift-data` CLI steps (a statement is a `sql` step on the connection, which already uses the Data API); no Redshift-specific target-interview questions (that would be a platform branch in interface code): the performance skill starts from Redshift's AUTO keys.
+
 ## 0.55.1
 
 - **Snowflake's and Databricks' estate through platform operations** (POP2 part 2; docs/specs/platform-operations.md §6.2). Tables, columns, views, keys and last-changed times are read by `estate.list_tables`, `estate.list_columns`, `estate.list_views`, `estate.list_primary_keys`, `estate.list_foreign_keys` and the new `estate.last_altered`, each now with Snowflake, Databricks and Redshift implementations, as the platform definitions name them. A changed system view is now a file change, and a read the account can't do is a reported gap (as for Redshift since 0.55.0).

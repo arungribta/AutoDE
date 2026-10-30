@@ -3,7 +3,7 @@ import { ConnectionEntry, ConnectionsConfig, envStandInVariables, loadConnection
 import { registerBuiltInCredentialResolvers } from '../engine/platform/credentials';
 import { gateQueryResult, sanitizeSnapshot } from '../engine/platform/sampleData';
 import { checkReadOnlySql, checkSingleStatement, stripTrailingSemicolon } from '../engine/platform/sqlGuard';
-import { explainStatements } from '../engine/platform/dialects';
+import { explainCovers, explainStatements } from '../engine/platform/dialects';
 import { EngineToolError } from './errors';
 import { EngineTool, ToolAnnotations } from './tools';
 import { governanceFacts } from '../engine/governance/governance';
@@ -277,6 +277,10 @@ export function platformTools(session: PlatformSession): EngineTool[] {
         if (check.firstKeyword === 'EXPLAIN') throw new EngineToolError('VALIDATION_FAILED', 'Pass the statement without EXPLAIN; the tool adds it.');
         const entry = session.entry(String(args.connectionId));
         const body = stripTrailingSemicolon(String(args.sql));
+        // v0.55.2: where the platform's EXPLAIN doesn't compile this kind of statement (Redshift's DDL), say so: never a pass.
+        if (!explainCovers(entry.platform, check.firstKeyword)) {
+          return { connectionId: entry.id, statement: check.firstKeyword, checked: false, reason: `${entry.platform}'s EXPLAIN doesn't compile ${check.firstKeyword} statements: this one is not checked by the platform. Review it from its statement.`, columns: [], plan: [] };
+        }
         // The platform definition's EXPLAIN; where the plan is read back separately (Oracle's PLAN_TABLE), the last statement reads it.
         const result = await run(entry.id, async (m) => {
           const statements = explainStatements(entry.platform, body);

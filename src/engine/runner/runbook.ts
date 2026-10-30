@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
 import { checkSingleStatement } from '../platform/sqlGuard';
 import { foreignDialect } from '../platform/dialectMarkers';
+import { explainCovers } from '../platform/dialects';
 import { ConnectionEntry } from '../platform/connectionsConfig';
 import { EnvironmentPolicy, RunbookPolicy, StepClass, approvalsNeeded, approverProblem, environmentOf } from './policy';
 import { explorationEnvironmentProblem } from '../documents/problemMode';
@@ -140,7 +141,9 @@ function checkStep(s: RunbookStep, entry: ConnectionEntry | undefined, ctx: Chec
     if (!s.sql?.trim()) { errors.push(`${at}: a sql step needs its statement.`); return undefined; }
     const c = classifySql(s.sql);
     if (!c.class) { errors.push(`${at}: ${c.problem}`); return undefined; }
-    const dry = c.class === 'read' ? undefined : { sql: s.sql, label: 'EXPLAIN on the connection (the platform compiles it without running it)' };
+    // v0.55.2: a statement the platform's EXPLAIN doesn't compile (Redshift's DDL) has no dry run, said in the check's warnings.
+    const checkable = explainCovers(entry?.platform, checkSingleStatement(s.sql).firstKeyword);
+    const dry = c.class === 'read' || !checkable ? undefined : { sql: s.sql, label: 'EXPLAIN on the connection (the platform compiles it without running it)' };
     return { id: s.id, title: s.title, kind: 'sql', class: c.class, run: { sql: s.sql }, dryRun: dry };
   }
   if (s.kind === 'cli' || s.kind === 'bundle') {
@@ -199,7 +202,12 @@ export function checkRunbook(rb: Runbook, ctx: CheckCtx): RunbookCheck {
     } else if (c.class === 'destructive' && !s.noRollbackReason?.trim()) errors.push(`step ${s.id} is destructive: give its rollback (steps or a procedure), or noRollbackReason.`);
     const foreign = s.kind === 'sql' && entry ? foreignDialect(s.sql ?? '', entry.platform) : [];
     if (foreign.length) warnings.push(`step ${s.id} looks like ${entry!.platform === 'snowflake' ? 'Databricks' : 'Snowflake'} SQL (${foreign.join('; ')}), but ${entry!.id} is a ${entry!.platform} connection: its dry run will likely fail.`);
-    if (c.class !== 'read' && !c.dryRun) warnings.push(`step ${s.id} has no dry run: it is reviewed from its description and the command.`);
+    if (c.class !== 'read' && !c.dryRun) {
+      const first = s.kind === 'sql' ? checkSingleStatement(s.sql ?? '').firstKeyword : undefined;
+      warnings.push(s.kind === 'sql' && entry && !explainCovers(entry.platform, first)
+        ? `step ${s.id} can't be dry-run: ${entry.platform}'s EXPLAIN doesn't compile ${first ?? 'this'} statements, so it is not checked by the platform. Review it from its statement.`
+        : `step ${s.id} has no dry run: it is reviewed from its description and the command.`);
+    }
     steps.push(c);
   }
   return { ok: errors.length === 0, errors, warnings, steps, environment: env, revision: runbookRevision(rb) };

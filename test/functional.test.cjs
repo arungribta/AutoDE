@@ -6045,7 +6045,7 @@ async function main() {
       assert.deepStrictEqual(kinds.sort(), Object.keys(params).sort(), 'a fixture for every Tier-1 primitive');
       let n = 0;
       for (const kind of kinds) {
-        for (const dialect of ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'ansi']) {
+        for (const dialect of ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'redshift', 'ansi']) {
           const r = await client.callTool({ name: 'autode_compile_transform', arguments: { transform: { kind, params: params[kind] }, target: { platform: 'snowflake', database: 'CURATED', schema: 'STAGING' }, dialect } });
           // GOV: ANSI SQL has no hash function, so a hashing mask is refused there rather than guessed.
           if (kind === 'mask' && dialect === 'ansi') { assert.ok(r.isError && /ANSI SQL has no hash function/.test(JSON.stringify(r.content)), JSON.stringify(r.content)); continue; }
@@ -6057,7 +6057,7 @@ async function main() {
           n++;
         }
       }
-      assert.strictEqual(n, 23);
+      assert.strictEqual(n, 27);
     } finally { await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
@@ -12994,8 +12994,8 @@ async function main() {
     const c = L.loadCatalog({ resourcesRoot: root });
     assert.deepStrictEqual(c.errors, []);
     const rs = L.platformById(c, 'redshift');
-    assert.deepStrictEqual(Object.entries(rs.capabilities).filter(([, v]) => v.operations).map(([k, v]) => [k, v.operations.every((id) => L.operationById(c, id) && L.operationById(c, id).item.platforms.redshift)]), [['estate', true], ['performance.assess', true], ['governance.assess', true], ['pipelines.assess', true]]);
-    assert.deepStrictEqual([rs.capabilities.lineage.support, rs.capabilities['compile.target'].support], ['not_applicable', 'not_applicable']);
+    assert.deepStrictEqual(Object.entries(rs.capabilities).filter(([, v]) => v.operations).map(([k, v]) => [k, v.operations.every((id) => L.operationById(c, id) && L.operationById(c, id).item.platforms.redshift)]), [['estate', true], ['performance.assess', true], ['governance.assess', true], ['pipelines.assess', true], ['governance.change', true]]);
+    assert.deepStrictEqual([rs.capabilities.lineage.support, rs.capabilities['compile.target'].support], ['not_applicable', 'supported']);
     assert.ok(L.operationById(c, 'platform.version').item.platforms.redshift);
     const Df = fresh('../dist/engine/agents/definitions.js');
     const skills = ['deployment', 'governance', 'ingestion', 'performance', 'pipelines'].map((k) => 'autode-redshift-' + k);
@@ -13018,7 +13018,8 @@ async function main() {
     assert.ok(/case 'saveDefinedConnection':/.test(read('core/webviewProvider.ts')) && /workspaceRoot: \(\) => vscode\.workspace/.test(read('extension.ts')) && /workspaceRoot: \(\) => this\.options\.workspaceRoot/.test(read('mcp/platform.ts')));
     assert.ok(/connectablePlatforms\(\)/.test(read('cli/main.ts')));
     const walk = (d) => nodeFs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(nodePath.join(d, e.name)) : e.name.endsWith('.ts') ? [nodePath.join(d, e.name)] : []);
-    const branches = ['engine', 'mcp', 'cli'].flatMap((d) => walk(nodePath.join(root, 'src', d))).filter((f) => /(===|!==|case)\s*'redshift'/.test(nodeFs.readFileSync(f, 'utf8')));
+    // v0.55.2: compiling deliverables to a dialect is allowed machinery (src/engine/transforms/, CLAUDE.md).
+    const branches = ['engine', 'mcp', 'cli'].flatMap((d) => walk(nodePath.join(root, 'src', d))).filter((f) => !f.includes(nodePath.join('engine', 'transforms'))).filter((f) => /(===|!==|case)\s*'redshift'/.test(nodeFs.readFileSync(f, 'utf8')));
     assert.deepStrictEqual(branches, [], 'Redshift is defined by files: no branch on its name in the engine, MCP or CLI');
   });
 
@@ -13139,6 +13140,79 @@ async function main() {
       const node = r.nodes.find((n) => n.label === 'DT_DAILY');
       assert.ok(node && node.type === 'table' && node.metadata.objectKind === 'dynamic_table', JSON.stringify(node));
       assert.ok(!r.nodes.find((n) => n.label === 'ORDERS').metadata.objectKind, 'a standard kind adds nothing');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.55.2: Redshift as a target ──
+
+  await test('v0.55.2: Redshift as a target — the redshift compile dialect (QUALIFY, unqualified MERGE SET, SHA2 over VARCHAR(65535), a rebuilt table dropped and created); other dialects unchanged; a DDL or MERGE step can\'t be dry-run and says so, a DML step can; autode_explain_sql reports a DDL statement as not checked', async () => {
+    const reg = fresh('../dist/engine/transforms/registry.js');
+    const D = fresh('../dist/engine/platform/dialects.js');
+    const get = (kind) => reg.TRANSFORM_PRIMITIVES ? reg.TRANSFORM_PRIMITIVES[kind] : reg.getPrimitive(kind);
+    const target = { platform: 'redshift', database: 'dw', schema: 'mart' };
+    const table = get('dedup').compile({ sourceObject: 'raw.orders', targetObject: 'mart.orders', partitionByColumns: ['order_id'], orderByColumn: 'updated_at', objectKind: 'table' }, target, 'redshift').content;
+    assert.ok(/^DROP TABLE IF EXISTS mart\.orders;\nCREATE TABLE mart\.orders AS\nSELECT \*\nFROM raw\.orders\nQUALIFY ROW_NUMBER\(\) OVER/.test(table), table);
+    assert.ok(/^CREATE OR REPLACE TABLE mart\.orders AS/.test(get('dedup').compile({ sourceObject: 'raw.orders', targetObject: 'mart.orders', partitionByColumns: ['order_id'], orderByColumn: 'updated_at', objectKind: 'table' }, target, 'snowflake').content), 'other dialects keep CREATE OR REPLACE');
+    assert.ok(/^DROP TABLE IF EXISTS mart\.c;\nCREATE TABLE mart\.c AS/.test(get('rename_cast').compile({ sourceObject: 'raw.c', targetObject: 'mart.c', objectKind: 'table', columns: [{ source: 'A', target: 'a' }] }, target, 'redshift').content));
+    // Dry runs: where Redshift's EXPLAIN compiles a statement, and where it doesn't.
+    assert.deepStrictEqual(['SELECT', 'INSERT', 'CREATE', 'MERGE', 'ALTER'].map((k) => D.explainCovers('redshift', k)), [true, true, false, false, false]);
+    assert.deepStrictEqual(['CREATE', 'MERGE'].map((k) => D.explainCovers('snowflake', k)), [true, true]);
+    const R = fresh('../dist/engine/runner/runbook.js');
+    const Pol = fresh('../dist/engine/runner/policy.js');
+    const ws = runbookWs('runbooks:\n  environments:\n    dev: { connections: [redshift:wg, snowflake:dev], approvers: any }\n');
+    try {
+      const policy = Pol.loadRunbookPolicy(ws);
+      const connections = [conn('redshift:wg', 'redshift'), conn('snowflake:dev', 'snowflake')];
+      const rb = (connectionId) => ({ id: 'deploy', title: 'Deploy', reason: 'r', connectionId, explanation: 'e', steps: [
+        { id: 'create', title: 'Create', kind: 'sql', sql: 'CREATE TABLE IF NOT EXISTS mart.fct (id BIGINT)', expect: 'the table' },
+        { id: 'load', title: 'Load', kind: 'sql', sql: 'INSERT INTO mart.fct SELECT id FROM raw.orders', expect: 'rows' },
+        { id: 'merge', title: 'Merge', kind: 'sql', sql: 'MERGE INTO mart.fct USING raw.orders AS src ON mart.fct.id = src.id WHEN NOT MATCHED THEN INSERT (id) VALUES (src.id)', expect: 'rows' }
+      ] });
+      const r = R.checkRunbook(rb('redshift:wg'), { workspaceRoot: ws, connections, policy });
+      assert.ok(r.ok, r.errors.join('\n'));
+      assert.deepStrictEqual(r.steps.map((x) => [x.id, !!x.dryRun]), [['create', false], ['load', true], ['merge', false]]);
+      assert.ok(r.warnings.some((w) => /step create can't be dry-run: redshift's EXPLAIN doesn't compile CREATE statements, so it is not checked by the platform/.test(w)) && r.warnings.some((w) => /step merge can't be dry-run/.test(w)), r.warnings.join('\n'));
+      const sf = R.checkRunbook(rb('snowflake:dev'), { workspaceRoot: ws, connections, policy });
+      assert.deepStrictEqual(sf.steps.map((x) => !!x.dryRun), [true, true, true], 'Snowflake dry-runs them all, as before');
+    } finally { require('node:fs').rmSync(ws, { recursive: true, force: true }); }
+    const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'mcp', 'platform.ts'), 'utf8');
+    assert.ok(/if \(!explainCovers\(entry\.platform, check\.firstKeyword\)\) \{\s*return \{ connectionId: entry\.id, statement: check\.firstKeyword, checked: false/.test(src), 'autode_explain_sql reports it unchecked, before running anything');
+  });
+
+  await test('v0.55.2: an approved change on Redshift runs through the statement runner — done, or failed with Redshift\'s own error; the governance change operations become runbook steps, never run', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    const D = fresh('../dist/engine/platform/definitions.js');
+    D.setPlatformResourcesRoot(root);
+    const { DefinitionAdapter } = fresh('../dist/engine/platform/adapters/DefinitionAdapter.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const { PlatformSession } = fresh('../dist/mcp/platform.js');
+    const Svc = fresh('../dist/engine/platform/operations/service.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-rs-target-'));
+    try {
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: redshift\n    role: target\n    workgroupName: wg\n    database: dw\n    credentials: { resolver: cli, ref: work }\n');
+      const fake = fakeRedshiftData((sql) => { if (/version\(\)/.test(sql)) return [{ version: '1.0.77467' }]; if (/nope/.test(sql)) throw new Error('ERROR: schema "nope" does not exist'); return []; });
+      const session = new PlatformSession({ workspaceRoot: ws, allowCli: true, allowWrite: true, log: () => {}, createManager: (log, options) => {
+        const m = new ConnectionManager(log, options);
+        m.registerAdapterFactory('redshift', (c, l) => new DefinitionAdapter('redshift', c, l, { definition: D.platformDefinition('redshift'), operation: (id) => D.platformOperation(id), cliConsent: true, call: fake.call, sleep: async () => {} }));
+        return m;
+      } });
+      try {
+        assert.ok(/^done in \d+ ms$/.test(await session.executeApprovedChange('redshift:wg', 'CREATE TABLE IF NOT EXISTS mart.fct (id BIGINT);')));
+        const submitted = fake.calls.filter((a) => a[1] === 'execute-statement').map((a) => a[a.indexOf('--sql') + 1]);
+        assert.ok(submitted.includes('CREATE TABLE IF NOT EXISTS mart.fct (id BIGINT)'), submitted.join('\n'));
+        const failed = await session.executeApprovedChange('redshift:wg', 'CREATE TABLE nope.t (id INT)').catch((e) => e);
+        assert.ok(failed.code === 'PLATFORM_ERROR' && /schema "nope" does not exist/.test(failed.details.raw), JSON.stringify(failed.details));
+      } finally { session.dispose(); }
+      // A governance change is the step to propose, bound safely; it never runs.
+      const ran = [];
+      const target = { connectionId: 'redshift:wg', platform: 'redshift', query: async (sqlText) => { ran.push(sqlText); return /version/.test(sqlText) ? [{ version: '1.0.77467' }] : []; } };
+      const err = await Svc.runOnConnection({ resourcesRoot: root }, target, 'governance.attach_masking_policy', { policy: 'mask_email', table: 'mart.customers', column: 'email', role: 'PUBLIC' }).catch((e) => e);
+      assert.deepStrictEqual([err.code, err.step.sql], ['CHANGE', 'ATTACH MASKING POLICY mask_email ON mart.customers(email) TO ROLE PUBLIC PRIORITY 10']);
+      const grant = await Svc.runOnConnection({ resourcesRoot: root }, target, 'governance.grant_select', { schema: 'mart', role: 'analyst"; DROP TABLE x; --' }).catch((e) => e);
+      assert.strictEqual(grant.step.sql, 'GRANT SELECT ON ALL TABLES IN SCHEMA mart TO ROLE "analyst""; DROP TABLE x; --"', 'a hostile name stays one quoted name');
+      assert.ok(!ran.some((q) => /GRANT|ATTACH/.test(q)), 'never run');
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 

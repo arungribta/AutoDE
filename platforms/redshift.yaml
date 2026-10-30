@@ -47,7 +47,6 @@ connection:
     - { mode: iam-temporary, label: IAM temporary credentials (provisioned cluster), requires: [clusterIdentifier, dbUser], note: "Redshift issues a short-lived database password for the user; your AWS identity needs redshift:GetClusterCredentials." }
     - { mode: aws-identity, label: Your AWS identity (Serverless), requires: [workgroupName], note: "Redshift Serverless signs you in as the database user mapped to your IAM identity." }
   roles: [source, target]
-  targetNote: "A Redshift target can be connected and read now; building for it (its SQL dialect, deploying runbooks) comes in v0.55.2."
 versionOperation: platform.version
 dialect:
   identifierQuote: '"'
@@ -57,8 +56,9 @@ dialect:
     sample: '(SELECT * FROM {table} LIMIT {n}) s0'
     regexMatch: 'CAST({column} AS VARCHAR) ~ {pattern}'
     distinctTuples: emulated
-    # EXPLAIN covers queries and DML, not DDL (a DDL dry run is reported as unchecked: v0.55.2).
+    # EXPLAIN covers queries and DML, not DDL or MERGE: a dry run of anything else is reported as not checked.
     explain: 'EXPLAIN {statement}'
+    explainCovers: 'SELECT, WITH, INSERT, UPDATE, DELETE'
 capabilities:
   estate:
     support: supported
@@ -82,10 +82,15 @@ capabilities:
   lineage:
     support: not_applicable
     note: Redshift records no lineage of its own. Its lineage in AutoDE is designed (mappings, Pipeline Specs) and generated.
+  governance.change:
+    support: supported
+    operations: [governance.grant_usage, governance.grant_select, governance.attach_masking_policy]
+    privileges: The role running the runbook owns the objects or holds the grant option; masking policies need sys:secadmin (or a role granted ATTACH MASKING POLICY).
+    note: Changes run only as runbook steps a person approves (the autode-redshift-governance skill).
   governance.tags:
     support: not_applicable
-    note: Grants and dynamic data masking come as runbook steps with Redshift as a target (v0.55.2).
+    note: Redshift has no object tags; personal data is protected with masking policies (governance.change).
   compile.target:
-    support: not_applicable
-    note: Building for Redshift (its SQL dialect, deploying runbooks) comes in v0.55.2.
+    support: supported
+    note: The redshift compile dialect (Pipeline Specs and Tier-1 primitives). A dry run can't check DDL or MERGE (Redshift's EXPLAIN doesn't compile them); those steps are reviewed from their statement.
 objectKinds: [table, view, late_binding_view, materialized_view, external_table, datashare_table]

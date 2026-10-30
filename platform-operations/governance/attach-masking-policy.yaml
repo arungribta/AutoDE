@@ -1,0 +1,19 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2b): mask a personal-data column for a role.
+# A change: it becomes a runbook step a person approves.
+formatVersion: 1
+id: governance.attach_masking_policy
+title: Mask a column for a role
+description: Attaches an existing masking policy to a column of a table, for a role (or PUBLIC). A change, run only as an approved runbook step.
+kind: change
+area: governance
+params:
+  - { name: policy, type: identifier, label: Masking policy }
+  - { name: table, type: identifier, label: Table }
+  - { name: column, type: identifier, label: Column }
+  - { name: role, type: identifier, label: "Role (or PUBLIC)" }
+  - { name: priority, type: number, label: Priority, default: 10, min: 0, max: 1000 }
+returns: []
+platforms:
+  # Redshift dynamic data masking: the highest priority applies when several policies match.
+  redshift:
+    sql: ATTACH MASKING POLICY {policy} ON {table}({column}) TO ROLE {role} PRIORITY {priority}

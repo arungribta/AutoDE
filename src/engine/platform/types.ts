@@ -3,7 +3,7 @@ import { BaseNode, GraphEdge } from '../context/types';
 import { DataPlatformProvider } from '../types';
 
 // ── SQL Dialects ──
-export type SqlDialect = 'snowflake' | 'spark_sql' | 'google_sql' | 'postgres' | 'tsql' | 'ansi';
+export type SqlDialect = 'snowflake' | 'spark_sql' | 'google_sql' | 'postgres' | 'tsql' | 'redshift' | 'ansi';
 
 // ── Platform Capabilities ──
 export interface PlatformCapabilities {

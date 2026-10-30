@@ -1,12 +1,12 @@
 ---
 name: autode-redshift-ingestion
-description: Bring an Amazon Redshift source into AutoDE's estate (tables, columns, views, keys, row counts, through the platform's estate operations) and plan how its data leaves Redshift for a new platform (UNLOAD to S3 as Parquet). Use it in source assessment when a source system is Redshift, and when a modernization moves data out of it.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_connections, mcp__autode__autode_list_databases, mcp__autode__autode_list_schemas, mcp__autode__autode_extract_metadata, mcp__autode__autode_ingest_metadata, mcp__autode__autode_platform_operations, mcp__autode__autode_platform_run, mcp__autode__autode_resolve, mcp__autode__autode_record_source_context, mcp__autode__autode_record_artifact]
+description: Bring an Amazon Redshift source into AutoDE's estate (tables, columns, views, keys, row counts, through the platform's estate operations) and plan how its data leaves Redshift for a new platform (UNLOAD to S3 as Parquet); and, with Redshift as a target, land source data from S3 with COPY into raw tables that mirror the estate. Use it in source assessment when a source system is Redshift, when a modernization moves data out of it, and in build stages when the target is Redshift.
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_connections, mcp__autode__autode_list_databases, mcp__autode__autode_list_schemas, mcp__autode__autode_extract_metadata, mcp__autode__autode_ingest_metadata, mcp__autode__autode_platform_operations, mcp__autode__autode_platform_run, mcp__autode__autode_resolve, mcp__autode__autode_record_source_context, mcp__autode__autode_record_artifact, mcp__autode__autode_check_grounding, mcp__autode__autode_explain_sql, mcp__autode__autode_propose_runbook]
 metadata:
   scope: redshift
   stageKinds: [source-assessment, build]
   platforms: [redshift]
-  version: 1
+  version: 2
   owner: AutoDE
   maturity: preview
 ---
@@ -37,7 +37,15 @@ When the target is another platform (Snowflake, Databricks), Redshift's data lea
 - Add `PARTITION BY (column)` for a large table loaded by date, `MAXFILESIZE` to bound the files, and `MANIFEST` so the loader knows the full set of files.
 - The IAM role is attached to the cluster or workgroup and needs write access to the bucket. Never put access keys in the statement.
 - Write the plan as an artifact (`autode_record_artifact`, for example `ingestion/redshift_unload.sql` with notes): table by table, the select (columns from the estate, never `*` for a table whose columns the mapping drops), the S3 prefix and the partitioning.
-- **Running it** is a change on Redshift: it runs as an approved runbook once Redshift's runbook steps are supported (v0.55.2, Redshift as a target). Until then the plan is the deliverable, and a person runs it.
+- **Running it** is a change on Redshift: propose it as a runbook (one `sql` step per table, `autode_propose_runbook`); a person approves it and AutoDE's runner runs it. UNLOAD has no dry run on Redshift (its EXPLAIN doesn't compile it): the check says so.
+
+## 4. Landing data in Redshift (a target)
+
+- **Raw tables mirror the estate:** the source table's columns with Redshift types (`BIGINT`, `NUMERIC(p,s)`, `VARCHAR(n)` with the source's length, `TIMESTAMP`), plus `_source_file VARCHAR(1024)` and `_loaded_at TIMESTAMP DEFAULT GETDATE()`. Write a `-- lands <source table>` comment above each, so the check can compare its columns with the estate. `CREATE TABLE IF NOT EXISTS`.
+- **Load with COPY** from S3: `COPY raw.orders FROM 's3://…/orders/' IAM_ROLE '<role arn>' FORMAT AS PARQUET` (or `CSV IGNOREHEADER 1`), a `MANIFEST` for an exact file set. The role is attached to the cluster or workgroup; never put keys in the statement.
+- **Reloads duplicate:** unlike Snowflake, COPY doesn't remember which files it loaded. Load into a staging table, then `MERGE` into the raw table on the key (the `incremental_load` primitive), or load each batch's files by manifest exactly once and say so in the runbook.
+- **Errors:** `MAXERROR 0` unless the quality rules allow skipping rows; `STL_LOAD_ERRORS` (or `SYS_LOAD_ERROR_DETAIL`) says which rows failed.
+- Propose the landing tables and loads as a runbook (the `autode-redshift-deployment` skill: order and what the dry run checks).
 
 ## Worked example (orders and customers)
 

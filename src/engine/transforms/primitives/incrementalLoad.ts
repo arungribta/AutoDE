@@ -1,4 +1,4 @@
-import { TransformPrimitive, CompiledArtifact, TargetEnvironmentSummary } from '../types';
+import { TransformPrimitive, CompiledArtifact, TargetEnvironmentSummary, SqlDialect } from '../types';
 
 export interface IncrementalLoadParams {
   sourceObject: string;
@@ -21,9 +21,10 @@ const paramSchema = {
   }
 };
 
-function compile(params: IncrementalLoadParams, _target: TargetEnvironmentSummary): CompiledArtifact {
+function compile(params: IncrementalLoadParams, _target: TargetEnvironmentSummary, dialect?: SqlDialect): CompiledArtifact {
   const onClause = params.keyColumns.map((k) => `tgt.${k} = src.${k}`).join(' AND ');
-  const updateSet = params.updateColumns.map((c) => `tgt.${c} = src.${c}`).join(',\n    ');
+  // Redshift's MERGE names the target's columns unqualified in SET.
+  const updateSet = params.updateColumns.map((c) => `${dialect === 'redshift' ? '' : 'tgt.'}${c} = src.${c}`).join(',\n    ');
   const insertColumns = [...params.keyColumns, ...params.updateColumns];
   const insertValues = insertColumns.map((c) => `src.${c}`).join(', ');
   const content = [

@@ -1,4 +1,5 @@
 import { TransformPrimitive, CompiledArtifact, TargetEnvironmentSummary, SqlDialect } from '../types';
+import { createOrReplace } from '../objectDdl';
 
 /**
  * `mask` (GOV, v0.47.0): masks personal-data columns, non-reversibly, in a
@@ -75,17 +76,19 @@ const paramSchema = {
   }
 };
 
-const TEXT: Record<SqlDialect, string> = { snowflake: 'VARCHAR', spark_sql: 'STRING', google_sql: 'STRING', postgres: 'TEXT', tsql: 'VARCHAR(8000)', ansi: 'VARCHAR(4000)' };
+// Redshift's plain VARCHAR is 256 characters: cast to its maximum so a long value isn't cut before it is hashed.
+const TEXT: Record<SqlDialect, string> = { snowflake: 'VARCHAR', spark_sql: 'STRING', google_sql: 'STRING', postgres: 'TEXT', tsql: 'VARCHAR(8000)', redshift: 'VARCHAR(65535)', ansi: 'VARCHAR(4000)' };
 
 /** SHA-256, lowercase hex, of a text expression. */
 function sha256(text: string, dialect: SqlDialect): string {
   switch (dialect) {
     case 'snowflake': return `SHA2(${text}, 256)`;
+    case 'redshift': return `SHA2(${text}, 256)`;
     case 'spark_sql': return `sha2(${text}, 256)`;
     case 'google_sql': return `TO_HEX(SHA256(${text}))`;
     case 'postgres': return `encode(sha256(convert_to(${text}, 'UTF8')), 'hex')`;
     case 'tsql': return `LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', ${text}), 2))`;
-    default: throw new Error('ANSI SQL has no hash function: compile the mask for a platform dialect (snowflake, spark_sql, google_sql, postgres, tsql).');
+    default: throw new Error('ANSI SQL has no hash function: compile the mask for a platform dialect (snowflake, spark_sql, google_sql, postgres, tsql, redshift).');
   }
 }
 
@@ -105,7 +108,7 @@ function compile(params: MaskParams, _target: TargetEnvironmentSummary, dialect:
   const kind = params.objectKind === 'table' ? 'TABLE' : 'VIEW';
   const content = [
     `-- Masks ${params.columns.length} personal-data column(s) of ${params.sourceObject} (non-reversible).`,
-    `CREATE OR REPLACE ${kind} ${params.targetObject} AS`,
+    createOrReplace(kind, params.targetObject, dialect),
     'SELECT',
     `  ${select.join(',\n  ')}`,
     `FROM ${params.sourceObject};`,

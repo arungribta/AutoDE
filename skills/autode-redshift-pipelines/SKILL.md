@@ -1,12 +1,12 @@
 ---
 name: autode-redshift-pipelines
-description: Find the pipelines living inside an Amazon Redshift source - stored procedures, materialized views and their refresh, views that encode business logic (the pipelines.list_procedures, pipelines.materialized_views and estate.list_views operations) - and hand them to code conversion and mapping. Building pipelines on Redshift comes in v0.55.2. Use it in source assessment and code conversion when a source is Redshift.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_connections, mcp__autode__autode_platform_operations, mcp__autode__autode_platform_run, mcp__autode__autode_record_artifact, mcp__autode__autode_record_source_context, mcp__autode__autode_record_assumption]
+description: Find the pipelines living inside an Amazon Redshift source - stored procedures, materialized views and their refresh, views that encode business logic (the pipelines.list_procedures, pipelines.materialized_views and estate.list_views operations) - and hand them to code conversion and mapping; and run a problem's compiled pipelines on Redshift as a target (the redshift dialect, MERGE for incremental loads, materialized views with auto refresh, the schedule outside the database). Use it in source assessment and code conversion when a source is Redshift, and in build stages when the target is Redshift.
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_connections, mcp__autode__autode_platform_operations, mcp__autode__autode_platform_run, mcp__autode__autode_record_artifact, mcp__autode__autode_record_source_context, mcp__autode__autode_record_assumption, mcp__autode__autode_compile_pipeline_spec, mcp__autode__autode_check_grounding, mcp__autode__autode_explain_sql, mcp__autode__autode_propose_runbook]
 metadata:
   scope: redshift
-  stageKinds: [source-assessment, code-conversion]
+  stageKinds: [source-assessment, code-conversion, build]
   platforms: [redshift]
-  version: 1
+  version: 2
   owner: AutoDE
   maturity: preview
 ---
@@ -35,6 +35,13 @@ What runs them is usually **outside** Redshift: scheduled queries (Amazon EventB
 
 `autode_record_source_context`: the procedures and materialized views found, what schedules them, and the gaps (schemas not read, schedules unknown).
 
-## Building on Redshift
+## Building on Redshift (a target)
 
-Pipelines compiled to Redshift's SQL dialect and created on Redshift through runbooks come with Redshift as a target (v0.55.2, platform-operations §6.2b).
+1. **Compile:** `autode_compile_pipeline_spec` with dialect `redshift`. AutoDE's primitives write Redshift's own forms: deduplication with `QUALIFY` (Redshift has no `SELECT * EXCLUDE`), incremental loads with `MERGE` (unqualified columns in `SET`), masking with `SHA2` over `VARCHAR(65535)` (a plain `VARCHAR` is 256 characters and would cut values before hashing). Keep the compiled logic; don't rewrite it.
+2. **How each step runs:**
+   - **Staging and conformed layers:** views (late-binding where the tables under them get rebuilt), or tables rebuilt by the runbook.
+   - **Incremental facts:** the compiled `MERGE`. Redshift's `MERGE` needs the source to have one row per key: run the dedup step before it.
+   - **Aggregates read often:** a materialized view with `AUTO REFRESH YES` (it refreshes when its base tables change). Note what it can't refresh incrementally (outer joins, window functions): Redshift then recomputes it fully.
+   - **Several statements that must run together:** a stored procedure wrapping them, created by the runbook.
+3. **The schedule** is outside the database: Redshift's scheduled queries (Amazon EventBridge), or the orchestrator the target context names (Airflow, Step Functions). Record it in the artifact's notes; AutoDE doesn't create it.
+4. `autode_check_grounding` on the SQL, then `autode_propose_runbook` on the target connection (the `autode-redshift-deployment` skill: order, idempotent forms, what the dry run can check).

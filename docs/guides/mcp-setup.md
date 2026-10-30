@@ -232,7 +232,7 @@ Since 0.55.0 AutoDE reaches Amazon Redshift with no Redshift code or driver: its
 - **Sign-in:** the Data API takes no plain password. Give `secretArn` (a Secrets Manager secret with the database user's password: recommended), or `clusterIdentifier` with `dbUser` (IAM temporary credentials), or a Serverless workgroup alone (your IAM identity).
 - **Your AWS identity:** `credentials: { resolver: cli, ref: <profile> }` names an AWS CLI profile; AutoDE stores nothing. Without a profile (CI), `resolver: env` reads `AUTODE_REDSHIFT[_<REF>]_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` and `_SESSION_TOKEN`, which AutoDE passes to the CLI as `AWS_ACCESS_KEY_ID` and the like, in its environment, never as arguments. Any field can also come from `AUTODE_REDSHIFT[_<REF>]_<FIELD>` (`SECRET_ARN`, `DB_USER`, `WORKGROUP_NAME` …).
 - **Reads:** `autode_extract_metadata` and `autode_ingest_metadata` run Redshift's estate operations (`SVV_ALL_TABLES`, `SVV_ALL_COLUMNS`, `pg_views`, `information_schema` keys, `SVV_TABLE_INFO` row counts). A read the user can't do is listed in the result, and the rest still come in. `autode_platform_operations` with `platform: redshift` lists everything AutoDE can read there.
-- **As a target** Redshift can be connected and read; building for it comes in 0.55.2.
+- **As a target** (since 0.55.2): `autode_compile_pipeline_spec` and `autode_compile_transform` take dialect `redshift`; runbook steps run on the connection through the same Data API calls. Redshift's EXPLAIN compiles only `SELECT`, `INSERT`, `UPDATE` and `DELETE`, so `autode_explain_sql` reports a DDL or `MERGE` statement as `checked: false`, and the runbook check says those steps have no dry run.
 
 ### Oracle
 

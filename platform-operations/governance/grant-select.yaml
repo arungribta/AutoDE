@@ -1,0 +1,16 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2b): give a role read access to a schema's
+# tables. A change: it never runs from here; it becomes a runbook step a person approves (autode_platform_run
+# returns the step to propose). The role also needs governance.grant_usage on the schema.
+formatVersion: 1
+id: governance.grant_select
+title: Grant read access to a schema's tables
+description: Lets a role select from all the tables and views a schema has now. A change, run only as an approved runbook step; pair it with governance.grant_usage.
+kind: change
+area: governance
+params:
+  - { name: schema, type: identifier, label: Schema }
+  - { name: role, type: identifier, label: Role }
+returns: []
+platforms:
+  redshift:
+    sql: GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO ROLE {role}

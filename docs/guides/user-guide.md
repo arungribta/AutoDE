@@ -89,7 +89,7 @@ Open **Source** or **Target** in the panel's settings. Each platform has a card:
   - **IAM temporary credentials** for a database user (provisioned clusters);
   - **your AWS identity** (Serverless).
 
-  Your AWS identity comes from an AWS CLI profile (*Find existing* lists them; this needs your consent for AutoDE to run the CLI) or, without one, access keys, which go to VS Code's secret storage and reach the CLI only through its environment. The card is drawn from `platforms/redshift.yaml`. Use *Save and connect*. As a target, Redshift can be connected and read now; building for it comes in 0.55.2.
+  Your AWS identity comes from an AWS CLI profile (*Find existing* lists them; this needs your consent for AutoDE to run the CLI) or, without one, access keys, which go to VS Code's secret storage and reach the CLI only through its environment. The card is drawn from `platforms/redshift.yaml`. Use *Save and connect*. As a target (since 0.55.2) AutoDE compiles for Redshift and deploys through runbooks; Redshift's EXPLAIN can't check DDL or `MERGE`, so those steps are reviewed from their statement, and the runbook says so.
 
 Each card shows the platform's **prerequisites** (CLIs, drivers) with *Install* and *Verify*. AutoDE never downloads anything by itself: it shows you the vendor's command and runs it in a visible terminal only when you click.
 

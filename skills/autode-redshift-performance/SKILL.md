@@ -1,12 +1,12 @@
 ---
 name: autode-redshift-performance
-description: Read an Amazon Redshift source's physical design from evidence - distribution style and key, sort keys, row skew, unsorted share, stale statistics and compression (the performance.table_design operation) - and carry what it says into the assessment and into the new platform's design. Tuning Redshift as a target comes in v0.55.2. Use it in source assessment and modelling when a source is Redshift.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_connections, mcp__autode__autode_platform_operations, mcp__autode__autode_platform_run, mcp__autode__autode_propose_assertion, mcp__autode__autode_record_artifact]
+description: Read an Amazon Redshift source's physical design from evidence - distribution style and key, sort keys, row skew, unsorted share, stale statistics and compression (the performance.table_design operation) - and carry what it says into the assessment and into the new platform's design; and, with Redshift as a target, choose distribution and sort keys only on evidence, as runbook steps. Use it in source assessment and modelling when a source is Redshift, and in build stages when the target is Redshift.
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_connections, mcp__autode__autode_platform_operations, mcp__autode__autode_platform_run, mcp__autode__autode_propose_assertion, mcp__autode__autode_record_artifact, mcp__autode__autode_propose_runbook]
 metadata:
   scope: redshift
-  stageKinds: [source-assessment, modelling]
+  stageKinds: [source-assessment, modelling, build]
   platforms: [redshift]
-  version: 1
+  version: 2
   owner: AutoDE
   maturity: preview
 ---
@@ -43,4 +43,9 @@ Record what the evidence shows as facts on the tables (`autode_propose_assertion
 
 ## Tuning Redshift as a target
 
-Choosing distribution and sort keys for new tables, workload management and maintenance runbooks come with Redshift as a target (v0.55.2, platform-operations §6.2b).
+- **Start with AUTO.** Tables the runbook creates get Redshift's automatic distribution and sort keys, which it adjusts from the workload. Don't set keys on a new table without evidence.
+- **Evidence for a key:** after the workload has run, `performance.table_design` on the target shows skew, the unsorted share and the keys Redshift chose. A large fact table joined to one dimension on one column is the case for `KEY` distribution on that column; a date range filter on most queries is the case for a sort key on the date.
+- **Change keys in place,** as runbook steps: `ALTER TABLE … ALTER DISTSTYLE KEY DISTKEY column`, `ALTER TABLE … ALTER SORTKEY (column)`. They rewrite the table: run them in a quiet window, and say so in the step.
+- **Small dimensions** (a few million rows or fewer, joined everywhere): `ALTER DISTSTYLE ALL`.
+- **Maintenance:** Redshift vacuums and analyzes automatically. Propose `VACUUM` or `ANALYZE` steps only when `performance.table_design` shows a backlog that persists.
+- **Serverless:** capacity is the workgroup's base RPU, set outside the database; there is no WLM to tune. Note it for the person if the workload needs more.

@@ -25,6 +25,8 @@ export interface SqlFragments {
   explain: string;
   /** When the plan is read by a second statement (Oracle's DBMS_XPLAN). */
   explainResult?: string;
+  /** v0.55.2: the statements (by first keyword) EXPLAIN compiles here, where it doesn't compile them all (Redshift: no DDL); absent = all. */
+  explainCovers?: string[];
 }
 
 /** For a platform with no definition, or no connection: standard SQL. */
@@ -52,7 +54,8 @@ export function fragmentsFor(platformId: string | undefined, scope: { resourcesR
     distinctTuples: f.distinctTuples === 'native' ? 'native' : 'emulated',
     ...(f.keyHash ? { keyHash: f.keyHash } : {}),
     explain: f.explain ?? ANSI.explain,
-    ...(f.explainResult ? { explainResult: f.explainResult } : {})
+    ...(f.explainResult ? { explainResult: f.explainResult } : {}),
+    ...(f.explainCovers ? { explainCovers: f.explainCovers.split(/[,\s]+/).map((k) => k.trim().toUpperCase()).filter(Boolean) } : {})
   } : ANSI;
   cache.set(key, out);
   return out;
@@ -67,4 +70,13 @@ export function fill(fragment: string, values: Record<string, string>): string {
 export function explainStatements(platformId: string | undefined, statement: string): string[] {
   const f = fragmentsFor(platformId);
   return [fill(f.explain, { statement }), ...(f.explainResult ? [f.explainResult] : [])];
+}
+
+/**
+ * v0.55.2: whether the platform's EXPLAIN compiles this statement (its first keyword), so a dry run can check it.
+ * Where it can't (Redshift's DDL and MERGE), a dry run must say "not checked by the platform", never pass.
+ */
+export function explainCovers(platformId: string | undefined, firstKeyword: string | undefined): boolean {
+  const covers = fragmentsFor(platformId).explainCovers;
+  return !covers || !firstKeyword || covers.includes(firstKeyword.toUpperCase());
 }
