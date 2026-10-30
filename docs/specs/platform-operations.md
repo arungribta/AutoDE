@@ -256,8 +256,15 @@ Scope:
 - **Redshift onboarded** (owner, 2026-10-29), as the proof that a platform is added by files:
   - a platform definition (category `warehouse`, access through the AWS CLI's `redshift-data`, asynchronous: `execute-statement`, `describe-statement`, `get-statement-result`, paged);
   - its estate and profiling operations (`SVV_TABLE_INFO`, `SVV_COLUMNS`, `SVV_ALL_TABLES` and the like, with version ranges and recorded examples);
-  - an `autode-redshift-*` skill: installing the AWS CLI, an AWS profile with a non-interactive sign-in, choosing a cluster or Serverless workgroup and database, the privileges needed, troubleshooting;
-  - Redshift as a **source** only: no compile dialect yet, so it isn't offered as a build target; lineage is designed only, since Redshift has no native column lineage. Its capability map says so;
+  - **its connection** (owner, 2026-10-30): an AWS profile and region; a provisioned cluster (`--cluster-identifier`) or a Serverless workgroup (`--workgroup-name`); the database. Sign-in is one of three, since the Data API takes no plain database password:
+    - a **Secrets Manager ARN** (`--secret-arn`) holding the database user's password: recommended, because AutoDE then holds no Redshift secret;
+    - **IAM temporary credentials** for a database user (`--db-user`, provisioned clusters);
+    - the **AWS profile** alone (SSO or an assumed role), which AutoDE only names.
+
+    Where a person gives AWS access keys instead of a profile, they reach the CLI as environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), never as arguments, so a definition's credential environment becomes a list of variables per credential. `providerRegistry.ts`'s Redshift entry (today `username-password` and `iam`) is replaced by these three;
+  - **cards in both roles:** Redshift appears under Source and under Target in the settings, with the steps the Snowflake and Databricks cards have (prerequisites, existing AWS profiles, test before saving, a named connection). Its card is **drawn from the platform definition** (connection fields, sign-in options, prerequisite check, install steps), not written for Redshift in `platformOnboarding.ts` or `webviewProvider.ts`, which would add platform branches the architecture test refuses. It is the first card built this way; Snowflake's and Databricks' can follow. Until Redshift as a target ships (§6.2b), the Target card says that a Redshift target can be connected and read, and that building for it comes in v0.55.2;
+  - **skills,** the same set as Snowflake and Databricks: `autode-redshift-ingestion` (COPY from S3, Spectrum), `-pipelines`, `-deployment`, `-performance` (distribution and sort keys, WLM), `-governance` (grants, dynamic data masking, Lake Formation). In part 1 they cover connecting and reading (installing the AWS CLI, a profile with a non-interactive sign-in, choosing a cluster or workgroup and database, the privileges, troubleshooting); building and deploying come with §6.2b. Agents reach Redshift through AutoDE's general tools (`autode_platform_run`, `autode_execute_query`, `autode_explain_sql`) and operation files: there are no Redshift MCP tools in code. Discovery (the source-assessment skill) is platform-neutral and works on Redshift once its estate operations exist;
+  - **as a source** in part 1: the estate, profiling, probes and reconciliation through its definition and operations. Lineage is designed only, since Redshift has no native lineage; its capability map says so;
 - **new object kinds:** an operation can read objects the snapshot didn't know (for example Snowflake dynamic tables, Databricks metric views). They come into the estate as their declared kind, not dropped.
 
 Acceptance:
@@ -267,6 +274,17 @@ Acceptance:
 - **Boundary:** the architecture baseline lists no platform SQL in the adapters.
 - **Redshift without code:** on recorded `redshift-data` output (including a paged result and a failed statement), Redshift's estate comes in through its platform definition, operations and skill only; the architecture test passes with no new exception. With the AWS CLI missing, the skill's install steps are shown.
 - **Oracle unchanged:** Oracle connections, probes, dry runs and object lineage work as in v0.54.1 (the existing tests pass).
+
+### 6.2b Redshift as a target (v0.55.2)
+
+Owner, 2026-10-30: right after POP2, before UI2. The connection and the Target card come in v0.55.0; this phase adds what building for Redshift needs:
+- **a compile dialect** `redshift` in `src/engine/transforms/` (`SqlDialect`), driven by the primitive definitions: Tier-1 primitive templates, golden snapshots and the conformance suite. Today's `postgres` dialect isn't close enough: Redshift has distribution and sort keys, no `CREATE OR REPLACE TABLE`, `SUPER` for semi-structured data, and its own `MERGE` and `IDENTITY` rules;
+- **runbook execution** through `redshift-data`: an approved step's statement runs through the generic statement runner (asynchronous, with its status and error read back), and the runner's allowed CLI commands include `aws redshift-data`, from the platform definition;
+- **the dry run:** Redshift's `EXPLAIN` covers queries and DML but not DDL, so a DDL step's dry run is reported as a gap ("not checked by the platform"), never as passed;
+- **the target-context interview** for Redshift (cluster or workgroup, schemas per layer, distribution and sort conventions) and the `-deployment`, `-pipelines` and `-performance` skills' building guidance;
+- **change operations** for governance (grants, masking policies) as runbook steps.
+
+Acceptance: a Pipeline Spec compiles to Redshift SQL that matches its golden snapshots; on recorded `redshift-data` output, an approved runbook step runs and a failed one stops the runbook with the platform's error; a DDL dry run is reported as unchecked; no new architecture exception.
 
 ### 6.2a Deferred: Oracle's platform work (owner, 2026-10-30)
 
