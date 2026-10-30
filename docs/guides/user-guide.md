@@ -84,6 +84,12 @@ Open **Source** or **Target** in the panel's settings. Each platform has a card:
 - **Snowflake:** account, user, warehouse, database, schema, role; key-pair, password (through the Snowflake CLI) or an existing `snow` connection.
 - **Databricks:** workspace host, SQL warehouse HTTP path, catalog and schema; a token or a Databricks CLI profile.
 - **Oracle** (source only): a `tnsnames.ora` alias or Easy Connect string, user, and the password (*AutoDE: Set Oracle Password*). It needs the Oracle driver: *AutoDE: Install Oracle Driver* guides you through it.
+- **Amazon Redshift** (source or target; since 0.55.0): a Serverless workgroup or a provisioned cluster, the database, and how to sign in. AutoDE reaches Redshift through the **AWS CLI version 2** (its Redshift Data API commands), which you install; *Check prerequisites* on the card shows how. The Data API takes no plain password, so pick one of:
+  - a **Secrets Manager secret** (recommended): AutoDE passes only the secret's ARN and holds no Redshift secret;
+  - **IAM temporary credentials** for a database user (provisioned clusters);
+  - **your AWS identity** (Serverless).
+
+  Your AWS identity comes from an AWS CLI profile (*Find existing* lists them; this needs your consent for AutoDE to run the CLI) or, without one, access keys, which go to VS Code's secret storage and reach the CLI only through its environment. The card is drawn from `platforms/redshift.yaml`. Use *Save and connect*. As a target, Redshift can be connected and read now; building for it comes in 0.55.2.
 
 Each card shows the platform's **prerequisites** (CLIs, drivers) with *Install* and *Verify*. AutoDE never downloads anything by itself: it shows you the vendor's command and runs it in a visible terminal only when you click.
 
@@ -237,6 +243,7 @@ The estate (`.autode/knowledge/estate.yaml`, *AutoDE: Open Estate*) lists the sy
 ### 7.2 Bringing metadata in
 
 - **Run Source Assessment** on a platform card: choose a named connection, a database and its schemas. AutoDE brings the tables and columns into the estate, with profiles (null rates, distinct counts, min and max where sample data is allowed). Profiling is budgeted: `discovery.profileQueryBudget` queries at most, `discovery.profileConcurrency` at a time.
+- **What couldn't be read is said.** If the account can't do one of the reads (a missing grant, an edition), the others still come in and the result lists what wasn't read and why (for example Redshift's row counts, which need access to `SVV_TABLE_INFO`).
 - **Ingest File** (*AutoDE: Ingest File as Source Context*): DDL, CSV (types only, never values) or JSON.
 - **Column-dictionary exports** (Teradata, Oracle or `information_schema` column listings as CSV) are recognised by *Ingest File* and loaded as tables and columns.
 - From a terminal: `autode estate ingest <file>… [--system <id>]` and `autode estate extract --connection <id> --schema <DATABASE.SCHEMA>… [--profile]`; `autode estate show` lists systems and the working set.

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { PrincipalType } from '../../types';
 import { CredentialReference, CredentialResolver } from './types';
 import { readDatabricksCfgProfiles } from './databricksCfg';
+import { platformDefinition } from '../definitions';
 
 /** Top-level `[name]` table headers in a `connections.toml` file, in file order. */
 async function readConnectionNames(filePath: string): Promise<string[] | undefined> {
@@ -65,6 +66,9 @@ export class CliConfigResolver implements CredentialResolver {
     if (reference.platform === 'databricks') {
       return this.resolveDatabricks(reference);
     }
+    // v0.55.0: a platform defined by files names the CLI's own profile; the CLI signs in with it (checked when connecting).
+    const field = platformDefinition(reference.platform)?.connection?.cliProfileField;
+    if (field) return { [field]: reference.ref && reference.ref.trim() ? reference.ref.trim() : 'default' };
     return undefined;
   }
 

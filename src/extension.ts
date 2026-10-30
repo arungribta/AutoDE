@@ -103,7 +103,9 @@ export function activate(context: vscode.ExtensionContext): void {
     cliConsent: () => configManager.getSettings().dataPlatformCliConsent === true,
     // Phase 4: row values reach prompts only if .autode/config/connections.yaml allows it for this connection.
     sampleDataConsent: sampleDataConsentFromWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
-    driversRoot: () => configManager.getSettings().driversDirectory
+    driversRoot: () => configManager.getSettings().driversDirectory,
+    // v0.55.0: a platform defined by files uses the workspace's approved copy of its definition, where there is one.
+    workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
   });
   const cardSecrets: Record<string, string> = {
     'source.snowflake.password': SECRET_KEYS.snowflakePassword, 'source.snowflake.privateKeyPassphrase': SECRET_KEYS.snowflakePrivateKeyPassphrase,

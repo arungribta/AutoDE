@@ -83,6 +83,60 @@ export interface PlatformCapability {
   note?: string;
 }
 
+/**
+ * v0.55.0: how a statement reaches a platform that has only a CLI (no adapter class). Each call is an argument
+ * list after the CLI's command; `{sql}` and `{id}` are filled in, and the connection's arguments are added
+ * (its fields' `cliArg`). `sync`: one call returns the rows. `async`: submit, poll until finished, fetch pages.
+ */
+export interface CliStatement {
+  mode: 'sync' | 'async';
+  /** sync: the call, and where its rows are (a dotted path; absent = the output is the rows). */
+  run?: { args: string[]; rows?: string };
+  /** async: the call that submits the statement, and where its id is. */
+  submit?: { args: string[]; id: string };
+  /** async: the call that reads its state; which states end it; where the error and "has a result" are. */
+  poll?: { args: string[]; status: string; finished: string[]; failed: string[]; error?: string; hasResult?: string };
+  /** async: the call that reads a page of the result; where the rows, column names and next page's token are. */
+  fetch?: { args: string[]; rows: string; columns?: string; columnName?: string; nextToken?: string; nextTokenArg?: string; cells?: 'plain' | 'typed' };
+  /** async: the call that cancels it (best effort, on a timeout or a stop). */
+  cancel?: { args: string[] };
+}
+
+/** v0.55.0: one field of a connection to the platform, as its card, `connections.yaml` and the CLI ask for it. */
+export interface ConnectionField {
+  name: string;
+  label: string;
+  description?: string;
+  required?: boolean;
+  /** Differs per engineer: kept in the personal file. */
+  personal?: boolean;
+  /** A credential: never in a file; from VS Code's secret storage or the environment. */
+  secret?: boolean;
+  /** Passed to the CLI as this argument (a non-secret field). */
+  cliArg?: string;
+  /** `every`: on every CLI call (region, profile); `submit` (default): only where the statement is submitted. */
+  cliScope?: 'every' | 'submit';
+  /** Passed to the CLI in this environment variable (a secret's only way in). */
+  env?: string;
+}
+
+/** v0.55.0: what a connection to the platform is made of, for a platform without a card written for it. */
+export interface ConnectionDefinition {
+  fields: ConnectionField[];
+  /** The fields whose first present value names the connection (`redshift:<it>`). */
+  idFields?: string[];
+  /** Groups of fields of which exactly one must be given. */
+  exactlyOne?: string[][];
+  /** The ways to sign in, each with the fields it needs. */
+  authModes?: Array<{ mode: string; label: string; requires?: string[]; note?: string }>;
+  /** The field a `cli` reference (the CLI's own profile) fills. */
+  cliProfileField?: string;
+  /** Roles it can play; default both. */
+  roles?: Array<'source' | 'target'>;
+  /** Shown on a Target card while building for the platform isn't supported yet. */
+  targetNote?: string;
+}
+
 /** What a platform is and what AutoDE can do with it (§2.2). */
 export interface PlatformDefinition {
   formatVersion: number;
@@ -91,7 +145,25 @@ export interface PlatformDefinition {
   category: 'warehouse' | 'lakehouse' | 'semantic' | 'catalog' | 'orchestration' | 'bi';
   transports: Array<'sql' | 'cli' | 'http' | 'file'>;
   /** How AutoDE reaches it: the CLI (installed by the user, never bundled) and the API where the vendor has one. */
-  access?: { cli?: { command: string; minVersion?: string; install?: string; credentialEnv?: string }; api?: { name: string } };
+  access?: {
+    cli?: {
+      command: string; minVersion?: string; install?: string; credentialEnv?: string;
+      /** v0.55.0: the executable's name per OS, when it differs from `command` (Windows: `aws.exe`). */
+      binary?: { win32?: string; default?: string };
+      /** v0.55.0: folders the vendor's installer uses, looked in when it isn't on PATH. */
+      wellKnownDirs?: { win32?: string[]; default?: string[] };
+      versionArgs?: string[];
+      /** v0.55.0: environment variables set on every call (no secrets: for example turning the CLI's pager off). */
+      env?: Record<string, string>;
+      /** v0.55.0: the arguments that list the CLI's own profiles, one per line. */
+      listProfiles?: string[];
+      /** v0.55.0: how a statement runs through the CLI, for a platform without an adapter class. */
+      statement?: CliStatement;
+    };
+    api?: { name: string };
+  };
+  /** v0.55.0: the connection's fields and sign-in, for a platform without a card written for it. */
+  connection?: ConnectionDefinition;
   /** The operation that reads the platform's version. */
   versionOperation?: string;
   /** How names and values are written on this platform. */

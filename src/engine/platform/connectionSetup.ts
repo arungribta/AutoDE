@@ -4,6 +4,7 @@ import { envCredentialVariable } from './credentials/EnvVarCredentialResolver';
 import { databricksConfigPath, readDatabricksCfgProfiles } from './credentials/databricksCfg';
 import { listSnowflakeConnectionNames, snowflakeConnectionsTomlPath } from './credentials/CliConfigResolver';
 import { readTnsNames } from './credentials/tnsnames';
+import { platformDefinition } from './definitions';
 
 /**
  * Setting up a connection outside the settings cards (v0.43.1): what the
@@ -37,6 +38,10 @@ export interface CredentialNeeds {
 /** Where a draft's secret comes from and what still has to be set — never the secret itself. */
 export function credentialNeeds(draft: Pick<ConnectionDraft, 'platform' | 'fields' | 'credentials'>, env: NodeJS.ProcessEnv = process.env): CredentialNeeds {
   const { resolver, ref } = draft.credentials;
+  const defined = CONNECTION_FIELDS[draft.platform] ? undefined : platformDefinition(draft.platform);
+  if (resolver === 'cli' && defined) {
+    return { summary: `Credentials come from your ${defined.access?.cli?.command ?? 'CLI'} profile "${ref || 'default'}"; AutoDE stores none.`, variables: [] };
+  }
   if (resolver === 'cli') {
     const where = draft.platform === 'snowflake' ? `the Snowflake CLI connection [${ref || 'default'}] in ${snowflakeConnectionsTomlPath()}` : `the profile [${ref || 'DEFAULT'}] in ${databricksConfigPath()}`;
     return { summary: `Credentials come from ${where}; AutoDE stores none.`, variables: [] };
@@ -45,12 +50,12 @@ export function credentialNeeds(draft: Pick<ConnectionDraft, 'platform' | 'field
     .map((field) => ({ field, name: envCredentialVariable(draft.platform, ref, field) }))
     .filter((v): v is { field: string; name: string } => !!v.name)
     .map((v) => ({ ...v, set: !!env[v.name] }));
-  const optional = draft.platform === 'snowflake' && (draft.fields?.authMode || 'key-pair') === 'key-pair';
+  const optional = (draft.platform === 'snowflake' && (draft.fields?.authMode || 'key-pair') === 'key-pair') || !!defined;
   const lead = resolver === 'vscode'
     ? 'Inside VS Code the secret comes from its secret storage; elsewhere (CLI, MCP clients) from'
     : 'The secret comes from';
   return {
-    summary: variables.length ? `${lead} ${variables.map((v) => v.name).join(' and ')}${optional ? ' (only if the private key is encrypted)' : ''}.` : 'This connection needs no secret.',
+    summary: variables.length ? `${lead} ${variables.map((v) => v.name).join(' and ')}${optional ? (defined ? ' (only for the sign-in that needs them)' : ' (only if the private key is encrypted)') : ''}.` : 'This connection needs no secret.',
     variables
   };
 }
@@ -85,5 +90,11 @@ export function setupFields(platform: DataPlatformProvider, resolver: string): A
     return [f('workspaceUrl', 'Workspace URL (adb-….azuredatabricks.net)', true), f('httpPath', 'SQL warehouse HTTP path (/sql/1.0/warehouses/…)', true), f('catalog', 'Catalog'), f('schema', 'Schema')];
   }
   if (platform === 'oracle') return [f('connectString', 'Connect string: a tnsnames alias or host:port/service', true), f('username', 'Username', true), f('configDir', 'Folder with tnsnames.ora (blank: TNS_ADMIN)')];
+  // A platform defined by files: its definition's fields, minus the CLI profile a `cli` reference already names.
+  const c = platformDefinition(platform)?.connection;
+  if (c) {
+    return c.fields.filter((x) => !x.secret && !(resolver === 'cli' && x.name === c.cliProfileField))
+      .map((x) => ({ field: x.name, label: x.description ? `${x.label} (${x.description})` : x.label, required: !!x.required, personal: !!x.personal }));
+  }
   return (CONNECTION_FIELDS[platform] ?? []).map((x) => f(x, x));
 }

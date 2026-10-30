@@ -1,0 +1,23 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): the databases a connection can see, to pick from.
+formatVersion: 1
+id: estate.list_databases
+title: Databases
+description: The databases (catalogs) the connection's user can see. Names only.
+kind: read
+content: metadata
+area: estate
+params: []
+returns:
+  - { name: name, label: Database }
+platforms:
+  redshift:
+    sql: >
+      SELECT datname AS name FROM pg_database
+      WHERE datname NOT IN ('padb_harvest', 'template0', 'template1', 'sys:internal')
+      ORDER BY datname
+example:
+  platform: redshift
+  params: {}
+  rows:
+    - { name: dev }
+    - { name: analytics }

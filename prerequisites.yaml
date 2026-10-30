@@ -58,3 +58,23 @@ tools:
           - [brew, trust, databricks/tap]
           - [brew, install, databricks]
     manual: The vendor's curl script (Linux, macOS, WSL) pipes a download into a shell, so AutoDE only links to it; see the vendor's page.
+  aws-cli:
+    platform: redshift
+    title: AWS CLI version 2 (aws)
+    why: Required for Redshift. AutoDE runs statements through its Redshift Data API commands (redshift-data), signed in with your AWS profile or credentials; it bundles no Redshift driver.
+    docs: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+    minVersion: 2.0.0
+    verifiedAt: 2026-10-30
+    verifiedHow: written from the vendor's documented WinGet id and Homebrew formula; not yet checked against the install page, so check it before relying on it
+    options:
+      - manager: WinGet
+        os: [win32]
+        probe: [winget, --version]
+        commands:
+          - [winget, install, --exact, --id, Amazon.AWSCLI]
+      - manager: Homebrew
+        os: [darwin, linux]
+        probe: [brew, --version]
+        commands:
+          - [brew, install, awscli]
+    manual: On Windows without WinGet, use the vendor's MSI installer; on Linux, the vendor's zip installer (both from the vendor's page). AWS CLI version 1 isn't supported. After installing, sign in with aws configure sso (or aws configure) and check with aws sts get-caller-identity.

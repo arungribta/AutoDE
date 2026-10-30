@@ -803,6 +803,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'prerequisiteAction':
         case 'findExistingConnections':
         case 'saveNamedConnection':
+        case 'saveDefinedConnection':
         case 'useConnection':
         case 'stopUsingConnection':
         case 'recheckConnection':
@@ -1808,6 +1809,29 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         this.postLog(result.ok ? `${result.message} Connect now uses it for the ${role}.` : result.message);
         this.postMessage('namedConnectionResult', { ...result, platform, role });
         this.postPlatformsState();
+        break;
+      }
+      case 'saveDefinedConnection': {
+        // v0.55.0: a card drawn from a platform's definition sends what it holds; secrets go to secret storage, never a file.
+        const values = (m.values && typeof m.values === 'object' ? m.values : {}) as Record<string, string>;
+        const cliRef = typeof m.cliRef === 'string' ? m.cliRef : '';
+        const scope = m.scope === 'personal' ? 'personal' : 'team';
+        let result = await onboarding.saveDefinedCard(platform, role, values, { cliRef, scope });
+        if (!result.ok && result.message.includes('dataPlatformCliConsent')) {
+          const pick = await vscode.window.showErrorMessage(result.message, 'Enable CLI Consent & Retry');
+          if (pick === 'Enable CLI Consent & Retry') {
+            await this.configManager.updateSettings({ dataPlatformCliConsent: true });
+            result = await onboarding.saveDefinedCard(platform, role, values, { cliRef, scope });
+          }
+        }
+        if (result.ok && result.id) await this.setActiveConnection(role, result.id);
+        this.postLog(result.ok ? `${result.message} Connect now uses it for the ${role}.` : result.message);
+        this.postMessage('namedConnectionResult', { ...result, platform, role });
+        this.postPlatformsState();
+        if (result.ok && m.connect === true) {
+          await vscode.commands.executeCommand(role === 'target' ? `${EXTENSION_ID}.testTargetConnection` : `${EXTENSION_ID}.testConnection`);
+          this.postPlatformsState();
+        }
         break;
       }
       case 'useConnection': {

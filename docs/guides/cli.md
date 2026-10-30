@@ -184,7 +184,7 @@ Connections to Snowflake, Databricks and Oracle (Oracle as a source) are kept in
 
 **`add`, step by step:**
 1. It asks for the platform and the role (source or target).
-2. **It offers the connections your platform tools already know**: the named connections in the Snowflake CLI's `connections.toml`, or the profiles in `.databrickscfg`. Pick one, and AutoDE stores only its name. Or answer `env` to give the settings yourself and supply the secret through an environment variable.
+2. **It offers the connections your platform tools already know**: the named connections in the Snowflake CLI's `connections.toml`, the profiles in `.databrickscfg`, or (Redshift, with `--allow-cli`, since running the AWS CLI needs your consent) your AWS CLI profiles. Pick one, and AutoDE stores only its name. Or answer `env` to give the settings yourself and supply the secret through an environment variable.
 3. It asks only for what is still missing, for example the SQL warehouse's HTTP path for a Databricks profile. Fields that differ per engineer (username, key path) go to your personal file.
 4. **It tests the connection before saving it.** If the test fails, nothing is written, and you see the platform's own error.
 5. It shows what will be written and asks you to type `save`.
@@ -193,7 +193,10 @@ You can answer any question up front with flags: `--platform`, `--role`, `--reso
 
 ```
 autode connections add --platform databricks --resolver cli --ref prod --set httpPath=/sql/1.0/warehouses/abc123
+autode connections add --platform redshift --allow-cli --resolver cli --ref work --set workgroupName=analytics-wg --set database=dev --set secretArn=arn:aws:secretsmanager:eu-west-1:123456789012:secret:redshift-autode
 ```
+
+Redshift asks for its fields from its platform definition (`platforms/redshift.yaml`): a Serverless workgroup or a provisioned cluster, the database, and the sign-in fields (user guide §2.4).
 
 `add` and `remove` need an interactive terminal and refuse when `CI` is set, like `decisions approve`. A connection decides which platforms AutoDE and its agents can reach, so a person sets it up. An agent in Claude Code or another MCP client can propose one with `autode_propose_connection`, and a person approves it with `autode decisions approve`. In a pipeline, commit the file instead.
 

@@ -56,7 +56,9 @@ import { conformanceFailures, loadProfiles, packConformance, probeCandidates, re
 import { ProbeDialect, ProbeExecutor, combineProbeExecutors, createProbeResolver, createSqlProbeExecutor, probeAssertions } from '../engine/context/probes';
 import { checkPrerequisites } from '../engine/platform/prerequisites';
 import { connectionStatus, forgetReadiness, readReadiness, recordReadiness } from '../engine/platform/connectionReadiness';
-import { ConnectionDraft, ConnectionRole, loadConnectionsConfig, removeConnection, saveConnection, validateConnectionDraft } from '../engine/platform/connectionsConfig';
+import { ConnectionDraft, ConnectionRole, connectablePlatforms, loadConnectionsConfig, removeConnection, saveConnection, validateConnectionDraft } from '../engine/platform/connectionsConfig';
+import { platformDefinition } from '../engine/platform/definitions';
+import { getCliDescriptor } from '../engine/platform/credentials/cliRegistry';
 import { credentialNeeds, discoverCliConnections, draftEntry, setupFields } from '../engine/platform/connectionSetup';
 import { activeProblemId, listProblems, setActiveProblem, startProblem } from '../engine/documents/problems';
 import { IngestResult, ingestConnection, ingestFile, openContext } from '../engine/context/estateIngest';
@@ -287,9 +289,10 @@ Governance (personal data):
 Connections:
   connections list             Each connection, whether it is ready, and what MCP clients still need
   connections test <id>        Connect read-only and record readiness on this machine
-  connections add              (terminal) Set one up: pick a Snowflake CLI connection or Databricks profile, or give fields;
-                               tested before it is saved. Flags: --platform --role --resolver cli|env --ref <name>
-                               --set key=value (repeat) --scope team|personal --allow-sample-data --no-test
+  connections add              (terminal) Set one up: pick a Snowflake CLI connection, Databricks profile or (with
+                               --allow-cli) AWS profile for Redshift, or give fields; tested before it is saved.
+                               Flags: --platform --role --resolver cli|env --ref <name> --set key=value (repeat)
+                               --scope team|personal --allow-sample-data --no-test --allow-cli
   connections remove <id>      (terminal) Remove it from the connections files
 
 Human (an interactive terminal; refused when CI is set):
@@ -2108,7 +2111,8 @@ async function cmdSql(ctx: Ctx, command: 'query' | 'explain', rest: string[]): P
 
 // ── connections (v0.43.1) ────────────────────────────────────────────────────
 
-const PLATFORMS = ['snowflake', 'databricks', 'oracle'] as const;
+/** The platforms a connection can be set up for: the built-in ones and (v0.55.0) those defined by files. */
+const platformsForSetup = (): string[] => connectablePlatforms();
 
 async function cmdConnections(ctx: Ctx, rest: string[]): Promise<number> {
   const [sub, id, ...extra] = rest;
@@ -2179,27 +2183,49 @@ function parseSet(values: readonly string[] | undefined): Record<string, string>
   return out;
 }
 
+/** The connections a platform's own configuration holds, for the set-up's picker (platforms defined by files list their CLI's profiles instead). */
+const CLI_SETUP_SOURCES: Partial<Record<string, { list: string; one: string; known: (d: Awaited<ReturnType<typeof discoverCliConnections>>) => Array<{ name: string; note: string }> }>> = {
+  snowflake: { list: 'Snowflake CLI connections (connections.toml)', one: 'Snowflake CLI connection', known: (d) => d.snowflake.map((n) => ({ name: n, note: 'Snowflake CLI connection' })) },
+  databricks: { list: 'Databricks profiles (.databrickscfg)', one: 'Databricks profile', known: (d) => d.databricks.map((x) => ({ name: x.name, note: x.host ? `profile, ${x.host}` : 'profile' })) }
+};
+
+/** The profiles a platform's CLI lists (v0.55.0, a platform defined by files); none when the CLI isn't there. */
+async function definedCliProfiles(platform: DataPlatformProvider): Promise<string[]> {
+  const descriptor = getCliDescriptor(platform);
+  if (!descriptor) return [];
+  const found = await descriptor.detect();
+  return found.found && found.cliPath ? (await descriptor.listConnections(found.cliPath)).map((x) => x.name) : [];
+}
+
 async function connectionsAdd(ctx: Ctx): Promise<number> {
   requirePerson(ctx, 'connections add', `Write ${'.autode/config/connections.yaml'} instead (docs/guides/mcp-setup.md), or have an agent propose it (autode_propose_connection) for a person to approve.`);
   const v = ctx.values;
   const env = ctx.io.env;
-  const platform = (v.platform ?? await ask(ctx, `Platform (${PLATFORMS.join(', ')})`, { choices: PLATFORMS, required: true })) as (typeof PLATFORMS)[number];
-  if (!PLATFORMS.includes(platform)) throw new CliError(EXIT.USAGE, `--platform is one of: ${PLATFORMS.join(', ')}.`);
-  const role = (v.role ?? (platform === 'oracle' ? 'source' : await ask(ctx, 'Role (source, target)', { choices: ['source', 'target'], default: 'source' }))) as ConnectionRole;
+  const platforms = platformsForSetup();
+  const platform = (v.platform ?? await ask(ctx, `Platform (${platforms.join(', ')})`, { choices: platforms, required: true })) as DataPlatformProvider;
+  if (!platforms.includes(platform)) throw new CliError(EXIT.USAGE, `--platform is one of: ${platforms.join(', ')}.`);
+  const defined = platformDefinition(platform)?.connection ? platformDefinition(platform) : undefined;
+  const roles = platform === 'oracle' ? ['source'] : defined?.connection?.roles ?? ['source', 'target'];
+  const role = (v.role ?? (roles.length === 1 ? roles[0] : await ask(ctx, 'Role (source, target)', { choices: roles, default: 'source' }))) as ConnectionRole;
   const discovered = await discoverCliConnections(env);
   let resolver = v.resolver;
   let ref = v.ref;
   if (!resolver) {
-    const known = platform === 'snowflake' ? discovered.snowflake.map((n) => ({ name: n, note: 'Snowflake CLI connection' }))
-      : platform === 'databricks' ? discovered.databricks.map((p) => ({ name: p.name, note: p.host ? `profile, ${p.host}` : 'profile' })) : [];
+    // A platform defined by files: its CLI's own profiles (names only), with --allow-cli (running the CLI needs consent).
+    const definedProfiles = defined && v['allow-cli'] === true ? await definedCliProfiles(platform) : [];
+    if (defined && v['allow-cli'] !== true && !v.resolver) ctx.io.out(`To pick from your ${defined.access?.cli?.command ?? platform} profiles, run this with --allow-cli (AutoDE runs the CLI only with your consent).`);
+    const builtIn = CLI_SETUP_SOURCES[platform];
+    const cliName = defined?.access?.cli?.command ?? platform;
+    const source = builtIn ?? { list: `${cliName} profiles`, one: `${cliName} profile` };
+    const known = builtIn ? builtIn.known(discovered) : definedProfiles.map((n) => ({ name: n, note: `${cliName} profile` }));
     if (known.length) {
-      ctx.io.out(`Your ${platform === 'snowflake' ? 'Snowflake CLI connections (connections.toml)' : 'Databricks profiles (.databrickscfg)'}:`);
+      ctx.io.out(`Your ${source.list}:`);
       known.forEach((k, i) => ctx.io.out(`  ${i + 1}. ${k.name} — ${k.note}`));
       const pick = await ask(ctx, `Use which one? A number, or "env" to give the settings yourself (secret from environment variables)`, { choices: [...known.map((_k, i) => String(i + 1)), 'env'], default: '1' });
       if (pick === 'env') resolver = 'env'; else { resolver = 'cli'; ref = known[Number(pick) - 1].name; }
     } else {
       resolver = 'env';
-      if (platform !== 'oracle') ctx.io.out(`No ${platform === 'snowflake' ? 'Snowflake CLI connection' : 'Databricks profile'} found on this machine; the secret will come from an environment variable.`);
+      if (platform !== 'oracle') ctx.io.out(`No ${source.one} found on this machine; the secret will come from an environment variable.`);
     }
   }
   if (resolver !== 'cli' && resolver !== 'env') throw new CliError(EXIT.USAGE, 'Outside VS Code --resolver is cli or env (VS Code\'s secret storage is only reachable from the extension).');

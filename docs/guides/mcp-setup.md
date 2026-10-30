@@ -169,11 +169,20 @@ connections:
     httpPath: /sql/1.0/warehouses/abc123
     credentials: { resolver: env }
     allowSampleDataInPrompts: false
+
+  # Redshift Serverless through the AWS CLI (needs --allow-cli), signed in by your AWS profile "work";
+  # the database user's password stays in Secrets Manager. See Redshift below.
+  - platform: redshift
+    workgroupName: analytics-wg
+    database: dev
+    region: eu-west-1
+    secretArn: arn:aws:secretsmanager:eu-west-1:123456789012:secret:redshift-autode
+    credentials: { resolver: cli, ref: work }
 ```
 
 | Key | Meaning |
 |---|---|
-| `platform` | `snowflake`, `databricks` or `oracle` (a source; see [Oracle](#oracle)). |
+| `platform` | `snowflake`, `databricks`, `oracle` (a source; see [Oracle](#oracle)), or a platform defined by files in `platforms/`: `redshift` (see [Redshift](#redshift)). |
 | `role` | `source` (default) or `target`. |
 | `credentials.resolver` | `env`: environment variables `AUTODE_<PLATFORM>_<FIELD>`, or `AUTODE_<PLATFORM>_<REF>_<FIELD>` when `ref` is set. `cli`: a named connection in the Snowflake CLI's `connections.toml`, or a profile in `.databrickscfg` (host and personal access token; `httpPath` still comes from the entry). `vscode`: VS Code's secret storage, which only the AutoDE extension can read; an MCP server takes the secret from the same `AUTODE_<PLATFORM>_<REF>_<FIELD>` variables instead (`autode_list_connections` names them in `secretFromEnv`). |
 | `credentials.ref` | The CLI connection or profile name, the infix of the environment variables, or the secret-storage reference. |
@@ -214,6 +223,16 @@ Environment variable fields: Snowflake `ACCOUNT`, `USERNAME`, `WAREHOUSE`, `DATA
 **Renamed in 0.39.0:** Snowflake's role is `snowflakeRole` in these files. `role` always meant source or target, so a Snowflake role given as `role` made the entry invalid.
 
 **Without the platform CLIs.** Snowflake key-pair and Databricks token connections go over HTTPS and need no CLI.
+
+### Redshift
+
+Since 0.55.0 AutoDE reaches Amazon Redshift with no Redshift code or driver: its connection, how a statement runs and how its estate is read are in `platforms/redshift.yaml` and its operations. Each statement runs through the **AWS CLI version 2** (`aws redshift-data`: submitted, polled until it finishes, fetched page by page), so the server needs `--allow-cli`.
+
+- **Fields:** `workgroupName` (Serverless) or `clusterIdentifier` (provisioned), exactly one; `database`; optional `schema`, `region` (default: the profile's), `secretArn`, and the personal `dbUser` and `profile`. The id is `redshift:<workgroup or cluster>`.
+- **Sign-in:** the Data API takes no plain password. Give `secretArn` (a Secrets Manager secret with the database user's password: recommended), or `clusterIdentifier` with `dbUser` (IAM temporary credentials), or a Serverless workgroup alone (your IAM identity).
+- **Your AWS identity:** `credentials: { resolver: cli, ref: <profile> }` names an AWS CLI profile; AutoDE stores nothing. Without a profile (CI), `resolver: env` reads `AUTODE_REDSHIFT[_<REF>]_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` and `_SESSION_TOKEN`, which AutoDE passes to the CLI as `AWS_ACCESS_KEY_ID` and the like, in its environment, never as arguments. Any field can also come from `AUTODE_REDSHIFT[_<REF>]_<FIELD>` (`SECRET_ARN`, `DB_USER`, `WORKGROUP_NAME` …).
+- **Reads:** `autode_extract_metadata` and `autode_ingest_metadata` run Redshift's estate operations (`SVV_ALL_TABLES`, `SVV_ALL_COLUMNS`, `pg_views`, `information_schema` keys, `SVV_TABLE_INFO` row counts). A read the user can't do is listed in the result, and the rest still come in. `autode_platform_operations` with `platform: redshift` lists everything AutoDE can read there.
+- **As a target** Redshift can be connected and read; building for it comes in 0.55.2.
 
 ### Oracle
 

@@ -1,0 +1,29 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): row counts and sizes, where a platform
+# keeps them apart from its table list. Merged into the tables by name; without it the tables still come in.
+formatVersion: 1
+id: estate.table_stats
+title: Table sizes
+description: Each table's row count and size in bytes for one schema, as the platform last recorded them. Numbers only.
+kind: read
+content: metadata
+area: estate
+params:
+  - { name: database, type: literal, label: Database }
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: Table }
+  - { name: row_count, as: number, label: Rows }
+  - { name: bytes, as: number, label: Size (bytes) }
+platforms:
+  # SVV_TABLE_INFO: size is in 1 MB blocks. A regular user sees only some tables here.
+  redshift:
+    sql: >
+      SELECT "schema" AS table_schema, "table" AS table_name, tbl_rows AS row_count, size * 1048576 AS bytes
+      FROM svv_table_info
+      WHERE "database" = {database:lower} AND "schema" = {schema:lower}
+example:
+  platform: redshift
+  params: { database: dev, schema: sales }
+  rows:
+    - { table_schema: sales, table_name: orders, row_count: 1200000, bytes: 52428800 }

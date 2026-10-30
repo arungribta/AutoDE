@@ -16,6 +16,9 @@ platforms:
     sql: SELECT version() AS version
   oracle:
     sql: SELECT version AS version FROM product_component_version WHERE product LIKE 'Oracle Database%' AND ROWNUM = 1
+  # version() starts with the PostgreSQL version Redshift forked from; the Redshift version follows the word Redshift.
+  redshift:
+    sql: SELECT TRIM(SPLIT_PART(version(), 'Redshift', 2)) AS version
 example:
   platform: snowflake
   params: {}

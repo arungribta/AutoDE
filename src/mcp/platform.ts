@@ -117,7 +117,7 @@ export class PlatformSession {
     if (!pending) {
       pending = (async () => {
         const log = (msg: string) => this.options.log(`[${entry.id}] ${msg}`);
-        const managerOptions: ConnectionManagerOptions = { cliConsent: () => this.options.allowCli, sampleDataConsent: () => this.consent(entry.id), driversRoot: () => this.options.driversRoot };
+        const managerOptions: ConnectionManagerOptions = { cliConsent: () => this.options.allowCli, sampleDataConsent: () => this.consent(entry.id), driversRoot: () => this.options.driversRoot, workspaceRoot: () => this.options.workspaceRoot };
         const manager = this.options.createManager?.(log, managerOptions) ?? new ConnectionManager(log, managerOptions);
         try {
           const credentials = await resolveConnectionCredentials(entry, this.options.env ?? process.env);

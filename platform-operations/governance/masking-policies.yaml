@@ -1,0 +1,31 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): the masking policies attached to a schema's
+# columns, for assessing how a source protects personal data (the autode-redshift-governance skill).
+formatVersion: 1
+id: governance.masking_policies
+title: Masking policies in a schema
+description: Each masking policy attached to one schema's tables, the columns it masks and for whom. Names only, never the masked values.
+kind: read
+content: metadata
+area: governance
+params:
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: policy_name, label: Policy }
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: Table }
+  - { name: columns, label: Columns masked }
+  - { name: grantee, label: Applies to }
+  - { name: priority, as: number, label: Priority }
+platforms:
+  # Dynamic data masking (2023 and later).
+  redshift:
+    sql: >
+      SELECT policy_name, schema_name AS table_schema, table_name, input_columns AS columns, grantee, priority
+      FROM svv_attached_masking_policy
+      WHERE schema_name = {schema:lower}
+      ORDER BY table_name, priority
+example:
+  platform: redshift
+  params: { schema: sales }
+  rows:
+    - { policy_name: mask_email, table_schema: sales, table_name: customers, columns: '["email"]', grantee: public, priority: 10 }

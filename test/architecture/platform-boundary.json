@@ -2,7 +2,7 @@
   "about": "Exceptions to the platform boundary (CLAUDE.md), recorded 2026-10-28 when the rule was introduced. Counts are platform statements/commands and platform-name branches outside src/engine/platform/, src/engine/runner/ and src/engine/transforms/. Never raise a count to pass the test; lower counts as code moves. v0.54.1 moved the last TO MOVE entries (probe, reconciliation and EXPLAIN dialects) into the platform definitions (platforms/*.yaml, read by src/engine/platform/dialects.ts); what remains is interface selection and wording.",
   "files": {
     "src/cli/main.ts": {
-      "branches": 7,
+      "branches": 3,
       "why": "Interface: which connection, adapter or prerequisite to use for the platform the user named (selection, not platform behaviour)."
     },
     "src/core/agentHub.ts": {
@@ -18,10 +18,6 @@
       "statements": 1,
       "branches": 10,
       "why": "Interface: the panel's connection cards and settings per platform (selection, not platform behaviour)."
-    },
-    "src/engine/agents/definitions.ts": {
-      "branches": 3,
-      "why": "Validates that a platform skill declares its platform (the skill registry; keeps platform knowledge in skills)."
     },
     "src/engine/context/fileIngestion.ts": {
       "statements": 1,

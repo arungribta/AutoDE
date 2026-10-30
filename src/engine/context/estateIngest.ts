@@ -61,5 +61,5 @@ export async function ingestConnection(cfm: ContextFileManager, manager: Connect
   const g = manager.snapshotGraph(snapshot);
   const columns = g.nodes.filter((n) => n.type === 'column').length;
   const r = await cfm.ingestParsed(g.nodes, g.edges);
-  return { source: `${connectionId} (${schemas.join(', ')})`, system: resolved.identity.system ?? '', environment: resolved.identity.environment ?? '', tables: snapshot.tables.length + snapshot.views.length, columns, catalogued: r.catalogued, promoted: r.promoted, warnings: [] };
+  return { source: `${connectionId} (${schemas.join(', ')})`, system: resolved.identity.system ?? '', environment: resolved.identity.environment ?? '', tables: snapshot.tables.length + snapshot.views.length, columns, catalogued: r.catalogued, promoted: r.promoted, warnings: (snapshot.gaps ?? []).map((g) => `Not read: ${g}`) };
 }

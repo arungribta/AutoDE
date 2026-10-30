@@ -11,6 +11,9 @@ import { driversRoot } from '../engine/platform/driverStore';
 import { databricksConfigPath, readDatabricksCfgProfiles } from '../engine/platform/credentials/databricksCfg';
 import { listSnowflakeConnectionNames, snowflakeConnectionsTomlPath } from '../engine/platform/credentials/CliConfigResolver';
 import { readTnsNames } from '../engine/platform/credentials/tnsnames';
+import { getCliDescriptor } from '../engine/platform/credentials/cliRegistry';
+import { definedConnectionPlatforms, platformDefinition } from '../engine/platform/definitions';
+import { ConnectionField } from '../engine/platform/operations/types';
 
 /**
  * Platform onboarding in the settings cards (docs/specs/mcp-engine.md
@@ -58,7 +61,25 @@ export interface SavedConnectionView {
   status: ConnectionStatus;
 }
 
+/** v0.55.0: a card drawn from a platform's definition (no card written for it). */
+export interface DefinedCard {
+  id: string;
+  title: string;
+  roles: ConnectionRole[];
+  fields: ConnectionField[];
+  authModes: Array<{ mode: string; label: string; requires?: string[]; note?: string }>;
+  exactlyOne: string[][];
+  /** The field a CLI profile fills, when one is picked. */
+  cliProfileField?: string;
+  /** How its CLI lists profiles, for the "existing" picker's label. */
+  existingLabel: string;
+  targetNote?: string;
+  backend: { backend: string; caveat: string };
+}
+
 export interface PlatformsState {
+  /** v0.55.0: the platforms whose card is drawn from their definition. */
+  defined: DefinedCard[];
   connections: SavedConnectionView[];
   active: { source: string; target: string };
   errors: string[];
@@ -90,6 +111,9 @@ export function backendFor(platform: DataPlatformProvider, authMode?: string, vi
   }
   if (platform === 'databricks') return { backend: 'Statement Execution API (REST)', caveat: 'The only backend: the Databricks CLI wraps the same API, so AutoDE reads its profiles but never runs it. Needs a SQL warehouse HTTP path.' };
   if (platform === 'oracle') return { backend: 'node-oracledb, Thin mode', caveat: 'Oracle Database 12.1 or later. 11g and older need Thick mode (Oracle Instant Client), which AutoDE does not load. Oracle is a source only.' };
+  const d = platformDefinition(platform);
+  const cli = d?.connection ? d.access?.cli : undefined;
+  if (d && cli?.statement) return { backend: `The ${cli.command} CLI${cli.statement.mode === 'async' ? ' (statements submitted, then fetched)' : ''}`, caveat: `Needs the ${cli.command} CLI${cli.minVersion ? ` ${cli.minVersion} or later` : ''} and your consent for AutoDE to run it; MCP clients need the server started with --allow-cli. Defined by platforms/${d.id}.yaml.` };
   return { backend: 'not supported', caveat: '' };
 }
 
@@ -105,6 +129,19 @@ function cardFields(platform: DataPlatformProvider, role: ConnectionRole, settin
   return Object.fromEntries(Object.entries(all).filter(([k, v]) => allowed.includes(k) && v && v.trim()));
 }
 
+/** The cards for platforms defined by files. */
+export function definedCards(scope: { workspaceRoot?: string; resourcesRoot?: string } = {}): DefinedCard[] {
+  return definedConnectionPlatforms(scope).map((d) => {
+    const c = d.connection!;
+    const cli = d.access?.cli;
+    return {
+      id: d.id, title: d.title, roles: c.roles ?? ['source', 'target'], fields: c.fields, authModes: c.authModes ?? [], exactlyOne: c.exactlyOne ?? [],
+      cliProfileField: c.cliProfileField, existingLabel: cli?.listProfiles ? `${cli.command} profile` : 'profile', targetNote: c.targetNote,
+      backend: backendFor(d.id as DataPlatformProvider)
+    };
+  });
+}
+
 export class PlatformOnboarding {
   constructor(private readonly host: OnboardingHost) {}
 
@@ -116,10 +153,13 @@ export class PlatformOnboarding {
       databricks: backendFor('databricks'), oracle: backendFor('oracle')
     };
     const root = this.host.workspaceRoot();
-    if (!root) return { connections: [], active, errors: [], files: { team: '', teamExists: false, local: '', localExists: false }, backends, noWorkspace: true };
+    const defined = definedCards({ workspaceRoot: root, resourcesRoot: this.host.resourcesRoot?.() });
+    for (const d of defined) backends[d.id] = d.backend;
+    if (!root) return { defined, connections: [], active, errors: [], files: { team: '', teamExists: false, local: '', localExists: false }, backends, noWorkspace: true };
     const config = loadConnectionsConfig(root);
     const readiness = readReadiness(root);
     return {
+      defined,
       connections: config.connections.map((c) => ({
         id: c.id, platform: c.platform, role: c.role, origin: c.origin, resolver: c.credentials.resolver, ref: c.credentials.ref,
         personal: c.personal ?? [], allowSampleDataInPrompts: c.allowSampleDataInPrompts, status: connectionStatus(c, readiness[c.id])
@@ -152,7 +192,55 @@ export class PlatformOnboarding {
       const tns = readTnsNames(this.host.settings().oracleConfigDir || undefined);
       return { kind: 'tns', where: tns.file ?? tns.location?.dir ?? '', items: tns.aliases.map((name) => ({ name, usable: true })), problem: tns.problem };
     }
+    // v0.55.0: a platform defined by files lists its CLI's profiles (names only).
+    const d = platformDefinition(platform);
+    const descriptor = d?.connection ? getCliDescriptor(platform) : undefined;
+    if (d && descriptor) {
+      const found = await descriptor.detect();
+      if (!found.found || !found.cliPath) return { kind: 'cli', where: '', items: [], problem: found.error ?? `The ${d.access?.cli?.command} CLI was not found.` };
+      const items = await descriptor.listConnections(found.cliPath);
+      return { kind: 'cli', where: `${d.access?.cli?.command} ${(d.access?.cli?.listProfiles ?? []).join(' ')}`, items: items.map((i) => ({ name: i.name, usable: true })), problem: items.length ? undefined : `No ${d.access?.cli?.command} profiles yet: the autode-${d.id}-* skills say how to add one.` };
+    }
     return { kind: 'cli', where: '', items: [], problem: `No onboarding for ${platform}.` };
+  }
+
+  /**
+   * v0.55.0: saves a card drawn from a platform's definition. The values are
+   * what the card holds (secret fields included, which go to VS Code's secret
+   * storage, never a file); a CLI profile, when picked, is the credentials
+   * reference. Checked first; nothing is written if the check fails.
+   */
+  async saveDefinedCard(platform: DataPlatformProvider, role: ConnectionRole, values: Record<string, string>, options: { cliRef?: string; scope?: 'team' | 'personal' } = {}): Promise<OnboardingResult> {
+    const root = this.host.workspaceRoot();
+    if (!root) return { ok: false, message: 'Open a workspace folder first: named connections are saved in it.' };
+    const c = platformDefinition(platform, { workspaceRoot: root, resourcesRoot: this.host.resourcesRoot?.() })?.connection;
+    if (!c) return { ok: false, message: `${platform} has no connection in its platform definition.` };
+    const clean = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+    const fields: Record<string, string> = {};
+    const secrets: Record<string, string> = {};
+    for (const f of c.fields) {
+      const v = clean(values[f.name]);
+      if (!v || (options.cliRef && f.name === c.cliProfileField)) continue;
+      if (f.secret) secrets[f.name] = v; else fields[f.name] = v;
+    }
+    const cliRef = clean(options.cliRef);
+    const provisional = connectionIdFor(platform, fields, { resolver: cliRef ? 'cli' : 'vscode', ref: cliRef });
+    const draft: ConnectionDraft = { platform, role, fields, credentials: cliRef ? { resolver: 'cli', ref: cliRef } : { resolver: 'vscode', ref: secretRef(provisional, platform) }, scope: options.scope };
+    const probe: ConnectionEntry = { id: provisional, platform, role, fields, credentials: draft.credentials, allowSampleDataInPrompts: false, origin: 'file' };
+    let info: ConnectionInfo;
+    try {
+      const credentials = { ...adapterFields(fields), ...secrets, ...(cliRef && c.cliProfileField ? { [c.cliProfileField]: cliRef } : {}) };
+      this.host.log(`Checking ${probe.id} before saving it…`);
+      info = await this.check(platform, credentials);
+    } catch (err) {
+      return { ok: false, id: probe.id, message: `Not saved — the connectivity check failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    for (const [field, value] of Object.entries(secrets)) await this.host.secrets.store(this.host.secretKey(platform, draft.credentials.ref, field), value);
+    const saved = saveConnection(root, draft);
+    const entry = loadConnectionsConfig(root).connections.find((x) => x.id === saved.id);
+    const detail = `${info.databaseName}${info.schemaName ? `.${info.schemaName}` : ''} (${info.version})`;
+    if (entry) recordReadiness(root, entry, true, detail);
+    return { ok: true, id: saved.id, message: `Saved ${saved.id} to ${saved.written.join(' and ')} — connectivity check passed: ${detail}.` };
   }
 
   /** The draft a card describes, and the secrets to store with it. */
@@ -251,7 +339,8 @@ export class PlatformOnboarding {
     const changed = removeConnection(root, id);
     forgetReadiness(root, id);
     if (entry?.credentials.resolver === 'vscode') {
-      for (const field of ['password', 'token', 'privateKeyPassphrase', 'walletPassword']) await this.host.secrets.delete(this.host.secretKey(entry.platform, entry.credentials.ref, field));
+      const fields = new Set(['password', 'token', 'privateKeyPassphrase', 'walletPassword', ...secretFieldsFor(entry.platform, entry.fields)]);
+      for (const field of fields) await this.host.secrets.delete(this.host.secretKey(entry.platform, entry.credentials.ref, field));
     }
     if (!changed.length) return { ok: false, id, message: entry?.origin === 'environment' ? `${id} comes from environment variables, not a file — unset them to remove it.` : `${id} is not in a connections file.` };
     return { ok: true, id, message: `Removed ${id} from ${changed.join(' and ')}.` };

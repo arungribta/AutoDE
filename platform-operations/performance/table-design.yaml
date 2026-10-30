@@ -1,0 +1,35 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): a schema's physical table design, for
+# assessing a source and planning its move (the autode-redshift-performance skill).
+formatVersion: 1
+id: performance.table_design
+title: Physical table design
+description: For each table of one schema, how it is distributed and sorted and its health (skew, unsorted share, stale statistics, compression), with its rows and size. Numbers and names only.
+kind: read
+content: metadata
+area: performance
+params:
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: Table }
+  - { name: distribution, label: "Distribution (EVEN, KEY(column), ALL, AUTO)" }
+  - { name: sort_key, label: First sort key column }
+  - { name: skew_rows, as: number, label: "Row skew (largest slice / smallest)" }
+  - { name: unsorted_pct, as: number, label: Unsorted (%) }
+  - { name: stats_off_pct, as: number, label: Statistics staleness (%) }
+  - { name: encoded, label: Compressed (Y or N) }
+  - { name: row_count, as: number, label: Rows }
+  - { name: size_mb, as: number, label: Size (MB) }
+platforms:
+  redshift:
+    sql: >
+      SELECT "schema" AS table_schema, "table" AS table_name, diststyle AS distribution, sortkey1 AS sort_key,
+        skew_rows, unsorted AS unsorted_pct, stats_off AS stats_off_pct, encoded, tbl_rows AS row_count, size AS size_mb
+      FROM svv_table_info
+      WHERE "schema" = {schema:lower}
+      ORDER BY size DESC
+example:
+  platform: redshift
+  params: { schema: sales }
+  rows:
+    - { table_schema: sales, table_name: orders, distribution: KEY(customer_id), sort_key: order_date, skew_rows: 1.4, unsorted_pct: 12.5, stats_off_pct: 3.1, encoded: Y, row_count: 1200000, size_mb: 50 }

@@ -56,10 +56,12 @@ export const PROVIDER_REGISTRY: Record<DataPlatformProvider, ProviderDefinition>
   redshift: {
     displayName: 'Redshift',
     capabilities: ['metadata', 'query-execution'],
-    configKeys: ['clusterId', 'database', 'schema'],
+    // v0.55.0: the connection's fields and sign-in are in platforms/redshift.yaml (the Data API takes no plain password).
+    configKeys: ['workgroupName', 'clusterIdentifier', 'database', 'schema', 'region'],
     authModes: [
-      { mode: 'username-password', principalTypes: ['interactive-user'] },
-      { mode: 'iam', principalTypes: ['interactive-user', 'service-account'] }
+      { mode: 'secrets-manager', principalTypes: ['interactive-user', 'service-account'] },
+      { mode: 'iam-temporary', principalTypes: ['interactive-user', 'service-account'] },
+      { mode: 'aws-identity', principalTypes: ['interactive-user', 'service-account'] }
     ]
   },
   synapse: {

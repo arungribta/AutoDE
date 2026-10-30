@@ -1,0 +1,34 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): the estate's tables and views in one schema.
+# The result columns are the names AutoDE's estate assembly reads, the same for every platform.
+formatVersion: 1
+id: estate.list_tables
+title: Tables in a schema
+description: The tables and views of one schema, with their type and comment. Object names only.
+kind: read
+content: metadata
+area: estate
+params:
+  - { name: database, type: literal, label: Database }
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: table_catalog, label: Database }
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: Table }
+  - { name: table_type, label: "Type (TABLE, VIEW, EXTERNAL)" }
+  - { name: comment, label: Comment }
+platforms:
+  # SVV_ALL_TABLES covers local, external (Spectrum) and datashare tables of any database the user can see.
+  redshift:
+    sql: >
+      SELECT database_name AS table_catalog, schema_name AS table_schema, table_name,
+        CASE table_type WHEN 'EXTERNAL TABLE' THEN 'EXTERNAL' WHEN 'SHARED TABLE' THEN 'TABLE' ELSE table_type END AS table_type,
+        remarks AS comment
+      FROM svv_all_tables
+      WHERE database_name = {database:lower} AND schema_name = {schema:lower}
+      ORDER BY table_name
+example:
+  platform: redshift
+  params: { database: dev, schema: sales }
+  rows:
+    - { table_catalog: dev, table_schema: sales, table_name: orders, table_type: TABLE, comment: One row per order }
+    - { table_catalog: dev, table_schema: sales, table_name: v_open_orders, table_type: VIEW, comment: null }

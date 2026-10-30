@@ -16,6 +16,8 @@ import { LAYOUT, layoutRel } from '../workspaceLayout';
 import { sanitizeSnapshot } from './sampleData';
 import { checkReadOnlySql } from './sqlGuard';
 import { fragmentsFor } from './dialects';
+import { DefinitionAdapter } from './adapters/DefinitionAdapter';
+import { platformDefinition, platformOperation } from './definitions';
 
 export type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
 
@@ -28,6 +30,8 @@ export interface ConnectionManagerOptions {
    * dependency (v0.26.0). Defaults to no consent.
    */
   cliConsent?: () => boolean;
+  /** v0.55.0: the workspace whose approved platform files apply to a platform defined by files. */
+  workspaceRoot?: () => string | undefined;
   /**
    * Phase 4: whether row values from this connection may reach a prompt (the
    * per-connection `allowSampleDataInPrompts` in `.autode/config/connections.yaml`,
@@ -59,15 +63,29 @@ export class ConnectionManager implements Disposable {
   private adapterFactories: Map<DataPlatformProvider, AdapterFactory> = new Map();
   private estateResolver?: EstateResolver;
   private readonly sampleDataConsent: (connectionId: string | undefined) => boolean;
+  private readonly cliConsent: () => boolean;
+  private readonly workspaceRoot: () => string | undefined;
 
   constructor(private readonly log: (msg: string) => void, options: ConnectionManagerOptions = {}) {
     this.sampleDataConsent = options.sampleDataConsent ?? (() => false);
     const cliConsent = options.cliConsent ?? (() => false);
+    this.cliConsent = cliConsent;
+    this.workspaceRoot = options.workspaceRoot ?? (() => undefined);
     // Register adapter factories for supported platforms
     this.adapterFactories.set('snowflake', (creds, l) => new SnowflakeAdapter(creds, l, { cliConsent: cliConsent() }));
     this.adapterFactories.set('databricks', (creds, l) => new DatabricksAdapter(creds, l));
     this.adapterFactories.set('oracle', (creds, l) => new OracleAdapter(creds, l, { loadDriver: () => loadDriver<OracleDriver>(driversRoot(options.driversRoot?.()), 'oracle') }));
-    // Future: bigquery, redshift, synapse
+    // Other platforms (Redshift first) are defined by files: see factoryFor.
+  }
+
+  /** The registered adapter, or (v0.55.0) one built from the platform's definition when it describes a connection and a CLI statement. */
+  private factoryFor(platform: DataPlatformProvider): AdapterFactory | undefined {
+    const registered = this.adapterFactories.get(platform);
+    if (registered) return registered;
+    const scope = { workspaceRoot: this.workspaceRoot() };
+    const definition = platformDefinition(platform, scope);
+    if (!definition?.connection || !definition.access?.cli?.statement) return undefined;
+    return (creds, l) => new DefinitionAdapter(platform, creds, l, { definition, operation: (id) => platformOperation(id, scope), cliConsent: this.cliConsent() });
   }
 
   /** Registers (or replaces) the adapter for a platform — further platforms, and fakes in tests. */
@@ -107,9 +125,9 @@ export class ConnectionManager implements Disposable {
       this.activeAdapter = null;
     }
 
-    const factory = this.adapterFactories.get(platform);
+    const factory = this.factoryFor(platform);
     if (!factory) {
-      throw new Error(`No adapter registered for platform: ${platform}. Supported platforms: ${Array.from(this.adapterFactories.keys()).join(', ')}`);
+      throw new Error(`No adapter registered for platform: ${platform}, and its platform definition describes no connection. Supported platforms: ${Array.from(this.adapterFactories.keys()).join(', ')} and those defined in platforms/.`);
     }
 
     this.activeAdapter = factory(credentials, this.log);
@@ -153,6 +171,7 @@ export class ConnectionManager implements Disposable {
     if (this.activeAdapter instanceof SnowflakeAdapter) return 'snowflake';
     if (this.activeAdapter instanceof DatabricksAdapter) return 'databricks';
     if (this.activeAdapter instanceof OracleAdapter) return 'oracle';
+    if (this.activeAdapter instanceof BaseDataSourceAdapter) return this.activeAdapter.platformId;
     return null;
   }
 

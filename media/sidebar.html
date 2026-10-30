@@ -495,7 +495,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         <div class="card" data-provider="databricks"><div class="card-header"><span class="radio"></span><span class="card-title">Databricks</span><span class="card-status" id="databricksStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Workspace URL</label><input id="dbxWorkspaceUrl" placeholder="adb-1234.5.azuredatabricks.net" /></div><div><label>SQL Warehouse HTTP Path</label><input id="dbxHttpPath" placeholder="/sql/1.0/warehouses/abc123" /></div></div><div class="form-row"><div><label>Catalog</label><input id="dbxCatalog" placeholder="main" /></div><div><label>Schema</label><input id="dbxSchema" placeholder="default" /></div></div><div class="form-row"><div><label>Catalog Type</label><select id="dbxCatalogType"><option value="auto">Auto</option><option value="unity">Unity Catalog</option><option value="hive_metastore">Hive Metastore</option></select></div><div><label>CLI path (only if not found automatically)</label><input id="dbxCliPath" placeholder="leave blank if databricks is on PATH" /></div></div><div class="form-row"><div><label>Token</label><input id="dbxToken" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testConnBtnDbx" class="primary">Connect</button><button id="browseSourceBtnDbx">Browse...</button><button id="sourceAssessmentBtnDbx">Source Assessment</button><button id="disconnectBtnDbx">Disconnect</button></div></div></div>
         <div class="card" data-provider="oracle"><div class="card-header"><span class="radio"></span><span class="card-title">Oracle</span><span class="card-status" id="oracleStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Connect string (tnsnames alias or host:port/service)</label><input id="oraConnectString" placeholder="PRODDB or db1.example.com:1521/ORCLPDB1" /></div></div><div class="form-row"><div><label>Username</label><input id="oraUsername" placeholder="hr" /></div><div><label>tnsnames.ora folder (only if not TNS_ADMIN)</label><input id="oraConfigDir" placeholder="leave blank to use TNS_ADMIN / ORACLE_HOME" /></div></div><div class="form-row"><div><label>Password</label><input id="oraPassword" type="password" placeholder="Stored in VS Code SecretStorage — never shown again" autocomplete="new-password" /></div></div><div class="form-row"><div><label>TLS wallet folder (optional)</label><input id="oraWalletLocation" placeholder="e.g. Autonomous Database wallet folder" /></div><div><label>Wallet password (optional)</label><input id="oraWalletPassword" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testConnBtnOra" class="primary">Connect</button><button id="browseSourceBtnOra">Browse...</button><button id="sourceAssessmentBtnOra">Source Assessment</button><button id="disconnectBtnOra">Disconnect</button></div></div></div>
         <div class="card" data-provider="bigquery"><div class="card-header"><span class="radio"></span><span class="card-title">BigQuery</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Project ID</label><input placeholder="my-project" /></div><div><label>Dataset</label><input placeholder="analytics" /></div></div></div></div>
-        <div class="card" data-provider="redshift"><div class="card-header"><span class="radio"></span><span class="card-title">Redshift</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Cluster</label><input placeholder="my-cluster" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
+        <div id="definedCardsSource" data-role="source"><!-- v0.55.0: cards for platforms defined by files (platforms/*.yaml), drawn by renderDefinedCards() --></div>
         <div class="card" data-provider="synapse"><div class="card-header"><span class="radio"></span><span class="card-title">Azure Synapse</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Server</label><input placeholder="my-server" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
       </div>
       <div class="section slide-section" id="slideSectionTarget" style="display:none;">
@@ -504,7 +504,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
         <div class="card selected" data-target-provider="snowflake"><div class="card-header"><span class="radio"></span><span class="card-title">Snowflake</span><span class="card-status" id="tgtSnowflakeStatus">Not connected</span></div><div class="card-body"><div class="form-row"><div><label>Account</label><input id="tgtSfAccount" placeholder="XYZ12345" /></div><div><label>Username</label><input id="tgtSfUsername" placeholder="data_agent" /></div></div><div class="form-row"><div><label>Warehouse</label><input id="tgtSfWarehouse" placeholder="WH_XS" /></div><div><label>Database</label><input id="tgtSfDatabase" placeholder="TARGET_DB" /></div></div><div class="form-row"><div><label>Schema</label><input id="tgtSfSchema" placeholder="PUBLIC" /></div><div><label>Role</label><input id="tgtSfRole" placeholder="SYSADMIN" /></div></div><div class="form-row"><div><label>Auth Mode</label><select id="tgtSfAuthMode"><option value="key-pair">Key-Pair</option><option value="username-password">Username + Password</option><option value="oauth">OAuth</option><option value="external-browser">External Browser</option><option value="mcp">MCP</option></select></div><div><label>Key Path</label><input id="tgtSfKeyPath" placeholder="/path/to/key.pem" /></div></div><div class="form-row"><div><label>Password (for Username + Password auth)</label><input id="tgtSfPassword" type="password" placeholder="Stored in VS Code SecretStorage — never shown again" autocomplete="new-password" /></div></div><div class="form-row"><div><label>Snowflake CLI path (only if not found automatically)</label><input id="tgtSfCliPath" placeholder="e.g. D:\Program Files\Snowflake CLI\snow.exe — leave blank if `snow` is on PATH" /></div></div><div class="btn-row"><button id="testTargetConnBtn" class="primary">Connect</button><button id="browseTargetBtn">Browse...</button><button id="targetDisconnectBtn">Disconnect</button></div></div></div>
         <div class="card" data-target-provider="databricks"><div class="card-header"><span class="radio"></span><span class="card-title">Databricks</span><span class="card-status" id="tgtDatabricksStatus">Not connected</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Workspace URL</label><input id="tgtDbxWorkspaceUrl" placeholder="adb-1234.5.azuredatabricks.net" /></div><div><label>SQL Warehouse HTTP Path</label><input id="tgtDbxHttpPath" placeholder="/sql/1.0/warehouses/abc123" /></div></div><div class="form-row"><div><label>Catalog</label><input id="tgtDbxCatalog" placeholder="main" /></div><div><label>Schema</label><input id="tgtDbxSchema" placeholder="default" /></div></div><div class="form-row"><div><label>Catalog Type</label><select id="tgtDbxCatalogType"><option value="auto">Auto</option><option value="unity">Unity Catalog</option><option value="hive_metastore">Hive Metastore</option></select></div><div><label>CLI path (only if not found automatically)</label><input id="tgtDbxCliPath" placeholder="leave blank if databricks is on PATH" /></div></div><div class="form-row"><div><label>Token</label><input id="tgtDbxToken" type="password" placeholder="Stored in VS Code SecretStorage" autocomplete="new-password" /></div></div><div class="btn-row"><button id="testTargetConnBtnDbx" class="primary">Connect</button><button id="browseTargetBtnDbx">Browse...</button><button id="targetDisconnectBtnDbx">Disconnect</button></div></div></div>
         <div class="card" data-target-provider="bigquery"><div class="card-header"><span class="radio"></span><span class="card-title">BigQuery</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Project ID</label><input placeholder="my-project" /></div><div><label>Dataset</label><input placeholder="analytics" /></div></div></div></div>
-        <div class="card" data-target-provider="redshift"><div class="card-header"><span class="radio"></span><span class="card-title">Redshift</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Cluster</label><input placeholder="my-cluster" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
+        <div id="definedCardsTarget" data-role="target"><!-- v0.55.0: cards for platforms defined by files --></div>
         <div class="card" data-target-provider="synapse"><div class="card-header"><span class="radio"></span><span class="card-title">Azure Synapse</span><span class="card-status">Not configured</span></div><div class="card-body collapsed"><div class="form-row"><div><label>Server</label><input placeholder="my-server" /></div><div><label>Database</label><input placeholder="analytics" /></div></div></div></div>
       </div>
       <div class="section slide-section" id="slideSectionPrefs" style="display:none;">
@@ -1683,7 +1683,72 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var out = [];
     providerCards.forEach(function (c) { out.push({ card: c, platform: c.getAttribute('data-provider'), role: 'source', list: providerCards }); });
     targetProviderCards.forEach(function (c) { out.push({ card: c, platform: c.getAttribute('data-target-provider'), role: 'target', list: targetProviderCards }); });
+    document.querySelectorAll('.card[data-defined]').forEach(function (c) { out.push({ card: c, platform: c.getAttribute('data-defined'), role: c.getAttribute('data-role'), list: [] }); });
     return out;
+  }
+  // v0.55.0: a card for each platform defined by files (platforms/*.yaml: Redshift first), drawn from its definition:
+  // its fields, its ways to sign in, its CLI's profiles. Saved as a named connection (checked first), then used to connect.
+  function renderDefinedCards() {
+    var st = platformsState;
+    if (!st || !st.defined) return;
+    [['source', '#definedCardsSource'], ['target', '#definedCardsTarget']].forEach(function (pair) {
+      var role = pair[0], box = $(pair[1]);
+      if (!box) return;
+      st.defined.forEach(function (d) {
+        if (d.roles.indexOf(role) < 0 || box.querySelector('[data-defined="' + d.id + '"]')) return;
+        var card = document.createElement('div');
+        card.className = 'card';
+        card.setAttribute('data-defined', d.id);
+        card.setAttribute('data-role', role);
+        var fieldsHtml = '', inRow = 0;
+        d.fields.forEach(function (f) {
+          if (inRow === 0) fieldsHtml += '<div class="form-row">';
+          fieldsHtml += '<div><label>' + escapeHtml(f.label) + (f.required ? ' *' : '') + '</label><input data-field="' + escapeHtml(f.name) + '"' + (f.secret ? ' type="password" autocomplete="off"' : '') +
+            ' placeholder="' + escapeHtml(f.description || (f.secret ? 'Stored in VS Code\'s secret storage, never in a file' : '')) + '" title="' + escapeHtml(f.description || '') + '" /></div>';
+          inRow++;
+          if (inRow === 2) { fieldsHtml += '</div>'; inRow = 0; }
+        });
+        if (inRow) fieldsHtml += '</div>';
+        var modes = d.authModes.map(function (m, i) { return '<option value="' + i + '">' + escapeHtml(m.label) + '</option>'; }).join('');
+        card.innerHTML = '<div class="card-header"><span class="radio"></span><span class="card-title">' + escapeHtml(d.title) + '</span><span class="card-status" data-defined-status="' + escapeHtml(d.id) + '">Not connected</span></div>' +
+          '<div class="card-body collapsed"><div class="onb">' +
+          '<div class="onb-active" style="display:none;"></div>' +
+          (role === 'target' && d.targetNote ? '<div class="onb-note">' + escapeHtml(d.targetNote) + '</div>' : '') +
+          '<div class="onb-prereq"><div class="btn-row" style="margin-top:0;"><button class="onb-check">Check prerequisites</button></div><div class="onb-prereq-list"></div></div>' +
+          '<div class="onb-note onb-backend"></div>' +
+          (modes ? '<div class="form-row"><div><label>Sign in with</label><select class="onb-def-auth">' + modes + '</select></div></div><div class="onb-note onb-def-auth-note"></div>' : '') +
+          '<div class="form-row"><div><label>Use an existing ' + escapeHtml(d.existingLabel) + '</label><select class="onb-existing"><option value="">— the fields below —</option></select></div></div>' +
+          '<div class="btn-row" style="margin-top:0;"><button class="onb-find">Find existing</button></div>' +
+          '<div class="onb-note onb-existing-note"></div></div>' +
+          fieldsHtml +
+          '<div class="onb-save-row"><button class="onb-def-save" data-connect="1">Save and connect</button><button class="onb-def-save">Save only</button>' +
+          '<label class="toggle-row" style="font-size:inherit;"><input type="checkbox" class="onb-share" checked /> Share with the team</label>' +
+          '<span class="onb-note">Checks the connection first; saved only if it connects. Shared: .autode/config/connections.yaml (commit it); personal fields stay in .autode/local/; secrets go to VS Code\'s secret storage.</span></div></div>';
+        box.appendChild(card);
+        var body = card.querySelector('.card-body');
+        card.querySelector('.card-header').onclick = function () { body.classList.toggle('collapsed'); };
+        var authSel = card.querySelector('.onb-def-auth');
+        function showAuth() {
+          if (!authSel) return;
+          var m = d.authModes[Number(authSel.value)] || {};
+          var needs = (m.requires || []).map(function (n) { var f = d.fields.filter(function (x) { return x.name === n; })[0]; return f ? f.label : n; });
+          card.querySelector('.onb-def-auth-note').textContent = (m.note || '') + (needs.length ? ' Needs: ' + needs.join(', ') + '.' : '');
+        }
+        if (authSel) { authSel.onchange = showAuth; showAuth(); }
+        card.querySelector('.onb-check').onclick = function () { card.querySelector('.onb-prereq-list').innerHTML = '<div class="onb-note">Checking…</div>'; post('checkPrerequisites', { platform: d.id }); };
+        card.querySelector('.onb-find').onclick = function () { card.querySelector('.onb-existing-note').textContent = 'Reading…'; post('findExistingConnections', { platform: d.id, role: role }); };
+        card.querySelectorAll('.onb-def-save').forEach(function (b) {
+          b.onclick = function () {
+            var values = {};
+            card.querySelectorAll('input[data-field]').forEach(function (inp) { if (inp.value.trim()) values[inp.getAttribute('data-field')] = inp.value.trim(); });
+            card.querySelectorAll('.onb-def-save').forEach(function (x) { x.disabled = true; });
+            showToast('Checking the connection…', '');
+            post('saveDefinedConnection', { platform: d.id, role: role, values: values, cliRef: card.querySelector('.onb-existing').value, scope: card.querySelector('.onb-share').checked ? 'team' : 'personal', connect: b.getAttribute('data-connect') === '1' });
+            card.querySelectorAll('input[type="password"]').forEach(function (inp) { inp.value = ''; });
+          };
+        });
+      });
+    });
   }
   function authModeFor(platform, role) {
     if (platform !== 'snowflake') return '';
@@ -1771,6 +1836,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function renderPlatformsState() {
     var st = platformsState;
     if (!st) return;
+    renderDefinedCards();
     [['source', '#savedConnsSource'], ['target', '#savedConnsTarget']].forEach(function (pair) {
       var role = pair[0], box = $(pair[1]);
       if (!box) return;
@@ -1838,6 +1904,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
           else if (!status || !status.connected) { el.textContent = 'Not connected'; }
         }
         renderCardStatus(snowflakeStatus, msg.source, 'snowflake');
+        document.querySelectorAll('#definedCardsSource [data-defined-status]').forEach(function (el) { renderCardStatus(el, msg.source, el.getAttribute('data-defined-status')); });
+        document.querySelectorAll('#definedCardsTarget [data-defined-status]').forEach(function (el) { renderCardStatus(el, msg.target, el.getAttribute('data-defined-status')); });
         renderCardStatus($('#databricksStatus'), msg.source, 'databricks');
         renderCardStatus($('#oracleStatus'), msg.source, 'oracle');
         renderCardStatus($('#tgtSnowflakeStatus'), msg.target, 'snowflake');
@@ -1857,7 +1925,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'openInbox': openPalette(); break;
       case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
       case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
-      case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { var b = o.card.querySelector('.onb-save'); if (b) b.disabled = false; }); break;
+      case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { o.card.querySelectorAll('.onb-save, .onb-def-save').forEach(function (b) { b.disabled = false; }); }); break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
       case 'chatResponse': endPending(); if (msg.message) { var replyDiv = addMessage('ai', msg.message, msg.error ? '⚠ AutoDE' : '🤖 AutoDE', msg.citations); if (msg.trace) { addTrace(replyDiv, msg.trace); } if (msg.handoff) { addHandoff(replyDiv, msg.handoff); } } if (msg.actions && msg.actions.length) { addLogEntry('Actions: ' + msg.actions.join('; ')); } break;

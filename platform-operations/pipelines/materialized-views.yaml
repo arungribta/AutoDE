@@ -1,0 +1,29 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): materialized views and how they refresh,
+# part of a source's pipelines (the autode-redshift-pipelines skill).
+formatVersion: 1
+id: pipelines.materialized_views
+title: Materialized views and their refresh
+description: Each materialized view in one schema, whether it refreshes automatically and whether it is stale. Names and states only; the view's SQL is read with estate.list_views.
+kind: read
+content: metadata
+area: pipelines
+params:
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: Materialized view }
+  - { name: auto_refresh, label: Refreshes automatically (t or f) }
+  - { name: is_stale, label: Stale (t or f) }
+  - { name: owner, label: Owner }
+platforms:
+  redshift:
+    sql: >
+      SELECT schema_name AS table_schema, name AS table_name, autorefresh AS auto_refresh, is_stale, user_name AS owner
+      FROM svv_mv_info
+      WHERE schema_name = {schema:lower}
+      ORDER BY name
+example:
+  platform: redshift
+  params: { schema: sales }
+  rows:
+    - { table_schema: sales, table_name: mv_daily_revenue, auto_refresh: t, is_stale: f, owner: etl_user }

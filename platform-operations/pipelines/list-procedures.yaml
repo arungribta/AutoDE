@@ -1,0 +1,30 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): the stored procedures of a schema with their
+# code, the legacy pipeline logic a modernization converts (the autode-redshift-pipelines skill).
+formatVersion: 1
+id: pipelines.list_procedures
+title: Stored procedures in a schema
+description: Each stored procedure of one schema with its arguments and body (code, not data).
+kind: read
+content: metadata
+area: pipelines
+params:
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: procedure_schema, label: Schema }
+  - { name: procedure_name, label: Procedure }
+  - { name: arguments, label: Arguments }
+  - { name: body, label: Body }
+platforms:
+  # pg_proc_info is Redshift's pg_proc with the kind of routine (p: a procedure); the connected database only.
+  redshift:
+    sql: >
+      SELECT n.nspname AS procedure_schema, p.proname AS procedure_name, oidvectortypes(p.proargtypes) AS arguments, p.prosrc AS body
+      FROM pg_proc_info p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.prokind = 'p' AND n.nspname = {schema:lower}
+      ORDER BY p.proname
+example:
+  platform: redshift
+  params: { schema: etl }
+  rows:
+    - { procedure_schema: etl, procedure_name: load_orders, arguments: date, body: "BEGIN INSERT INTO sales.orders SELECT * FROM stage.orders WHERE order_date = $1; END;" }

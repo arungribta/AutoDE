@@ -15,6 +15,17 @@ import {
   SqlDialect
 } from './types';
 
+/** The estate's raw reads for one scope, as rows with the platform-neutral column names `assembleTables` and the others read. */
+export interface EstateReads {
+  tables: QueryResult;
+  columns: QueryResult;
+  foreignKeys: QueryResult;
+  views: QueryResult;
+  primaryKeys: QueryResult;
+  /** What couldn't be read, and why. */
+  gaps: string[];
+}
+
 /**
  * Abstract base class for all data platform adapters.
  * Sub-agents interact with this interface — never with platform-specific code.
@@ -48,6 +59,9 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
       || this.credentials['workspaceUrl'] || this.credentials['connectString'] || this.credentials['username'] || '';
     return ref ? `${this.platform}:${ref}` : this.platform;
   }
+
+  /** The platform this adapter connects to. */
+  public get platformId(): DataPlatformProvider { return this.platform; }
 
   abstract listDatabases(): Promise<string[]>;
   abstract listSchemas(database: string): Promise<string[]>;
@@ -90,12 +104,14 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     for (let i = 0; i < scopes.length; i++) {
       if (options?.signal?.aborted) break;
       if (scopes[i]) this.log(`[${this.platform}] Schema ${scopes[i]} (${i + 1}/${scopes.length})`);
-      parts.push(await this.extractScope(this.getMetadataQueries(scopes[i], tables), options));
+      parts.push(await this.extractScope(scopes[i], tables, options));
     }
     if (parts.length === 1) return parts[0];
     const reports = parts.map((p) => p.profiling).filter((r): r is ProfilingReport => !!r);
+    const gaps = parts.flatMap((p) => p.gaps ?? []);
     return {
       ...(reports.length ? { profiling: { queries: reports.reduce((n, r) => n + r.queries, 0), budget: reports[0].budget, profiledTables: reports.reduce((n, r) => n + r.profiledTables, 0), skippedTables: reports.reduce((n, r) => n + r.skippedTables, 0) } } : {}),
+      ...(gaps.length ? { gaps } : {}),
       platform: this.platform,
       connectionId: this.getConnectionId(),
       extractedAt: parts[0]?.extractedAt ?? new Date().toISOString(),
@@ -105,61 +121,48 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     };
   }
 
-  private async extractScope(queries: PlatformMetadataQueries, options: ExtractOptions | undefined): Promise<SchemaSnapshot> {
-    const startTime = new Date().toISOString();
-
-    this.log(`[${this.platform}] Extracting metadata...`);
-
-    // 1. Fetch tables
-    this.log(`[${this.platform}] Fetching tables...`);
-    let tablesResult: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
-    try {
-      tablesResult = await this.executeQuery(queries.listTables, {
-        timeoutMs: 60000,
-        signal: options?.signal
-      });
-    } catch (err) {
-      this.log(`[${this.platform}] Table listing failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 2. Fetch columns — non-fatal: some catalog types (e.g. Databricks' legacy
+  /**
+   * The estate's raw reads for one scope (v0.55.0: overridable, so a platform
+   * defined by files reads them through its operations). Each read is
+   * non-fatal: a failure leaves it empty and is reported as a gap.
+   */
+  protected async readEstate(queries: PlatformMetadataQueries, _scope: string | undefined, options: ExtractOptions | undefined): Promise<EstateReads> {
+    const empty: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
+    const gaps: string[] = [];
+    const read = async (what: string, sql: string | undefined, timeoutMs: number): Promise<QueryResult> => {
+      if (!sql) return empty;
+      this.log(`[${this.platform}] Fetching ${what}...`);
+      try {
+        return await this.executeQuery(sql, { timeoutMs, signal: options?.signal });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        this.log(`[${this.platform}] ${what[0].toUpperCase()}${what.slice(1)} failed (non-fatal): ${reason}`);
+        gaps.push(`${what}: ${reason}`);
+        return empty;
+      }
+    };
+    // Columns are non-fatal too: some catalog types (e.g. Databricks' legacy
     // `hive_metastore`) have no bulk, schema-wide column-introspection query at
     // all (no `information_schema` support), only a per-table DESCRIBE — degrade
     // to tables-without-column-detail rather than aborting the whole extraction.
-    this.log(`[${this.platform}] Fetching columns...`);
-    let columnsResult: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
-    try {
-      columnsResult = await this.executeQuery(queries.listColumns, {
-        timeoutMs: 60000,
-        signal: options?.signal
-      });
-    } catch (err) {
-      this.log(`[${this.platform}] Column listing failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const tables = await read('tables', queries.listTables, 60000);
+    const columns = await read('columns', queries.listColumns, 60000);
+    const foreignKeys = await read('foreign keys', queries.listForeignKeys, 30000);
+    const views = await read('views', queries.listViews, 30000);
+    const primaryKeys = await read('primary keys', queries.listPrimaryKeys, 30000);
+    return { tables, columns, foreignKeys, views, primaryKeys, gaps };
+  }
 
-    // 3. Fetch foreign keys
-    this.log(`[${this.platform}] Fetching foreign keys...`);
-    let fkResult: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
-    try {
-      fkResult = await this.executeQuery(queries.listForeignKeys, {
-        timeoutMs: 30000,
-        signal: options?.signal
-      });
-    } catch (err) {
-      this.log(`[${this.platform}] Foreign key extraction failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    }
+  private async extractScope(scope: string | undefined, tableNames: string[] | undefined, options: ExtractOptions | undefined): Promise<SchemaSnapshot> {
+    const startTime = new Date().toISOString();
+    const queries = this.getMetadataQueries(scope, tableNames);
 
-    // 4. Fetch views
-    this.log(`[${this.platform}] Fetching views...`);
-    let viewsResult: QueryResult = { columns: [], rows: [], rowCount: 0, executionTimeMs: 0 };
-    try {
-      viewsResult = await this.executeQuery(queries.listViews, {
-        timeoutMs: 30000,
-        signal: options?.signal
-      });
-    } catch (err) {
-      this.log(`[${this.platform}] View extraction failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    }
+    this.log(`[${this.platform}] Extracting metadata...`);
+    const reads = await this.readEstate(queries, scope, options);
+    const tablesResult = reads.tables;
+    const columnsResult = reads.columns;
+    const fkResult = reads.foreignKeys;
+    const viewsResult = reads.views;
 
     // 5. Assemble tables with columns (a table filter also applies client-side, for
     // platforms whose listing can't be filtered, e.g. Hive metastore's SHOW TABLES)
@@ -173,14 +176,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     const foreignKeys = this.assembleForeignKeys(fkResult);
 
     // 7b. Key flags (v0.38.0): primary keys where the platform lists them, foreign keys from step 3.
-    let pkRows: QueryResult['rows'] = [];
-    if (queries.listPrimaryKeys) {
-      try {
-        pkRows = (await this.executeQuery(queries.listPrimaryKeys, { timeoutMs: 30000, signal: options?.signal })).rows;
-      } catch (err) {
-        this.log(`[${this.platform}] Primary key extraction failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    const pkRows: QueryResult['rows'] = reads.primaryKeys.rows;
     const keyOf = (schema: unknown, table: unknown, column: unknown) => `${String(schema)}.${String(table)}.${String(column)}`.toLowerCase();
     const pks = new Set(pkRows.map((r) => { const x = r as Record<string, unknown>; return keyOf(x['table_schema'] ?? x['TABLE_SCHEMA'], x['table_name'] ?? x['TABLE_NAME'], x['column_name'] ?? x['COLUMN_NAME']); }));
     const fks = new Set(foreignKeys.map((f) => keyOf(f.sourceSchema, f.sourceTable, f.sourceColumn)));
@@ -209,7 +205,8 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
       tables,
       views,
       foreignKeys,
-      ...(profiling ? { profiling } : {})
+      ...(profiling ? { profiling } : {}),
+      ...(reads.gaps.length ? { gaps: reads.gaps } : {})
     };
   }
 

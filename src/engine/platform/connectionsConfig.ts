@@ -7,6 +7,7 @@ import { ensureLayout, layoutPath, layoutRel } from '../workspaceLayout';
 import { CredentialReference, VSCODE_SECRET_RESOLVER_ID } from './credentials/types';
 import { getCredentialResolver, resolveCredential } from './credentials/registry';
 import { envCredentialVariable } from './credentials/EnvVarCredentialResolver';
+import { definedConnectionPlatforms, platformDefinition } from './definitions';
 
 /**
  * The connections the MCP server and the extension can use (docs/mcp-engine-
@@ -78,6 +79,40 @@ export const CONNECTION_FIELDS: Readonly<Partial<Record<DataPlatformProvider, re
   oracle: ['connectString', 'username', 'configDir', 'walletLocation']
 };
 
+/**
+ * v0.55.0: a platform's connection fields: the list above, or (a platform defined by files, Redshift first)
+ * its definition's non-secret fields. `undefined`: AutoDE can't connect to it.
+ */
+export function connectionFieldsFor(platform: DataPlatformProvider): readonly string[] | undefined {
+  const builtIn = CONNECTION_FIELDS[platform];
+  if (builtIn) return builtIn;
+  const c = platformDefinition(platform)?.connection;
+  return c ? c.fields.filter((f) => !f.secret).map((f) => f.name) : undefined;
+}
+
+/** The secret fields a platform defined by files names (refused in the files, supplied by a resolver). */
+function definedSecretFields(platform: DataPlatformProvider): string[] {
+  if (CONNECTION_FIELDS[platform]) return [];
+  return (platformDefinition(platform)?.connection?.fields ?? []).filter((f) => f.secret).map((f) => f.name);
+}
+
+/** The fields that differ per engineer, for this platform. */
+export function personalFieldsFor(platform: DataPlatformProvider): string[] {
+  const defined = CONNECTION_FIELDS[platform] ? [] : (platformDefinition(platform)?.connection?.fields ?? []).filter((f) => f.personal).map((f) => f.name);
+  return [...PERSONAL_FIELDS, ...defined];
+}
+
+/** The roles a platform can play. */
+function rolesFor(platform: DataPlatformProvider): ConnectionRole[] {
+  if (platform === 'oracle') return ['source'];
+  return platformDefinition(platform)?.connection?.roles ?? ['source', 'target'];
+}
+
+/** The platforms a connection can name, for messages. */
+export function connectablePlatforms(): string[] {
+  return [...Object.keys(CONNECTION_FIELDS), ...definedConnectionPlatforms().map((d) => d.id).filter((id) => !(id in CONNECTION_FIELDS))];
+}
+
 /** File field → the credential field the adapters take, where they differ. */
 const ADAPTER_FIELD: Readonly<Record<string, string>> = { snowflakeRole: 'role' };
 
@@ -98,15 +133,17 @@ const KNOWN_KEYS = new Set(['id', 'platform', 'role', 'credentials', 'allowSampl
 
 /** The id a connection gets — mirrors `BaseDataSourceAdapter.getConnectionId()` over the non-secret fields. */
 export function connectionIdFor(platform: DataPlatformProvider, fields: Readonly<Record<string, string>>, credentials: { resolver: string; ref: string }): string {
+  // A platform defined by files is named by its definition's id fields (a Redshift workgroup or cluster), not the CLI profile.
+  const defined = CONNECTION_FIELDS[platform] ? '' : (platformDefinition(platform)?.connection?.idFields ?? []).map((f) => fields[f]).find((v) => !!v) ?? '';
   const cliRef = credentials.resolver === 'cli' ? credentials.ref || (platform === 'databricks' ? 'DEFAULT' : 'default') : '';
-  const ref = cliRef || fields.account || fields.workspaceUrl || fields.connectString || fields.username || '';
+  const ref = defined || cliRef || fields.account || fields.workspaceUrl || fields.connectString || fields.username || '';
   return ref ? `${platform}:${ref}` : platform;
 }
 
 /** Non-secret fields the `env` resolver would supply for this reference (to compute ids before connecting). */
 function envFields(platform: DataPlatformProvider, ref: string, env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const field of CONNECTION_FIELDS[platform] ?? []) {
+  for (const field of connectionFieldsFor(platform) ?? []) {
     const name = envCredentialVariable(platform, ref, field);
     const value = name ? env[name] : undefined;
     if (value) out[field] = value;
@@ -114,8 +151,9 @@ function envFields(platform: DataPlatformProvider, ref: string, env: NodeJS.Proc
   return out;
 }
 
-function secretKeys(e: Record<string, unknown>): string[] {
-  return Object.keys(e).filter((k) => SECRET_FIELDS.some((s) => s.toLowerCase() === k.toLowerCase()));
+function secretKeys(e: Record<string, unknown>, platform?: DataPlatformProvider): string[] {
+  const defined = platform ? definedSecretFields(platform) : [];
+  return Object.keys(e).filter((k) => [...SECRET_FIELDS, ...defined].some((s) => s.toLowerCase() === k.toLowerCase()));
 }
 
 function parseCredentials(value: unknown, where: string, errors: string[]): { resolver: string; ref: string } | undefined {
@@ -143,13 +181,14 @@ function parseEntry(item: unknown, where: string, origin: 'file' | 'local', env:
   if (!item || typeof item !== 'object' || Array.isArray(item)) { errors.push(`${where}: not a mapping.`); return undefined; }
   const e = item as Record<string, unknown>;
   const platform = String(e.platform ?? '') as DataPlatformProvider;
-  const allowed = CONNECTION_FIELDS[platform];
-  if (!allowed) { errors.push(`${where}: platform "${String(e.platform ?? '')}" is not supported (snowflake, databricks, oracle).`); return undefined; }
-  const secrets = secretKeys(e);
+  const allowed = connectionFieldsFor(platform);
+  if (!allowed) { errors.push(`${where}: platform "${String(e.platform ?? '')}" is not supported (${connectablePlatforms().join(', ')}).`); return undefined; }
+  const secrets = secretKeys(e, platform);
   if (secrets.length) { errors.push(`${where}: ${secrets.join(', ')} must not be in this file. Supply secrets through the credentials resolver (env vars, the platform CLI's configuration, or VS Code's secret storage).`); return undefined; }
   const role = e.role === undefined ? 'source' : String(e.role);
   if (role !== 'source' && role !== 'target') { errors.push(`${where}: role must be source or target.`); return undefined; }
   if (platform === 'oracle' && role === 'target') { errors.push(`${where}: Oracle is supported as a source only.`); return undefined; }
+  if (!rolesFor(platform).includes(role)) { errors.push(`${where}: ${platform} can't be a ${role}.`); return undefined; }
   const credentials = parseCredentials(e.credentials, where, errors);
   if (!credentials) return undefined;
   const fields: Record<string, string> = {};
@@ -167,11 +206,11 @@ function parseEntry(item: unknown, where: string, origin: 'file' | 'local', env:
 /** Applies a local-file item to the team entry with the same id. */
 function applyPersonal(entry: ConnectionEntry, e: Record<string, unknown>, where: string, errors: string[]): void {
   if (e.platform !== undefined && String(e.platform) !== entry.platform) { errors.push(`${where}: platform differs from the team entry "${entry.id}" (ignored).`); return; }
-  const secrets = secretKeys(e);
+  const secrets = secretKeys(e, entry.platform);
   if (secrets.length) { errors.push(`${where}: ${secrets.join(', ')} must not be in this file either — it is plain text on disk. Use VS Code's secret storage (resolver vscode), env vars or the platform CLI's configuration.`); return; }
   if (e.allowSampleDataInPrompts !== undefined) errors.push(`${where}: allowSampleDataInPrompts is the team's decision — set it in ${layoutRel('connections')} (ignored).`);
   if (e.role !== undefined && String(e.role) !== entry.role) errors.push(`${where}: role is set by the team entry (ignored).`);
-  const allowed = CONNECTION_FIELDS[entry.platform] ?? [];
+  const allowed = connectionFieldsFor(entry.platform) ?? [];
   const personal: string[] = [];
   for (const [k, v] of Object.entries(e)) {
     if (KNOWN_KEYS.has(k)) continue;
@@ -260,7 +299,7 @@ export function secretFieldsFor(platform: DataPlatformProvider, fields: Readonly
     if (mode === 'key-pair') return ['privateKeyPassphrase'];
     return ['token'];
   }
-  return [];
+  return definedSecretFields(platform);
 }
 
 /**
@@ -300,13 +339,19 @@ export async function resolveConnectionCredentials(entry: ConnectionEntry, env: 
       const name = envCredentialVariable(entry.platform, entry.credentials.ref, field);
       if (name && env[name]) supplied[field] = env[name] as string;
     }
-    const optional = entry.platform === 'snowflake' && (entry.fields.authMode || 'key-pair') === 'key-pair';
+    // Key-pair Snowflake, and platforms defined by files (their secrets are one sign-in option among others), may have none.
+    const optional = (entry.platform === 'snowflake' && (entry.fields.authMode || 'key-pair') === 'key-pair') || definedSecretFields(entry.platform).length > 0;
     if (!Object.keys(supplied).length && !optional) {
       throw new Error(`Connection "${entry.id}" keeps its secret in VS Code's secret storage, which only the AutoDE extension can read. For this client, set ${vars.join(' and ')} in its environment, or use a CLI connection (resolver cli).`);
     }
     return { ...adapterFields(entry.fields), ...supplied };
   }
   const resolved = await resolveCredential(reference);
+  const profileField = CONNECTION_FIELDS[entry.platform] ? undefined : platformDefinition(entry.platform)?.connection?.cliProfileField;
+  if (!resolved && entry.credentials.resolver === 'cli' && profileField) {
+    // A platform defined by files: the reference names the CLI's own profile, which the CLI checks when it signs in.
+    return { ...adapterFields(entry.fields), [profileField]: entry.credentials.ref || 'default' };
+  }
   if (!resolved && entry.credentials.resolver === 'cli') {
     if (entry.platform === 'oracle') throw new Error('Oracle connections take credentials from environment variables (resolver env) or VS Code\'s secret storage (resolver vscode); the connect string (a tnsnames alias or Easy Connect) is a field of the entry.');
     const where = entry.platform === 'snowflake' ? 'connections.toml' : '.databrickscfg';
@@ -386,13 +431,14 @@ function writeDoc(file: string, doc: Document): void {
  */
 export function validateConnectionDraft(draft: ConnectionDraft): string[] {
   const errors: string[] = [];
-  const allowed = CONNECTION_FIELDS[draft.platform];
-  if (!allowed) { errors.push(`Platform "${draft.platform}" is not supported (snowflake, databricks, oracle).`); return errors; }
+  const allowed = connectionFieldsFor(draft.platform);
+  if (!allowed) { errors.push(`Platform "${draft.platform}" is not supported (${connectablePlatforms().join(', ')}).`); return errors; }
   if (draft.role !== 'source' && draft.role !== 'target') errors.push('role must be source or target.');
   if (draft.platform === 'oracle' && draft.role === 'target') errors.push('Oracle is supported as a source only.');
+  else if ((draft.role === 'source' || draft.role === 'target') && !rolesFor(draft.platform).includes(draft.role)) errors.push(`${draft.platform} can't be a ${draft.role}.`);
   if (draft.scope !== undefined && draft.scope !== 'team' && draft.scope !== 'personal') errors.push('scope must be team or personal.');
   const fields = draft.fields ?? {};
-  const secrets = secretKeys(fields);
+  const secrets = secretKeys(fields, draft.platform);
   if (secrets.length) errors.push(`${secrets.join(', ')} can't be written to a connections file; it goes to the credentials resolver (environment variables, the platform CLI's configuration, or VS Code's secret storage).`);
   if (!draft.credentials || !CONNECTION_RESOLVERS.includes(draft.credentials.resolver)) errors.push('credentials.resolver must be env, cli or vscode.');
   if (draft.platform === 'oracle' && draft.credentials?.resolver === 'cli') errors.push('Oracle has no CLI configuration to read credentials from: use resolver env (or vscode inside VS Code).');
@@ -407,7 +453,8 @@ export function saveConnection(workspaceRoot: string, draft: ConnectionDraft, en
   for (const [k, v] of Object.entries(draft.fields)) {
     if (v !== undefined && v !== null && String(v).trim() !== '') fields[k] = String(v).trim();
   }
-  const allowed = CONNECTION_FIELDS[draft.platform]!;
+  const allowed = connectionFieldsFor(draft.platform)!;
+  const personalFields = personalFieldsFor(draft.platform);
   const id = connectionIdFor(draft.platform, fields, draft.credentials);
   ensureLayout(workspaceRoot);
   const teamFile = layoutPath(workspaceRoot, 'connections');
@@ -417,8 +464,8 @@ export function saveConnection(workspaceRoot: string, draft: ConnectionDraft, en
   const written: string[] = [];
   let credentialsLocal = false;
 
-  const personal = Object.fromEntries(Object.entries(fields).filter(([k]) => PERSONAL_FIELDS.includes(k)));
-  const shared = Object.fromEntries(Object.entries(fields).filter(([k]) => !PERSONAL_FIELDS.includes(k)));
+  const personal = Object.fromEntries(Object.entries(fields).filter(([k]) => personalFields.includes(k)));
+  const shared = Object.fromEntries(Object.entries(fields).filter(([k]) => !personalFields.includes(k)));
   const existingLocal = findItem(local, id, env);
   const existingTeam = findItem(team, id, env);
 
@@ -435,7 +482,7 @@ export function saveConnection(workspaceRoot: string, draft: ConnectionDraft, en
     const creds = (current.credentials ?? {}) as Record<string, unknown>;
     const same = String(creds.resolver ?? 'env') === draft.credentials.resolver && String(creds.ref ?? '') === draft.credentials.ref;
     if (!same) { localCredentials = draft.credentials; credentialsLocal = true; }
-    for (const k of allowed) if (!PERSONAL_FIELDS.includes(k) && !(k in shared) && existingTeam.has(k)) existingTeam.delete(k);
+    for (const k of allowed) if (!personalFields.includes(k) && !(k in shared) && existingTeam.has(k)) existingTeam.delete(k);
     for (const [k, v] of Object.entries(shared)) existingTeam.set(k, v);
     if (!existingTeam.has('id')) existingTeam.set('id', id);
   } else {

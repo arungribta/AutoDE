@@ -7,6 +7,7 @@
 
 const name = { type: 'string', pattern: '^[a-z][a-z0-9_]*$', description: 'Lower case, digits and _.' };
 const version = { type: 'string', pattern: '^\\d+(\\.\\d+){0,3}$', description: 'A version such as 8.0 or 3.5.1.' };
+const strings = { type: 'array', items: { type: 'string' } };
 
 export const OPERATION_SCHEMA = {
   $schema: 'http://json-schema.org/draft-07/schema#',
@@ -89,11 +90,58 @@ export const PLATFORM_SCHEMA = {
     access: {
       type: 'object', additionalProperties: false,
       properties: {
-        cli: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' }, minVersion: version, install: { type: 'string' }, credentialEnv: { type: 'string', pattern: '^[A-Z][A-Z0-9_]*$', description: 'The environment variable the CLI reads a password or token from: AutoDE passes the credential there, never as an argument.' } } },
+        cli: {
+          type: 'object', additionalProperties: false, required: ['command'],
+          properties: {
+            command: { type: 'string' }, minVersion: version, install: { type: 'string' },
+            credentialEnv: { type: 'string', pattern: '^[A-Z][A-Z0-9_]*$', description: 'The environment variable the CLI reads a password or token from: AutoDE passes the credential there, never as an argument.' },
+            binary: { type: 'object', additionalProperties: false, properties: { win32: { type: 'string' }, default: { type: 'string' } }, description: 'The executable\'s name per OS, when it differs from command.' },
+            wellKnownDirs: { type: 'object', additionalProperties: false, properties: { win32: strings, default: strings }, description: 'Folders the vendor\'s installer uses, looked in when the CLI isn\'t on PATH.' },
+            versionArgs: strings,
+            env: { type: 'object', additionalProperties: { type: 'string' }, propertyNames: { pattern: '^[A-Z][A-Z0-9_]*$' }, description: 'Environment variables set on every call (never a secret): for example turning the CLI\'s pager off.' },
+            listProfiles: { ...strings, description: 'The arguments that list the CLI\'s own profiles, one per line.' },
+            statement: {
+              type: 'object', additionalProperties: false, required: ['mode'],
+              description: 'How a statement runs through the CLI, for a platform without an adapter class: {sql} and {id} are filled in, and the connection\'s arguments added.',
+              properties: {
+                mode: { enum: ['sync', 'async'] },
+                run: { type: 'object', additionalProperties: false, required: ['args'], properties: { args: strings, rows: { type: 'string' } } },
+                submit: { type: 'object', additionalProperties: false, required: ['args', 'id'], properties: { args: strings, id: { type: 'string' } } },
+                poll: { type: 'object', additionalProperties: false, required: ['args', 'status', 'finished', 'failed'], properties: { args: strings, status: { type: 'string' }, finished: strings, failed: strings, error: { type: 'string' }, hasResult: { type: 'string' } } },
+                fetch: { type: 'object', additionalProperties: false, required: ['args', 'rows'], properties: { args: strings, rows: { type: 'string' }, columns: { type: 'string' }, columnName: { type: 'string' }, nextToken: { type: 'string' }, nextTokenArg: { type: 'string' }, cells: { enum: ['plain', 'typed'] } } },
+                cancel: { type: 'object', additionalProperties: false, required: ['args'], properties: { args: strings } }
+              }
+            }
+          }
+        },
         api: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string' } } }
       }
     },
     versionOperation: { type: 'string' },
+    connection: {
+      type: 'object', additionalProperties: false, required: ['fields'],
+      description: 'What a connection to the platform is made of, for a platform whose card is drawn from this file.',
+      properties: {
+        fields: {
+          type: 'array', minItems: 1,
+          items: {
+            type: 'object', additionalProperties: false, required: ['name', 'label'],
+            properties: {
+              name: { type: 'string', pattern: '^[a-z][A-Za-z0-9]*$' }, label: { type: 'string', minLength: 1 }, description: { type: 'string' },
+              required: { type: 'boolean' }, personal: { type: 'boolean' }, secret: { type: 'boolean' },
+              cliArg: { type: 'string', pattern: '^--?[a-z][a-z0-9-]*$' }, cliScope: { enum: ['every', 'submit'] },
+              env: { type: 'string', pattern: '^[A-Z][A-Z0-9_]*$' }
+            }
+          }
+        },
+        idFields: strings,
+        exactlyOne: { type: 'array', items: strings },
+        authModes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['mode', 'label'], properties: { mode: { type: 'string' }, label: { type: 'string' }, requires: strings, note: { type: 'string' } } } },
+        cliProfileField: { type: 'string' },
+        roles: { type: 'array', items: { enum: ['source', 'target'] } },
+        targetNote: { type: 'string' }
+      }
+    },
     dialect: {
       type: 'object', additionalProperties: false,
       properties: {

@@ -7588,7 +7588,8 @@ async function main() {
       assert.deepStrictEqual([pkg.name, pkg.version, pkg.bin.autode, pkg.dependencies], ['autode', require('../package.json').version, 'dist/autode.js', undefined], 'no runtime dependency');
       const packed = pack(dir, tmp);
       assert.ok(nodeFs.existsSync(packed.tarball));
-      assert.ok(packed.size < 600 * 1024, `tarball ${Math.round(packed.size / 1024)} KB (budget 600 KB)`);
+      // v0.55.0: 600 → 650 KB for Redshift's platform definition, its operations and its five skills (data files, not code).
+      assert.ok(packed.size < 650 * 1024, `tarball ${Math.round(packed.size / 1024)} KB (budget 650 KB)`);
       // The development build is not minified (the published one is, at well under half): this budget guards growth, not the shipped size.
       assert.ok(packed.unpackedSize < 2.5 * 1024 * 1024, `unpacked ${Math.round(packed.unpackedSize / 1024)} KB (budget 2.5 MB)`);
       for (const want of ['package.json', 'README.md', 'LICENSE', 'dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'media/autode-icon-64.png', 'skills/autode-de-interview-requirements/SKILL.md']) assert.ok(packed.files.includes(want), `missing ${want}`);
@@ -8506,9 +8507,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-orchestrator', 'autode-core-semantic-modeling', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-de-conformance', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-specification-authoring', 'autode-de-documentation', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment',
-      'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project',
-      'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-orchestrator', 'autode-core-semantic-modeling', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment', 'autode-de-specification-authoring', 'autode-redshift-deployment', 'autode-redshift-governance', 'autode-redshift-ingestion', 'autode-redshift-performance', 'autode-redshift-pipelines', 'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -12549,8 +12548,9 @@ async function main() {
     const root = nodePath.join(__dirname, '..');
     const c = L.loadCatalog({ resourcesRoot: root });
     assert.deepStrictEqual(c.errors, []);
-    assert.deepStrictEqual(c.platforms.map((p) => p.item.id).sort(), ['databricks', 'oracle', 'snowflake']);
-    assert.deepStrictEqual(c.operations.map((o) => o.item.id).sort(), ['lineage.columns', 'lineage.objects', 'platform.version'], 'one operation per kind of lineage, an implementation per platform in it');
+    assert.deepStrictEqual(c.platforms.map((p) => p.item.id).sort(), ['databricks', 'oracle', 'redshift', 'snowflake']);
+    assert.deepStrictEqual(c.operations.filter((o) => o.item.area === 'lineage').map((o) => o.item.id).sort(), ['lineage.columns', 'lineage.objects'], 'one operation per kind of lineage, an implementation per platform in it');
+    assert.ok(L.operationById(c, 'platform.version'));
     assert.deepStrictEqual(['snowflake', 'databricks', 'oracle'].map((id) => L.platformById(c, id).capabilities.lineage.operations), [['lineage.columns', 'lineage.objects'], ['lineage.columns', 'lineage.objects'], ['lineage.objects']]);
     assert.deepStrictEqual(Object.keys(L.operationById(c, 'lineage.objects').item.platforms), ['snowflake', 'databricks', 'oracle']);
     assert.deepStrictEqual([L.platformById(c, 'oracle').scopeLevel, L.platformById(c, 'snowflake').scopeLevel], ['schema', undefined]);
@@ -12678,9 +12678,11 @@ async function main() {
       assert.deepStrictEqual([r.databases, r.methods.map((m) => [m.operation, m.recorded, !!m.error])], [['HR'], [['lineage.objects', 1, false]]], JSON.stringify(r));
       assert.ok(oran.some((s) => /FROM all_dependencies/.test(s) && /IN \('hr'\)/.test(s) && /FETCH FIRST 5001 ROWS ONLY/.test(s)), oran.join('\n'));
       assert.ok(cfm.getLedger().assertions().some((a) => a.kind === 'lineage' && a.status === 'active' && a.subject[0] === 'obj:hr/prod/hr.v_staff' && a.subject[1] === 'obj:hr/prod/hr.employees'), 'a table-level lineage fact');
-      // A platform with no definition (no lineage operations): said plainly.
+      // A platform with no definition (no lineage operations): said plainly. One whose definition says it records none (v0.55.0, Redshift): its reason.
+      r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: { connectionId: 'bigquery:x', platform: 'bigquery', query: async () => [] } });
+      assert.ok(/No lineage operations for bigquery/.test(r.note), r.note);
       r = await refreshLineage({ resourcesRoot: root, workspaceRoot: ws, cfm, target: { connectionId: 'redshift:x', platform: 'redshift', query: async () => [] } });
-      assert.ok(/No lineage operations for redshift/.test(r.note), r.note);
+      assert.ok(/Redshift records no lineage of its own/.test(r.note), r.note);
       cfm.dispose();
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
@@ -12744,7 +12746,7 @@ async function main() {
     const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const D = fresh('../dist/engine/platform/dialects.js');
     const pr = require('../dist/engine/context/probes.js');
-    const [sf, db, ora, none] = ['snowflake', 'databricks', 'oracle', 'redshift'].map((x) => D.fragmentsFor(x));
+    const [sf, db, ora, none] = ['snowflake', 'databricks', 'oracle', 'bigquery'].map((x) => D.fragmentsFor(x));
     assert.deepStrictEqual([sf.distinctTuples, db.distinctTuples, ora.distinctTuples, none.distinctTuples], ['native', 'native', 'emulated', 'emulated']);
     assert.deepStrictEqual([none.id, none.regexMatch, none.keyHash], ['ansi', undefined, undefined], 'no definition: standard SQL, no regular expressions or key hash');
     assert.deepStrictEqual(ora.booleans, ['1', '0']);
@@ -12757,7 +12759,7 @@ async function main() {
     const flag = (d) => pr.renderProbeSql({ check: 'accepted_values', table: { fqn: 't' }, columns: ['f'], values: [true] }, d);
     assert.ok(/\(TRUE\)/.test(flag(sf)) && /\(1\)/.test(flag(ora)) && !/TRUE/.test(flag(ora)), flag(ora));
     assert.strictEqual(D.fill(db.keyHash, { keys: 'a, b' }), 'SUM(CAST(xxhash64(a, b) AS DECIMAL(38, 0)))');
-    assert.deepStrictEqual(['snowflake', 'databricks', 'oracle', 'redshift'].map((x) => D.explainStatements(x, 'SELECT 1')), [
+    assert.deepStrictEqual(['snowflake', 'databricks', 'oracle', 'bigquery'].map((x) => D.explainStatements(x, 'SELECT 1')), [
       ['EXPLAIN USING TEXT SELECT 1'], ['EXPLAIN SELECT 1'],
       ['EXPLAIN PLAN FOR SELECT 1', 'SELECT plan_table_output AS "plan" FROM TABLE(DBMS_XPLAN.DISPLAY())'], ['EXPLAIN SELECT 1']
     ]);
@@ -12789,6 +12791,235 @@ async function main() {
       assert.ok(ext.includes(`\`\${EXTENSION_ID}.${c}\``) && new RegExp(`refreshLineageCmd, platformOperations, customisePlatformOperation, proposePlatformFile`).test(ext), c);
     }
     assert.ok(/propose\(new DecisionStore\(wsRoot\)[^\n]*'platform_operation'/.test(ext), 'Propose makes a platform_operation decision');
+  });
+
+  // ── v0.55.0: POP2 part 1 — Redshift defined by files ──
+
+  /** A recorded Redshift Data API: execute-statement, describe-statement (one STARTED poll first), paged get-statement-result with typed cells. */
+  function fakeRedshiftData(answer) {
+    const statements = new Map(); const calls = []; let n = 0;
+    const typed = (v) => v === null || v === undefined ? { isNull: true } : typeof v === 'number' ? (Number.isInteger(v) ? { longValue: v } : { doubleValue: v }) : typeof v === 'boolean' ? { booleanValue: v } : { stringValue: String(v) };
+    const call = async (args) => {
+      calls.push(args);
+      const cmd = args[1];
+      if (args[0] !== 'redshift-data') throw new Error('not redshift-data: ' + args.join(' '));
+      if (cmd === 'execute-statement') {
+        const id = 'st-' + (++n); const sql = args[args.indexOf('--sql') + 1];
+        let r; try { r = { rows: answer(sql) }; } catch (e) { r = { error: e.message }; }
+        statements.set(id, { ...r, sql, polls: 0 });
+        return JSON.stringify({ Id: id });
+      }
+      const st = statements.get(args[args.indexOf('--id') + 1]);
+      if (cmd === 'describe-statement') {
+        st.polls++;
+        if (st.polls < 2) return JSON.stringify({ Status: 'STARTED' });
+        return JSON.stringify(st.error ? { Status: 'FAILED', Error: st.error } : { Status: 'FINISHED', HasResultSet: st.rows.length > 0 || /^\s*SELECT/i.test(st.sql) });
+      }
+      if (cmd === 'get-statement-result') {
+        const cols = st.rows[0] ? Object.keys(st.rows[0]) : [];
+        const token = args.includes('--next-token') ? args[args.indexOf('--next-token') + 1] : undefined;
+        const half = Math.ceil(st.rows.length / 2);
+        const page = token ? st.rows.slice(half) : st.rows.slice(0, half);
+        return JSON.stringify({ ColumnMetadata: cols.map((name) => ({ name })), Records: page.map((row) => cols.map((c) => typed(row[c]))), ...(token || st.rows.length < 2 ? {} : { NextToken: 'page-2' }) });
+      }
+      if (cmd === 'cancel-statement') return JSON.stringify({ Status: true });
+      throw new Error('unexpected ' + cmd);
+    };
+    return { call, calls };
+  }
+
+  /** What a Redshift account returns for AutoDE's estate operations (dev.sales: orders, customers, one view; SVV_TABLE_INFO refused). */
+  function redshiftEstate(sql) {
+    if (/version\(\)/.test(sql)) return [{ version: '1.0.77467' }];
+    if (/svv_table_info/.test(sql)) throw new Error('permission denied for relation svv_table_info');
+    if (/svv_all_tables/.test(sql)) return [
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'orders', table_type: 'TABLE', comment: 'One row per order' },
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'customers', table_type: 'TABLE', comment: null },
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'v_open_orders', table_type: 'VIEW', comment: null }];
+    if (/svv_all_columns/.test(sql)) return [
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'orders', column_name: 'order_id', data_type: 'bigint', is_nullable: 'NO', ordinal_position: 1, column_default: null, comment: null },
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'orders', column_name: 'customer_id', data_type: 'bigint', is_nullable: 'YES', ordinal_position: 2, column_default: null, comment: null },
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'orders', column_name: 'amount', data_type: 'numeric(12,2)', is_nullable: 'YES', ordinal_position: 3, column_default: null, comment: 'Order total' },
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'customers', column_name: 'customer_id', data_type: 'bigint', is_nullable: 'NO', ordinal_position: 1, column_default: null, comment: null },
+      { table_catalog: 'dev', table_schema: 'sales', table_name: 'v_open_orders', column_name: 'order_id', data_type: 'bigint', is_nullable: 'YES', ordinal_position: 1, column_default: null, comment: null }];
+    if (/pg_views/.test(sql)) return [{ table_catalog: 'dev', table_schema: 'sales', table_name: 'v_open_orders', view_definition: "SELECT order_id FROM sales.orders WHERE status = 'open'" }];
+    if (/PRIMARY KEY/.test(sql)) return [{ table_schema: 'sales', table_name: 'orders', column_name: 'order_id' }, { table_schema: 'sales', table_name: 'customers', column_name: 'customer_id' }];
+    if (/FOREIGN KEY/.test(sql)) return [{ constraint_name: 'orders_customer_fk', source_schema: 'sales', source_table: 'orders', source_column: 'customer_id', target_schema: 'sales', target_table: 'customers', target_column: 'customer_id' }];
+    if (/pg_database/.test(sql)) return [{ name: 'dev' }, { name: 'analytics' }];
+    if (/svv_all_schemas/.test(sql)) return [{ name: 'public' }, { name: 'sales' }];
+    return [];
+  }
+
+  await test('v0.55.0 POP2: a statement through a CLI, from the platform definition alone — submitted, polled until it finishes, fetched page by page with typed cells; a failed statement says why; a slow one is cancelled; nothing secret is ever an argument', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const CS = fresh('../dist/engine/platform/cliStatement.js');
+    const D = fresh('../dist/engine/platform/definitions.js');
+    const def = D.platformDefinition('redshift', { resourcesRoot: nodePath.join(__dirname, '..') });
+    const spec = def.access.cli.statement;
+    const values = { workgroupName: 'wg', database: 'dev', region: 'eu-west-1', profile: 'work', secretArn: 'arn:aws:secretsmanager:x', accessKeyId: 'AKIA-SECRET', secretAccessKey: 'shh' };
+    const conn = { every: CS.connectionArgs(def.connection, values, 'every'), submit: CS.connectionArgs(def.connection, values, 'submit') };
+    assert.deepStrictEqual(conn.every, ['--region', 'eu-west-1', '--profile', 'work']);
+    assert.deepStrictEqual(conn.submit, ['--workgroup-name', 'wg', '--database', 'dev', '--secret-arn', 'arn:aws:secretsmanager:x']);
+    assert.deepStrictEqual(CS.connectionEnv(def.connection, values, def.access.cli.env), { AWS_PAGER: '', AWS_ACCESS_KEY_ID: 'AKIA-SECRET', AWS_SECRET_ACCESS_KEY: 'shh' }, 'secrets only through the environment');
+    const fake = fakeRedshiftData((sql) => /orders/.test(sql) ? [{ id: 1, name: 'a', ok: true, amt: 1.5, note: null }, { id: 2, name: 'b', ok: false, amt: 2, note: 'x' }, { id: 3, name: 'c', ok: true, amt: 0, note: null }] : []);
+    const r = await CS.runCliStatement(spec, fake.call, 'SELECT * FROM orders', conn, { sleep: async () => {} });
+    assert.deepStrictEqual(r.rows, [{ id: 1, name: 'a', ok: true, amt: 1.5, note: null }, { id: 2, name: 'b', ok: false, amt: 2, note: 'x' }, { id: 3, name: 'c', ok: true, amt: 0, note: null }], 'two pages, typed cells decoded');
+    assert.deepStrictEqual(fake.calls.map((a) => a[1]), ['execute-statement', 'describe-statement', 'describe-statement', 'get-statement-result', 'get-statement-result']);
+    assert.ok(fake.calls.every((a) => !a.includes('AKIA-SECRET') && !a.includes('shh')), 'no secret in any argument');
+    assert.ok(fake.calls.slice(1).every((a) => a.includes('--profile') && !a.includes('--secret-arn')), 'the profile on every call; the connection only where it is submitted');
+    assert.deepStrictEqual((await CS.runCliStatement(spec, fake.call, 'SELECT 1 FROM orders', conn, { sleep: async () => {}, maxRows: 2 })).rows.length, 2, 'stops fetching at maxRows');
+    const failing = fakeRedshiftData(() => { throw new Error('ERROR: relation "sales.nope" does not exist'); });
+    await assert.rejects(CS.runCliStatement(spec, failing.call, 'SELECT 1 FROM sales.nope', conn, { sleep: async () => {} }), /The statement failed: ERROR: relation "sales.nope" does not exist/);
+    // A statement that never finishes is cancelled.
+    const stuck = []; const never = async (args) => { stuck.push(args[1]); return args[1] === 'execute-statement' ? '{"Id":"s1"}' : args[1] === 'describe-statement' ? '{"Status":"STARTED"}' : '{}'; };
+    await assert.rejects(CS.runCliStatement(spec, never, 'SELECT 1', conn, { sleep: async () => {}, timeoutMs: -1 }), /didn't finish within .* it was cancelled/);
+    assert.ok(stuck.includes('cancel-statement'));
+    // The sync form: one call returns the rows.
+    const sync = await CS.runCliStatement({ mode: 'sync', run: { args: ['query', '{sql}'], rows: 'result.rows' } }, async () => JSON.stringify({ result: { rows: [{ a: 1 }] } }), 'SELECT 1', { every: [], submit: [] });
+    assert.deepStrictEqual(sync.rows, [{ a: 1 }]);
+  });
+
+  await test('v0.55.0 POP2: Redshift connects and its estate comes in with no Redshift code — the version read, tables, columns, views and keys through its estate operations; a read the account can\'t do is a gap and the rest still come in; the ingest reports it', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    const D = fresh('../dist/engine/platform/definitions.js');
+    D.setPlatformResourcesRoot(root);
+    const { DefinitionAdapter } = fresh('../dist/engine/platform/adapters/DefinitionAdapter.js');
+    const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+    const { openContext, ingestConnection } = fresh('../dist/engine/context/estateIngest.js');
+    const definition = D.platformDefinition('redshift');
+    const creds = { workgroupName: 'analytics-wg', database: 'dev', secretArn: 'arn:aws:secretsmanager:eu-west-1:1:secret:rs', profile: 'work' };
+    const fake = fakeRedshiftData(redshiftEstate);
+    const adapter = (c) => new DefinitionAdapter('redshift', c, () => {}, { definition, operation: (id) => D.platformOperation(id), cliConsent: true, call: fake.call, sleep: async () => {} });
+    const a = adapter(creds);
+    assert.strictEqual(a.getConnectionId(), 'redshift:analytics-wg');
+    const info = await a.connect();
+    assert.deepStrictEqual([info.version, info.databaseName, info.platform], ['1.0.77467', 'dev', 'redshift']);
+    const snap = await a.extractMetadata({ schemaFilter: ['dev.sales'] });
+    assert.deepStrictEqual(snap.tables.map((t) => [t.fqn, t.type, t.columns.map((c) => c.name + (c.isPrimaryKey ? '*' : '') + (c.isForeignKey ? '>' : ''))]), [
+      ['dev.sales.orders', 'TABLE', ['order_id*', 'customer_id>', 'amount']], ['dev.sales.customers', 'TABLE', ['customer_id*']], ['dev.sales.v_open_orders', 'VIEW', ['order_id']]]);
+    assert.deepStrictEqual([snap.views.map((v) => v.fqn), snap.foreignKeys.length, snap.tables[0].comment, snap.tables[0].columns[2].dataType], [['dev.sales.v_open_orders'], 1, 'One row per order', 'numeric(12,2)']);
+    assert.deepStrictEqual(snap.gaps, ['estate.table_stats: The statement failed: permission denied for relation svv_table_info']);
+    assert.ok(fake.calls.filter((x) => x[1] === 'execute-statement').every((x) => x.includes('--workgroup-name') && x.includes('--secret-arn') && x.includes('--database')));
+    assert.deepStrictEqual([await a.listDatabases(), await a.listSchemas('dev')], [['dev', 'analytics'], ['public', 'sales']]);
+    // What the connection needs is checked before anything runs.
+    await assert.rejects(adapter({ database: 'dev' }).connect(), /needs: exactly one of Serverless workgroup or Provisioned cluster/);
+    await assert.rejects(adapter({ workgroupName: 'w', clusterIdentifier: 'c', database: 'dev' }).connect(), /2 given/);
+    // Without consent the CLI is never run; ConnectionManager reaches the definition with no adapter registered for Redshift.
+    const m = new ConnectionManager(() => {});
+    await assert.rejects(m.connect('redshift', creds), /reached through its CLI \(aws\), which AutoDE runs only with your consent/);
+    // Through the manager and the ingest, as the panel, CLI and MCP do: the gap becomes a warning; the platform is known.
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-redshift-'));
+    try {
+      const cfm = await openContext(ws);
+      const mgr = new ConnectionManager(() => {});
+      mgr.registerAdapterFactory('redshift', (c) => adapter(c));
+      await mgr.connect('redshift', creds);
+      assert.strictEqual(mgr.getActivePlatform(), 'redshift');
+      const r = await ingestConnection(cfm, mgr, 'redshift:analytics-wg', { schemas: ['dev.sales'], system: 'warehouse', environment: 'prod' });
+      assert.deepStrictEqual([r.tables, r.columns, r.warnings], [4, 5, ['Not read: estate.table_stats: The statement failed: permission denied for relation svv_table_info']], JSON.stringify(r));
+      assert.ok(cfm.getLedger ? true : true);
+      cfm.dispose();
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.55.0 POP2: a Redshift connection in the files and the cards — fields, sign-in, id and secrets from its definition; a secret is refused in a file and stored in secret storage; both roles; the card saves only what connects; env and CLI-profile credentials', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    fresh('../dist/engine/platform/definitions.js').setPlatformResourcesRoot(root);
+    const C = fresh('../dist/engine/platform/connectionsConfig.js');
+    const S = fresh('../dist/engine/platform/connectionSetup.js');
+    const E = fresh('../dist/engine/platform/credentials/EnvVarCredentialResolver.js');
+    assert.deepStrictEqual(C.connectionFieldsFor('redshift'), ['workgroupName', 'clusterIdentifier', 'database', 'schema', 'region', 'secretArn', 'dbUser', 'profile']);
+    const parsed = C.parseConnectionsConfig([
+      'connections:',
+      '  - platform: redshift', '    role: target', '    clusterIdentifier: prod-cluster', '    database: dw', '    credentials: { resolver: env, ref: prod }',
+      '  - platform: redshift', '    workgroupName: wg', '    database: dev', '    secretAccessKey: nope',
+      '  - platform: redshift', '    workgroupName: wg2', '    database: dev', '    color: blue'
+    ].join('\n'), {});
+    assert.deepStrictEqual(parsed.connections.map((c) => [c.id, c.role]), [['redshift:prod-cluster', 'target'], ['redshift:wg2', 'source']]);
+    assert.ok(parsed.errors.some((e) => /secretAccessKey must not be in this file/.test(e)) && parsed.errors.some((e) => /unknown field "color"/.test(e)), parsed.errors.join('\n'));
+    assert.strictEqual(E.envCredentialVariable('redshift', 'prod', 'secretAccessKey'), 'AUTODE_REDSHIFT_PROD_SECRET_ACCESS_KEY');
+    const reg = require('../dist/engine/platform/credentials/registry.js');
+    reg.registerCredentialResolver(new E.EnvVarCredentialResolver({ AUTODE_REDSHIFT_PROD_ACCESS_KEY_ID: 'AKIA', AUTODE_REDSHIFT_PROD_SECRET_ACCESS_KEY: 'shh', AUTODE_REDSHIFT_PROD_DB_USER: 'etl' }));
+    let resolved;
+    try { resolved = await C.resolveConnectionCredentials(parsed.connections[0], {}); } finally { reg.registerCredentialResolver(new E.EnvVarCredentialResolver()); }
+    assert.deepStrictEqual([resolved.clusterIdentifier, resolved.accessKeyId, resolved.secretAccessKey, resolved.dbUser], ['prod-cluster', 'AKIA', 'shh', 'etl']);
+    const viaProfile = await C.resolveConnectionCredentials({ ...parsed.connections[1], credentials: { resolver: 'cli', ref: 'work' } }, {});
+    assert.strictEqual(viaProfile.profile, 'work', 'a cli reference names the AWS profile');
+    assert.deepStrictEqual(C.validateConnectionDraft({ platform: 'redshift', role: 'target', fields: { workgroupName: 'w', database: 'd' }, credentials: { resolver: 'cli', ref: 'p' } }), []);
+    assert.ok(C.connectablePlatforms().includes('redshift'));
+    const fields = S.setupFields('redshift', 'cli');
+    assert.ok(fields.some((f) => f.field === 'database' && f.required) && !fields.some((f) => f.field === 'profile') && fields.some((f) => f.field === 'dbUser' && f.personal));
+    assert.ok(/AutoDE stores none/.test(S.credentialNeeds({ platform: 'redshift', fields: {}, credentials: { resolver: 'cli', ref: 'work' } }).summary));
+    // The card: drawn from the definition, saved only if it connects; secrets to secret storage, personal fields to the local file.
+    const w = drv2Workspace('autode-redshift-card-');
+    try {
+      const { PlatformOnboarding, definedCards } = fresh('../dist/core/platformOnboarding.js');
+      const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
+      const store = new Map(); let fail = true; const checked = [];
+      const onboarding = new PlatformOnboarding({
+        workspaceRoot: () => w.ws, resourcesRoot: () => root, settings: () => ({}),
+        secrets: { get: async (k) => store.get(k), store: async (k, v) => { store.set(k, v); }, delete: async (k) => { store.delete(k); } },
+        secretKey: (platform, ref, field) => 'named.' + platform + '.' + ref + '.' + field, cardSecretKey: () => undefined,
+        createManager: (log) => { const m = new ConnectionManager(log); m.registerAdapterFactory('redshift', (creds) => ({ connect: async () => { checked.push(creds); if (fail) throw new Error('AccessDeniedException'); return { databaseName: 'dev', schemaName: '', version: '1.0.77467' }; }, disconnect: async () => {}, dispose() {} })); return m; },
+        log: () => {}
+      });
+      const card = definedCards({ resourcesRoot: root }).find((d) => d.id === 'redshift');
+      assert.deepStrictEqual([card.roles, card.authModes.map((m) => m.mode), card.fields.filter((f) => f.secret).map((f) => f.name)], [['source', 'target'], ['secrets-manager', 'iam-temporary', 'aws-identity'], ['accessKeyId', 'secretAccessKey', 'sessionToken']]);
+      assert.ok(onboarding.state().defined.some((d) => d.id === 'redshift') && /The aws CLI/.test(onboarding.state().backends.redshift.backend));
+      const values = { workgroupName: 'analytics-wg', database: 'dev', dbUser: 'arun', accessKeyId: 'AKIA', secretAccessKey: 'shh', color: 'ignored' };
+      let r = await onboarding.saveDefinedCard('redshift', 'source', values);
+      assert.ok(!r.ok && /Not saved — the connectivity check failed: AccessDeniedException/.test(r.message) && !w.exists('.autode', 'config', 'connections.yaml') && store.size === 0, 'nothing written');
+      fail = false;
+      r = await onboarding.saveDefinedCard('redshift', 'source', values);
+      assert.ok(r.ok && r.id === 'redshift:analytics-wg', r.message);
+      assert.deepStrictEqual([checked[1].accessKeyId, checked[1].workgroupName, checked[1].color], ['AKIA', 'analytics-wg', undefined]);
+      const team = nodeFs.readFileSync(nodePath.join(w.ws, '.autode', 'config', 'connections.yaml'), 'utf8');
+      const local = nodeFs.readFileSync(nodePath.join(w.ws, '.autode', 'local', 'connections.yaml'), 'utf8');
+      assert.ok(/workgroupName: analytics-wg/.test(team) && !/AKIA|shh|dbUser/.test(team) && /dbUser: arun/.test(local) && !/AKIA|shh/.test(local), team + local);
+      assert.deepStrictEqual([store.get('named.redshift.analytics-wg.accessKeyId'), store.get('named.redshift.analytics-wg.secretAccessKey')], ['AKIA', 'shh']);
+      // A CLI profile picked instead: the reference, no secrets stored.
+      r = await onboarding.saveDefinedCard('redshift', 'target', { clusterIdentifier: 'prod', database: 'dw', profile: 'typed-but-ignored' }, { cliRef: 'work', scope: 'personal' });
+      assert.ok(r.ok && r.id === 'redshift:prod' && checked[2].profile === 'work', r.message);
+      await onboarding.remove('redshift:analytics-wg');
+      assert.strictEqual(store.size, 0, 'its secrets go with it');
+    } finally { w.done(); }
+  });
+
+  await test('v0.55.0 POP2: Redshift follows the platform pattern — its definition, operations and five skills load clean; a platform skill names only its platform; the AWS CLI is a prerequisite with install steps; the card, CLI and MCP wiring; no Redshift branch in code', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const c = L.loadCatalog({ resourcesRoot: root });
+    assert.deepStrictEqual(c.errors, []);
+    const rs = L.platformById(c, 'redshift');
+    assert.deepStrictEqual(Object.entries(rs.capabilities).filter(([, v]) => v.operations).map(([k, v]) => [k, v.operations.every((id) => L.operationById(c, id) && L.operationById(c, id).item.platforms.redshift)]), [['estate', true], ['performance.assess', true], ['governance.assess', true], ['pipelines.assess', true]]);
+    assert.deepStrictEqual([rs.capabilities.lineage.support, rs.capabilities['compile.target'].support], ['not_applicable', 'not_applicable']);
+    assert.ok(L.operationById(c, 'platform.version').item.platforms.redshift);
+    const Df = fresh('../dist/engine/agents/definitions.js');
+    const skills = ['deployment', 'governance', 'ingestion', 'performance', 'pipelines'].map((k) => 'autode-redshift-' + k);
+    for (const k of skills) {
+      const text = nodeFs.readFileSync(nodePath.join(root, 'skills', k, 'SKILL.md'), 'utf8');
+      assert.ok(/platforms: \[redshift\]/.test(text) && /maturity: preview/.test(text), k);
+      for (const id of (text.match(new RegExp('\x60((?:estate|performance|governance|pipelines)\\.[a-z_]+)\x60', 'g')) || []).map((x) => x.slice(1, -1))) assert.ok(L.operationById(c, id), k + ' names ' + id);
+      assert.ok(!/\bSELECT\b[\s\S]{0,200}\bFROM\s+svv_/i.test(text), k + ' carries no catalog SQL: it names operations');
+    }
+    assert.deepStrictEqual(Df.skillMeta('autode-redshift-x', { platforms: ['any'], stageKinds: ['build'], version: 1, maturity: 'preview' }, ['build']).errors, ['a redshift skill has platforms: [redshift].']);
+    const P = fresh('../dist/engine/platform/prerequisites.js');
+    const g = P.loadToolGuides(root).guides.find((x) => x.id === 'aws-cli');
+    assert.ok(g && g.platform === 'redshift' && g.options.some((o) => o.manager === 'WinGet') && /not yet checked/.test(g.verifiedHow));
+    const pre = await P.checkPrerequisites({ driversRoot: '', platforms: ['redshift'], resourcesRoot: root });
+    assert.ok(pre.length === 1 && pre[0].id === 'redshift-cli' && pre[0].required === true && pre[0].title === 'AWS CLI version 2 (aws)', JSON.stringify(pre));
+    // Wiring: the card is drawn, not written; the panel saves it; the managers know the workspace; the CLI offers Redshift.
+    const html = nodeFs.readFileSync(nodePath.join(root, 'media', 'sidebar.html'), 'utf8');
+    assert.ok(/id="definedCardsSource"/.test(html) && /id="definedCardsTarget"/.test(html) && !/data-provider="redshift"|data-target-provider="redshift"/.test(html) && /post\('saveDefinedConnection'/.test(html));
+    const read = (f) => nodeFs.readFileSync(nodePath.join(root, 'src', f), 'utf8');
+    assert.ok(/case 'saveDefinedConnection':/.test(read('core/webviewProvider.ts')) && /workspaceRoot: \(\) => vscode\.workspace/.test(read('extension.ts')) && /workspaceRoot: \(\) => this\.options\.workspaceRoot/.test(read('mcp/platform.ts')));
+    assert.ok(/connectablePlatforms\(\)/.test(read('cli/main.ts')));
+    const walk = (d) => nodeFs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(nodePath.join(d, e.name)) : e.name.endsWith('.ts') ? [nodePath.join(d, e.name)] : []);
+    const branches = ['engine', 'mcp', 'cli'].flatMap((d) => walk(nodePath.join(root, 'src', d))).filter((f) => /(===|!==|case)\s*'redshift'/.test(nodeFs.readFileSync(f, 'utf8')));
+    assert.deepStrictEqual(branches, [], 'Redshift is defined by files: no branch on its name in the engine, MCP or CLI');
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

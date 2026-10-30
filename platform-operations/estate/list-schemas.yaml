@@ -1,0 +1,26 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): the schemas of a database, to pick from.
+formatVersion: 1
+id: estate.list_schemas
+title: Schemas in a database
+description: The schemas of one database the connection's user can see, without the platform's own. Names only.
+kind: read
+content: metadata
+area: estate
+params:
+  - { name: database, type: literal, label: Database }
+returns:
+  - { name: name, label: Schema }
+platforms:
+  redshift:
+    sql: >
+      SELECT schema_name AS name FROM svv_all_schemas
+      WHERE database_name = {database:lower}
+        AND schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_internal', 'pg_automv', 'catalog_history')
+        AND schema_name NOT LIKE 'pg_temp%'
+      ORDER BY schema_name
+example:
+  platform: redshift
+  params: { database: dev }
+  rows:
+    - { name: public }
+    - { name: sales }

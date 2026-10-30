@@ -1,0 +1,29 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): the views of one schema, with their definitions.
+formatVersion: 1
+id: estate.list_views
+title: View definitions in a schema
+description: Each view of one schema with its SQL definition (structure, not data).
+kind: read
+content: metadata
+area: estate
+params:
+  - { name: database, type: literal, label: Database }
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: table_catalog, label: Database }
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: View }
+  - { name: view_definition, label: Definition }
+platforms:
+  # pg_views covers the connected database only (late-binding views included).
+  redshift:
+    sql: >
+      SELECT current_database() AS table_catalog, schemaname AS table_schema, viewname AS table_name, definition AS view_definition
+      FROM pg_views
+      WHERE schemaname = {schema:lower} AND current_database() = {database:lower}
+      ORDER BY viewname
+example:
+  platform: redshift
+  params: { database: dev, schema: sales }
+  rows:
+    - { table_catalog: dev, table_schema: sales, table_name: v_open_orders, view_definition: "SELECT order_id, amount FROM sales.orders WHERE status = 'open'" }

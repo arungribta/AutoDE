@@ -1,6 +1,6 @@
 # Platform skills
 
-AutoDE has its own Snowflake and Databricks skills, plus dbt and reconciliation. They work with no vendor skill installed. This page covers:
+AutoDE has its own Snowflake, Databricks and Redshift skills, plus dbt and reconciliation. They work with no vendor skill installed. This page covers:
 - what the skills do and when a stage gets them;
 - how they are tested;
 - how they work with the vendors' skills;
@@ -22,10 +22,15 @@ The full list, with versions and the roles that use each skill, is in [skills.md
 | `autode-databricks-governance` | platform-setup | Grants to groups (inherited from catalog and schema); column masks; row filters; tags |
 | `autode-databricks-performance` | build, platform-setup | Liquid clustering; predictive optimization or scheduled `OPTIMIZE`; `VACUUM` with a retention that keeps time travel |
 | `autode-databricks-deployment` | deploy | Bundles: dev and prod targets, `run_as` a service principal in production, validate as the dry run |
+| `autode-redshift-deployment` | platform-setup, source-assessment, target-context | Reaching Redshift (preview): the AWS CLI, the three sign-ins (Secrets Manager secret, IAM temporary credentials, AWS identity), the reads' privileges, troubleshooting. Deploying comes in 0.55.2 |
+| `autode-redshift-ingestion` | source-assessment, build | Redshift as a source (preview): the estate through its operations and what its gaps mean; moving data out with `UNLOAD` to S3 as Parquet |
+| `autode-redshift-performance` | source-assessment, modelling | Reading distribution and sort keys, skew, unsorted share and stale statistics (`performance.table_design`) into the assessment and the new design (preview) |
+| `autode-redshift-governance` | source-assessment, platform-setup | Reading privileges and masking policies (`governance.relation_privileges`, `governance.masking_policies`) into personas and personal-data rules (preview) |
+| `autode-redshift-pipelines` | source-assessment, code-conversion | Finding stored procedures, materialized views and logic-bearing views (`pipelines.*`) and what schedules them, for code conversion (preview) |
 | `autode-dbt-project` | build | Sources with freshness; staging models compiled by AutoDE; incremental marts; data tests from the quality rules (Snowflake or Databricks) |
 | `autode-de-reconciliation` | reconcile | Source against target, read-only: counts, distinct keys, sums, ranges, null counts; key hashes on one platform; missing keys on one connection |
 
-AutoDE wrote these from the vendors' public documentation. They contain no vendor skill text.
+AutoDE wrote these from the vendors' public documentation. They contain no vendor skill text. The Redshift skills name platform operations rather than carry SQL (CLAUDE.md), and are *preview* until checked on a live account: building for Redshift comes with Redshift as a target (0.55.2).
 
 ## When a stage gets them
 

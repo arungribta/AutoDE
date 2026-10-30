@@ -6,6 +6,20 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.55.0
+
+- **Amazon Redshift, defined by files** (POP2 part 1; docs/specs/platform-operations.md §6.2; owner, 2026-10-30: Redshift first). AutoDE reaches Redshift with no Redshift code, adapter or card written for it: everything comes from `platforms/redshift.yaml` and its operations.
+  - **Connecting:** through the AWS CLI version 2's Redshift Data API commands (`aws redshift-data`), which the person installs. The Data API takes no plain password, so the sign-in is a Secrets Manager secret (recommended: AutoDE holds no Redshift secret), IAM temporary credentials (provisioned), or the AWS identity (Serverless). The AWS identity is a CLI profile (named, nothing stored) or access keys, which reach the CLI only through its environment.
+  - **Cards in Source and Target,** drawn from the definition: its fields, sign-in choices, prerequisites (the AWS CLI, with install options) and the AWS profiles to pick from; *Save and connect* checks first. As a target, Redshift can be connected and read; building for it comes in 0.55.2. Also in `connections.yaml`, `autode connections add --platform redshift --allow-cli` and `autode_propose_connection`.
+  - **The estate** through estate operations (`estate.list_tables`, `list_columns`, `list_views`, `list_primary_keys`, `list_foreign_keys`, `table_stats`, `list_databases`, `list_schemas`), whose results use the column names AutoDE's estate assembly already reads. `platform.version` reads Redshift's own version.
+  - **Assessment reads** as operations: `performance.table_design`, `governance.relation_privileges`, `governance.masking_policies`, `pipelines.list_procedures`, `pipelines.materialized_views`.
+  - **Five skills** (preview until checked live): `autode-redshift-deployment` (reaching Redshift), `-ingestion` (the estate; UNLOAD plans), `-performance`, `-governance` and `-pipelines` (reading a source for assessment and conversion). They name operations instead of carrying SQL. Building on Redshift comes in 0.55.2.
+- **For any platform:** a read the account can't do (a privilege, an edition) is a **gap**: the other reads still come in, and the extraction and ingest results say what wasn't read and why (`SchemaSnapshot.gaps`; ingest warnings).
+- **The machinery, once for every CLI platform:** `cliStatement.ts` (a statement run through a CLI: one call, or submit, poll, fetch pages; a stuck statement cancelled), `DefinitionAdapter` (connect, query, estate and profiling from a definition), `BaseAdapter.readEstate` (overridable), `ConnectionManager` falling back to the definition, and connections, credentials (env names, CLI profiles), prerequisites and onboarding reading the definition. New definition fields: `connection` and `access.cli` `binary`, `wellKnownDirs`, `versionArgs`, `env`, `listProfiles`, `statement` (JSON Schema updated).
+- **Fewer platform branches:** the skill registry checks a platform skill with one rule instead of a branch per platform, and `autode connections add` names each platform's connections from a table: the architecture baseline drops by seven branches (`src/cli/main.ts` 7 → 3; `src/engine/agents/definitions.ts` removed).
+- **Deviations:** the skills' reads became operation files (CLAUDE.md: skills name operations), adding the `performance.assess`, `governance.assess` and `pipelines.assess` capabilities; the AWS CLI's install options are marked unverified until checked against the vendor's page; the CLI package's size budget in the tests rose from 600 to 650 KB for the new data files and skills (no code).
+- **Checked on recorded results only.** Live checks: manual-verification Part 55.
+
 ## 0.54.1
 
 - **POP1, part 2: the last platform SQL in the engine moves into the platform definitions** (docs/specs/platform-operations.md §6.1; requirement PLT-9). POP1 is complete.

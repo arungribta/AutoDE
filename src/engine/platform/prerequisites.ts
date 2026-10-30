@@ -5,6 +5,7 @@ import { parseYaml } from '../context/Yaml';
 import { layoutPath } from '../workspaceLayout';
 import { DataPlatformProvider } from '../types';
 import { getCliDescriptor } from './credentials/cliRegistry';
+import { platformDefinition } from './definitions';
 import { DRIVERS, DriverId, driverStatus, installCommand } from './driverStore';
 
 /**
@@ -142,12 +143,15 @@ export async function checkPrerequisites(options: PrerequisiteOptions): Promise<
   const { guides } = loadToolGuides(options.resourcesRoot, options.workspaceRoot);
   for (const platform of platforms) {
     const guide = guides.find((g) => g.platform === platform);
-    const cli = guide ?? CLI_FALLBACK[platform];
+    const defined = platformDefinition(platform);
+    // v0.55.0: a platform defined by files: its definition's CLI, when prerequisites.yaml has no entry for it.
+    const fromDefinition = defined?.connection && defined.access?.cli ? { title: `${defined.title} CLI (${defined.access.cli.command})`, why: `Required. AutoDE reaches ${defined.title} through it.`, docs: '' } : undefined;
+    const cli = guide ?? CLI_FALLBACK[platform] ?? fromDefinition;
     const descriptor = getCliDescriptor(platform);
     if (cli && descriptor) {
-      const found = await descriptor.detect(platform === 'snowflake' ? options.snowflakeCliPath : options.databricksCliPath);
+      const found = await descriptor.detect(platform === 'snowflake' ? options.snowflakeCliPath : platform === 'databricks' ? options.databricksCliPath : undefined);
       out.push({
-        id: `${platform}-cli`, platform, kind: 'cli', title: cli.title, why: cli.why, required: false,
+        id: `${platform}-cli`, platform, kind: 'cli', title: cli.title, why: cli.why, required: !!fromDefinition,
         state: found.found ? 'ready' : 'missing', version: found.version,
         detail: found.found ? `${found.cliPath} (${found.source})` : found.error ?? 'not found',
         install: found.found ? undefined : {

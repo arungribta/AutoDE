@@ -1253,6 +1253,29 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: *AutoDE: Platform Operations*; pick `lineage.objects`; *Customise*; change its row limit default; *AutoDE: Propose Platform File for Approval*; approve the decision; run *AutoDE: Platform Operations* again.
   Expect: the shipped file opens read-only with *Customise*; the copy opens from `.autode/config/platform-operations/lineage.objects.yaml`; it is listed as a draft until approved, then as the team's copy in effect.
 
+## Part 55 — v0.55.0 Redshift, defined by files
+
+Needs a Redshift Serverless workgroup or provisioned cluster you can read, and the AWS CLI version 2 signed in (`aws sts get-caller-identity` works).
+
+- [ ] **55.1 The card and the AWS CLI.**
+  Do: Settings → Source; open the *Amazon Redshift* card; *Check prerequisites*; *Find existing*.
+  Expect: the AWS CLI found with its version (or, without it, the install options for this machine); your AWS profiles listed; the sign-in choices with what each needs. The Target section has the same card, with the note that building for Redshift comes in 0.55.2.
+- [ ] **55.2 Save and connect.**
+  Do: pick your profile, fill the workgroup (or cluster) and database, and a Secrets Manager ARN if your team uses one; *Save and connect*. Then once with a wrong database name.
+  Expect: *Connected to source redshift:<workgroup>* with Redshift's version (1.0.x, not the PostgreSQL 8.0.2 in `version()`); the entry in `.autode/config/connections.yaml`, the profile in `.autode/local/`, no secret in either. The wrong name: *Not saved* with Redshift's own error, nothing written.
+- [ ] **55.3 The estate.**
+  Do: *Run Source Assessment* on the Redshift connection for a schema with tables, a view and declared keys; then the same as a user without access to `SVV_TABLE_INFO`.
+  Expect: tables, columns (types with length or precision), the view with its definition, primary and foreign keys flagged. Without `SVV_TABLE_INFO`: everything else in, and the result says row counts weren't read and why.
+- [ ] **55.4 Assessment reads.**
+  Do: `autode platform run performance.table_design --connection redshift:<workgroup> --param schema=<schema> --allow-cli`; then `governance.relation_privileges`, `governance.masking_policies`, `pipelines.list_procedures`, `pipelines.materialized_views`.
+  Expect: each returns rows or a plain reason (a privilege it lacks); none fails with an unknown column.
+- [ ] **55.5 From an agent host and the terminal.**
+  Do: `autode connections add --platform redshift --allow-cli`; `autode mcp --allow-cli` in Claude Code, then ask it to bring the Redshift schema into the estate.
+  Expect: the set-up lists your profiles and tests before saving; the agent uses `autode_ingest_metadata` (not SQL of its own) and the `autode-redshift-*` skills.
+- [ ] **55.6 The process list.**
+  Do: with access keys instead of a profile (card fields), run a query while watching the process list.
+  Expect: `aws redshift-data …` with no key on its command line.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1570,5 +1593,11 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 | 54.2 |  |  |
 | 54.3 |  |  |
 | 54.4 |  |  |
+| 55.1 |  |  |
+| 55.2 |  |  |
+| 55.3 |  |  |
+| 55.4 |  |  |
+| 55.5 |  |  |
+| 55.6 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

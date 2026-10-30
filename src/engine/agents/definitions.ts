@@ -54,8 +54,8 @@ export interface SkillMeta {
 }
 
 /** The naming convention of AutoDE's own skills (owner, 2026-10-22): `autode-<scope>-<capability>`. */
-export const SKILL_SCOPES = ['core', 'de', 'snowflake', 'databricks', 'oracle', 'dbt'] as const;
-export const SKILL_PLATFORMS = ['any', 'snowflake', 'databricks', 'oracle'] as const;
+export const SKILL_SCOPES = ['core', 'de', 'snowflake', 'databricks', 'oracle', 'redshift', 'dbt'] as const;
+export const SKILL_PLATFORMS = ['any', 'snowflake', 'databricks', 'oracle', 'redshift'] as const;
 export const AUTODE_SKILL_NAME = new RegExp(`^autode-(${SKILL_SCOPES.join('|')})-[a-z0-9]+(-[a-z0-9]+)*$`);
 
 const listOf = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[,\s]+/) : []).map((x) => String(x).trim()).filter(Boolean);
@@ -72,7 +72,8 @@ export function skillMeta(name: string, metadata: Record<string, unknown> | unde
   const platforms = listOf(m.platforms);
   if (!platforms.length) errors.push('metadata.platforms is required (any, or the platforms it is for).');
   for (const p of platforms) if (!(SKILL_PLATFORMS as readonly string[]).includes(p)) errors.push(`metadata.platforms: unknown platform "${p}".`);
-  if ((scope === 'snowflake' || scope === 'databricks' || scope === 'oracle') && !(platforms.length === 1 && platforms[0] === scope)) errors.push(`a ${scope} skill has platforms: [${scope}].`);
+  // A platform's own skill (its scope is a platform) is for that platform only.
+  if (scope !== 'any' && (SKILL_PLATFORMS as readonly string[]).includes(scope) && !(platforms.length === 1 && platforms[0] === scope)) errors.push(`a ${scope} skill has platforms: [${scope}].`);
   const version = Number(m.version ?? 0);
   if (!Number.isInteger(version) || version < 1) errors.push('metadata.version must be a whole number, 1 or more.');
   const maturity = m.maturity === 'preview' ? 'preview' : m.maturity === 'tested' ? 'tested' : undefined;

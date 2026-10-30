@@ -78,6 +78,8 @@ export interface SchemaSnapshot {
   readonly views: ViewMetadata[];
   readonly foreignKeys: ForeignKeyMetadata[];
   readonly profiling?: ProfilingReport;
+  /** v0.55.0: the reads that failed (a privilege, an edition), with why; the rest of the extraction still ran. */
+  readonly gaps?: string[];
 }
 
 export interface TableMetadata {

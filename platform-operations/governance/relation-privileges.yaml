@@ -1,0 +1,30 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): who can do what on a schema's tables and
+# views, for assessing a source's access model (the autode-redshift-governance skill).
+formatVersion: 1
+id: governance.relation_privileges
+title: Privileges on a schema's objects
+description: Each privilege granted on one schema's tables and views, and to whom (user, role or group). Names only.
+kind: read
+content: metadata
+area: governance
+params:
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: table_schema, label: Schema }
+  - { name: table_name, label: Table or view }
+  - { name: privilege, label: Privilege }
+  - { name: grantee, label: Granted to }
+  - { name: grantee_type, label: "Kind (user, role, group)" }
+platforms:
+  redshift:
+    sql: >
+      SELECT namespace_name AS table_schema, relation_name AS table_name, privilege_type AS privilege,
+        identity_name AS grantee, identity_type AS grantee_type
+      FROM svv_relation_privileges
+      WHERE namespace_name = {schema:lower}
+      ORDER BY relation_name, identity_name, privilege_type
+example:
+  platform: redshift
+  params: { schema: sales }
+  rows:
+    - { table_schema: sales, table_name: orders, privilege: SELECT, grantee: analyst, grantee_type: role }

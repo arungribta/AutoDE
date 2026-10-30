@@ -1,0 +1,39 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.2): declared foreign keys touching one schema.
+formatVersion: 1
+id: estate.list_foreign_keys
+title: Foreign keys in a schema
+description: Each declared foreign-key column and the column it references, where either side is in the schema. Where the platform doesn't enforce keys (Redshift), they are what was declared.
+kind: read
+content: metadata
+area: estate
+params:
+  - { name: database, type: literal, label: Database }
+  - { name: schema, type: literal, label: Schema }
+returns:
+  - { name: constraint_name, label: Constraint }
+  - { name: source_schema, label: Schema }
+  - { name: source_table, label: Table }
+  - { name: source_column, label: Column }
+  - { name: target_schema, label: Referenced schema }
+  - { name: target_table, label: Referenced table }
+  - { name: target_column, label: Referenced column }
+platforms:
+  # information_schema covers the connected database only. A key over several columns pairs them by position
+  # only where the platform says so; here each column is listed against each referenced column.
+  redshift:
+    sql: >
+      SELECT tc.constraint_name, kcu.table_schema AS source_schema, kcu.table_name AS source_table, kcu.column_name AS source_column,
+        ccu.table_schema AS target_schema, ccu.table_name AS target_table, ccu.column_name AS target_column
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_name = tc.constraint_name AND ccu.constraint_schema = tc.constraint_schema
+      WHERE tc.constraint_type = 'FOREIGN KEY'
+        AND (kcu.table_schema = {schema:lower} OR ccu.table_schema = {schema:lower})
+        AND current_database() = {database:lower}
+example:
+  platform: redshift
+  params: { database: dev, schema: sales }
+  rows:
+    - { constraint_name: orders_customer_fk, source_schema: sales, source_table: orders, source_column: customer_id, target_schema: sales, target_table: customers, target_column: customer_id }

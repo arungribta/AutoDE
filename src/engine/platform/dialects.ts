@@ -1,6 +1,5 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { loadCatalog, platformById } from './operations/load';
+import { onPlatformResourcesRootChange, platformResourcesRoot } from './definitions';
 
 /**
  * A platform's SQL dialect, as its platform definition states it (POP1 part 2;
@@ -31,25 +30,15 @@ export interface SqlFragments {
 /** For a platform with no definition, or no connection: standard SQL. */
 export const ANSI: SqlFragments = { id: 'ansi', sample: '(SELECT * FROM {table} LIMIT {n}) s0', booleans: ['TRUE', 'FALSE'], distinctTuples: 'emulated', explain: 'EXPLAIN {statement}' };
 
-let registeredRoot: string | undefined;
-
-/** Where AutoDE's shipped platform definitions are (the extension, the CLI package, the MCP server set it at start). */
-export function setPlatformResourcesRoot(resourcesRoot: string): void { registeredRoot = resourcesRoot; cache.clear(); }
+export { setPlatformResourcesRoot } from './definitions';
 
 const cache = new Map<string, SqlFragments>();
-
-/** Unset: the package this module ships in (bundled in dist/, or compiled to dist/engine/platform/), so a caller that never set it still gets the platform's dialect, not standard SQL. */
-function shippedRoot(): string | undefined {
-  for (let dir = __dirname, i = 0; i < 4; i++, dir = path.dirname(dir)) {
-    if (fs.existsSync(path.join(dir, 'platforms')) && fs.existsSync(path.join(dir, 'platform-operations'))) return dir;
-  }
-  return undefined;
-}
+onPlatformResourcesRootChange(() => cache.clear());
 
 /** A platform's dialect from its definition (the team's approved copy when there is one), standard SQL for an unknown platform. */
 export function fragmentsFor(platformId: string | undefined, scope: { resourcesRoot?: string; workspaceRoot?: string } = {}): SqlFragments {
   if (!platformId) return ANSI;
-  const resourcesRoot = scope.resourcesRoot ?? registeredRoot ?? shippedRoot();
+  const resourcesRoot = platformResourcesRoot(scope);
   const key = `${resourcesRoot ?? ''}|${scope.workspaceRoot ?? ''}|${platformId}`;
   const hit = cache.get(key);
   if (hit) return hit;

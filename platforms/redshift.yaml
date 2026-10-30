@@ -1,0 +1,91 @@
+# AutoDE platform definition (docs/specs/platform-operations.md §2.2, §6.2). Redshift is the first platform
+# added by files alone: no adapter class and no card written for it. Its connection, its card, how a statement
+# runs through the AWS CLI and how its estate is read all come from here and its operations.
+# A team's copy in .autode/config/platforms/ with the same id replaces this one once a person approves it.
+formatVersion: 1
+id: redshift
+title: Amazon Redshift
+category: warehouse
+transports: [sql, cli]
+access:
+  cli:
+    command: aws
+    minVersion: "2.0"
+    install: "Install the AWS CLI version 2 and sign in with a profile (aws configure sso, or aws configure); the autode-redshift-* skills say how."
+    binary: { win32: aws.exe, default: aws }
+    wellKnownDirs: { win32: ['C:\Program Files\Amazon\AWSCLIV2'] }
+    versionArgs: [--version]
+    # Never page the output (the AWS CLI version 2 can).
+    env: { AWS_PAGER: '' }
+    listProfiles: [configure, list-profiles]
+    # The Redshift Data API through the AWS CLI: submit the statement, poll until it finishes, fetch the result in pages.
+    statement:
+      mode: async
+      submit: { args: [redshift-data, execute-statement, --sql, '{sql}', --output, json], id: Id }
+      poll: { args: [redshift-data, describe-statement, --id, '{id}', --output, json], status: Status, finished: [FINISHED], failed: [FAILED, ABORTED], error: Error, hasResult: HasResultSet }
+      fetch: { args: [redshift-data, get-statement-result, --id, '{id}', --output, json], rows: Records, columns: ColumnMetadata, columnName: name, cells: typed, nextToken: NextToken, nextTokenArg: --next-token }
+      cancel: { args: [redshift-data, cancel-statement, --id, '{id}', --output, json] }
+connection:
+  # The Data API takes no plain database password: a Secrets Manager secret, IAM temporary credentials, or your AWS identity.
+  fields:
+    - { name: workgroupName, label: Serverless workgroup, description: "For Redshift Serverless. Give this or a provisioned cluster.", cliArg: --workgroup-name }
+    - { name: clusterIdentifier, label: Provisioned cluster, description: "The cluster identifier. Give this or a Serverless workgroup.", cliArg: --cluster-identifier }
+    - { name: database, label: Database, required: true, cliArg: --database }
+    - { name: schema, label: Default schema, description: "Used where a read names no schema (default public)." }
+    - { name: region, label: AWS region, description: "Default: your AWS profile's region.", cliArg: --region, cliScope: every }
+    - { name: secretArn, label: Secrets Manager secret ARN, description: "The secret holding the database user's password. AutoDE passes only its ARN.", cliArg: --secret-arn }
+    - { name: dbUser, label: Database user, description: "For IAM temporary credentials on a provisioned cluster.", personal: true, cliArg: --db-user }
+    - { name: profile, label: AWS profile, description: "A profile from your AWS CLI configuration (aws configure list-profiles).", personal: true, cliArg: --profile, cliScope: every }
+    - { name: accessKeyId, label: AWS access key ID, description: "Only without a profile. Passed to the AWS CLI in its environment, never as an argument.", secret: true, env: AWS_ACCESS_KEY_ID }
+    - { name: secretAccessKey, label: AWS secret access key, secret: true, env: AWS_SECRET_ACCESS_KEY }
+    - { name: sessionToken, label: AWS session token, description: "For temporary AWS credentials.", secret: true, env: AWS_SESSION_TOKEN }
+  idFields: [workgroupName, clusterIdentifier]
+  exactlyOne: [[workgroupName, clusterIdentifier]]
+  cliProfileField: profile
+  authModes:
+    - { mode: secrets-manager, label: Secrets Manager secret (recommended), requires: [secretArn], note: "The database user's password stays in AWS Secrets Manager: AutoDE holds no Redshift secret." }
+    - { mode: iam-temporary, label: IAM temporary credentials (provisioned cluster), requires: [clusterIdentifier, dbUser], note: "Redshift issues a short-lived database password for the user; your AWS identity needs redshift:GetClusterCredentials." }
+    - { mode: aws-identity, label: Your AWS identity (Serverless), requires: [workgroupName], note: "Redshift Serverless signs you in as the database user mapped to your IAM identity." }
+  roles: [source, target]
+  targetNote: "A Redshift target can be connected and read now; building for it (its SQL dialect, deploying runbooks) comes in v0.55.2."
+versionOperation: platform.version
+dialect:
+  identifierQuote: '"'
+  unquotedCase: lower
+  booleans: ['TRUE', 'FALSE']
+  fragments:
+    sample: '(SELECT * FROM {table} LIMIT {n}) s0'
+    regexMatch: 'CAST({column} AS VARCHAR) ~ {pattern}'
+    distinctTuples: emulated
+    # EXPLAIN covers queries and DML, not DDL (a DDL dry run is reported as unchecked: v0.55.2).
+    explain: 'EXPLAIN {statement}'
+capabilities:
+  estate:
+    support: supported
+    operations: [estate.list_tables, estate.table_stats, estate.list_columns, estate.list_views, estate.list_primary_keys, estate.list_foreign_keys]
+    privileges: USAGE on the schemas in scope and SELECT on their tables (SVV_ALL_TABLES and SVV_ALL_COLUMNS list only what the user can access). Row counts come from SVV_TABLE_INFO, which shows a regular user only some tables; without them the tables still come in. View definitions and keys are read for the connected database only.
+  profiling:
+    support: supported
+    privileges: SELECT on the tables profiled (sampled, within a query budget).
+  performance.assess:
+    support: supported
+    operations: [performance.table_design]
+    privileges: SELECT on SVV_TABLE_INFO, which shows a regular user only some tables.
+  governance.assess:
+    support: supported
+    operations: [governance.relation_privileges, governance.masking_policies]
+    privileges: Privileges and masking policies visible to the user (SVV_RELATION_PRIVILEGES, SVV_ATTACHED_MASKING_POLICY); a superuser or a role with sys:secadmin sees all.
+  pipelines.assess:
+    support: supported
+    operations: [pipelines.list_procedures, pipelines.materialized_views]
+    privileges: Procedures and materialized views of the connected database the user can see.
+  lineage:
+    support: not_applicable
+    note: Redshift records no lineage of its own. Its lineage in AutoDE is designed (mappings, Pipeline Specs) and generated.
+  governance.tags:
+    support: not_applicable
+    note: Grants and dynamic data masking come as runbook steps with Redshift as a target (v0.55.2).
+  compile.target:
+    support: not_applicable
+    note: Building for Redshift (its SQL dialect, deploying runbooks) comes in v0.55.2.
+objectKinds: [table, view, late_binding_view, materialized_view, external_table, datashare_table]
