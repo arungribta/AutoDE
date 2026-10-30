@@ -96,6 +96,10 @@ The estate already holds several source systems beside a target (STC-10), `conne
 - **discovery per source or across all:** the journey's discovery steps show each source system's progress (tables read, facts waiting), and a stage that reads the estate names which connection it uses;
 - commands that act on "the" source (Refresh Observed Lineage, Browse, Disconnect) ask which one when there are several.
 
+### 3.7 Coverage in the plan step (PLN0; owner, 2026-10-30)
+
+The plan step shows the **coverage** of the approved specification ([workflow-planning.md](workflow-planning.md) §3.1, §4): each in-scope item with the stages that deliver it, or out of scope with a reason, or a gap, or a question still to place; the engine's checks; and the coverage approval before the workflow's. The person places the open items (the planner does it from PLN1, v0.56.1).
+
 ## 4. Acceptance
 
 - **The journey from day one:** a new problem with only a statement shows the five phases, ① *now*, and the suggested template's stages as a preview.
@@ -105,6 +109,7 @@ The estate already holds several source systems beside a target (STC-10), `conne
 - **History:** a step's history lists its events, with time and channel.
 - **One source:** the Workflow tab, the palette, `autode workflow status` and `autode_workflow_status` give the same phases and steps (one test compares them).
 - **One window:** the three views are tabs of one panel, each keeping its state when hidden.
+- **Coverage:** on the reference problem the plan step lists every in-scope item with its stages; an item no stage delivers is an open question, and the workflow can't be approved until it is placed and the coverage approved.
 - **Several sources:** with a Snowflake and a Redshift source connected at once, both show as connected, discovery reads each into its own system, and a command acting on a source asks which.
 - **Usable:** keyboard and screen reader (UI-4); VS Code's themes; the step list and the preview wrap at narrow widths; empty states say what to do next.
 
