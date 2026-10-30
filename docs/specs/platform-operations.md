@@ -1,6 +1,6 @@
 # Platform operations: one catalog for every interaction with a platform
 
-**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the adapters' metadata extraction, and Redshift onboarded (v0.55.0); **POP4** the operations and skills catalog in the UI (v0.57.0, after the UI2 simplification); **POP3** agent-proposed operations and drift detection (v0.58.0); **POP5** onboarding new systems and sharing them (v0.61.0, before the AtScale import). Requirement: PLT-9 in [requirements.md](../requirements.md). **Rule for contributors:** [CLAUDE.md](../../CLAUDE.md). **Related:** [platform-skills.md](../guides/platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
+**Status:** specified 2026-10-28 (owner). Built in four phases (roadmap): **POP1** the catalog and executor, with LIN's platform lineage reads (v0.54.0); **POP2** the estate read through operations, Redshift first (v0.55.0), then Snowflake's and Databricks' extraction (v0.55.1); Oracle's platform work is deferred to the backlog (§6.2a, owner 2026-10-30); **POP4** the operations and skills catalog in the UI (v0.57.0, after the UI2 simplification); **POP3** agent-proposed operations and drift detection (v0.58.0); **POP5** onboarding new systems and sharing them (v0.61.0, before the AtScale import). Requirement: PLT-9 in [requirements.md](../requirements.md). **Rule for contributors:** [CLAUDE.md](../../CLAUDE.md). **Related:** [platform-skills.md](../guides/platform-skills.md), the runner (technical-design §5, runbooks), transform primitives (`primitive-definitions/`, the same pattern for deliverables).
 
 ## 1. Need and intent
 
@@ -171,7 +171,7 @@ How the systems AutoDE plans for differ:
 | Redshift | warehouse | `sql` through the AWS CLI (`redshift-data`) | estate, profiling; no native column lineage, so lineage is designed only; compile target once its dialect exists | DDL, grants |
 | AtScale | semantic | `file` (SML in Git), `http` | semantic import and export (IMP1) | the exported model as a reviewed file change or API call |
 | Collibra | catalog | `http` | glossary, domains, owners and lineage import (IMP3) | certified knowledge pushed back |
-| Oracle | warehouse (source) | `sql` through SQLcl (JSON output) | estate, profiling | none (a source) |
+| Oracle | warehouse (source) | the Node driver today; `sql` through SQLcl (JSON output) when its deferred work resumes (§6.2a) | estate, profiling; view dependencies as lineage | none (a source) |
 
 ## 3. How operations run
 
@@ -234,14 +234,24 @@ Acceptance:
 - **Boundary:** the architecture test's baseline loses the TO MOVE entries.
 - **Lineage:** on a recorded fixture of each platform, the lineage operations' facts match a golden set; a failed read retires nothing. LIN's live Snowflake check passes.
 
-### 6.2 POP2 — the adapters' metadata extraction, and Redshift (v0.55.0)
+### 6.2 POP2 — the estate through operations, Redshift first (v0.55.0–v0.55.1)
 
 The adapters (`SnowflakeAdapter`, `DatabricksAdapter`, `OracleAdapter`) still carry the estate reads as code: tables, columns, keys, views, profiling and last-altered times. POP2 moves them to operations, so the estate itself stays current with the platforms.
 
+**Two parts** (owner, 2026-10-30: Redshift's priority raised, Oracle deferred):
+- **Part 1 (v0.55.0), Redshift first.** The generic pieces Redshift needs, then Redshift itself:
+  - the `estate.*` operations' result shape, taken from today's snapshot model (so it isn't Redshift's shape), checked against recorded Snowflake and Databricks results as well;
+  - `extractMetadata` reads a platform's estate through the operations its definition names for `estate`, and through the adapter's code where it names none (Snowflake, Databricks and Oracle until they move);
+  - the executor's asynchronous pattern (submit, poll, fetch pages) and a **generic statement runner** for a platform reached only by its CLI, so a platform needs no adapter class: queries, probes and dry runs reach Redshift through its definition;
+  - Redshift onboarded (below).
+- **Part 2 (v0.55.1).** Snowflake's and Databricks' estate extraction moved onto the same operations (the same snapshot, node for node), their adapters keeping only connection, authentication and execution; new object kinds from an operation file.
+
+**Why Redshift can lead:** it depends on nothing Oracle-related, only on the generic pieces of part 1, which POP2 needed anyway. Splitting the work this way is a risk only if the estate operations are shaped around Redshift alone, so part 1 checks the shape against recorded Snowflake and Databricks results too.
+
 Scope:
-- operations `estate.list_tables`, `estate.list_columns`, `estate.list_primary_keys`, `estate.list_foreign_keys`, `estate.list_views`, `estate.last_altered`, `estate.profile_table` for each platform, with version ranges and recorded examples;
+- operations `estate.list_tables`, `estate.list_columns`, `estate.list_primary_keys`, `estate.list_foreign_keys`, `estate.list_views`, `estate.last_altered`, `estate.profile_table` for Redshift (part 1), Snowflake and Databricks (part 2), with version ranges and recorded examples;
 - `BaseDataSourceAdapter.extractMetadata` calls them by id. The adapters keep only connection, authentication and execution (the allowed machinery);
-- **access through CLI or API only** (§2.1): Snowflake and Databricks keep their CLI and API paths; **Oracle moves from the Node driver to SQLcl** (JSON output), and the driver path (the drivers folder, PLT-7's driver install) is removed. The async pattern and the generic sign-in methods live in the executor;
+- **access through CLI or API only** (§2.1): Snowflake and Databricks keep their CLI and API paths; Redshift is reached through the AWS CLI. The async pattern and the generic sign-in methods live in the executor. **Oracle is deferred (§6.2a):** it keeps the Node driver and its adapter's code extraction, the one recorded exception to CLI or API only;
 - a read the account can't do (an edition, a privilege) is reported per operation, and the rest of the extraction continues;
 - **Redshift onboarded** (owner, 2026-10-29), as the proof that a platform is added by files:
   - a platform definition (category `warehouse`, access through the AWS CLI's `redshift-data`, asynchronous: `execute-statement`, `describe-statement`, `get-statement-result`, paged);
@@ -256,7 +266,32 @@ Acceptance:
 - **Resilient:** a failing operation (fixture: a missing privilege) leaves the other reads' results and reports the gap in the ingest result and the Estate view.
 - **Boundary:** the architecture baseline lists no platform SQL in the adapters.
 - **Redshift without code:** on recorded `redshift-data` output (including a paged result and a failed statement), Redshift's estate comes in through its platform definition, operations and skill only; the architecture test passes with no new exception. With the AWS CLI missing, the skill's install steps are shown.
-- **Oracle through SQLcl:** on recorded SQLcl output, Oracle's estate matches what the driver gave (golden test); with SQLcl missing, the skill's install steps are shown.
+- **Oracle unchanged:** Oracle connections, probes, dry runs and object lineage work as in v0.54.1 (the existing tests pass).
+
+### 6.2a Deferred: Oracle's platform work (owner, 2026-10-30)
+
+Oracle is deprioritised and its remaining platform work is in the product backlog (roadmap §2). This section is the record of what is pending, so it can be resumed as one phase without rediscovery.
+
+**What Oracle has today (v0.54.1):**
+- a **source** only, through the Node `oracledb` driver in Thin mode (Oracle Database 12.1 or later), which the user installs with AutoDE's guidance (DRV1, PLT-7);
+- the estate read as code in `OracleAdapter` (tables, columns, keys, views, comments);
+- `platforms/oracle.yaml`: its dialect (booleans `1`/`0` before 23ai, distinct tuples emulated, `FETCH FIRST` sampling, `REGEXP_LIKE`, `EXPLAIN PLAN FOR` with the plan read from `DBMS_XPLAN`), `scopeLevel: schema`, lineage `partly`;
+- operations `platform.version` (`product_component_version`) and `lineage.objects` (`all_dependencies`: views on tables and views, per bound schema).
+
+**Pending, in the order it would be done:**
+1. **Oracle through SQLcl** (was in POP2):
+   - `oracle.yaml`'s access becomes SQLcl (`sql`), with JSON output (`SET SQLFORMAT JSON`) and its version detected (`sql -V`);
+   - the statement reaches SQLcl through standard input, not as an argument;
+   - **credentials need a design:** SQLcl reads no password from an environment variable, so `credentialEnv` stays empty. Options are `/nolog` with `CONNECT` sent through standard input, or a saved SQLcl connection or wallet that AutoDE only names (the `cli` resolver). It must keep the rule that a password is never on a command line or in a file of AutoDE's;
+   - an `autode-oracle-*` skill: installing SQLcl (it needs Java), the saved connection or wallet, the privileges, troubleshooting.
+2. **Oracle's estate as operations:** `estate.*` for Oracle over `ALL_TABLES`, `ALL_TAB_COLUMNS`, `ALL_CONSTRAINTS` and `ALL_CONS_COLUMNS`, `ALL_VIEWS`, `ALL_TAB_COMMENTS` and `ALL_COL_COMMENTS`, `ALL_OBJECTS.LAST_DDL_TIME`, and profiling. A golden test compares them with what the driver gives, node for node, and then `OracleAdapter` keeps only the connection.
+3. **The driver path removed** once SQLcl works: the drivers folder, `driverStore.ts`, the *Install Oracle Driver*, *Verify Oracle Driver* and *Set Oracle Password* commands, `autode doctor`'s driver check and PLT-7's guided install (PLT-7 is then superseded). Until then PLT-7 stays live.
+4. **Live checks not yet run:** manual-verification Part 54.1 (Oracle's plan from `DBMS_XPLAN`) and 54.2 (Oracle object lineage). Both are covered only by recorded-result tests.
+5. **Later, if needed:** lineage beyond views (procedures and packages from `ALL_DEPENDENCIES`, reads from Unified Auditing; Oracle has no native column lineage); booleans as a version range once 23ai's `BOOLEAN` matters; **Oracle as a target** (its own backlog item).
+
+**What doesn't change while it waits:** Oracle connections keep working as they do today, and its tests stay in `npm test`. `OracleAdapter` is in the allowed folder, so there is no architecture exception. POP4's catalog shows Oracle as it is: driver access, lineage `partly`. POP5's template doesn't need Oracle.
+
+**Resume when:** an engagement needs Oracle sources, or the driver path becomes a support burden. Then specify these items as one phase, starting from this list.
 
 ### 6.3 POP4 — the operations and skills catalog (v0.57.0)
 

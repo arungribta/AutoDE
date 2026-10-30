@@ -1240,10 +1240,10 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
 
 ## Part 54 — v0.54.1 Platform dialects, Oracle lineage, credentials, the commands
 
-- [ ] **54.1 Probes and the dry run unchanged on a live account.**
+- [ ] **54.1 Probes and the dry run unchanged on a live account.** (Its Oracle part is deferred with Oracle's platform work, platform-operations §6.2a: run it only if you have an Oracle connection.)
   Do: on a Snowflake connection, *AutoDE: Verify Claims with Probes* (or `autode probe --connection <yours>`) for a table with a key; `autode explain --connection <yours> "CREATE OR REPLACE VIEW v AS SELECT 1"`. On Oracle, `autode explain` a `SELECT`.
   Expect: the probes run and report as before (Snowflake samples with `SAMPLE (n ROWS)`); Snowflake returns its plan; Oracle returns its plan lines from `DBMS_XPLAN`.
-- [ ] **54.2 Oracle object lineage.**
+- [ ] **54.2 Oracle object lineage.** (Deferred with Oracle's platform work: run it only if you have an Oracle connection.)
   Do: bind an Oracle connection's schema that has views (`schemas: [HR]` in estate.yaml); `autode lineage refresh --connection <yours>`; open a view's Lineage tab.
   Expect: `lineage.objects` read for `HR`, each view linked to the tables it reads (table level, *observed*).
 - [ ] **54.3 The password stays off the command line.**

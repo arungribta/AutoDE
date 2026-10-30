@@ -6,7 +6,7 @@ title: Oracle Database
 category: warehouse
 transports: [sql]
 access:
-  cli: { command: sql, install: "Oracle SQLcl. Until POP2 moves Oracle to SQLcl, AutoDE reads it through the Node driver you install (the platform card says how)." }
+  cli: { command: sql, install: "Oracle SQLcl. Oracle's move to SQLcl is in the backlog (platform-operations.md §6.2a); until then AutoDE reads Oracle through the Node driver you install (the platform card says how)." }
 versionOperation: platform.version
 dialect:
   identifierQuote: '"'
