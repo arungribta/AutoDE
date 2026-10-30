@@ -49,7 +49,9 @@ import { EngineToolError, redact, toEnvelope } from '../mcp/errors';
 import { PlatformSession } from '../mcp/platform';
 import { findResourcesRoot, main as mcpMain, readVersion } from '../mcp/server';
 import { Decision, DecisionError, DecisionStatus, DecisionStore, stakesFor } from '../engine/decisions/decisionStore';
-import { applyDecision, propose } from '../engine/decisions/proposals';
+import { applyDecision, approvalBlockers, propose } from '../engine/decisions/proposals';
+import { journeyContext, journeyFor, journeyLines } from '../engine/workflows/journey';
+import { CoverageStatus, placeCoverage, specCoverage } from '../engine/workflows/coverage';
 import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocument } from '../engine/documents/problemDocuments';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { conformanceFailures, loadProfiles, packConformance, probeCandidates, readPackDocument, readPackFile, sampleProbeExecutor } from '../engine/context/packChecks';
@@ -205,7 +207,10 @@ Estate (observed metadata; recorded without a decision):
 
 Workflow (the planned stages of a problem; approving is a person's: interactive terminal):
   workflow templates           The workflow templates (bundled and this workspace's)
-  workflow status              Each stage: done, ready, waiting (and for what), stale, skipped
+  workflow status              The whole journey (problem, discovery, specification, plan, delivery: where you are and
+                               the next step), then each stage: done, ready, waiting (and for what), stale, skipped
+  workflow coverage [show|check|place <item> --status <s> [--stage <id>]… [--reason <text>]]
+                               The specification's coverage by the workflow; an open item blocks approving the plan
   workflow plan [--template <id>]   Draft the workflow from a template (default: AutoDE's suggestion) and propose it for approval
   workflow next                What to do now, and by which role
   workflow start <stage>       Mark a stage in progress (working ahead of its dependencies is allowed, with a warning)
@@ -413,13 +418,14 @@ const OPTIONS = {
   format: { type: 'string' },
   method: { type: 'string' },
   param: { type: 'string', multiple: true },
+  stage: { type: 'string', multiple: true },
   days: { type: 'string' },
   complete: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
 
-type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output' | 'param'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[]; param?: string[] };
+type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output' | 'param' | 'stage'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[]; param?: string[]; stage?: string[] };
 
 class CliError extends Error {
   public constructor(public readonly exit: number, message: string) { super(message); }
@@ -827,6 +833,11 @@ async function cmdDecisions(ctx: Ctx, rest: string[]): Promise<number> {
   const by = (ctx.values.by ?? safeUsername()).trim();
   ctx.io.out(describeDecision(d, store.proposal(d.id)));
   if (sub === 'approve' && d.kind === 'gate' && d.problemId) await gateMaintenanceCheck(ctx, d.problemId);
+  if (sub === 'approve') {
+    // PLN0: a workflow whose coverage of the specification isn't complete can't be approved yet.
+    const blockers = approvalBlockers(store, d.id, { workspaceRoot: ctx.workspaceRoot, problemRoot: d.problemId ? layoutPath(ctx.workspaceRoot, 'problems', d.problemId) : undefined });
+    if (blockers.length) throw new CliError(EXIT.FAILED, blockers.join(' '));
+  }
   // C4c: in an exploration problem a stage gate takes one step (y), not a typed word.
   const oneStep = d.kind === 'gate' && !!d.problemId && problemMode(layoutPath(ctx.workspaceRoot, 'problems', d.problemId)) === 'exploration';
   const answer = (await ctx.io.prompt(oneStep ? `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}" (exploration mode)? [y/N] ` : `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}"? Type ${sub} to confirm: `)).trim().toLowerCase();
@@ -1289,9 +1300,36 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
   const by = (ctx.values.by ?? safeUsername()).trim();
   const who: Actor = { kind: 'person', name: by };
   try {
+    if (sub === 'coverage') {
+      // PLN0: the specification's coverage by the workflow.
+      const [action = 'show', item] = args;
+      const c = specCoverage(ctx.workspaceRoot, problemId);
+      if (!c) throw new CliError(EXIT.NOT_FOUND, 'No coverage yet: it needs the specification and a workflow (autode workflow propose).');
+      if (action === 'place') {
+        if (!item) throw new CliError(EXIT.USAGE, 'workflow coverage place <item id> --status covered|manual|out-of-scope|gap [--stage <id>]… [--reason <text>].');
+        const status = ctx.values.status as Exclude<CoverageStatus, 'question'> | undefined;
+        if (!status || !['covered', 'manual', 'out-of-scope', 'gap'].includes(status)) throw new CliError(EXIT.USAGE, '--status is covered, manual, out-of-scope or gap.');
+        try { placeCoverage(c.problemRoot, c.coverage, item, { status, stages: ctx.values.stage, reason: ctx.values.reason }, `person: ${by}`); }
+        catch (err) { throw new CliError(EXIT.USAGE, err instanceof Error ? err.message : String(err)); }
+      } else if (action !== 'show' && action !== 'check') throw new CliError(EXIT.USAGE, 'workflow coverage takes show, check, or place <item>.');
+      const now = specCoverage(ctx.workspaceRoot, problemId)!;
+      const mark: Record<string, string> = { covered: '✓', manual: '✋', 'out-of-scope': '–', gap: '!', question: '?' };
+      emit(ctx, { ok: now.check.ok, against: now.against, ...now.coverage, check: now.check }, [
+        `Coverage of the specification by the ${now.against} workflow${now.coverage.approvedBy ? ` (approved by ${now.coverage.approvedBy})` : ''}:`,
+        ...now.coverage.entries.map((e) => `  ${mark[e.status]} ${e.id.padEnd(32)} ${e.status}${e.stages?.length ? ` → ${e.stages.join(', ')}` : ''}${e.reason ? ` — ${e.reason}` : ''}`),
+        ...(now.check.errors.length ? ['', 'To fix before the workflow can be approved:', ...now.check.errors.map((x) => `  ✗ ${x}`)] : []),
+        ...(now.check.warnings.length ? ['', ...now.check.warnings.map((x) => `  ! ${x}`)] : [])
+      ].join('\n'));
+      return action === 'check' && !now.check.ok ? EXIT.FAILED : EXIT.OK;
+    }
     if (sub === 'status') {
-      const st = statusFor(scope);
-      emit(ctx, { ok: true, ...st }, [`${problemId} — ${st.template}${st.approved ? '' : ' (not approved yet)'}`, ...st.stages.map((x) => `  ${STATUS_MARK[x.status] ?? ' '} ${x.id.padEnd(18)} ${x.status}${x.why ? ` — ${x.why}` : ''}`), st.next ? `Next: ${st.next.id} (${st.next.status})` : 'Nothing to do now.'].join('\n'));
+      // UI2: the whole journey first (the same answer as the panel and autode_workflow_status), then the stages.
+      const cfm = await openContext(ctx.workspaceRoot, () => undefined);
+      let journey;
+      try { journey = journeyFor({ ...scope, context: journeyContext(cfm), previewTemplate: ctx.values.template }); } finally { cfm.dispose(); }
+      let st;
+      try { st = statusFor(scope); } catch { emit(ctx, { ok: true, journey }, journeyLines(journey).join('\n')); return EXIT.OK; }
+      emit(ctx, { ok: true, ...st, journey }, [...journeyLines(journey), '', 'Stages:', `${problemId} — ${st.template}${st.approved ? '' : ' (not approved yet)'}`, ...st.stages.map((x) => `  ${STATUS_MARK[x.status] ?? ' '} ${x.id.padEnd(18)} ${x.status}${x.why ? ` — ${x.why}` : ''}`), st.next ? `Next: ${st.next.id} (${st.next.status})` : 'Nothing to do now.'].join('\n'));
       return EXIT.OK;
     }
     if (sub === 'plan') {

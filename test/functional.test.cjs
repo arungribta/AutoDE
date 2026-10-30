@@ -5886,12 +5886,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5942,6 +5942,8 @@ async function main() {
       autode_find_source_files: [{}, { x: 1 }],
       autode_workflow_templates: [{}, { x: 1 }],
       autode_workflow_status: [{}, { x: 1 }],
+      autode_coverage: [{}, { x: 1 }],
+      autode_place_coverage: [{ item: 'scope:orders', status: 'gap', reason: 'no skill' }, { item: 'scope:orders', status: 'question' }],
       autode_workflow_next: [{}, { x: 1 }],
       autode_workflow_history: [{ stage: 'mapping' }, { stage: '' }],
       autode_propose_workflow: [{ template: 'greenfield' }, { template: '' }],
@@ -13214,6 +13216,116 @@ async function main() {
       assert.strictEqual(grant.step.sql, 'GRANT SELECT ON ALL TABLES IN SCHEMA mart TO ROLE "analyst""; DROP TABLE x; --"', 'a hostile name stays one quoted name');
       assert.ok(!ran.some((q) => /GRANT|ATTACH/.test(q)), 'never run');
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.56.0: UI2 (the whole journey in view) and PLN0 (coverage) ──
+
+  await test('v0.56.0 UI2/PLN0: the journey from day one to delivery, the same on the CLI and over MCP — five phases from state, where you are and the one next action, the delivery preview; coverage of the specification blocks the plan until an item no stage delivers is placed, then is approved with it', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const PD = fresh('../dist/engine/documents/problemDocuments.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-journey-'));
+    const W = ['--workspace', ws];
+    let client;
+    try {
+      const id = (await cli(['problems', 'new', 'Daily revenue from shop orders, with a sales dashboard', ...W, '--json'])).json().id;
+      const prob = nodePath.join(ws, '.autode', 'problems', id);
+      // Day one: only a statement. Phase 1 waits for you; the template's stages are previewed.
+      let j = (await cli(['workflow', 'status', ...W, '--json'])).json().journey;
+      assert.deepStrictEqual(j.phases.map((x) => [x.n, x.title, x.status]), [[1, 'Problem', 'waiting'], [2, 'Discovery', 'waiting'], [3, 'Specification', 'todo'], [4, 'Workflow plan', 'todo'], [5, 'Delivery', 'todo']]);
+      assert.deepStrictEqual([j.current.phase, j.current.step, j.current.action.id], [1, 'confirm', 'confirm-statement']);
+      assert.ok(j.preview && j.preview.stages.length > 3 && j.preview.alternatives.some((a) => a.suggested), JSON.stringify(j.preview));
+      assert.deepStrictEqual(j.phases[1].steps.map((x) => [x.id, x.who, !!x.checkpoint]), [['sources', 'You', false], ['interview', 'You', false], ['facts', 'You', false], ['glossary', 'Knowledge engineer', true], ['semantic', 'Semantic modeler', true]]);
+      const text = (await cli(['workflow', 'status', ...W])).out;
+      assert.ok(/You are here: phase 1 of 5 · Problem/.test(text) && /Delivery preview/.test(text) && /Stages:/.test(text), text);
+      // The specification approved, with scope: discovery is done, the plan is next.
+      const spec = PD.parseBusinessProblemSpec(PD.readProblemDocument(prob, 'spec'));
+      PD.writeBusinessProblemSpec(prob, { ...spec, status: 'approved', problemStatementApproved: true, objectives: ['Daily revenue by store'], scope: { in: ['shop orders', 'a sales dashboard'], out: [] } });
+      j = (await cli(['workflow', 'status', ...W, '--json'])).json().journey;
+      // The draft already shows what the plan wouldn't deliver: the dashboard needs BI work the greenfield draft leaves out.
+      assert.deepStrictEqual(j.phases.map((x) => x.status), ['done', 'done', 'done', 'waiting', 'todo']);
+      assert.deepStrictEqual([j.current.phase, j.current.step, j.current.action && j.current.action.id], [4, 'coverage', 'place-coverage']);
+      assert.strictEqual(j.phases[3].steps.find((x) => x.id === 'approved').action.id, 'propose-workflow');
+      // One source of truth: the CLI and MCP give the same journey.
+      client = await mcpSession(ws);
+      const call = async (name, args) => (await client.callTool({ name, arguments: args })).structuredContent;
+      const viaMcp = (await call('autode_workflow_status', {})).journey;
+      const shape = (x) => x.phases.map((ph) => [ph.n, ph.status, ph.summary, ph.steps.map((st) => [st.id, st.status, st.who, st.line])]);
+      assert.deepStrictEqual(shape(viaMcp), shape(j));
+      // Proposed: the dashboard needs BI work, which the greenfield workflow leaves out — an open question.
+      await call('autode_propose_workflow', {});
+      let cov = await call('autode_coverage', {});
+      const q = cov.entries.find((e) => e.status === 'question');
+      assert.ok(q && q.id === 'scope:a-sales-dashboard' && cov.entries.find((e) => e.id === 'scope:shop-orders').status === 'covered' && cov.check.ok === false, JSON.stringify(cov));
+      const blocked = await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.ok(blocked.code === 1 && /coverage isn't complete \(1 item\(s\) to place\).*a sales dashboard/.test(blocked.err + blocked.out), blocked.out + blocked.err);
+      j = (await call('autode_workflow_status', {})).journey;
+      assert.deepStrictEqual([j.current.phase, j.phases[3].steps.find((x) => x.id === 'coverage').status, j.waiting.some((w) => /1 scope item to place/.test(w))], [4, 'waiting', true]);
+      // A placement must say why; then the plan can be approved, and the coverage with it.
+      assert.strictEqual((await cli(['workflow', 'coverage', 'place', 'scope:a-sales-dashboard', '--status', 'out-of-scope', ...W])).code, 2);
+      const placed = await cli(['workflow', 'coverage', 'place', 'scope:a-sales-dashboard', '--status', 'out-of-scope', '--reason', 'The dashboard is a later problem.', ...W, '--json']);
+      assert.ok(placed.code === 0 && placed.json().check.ok, placed.out);
+      const ap = await cli(['workflow', 'approve', ...W, '--by', 'priya'], { interactive: true, answers: ['approve'] });
+      assert.strictEqual(ap.code, 0, ap.out + ap.err);
+      cov = (await cli(['workflow', 'coverage', ...W, '--json'])).json();
+      assert.deepStrictEqual([cov.against, cov.approvedBy, cov.entries.find((e) => e.id === 'scope:a-sales-dashboard').placedBy], ['approved', 'priya', 'person: ' + require('node:os').userInfo().username.trim() || 'person']);
+      j = (await cli(['workflow', 'status', ...W, '--json'])).json().journey;
+      assert.deepStrictEqual([j.phases[3].status, j.phases[4].status === 'todo', !!j.preview], ['done', false, false]);
+      assert.ok(j.phases[4].steps.length > 3 && j.phases[4].steps.every((x) => x.id !== 'specify' && x.id !== 'plan'));
+      // An agent can place an item too, and the check is the engine's.
+      const bad = await client.callTool({ name: 'autode_place_coverage', arguments: { item: 'scope:shop-orders', status: 'covered', stages: ['no-such-stage'] } });
+      const after = bad.structuredContent;
+      assert.ok(after.check.ok === false && after.check.errors.some((e) => /names stage no-such-stage, which isn't in the workflow/.test(e)), JSON.stringify(after));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.56.0 UI2: the delivery preview switches template from the files — a stage repeated per source system drawn with one lane per system, optional and conditional stages dashed, each template with why it fits; the checks of coverage refuse what isn\'t right', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const J = fresh('../dist/engine/workflows/journey.js');
+    const C = fresh('../dist/engine/workflows/coverage.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-preview-'));
+    try {
+      const id = (await cli(['problems', 'new', 'Migrate the legacy warehouse to Snowflake', '--workspace', ws, '--json'])).json().id;
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'knowledge'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'knowledge', 'estate.yaml'), 'systems:\n  - { id: shop, name: Shop, role: source }\n  - { id: crm, name: CRM, role: source }\n  - { id: dw, name: Warehouse, role: target }\nbindings: []\n');
+      const root = nodePath.join(__dirname, '..');
+      const scope = { workspaceRoot: ws, resourcesRoot: root, problemId: id };
+      const ctx = { systems: [{ id: 'shop', name: 'Shop', role: 'source', tables: 12 }, { id: 'crm', name: 'CRM', role: 'source', tables: 4 }], facts: { total: 3, high: 1 }, glossary: { terms: 5, uncategorized: 2 } };
+      let j = J.journeyFor({ ...scope, context: ctx });
+      assert.strictEqual(j.preview.template, 'modernization');
+      const sources = j.preview.stages.find((x) => x.id === 'sources');
+      assert.deepStrictEqual(sources.lanes, ['shop', 'crm']);
+      assert.ok(j.preview.stages.filter((x) => x.dashed).every((x) => x.inclusion === 'optional' || x.inclusion === 'conditional') && j.preview.stages.some((x) => x.dashed));
+      assert.ok(/migrat/.test(j.preview.alternatives.find((a) => a.id === 'modernization').reason));
+      assert.deepStrictEqual(j.phases[1].steps.find((x) => x.id === 'sources').line, 'shop: 12 tables · crm: 4 tables');
+      assert.deepStrictEqual([j.phases[1].steps.find((x) => x.id === 'facts').line, j.phases[1].steps.find((x) => x.id === 'glossary').line], ['3 facts wait for you (1 high stakes).', '5 terms · 2 in no category']);
+      assert.ok(j.holds.tables === 16 && j.waiting.includes('3 facts wait for you'));
+      j = J.journeyFor({ ...scope, context: ctx, previewTemplate: 'greenfield' });
+      assert.strictEqual(j.preview.template, 'greenfield');
+      // The checks (PLN0): an unknown item, a stage that isn't there, a reason missing, an item twice, an item without an entry.
+      const w = { stages: [{ id: 'build', kind: 'build', included: true, inclusion: 'mandatory', title: 'Build' }, { id: 'bi', kind: 'bi-migration', included: false, inclusion: 'optional', title: 'BI' }] };
+      const spec = { scope: { in: ['orders', 'the sales dashboard'] }, objectives: [] };
+      const start = C.startingCoverage(C.coverageItems(spec), w);
+      assert.deepStrictEqual(start.map((e) => [e.id, e.status, e.stages]), [['scope:orders', 'covered', ['build']], ['scope:the-sales-dashboard', 'question', undefined]]);
+      const bad = { entries: [{ id: 'scope:orders', text: 'orders', source: 'scope.in', status: 'covered', stages: ['bi'], placedBy: 'x' }, { id: 'scope:orders', text: 'orders', source: 'scope.in', status: 'gap', placedBy: 'x' }, { id: 'scope:nope', text: 'nope', source: 'scope.in', status: 'out-of-scope', reason: 'r', placedBy: 'x' }] };
+      const errs = C.checkCoverage(bad, spec, w).errors.join('\n');
+      for (const want of [/names stage bi, which isn't in the workflow/, /"orders" is gap without a reason/, /"nope" isn't in the specification/, /"orders" is listed 2 times/, /"the sales dashboard" has no entry/]) assert.ok(want.test(errs), String(want) + '\n' + errs);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.56.0 UI2: the window and the palette — the Workflow tab draws the tabs, the rail, the steps beside "About this step", coverage and the preview; the Knowledge Explorer has the same tabs; the palette keeps where you are and one action, the rest under More; several sources live at once in the panel', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const read = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', f), 'utf8');
+    const wf = read('media/workflow.html');
+    for (const want of [/role="tablist" aria-label="AutoDE window"/, /data-tab="knowledge"/, /data-tab="platforms"/, /class="rail" role="tablist" aria-label="Phases"/, /You are here · phase /, /Why it is here:/, /checkpoint, not a gate/, /Coverage of the specification/, /data-place=/, /id="ptpl"/, /class="lane"/, /dashed/]) assert.ok(want.test(wf), String(want));
+    const ex = read('media/explorer.html');
+    assert.ok(/data-window-tab="workflow"/.test(ex) && /data-window-tab="platforms"/.test(ex));
+    const sb = read('media/sidebar.html');
+    assert.ok(/id="paletteJourney"/.test(sb) && /<details id="paletteMore">/.test(sb) && /post\('journey'\)/.test(sb) && /Open the workflow/.test(sb) && /data-sc="disconnect"/.test(sb));
+    const wv = read('src/core/webviewProvider.ts');
+    assert.ok(/case 'journey':/.test(wv) && /case 'journeyAction':/.test(wv) && /public journey\(previewTemplate\?: string\)/.test(wv) && /approvalBlockers\(store, id, ctx\)/.test(wv));
+    const ext = read('src/extension.ts');
+    assert.ok(/const sourcePool = new Map<string, ConnectionManager>\(\)/.test(ext) && /await pickSource\('Refresh observed lineage'\)/.test(ext) && /await pickSource\('Browse'\)/.test(ext) && /journey: \(previewTemplate\) => sidebarProvider\.journey\(previewTemplate\)/.test(ext));
+    assert.ok(/'AutoDE · Workflow'/.test(read('src/core/workflowView.ts')) && /'AutoDE · Knowledge Explorer'/.test(read('src/core/knowledgeExplorer.ts')));
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

@@ -1,6 +1,6 @@
 # Workflow planning: coverage, composed workflows and clarification
 
-**Status:** specified 2026-10-30 (owner). Built in two phases (roadmap): **PLN0** the deterministic coverage check, with UI2 (v0.56.0); **PLN1** the planner that composes a workflow from coverage, with a clarification round (v0.56.1). Requirement: ORC-12 in [requirements.md](../requirements.md). **Builds on:** [workflow-templates.md](workflow-templates.md) (stage kinds, templates, the plan gate), [ui-simplification.md](ui-simplification.md) (the journey view that shows it), the interview (mcp-engine §9.2 PA3) and the decisions (ORC-8).
+**Status:** specified 2026-10-30 (owner). **PLN0 shipped in v0.56.0** (CHANGELOG.md 0.56.0): coverage items, the engine's starting coverage and checks, `coverage.yaml`, the plan step's coverage table, placing from the panel, `autode workflow coverage` and `autode_coverage` / `autode_place_coverage`; a workflow can't be approved while an item is open, and its approval records the coverage's. Built in two phases (roadmap): **PLN0** the deterministic coverage check, with UI2 (v0.56.0); **PLN1** the planner that composes a workflow from coverage, with a clarification round (v0.56.1). Requirement: ORC-12 in [requirements.md](../requirements.md). **Builds on:** [workflow-templates.md](workflow-templates.md) (stage kinds, templates, the plan gate), [ui-simplification.md](ui-simplification.md) (the journey view that shows it), the interview (mcp-engine §9.2 PA3) and the decisions (ORC-8).
 
 ## 1. Need
 

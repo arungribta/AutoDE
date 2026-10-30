@@ -54,7 +54,7 @@ export class KnowledgeExplorerPanel {
 
   public static show(context: vscode.ExtensionContext, host: KnowledgeExplorerHost, asset?: string): void {
     if (!KnowledgeExplorerPanel.current) {
-      const panel = vscode.window.createWebviewPanel('autodeKnowledgeExplorer', 'Knowledge Explorer', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist'), vscode.Uri.joinPath(context.extensionUri, 'media')] });
+      const panel = vscode.window.createWebviewPanel('autodeKnowledgeExplorer', 'AutoDE · Knowledge Explorer', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist'), vscode.Uri.joinPath(context.extensionUri, 'media')] });
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'autode-icon-64.png');
       const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
       const cytoscape = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'cytoscape.min.js')).toString();
@@ -67,6 +67,9 @@ export class KnowledgeExplorerPanel {
   }
 
   private async onMessage(m: ExplorerMessage): Promise<void> {
+    // UI2: the AutoDE window's other tabs.
+    const tab = (m as unknown as { type: string; tab?: string });
+    if (tab.type === 'openTab') { await vscode.commands.executeCommand(tab.tab === 'workflow' ? 'autoDataEngineeringHub.openWorkflow' : 'autoDataEngineeringHub.platformOperations'); return; }
     const answer = await answerExplorerMessage(m, { workspaceRoot: () => this.host.workspaceRoot(), sources: async () => { const root = this.host.workspaceRoot(); return root ? this.cache.get(root) : undefined; } });
     if (answer.reply) void this.panel.webview.postMessage(answer.reply);
     if (answer.action) await this.act(answer.action);

@@ -132,6 +132,18 @@ export function activate(context: vscode.ExtensionContext): void {
   // ConnectionManager instance rather than reusing the source one.
   let targetConnectionManager: ConnectionManager | undefined;
   disposableRegistry.register({ dispose: () => targetConnectionManager?.dispose() });
+  // UI2 §3.6: every live source connection, by id; `connectionManager` is the active one (the one Connect used last).
+  const sourcePool = new Map<string, ConnectionManager>();
+  disposableRegistry.register({ dispose: () => { for (const m of sourcePool.values()) if (m !== connectionManager) m.dispose(); sourcePool.clear(); } });
+  const liveSources = () => [...sourcePool.entries()].filter(([, m]) => m.isConnected());
+  /** The source to act on: the only live one, or the person's pick when several are connected. */
+  const pickSource = async (verb: string): Promise<ConnectionManager | undefined> => {
+    const live = liveSources();
+    if (live.length <= 1) return live[0]?.[1] ?? connectionManager;
+    const active = connectionManager?.activeConnectionId();
+    const pick = await vscode.window.showQuickPick(live.map(([id, m]) => ({ label: id, description: `${m.getActivePlatform() ?? ''}${id === active ? ' · active' : ''}` })), { title: `${verb}: which source?` });
+    return pick ? sourcePool.get(pick.label) : undefined;
+  };
 
   // ── Commands ──
 
@@ -246,7 +258,9 @@ export function activate(context: vscode.ExtensionContext): void {
     resolve: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note),
     workflowAction: (action, stage, arg) => sidebarProvider.workflowActionFromView(action, stage, arg),
     user: skillActor,
-    waiting: () => sidebarProvider.waitingForYou()
+    waiting: () => sidebarProvider.waitingForYou(),
+    journey: (previewTemplate) => sidebarProvider.journey(previewTemplate),
+    journeyAction: (id, args) => sidebarProvider.journeyAction(id, args)
   }));
   // C5b: the Knowledge Explorer — search, asset pages, graph, facts, estate — over the engine's workspace.
   context.subscriptions.push(...registerKnowledgeExplorer(context, {
@@ -461,8 +475,17 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
       );
       // Phase K1: extractions are tagged with the estate system this connection feeds.
       newManager.setEstateResolver((id) => sidebarProvider.resolveConnectionIdentity(id, role));
-      if (role === 'target') { targetConnectionManager?.dispose(); targetConnectionManager = newManager; } else { connectionManager?.dispose(); connectionManager = newManager; }
+      if (role === 'target') { targetConnectionManager?.dispose(); targetConnectionManager = newManager; } else {
+        // A source already in the pool stays connected; only a manager outside it is let go.
+        const old = connectionManager; const oldId = old?.activeConnectionId();
+        if (old && !(oldId && sourcePool.get(oldId) === old)) old.dispose();
+        connectionManager = newManager;
+      }
       const info = await newManager.connect(platform, credentials);
+      if (role === 'source') {
+        const id = newManager.activeConnectionId();
+        if (id) { const prev = sourcePool.get(id); if (prev && prev !== newManager) prev.dispose(); sourcePool.set(id, newManager); }
+      }
       if (named) onboarding.markChecked(named.entry, true, `${info.databaseName}.${info.schemaName} (${info.version})`);
       const successMsg = `Connected to ${role} ${named ? named.entry.id : platform}: ${info.databaseName}.${info.schemaName} (v${info.version})`;
       vscode.window.showInformationMessage(successMsg);
@@ -471,7 +494,8 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
       // "Source Assessment", a source-only, separate step), so the status
       // pill/chat context should say "connected" without implying tables are
       // already known.
-      sidebarProvider.notifyConnectionStatus(role, { connected: true, platform, detail: `${info.databaseName}.${info.schemaName}` });
+      sidebarProvider.notifyConnectionStatus(role, { connected: true, platform, detail: `${info.databaseName}.${info.schemaName}${role === 'source' && liveSources().length > 1 ? ` · ${liveSources().length} sources connected` : ''}` });
+      sidebarProvider.postLiveConnections();
       // Phase K2: the source connection answers catalog query-through and refresh on use.
       if (role === 'source') sidebarProvider.setCatalogFetcher(newManager.catalogFetcher());
       // Phase C4a: probes (read-only, aggregates only) run on the source connection.
@@ -583,8 +607,8 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
   });
 
   /** Shared by `disconnectDataPlatform`/`disconnectTargetDataPlatform` (v0.19.0) — same logic, parameterized by role. */
-  async function runDisconnect(role: 'source' | 'target'): Promise<void> {
-    const mgr = role === 'target' ? targetConnectionManager : connectionManager;
+  async function runDisconnect(role: 'source' | 'target', connectionId?: string): Promise<void> {
+    const mgr = role === 'target' ? targetConnectionManager : connectionId ? sourcePool.get(connectionId) : await pickSource('Disconnect');
     if (!mgr || !mgr.isConnected()) {
       const msg = `Not currently connected to a ${role} data platform.`;
       vscode.window.showInformationMessage(msg);
@@ -605,11 +629,25 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
       // the local ConnectionManager handle is gone either way (isConnected() will
       // report false from here on), so chat/the status pill must not keep
       // claiming a connection that no longer exists on AutoDE's side.
-      sidebarProvider.notifyConnectionStatus(role, { connected: false });
+      if (role === 'source') {
+        const id = [...sourcePool.entries()].find(([, m]) => m === mgr)?.[0];
+        if (id) sourcePool.delete(id);
+        // The active source moves to another live one, when there is one.
+        if (mgr === connectionManager) {
+          const next = liveSources()[0];
+          connectionManager = next?.[1];
+          if (next) { sidebarProvider.setCatalogFetcher(next[1].catalogFetcher()); sidebarProvider.setLiveProbes(next[1].probeExecutor()); sidebarProvider.notifyConnectionStatus('source', { connected: true, platform: next[1].getActivePlatform() ?? undefined, detail: next[0] }); }
+          else sidebarProvider.notifyConnectionStatus(role, { connected: false });
+        }
+        sidebarProvider.postLiveConnections();
+      } else sidebarProvider.notifyConnectionStatus(role, { connected: false });
     }
   }
 
   const disconnectDataPlatform = vscode.commands.registerCommand(`${EXTENSION_ID}.disconnectDataPlatform`, () => runDisconnect('source'));
+  // UI2: one live source by id, from the Saved connections list.
+  context.subscriptions.push(vscode.commands.registerCommand(`${EXTENSION_ID}.disconnectConnection`, (id?: unknown) => runDisconnect('source', typeof id === 'string' ? id : undefined)));
+  sidebarProvider.setLiveConnections(() => [...liveSources().map(([id]) => id), ...(targetConnectionManager?.isConnected() && targetConnectionManager.activeConnectionId() ? [targetConnectionManager.activeConnectionId()!] : [])]);
   const disconnectTargetDataPlatform = vscode.commands.registerCommand(`${EXTENSION_ID}.disconnectTargetDataPlatform`, () => runDisconnect('target'));
 
   /**
@@ -623,7 +661,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
    * the panel's displayed fields don't go stale.
    */
   async function browseDatabaseAndSchema(role: 'source' | 'target'): Promise<void> {
-    let mgr = role === 'target' ? targetConnectionManager : connectionManager;
+    let mgr = role === 'target' ? targetConnectionManager : await pickSource('Browse');
     if (!mgr || !mgr.isConnected()) {
       await runConnectionTest(role);
       mgr = role === 'target' ? targetConnectionManager : connectionManager;
@@ -903,15 +941,16 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
   // LIN through POP1: observed lineage from the connected platform, by the lineage operations its platform definition names.
   const refreshLineageCmd = vscode.commands.registerCommand(`${EXTENSION_ID}.refreshLineage`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const connectionId = connectionManager?.activeConnectionId();
-    const platform = connectionManager?.getActivePlatform();
-    if (!wsRoot || !connectionManager || !connectionManager.isConnected() || !connectionId || !platform) {
+    const source = await pickSource('Refresh observed lineage');
+    const connectionId = source?.activeConnectionId();
+    const platform = source?.getActivePlatform();
+    if (!wsRoot || !source || !source.isConnected() || !connectionId || !platform) {
       vscode.window.showErrorMessage('Connect to the platform first (Settings → Connections), or run autode lineage refresh --connection <id> in a terminal.');
       return;
     }
     const days = await vscode.window.showQuickPick(['30', '7', '90', '365'], { title: `Observed lineage from ${connectionId}: how many days back?` });
     if (!days) return;
-    const manager = connectionManager;
+    const manager = source;
     const cfm = await openContext(wsRoot);
     try {
       const target = { connectionId, platform, query: async (sql: string, maxRows: number) => (await manager.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>> };

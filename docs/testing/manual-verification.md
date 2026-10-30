@@ -1305,6 +1305,30 @@ Needs a Redshift target connection (a dev workgroup or database) with a role tha
   Do: `autode platform run governance.grant_select --connection redshift:<wg> --param schema=mart --param role=analyst --allow-cli`.
   Expect: no grant is made; the output is the runbook step to propose.
 
+## Part 58 — v0.56.0 The journey, coverage, one window, several sources
+
+- [ ] **58.1 Day one.**
+  Do: *＋ New* in the palette with a statement; open the palette, then *Open the workflow*.
+  Expect: the palette shows the problem, a five-segment bar, *① Problem · phase 1 of 5*, the next step (*confirm the statement*) and its button. The Workflow tab shows the five phases, ① waiting for you, and in ⑤ a preview of the suggested template's stages, greyed.
+- [ ] **58.2 Discovery and the steps.**
+  Do: confirm the statement; answer some interview questions; ingest a DDL file; click phase ②.
+  Expect: each step with who acts, a line with counts (tables per system, interview parts, facts waiting, terms in no category), *About this step* with why it is there and its parts; the glossary and semantic layer marked *checkpoint, not a gate*.
+- [ ] **58.3 The preview.**
+  Do: in ⑤ switch the template to modernization, with two source systems in the estate.
+  Expect: the stages redraw; *Source assessment* has a lane per system; optional stages dashed; each template with why it fits.
+- [ ] **58.4 Coverage blocks the plan.**
+  Do: put a dashboard in the specification's scope; approve the specification; draft the greenfield workflow; try to approve it.
+  Expect: ④ shows the dashboard as a question; approving is refused with the item named; *Place…* → out of scope with a reason; approving now works, and the coverage shows it was approved with the plan.
+- [ ] **58.5 The same in a terminal and an agent host.**
+  Do: `autode workflow status`; `autode workflow coverage`; ask Claude Code (AutoDE's MCP server) where the problem stands.
+  Expect: the same phases, next step and coverage as the Workflow tab.
+- [ ] **58.6 One window.**
+  Do: switch between the Workflow and Knowledge Explorer tabs with the tab bar, and back.
+  Expect: each keeps its place (selected phase, Explorer page); *Platform catalog* opens the platform operations list.
+- [ ] **58.7 Several sources.**
+  Do: connect a Snowflake source, then *Use* a second source connection (Redshift or another Snowflake); then *Refresh Observed Lineage*.
+  Expect: both marked *connected* in Saved connections, each with Disconnect; the refresh asks which source.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1635,5 +1659,12 @@ Needs a Redshift target connection (a dev workgroup or database) with a role tha
 | 57.2 |  |  |
 | 57.3 |  |  |
 | 57.4 |  |  |
+| 58.1 |  |  |
+| 58.2 |  |  |
+| 58.3 |  |  |
+| 58.4 |  |  |
+| 58.5 |  |  |
+| 58.6 |  |  |
+| 58.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

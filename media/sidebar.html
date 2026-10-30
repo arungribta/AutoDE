@@ -519,6 +519,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   <div class="slide-panel" id="palettePanel">
     <div class="slide-panel-header"><span class="slide-title">🧰 Workflow Palette</span><button class="icon-btn" id="paletteCloseBtn">✕</button></div>
     <div class="slide-panel-body" id="paletteBody">
+      <div class="section" id="paletteJourney"><!-- UI2: where you are and the one next action, from the journey --></div>
+      <details id="paletteMore"><summary class="section-title" style="cursor:pointer;">More: decisions, problems, specification, context, artifacts, primitives</summary>
       <div class="section" id="paletteDecisions"></div>
       <div class="section" id="paletteProblems">
         <!-- Active business problem + switcher rendered by JS -->
@@ -540,6 +542,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       <div class="section" id="palettePrimitives">
         <!-- Transform primitive catalog (Tier 1 + Tier 2) rendered by JS -->
       </div>
+      </details>
     </div>
   </div>
 
@@ -1400,7 +1403,36 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 
   // ── Palette Panel ──
   const paletteOverlay = $('#paletteOverlay'), palettePanel = $('#palettePanel'), paletteBtn = $('#paletteBtn'), paletteCloseBtn = $('#paletteCloseBtn');
-  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); post('listDecisions'); renderDecisions(); renderPaletteProblems(); renderPaletteSpec(); renderPaletteContext(); post('checkArtifactStaleness'); post('listPrimitives'); }
+  // UI2: the journey in the palette: the problem, a five-phase bar, where you are, the one next action, what waits.
+  var journeyState = null;
+  var PHASE_COLOR = { done: 'var(--vscode-testing-iconPassed, #2ea043)', now: 'var(--vscode-textLink-foreground)', waiting: 'var(--vscode-editorWarning-foreground, #cca700)', todo: 'var(--vscode-disabledForeground, #888)', skipped: 'var(--vscode-disabledForeground, #888)' };
+  var PHASE_NUM = ['', '①', '②', '③', '④', '⑤'];
+  function renderPaletteJourney() {
+    var box = $('#paletteJourney');
+    if (!box) return;
+    var j = journeyState;
+    if (!j) { box.innerHTML = '<div class="onb-note">Start a business problem to see where it stands.</div><button class="primary" id="pjNew" style="margin-top:6px;">＋ New problem</button>'; var nb = $('#pjNew'); if (nb) nb.onclick = function () { var b = document.getElementById('paletteNewProblemBtn'); if (b) b.click(); else post('startNewBusinessProblem'); }; return; }
+    var bar = '<div style="display:flex;gap:3px;margin:8px 0 6px;" role="img" aria-label="Phases">' + j.phases.map(function (p) { return '<div title="' + escapeHtml(p.n + '. ' + p.title + ': ' + p.status) + '" style="flex:1;height:6px;border-radius:3px;background:' + (PHASE_COLOR[p.status] || PHASE_COLOR.todo) + ';opacity:' + (p.n === j.current.phase ? '1' : '0.6') + ';"></div>'; }).join('') + '</div>';
+    var a = j.current.action;
+    box.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;font-weight:600;">' + escapeHtml((j.statement || j.problemId).slice(0, 90)) + '</div>' +
+      '<button class="icon-btn" id="pjNew" title="Start a new business problem">＋ New</button><button class="icon-btn" id="pjSwitch" title="Switch business problem">⇄ Switch</button></div>' + bar +
+      '<div class="onb-note">' + PHASE_NUM[j.current.phase] + ' ' + escapeHtml(j.current.phaseTitle) + ' · phase ' + j.current.phase + ' of 5</div>' +
+      '<div style="margin:4px 0;">' + escapeHtml(j.current.line) + '</div>' +
+      (a ? '<button class="primary" id="pjAction" style="width:100%;">' + escapeHtml(a.label) + '</button>' : '') +
+      (j.waiting && j.waiting.length ? '<div class="onb-note" style="margin-top:6px;">⏳ ' + escapeHtml(j.waiting.join(' · ')) + '</div>' : '') +
+      '<button id="pjOpen" style="width:100%;margin-top:6px;">Open the workflow</button>';
+    var click = function (id) { var b = document.getElementById(id); if (b) b.click(); };
+    $('#pjNew').onclick = function () { renderPaletteProblems(); click('paletteNewProblemBtn'); };
+    $('#pjSwitch').onclick = function () { renderPaletteProblems(); click('paletteSwitchProblemBtn'); };
+    $('#pjOpen').onclick = function () { post('openWorkflowView'); };
+    var ab = $('#pjAction');
+    if (ab) ab.onclick = function () {
+      // Approvals and coverage are made in the Workflow tab, where what is approved is in view.
+      if (a.id === 'approve-workflow' || a.id === 'place-coverage' || a.id === 'approve-stage') { post('openWorkflowView'); return; }
+      post('journeyAction', { id: a.id, args: a.args || {} });
+    };
+  }
+  function openPalette() { paletteOverlay.classList.add('visible'); palettePanel.classList.add('visible'); post('journey'); renderPaletteJourney(); post('listDecisions'); renderDecisions(); renderPaletteProblems(); renderPaletteSpec(); renderPaletteContext(); post('checkArtifactStaleness'); post('listPrimitives'); }
   function closePalette() { paletteOverlay.classList.remove('visible'); palettePanel.classList.remove('visible'); }
   paletteOverlay.onclick = closePalette; paletteCloseBtn.onclick = closePalette; paletteBtn.onclick = openPalette;
 
@@ -1845,13 +1877,16 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       var html = '<div class="section-title">Saved connections</div>';
       if (st.noWorkspace) html += '<div class="onb-note">Open a workspace folder to save named connections.</div>';
       else if (!rows.length) html += '<div class="onb-note">None yet. Fill in a card below and use “Save as named connection”; it is checked before it is saved, and the MCP server sees it too.</div>';
+      else if (role === 'source') html += '<div class="onb-note">Several sources can be connected at once: Use connects one without disconnecting the others.</div>';
       rows.forEach(function (c) {
         var s = c.status;
         var autode = s.autode === 'ready' ? badge('AutoDE: ready', 'ok', s.detail) : s.autode === 'failed' ? badge('AutoDE: failed', 'err', s.detail) : s.autode === 'stale' ? badge('AutoDE: re-check', 'warn', 'Changed since its last check') : badge('AutoDE: not checked', 'warn');
         var mcp = badge(s.mcp.ready ? 'MCP: ready' : 'MCP: not ready', s.mcp.ready ? 'ok' : 'warn', s.mcp.note);
         var where = c.origin === 'local' ? badge('personal', '', 'Only in .autode/local/connections.yaml') : c.origin === 'environment' ? badge('env vars', '', 'Defined by AUTODE_* environment variables') : '';
         var inUse = active && active.toLowerCase() === c.id.toLowerCase();
-        html += '<div class="saved-conn"><span class="sc-id">' + (inUse ? '● ' : '') + escapeHtml(c.id) + '</span><span class="sc-badges">' + autode + mcp + where + badge(c.resolver, '', 'Credentials resolver') + '</span>' +
+        var live = (st.live || []).some(function (x) { return x.toLowerCase() === c.id.toLowerCase(); });
+        html += '<div class="saved-conn"><span class="sc-id">' + (inUse ? '● ' : '') + escapeHtml(c.id) + '</span><span class="sc-badges">' + (live ? badge('connected', 'ok', 'Live in this window') : '') + autode + mcp + where + badge(c.resolver, '', 'Credentials resolver') + '</span>' +
+          (live && role === 'source' ? '<span class="btn-row" style="margin-top:0;"><button data-sc="disconnect" data-id="' + escapeHtml(c.id) + '">Disconnect</button></span>' : '') +
           '<span class="btn-row" style="margin-top:0;">' + (inUse ? '<button data-sc="stop" data-role="' + role + '">Use card fields</button>' : '<button data-sc="use" data-id="' + escapeHtml(c.id) + '" data-role="' + role + '">Use</button>') +
           '<button data-sc="recheck" data-id="' + escapeHtml(c.id) + '">Re-check</button>' + (c.origin === 'environment' ? '' : '<button data-sc="remove" data-id="' + escapeHtml(c.id) + '">Remove</button>') + '</span>' +
           (s.mcp.note ? '<div class="onb-note" style="flex-basis:100%;">' + escapeHtml(s.mcp.note) + '</div>' : '') + '</div>';
@@ -1865,6 +1900,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
           else if (act === 'stop') post('stopUsingConnection', { role: b.getAttribute('data-role') });
           else if (act === 'recheck') post('recheckConnection', { id: id });
           else if (act === 'remove') post('removeConnection', { id: id });
+          else if (act === 'disconnect') post('disconnectConnection', { id: id });
         };
       });
     });
@@ -1925,6 +1961,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'openInbox': openPalette(); break;
       case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
       case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
+      case 'journey': journeyState = msg.journey || null; renderPaletteJourney(); break;
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { o.card.querySelectorAll('.onb-save, .onb-def-save').forEach(function (b) { b.disabled = false; }); }); break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;

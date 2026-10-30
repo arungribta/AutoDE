@@ -4,19 +4,38 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AutoDE Workflow</title>
+<title>AutoDE · Workflow</title>
 <style>
   :root { --gap: 12px; --radius: 6px; }
-  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 16px 20px; }
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 0 20px 20px; }
   h1 { font-size: 16px; margin: 0 0 4px; }
-  .statement { opacity: 0.85; margin-bottom: 8px; }
+  h2 { font-size: 14px; margin: 0 0 6px; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--vscode-editorWidget-border, #555); margin: 0 -20px 14px; padding: 0 20px; position: sticky; top: 0; background: var(--vscode-editor-background); z-index: 1; }
+  .tabs button { margin: 0; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--vscode-foreground); padding: 8px 12px; opacity: 0.75; }
+  .tabs button[aria-selected="true"] { border-bottom-color: var(--vscode-focusBorder); opacity: 1; font-weight: 600; }
+  .statement { opacity: 0.85; margin-bottom: 6px; }
   .meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; opacity: 0.8; }
-  .prov { margin: 8px 0 12px; padding: 8px 10px; border-left: 3px solid var(--vscode-textLink-foreground); background: var(--vscode-textBlockQuote-background); font-size: 12px; }
-  .prov div { margin: 2px 0; }
-  .progress { height: 6px; background: var(--vscode-editorWidget-border, #444); border-radius: 3px; overflow: hidden; margin: 8px 0 14px; }
-  .progress > div { height: 100%; background: var(--vscode-testing-iconPassed, #2ea043); }
-  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: var(--gap); align-items: start; }
+  .here { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0; padding: 10px 12px; border-radius: var(--radius); border-left: 4px solid var(--vscode-focusBorder); background: var(--vscode-textBlockQuote-background); }
+  .here .where { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+  .here .line { flex: 1 1 260px; }
+  .rail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 0 0 14px; }
+  @media (max-width: 700px) { .rail { grid-template-columns: 1fr; } }
+  .phase { text-align: left; margin: 0; padding: 8px 10px; border: 1px solid var(--vscode-editorWidget-border, #555); border-radius: var(--radius); background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); cursor: pointer; }
+  .phase[aria-selected="true"] { outline: 2px solid var(--vscode-focusBorder); }
+  .phase .n { font-weight: 600; }
+  .phase .sum { font-size: 11px; opacity: 0.8; margin-top: 3px; }
+  .p-done { border-left: 4px solid var(--vscode-testing-iconPassed, #2ea043); }
+  .p-now { border-left: 4px solid var(--vscode-textLink-foreground); }
+  .p-waiting { border-left: 4px solid var(--vscode-editorWarning-foreground, #cca700); }
+  .p-todo, .p-skipped { border-left: 4px solid var(--vscode-disabledForeground, #888); }
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: var(--gap); align-items: start; }
   @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .steps { display: flex; flex-direction: column; gap: 6px; }
+  .step { border: 1px solid var(--vscode-editorWidget-border, #555); border-radius: var(--radius); padding: 8px 10px; background: var(--vscode-editorWidget-background); cursor: pointer; }
+  .step.sel, .step:focus-visible { outline: 2px solid var(--vscode-focusBorder); }
+  .step .t { font-weight: 600; }
+  .step .who { font-size: 11px; opacity: 0.75; margin-left: 6px; font-weight: normal; }
+  .step .s { font-size: 12px; opacity: 0.85; margin-top: 2px; }
   .board { display: flex; gap: var(--gap); overflow-x: auto; padding-bottom: 6px; }
   .col { min-width: 170px; display: flex; flex-direction: column; gap: 8px; }
   .col-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; }
@@ -24,14 +43,17 @@
   .card:focus-visible, .card.sel { outline: 2px solid var(--vscode-focusBorder); }
   .card .t { font-weight: 600; }
   .card .s { font-size: 11px; opacity: 0.8; margin-top: 2px; }
+  .card.dashed { border-style: dashed; opacity: 0.75; }
+  .card.out { opacity: 0.45; }
+  .lanes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .lane { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
   .st-done { border-left: 4px solid var(--vscode-testing-iconPassed, #2ea043); }
-  .st-ready, .st-in-progress { border-left: 4px solid var(--vscode-textLink-foreground); }
-  .st-awaiting-approval, .st-awaiting-check { border-left: 4px solid var(--vscode-editorWarning-foreground, #cca700); }
+  .st-ready, .st-in-progress, .st-now { border-left: 4px solid var(--vscode-textLink-foreground); }
+  .st-awaiting-approval, .st-awaiting-check, .st-waiting { border-left: 4px solid var(--vscode-editorWarning-foreground, #cca700); }
   .st-stale { border-left: 4px solid var(--vscode-editorError-foreground, #f14c4c); }
   .st-skipped { opacity: 0.55; border-style: dashed; }
-  .st-pending { border-left: 4px solid var(--vscode-disabledForeground, #888); }
+  .st-pending, .st-todo { border-left: 4px solid var(--vscode-disabledForeground, #888); }
   .panel { border: 1px solid var(--vscode-editorWidget-border, #555); border-radius: var(--radius); padding: 12px; background: var(--vscode-editorWidget-background); }
-  .panel h2 { font-size: 14px; margin: 0 0 6px; }
   .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 8px; font-size: 12px; margin: 8px 0; }
   .kv div:nth-child(odd) { opacity: 0.7; }
   .hist { font-size: 12px; margin: 6px 0 0; padding-left: 16px; }
@@ -43,62 +65,75 @@
   select { font-family: inherit; font-size: 12px; padding: 3px; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); }
   a { color: var(--vscode-textLink-foreground); cursor: pointer; }
   .guide { margin: 8px 0; padding: 6px 8px; border-radius: 4px; background: var(--vscode-textBlockQuote-background); font-size: 12px; }
-  .proposal td, .proposal th { text-align: left; font-size: 12px; padding: 3px 8px 3px 0; vertical-align: top; }
+  table.t { border-collapse: collapse; width: 100%; }
+  table.t td, table.t th { text-align: left; font-size: 12px; padding: 3px 8px 3px 0; vertical-align: top; }
   .out { opacity: 0.6; }
   .exploration { margin: 0 0 10px; padding: 6px 8px; border-radius: 4px; border-left: 3px solid var(--vscode-editorWarning-foreground); background: var(--vscode-inputValidation-warningBackground, var(--vscode-textBlockQuote-background)); font-size: 12px; }
   .tag { display: inline-block; font-size: 10px; padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; opacity: 0.8; margin-left: 4px; }
+  .section { margin-top: 14px; }
 </style>
 </head>
 <body>
+<div class="tabs" role="tablist" aria-label="AutoDE window">
+  <button role="tab" aria-selected="true">Workflow</button>
+  <button role="tab" aria-selected="false" data-tab="knowledge">Knowledge Explorer</button>
+  <button role="tab" aria-selected="false" data-tab="platforms">Platform catalog</button>
+</div>
 <div id="root"><p class="muted">Loading the workflow…</p></div>
 <script nonce="{{nonce}}">
 (function () {
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
-  let state = { model: null, details: {}, selected: null };
+  let state = { model: null, journey: null, details: {}, selected: null, phase: null, step: null };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const MARK = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−' };
+  const MARK = { done: '✓', ready: '→', 'in-progress': '…', 'awaiting-approval': '?', 'awaiting-check': '?', pending: '·', stale: '!', skipped: '−', now: '●', waiting: '◆', todo: '○' };
+  const PHASE_MARK = { done: '✓', now: '●', waiting: '◆', todo: '○', skipped: '−' };
   const ACTION_LABEL = { approve: 'Approve…', 'approve-document': 'Approve…', run: 'Run agent', 'open-document': 'Open document', 'hand-in': 'Hand in…', 'approve-again': 'Approve again…', skip: 'Skip…', reopen: 'Re-open…' };
+  const COVER_MARK = { covered: '✓', manual: '✋', 'out-of-scope': '−', gap: '!', question: '?' };
   const send = (m) => vscode.postMessage(m);
   const when = (iso) => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
 
-  function render() {
+  // ── A journey step's action: approvals and stage actions here, the rest through the panel ──
+  function actionButton(a, primary) {
+    if (!a) return '';
+    return '<button' + (primary ? ' class="primary"' : '') + ' data-jact="' + esc(a.id) + '" data-jargs="' + esc(JSON.stringify(a.args || {})) + '">' + esc(a.label) + '</button>' + (a.cli ? '<span class="muted"> or in a terminal: <code>' + esc(a.cli) + '</code></span>' : '');
+  }
+  function doAction(id, args) {
     const m = state.model;
-    if (!m) { root.innerHTML = '<p class="muted">' + esc(state.error || 'Start or open a business problem to see its workflow.') + '</p>'; return; }
-    const pct = m.progress.total ? Math.round(100 * m.progress.done / m.progress.total) : 0;
-    let h = (state.exploration ? '<div class="exploration">⚠ ' + esc(state.exploration) + ' Approvals take one click; failed checks only warn.</div>' : '') + '<h1>' + esc(m.problemId) + '</h1><div class="statement">' + esc(m.statement) + '</div>' +
-      '<div class="meta"><span>Template: <b>' + esc(m.template) + '</b></span><span>' + (m.approved ? 'Workflow approved' : 'Workflow not approved yet') + '</span><span>' + m.progress.done + ' of ' + m.progress.total + ' stages done</span>' +
-      (m.next ? '<span>Next: <b>' + esc(m.next.title) + '</b> (' + esc(m.next.status) + ')</span>' : '') + '</div>' +
-      '<div class="progress" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100"><div style="width:' + pct + '%"></div></div>';
-    if (m.provenance.length) h += '<div class="prov">' + m.provenance.map((p) => '<div>' + esc(p) + '</div>').join('') + '<div><a data-history="1">Full history</a></div></div>';
-    if (!m.approved) {
-      h += '<div class="panel"><h2>Plan the workflow</h2>';
-      if (m.proposal) {
-        const p = m.proposal;
-        h += '<div class="muted">Proposed: ' + esc(p.template) + '. Review what is in and what is left out, then approve it.</div>' +
-          '<table class="proposal"><tr><th>Stage</th><th>Kind</th><th>Inclusion</th><th>In the workflow</th></tr>' + p.stages.map((x) =>
-            '<tr class="' + (x.included ? '' : 'out') + '"><td>' + esc(x.title) + (x.origin === 'added' ? '<span class="tag">added</span>' : '') + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.inclusion) + '</td><td>' +
-            (x.included ? 'yes' + (x.systems && x.systems.length ? ' (per source system: ' + x.systems.map(esc).join(', ') + ')' : '') : 'no — ' + esc(x.reason || 'optional, not included')) + '</td></tr>').join('') + '</table>' +
-          (p.errors.length ? '<div class="guide">The engine refuses it: ' + p.errors.map(esc).join(' ') + '</div>' : '');
-      }
-      if (m.pendingWorkflowDecision) {
-        h += '<div class="muted">Waiting for a person: ' + esc(m.pendingWorkflowDecision.title) + '</div>' +
-          '<button class="primary" data-decide="approve" data-id="' + esc(m.pendingWorkflowDecision.id) + '">Approve workflow…</button><button data-decide="reject" data-id="' + esc(m.pendingWorkflowDecision.id) + '">Reject…</button><button data-open-decision="' + esc(m.pendingWorkflowDecision.id) + '">Open decision</button>';
-      } else {
-        h += '<div class="muted">The engine drafts the stages from a template and what it knows about the specification and estate; you review and approve it.</div>';
-      }
-      h += '<div><select id="tpl">' + m.templates.map((t) => '<option value="' + esc(t.id) + '"' + (m.template.indexOf(t.id + ' ') === 0 ? ' selected' : '') + '>' + esc(t.title) + '</option>').join('') + '</select><button data-propose="1">' + (m.pendingWorkflowDecision ? 'Re-draft' : 'Draft the workflow') + '</button></div></div>';
+    if (id === 'approve-workflow' && m && m.pendingWorkflowDecision) { send({ type: 'approve', decisionId: m.pendingWorkflowDecision.id }); return; }
+    if (id === 'place-coverage') { state.phase = 4; state.step = 'coverage'; render(); return; }
+    if (id === 'approve-stage' || id === 'run-stage') { state.phase = 5; state.selected = args.stage; render(); if (id === 'run-stage') send({ type: 'run', stage: args.stage }); return; }
+    send({ type: 'journeyAction', id: id, args: args });
+  }
+
+  // ── The plan panel and the stage board (phases ④ and ⑤) ──
+  function planHtml(m) {
+    let h = '<div class="panel section"><h2>Plan the workflow</h2>';
+    if (m.proposal) {
+      const p = m.proposal;
+      h += '<div class="muted">Proposed: ' + esc(p.template) + '. Review what is in and what is left out, then approve it.</div>' +
+        '<table class="t"><tr><th>Stage</th><th>Kind</th><th>Inclusion</th><th>In the workflow</th></tr>' + p.stages.map((x) =>
+          '<tr class="' + (x.included ? '' : 'out') + '"><td>' + esc(x.title) + (x.origin === 'added' ? '<span class="tag">added</span>' : '') + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.inclusion) + '</td><td>' +
+          (x.included ? 'yes' + (x.systems && x.systems.length ? ' (per source system: ' + x.systems.map(esc).join(', ') + ')' : '') : 'no — ' + esc(x.reason || 'optional, not included')) + '</td></tr>').join('') + '</table>' +
+        (p.errors.length ? '<div class="guide">The engine refuses it: ' + p.errors.map(esc).join(' ') + '</div>' : '');
     }
-    // Board: one column per dependency step.
+    if (m.pendingWorkflowDecision) {
+      h += '<div class="muted">Waiting for a person: ' + esc(m.pendingWorkflowDecision.title) + '</div>' +
+        '<button class="primary" data-decide="approve" data-id="' + esc(m.pendingWorkflowDecision.id) + '">Approve workflow…</button><button data-decide="reject" data-id="' + esc(m.pendingWorkflowDecision.id) + '">Reject…</button><button data-open-decision="' + esc(m.pendingWorkflowDecision.id) + '">Open decision</button>';
+    } else {
+      h += '<div class="muted">The engine drafts the stages from a template and what it knows about the specification and estate; you review and approve it.</div>';
+    }
+    h += '<div><select id="tpl" aria-label="Template">' + m.templates.map((t) => '<option value="' + esc(t.id) + '"' + (m.template.indexOf(t.id + ' ') === 0 ? ' selected' : '') + '>' + esc(t.title) + '</option>').join('') + '</select><button data-propose="1">' + (m.pendingWorkflowDecision ? 'Re-draft' : 'Draft the workflow') + '</button></div></div>';
+    return h;
+  }
+  function boardHtml(m) {
     const cols = {};
     m.stages.forEach((s) => { (cols[s.level] = cols[s.level] || []).push(s); });
-    h += '<div class="layout"><div><div class="board" role="list">' + Object.keys(cols).sort((a, b) => a - b).map((lv) =>
+    let h = '<div class="layout"><div><div class="board" role="list">' + Object.keys(cols).sort((a, b) => a - b).map((lv) =>
       '<div class="col"><div class="col-title">Step ' + (Number(lv) + 1) + '</div>' + cols[lv].map((s) =>
         '<div class="card st-' + esc(s.status) + (state.selected === s.id ? ' sel' : '') + '" tabindex="0" role="listitem" data-stage="' + esc(s.id) + '" aria-label="' + esc(s.title + ', ' + s.status) + '">' +
         '<div class="t">' + (MARK[s.status] || '') + ' ' + esc(s.title) + (s.origin === 'added' ? '<span class="tag">added</span>' : '') + (s.manual ? '<span class="tag" title="No AutoDE agent does this stage yet: a person does it and hands it in.">manual</span>' : '') + '</div>' +
-        '<div class="s">' + esc(s.status) + '</div><div class="s">' + esc(s.guide) + '</div></div>').join('') + '</div>').join('') + '</div>';
-    h += '</div>';
-    // Detail of the selected stage.
+        '<div class="s">' + esc(s.status) + '</div><div class="s">' + esc(s.guide) + '</div></div>').join('') + '</div>').join('') + '</div></div>';
     const s = m.stages.find((x) => x.id === state.selected) || m.stages[0];
     const d = s && state.details[s.id];
     if (s) {
@@ -120,27 +155,99 @@
       }
       h += '<h2 style="margin-top:12px;">History</h2>' + (d && d.history.length ? '<ul class="hist">' + d.history.map((e) => '<li>' + esc(when(e.at)) + ' <b>' + esc(e.type) + '</b> by ' + esc(e.who) + (e.channel ? ' (' + esc(e.channel) + ')' : '') + (e.reason ? ' — ' + esc(e.reason) : '') + '</li>').join('') + '</ul>' : '<div class="muted">Nothing recorded for this stage yet.</div>') + '</div>';
     }
-    h += '</div>';
-    root.innerHTML = h;
+    return h + '</div>';
+  }
+
+  // ── The journey (UI2) ──
+  function coverageHtml(j) {
+    const c = j.coverage;
+    if (!c) return '<div class="muted">The coverage appears once there is a specification and a drafted plan.</div>';
+    let h = '<table class="t"><tr><th></th><th>In the specification</th><th>Delivered by</th><th></th></tr>' + c.entries.map((e) =>
+      '<tr><td>' + esc(COVER_MARK[e.status] || '') + '</td><td>' + esc(e.text) + '<div class="muted">' + esc(e.source) + '</div></td><td>' + esc(e.status) + (e.stages && e.stages.length ? ': ' + e.stages.map(esc).join(', ') : '') + (e.reason ? '<div class="muted">' + esc(e.reason) + '</div>' : '') + '<div class="muted">placed by ' + esc(e.placedBy) + '</div></td><td><button' + (e.status === 'question' ? ' class="primary"' : '') + ' data-place="' + esc(e.id) + '">' + (e.status === 'question' ? 'Place…' : 'Change…') + '</button></td></tr>').join('') + '</table>';
+    if (c.check.errors.length) h += '<div class="guide">Before the plan can be approved: ' + c.check.errors.map(esc).join(' ') + '</div>';
+    if (c.check.warnings.length) h += '<div class="muted">' + c.check.warnings.map(esc).join(' ') + '</div>';
+    if (c.approvedBy) h += '<div class="muted">Approved with the plan by ' + esc(c.approvedBy) + (c.approvedAt ? ' on ' + esc(when(c.approvedAt)) : '') + '.</div>';
+    return h;
+  }
+  function previewHtml(j) {
+    const p = j.preview;
+    if (!p) return '<div class="muted">No template to preview.</div>';
+    let h = '<div class="muted">The delivery stages if the plan uses this template: greyed until the plan is approved. Dashed: optional or conditional.</div>' +
+      '<div><label class="muted" for="ptpl">Template </label><select id="ptpl">' + p.alternatives.map((a) => '<option value="' + esc(a.id) + '"' + (a.id === p.template ? ' selected' : '') + '>' + esc(a.title) + (a.suggested ? ' · suggested' : '') + '</option>').join('') + '</select></div>' +
+      '<div class="muted">' + p.alternatives.map((a) => '<div><b>' + esc(a.title) + '</b>: ' + esc(a.reason) + '</div>').join('') + '</div>';
+    h += '<div class="board section" role="list">' + p.stages.map((s, i) =>
+      '<div class="col"><div class="col-title">' + (i + 3) + '</div><div class="card' + (s.dashed ? ' dashed' : '') + (s.included ? '' : ' out') + '" role="listitem" aria-label="' + esc(s.title + (s.included ? '' : ', left out')) + '"><div class="t">' + esc(s.title) + '</div><div class="s">' + esc(s.kind) + ' · ' + esc(s.inclusion) + (s.included ? '' : ' · left out' + (s.reason ? ': ' + esc(s.reason) : '')) + '</div>' +
+      (s.lanes.length ? '<div class="lanes">' + s.lanes.map((l) => '<span class="lane">' + esc(l) + '</span>').join('') + '</div>' : '') + '</div></div>').join('') + '</div>';
+    return h;
+  }
+  function stepAbout(step) {
+    if (!step) return '';
+    let h = '<div class="panel" aria-live="polite"><h2>' + esc(MARK[step.status] || '') + ' ' + esc(step.title) + '</h2><div class="muted">' + esc(step.who) + (step.checkpoint ? ' · checkpoint, not a gate' : '') + '</div>' +
+      '<div class="guide"><b>Why it is here:</b> ' + esc(step.why) + '</div>' +
+      (step.waitsOn ? '<div class="guide"><b>Waiting on:</b> ' + esc(step.waitsOn) + '</div>' : '') +
+      '<div>' + esc(step.line) + '</div>' + actionButton(step.action, true);
+    if (step.parts && step.parts.length && step.id !== 'coverage') h += '<h2 style="margin-top:12px;">Parts</h2><ul class="hist">' + step.parts.map((p) => '<li>' + esc(p.name) + ' — ' + esc(p.status) + (p.detail ? ' (' + esc(p.detail) + ')' : '') + '</li>').join('') + '</ul>';
+    h += '<h2 style="margin-top:12px;">History</h2>' + (step.history.length ? '<ul class="hist">' + step.history.map((e) => '<li>' + esc(when(e.at)) + ' ' + esc(e.what) + (e.channel ? ' (' + esc(e.channel) + ')' : '') + '</li>').join('') + '</ul>' : '<div class="muted">Nothing recorded yet.</div>');
+    return h + '</div>';
+  }
+  function journeyHtml(j, m) {
+    const phaseN = state.phase || j.current.phase;
+    const phase = j.phases.find((p) => p.n === phaseN) || j.phases[0];
+    let h = (state.exploration ? '<div class="exploration">⚠ ' + esc(state.exploration) + ' Approvals take one click; failed checks only warn.</div>' : '') +
+      '<h1>' + esc(j.statement || j.problemId) + '</h1><div class="meta"><span>' + esc(j.problemId) + '</span><span>' + esc(j.mode) + '</span><span>' + j.holds.systems + ' systems · ' + j.holds.tables + ' tables · ' + j.holds.facts + ' facts to review</span></div>' +
+      '<div class="here" aria-live="polite"><div><div class="where">You are here · phase ' + j.current.phase + ' of 5 · ' + esc(j.current.phaseTitle) + '</div><div class="line">' + esc(j.current.line) + '</div></div>' + actionButton(j.current.action, true) + '</div>' +
+      '<div class="rail" role="tablist" aria-label="Phases">' + j.phases.map((p) =>
+        '<button class="phase p-' + esc(p.status) + '" role="tab" aria-selected="' + (p.n === phase.n) + '" data-phase="' + p.n + '"><div class="n">' + esc(PHASE_MARK[p.status] || '') + ' ' + p.n + '. ' + esc(p.title) + '</div><div class="sum">' + esc(p.summary) + '</div></button>').join('') + '</div>';
+    if (phase.n === 5) {
+      if (m && m.approved) return h + boardHtml(m);
+      return h + '<div class="panel">' + previewHtml(j) + '</div>';
+    }
+    const sel = phase.steps.find((s) => s.id === state.step) || phase.steps.find((s) => s.id === j.current.step) || phase.steps[0];
+    h += '<div class="layout"><div class="steps" role="list">' + phase.steps.map((s) =>
+      '<div class="step st-' + esc(s.status) + (sel && sel.id === s.id ? ' sel' : '') + '" tabindex="0" role="listitem" data-step="' + esc(s.id) + '" aria-label="' + esc(s.title + ', ' + s.status) + '"><div class="t">' + esc(MARK[s.status] || '') + ' ' + esc(s.title) + '<span class="who">' + esc(s.who) + '</span>' + (s.checkpoint ? '<span class="tag">checkpoint, not a gate</span>' : '') + '</div><div class="s">' + esc(s.line) + '</div>' + (s.action ? actionButton(s.action, sel && sel.id === s.id) : '') + '</div>').join('') + '</div>' + stepAbout(sel) + '</div>';
+    if (phase.n === 4) {
+      h += '<div class="panel section"><h2>Coverage of the specification</h2>' + coverageHtml(j) + '</div>';
+      if (m) h += planHtml(m);
+    }
+    return h;
+  }
+
+  function render() {
+    const m = state.model, j = state.journey;
+    if (!m && !j) { root.innerHTML = '<p class="muted">' + esc(state.error || 'Start or open a business problem to see its journey and workflow.') + '</p>'; return; }
+    root.innerHTML = j ? journeyHtml(j, m) : (planHtml(m) + boardHtml(m));
+    bind();
+  }
+
+  function bind() {
+    root.querySelectorAll('[data-phase]').forEach((b) => { b.onclick = () => { state.phase = Number(b.getAttribute('data-phase')); state.step = null; render(); }; });
+    root.querySelectorAll('[data-step]').forEach((el) => {
+      const pick = () => { state.step = el.getAttribute('data-step'); render(); };
+      el.onclick = (e) => { if (e.target.closest('button')) return; pick(); };
+      el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+    });
     root.querySelectorAll('[data-stage].card').forEach((el) => {
       const pick = () => { state.selected = el.getAttribute('data-stage'); send({ type: 'select', stage: state.selected }); render(); };
       el.onclick = pick; el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
     });
+    root.querySelectorAll('[data-jact]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); let args = {}; try { args = JSON.parse(b.getAttribute('data-jargs') || '{}'); } catch (x) { args = {}; } doAction(b.getAttribute('data-jact'), args); }; });
+    root.querySelectorAll('[data-place]').forEach((b) => { b.onclick = () => send({ type: 'placeCoverage', item: b.getAttribute('data-place') }); });
     root.querySelectorAll('[data-decide]').forEach((b) => { b.onclick = () => send({ type: b.getAttribute('data-decide'), decisionId: b.getAttribute('data-id') }); });
     root.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => send({ type: b.getAttribute('data-act'), stage: b.getAttribute('data-stage') }); });
     root.querySelectorAll('[data-open-decision]').forEach((b) => { b.onclick = () => send({ type: 'openDecision', decisionId: b.getAttribute('data-open-decision') }); });
     root.querySelectorAll('[data-file]').forEach((b) => { b.onclick = () => send({ type: 'openFile', file: b.getAttribute('data-file') }); });
-    root.querySelectorAll('[data-history]').forEach((b) => { b.onclick = () => send({ type: 'openHistory' }); });
     root.querySelectorAll('[data-runbook]').forEach((b) => { b.onclick = () => send({ type: 'openRunbook', file: b.getAttribute('data-runbook') }); });
     const p = root.querySelector('[data-propose]');
     if (p) p.onclick = () => { p.disabled = true; send({ type: 'propose', template: (document.getElementById('tpl') || {}).value }); };
+    const pt = document.getElementById('ptpl');
+    if (pt) pt.onchange = () => send({ type: 'preview', template: pt.value });
   }
 
+  document.querySelectorAll('.tabs [data-tab]').forEach((b) => { b.onclick = () => send({ type: 'openTab', tab: b.getAttribute('data-tab') }); });
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
     if (msg.type === 'model') {
-      state.model = msg.model; state.details = msg.details || {}; state.error = msg.error; state.exploration = msg.exploration;
-      if (msg.selected && !state.selected) state.selected = msg.selected;
+      state.model = msg.model; state.journey = msg.journey || null; state.details = msg.details || {}; state.error = msg.error; state.exploration = msg.exploration;
       if (msg.selected) state.selected = msg.selected;
       render();
     }

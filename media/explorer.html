@@ -6,6 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Knowledge Explorer</title>
 <style>
+  .window-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--vscode-editorWidget-border, #555); margin-bottom: 8px; }
+  .window-tabs button { margin: 0; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--vscode-foreground); padding: 8px 12px; opacity: 0.75; cursor: pointer; font: inherit; }
+  .window-tabs button[aria-selected="true"] { border-bottom-color: var(--vscode-focusBorder); opacity: 1; font-weight: 600; }
   :root {
     --gap: 12px; --radius: 6px;
     --border: var(--vscode-editorWidget-border, var(--vscode-panel-border, #4446));
@@ -195,6 +198,11 @@
 </style>
 </head>
 <body>
+<nav class="window-tabs" role="tablist" aria-label="AutoDE window">
+  <button role="tab" aria-selected="false" data-window-tab="workflow">Workflow</button>
+  <button role="tab" aria-selected="true">Knowledge Explorer</button>
+  <button role="tab" aria-selected="false" data-window-tab="platforms">Platform catalog</button>
+</nav>
 <header>
   <h1>Knowledge Explorer</h1>
   <div class="history" aria-label="History">
@@ -261,6 +269,7 @@
   let nextId = 1; const pending = new Map();
   const ask = (request) => new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); vscode.postMessage({ type: 'request', requestId: id, request }); });
   const post = (m) => vscode.postMessage(m);
+  document.querySelectorAll('[data-window-tab]').forEach((b) => { b.onclick = () => post({ type: 'openTab', tab: b.getAttribute('data-window-tab') }); });
   window.addEventListener('message', (e) => {
     const m = e.data;
     if (m.type === 'response') { const r = pending.get(m.requestId); if (r) { pending.delete(m.requestId); r(m.body); } else if (m.requestId === 0) onOverview(m.body); }

@@ -51,7 +51,8 @@ import { ConnectionManager } from '../engine/platform/ConnectionManager';
 import type { PlatformOnboarding } from './platformOnboarding';
 import * as os from 'node:os';
 import { Decision, DecisionStore } from '../engine/decisions/decisionStore';
-import { ApplyResult, ProposalContext, applyDecision, processResolved } from '../engine/decisions/proposals';
+import { ApplyResult, ProposalContext, applyDecision, approvalBlockers, processResolved } from '../engine/decisions/proposals';
+import { Journey, journeyContext, journeyFor } from '../engine/workflows/journey';
 import { layoutPath } from '../engine/workspaceLayout';
 import { ChatTurn, citedFactIds, extractFromTurn, parseCaptureCommand } from '../engine/context/chatExtraction';
 import { EXPLORATION_DISCLAIMER, admitForMode, problemMode, renderHardening, setProblemMode } from '../engine/documents/problemMode';
@@ -808,6 +809,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         case 'stopUsingConnection':
         case 'recheckConnection':
         case 'removeConnection': { await this.handlePlatformMessage(message); break; }
+        case 'disconnectConnection': { const id = (message as unknown as { id?: string }).id; await vscode.commands.executeCommand(`${EXTENSION_ID}.disconnectConnection`, id); break; }
         case 'disconnectDataPlatform': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.disconnectDataPlatform`); } catch { this.postLog('Disconnect command not yet registered.'); } break; }
         case 'testTargetConnection': { this.postLog('Connecting to target database...'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.testTargetConnection`); } catch { this.postLog('Test target connection command not yet registered.'); } break; }
         case 'disconnectTargetDataPlatform': { try { await vscode.commands.executeCommand(`${EXTENSION_ID}.disconnectTargetDataPlatform`); } catch { this.postLog('Disconnect target command not yet registered.'); } break; }
@@ -1096,6 +1098,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
           this.postMessage('sourceContextQuestions', { questions, answers: existing?.answers ?? {} });
           break;
         }
+        // UI2: the palette's journey, and its one action.
+        case 'journey': { let journey; try { journey = this.journey(); } catch { journey = undefined; } this.postMessage('journey', { journey: journey ?? null }); break; }
+        case 'journeyAction': { const m = message as unknown as { id?: string; args?: Record<string, string> }; if (m.id) await this.journeyAction(m.id, m.args ?? {}); this.postMessage('journey', { journey: this.journey() ?? null }); break; }
         case 'listDecisions':
         case 'openWorkflowView': { await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow'); break; }
         case 'openKnowledgeExplorer': { await vscode.commands.executeCommand('autoDataEngineeringHub.openKnowledgeExplorer'); break; }
@@ -1700,6 +1705,9 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     try {
       const pending = store.get(id);
       if (decision === 'approved' && pending?.kind === 'gate' && pending.problemId && await this.maintenanceHoldsGate(pending.problemId)) return;
+      // PLN0: a workflow whose coverage isn't complete can't be approved yet: say what to place.
+      const blockers = decision === 'approved' ? approvalBlockers(store, id, ctx) : [];
+      if (blockers.length) { vscode.window.showWarningMessage(blockers.join(' ')); this.postLog(blockers.join(' ')); return; }
       const resolved = store.resolve(id, { decision, by: this.panelUser(), channel: 'panel', note });
       if (resolved.status === 'approved') {
         const result = await applyDecision(store, id, ctx);
@@ -1761,8 +1769,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private postPlatformsState(): void {
-    if (this.platformOnboarding) this.postMessage('platformsState', { state: this.platformOnboarding.state() });
+    if (this.platformOnboarding) this.postMessage('platformsState', { state: { ...this.platformOnboarding.state(), live: this.liveConnections?.() ?? [] } });
   }
+
+  /** UI2 §3.6: the connections live in the extension now (several sources at once), for the Saved connections list. */
+  private liveConnections?: () => string[];
+  public setLiveConnections(f: () => string[]): void { this.liveConnections = f; }
+  public postLiveConnections(): void { this.postPlatformsState(); }
 
   private async setActiveConnection(role: 'source' | 'target', id: string): Promise<void> {
     await this.configManager.updateSettings(role === 'target' ? { activeTargetConnection: id } : { activeSourceConnection: id });
@@ -1878,6 +1891,36 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** Workflow actions from the Workflow view: the same code as the palette used. */
   public async workflowActionFromView(action: string, stage?: string, arg?: string): Promise<void> {
     await this.workflowAction(action, stage, arg);
+  }
+
+  /** UI2: the active problem's journey, with the panel's open context (estate, catalog, ledger). */
+  public journey(previewTemplate?: string): Journey | undefined {
+    const scope = this.currentWorkflowScope();
+    if (!scope) return undefined;
+    return journeyFor({ ...scope, ...(this.contextFileManager ? { context: journeyContext(this.contextFileManager) } : {}), previewTemplate });
+  }
+
+  /**
+   * UI2: moves a journey step forward, whichever surface shows it (the Workflow tab, the palette). Each action id
+   * is done the way the panel already does it: the interview and drafting in the chat, approvals through the
+   * panel's own handlers (a person, the panel channel), the rest through AutoDE's commands.
+   */
+  public async journeyAction(id: string, args: Record<string, string> = {}): Promise<void> {
+    const chat = async (hint: string) => { await vscode.commands.executeCommand(`${EXTENSION_ID}.openSidebar`); this.postLog(hint); };
+    switch (id) {
+      case 'write-statement': await chat('Describe the business problem in the chat to start: AutoDE drafts the statement from it.'); return;
+      case 'confirm-statement': await this.handleMessage({ type: 'approveBusinessProblem' } as WebviewMessage); return;
+      case 'answer-interview': await chat('The interview continues here: answer the open questions in the chat.'); return;
+      case 'draft-spec': await chat('Ask in the chat to draft the specification from the interview (or keep answering: AutoDE drafts it when the interview is complete).'); return;
+      case 'approve-spec': await this.approveCurrentSpec(); return;
+      case 'review-facts': await vscode.commands.executeCommand(`${EXTENSION_ID}.openSidebar`); this.openInbox(); return;
+      case 'source-assessment': await vscode.commands.executeCommand(`${EXTENSION_ID}.sourceAssessment`); return;
+      case 'structure-glossary': await chat('Ask the knowledge engineer in the chat to structure the glossary (categories, broader and related terms): it proposes, you approve.'); return;
+      case 'draft-semantic': await vscode.commands.executeCommand(`${EXTENSION_ID}.newSemanticModel`); return;
+      case 'propose-workflow': await this.workflowAction('propose', undefined, args.template); return;
+      case 'run-stage': await this.workflowAction('run', args.stage, undefined); return;
+      default: this.postLog(`No panel action for "${id}" here: use the Workflow tab.`);
+    }
   }
 
   /** SIMP-1: everything that waits for a person, from the panel's own ledger and the workspace. */

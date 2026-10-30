@@ -14,6 +14,10 @@ import { recordArtifact } from '../engine/agents/artifacts';
 import { stageReadiness } from '../engine/workflows/readiness';
 import { stageContextGaps } from '../engine/agents/stageGaps';
 import { problemMode } from '../engine/documents/problemMode';
+import { journeyContextFrom, journeyFor } from '../engine/workflows/journey';
+import { CoverageStatus, placeCoverage, specCoverage } from '../engine/workflows/coverage';
+import { parseEstate } from '../engine/context/estate';
+import * as fs from 'node:fs';
 
 /**
  * The workflow over MCP (PA3a): the runtime is the hub; an agent asks what to
@@ -78,10 +82,57 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
     },
     {
       name: 'autode_workflow_status',
-      description: 'The active problem\'s workflow: each stage\'s state (done, ready, in-progress, awaiting-approval, pending with what it waits for, stale with why, skipped with the reason) and what to do next.',
-      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      description: 'The active problem\'s workflow: each stage\'s state (done, ready, in-progress, awaiting-approval, pending with what it waits for, stale with why, skipped with the reason) and what to do next. Since v0.56.0 also "journey": the whole journey in five phases (problem, discovery, specification, workflow plan, delivery), each step with who acts, where it stands and its one action; the specification\'s coverage; and, before the plan is approved, a preview of the delivery stages (template: one to preview).',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { template: { type: 'string', minLength: 1, description: 'The template the delivery preview shows (default: the suggested one).' } } },
       annotations: read('Workflow status'),
-      handler: async (_args, ws) => wrap(() => statusFor(scopeOf(ws)) as unknown as Record<string, unknown>)
+      handler: async (args, ws) => {
+        const sources = await ws.contextSources();
+        return wrap(() => {
+          const scope = scopeOf(ws);
+          let systems: Array<{ id: string; name: string; role: string }> = [];
+          try { systems = parseEstate(fs.readFileSync(layoutPath(scope.workspaceRoot, 'estate'), 'utf8')).systems; } catch { /* no estate yet */ }
+          const journey = journeyFor({ ...scope, context: journeyContextFrom({ systems, catalog: (sources.catalog as unknown as { all?: () => Array<{ system: string }> } | undefined)?.all?.() ?? [], assertions: sources.assertions }), previewTemplate: args.template as string | undefined });
+          let status: Record<string, unknown> = {};
+          try { status = statusFor(scope) as unknown as Record<string, unknown>; } catch { /* no workflow yet: the journey says what comes first */ }
+          return { ...status, journey };
+        });
+      }
+    },
+    {
+      name: 'autode_coverage',
+      description: 'The active problem\'s coverage (PLN0): each in-scope item and objective of the specification with its status (covered by named stages, manual, out-of-scope with a reason, gap, or question still to place), against the approved workflow or the one waiting for approval, with the engine\'s checks. The workflow can\'t be approved while a question is open.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: read('Coverage'),
+      handler: async (_args, ws) => wrap(() => {
+        const scope = scopeOf(ws);
+        const c = specCoverage(scope.workspaceRoot, scope.problemId);
+        if (!c) throw new EngineToolError('NOT_FOUND', 'No coverage yet: it needs the specification and a workflow (autode_workflow_draft, autode_propose_workflow).');
+        return { against: c.against, ...c.coverage, check: c.check };
+      })
+    },
+    {
+      name: 'autode_place_coverage',
+      description: 'Place one coverage item (from autode_coverage): covered by stage ids, manual (tracked by stage ids, done outside AutoDE), out-of-scope with a reason, or gap with what is missing. Recorded with you as its author; a person approves the coverage with the workflow.',
+      inputSchema: {
+        type: 'object', additionalProperties: false, required: ['item', 'status'],
+        properties: {
+          item: { type: 'string', minLength: 1, description: 'The item id (scope:… or objective:…).' },
+          status: { type: 'string', enum: ['covered', 'manual', 'out-of-scope', 'gap'] },
+          stages: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 20 },
+          reason: { type: 'string', minLength: 1, maxLength: 2000 }
+        }
+      },
+      annotations: records('Place a coverage item'),
+      handler: async (args, ws) => wrap(() => {
+        const scope = scopeOf(ws);
+        const c = specCoverage(scope.workspaceRoot, scope.problemId);
+        if (!c) throw new EngineToolError('NOT_FOUND', 'No coverage yet: it needs the specification and a workflow.');
+        let next;
+        try { next = placeCoverage(c.problemRoot, c.coverage, String(args.item), { status: args.status as Exclude<CoverageStatus, 'question'>, stages: args.stages as string[] | undefined, reason: args.reason as string | undefined }, `agent: ${clientName() ?? 'MCP client'}`); }
+        catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+        const after = specCoverage(scope.workspaceRoot, scope.problemId)!;
+        return { placed: next.entries.find((e) => e.id === args.item), check: after.check };
+      })
     },
     {
       name: 'autode_workflow_next',

@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import { checksumOf, loadCatalog, writeApproval } from '../platform/operations/load';
 
 import { WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, writeWorkflow } from '../workflows/instance';
+import { approveCoverage, checkCoverage, effectiveCoverage, readCoverage } from '../workflows/coverage';
 import { appendEvent } from '../workflows/events';
 import { loadTemplates } from '../workflows/templates';
 
@@ -356,6 +357,23 @@ export interface ApplyResult { decision: Decision; applied: boolean; message: st
  * was proposed is superseded instead — never applied to state its reviewer
  * didn't see.
  */
+/**
+ * What stops a pending decision from being approved now, in words (empty: nothing). PLN0: a workflow whose
+ * coverage of the specification has an open question or an error. The CLI and the panel ask before resolving;
+ * `applyDecision` asks again for a decision resolved by editing its file.
+ */
+export function approvalBlockers(store: DecisionStore, id: string, ctx: Pick<ProposalContext, 'workspaceRoot' | 'problemRoot'>): string[] {
+  const d = store.get(id);
+  if (d.kind !== 'workflow') return [];
+  const p = store.proposal<WorkflowInstance>(id);
+  const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', p.problemId);
+  let spec: BusinessProblemSpec | undefined;
+  try { spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? ''); } catch { return []; }
+  const c = effectiveCoverage(spec, p, readCoverage(root));
+  const check = checkCoverage(c, spec, p);
+  return check.ok ? [] : [`The specification's coverage isn't complete (${check.counts.question} item(s) to place): ${check.errors.join(' ')} Place them in the plan step (or autode workflow coverage place), then approve.`];
+}
+
 export async function applyDecision(store: DecisionStore, id: string, ctx: ProposalContext, deps: ApplyDeps = {}): Promise<ApplyResult> {
   const d = store.get(id);
   if (d.status !== 'approved') throw new DecisionError('NOT_APPROVED', `Decision ${id} is ${d.status}; only an approved decision is applied.`, { status: d.status });
@@ -430,6 +448,9 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
       case 'workflow': {
         const p = store.proposal<WorkflowInstance>(id);
         const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', p.problemId);
+        // PLN0: approved through a channel that didn't ask first (an edited decision file): the coverage still has to be complete.
+        const blockers = approvalBlockers(store, id, { workspaceRoot: ctx.workspaceRoot, problemRoot: root });
+        if (blockers.length) { const failed = store.markFailed(id, blockers.join(' ')); return { decision: failed, applied: false, message: blockers.join(' ') }; }
         const current = readWorkflow(root);
         // Re-planning on the same template keeps the state of the stages both share; a new template restarts (owner, 2026-10-21).
         const keep = current && current.template.id === p.template.id ? new Map(current.stages.map((s) => [s.id, s.record])) : new Map();
@@ -440,6 +461,11 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         writeWorkflow(root, next);
         const resolved = [...d.events].reverse().find((e) => e.type === 'approved');
         appendEvent(root, { at: now.toISOString(), type: 'approved', actor: { kind: 'person', name: approver }, channel: resolved?.channel, decisionId: id, template: p.template.id, reason: keep.size ? 'the stages both workflows share keep their state' : current ? 'a new template restarts the workflow' : undefined });
+        // PLN0: the coverage the approver saw with the plan is approved with it.
+        try {
+          const spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? '');
+          approveCoverage(root, effectiveCoverage(spec, next, readCoverage(root)), approver, now.toISOString());
+        } catch { /* no specification to cover */ }
         break;
       }
       case 'vocabulary': {

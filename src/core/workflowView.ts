@@ -7,6 +7,8 @@ import { stageDetail, WorkflowScope } from '../engine/workflows/service';
 import { actorLabel } from '../engine/workflows/events';
 import { layoutPath } from '../engine/workspaceLayout';
 import { EXPLORATION_LABEL, problemMode } from '../engine/documents/problemMode';
+import { Journey } from '../engine/workflows/journey';
+import { CoverageStatus, placeCoverage, specCoverage } from '../engine/workflows/coverage';
 
 /**
  * The Workflow view (v0.44.1): a tree in AutoDE's activity bar, a full editor
@@ -23,6 +25,10 @@ export interface WorkflowViewHost {
   user(): string;
   /** SIMP-1: everything that waits for a person. */
   waiting?(): WaitingItem[];
+  /** UI2: the whole journey (the delivery preview for this template, when given). */
+  journey?(previewTemplate?: string): Journey | undefined;
+  /** UI2: moves a journey step forward the way the panel does it. */
+  journeyAction?(id: string, args?: Record<string, string>): Promise<void>;
 }
 
 type Node = { kind: 'waiting'; items: WaitingItem[] } | { kind: 'waitingItem'; item: WaitingItem } | { kind: 'problem'; model: WorkflowModel } | { kind: 'stage'; stage: StageModel; model: WorkflowModel } | { kind: 'task'; label: string; done?: boolean } | { kind: 'empty'; label: string };
@@ -111,15 +117,17 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<Node> {
 export class WorkflowPanel {
   private static current: WorkflowPanel | undefined;
   private selected: string | undefined;
+  /** UI2: the template the delivery preview shows (the suggested one until a person picks another). */
+  private previewTemplate: string | undefined;
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly context: vscode.ExtensionContext, private readonly host: WorkflowViewHost, private readonly onChange: () => void) {
     panel.onDidDispose(() => { WorkflowPanel.current = undefined; });
-    panel.webview.onDidReceiveMessage((m: { type: string; stage?: string; decisionId?: string; template?: string; action?: string; file?: string }) => void this.onMessage(m));
+    panel.webview.onDidReceiveMessage((m: { type: string; stage?: string; decisionId?: string; template?: string; action?: string; file?: string; id?: string; args?: Record<string, string>; item?: string; tab?: string }) => void this.onMessage(m));
   }
 
   public static show(context: vscode.ExtensionContext, host: WorkflowViewHost, onChange: () => void, stage?: string): void {
     if (!WorkflowPanel.current) {
-      const panel = vscode.window.createWebviewPanel('autodeWorkflow', 'AutoDE Workflow', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
+      const panel = vscode.window.createWebviewPanel('autodeWorkflow', 'AutoDE · Workflow', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'autode-icon-64.png');
       const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
       const html = fs.readFileSync(path.join(context.extensionUri.fsPath, 'media', 'workflow.html'), 'utf8').replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, panel.webview.cspSource);
@@ -136,20 +144,54 @@ export class WorkflowPanel {
   private post(): void {
     const scope = this.host.scope();
     if (!scope) { void this.panel.webview.postMessage({ type: 'model', model: null }); return; }
+    // UI2: the journey first; the stage board (below it) only once there is a workflow.
+    let journey: Journey | undefined;
+    try { journey = this.host.journey?.(this.previewTemplate); } catch { journey = undefined; }
     let model: WorkflowModel;
-    try { model = buildWorkflowModel(scope); } catch (err) { void this.panel.webview.postMessage({ type: 'model', model: null, error: err instanceof Error ? err.message : String(err) }); return; }
+    try { model = buildWorkflowModel(scope); } catch (err) { void this.panel.webview.postMessage({ type: 'model', model: null, journey, error: err instanceof Error ? err.message : String(err) }); return; }
     const details = Object.fromEntries(model.stages.map((s) => {
       const d = stageDetail(scope, s.id);
       return [s.id, d ? { ...d, history: d.history.map((e) => ({ ...e, who: actorLabel(e.actor) })), decision: d.decision ? { ...d.decision, events: d.decision.events } : undefined } : undefined];
     }));
     const exploration = problemMode(layoutPath(scope.workspaceRoot, 'problems', scope.problemId)) === 'exploration';
-    void this.panel.webview.postMessage({ type: 'model', model, details, selected: this.selected ?? model.next?.id ?? model.stages[0]?.id, exploration: exploration ? EXPLORATION_LABEL : undefined });
+    void this.panel.webview.postMessage({ type: 'model', model, journey, details, selected: this.selected ?? model.next?.id ?? model.stages[0]?.id, exploration: exploration ? EXPLORATION_LABEL : undefined });
   }
 
-  private async onMessage(m: { type: string; stage?: string; decisionId?: string; template?: string; action?: string; file?: string }): Promise<void> {
+  /** PLN0: a person places a coverage item: a stage that delivers it, done outside AutoDE, out of scope, or a gap. */
+  private async placeItem(itemId: string): Promise<void> {
+    const scope = this.host.scope();
+    if (!scope) return;
+    const c = specCoverage(scope.workspaceRoot, scope.problemId);
+    const e = c?.coverage.entries.find((x) => x.id === itemId);
+    if (!c || !e) return;
+    const how = await vscode.window.showQuickPick([
+      { label: '$(check) Delivered by stages…', status: 'covered' as const },
+      { label: '$(person) Done outside AutoDE, tracked by a stage…', status: 'manual' as const },
+      { label: '$(circle-slash) Out of scope…', status: 'out-of-scope' as const },
+      { label: '$(warning) A gap: no approved skill can deliver it…', status: 'gap' as const }
+    ], { title: `Place "${e.text}"`, placeHolder: e.reason ?? 'How is this item delivered?' });
+    if (!how) return;
+    let stages: string[] | undefined; let reason: string | undefined;
+    if (how.status === 'covered' || how.status === 'manual') {
+      const picked = await vscode.window.showQuickPick(c.stages.map((x) => ({ label: x.title, description: `${x.id} · ${x.kind}`, id: x.id, picked: e.stages?.includes(x.id) })), { canPickMany: true, title: `Which stages ${how.status === 'manual' ? 'track' : 'deliver'} "${e.text}"?` });
+      if (!picked?.length) return;
+      stages = picked.map((x) => x.id);
+    } else {
+      reason = await vscode.window.showInputBox({ title: `"${e.text}" is ${how.status}: why?`, prompt: how.status === 'gap' ? 'What is missing (a stage kind, a platform skill, a capability)?' : 'Why is it not delivered by this problem?', validateInput: (v) => (v.trim() ? undefined : 'Give a reason.') });
+      if (!reason) return;
+    }
+    placeCoverage(c.problemRoot, c.coverage, itemId, { status: how.status as Exclude<CoverageStatus, 'question'>, stages, reason }, `person: ${this.host.user()}`);
+  }
+
+  private async onMessage(m: { type: string; stage?: string; decisionId?: string; template?: string; action?: string; file?: string; id?: string; args?: Record<string, string>; item?: string; tab?: string }): Promise<void> {
     const scope = this.host.scope();
     try {
       switch (m.type) {
+        // UI2: the window's tabs, the journey's actions, the delivery preview, coverage.
+        case 'openTab': if (m.tab === 'knowledge') await vscode.commands.executeCommand('autoDataEngineeringHub.openKnowledgeExplorer'); else if (m.tab === 'platforms') await vscode.commands.executeCommand('autoDataEngineeringHub.platformOperations'); return;
+        case 'journeyAction': if (m.id) await this.host.journeyAction?.(m.id, m.args ?? {}); break;
+        case 'preview': this.previewTemplate = m.template || undefined; this.post(); return;
+        case 'placeCoverage': if (m.item) await this.placeItem(m.item); break;
         case 'ready': this.post(); return;
         case 'select': this.selected = m.stage; return;
         case 'approve': case 'reject': {

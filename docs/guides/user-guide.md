@@ -98,7 +98,7 @@ Click **Save as named connection**. AutoDE tests it first and saves it only if t
 - your user name and file paths go to `.autode/local/connections.yaml` (not committed);
 - passwords and tokens go to VS Code's secret storage. Secrets never go in files.
 
-The **Saved connections** list at the top of the tab shows each connection's readiness, in AutoDE and for agent hosts.
+The **Saved connections** list at the top of the tab shows each connection's readiness, in AutoDE and for agent hosts. Since 0.56.0 several sources can be connected at once: *Use* connects one without disconnecting the others, the list marks which are connected (each with *Disconnect*), and commands that act on a source ask which one.
 
 **Read-only by default.** AutoDE's queries only read. **Sample data**: by default no row values reach a model, only columns and counts. To allow sample rows for a connection, set `allowSampleDataInPrompts: true` on it in `connections.yaml`. Even then, columns that look like personal data (or that you classified as personal, [§12](#12-personal-data)) are masked.
 
@@ -585,6 +585,15 @@ The planning stage drafts the workflow deterministically from the template and w
 
 ### 9.4 The Workflow view
 
+**The journey** (since 0.56.0). *AutoDE: Open Workflow* opens the AutoDE window on its Workflow tab (beside the Knowledge Explorer and the Platform catalog tabs). From a problem's first statement it shows five phases: ① Problem, ② Discovery, ③ Specification, ④ Workflow plan, ⑤ Delivery.
+- **You are here** names the phase and the next step, with its button.
+- **The rail:** each phase's status (✓ done, ● now, ◆ waiting for you, ○ not started) and a summary. Click a phase to see its steps.
+- **Each step** says who acts (you, AutoDE, or an agent's role), where it stands, why it is there, what it waits on, and its history, with one action. The glossary and the semantic layer are *checkpoints, not gates*: shown, never blocking.
+- **④ Workflow plan** shows the **coverage** of your specification: each in-scope item and objective with the stages that deliver it. An item no stage delivers is a question: *Place…* says which stages deliver it, that a person does it outside AutoDE, that it is out of scope (with why) or a gap. The plan can't be approved while one is open; approving it approves the coverage too. In a terminal: `autode workflow coverage`.
+- **⑤ Delivery**, before the plan is approved, previews the template's stages (switch templates to compare; a stage done per source system has a lane per system; dashed stages are optional). After approval it shows the stages, as below.
+
+The Workflow Palette now shows just where you are: the problem (＋ New, ⇄ Switch), a five-phase bar, the next step and its action, what waits for you, and *Open the workflow*. Everything else is under *More*.
+
 The Workflow view shows each stage's state: **done**, **ready**, **in progress**, **awaiting approval**, **pending** (with what it waits for), **stale** (with why) or **skipped** (with the reason). A *Next* line says what to do now. *AutoDE: Open Workflow* opens a larger editor tab; the status bar shows the current stage.
 
 Actions on a stage:
@@ -977,7 +986,7 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](../roadmap.md)):
 
-- **A simpler workspace** (v0.56.0): the Knowledge Explorer, the Workflow view and the Platform catalog in one AutoDE window, and a simpler Workflow Palette.
+- **A planner that composes the workflow from coverage** (v0.56.1): workflows beyond the three templates, from AutoDE's approved skills only, a short clarification round when the plan needs your answers, and re-planning as the work runs.
 - **Platform operations** (the catalog since v0.54.0; more through v0.58.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release.
   - AutoDE reads observed lineage from Snowflake and Databricks itself (since v0.54.0), then the estate (v0.55.0), when **Redshift** also arrives, as a source through the AWS CLI.
   - A **platform catalog** (v0.57.0) shows every operation AutoDE runs on your platforms and the skills and features that rely on it. There you can try reads, and edit skills (including your own copy of AutoDE's) and operations, each reviewed before use.

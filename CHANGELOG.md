@@ -6,6 +6,22 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.0
+
+- **UI2: the whole journey in view** (docs/specs/ui-simplification.md; requirement UI-8; owner, 2026-10-28/29).
+  - **The journey, from the first statement:** every problem shows five phases, ① Problem, ② Discovery, ③ Specification, ④ Workflow plan, ⑤ Delivery. Each step says who acts (you, AutoDE or the agent's role), where it stands with counts, why it is there, what it waits on, its parts (the interview's) and its history, and offers one action. The glossary and the semantic layer are *checkpoints, not gates*. Computed by one engine function, `journeyFor()`, from the state AutoDE already keeps (nothing new is stored).
+  - **The Workflow tab:** the window's tabs, the problem, *You are here* with the next step's button, the five-phase rail, the selected phase's steps beside *About this step*, coverage and the plan in ④, and in ⑤ the stage board, or before the plan is approved a **delivery preview**: the template's stages greyed, a template switch with why each fits, a stage repeated per source system drawn with one lane per system, optional and conditional stages dashed.
+  - **The palette:** the problem with ＋ New and ⇄ Switch, a five-segment bar, the phase and next step, its one action, what waits for you, *Open the workflow*; the rest under *More*.
+  - **The same everywhere:** `autode workflow status` shows the journey first, then the stages; `autode_workflow_status` has a `journey` field (and previews another template with `template`). A test compares the CLI's and MCP's journeys.
+  - **Several sources at once in the panel:** connecting another source keeps the others live (a pool by connection id); the Saved connections list marks which are connected, each with Disconnect; Disconnect, Browse and Refresh Observed Lineage ask which source when several are live.
+- **PLN0: coverage of the specification** (docs/specs/workflow-planning.md §3.1, §4; requirement ORC-12; owner, 2026-10-30). Every in-scope item and objective is covered by named stages, done outside AutoDE (manual), out of scope with a reason, a gap, or an open question. The engine proposes a starting coverage (an item that names a kind of work goes to the workflow's stage of that kind; a data subject to the main delivery stage) and checks it: unknown items, stages not in the workflow, reasons missing, items listed twice or not at all. **A workflow can't be approved while an item is open** (the panel, `autode workflow approve`, `autode decisions approve`, and an edited decision file all ask first); approving it records the coverage's approval. Place items in the plan step, with `autode workflow coverage place <item> --status … [--stage …] [--reason …]`, or `autode_place_coverage`; read it with `autode workflow coverage` or `autode_coverage`.
+- **Deviations:**
+  - **One window:** the three views are editor tabs titled *AutoDE · …* in one group, each with the same tab bar linking the others (the Platform catalog opens the interim *AutoDE: Platform Operations* until POP4), not one webview hosting all three: merging the Explorer's and the Workflow view's separate apps into one page was left for when POP4 adds the catalog's own view.
+  - **The palette:** where you are and the one next action at the top; its other sections (decisions, problems, specification, context, artifacts, primitives) are folded under *More*, one click away, rather than removed, since several hold working features.
+  - **Coverage approval (PLN0):** approving the workflow records the coverage's approval with it (one action, coverage shown first); the separate, ordered coverage decision comes with the planner (PLN1). Coverage items are the specification's in-scope items and objectives; quality rules and constraints join in PLN1.
+  - **Several sources:** source connections are pooled; a target stays one live connection.
+  - **Journey actions for the interview and drafting** open the chat (where they happen today) rather than a new form.
+
 ## 0.55.2
 
 - **Amazon Redshift as a target** (docs/specs/platform-operations.md §6.2b; owner, 2026-10-30: right after POP2).
