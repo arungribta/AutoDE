@@ -314,7 +314,7 @@ The Context Inbox, in the panel, lists what waits for you: facts to review (grou
 
 From a terminal: `autode facts`, `autode facts show <id>`, `autode facts confirm <id>…` (or `--from <source>`), `autode facts reject <id>`, `autode facts edit <id>`, `autode facts conflicts`.
 
-**Conflicts** — two facts that contradict each other — are shown side by side, never merged silently.
+**Conflicts** — two facts that contradict each other — are shown side by side, never merged silently. Each fact's card says what it contradicts. **Confirming one side settles it** (since 0.56.3): the other side is rejected, with the reason recorded. A side you or a colleague already confirmed, or the primary key the schema declares, isn't overruled: Confirm says so, and you edit the fact to agree or reject it. *Confirm all documented facts* leaves disputed facts for you.
 
 ### 8.4 Context gaps
 
@@ -988,7 +988,7 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](../roadmap.md)):
 
-- **A planner that composes the workflow from coverage** (v0.56.3): workflows beyond the three templates, from AutoDE's approved skills only, a short clarification round when the plan needs your answers, and re-planning as the work runs.
+- **A planner that composes the workflow from coverage** (v0.56.4): workflows beyond the three templates, from AutoDE's approved skills only, a short clarification round when the plan needs your answers, and re-planning as the work runs.
 - **Platform operations** (the catalog since v0.54.0; more through v0.58.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release.
   - AutoDE reads observed lineage from Snowflake and Databricks itself (since v0.54.0), then the estate (v0.55.0), when **Redshift** also arrives, as a source through the AWS CLI.
   - A **platform catalog** (v0.57.0) shows every operation AutoDE runs on your platforms and the skills and features that rely on it. There you can try reads, and edit skills (including your own copy of AutoDE's) and operations, each reviewed before use.

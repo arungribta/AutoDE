@@ -98,7 +98,7 @@ The estate already holds several source systems beside a target (STC-10), `conne
 
 ### 3.7 Coverage in the plan step (PLN0; owner, 2026-10-30)
 
-The plan step shows the **coverage** of the approved specification ([workflow-planning.md](workflow-planning.md) §3.1, §4): each in-scope item with the stages that deliver it, or out of scope with a reason, or a gap, or a question still to place; the engine's checks; and the coverage approval before the workflow's. The person places the open items (the planner does it from PLN1, v0.56.3).
+The plan step shows the **coverage** of the approved specification ([workflow-planning.md](workflow-planning.md) §3.1, §4): each in-scope item with the stages that deliver it, or out of scope with a reason, or a gap, or a question still to place; the engine's checks; and the coverage approval before the workflow's. The person places the open items (the planner does it from PLN1, v0.56.4).
 
 ## 4. Acceptance
 

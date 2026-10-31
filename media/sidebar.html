@@ -797,11 +797,25 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       }
       html += '</div>';
     }
+    // v0.56.3: a question without options could be answered only in the chat box, which the card didn't say.
+    html += '<textarea class="spec-q-input spec-q-answer" rows="2" placeholder="' + (question.options && question.options.length ? 'Or type another answer…' : 'Type your answer…') + '"></textarea>' +
+      '<div class="btn-row"><button class="primary spec-q-send">Answer</button></div>';
     html += '</div>';
     var div = document.createElement('div');
     div.innerHTML = html;
     var el = chatStream.appendChild(div.firstElementChild);
     chatStream.scrollTop = chatStream.scrollHeight;
+    var answerBox = el.querySelector('.spec-q-answer');
+    var qSend = el.querySelector('.spec-q-send');
+    var answer = function () {
+      var v = answerBox.value.trim();
+      if (!v) { showToast('Type an answer first', ''); return; }
+      answerBox.disabled = true; qSend.disabled = true;
+      chatInput.value = v;
+      sendMessage();
+    };
+    qSend.onclick = answer;
+    answerBox.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answer(); } };
     var options = el.querySelectorAll('.spec-q-option');
     options.forEach(function (btn) {
       btn.onclick = function () {
@@ -1637,7 +1651,8 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var notes = '';
     if (f.supersedes) notes += '<div class="d-note">↻ corrects: ' + escapeHtml(f.supersedes.statement || f.supersedes.id) + ' (retired when you confirm)</div>';
     if (f.verification) notes += '<div class="d-note">' + (f.verification.result === 'pass' ? '✔ ' : '✖ ') + escapeHtml(f.verification.detail || '') + '</div>';
-    if (f.reviewReason && !f.verification) notes += '<div class="d-note">⚠ ' + escapeHtml(f.reviewReason) + '</div>';
+    if (f.reviewReason && !f.verification && !(f.contradicts || []).length) notes += '<div class="d-note">⚠ ' + escapeHtml(f.reviewReason) + '</div>';
+    (f.contradicts || []).forEach(function (c) { notes += '<div class="d-note">⚠ Contradicts “' + escapeHtml(c.statement) + '”' + (c.settles === 'blocks' ? ', which is confirmed: edit this one to agree, or reject it.' : ' (' + escapeHtml(c.status) + '). Confirming this one rejects that one.') + '</div>'; });
     if ((f.flags || []).indexOf('unresolved_subject') >= 0) notes += '<div class="d-note">⚠ subject not found in the estate: ' + escapeHtml(f.subject.join(', ')) + '</div>';
     (f.evidence || []).forEach(function (e) { notes += '<div class="d-note">↳ ' + escapeHtml(e.ref) + (e.excerpt ? ' — “' + escapeHtml(e.excerpt.slice(0, 140)) + '”' : '') + '</div>'; });
     var probeable = ['key', 'grain', 'relationship', 'quality_expectation'].indexOf(f.kind) >= 0;

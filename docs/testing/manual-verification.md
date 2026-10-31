@@ -1355,6 +1355,18 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: ＋ New → *Start new problem*; describe the problem.
   Expect: the same: a new draft problem, its interview, its journey.
 
+## Part 61 — v0.56.3 Confirm settles a contradiction; every question can be answered
+
+- [ ] **61.1 Two definitions of one term.**
+  Do: in chat, say *Net sales is gross sales minus returns*; later, *net sales means invoiced amount after rebates*. In the Context Inbox, confirm the first.
+  Expect: both cards said *Contradicts “…”. Confirming this one rejects that one.*; after Confirm both leave the inbox; the log says the contradicted fact was rejected; the Knowledge Explorer shows the first definition.
+- [ ] **61.2 A confirmed side isn't overruled.**
+  Do: say a third definition of net sales; confirm it.
+  Expect: an error naming the confirmed fact; the new one stays in the inbox. *Edit…* it to the confirmed definition, save: it leaves the inbox.
+- [ ] **61.3 An open question.**
+  Do: in an interview, wait for a clarifying question without options.
+  Expect: the card has an answer box and **Answer**; answering (or Enter) continues the interview.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1698,5 +1710,8 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 59.4 |  |  |
 | 60.1 |  |  |
 | 60.2 |  |  |
+| 61.1 |  |  |
+| 61.2 |  |  |
+| 61.3 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

@@ -13418,6 +13418,61 @@ async function main() {
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
+  // ── v0.56.3: the owner's UI test, facts that stayed after Confirm ──
+
+  await test('v0.56.3: confirming one of two contradicting facts rejects the other and stays confirmed after conflict detection runs (before, it went straight back to review); a confirmed side or the schema is not overruled; bulk confirm leaves disputed facts; the inbox says what Confirm will do', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+    const { detectConflicts, flagConflicts } = fresh('../dist/engine/context/conflicts.js');
+    const R = fresh('../dist/engine/context/factReview.js');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-settle-'));
+    try {
+      const ledger = new AssertionLedger(dir);
+      await ledger.load();
+      const term = (definition, createdBy = 'chat:t1', trust = 'inferred') => ledger.assert({ kind: 'business_term', subject: ['term:net-sales'], predicate: 'defined_as', value: { term: 'Net sales', definition }, statement: 'Net sales: ' + definition, evidence: [{ kind: 'chat', ref: 't1' }], trust, status: 'proposed', createdBy });
+      // What the panel does after every review: detect conflicts, flag their active sides.
+      const settle = async () => flagConflicts(ledger, detectConflicts(ledger.assertions()));
+      const a = await term('gross sales minus returns and discounts');
+      const b = await term('invoiced amount after rebates');
+      let box = R.inbox(ledger);
+      const fa = box.facts.find((f) => f.id === a.id);
+      assert.deepStrictEqual(fa.contradicts.map((c) => [c.id, c.settles]), [[b.id, 'rejects']]);
+      const line = await R.reviewFact(ledger, a.id, 'confirm', 'user:arun');
+      assert.ok(/The fact it contradicted was rejected/.test(line), line);
+      await settle();
+      assert.deepStrictEqual([ledger.get(a.id).status, ledger.get(b.id).status], ['active', 'rejected'], 'Confirm sticks');
+      box = R.inbox(ledger);
+      assert.deepStrictEqual([box.facts.length, box.conflicts.length], [0, 0], 'the inbox is clear');
+      // A later contradiction can't overrule a confirmed fact without saying so.
+      const c = await term('shipped value');
+      assert.strictEqual(R.inbox(ledger).facts.find((f) => f.id === c.id).contradicts[0].settles, 'blocks');
+      await assert.rejects(R.reviewFact(ledger, c.id, 'confirm', 'user:arun'), /contradicts the confirmed fact "Net sales: gross sales minus returns and discounts"/);
+      assert.strictEqual(ledger.get(c.id).status, 'proposed', 'nothing changed');
+      // Editing it to agree resolves it.
+      await R.reviewFact(ledger, c.id, 'edit', 'user:arun', { value: JSON.stringify({ term: 'Net sales', definition: 'gross sales minus returns and discounts' }) });
+      await settle();
+      assert.deepStrictEqual([R.inbox(ledger).facts.length, R.inbox(ledger).conflicts.length, ledger.get(a.id).status], [0, 0, 'active']);
+      // Bulk confirm leaves the disputed documented facts for a person.
+      const keyFact = (cols) => ledger.assert({ kind: 'grain', subject: ['table:sales.daily'], predicate: 'is', value: cols, statement: 'One row per ' + cols.join(', '), evidence: [{ kind: 'doc', ref: 'd.md' }], trust: 'documented', status: 'proposed', createdBy: 'doc:d.md' });
+      const g1 = await keyFact(['day', 'store']);
+      const g2 = await keyFact(['day', 'sku']);
+      const other = await ledger.assert({ kind: 'business_term', subject: ['term:sku'], predicate: 'defined_as', value: { term: 'SKU', definition: 'stock keeping unit' }, statement: 'SKU: stock keeping unit', evidence: [{ kind: 'doc', ref: 'd.md' }], trust: 'documented', status: 'proposed', createdBy: 'doc:d.md' });
+      assert.strictEqual(await R.bulkConfirmDocumented(ledger, 'doc:d.md', 'user:arun'), 1);
+      assert.deepStrictEqual([ledger.get(other.id).status, ledger.get(g1.id).status, ledger.get(g2.id).status], ['active', 'proposed', 'proposed']);
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    assert.ok(/Confirming this one rejects that one\./.test(html) && /which is confirmed: edit this one to agree, or reject it\./.test(html), 'the inbox card says what Confirm will do');
+  });
+
+  await test('v0.56.3: an interview question without options has its own answer box (before, only the chat box took the answer and the card did not say so); with options, the box takes another answer', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    const i = html.indexOf('function addSpecQuestion(question)');
+    const body = html.slice(i, html.indexOf('function addSpecQuestionsForm', i));
+    assert.ok(/<textarea class="spec-q-input spec-q-answer"/.test(body) && /'Type your answer…'/.test(body) && /'Or type another answer…'/.test(body), 'an answer box, always');
+    assert.ok(/qSend\.onclick = answer;/.test(body) && /chatInput\.value = v;\s*sendMessage\(\);/.test(body), 'it answers through the chat, which continues the interview');
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));

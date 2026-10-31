@@ -6,6 +6,13 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.3
+
+- **Fixed: Confirm seemed to do nothing for some facts** (owner's UI test, 2026-10-30). When two facts contradict each other (a model reading a conversation can propose the same term with two definitions, or a grain or key twice), confirming one made it active for a moment, then conflict detection sent it back to *needs review*, so it stayed in the Context Inbox. Confirming one side is now the choice: the other unconfirmed side is rejected (with the reason recorded), and the confirmed fact stays. A side a person already confirmed, or the primary key the schema declares, isn't overruled: Confirm is refused and says which, so you edit the fact to agree or reject it. *Edit & confirm* settles the same way.
+- The inbox card says what Confirm will do (*Contradicts “…”. Confirming this one rejects that one.*); `autode facts --json` gives each fact's `contradicts`. *Confirm all documented facts* leaves disputed facts for you to choose.
+- **Fixed: a clarifying question with no place to answer.** A question without options could be answered only in the chat box below, which the card didn't say. Every question card now has its own answer box (with options, it takes another answer).
+- **Roadmap:** the planner (PLN1) moves to v0.56.4.
+
 ## 0.56.2
 
 - **Fixed: the first message starts the problem** (owner's UI test, 2026-10-30). With no problem active (a new workspace, or right after ＋ New → *Start new problem*, which asks you to describe it), a chat message was answered as a general question and mined for facts, but no problem was created: the Workflow tab stayed empty and the facts belonged to no problem. Since v0.53.2 the panel asked for the statement and then didn't take it. The message is now the new problem's statement: the problem and its interview start, and the journey shows it as a draft right away (① with the statement waiting for confirmation, ⑤ previewing the suggested workflow). `/commands` and `@agent` messages are unchanged.
