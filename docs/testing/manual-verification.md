@@ -1382,6 +1382,18 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: `autode interview show` with an open select question.
   Expect: *(pick one: …)*, *(pick any, comma-separated: …)* or *(yes / no)* after the question.
 
+## Part 63 — v0.56.5 No folder, no workspace; contradictions only where one value fits
+
+- [ ] **63.1 No folder open.**
+  Do: in the development host, File → Close Folder (or a new empty window); open the AutoDE panel.
+  Expect: *Open a folder to work in*, with **New Workspace…** and **Open Folder…**; no `.autode/` appears in the AutoDE repository. Each button does what it says.
+- [ ] **63.2 Different facts about one subject.**
+  Do: in chat, say *the sales data has missing values, and one feed lands a day late*; confirm the missing-values fact in the Context Inbox.
+  Expect: neither card says *Contradicts*; the late-feed fact stays in the inbox for its own review.
+- [ ] **63.3 A real contradiction still is one.**
+  Do: say *customer history is SCD type 2*, then *customer history overwrites (type 1)*.
+  Expect: both cards say *Contradicts …*; confirming one rejects the other.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1732,5 +1744,8 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 62.2 |  |  |
 | 62.3 |  |  |
 | 62.4 |  |  |
+| 63.1 |  |  |
+| 63.2 |  |  |
+| 63.3 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

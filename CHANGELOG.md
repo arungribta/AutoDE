@@ -6,6 +6,12 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.5
+
+- **Fixed: AutoDE kept a workspace in its own folder when VS Code had no folder open** (owner's UI test, 2026-10-30). With no folder open, the panel fell back to the extension's install folder (in the development host, the AutoDE repository) and wrote `.autode/` there, so a session's facts, problems and chats ended up where the person never looked, and a workspace they had prepared stayed empty. With no folder open the panel now says so and offers **New Workspace…** and **Open Folder…**; nothing is written anywhere.
+- **Fixed: confirming a fact rejected a different fact that didn't contradict it.** Contradiction detection put every fact of one kind and a generic predicate about one subject in the same slot, so two different quality checks (*missing values*, *a feed that lands a day late*) or two decisions about the same subject counted as one value given twice; since 0.56.3, confirming one rejected the other. A slot now holds one value only where the kind does: a key, a grain, a named decision (such as an SCD type), a platform, one type of quality check. Business rules, assumptions, relationships, lineage, tags, owners, and decisions or constraints with a generic predicate can be many per subject and never contradict each other by value.
+- **Roadmap:** PLN1 is split (owner, 2026-10-30): **PLN1a** v0.56.6, the planner composing workflows from coverage with the `manual` stage kind, and constraints and acceptance criteria as coverage items; **PLN1b** v0.56.7, the clarification round and re-planning from stage reports.
+
 ## 0.56.4
 
 - **Interview questions answer by kind** (owner's UI test, 2026-10-30: questions always showed a text box). In the chat's question card and in the multi-question form alike: **radio buttons** for pick-one questions and Yes / No, **checkboxes** for pick-several, each with an *Other* box for an answer that isn't listed (typing in it clears a pick-one choice); a text box for open questions. Before, a card's choices were buttons that sent one answer even when several applied, Yes / No questions had no choices on a card, and the form gave pick-several questions a plain text box. Pick-several answers are sent as one comma-separated answer.

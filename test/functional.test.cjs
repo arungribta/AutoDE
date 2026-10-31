@@ -13418,6 +13418,47 @@ async function main() {
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
   });
 
+  await test('v0.56.5: facts a subject holds many of (two quality checks, two decisions, rules, assumptions) are not a contradiction, so confirming one no longer rejects the other; one slot with two values still is', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+    const { detectConflicts } = fresh('../dist/engine/context/conflicts.js');
+    const R = fresh('../dist/engine/context/factReview.js');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-slots-'));
+    try {
+      const ledger = new AssertionLedger(dir);
+      await ledger.load();
+      const fact = (kind, subject, predicate, value, statement) => ledger.assert({ kind, subject, predicate, value, statement, evidence: [{ kind: 'chat', ref: 't1' }], trust: 'inferred', status: 'proposed', createdBy: 'extractor:interview' });
+      // The owner's case (2026-10-30): both were extracted from one answer, and confirming the first rejected the second.
+      const nulls = await fact('quality_expectation', ['underlying data'], 'check', { check: 'not_null', values: ['missing values'] }, 'The underlying data carries missing values.');
+      const late = await fact('quality_expectation', ['underlying data'], 'check', { check: 'freshness', values: ['a feed that lands a day late'] }, 'The underlying data can include a feed that lands a day late.');
+      const d1 = await fact('decision', ['report specification'], 'decision', { text: 'Capture the report as one machine-readable specification.' }, 'Capture the report as one specification.');
+      const d2 = await fact('decision', ['report specification'], 'decision', { text: 'The specification drives the structures on the other platform.' }, 'The specification drives the other platform.');
+      await fact('business_rule', ['coverage gap'], 'rule', { text: 'Flag a coverage gap', level: 'STRICT' }, 'Flag a coverage gap.');
+      await fact('business_rule', ['coverage gap'], 'rule', { text: 'Never drop rows quietly', level: 'STRICT' }, 'Never drop rows quietly.');
+      assert.deepStrictEqual(detectConflicts(ledger.assertions()), [], 'no contradictions among them');
+      await R.reviewFact(ledger, nulls.id, 'confirm', 'user:arun');
+      await R.reviewFact(ledger, d1.id, 'confirm', 'user:arun');
+      assert.deepStrictEqual([late.id, d2.id].map((id) => ledger.get(id).status), ['proposed', 'proposed'], 'the other facts wait for their own review');
+      // Still contradictions: the same check with two values, a named decision made two ways.
+      await fact('quality_expectation', ['underlying data'], 'check', { check: 'freshness', values: ['within an hour'] }, 'Fresh within an hour.');
+      await fact('decision', ['dim_customer'], 'scd_type', { choice: 'type 2' }, 'Customer history: SCD2.');
+      await fact('decision', ['dim_customer'], 'scd_type', { choice: 'type 1' }, 'Customer history: overwrite.');
+      const keys = detectConflicts(ledger.assertions()).map((c) => c.key).sort();
+      assert.deepStrictEqual(keys, ['value|decision|dim_customer|scd_type', 'value|quality_expectation|underlying data|check#freshness'], keys.join(' '));
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('v0.56.5: with no folder open the panel offers New Workspace and Open Folder and builds no workspace (before, it fell back to its own install folder: in the development host, the AutoDE repository)', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { noFolderPage } = require('../dist/core/noFolderPage.js');
+    const page = noFolderPage();
+    assert.ok(/type: 'newWorkspace'/.test(page) && /type: 'openFolder'/.test(page) && /<script>/.test(page), 'two actions, and a plain <script> the CSP nonce is applied to');
+    const src = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
+    const i = src.indexOf('public async resolveWebviewView');
+    const guard = src.indexOf('if (!vscode.workspace.workspaceFolders?.[0]) {', i);
+    assert.ok(guard > i && guard < src.indexOf('new ContextFileManager(', i) && /noFolderPage\(\)[\s\S]{0,400}return;/.test(src.slice(guard, guard + 700)), 'the guard comes before any manager is built, and returns');
+  });
+
   // ── v0.56.3: the owner's UI test, facts that stayed after Confirm ──
 
   await test('v0.56.3: confirming one of two contradicting facts rejects the other and stays confirmed after conflict detection runs (before, it went straight back to review); a confirmed side or the schema is not overruled; bulk confirm leaves disputed facts; the inbox says what Confirm will do', async () => {

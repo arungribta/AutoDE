@@ -1,6 +1,6 @@
 # Workflow planning: coverage, composed workflows and clarification
 
-**Status:** specified 2026-10-30 (owner). **PLN0 shipped in v0.56.0** (CHANGELOG.md 0.56.0): coverage items, the engine's starting coverage and checks, `coverage.yaml`, the plan step's coverage table, placing from the panel, `autode workflow coverage` and `autode_coverage` / `autode_place_coverage`; a workflow can't be approved while an item is open, and its approval records the coverage's. Built in two phases (roadmap): **PLN0** the deterministic coverage check, with UI2 (v0.56.0); **PLN1** the planner that composes a workflow from coverage, with a clarification round (v0.56.5). Requirement: ORC-12 in [requirements.md](../requirements.md). **Builds on:** [workflow-templates.md](workflow-templates.md) (stage kinds, templates, the plan gate), [ui-simplification.md](ui-simplification.md) (the journey view that shows it), the interview (mcp-engine §9.2 PA3) and the decisions (ORC-8).
+**Status:** specified 2026-10-30 (owner). **PLN0 shipped in v0.56.0** (CHANGELOG.md 0.56.0): coverage items, the engine's starting coverage and checks, `coverage.yaml`, the plan step's coverage table, placing from the panel, `autode workflow coverage` and `autode_coverage` / `autode_place_coverage`; a workflow can't be approved while an item is open, and its approval records the coverage's. Built in two phases (roadmap): **PLN0** the deterministic coverage check, with UI2 (v0.56.0); **PLN1** the planner that composes a workflow from coverage, split into PLN1a (v0.56.6) and PLN1b, the clarification round and re-planning (v0.56.7). Requirement: ORC-12 in [requirements.md](../requirements.md). **Builds on:** [workflow-templates.md](workflow-templates.md) (stage kinds, templates, the plan gate), [ui-simplification.md](ui-simplification.md) (the journey view that shows it), the interview (mcp-engine §9.2 PA3) and the decisions (ORC-8).
 
 ## 1. Need
 
@@ -113,7 +113,8 @@ The same engine functions behind every surface (surface parity):
 ## 4. Phases
 
 - **PLN0 (v0.56.0, with UI2):** coverage as a file and a decision kind; the deterministic checks; the engine's starting coverage from the draft; the coverage table and gap list in the plan step; `autode_coverage`, `autode coverage show|check`. No planner changes: a person places the `question` items.
-- **PLN1 (v0.56.5):** the planner composes from coverage (§3.2: combined templates, composed workflows); the `manual` stage kind; the clarification round; the two ordered approvals; re-planning from stage reports; `autode_propose_coverage`, `autode_planning_questions`; the planning skill v2; eval cases (below).
+- **PLN1a (v0.56.6):** the planner composes from coverage (§3.2: combined templates, composed workflows); the `manual` stage kind; constraints, acceptance criteria and personal-data handling as coverage items; the two ordered approvals; `autode_propose_coverage`; the planning skill v2; eval cases (below).
+- **PLN1b (v0.56.7):** the clarification round (§3.4) with `autode_planning_questions`; re-planning from stage reports (§3.6).
 
 ## 5. Acceptance
 
@@ -135,5 +136,7 @@ The same engine functions behind every surface (surface parity):
 
 ## 7. Open
 
-- **The `manual` stage kind** (§3.3) is included as AutoDE recommended; the owner hasn't confirmed it yet.
-- Whether quality rules and constraints are coverage items in PLN0 or only from PLN1.
+Nothing open. Settled by the owner, 2026-10-30:
+- **The `manual` stage kind** (§3.3) is included, as specified.
+- **Constraints, acceptance criteria and personal-data handling are coverage items from PLN1a**, beside the in-scope items and objectives.
+- **PLN1 is built in two releases:** PLN1a (composition, the `manual` kind, the ordered approvals) and PLN1b (the clarification round and re-planning).

@@ -69,6 +69,26 @@ function valueKey(a: Assertion): string {
   return canonicalJson(a.value);
 }
 
+/** Kinds where one subject holds many facts: two rules, assumptions, joins or lineage edges about it don't contradict each other. */
+const MANY_PER_SUBJECT = new Set<string>(['business_rule', 'assumption', 'relationship', 'lineage', 'verified_query', 'schema_fact']);
+/** Predicates that name no particular choice: "a decision about X", "a constraint on X" (chat extraction's defaults). */
+const GENERIC_PREDICATES = new Set(['decision', 'decided', 'constraint', 'requires', 'assumes', 'assumption', 'rule']);
+
+/**
+ * The slot a fact fills, when its kind and predicate hold one value per subject (a key, a grain, a named
+ * decision such as modeling_approach, a platform, one type of quality check); undefined when a subject can
+ * hold many. v0.56.5: before, every fact of one kind and generic predicate shared a slot, so two different
+ * quality checks or decisions about the same subject were reported as a contradiction, and since v0.56.3
+ * confirming one rejected the other.
+ */
+function slotOf(a: Assertion): string | undefined {
+  if (MANY_PER_SUBJECT.has(a.kind)) return undefined;
+  if ((a.kind === 'decision' || a.kind === 'constraint') && GENERIC_PREDICATES.has(a.predicate)) return undefined;
+  if (a.kind === 'metadata' && (a.predicate === 'tag' || a.predicate === 'owner')) return undefined;
+  const check = a.kind === 'quality_expectation' ? `#${String((a.value as { check?: unknown } | undefined)?.check ?? '')}` : '';
+  return `${a.kind}|${[...a.subject].sort().join(',')}|${a.predicate}${check}`;
+}
+
 export function detectConflicts(assertions: readonly Assertion[]): Conflict[] {
   // A pending correction and the fact it would replace are a correction, not a conflict (C4b).
   const replaced = new Set(assertions.filter((a) => CONSIDERED.has(a.status) && a.supersedes).map((a) => a.supersedes as string));
@@ -100,8 +120,8 @@ export function detectConflicts(assertions: readonly Assertion[]): Conflict[] {
   const slots = new Map<string, Assertion[]>();
   for (const a of considered) {
     if (isMirror(a) || a.kind === 'business_term' || a.kind === 'metric') continue;
-    const k = `${a.kind}|${[...a.subject].sort().join(',')}|${a.predicate}`;
-    slots.set(k, [...(slots.get(k) ?? []), a]);
+    const k = slotOf(a);
+    if (k) slots.set(k, [...(slots.get(k) ?? []), a]);
   }
   for (const [k, list] of slots) {
     if (new Set(list.map(valueKey)).size < 2) continue;

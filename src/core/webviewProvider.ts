@@ -67,6 +67,7 @@ import { Assertion } from '../engine/context/assertions';
 import { backendFor } from './platformOnboarding';
 import { getCliDescriptor, resolveCredential, CredentialReference } from './credentials';
 import { applyCspNonce } from './webviewSecurity';
+import { noFolderPage } from './noFolderPage';
 import { classifyImplementationType } from './implementationType';
 import { NO_CONNECTION, buildTargetContextQuestions } from './targetContextQuestions';
 import { sourceEntryForSystem, sourceSystemChoices, targetConnectionChoices, targetDefaults, writeTargetContextDraft } from '../engine/context/problemContexts';
@@ -214,6 +215,17 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri]
     };
+
+    // v0.56.5: no folder open, no workspace. Before, AutoDE fell back to its own install folder (in the
+    // development host, the AutoDE repository) and kept .autode/ there.
+    if (!vscode.workspace.workspaceFolders?.[0]) {
+      webviewView.webview.html = applyCspNonce(noFolderPage(), webviewView.webview.cspSource);
+      webviewView.webview.onDidReceiveMessage(async (m: { type?: string }) => {
+        if (m.type === 'newWorkspace') await vscode.commands.executeCommand(`${EXTENSION_ID}.newWorkspace`);
+        else if (m.type === 'openFolder') await vscode.commands.executeCommand('vscode.openFolder');
+      });
+      return;
+    }
 
     webviewView.webview.html = this.getHtmlForSidebar(webviewView.webview);
     webviewView.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
