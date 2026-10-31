@@ -171,6 +171,8 @@ The interview turns your statement and the pack into a specification. It has par
 
 AutoDE **discovers before it asks**: it checks the pack and the facts first, and doesn't ask what they already answer (it tells you what it found instead). You can answer several questions at once, skip one, or say "I don't know": unanswered points become explicit assumptions in the specification.
 
+How you answer follows the question (since 0.56.4): **radio buttons** when one answer applies (and Yes / No questions), **checkboxes** when several can, and a text box for open questions. Questions with choices also have an *Other* box for an answer that isn't listed. In a terminal, `autode interview show` says whether to pick one or several; answer several separated by commas.
+
 The interview is saved with the problem. You can continue it in the panel, in a terminal (`autode interview show`, `autode interview answer`), or in an agent host; each answer records who gave it and where.
 
 **Attachments.** Files you attach in the interview become documents of the problem's pack ([§6](#6-the-pack-the-clients-documents)); a file from outside the workspace is copied in.
@@ -988,7 +990,7 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](../roadmap.md)):
 
-- **A planner that composes the workflow from coverage** (v0.56.4): workflows beyond the three templates, from AutoDE's approved skills only, a short clarification round when the plan needs your answers, and re-planning as the work runs.
+- **A planner that composes the workflow from coverage** (v0.56.5): workflows beyond the three templates, from AutoDE's approved skills only, a short clarification round when the plan needs your answers, and re-planning as the work runs.
 - **Platform operations** (the catalog since v0.54.0; more through v0.58.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release.
   - AutoDE reads observed lineage from Snowflake and Databricks itself (since v0.54.0), then the estate (v0.55.0), when **Redshift** also arrives, as a source through the AWS CLI.
   - A **platform catalog** (v0.57.0) shows every operation AutoDE runs on your platforms and the skills and features that rely on it. There you can try reads, and edit skills (including your own copy of AutoDE's) and operations, each reviewed before use.

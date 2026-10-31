@@ -6,6 +6,14 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.4
+
+- **Interview questions answer by kind** (owner's UI test, 2026-10-30: questions always showed a text box). In the chat's question card and in the multi-question form alike: **radio buttons** for pick-one questions and Yes / No, **checkboxes** for pick-several, each with an *Other* box for an answer that isn't listed (typing in it clears a pick-one choice); a text box for open questions. Before, a card's choices were buttons that sent one answer even when several applied, Yes / No questions had no choices on a card, and the form gave pick-several questions a plain text box. Pick-several answers are sent as one comma-separated answer.
+- The interviewer is told to offer choices when the likely answers are a small known set, which is why models (Copilot especially) asked mostly open questions.
+- `autode interview show` says whether to pick one or several (*pick one*, *pick any, comma-separated*, *yes / no*).
+- Unchanged: the Target and Source Context forms in the palette, which already had checkboxes for pick-several. They get no *Other* box, because their choices (estate systems, files, saved connections, AutoDE's own option lists) are the only valid answers.
+- **Roadmap:** the planner (PLN1) moves to v0.56.5.
+
 ## 0.56.3
 
 - **Fixed: Confirm seemed to do nothing for some facts** (owner's UI test, 2026-10-30). When two facts contradict each other (a model reading a conversation can propose the same term with two definitions, or a grain or key twice), confirming one made it active for a moment, then conflict detection sent it back to *needs review*, so it stayed in the Context Inbox. Confirming one side is now the choice: the other unconfirmed side is rejected (with the reason recorded), and the confirmed fact stays. A side a person already confirmed, or the primary key the schema declares, isn't overruled: Confirm is refused and says which, so you edit the fact to agree or reject it. *Edit & confirm* settles the same way.

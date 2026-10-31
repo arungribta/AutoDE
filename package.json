@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.56.3",
+  "version": "0.56.4",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -253,28 +253,107 @@
         "command": "autoDataEngineeringHub.configureMcpClaudeCode",
         "title": "AutoDE: Configure MCP for Claude Code"
       },
-      { "command": "autoDataEngineeringHub.openWorkflow", "title": "AutoDE: Open Workflow", "icon": "$(checklist)" },
-      { "command": "autoDataEngineeringHub.openKnowledgeExplorer", "title": "AutoDE: Open Knowledge Explorer", "icon": "$(type-hierarchy)" },
-      { "command": "autoDataEngineeringHub.newKnowledgeArticle", "title": "AutoDE: New Knowledge Article…" },
-      { "command": "autoDataEngineeringHub.approveKnowledgeArticle", "title": "AutoDE: Approve Knowledge Article" },
-      { "command": "autoDataEngineeringHub.workOnMaintenanceItem", "title": "AutoDE: Work on a Maintenance Item…" },
-      { "command": "autoDataEngineeringHub.dismissMaintenanceItem", "title": "AutoDE: Dismiss a Maintenance Item…" },
-      { "command": "autoDataEngineeringHub.scanWorkspaceForKnowledge", "title": "AutoDE: Scan Workspace for Knowledge" },
-      { "command": "autoDataEngineeringHub.refreshWorkflow", "title": "AutoDE: Refresh Workflow", "icon": "$(refresh)" },
-      { "command": "autoDataEngineeringHub.workflowRun", "title": "Run Stage Agent", "icon": "$(play)" },
-      { "command": "autoDataEngineeringHub.refreshSkills", "title": "Refresh Skills", "icon": "$(refresh)" },
-      { "command": "autoDataEngineeringHub.openWaiting", "title": "Open What Waits for You" },
-      { "command": "autoDataEngineeringHub.openRunbook", "title": "AutoDE: Open Runbook…", "icon": "$(run-all)" },
-      { "command": "autoDataEngineeringHub.installSkill", "title": "Install Skill…", "icon": "$(cloud-download)" },
-      { "command": "autoDataEngineeringHub.openSkillSource", "title": "Open Skill Source", "icon": "$(link-external)" },
-      { "command": "autoDataEngineeringHub.workflowApproveDocument", "title": "Approve Stage Document…", "icon": "$(pass)" },
-      { "command": "autoDataEngineeringHub.workflowProduce", "title": "Produce Stage Document", "icon": "$(edit)" },
-      { "command": "autoDataEngineeringHub.workflowOpenDocument", "title": "Open Stage Document", "icon": "$(go-to-file)" },
-      { "command": "autoDataEngineeringHub.workflowHandIn", "title": "Hand In Stage…", "icon": "$(check)" },
-      { "command": "autoDataEngineeringHub.workflowApproveAgain", "title": "Approve Stage Again…" },
-      { "command": "autoDataEngineeringHub.workflowSkip", "title": "Skip Stage…" },
-      { "command": "autoDataEngineeringHub.workflowReopen", "title": "Re-open Stage…" },
-      { "command": "autoDataEngineeringHub.workflowApprove", "title": "Review and Approve…", "icon": "$(pass)" },
+      {
+        "command": "autoDataEngineeringHub.openWorkflow",
+        "title": "AutoDE: Open Workflow",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "autoDataEngineeringHub.openKnowledgeExplorer",
+        "title": "AutoDE: Open Knowledge Explorer",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "autoDataEngineeringHub.newKnowledgeArticle",
+        "title": "AutoDE: New Knowledge Article…"
+      },
+      {
+        "command": "autoDataEngineeringHub.approveKnowledgeArticle",
+        "title": "AutoDE: Approve Knowledge Article"
+      },
+      {
+        "command": "autoDataEngineeringHub.workOnMaintenanceItem",
+        "title": "AutoDE: Work on a Maintenance Item…"
+      },
+      {
+        "command": "autoDataEngineeringHub.dismissMaintenanceItem",
+        "title": "AutoDE: Dismiss a Maintenance Item…"
+      },
+      {
+        "command": "autoDataEngineeringHub.scanWorkspaceForKnowledge",
+        "title": "AutoDE: Scan Workspace for Knowledge"
+      },
+      {
+        "command": "autoDataEngineeringHub.refreshWorkflow",
+        "title": "AutoDE: Refresh Workflow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowRun",
+        "title": "Run Stage Agent",
+        "icon": "$(play)"
+      },
+      {
+        "command": "autoDataEngineeringHub.refreshSkills",
+        "title": "Refresh Skills",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "autoDataEngineeringHub.openWaiting",
+        "title": "Open What Waits for You"
+      },
+      {
+        "command": "autoDataEngineeringHub.openRunbook",
+        "title": "AutoDE: Open Runbook…",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "autoDataEngineeringHub.installSkill",
+        "title": "Install Skill…",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "autoDataEngineeringHub.openSkillSource",
+        "title": "Open Skill Source",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowApproveDocument",
+        "title": "Approve Stage Document…",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowProduce",
+        "title": "Produce Stage Document",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowOpenDocument",
+        "title": "Open Stage Document",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowHandIn",
+        "title": "Hand In Stage…",
+        "icon": "$(check)"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowApproveAgain",
+        "title": "Approve Stage Again…"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowSkip",
+        "title": "Skip Stage…"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowReopen",
+        "title": "Re-open Stage…"
+      },
+      {
+        "command": "autoDataEngineeringHub.workflowApprove",
+        "title": "Review and Approve…",
+        "icon": "$(pass)"
+      },
       {
         "command": "autoDataEngineeringHub.installOracleDriver",
         "title": "AutoDE: Install Oracle Driver"
@@ -290,39 +369,143 @@
     ],
     "menus": {
       "view/title": [
-        { "command": "autoDataEngineeringHub.openKnowledgeExplorer", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@0" },
-        { "command": "autoDataEngineeringHub.openWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@1" },
-        { "command": "autoDataEngineeringHub.refreshWorkflow", "when": "view == autoDataEngineeringHubWorkflow", "group": "navigation@2" },
-        { "command": "autoDataEngineeringHub.importToolSkill", "when": "view == autoDataEngineeringHubSkills", "group": "navigation@0" },
-        { "command": "autoDataEngineeringHub.refreshSkills", "when": "view == autoDataEngineeringHubSkills", "group": "navigation@1" }
+        {
+          "command": "autoDataEngineeringHub.openKnowledgeExplorer",
+          "when": "view == autoDataEngineeringHubWorkflow",
+          "group": "navigation@0"
+        },
+        {
+          "command": "autoDataEngineeringHub.openWorkflow",
+          "when": "view == autoDataEngineeringHubWorkflow",
+          "group": "navigation@1"
+        },
+        {
+          "command": "autoDataEngineeringHub.refreshWorkflow",
+          "when": "view == autoDataEngineeringHubWorkflow",
+          "group": "navigation@2"
+        },
+        {
+          "command": "autoDataEngineeringHub.importToolSkill",
+          "when": "view == autoDataEngineeringHubSkills",
+          "group": "navigation@0"
+        },
+        {
+          "command": "autoDataEngineeringHub.refreshSkills",
+          "when": "view == autoDataEngineeringHubSkills",
+          "group": "navigation@1"
+        }
       ],
       "view/item/context": [
-        { "command": "autoDataEngineeringHub.workflowApprove", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve( |$)/", "group": "inline" },
-        { "command": "autoDataEngineeringHub.workflowRun", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )run( |$)/", "group": "inline" },
-        { "command": "autoDataEngineeringHub.installSkill", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )installable( |$)/", "group": "inline" },
-        { "command": "autoDataEngineeringHub.openSkillSource", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )hasSource( |$)/", "group": "inline" },
-        { "command": "autoDataEngineeringHub.updateToolSkill", "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )workspace( |$)/", "group": "inline" },
-        { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-document( |$)/", "group": "inline" },
-        { "command": "autoDataEngineeringHub.workflowProduce", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )produce( |$)/", "group": "workflow" },
-        { "command": "autoDataEngineeringHub.workflowOpenDocument", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )open-document( |$)/", "group": "workflow" },
-        { "command": "autoDataEngineeringHub.workflowHandIn", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )hand-in( |$)/", "group": "inline" },
-        { "command": "autoDataEngineeringHub.workflowApproveAgain", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-again( |$)/", "group": "workflow" },
-        { "command": "autoDataEngineeringHub.workflowSkip", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )skip( |$)/", "group": "workflow" },
-        { "command": "autoDataEngineeringHub.workflowReopen", "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )reopen( |$)/", "group": "workflow" }
+        {
+          "command": "autoDataEngineeringHub.workflowApprove",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowRun",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )run( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "autoDataEngineeringHub.installSkill",
+          "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )installable( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "autoDataEngineeringHub.openSkillSource",
+          "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )hasSource( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "autoDataEngineeringHub.updateToolSkill",
+          "when": "view == autoDataEngineeringHubSkills && viewItem =~ /(^| )workspace( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowApproveDocument",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-document( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowProduce",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )produce( |$)/",
+          "group": "workflow"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowOpenDocument",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )open-document( |$)/",
+          "group": "workflow"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowHandIn",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )hand-in( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowApproveAgain",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )approve-again( |$)/",
+          "group": "workflow"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowSkip",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )skip( |$)/",
+          "group": "workflow"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowReopen",
+          "when": "view == autoDataEngineeringHubWorkflow && viewItem =~ /(^| )reopen( |$)/",
+          "group": "workflow"
+        }
       ],
       "commandPalette": [
-        { "command": "autoDataEngineeringHub.workflowRun", "when": "false" },
-        { "command": "autoDataEngineeringHub.openWaiting", "when": "false" },
-        { "command": "autoDataEngineeringHub.installSkill", "when": "false" },
-        { "command": "autoDataEngineeringHub.openSkillSource", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowApproveDocument", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowProduce", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowOpenDocument", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowHandIn", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowApproveAgain", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowSkip", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowReopen", "when": "false" },
-        { "command": "autoDataEngineeringHub.workflowApprove", "when": "false" },
+        {
+          "command": "autoDataEngineeringHub.workflowRun",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.openWaiting",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.installSkill",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.openSkillSource",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowApproveDocument",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowProduce",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowOpenDocument",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowHandIn",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowApproveAgain",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowSkip",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowReopen",
+          "when": "false"
+        },
+        {
+          "command": "autoDataEngineeringHub.workflowApprove",
+          "when": "false"
+        },
         {
           "command": "autoDataEngineeringHub.publishToolSkill",
           "when": "config.autoDataEngineeringHub.toolSkillManagementEnabled"
@@ -369,15 +552,24 @@
         "url": "./docs/schemas/primitive-definition.schema.json"
       },
       {
-        "fileMatch": ["**/.autode/config/workflows/*.yaml", "**/workflows/*.yaml"],
+        "fileMatch": [
+          "**/.autode/config/workflows/*.yaml",
+          "**/workflows/*.yaml"
+        ],
         "url": "./docs/schemas/workflow-template.schema.json"
       },
       {
-        "fileMatch": ["**/.autode/config/platform-operations/**/*.yaml", "**/platform-operations/**/*.yaml"],
+        "fileMatch": [
+          "**/.autode/config/platform-operations/**/*.yaml",
+          "**/platform-operations/**/*.yaml"
+        ],
         "url": "./docs/schemas/platform-operation.schema.json"
       },
       {
-        "fileMatch": ["**/.autode/config/platforms/*.yaml", "**/platforms/*.yaml"],
+        "fileMatch": [
+          "**/.autode/config/platforms/*.yaml",
+          "**/platforms/*.yaml"
+        ],
         "url": "./docs/schemas/platform.schema.json"
       }
     ],
@@ -482,7 +674,11 @@
         },
         "autoDataEngineeringHub.defaultDatabricksCatalogType": {
           "type": "string",
-          "enum": ["auto", "unity", "hive_metastore"],
+          "enum": [
+            "auto",
+            "unity",
+            "hive_metastore"
+          ],
           "default": "auto",
           "description": "Which metadata-introspection shape to use for the configured catalog. 'auto' infers it from the catalog name (the reserved 'hive_metastore' name vs. everything else); set explicitly when a workspace has more than one catalog type, or as a manual override for another catalog that shares the legacy metastore's limitations (no bulk information_schema)."
         },
@@ -568,7 +764,11 @@
         },
         "autoDataEngineeringHub.defaultTargetDatabricksCatalogType": {
           "type": "string",
-          "enum": ["auto", "unity", "hive_metastore"],
+          "enum": [
+            "auto",
+            "unity",
+            "hive_metastore"
+          ],
           "default": "auto",
           "description": "Which metadata-introspection shape to use for the target's configured catalog. See defaultDatabricksCatalogType's description — same semantics, independent value for the target connection."
         },
@@ -695,7 +895,9 @@
         "autoDataEngineeringHub.llmModels": {
           "type": "object",
           "default": {},
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "The model each LLM provider uses, e.g. { \"copilot\": \"claude-sonnet-5-5\", \"claude\": \"opus\" }. An empty string uses the provider's own default (Claude Code's configured model; Copilot's first model). Set from the LLM tab."
         },
         "autoDataEngineeringHub.claudeCodePath": {

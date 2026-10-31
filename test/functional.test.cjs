@@ -13469,8 +13469,35 @@ async function main() {
     const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
     const i = html.indexOf('function addSpecQuestion(question)');
     const body = html.slice(i, html.indexOf('function addSpecQuestionsForm', i));
-    assert.ok(/<textarea class="spec-q-input spec-q-answer"/.test(body) && /'Type your answer…'/.test(body) && /'Or type another answer…'/.test(body), 'an answer box, always');
+    assert.ok(/specQuestionInputHtml\(question\)/.test(body) && /<button class="primary spec-q-send">Answer<\/button>/.test(body), 'an answer control and an Answer button, always');
     assert.ok(/qSend\.onclick = answer;/.test(body) && /chatInput\.value = v;\s*sendMessage\(\);/.test(body), 'it answers through the chat, which continues the interview');
+  });
+
+  await test('v0.56.4: interview questions answer by kind in the single card and the form: radio buttons for pick-one and yes/no, checkboxes for pick-several, each with an Other box; the CLI says which', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
+    const from = html.indexOf('var specQuestionSeq = 0;');
+    const src = html.slice(from, html.indexOf('function readSpecQuestionAnswer', from));
+    const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const h = new Function('escapeHtml', `${src}; return { specQuestionInputHtml, combineSpecAnswer };`)(escapeHtml);
+    const one = h.specQuestionInputHtml({ kind: 'single-select', options: ['Daily', 'Hourly'] });
+    assert.ok((one.match(/type="radio"/g) || []).length === 2 && /role="radiogroup"/.test(one) && /spec-q-other/.test(one), one);
+    const many = h.specQuestionInputHtml({ kind: 'multi-select', options: ['POS', 'ERP', 'CRM'] });
+    assert.ok((many.match(/type="checkbox"/g) || []).length === 3 && /spec-q-other/.test(many), many);
+    const yn = h.specQuestionInputHtml({ kind: 'boolean' });
+    assert.ok(/type="radio"[^>]*value="Yes"/.test(yn) && /value="No"/.test(yn), yn);
+    assert.ok(/<textarea class="spec-q-input spec-q-text"/.test(h.specQuestionInputHtml({ kind: 'text' })), 'open questions keep a text box');
+    assert.ok(!/radio|checkbox/.test(h.specQuestionInputHtml({ kind: 'single-select', options: [] })), 'a select question with no options falls back to text');
+    assert.ok(/name="(specq\d+)"[\s\S]*name="\1"/.test(one) && one.match(/name="(specq\d+)"/)[1] !== many.match(/name="(specq\d+)"/)[1], 'each question has its own radio group');
+    assert.strictEqual(h.combineSpecAnswer('multi-select', ['POS', 'ERP'], ' a flat file '), 'POS, ERP, a flat file');
+    assert.strictEqual(h.combineSpecAnswer('single-select', ['Daily'], ''), 'Daily');
+    assert.strictEqual(h.combineSpecAnswer('single-select', [], 'Every 15 minutes'), 'Every 15 minutes');
+    assert.strictEqual(h.combineSpecAnswer('boolean', [], ''), '');
+    const form = html.slice(html.indexOf('function addSpecQuestionsForm'), html.indexOf('// ── Contextual Actions'));
+    assert.ok(/specQuestionInputHtml\(q\)/.test(form) && /readSpecQuestionAnswer\(field, kindById\[qid\]\)/.test(form) && !/<select class="spec-q-input"/.test(form), 'the form uses the same controls (no dropdowns, no text box for pick-several)');
+    assert.ok(/"multi-select" when several can, "boolean" for yes or no/.test(require('../dist/core/specOpsPrompts.js').DISCOVERY_SYSTEM_PROMPT), 'the interviewer is told to offer choices');
+    const cli = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'cli', 'main.ts'), 'utf8');
+    assert.ok(/pick any, comma-separated/.test(cli) && /pick one: /.test(cli) && /\(yes \/ no\)/.test(cli), 'interview show says how to answer');
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

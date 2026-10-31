@@ -1011,6 +1011,13 @@ function interviewParts(ctx: Ctx): SkillDefinition[] {
   return interviewSkills(loadSkillPack(ctx.resourcesRoot).skills, fs.existsSync(overrides) ? overrides : undefined);
 }
 
+/** v0.56.4: an open question's choices, saying whether one or several are picked (several: answer them comma-separated). */
+function choicesHint(kind: string | undefined, options: string[] | undefined): string {
+  if (kind === 'boolean') return ' (yes / no)';
+  if (!options?.length) return '';
+  return kind === 'multi-select' ? ` (pick any, comma-separated: ${options.join(', ')})` : ` (pick one: ${options.join(' / ')})`;
+}
+
 /** `autode interview show | answer` (v0.45.12): the requirements interview on disk, continued from a terminal. */
 function cmdInterview(ctx: Ctx, rest: string[]): number {
   const [sub = 'show', questionId, ...words] = rest;
@@ -1025,7 +1032,7 @@ function cmdInterview(ctx: Ctx, rest: string[]): number {
     emit(ctx, { ok: true, problemId, interview: v }, [
       `${problemId}: interview ${v.status}${v.feeds ? ` (fed specification v${v.feeds.version})` : ''}, ${v.answered.length} answer(s), ${v.open.length} open question(s)`,
       ...v.parts.map((p) => `  ${p.status === 'addressed' ? '✓' : p.status === 'partial' ? '◐' : '·'} ${p.name}`),
-      ...(v.open.length ? ['Open:', ...v.open.map((q) => `  ${q.id} [${q.field}] ${q.prompt}${q.options?.length ? ` (${q.options.join(' / ')})` : ''}`)] : []),
+      ...(v.open.length ? ['Open:', ...v.open.map((q) => `  ${q.id} [${q.field}] ${q.prompt}${choicesHint(q.kind, q.options)}`)] : []),
       ...(v.answered.length ? ['Answered:', ...v.answered.map((a) => `  ${a.questionId} [${a.field}] ${a.value}${a.by ? ` — ${a.by}${a.channel ? `, ${a.channel}` : ''}` : ''}`)] : [])
     ].join('\n'));
     return EXIT.OK;

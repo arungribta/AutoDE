@@ -1367,6 +1367,21 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: in an interview, wait for a clarifying question without options.
   Expect: the card has an answer box and **Answer**; answering (or Enter) continues the interview.
 
+## Part 62 — v0.56.4 Questions answer by kind
+
+- [ ] **62.1 Pick one.**
+  Do: in an interview, wait for (or prompt, e.g. *ask me how often the report refreshes*) a question with choices.
+  Expect: radio buttons, one choice at a time, and an *Other* box. Typing in *Other* clears the choice; picking a choice clears *Other*. **Answer** sends one value; the next turn shows it as the answer.
+- [ ] **62.2 Pick several.**
+  Do: get a question about which systems or datasets apply (several can).
+  Expect: checkboxes; tick two and type a third in *Other*: the answer reads *A, B, third*.
+- [ ] **62.3 Yes / no and the form.**
+  Do: get a yes/no question, and a batch of questions in one form.
+  Expect: the yes/no question has Yes and No radio buttons; the form uses the same controls (no dropdowns), and **Submit answers** sends each one.
+- [ ] **62.4 Terminal.**
+  Do: `autode interview show` with an open select question.
+  Expect: *(pick one: …)*, *(pick any, comma-separated: …)* or *(yes / no)* after the question.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1713,5 +1728,9 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 61.1 |  |  |
 | 61.2 |  |  |
 | 61.3 |  |  |
+| 62.1 |  |  |
+| 62.2 |  |  |
+| 62.3 |  |  |
+| 62.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

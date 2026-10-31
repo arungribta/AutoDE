@@ -22,7 +22,8 @@ export const DISCOVERY_SYSTEM_PROMPT = [
   '- Choose "done" only when the specification is already complete.',
   '- The "field" must be one of the specification fields you are responsible for.',
   '- "kind" must be "text", "single-select", "multi-select", or "boolean".',
-  '- Include "options" only for single-select and multi-select questions.'
+  '- Include "options" only for single-select and multi-select questions.',
+  '- When the likely answers are a small known set (2-6), offer them: "single-select" when one applies, "multi-select" when several can, "boolean" for yes or no. The person can always type a different answer, so options never limit them. Keep "text" for open questions (names, descriptions, numbers).'
 ].join('\n');
 
 /** Extra discovery-turn rules that apply only when revising an already-approved specification. */

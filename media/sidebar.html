@@ -354,9 +354,6 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .spec-q-label { font-size: var(--font-size-sm); color: var(--accent); font-weight: 600; margin-bottom: 4px; }
 .spec-q-prompt { font-size: var(--font-size); margin-bottom: 6px; line-height: 1.45; }
 .spec-q-rationale { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: 8px; }
-.spec-q-options { display: flex; flex-wrap: wrap; gap: 6px; }
-.spec-q-option { background: var(--surface-active); border: 1px solid var(--border-soft); border-radius: var(--radius-pill); color: var(--text-primary, inherit); padding: 4px 10px; font-size: var(--font-size-sm); cursor: pointer; }
-.spec-q-option:hover { border-color: var(--accent); color: var(--accent); }
 .discovery-progress-bar { width: 100%; height: 3px; border-radius: 2px; background: var(--border-soft); overflow: hidden; margin: 4px 0 6px; }
 .discovery-progress-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width var(--transition-normal); }
 .discovery-skill-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
@@ -370,6 +367,9 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .spec-q-input { width: 100%; box-sizing: border-box; background: var(--surface-active); border: 1px solid var(--border-soft); border-radius: var(--radius); color: inherit; padding: 6px 8px; font-size: var(--font-size-sm); font-family: inherit; }
 .spec-q-input:focus { border-color: var(--accent); outline: none; }
 .spec-q-submit { margin-top: 4px; width: 100%; }
+.spec-q-choices { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.spec-q-choice { display: flex; align-items: flex-start; gap: 6px; font-size: var(--font-size-sm); cursor: pointer; line-height: 1.4; }
+.spec-q-choice input { margin: 2px 0 0; accent-color: var(--accent); }
 
 /* ── Artifact Cards ── */
 .artifact-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); margin-top: 6px; overflow: hidden; }
@@ -782,6 +782,47 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       '<div class="spec-field-meta">' + discoveryProgress.coveredFields + '/' + discoveryProgress.totalFields + ' areas addressed · turn ' + discoveryProgress.turnCount + ' of up to ' + discoveryProgress.turnBudget + '</div>';
   }
 
+  // v0.56.4: how a question is answered follows its kind, in the single card and in the form alike:
+  // radio buttons for pick-one and yes/no, checkboxes for pick-several, each with an "Other" box; a text box otherwise.
+  var specQuestionSeq = 0;
+  function specQuestionChoices(q) {
+    if (q.kind === 'boolean') return ['Yes', 'No'];
+    return q.options && q.options.length ? q.options : [];
+  }
+  function specQuestionInputHtml(q) {
+    var choices = specQuestionChoices(q);
+    if (!choices.length) return '<textarea class="spec-q-input spec-q-text" rows="2" placeholder="Type your answer…"></textarea>';
+    var multi = q.kind === 'multi-select';
+    var name = 'specq' + (specQuestionSeq++);
+    var html = '<div class="spec-q-choices" role="' + (multi ? 'group' : 'radiogroup') + '">';
+    for (var i = 0; i < choices.length; i++) {
+      html += '<label class="spec-q-choice"><input type="' + (multi ? 'checkbox' : 'radio') + '" name="' + name + '" value="' + escapeHtml(choices[i]) + '" /> ' + escapeHtml(choices[i]) + '</label>';
+    }
+    html += '</div><input class="spec-q-input spec-q-other" type="text" placeholder="' + (multi ? 'Other: add your own…' : 'Other: type a different answer…') + '" />';
+    return html;
+  }
+  /** One answer string: the ticked choices (and anything typed) for pick-several; for pick-one, what was typed or else the choice. */
+  function combineSpecAnswer(kind, picked, typed) {
+    typed = (typed || '').trim();
+    if (kind === 'multi-select') return picked.concat(typed ? [typed] : []).join(', ');
+    return typed || picked[0] || '';
+  }
+  function readSpecQuestionAnswer(container, kind) {
+    var picked = [];
+    container.querySelectorAll('.spec-q-choices input:checked').forEach(function (c) { picked.push(c.value); });
+    var box = container.querySelector('.spec-q-other, .spec-q-text');
+    return combineSpecAnswer(kind, picked, box ? box.value : '');
+  }
+  /** For pick-one, typing a different answer clears the choice and picking a choice clears the typing. */
+  function wireSpecQuestionInputs(container, kind) {
+    if (kind === 'multi-select') return;
+    var other = container.querySelector('.spec-q-other');
+    var radios = container.querySelectorAll('.spec-q-choices input');
+    if (!other) return;
+    other.addEventListener('input', function () { if (other.value.trim()) radios.forEach(function (r) { r.checked = false; }); });
+    radios.forEach(function (r) { r.addEventListener('change', function () { if (r.checked) other.value = ''; }); });
+  }
+
   function addSpecQuestion(question) {
     if (welcomeBlock) { welcomeBlock.style.display = 'none'; }
     var html = '<div class="spec-question">';
@@ -790,39 +831,25 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     html += discoveryProgressLineHtml();
     html += '<div class="spec-q-prompt">' + escapeHtml(question.prompt || '') + '</div>';
     if (question.rationale) { html += '<div class="spec-q-rationale">' + escapeHtml(question.rationale) + '</div>'; }
-    if (question.options && question.options.length > 0) {
-      html += '<div class="spec-q-options">';
-      for (var i = 0; i < question.options.length; i++) {
-        html += '<button class="spec-q-option" data-value="' + escapeHtml(question.options[i]) + '">' + escapeHtml(question.options[i]) + '</button>';
-      }
-      html += '</div>';
-    }
     // v0.56.3: a question without options could be answered only in the chat box, which the card didn't say.
-    html += '<textarea class="spec-q-input spec-q-answer" rows="2" placeholder="' + (question.options && question.options.length ? 'Or type another answer…' : 'Type your answer…') + '"></textarea>' +
-      '<div class="btn-row"><button class="primary spec-q-send">Answer</button></div>';
+    html += specQuestionInputHtml(question) + '<div class="btn-row"><button class="primary spec-q-send">Answer</button></div>';
     html += '</div>';
     var div = document.createElement('div');
     div.innerHTML = html;
     var el = chatStream.appendChild(div.firstElementChild);
     chatStream.scrollTop = chatStream.scrollHeight;
-    var answerBox = el.querySelector('.spec-q-answer');
+    wireSpecQuestionInputs(el, question.kind);
     var qSend = el.querySelector('.spec-q-send');
     var answer = function () {
-      var v = answerBox.value.trim();
-      if (!v) { showToast('Type an answer first', ''); return; }
-      answerBox.disabled = true; qSend.disabled = true;
+      var v = readSpecQuestionAnswer(el, question.kind);
+      if (!v) { showToast(specQuestionChoices(question).length ? 'Pick an answer or type one first' : 'Type an answer first', ''); return; }
+      el.querySelectorAll('input, textarea, button').forEach(function (x) { x.disabled = true; });
       chatInput.value = v;
       sendMessage();
     };
     qSend.onclick = answer;
-    answerBox.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answer(); } };
-    var options = el.querySelectorAll('.spec-q-option');
-    options.forEach(function (btn) {
-      btn.onclick = function () {
-        chatInput.value = btn.getAttribute('data-value');
-        sendMessage();
-      };
-    });
+    var box = el.querySelector('.spec-q-other, .spec-q-text');
+    if (box) box.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answer(); } };
   }
 
   function addSpecQuestionsForm(questions) {
@@ -835,15 +862,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       html += '<div class="spec-q-field" data-qid="' + escapeHtml(q.id) + '">';
       if (q.skillLabel) { html += '<div class="spec-field-meta">' + escapeHtml(q.skillLabel) + '</div>'; }
       html += '<div class="spec-q-prompt">' + escapeHtml(q.prompt || '') + '</div>';
-      if (q.kind === 'single-select' && q.options && q.options.length > 0) {
-        html += '<select class="spec-q-input"><option value="">— select —</option>';
-        for (var j = 0; j < q.options.length; j++) { html += '<option value="' + escapeHtml(q.options[j]) + '">' + escapeHtml(q.options[j]) + '</option>'; }
-        html += '</select>';
-      } else if (q.kind === 'boolean') {
-        html += '<select class="spec-q-input"><option value="">— select —</option><option value="yes">Yes</option><option value="no">No</option></select>';
-      } else {
-        html += '<input class="spec-q-input" type="text" placeholder="Type your answer…" />';
-      }
+      html += specQuestionInputHtml(q);
       html += '</div>';
     }
     html += '<button class="primary spec-q-submit">✓ Submit answers</button>';
@@ -852,13 +871,16 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     div.innerHTML = html;
     var el = chatStream.appendChild(div.firstElementChild);
     chatStream.scrollTop = chatStream.scrollHeight;
+    var kindById = {};
+    questions.forEach(function (q) { kindById[q.id] = q.kind; });
+    el.querySelectorAll('.spec-q-field').forEach(function (field) { wireSpecQuestionInputs(field, kindById[field.getAttribute('data-qid')]); });
     el.querySelector('.spec-q-submit').onclick = function () {
       var answers = [];
       var fields = el.querySelectorAll('.spec-q-field');
       fields.forEach(function (field) {
         var qid = field.getAttribute('data-qid');
-        var input = field.querySelector('.spec-q-input');
-        if (input && input.value.trim()) { answers.push({ questionId: qid, value: input.value.trim() }); }
+        var v = readSpecQuestionAnswer(field, kindById[qid]);
+        if (v) { answers.push({ questionId: qid, value: v }); }
       });
       if (answers.length === 0) { showToast('Answer at least one question', ''); return; }
       var submitBtn = el.querySelector('.spec-q-submit');
