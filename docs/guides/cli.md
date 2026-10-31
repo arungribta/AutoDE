@@ -172,6 +172,12 @@ Every read AutoDE makes on a platform is a platform operation: a reviewed YAML f
 | `autode lineage refresh --connection <c> [--database <d>]… [--days <n>]` | Reads observed lineage through the platform's lineage operations, for the databases (Oracle: schemas) bound to the connection, and records it. |
 | `autode lineage record <file.json> --connection <c> --method <name> [--complete]` | Records lineage you exported from elsewhere. |
 
+## Workspaces
+
+| Command | |
+|---|---|
+| `autode workspace new <folder> [--statement "<text>"] [--no-connections] [--no-approvals]` | A new workspace for a different subject area (since 0.56.1): the folder, set up, with empty knowledge. This workspace's `connections.yaml` and `approvals.yaml` come along unless you say not (settings only). With `--statement`, its first problem, active. Refuses a folder that exists and isn't empty. |
+
 ## Connections
 
 Connections to Snowflake, Databricks and Oracle (Oracle as a source) are kept in `.autode/config/connections.yaml`, which is committed and shared by the team, and in your personal `.autode/local/connections.yaml`. Neither file ever holds a secret. These commands manage those files without VS Code. They write exactly what the extension's settings cards write.

@@ -66,6 +66,12 @@ export class KnowledgeExplorerPanel {
     if (asset) void KnowledgeExplorerPanel.current.panel.webview.postMessage({ type: 'showAsset', id: asset });
   }
 
+  /** v0.56.1: knowledge changed on disk (a fact confirmed, an estate ingested): the open page shows it. */
+  public static refresh(): void {
+    const c = KnowledgeExplorerPanel.current;
+    if (c) void c.onMessage({ type: 'ready' });
+  }
+
   private async onMessage(m: ExplorerMessage): Promise<void> {
     // UI2: the AutoDE window's other tabs.
     const tab = (m as unknown as { type: string; tab?: string });
@@ -165,5 +171,17 @@ async function editMetadata(host: KnowledgeExplorerHost, panel: vscode.WebviewPa
 }
 
 export function registerKnowledgeExplorer(context: vscode.ExtensionContext, host: KnowledgeExplorerHost): vscode.Disposable[] {
-  return [vscode.commands.registerCommand('autoDataEngineeringHub.openKnowledgeExplorer', (asset?: unknown) => KnowledgeExplorerPanel.show(context, host, typeof asset === 'string' ? asset : undefined))];
+  const disposables: vscode.Disposable[] = [vscode.commands.registerCommand('autoDataEngineeringHub.openKnowledgeExplorer', (asset?: unknown) => KnowledgeExplorerPanel.show(context, host, typeof asset === 'string' ? asset : undefined))];
+  // v0.56.1: a fact confirmed, an estate ingested or a semantic model changed shows on the open page without navigating.
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (folder) {
+    let timer: NodeJS.Timeout | undefined;
+    const changed = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => KnowledgeExplorerPanel.refresh(), 500); };
+    for (const glob of ['.autode/knowledge/**', '.autode/local/catalog/**', '.autode/problems/*/semantic/**']) {
+      const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, glob));
+      w.onDidChange(changed); w.onDidCreate(changed); w.onDidDelete(changed);
+      disposables.push(w);
+    }
+  }
+  return disposables;
 }

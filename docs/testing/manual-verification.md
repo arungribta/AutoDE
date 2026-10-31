@@ -1329,6 +1329,23 @@ Needs a Redshift target connection (a dev workgroup or database) with a role tha
   Do: connect a Snowflake source, then *Use* a second source connection (Redshift or another Snowflake); then *Refresh Observed Lineage*.
   Expect: both marked *connected* in Saved connections, each with Disconnect; the refresh asks which source.
 
+## Part 59 — v0.56.1 A brand-new subject area
+
+Use a workspace that already holds another subject's knowledge (for example the reference retail problem).
+
+- [ ] **59.1 A problem that matches nothing here.**
+  Do: ＋ New → *Start new problem*; describe a problem about a different subject (hospital bed occupancy).
+  Expect: the chat says nothing here matches; a notification offers *New workspace for it…*. Choose it: name, location, bring connections (yes). A new window opens on the new folder with the problem active and an empty Knowledge Explorer; the problem is gone from the first workspace.
+- [ ] **59.2 New Workspace from the start.**
+  Do: *AutoDE: New Workspace…* (or ＋ New → *New workspace…*), with no connections.
+  Expect: an empty workspace in a new window; ＋ New starts its first problem.
+- [ ] **59.3 The palette follows.**
+  Do: with the palette open, start a problem, confirm its statement, confirm a fact in the Context Inbox.
+  Expect: the palette's phase, next step and *waits for you* change each time without closing it.
+- [ ] **59.4 Confirmed facts show.**
+  Do: open the Knowledge Explorer on its overview; confirm a proposed glossary term in the Context Inbox.
+  Expect: within a second the overview's glossary terms and knowledge facts count it, and *facts to review* drops; searching the term finds it.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1666,5 +1683,9 @@ Needs a Redshift target connection (a dev workgroup or database) with a role tha
 | 58.5 |  |  |
 | 58.6 |  |  |
 | 58.7 |  |  |
+| 59.1 |  |  |
+| 59.2 |  |  |
+| 59.3 |  |  |
+| 59.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

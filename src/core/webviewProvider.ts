@@ -444,7 +444,16 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     // v0.53.2: what the new problem builds on in this workspace, or that nothing matches.
     const root = this.workspaceRoot?.fsPath;
     if (root && this.contextFileManager) {
-      try { this.postLog(problemOverlap(root, problemStatement, this.contextFileManager.getPackSources()).message); } catch { /* the check is a courtesy */ }
+      try {
+        const overlap = problemOverlap(root, problemStatement, this.contextFileManager.getPackSources());
+        this.postLog(overlap.message);
+        // v0.56.1: a different subject area: offer its own workspace (the problem moves there while it is only a draft).
+        if (overlap.noMatch) {
+          void vscode.window.showInformationMessage('Nothing in this workspace matches this problem. Start it in a new workspace, with its own empty knowledge?', 'New workspace for it…', 'Keep it here').then((pick) => {
+            if (pick === 'New workspace for it…') void vscode.commands.executeCommand(`${EXTENSION_ID}.newWorkspace`, { statement: problemStatement, moveProblem: slug });
+          });
+        }
+      } catch { /* the check is a courtesy */ }
     }
     if (this.pendingExploration && this.problemRoot) {
       setProblemMode(this.problemRoot.fsPath, 'exploration', { by: this.pendingExploration, channel: 'panel', acknowledged: true });
@@ -463,14 +472,33 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     const known = root && this.contextFileManager ? knowledgeLine(workspaceKnowledge(root, this.contextFileManager.getPackSources())) : 'nothing yet';
     const choice = await vscode.window.showInformationMessage('Start a new business problem?', {
       modal: true,
-      detail: `The current chat is archived, not discarded. The new problem shares this workspace's knowledge: ${known}. If it is about a different estate, open another folder as its own workspace instead, so the two don't mix.`
-    }, 'Start new problem', 'Open another folder…');
+      detail: `The current chat is archived, not discarded. The new problem shares this workspace's knowledge: ${known}. If it is about a different subject area or estate, make it a new workspace (its own folder, with empty knowledge) so the two don't mix.`
+    }, 'Start new problem', 'New workspace…', 'Open another folder…');
+    // v0.56.1: a new workspace is made, not just picked: its own folder, set up, with empty knowledge.
+    if (choice === 'New workspace…') { await vscode.commands.executeCommand(`${EXTENSION_ID}.newWorkspace`); return; }
     if (choice === 'Open another folder…') { await vscode.commands.executeCommand('vscode.openFolder', undefined, { forceNewWindow: true }); return; }
     if (choice !== 'Start new problem') return;
     await this.activeProblemManager?.clearActiveProblem();
     await this.activateProblem(undefined);
     await this.startNewChat();
     this.postMessage('chatResponse', { message: `**Describe the new business problem**: what the business needs, in its words.\n\nIt shares this workspace's knowledge: ${known}. If it is about a different estate, open another folder as its own workspace (*File → Open Folder…*).` });
+  }
+
+  /**
+   * v0.56.1: a problem that moved to a new workspace while it was only a draft (no workflow, no decision) is removed
+   * here, and no problem is active. Refused, and left as it is, when it has gone further.
+   */
+  public async releaseNewProblem(id: string): Promise<boolean> {
+    const root = this.workspaceRoot?.fsPath;
+    if (!root) return false;
+    const problemRoot = layoutPath(root, 'problems', id);
+    const hasDecision = new DecisionStore(root).list({}).some((d) => d.problemId === id);
+    if (!fs.existsSync(problemRoot) || fs.existsSync(path.join(problemRoot, 'workflow.yaml')) || hasDecision) { this.postLog(`${id} stays here too: it has gone beyond its first draft.`); return false; }
+    if (this.activeProblemId === id) { await this.activeProblemManager?.clearActiveProblem(); await this.activateProblem(undefined); }
+    fs.rmSync(problemRoot, { recursive: true, force: true });
+    await this.startNewChat();
+    this.postLog(`${id} moved to its new workspace; nothing of it stays here.`);
+    return true;
   }
 
   /** C4c: the active problem's mode, for the panel's banner. */
@@ -1891,6 +1919,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
   /** Workflow actions from the Workflow view: the same code as the palette used. */
   public async workflowActionFromView(action: string, stage?: string, arg?: string): Promise<void> {
     await this.workflowAction(action, stage, arg);
+  }
+
+  /** v0.56.1: sends the palette the journey as it is now (after a problem, a fact or a decision changed). */
+  public pushJourney(): void {
+    let journey: Journey | undefined;
+    try { journey = this.journey(); } catch { journey = undefined; }
+    this.postMessage('journey', { journey: journey ?? null });
   }
 
   /** UI2: the active problem's journey, with the panel's open context (estate, catalog, ledger). */

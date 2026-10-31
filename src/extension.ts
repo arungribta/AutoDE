@@ -49,6 +49,8 @@ import { resolveAllowedToolNames } from './engine/skills/toolAllowList';
 import { openContext } from './engine/context/estateIngest';
 import { refreshLineage, refreshLines } from './engine/lineage/record';
 import { checksumOf, customise, loadCatalog } from './engine/platform/operations/load';
+import { CreatedWorkspace, createWorkspace } from './engine/workspaceCreate';
+import { generateProblemSlug } from './core/problemSlug';
 import { summarize } from './engine/platform/operations/service';
 import { DecisionStore } from './engine/decisions/decisionStore';
 import { propose } from './engine/decisions/proposals';
@@ -260,7 +262,8 @@ export function activate(context: vscode.ExtensionContext): void {
     user: skillActor,
     waiting: () => sidebarProvider.waitingForYou(),
     journey: (previewTemplate) => sidebarProvider.journey(previewTemplate),
-    journeyAction: (id, args) => sidebarProvider.journeyAction(id, args)
+    journeyAction: (id, args) => sidebarProvider.journeyAction(id, args),
+    refreshed: () => sidebarProvider.pushJourney()
   }));
   // C5b: the Knowledge Explorer — search, asset pages, graph, facts, estate — over the engine's workspace.
   context.subscriptions.push(...registerKnowledgeExplorer(context, {
@@ -966,6 +969,33 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     } finally { cfm.dispose(); }
   });
 
+  // v0.56.1: a new workspace (its own folder, empty knowledge) for a different subject area; optionally starting a problem
+  // and moving a just-started one that matches nothing in this workspace.
+  const newWorkspace = vscode.commands.registerCommand(`${EXTENSION_ID}.newWorkspace`, async (opts?: { statement?: string; moveProblem?: string }) => {
+    const current = firstFolder();
+    const suggested = opts?.statement ? generateProblemSlug(opts.statement, []) : 'autode-workspace';
+    const name = await vscode.window.showInputBox({ title: 'New AutoDE workspace (1/3): its folder name', prompt: 'A workspace is a folder with its own knowledge, estate and problems.', value: suggested, validateInput: (v) => (/^[\w.-]+$/.test(v.trim()) ? undefined : 'Letters, digits, dots, dashes and underscores.') });
+    if (!name) return;
+    const parent = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Create it here', title: `New AutoDE workspace (2/3): where to create "${name.trim()}"`, ...(current ? { defaultUri: vscode.Uri.file(path.dirname(current)) } : {}) });
+    if (!parent?.[0]) return;
+    let carry = false;
+    if (current && (fs.existsSync(layoutPath(current, 'connections')) || fs.existsSync(layoutPath(current, 'approvals')))) {
+      const pick = await vscode.window.showQuickPick([
+        { label: '$(check) Bring this workspace\'s connections and approval policy', description: 'settings only: no secrets, no knowledge', value: true },
+        { label: '$(circle-slash) Start with no connections', value: false }
+      ], { title: 'New AutoDE workspace (3/3): the team\'s set-up' });
+      if (!pick) return;
+      carry = pick.value;
+    }
+    let r: CreatedWorkspace;
+    try { r = createWorkspace({ folder: path.join(parent[0].fsPath, name.trim()), from: current, carry: { connections: carry, approvals: carry }, statement: opts?.statement }); }
+    catch (err) { vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err)); return; }
+    // The problem just started here held only its first draft: it moves, rather than staying behind half-made.
+    if (opts?.moveProblem && r.problemId) await sidebarProvider.releaseNewProblem(opts.moveProblem);
+    const open = await vscode.window.showInformationMessage(`Created the workspace ${name.trim()}, with empty knowledge.`, { modal: true, detail: [r.folder, r.carried.length ? `Brought along: ${r.carried.join(', ')}.` : 'Nothing brought along.', r.problemId ? `Its first problem, "${opts?.statement}", is waiting there.` : 'Start its first problem there with ＋ New.'].join('\n') }, 'Open it in a new window');
+    if (open) await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(r.folder), { forceNewWindow: true });
+  });
+
   // POP1 part 2 (v0.54.1): the platform operations catalog until its own view (POP4): browse, customise a shipped file, propose a team file.
   const platformOperations = vscode.commands.registerCommand(`${EXTENSION_ID}.platformOperations`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1286,7 +1316,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     openSidebar,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     copilotHandoff,
-    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, refreshLineageCmd, platformOperations, customisePlatformOperation, proposePlatformFile, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, refreshLineageCmd, platformOperations, customisePlatformOperation, proposePlatformFile, newWorkspace, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, updateToolSkill, classifyPersonalData, captureCoverage, findCandidates, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,

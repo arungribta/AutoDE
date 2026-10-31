@@ -51,6 +51,7 @@ import { findResourcesRoot, main as mcpMain, readVersion } from '../mcp/server';
 import { Decision, DecisionError, DecisionStatus, DecisionStore, stakesFor } from '../engine/decisions/decisionStore';
 import { applyDecision, approvalBlockers, propose } from '../engine/decisions/proposals';
 import { journeyContext, journeyFor, journeyLines } from '../engine/workflows/journey';
+import { CreatedWorkspace, createWorkspace } from '../engine/workspaceCreate';
 import { CoverageStatus, placeCoverage, specCoverage } from '../engine/workflows/coverage';
 import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocument } from '../engine/documents/problemDocuments';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
@@ -191,6 +192,10 @@ Deterministic (never change AutoDE's state):
 
 Business problems:
   problems list                Every business problem; * marks the active one
+  workspace new <folder> [--statement "<text>"] [--no-connections] [--no-approvals]
+                               A new workspace for a different subject area: its own folder and empty knowledge; the
+                               team's connections and approval policy come along unless you say not; with --statement,
+                               its first problem
   problems new "<statement>" [--exploration]   Start one: a first draft specification, made active
                                (--exploration, terminal: proceed on recorded assumptions, under a disclaimer)
   problems mode [exploration|governed]   (terminal) Show or switch the active problem's mode
@@ -372,6 +377,8 @@ const OPTIONS = {
   set: { type: 'string', multiple: true },
   'allow-sample-data': { type: 'boolean' },
   'no-test': { type: 'boolean' },
+  'no-connections': { type: 'boolean' },
+  'no-approvals': { type: 'boolean' },
   system: { type: 'string' },
   environment: { type: 'string' },
   schema: { type: 'string', multiple: true },
@@ -480,6 +487,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'decisions': return await cmdDecisions(ctx, rest);
       case 'connections': return await cmdConnections(ctx, rest);
       case 'problems': return await cmdProblems(ctx, rest);
+      case 'workspace': return cmdWorkspace(ctx, rest);
       case 'estate': return await cmdEstate(ctx, rest);
       case 'facts': return await cmdFacts(ctx, rest);
       case 'governance': return await cmdGovernance(ctx, rest);
@@ -1868,6 +1876,22 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
     }
     throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, or propose <file>.');
   } finally { session.dispose(); }
+}
+
+/** v0.56.1: a new workspace (its own folder) for a different subject area. */
+function cmdWorkspace(ctx: Ctx, rest: string[]): number {
+  const [sub, folder, ...extra] = rest;
+  if (sub !== 'new' || !folder || extra.length) throw new CliError(EXIT.USAGE, 'workspace new <folder> [--statement "<text>"] [--no-connections] [--no-approvals].');
+  let r: CreatedWorkspace;
+  try {
+    r = createWorkspace({ folder: path.resolve(ctx.io.cwd, folder), from: ctx.workspaceRoot, carry: { connections: ctx.values['no-connections'] !== true, approvals: ctx.values['no-approvals'] !== true }, statement: ctx.values.statement });
+  } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+  emit(ctx, { ok: true, ...r }, [
+    `Created the workspace ${r.folder}, with empty knowledge.`,
+    r.carried.length ? `Carried over from this workspace: ${r.carried.join(', ')} (settings only: each engineer still supplies their own credentials).` : 'Nothing carried over.',
+    r.problemId ? `Its first problem: ${r.problemId} (active). Next: autode interview --workspace "${r.folder}", or open the folder in VS Code.` : `Next: open the folder in VS Code, or autode problems new "<statement>" --workspace "${r.folder}".`
+  ].join('\n'));
+  return EXIT.OK;
 }
 
 /** C5a: the semantic layer — shared models and the active problem's composites. */

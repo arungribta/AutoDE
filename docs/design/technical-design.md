@@ -1516,6 +1516,9 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
 - **The Workflow tab** (v0.56.0): `WorkflowPanel` posts the journey with the model; messages `journeyAction`, `preview` (template), `placeCoverage` (quick picks: stages, or a reason), `openTab`. `media/workflow.html` renders the tab bar, the rail, steps with *About this step*, coverage, the plan panel, and the stage board or the preview. The palette (`#paletteJourney`) asks for `journey` and sends `journeyAction`; its older sections are under `<details id="paletteMore">`. The Knowledge Explorer has the same tab bar (`openTab`).
 - **Several live sources** (v0.56.0, `extension.ts`): `sourcePool` (connection id → `ConnectionManager`); `runConnectionTest('source')` adds to it and keeps other live sources; `pickSource(verb)` asks when several are live (Disconnect, Browse, Refresh Observed Lineage); `disconnectConnection` (by id) from the Saved connections list; `SidebarProvider.setLiveConnections()` adds `live` to the platforms state.
 
+- **A new workspace** (v0.56.1; `src/engine/workspaceCreate.ts`). `createWorkspace({ folder, from?, carry?, statement? })` refuses a non-empty folder or the current one, runs `ensureLayout`, copies `connections.yaml` and `approvals.yaml` from `from` unless `carry` says not, and with a statement calls `startProblem` (active). Surfaces: `autode workspace new`; the extension's `newWorkspace` command (name, location, carry, then `vscode.openFolder` in a new window); ＋ New's *New workspace…*; `ensureActiveProblem` offers it when `problemOverlap(…).noMatch`, then `releaseNewProblem(id)` removes the problem here if it has no `workflow.yaml` and no decision.
+- **Refresh** (v0.56.1): `WorkflowViewHost.refreshed()` after every Workflow view refresh calls `SidebarProvider.pushJourney()`; its watchers include `.autode/knowledge/ledger/**` and the problems' `spec/**`. The palette redraws its other sections on `journey` when open. `registerKnowledgeExplorer` watches `.autode/knowledge/**`, `.autode/local/catalog/**` and the problems' `semantic/**` (debounced 500 ms) and calls `KnowledgeExplorerPanel.refresh()` (a fresh overview; the page re-renders). `exploreOverview().needsReview` counts proposed facts too.
+
 ### 7.9 Roles, skills and assignments (v0.45.0; SKL-6, PA3b)
 
 - **Definitions** (`src/engine/agents/definitions.ts`):
@@ -2210,7 +2213,7 @@ src/core/credentials/    # VS Code SecretStorage credential resolver
 src/editors/    # custom editors
   DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SemanticModelEditorProvider.ts, SttmEditorProvider.ts
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
-  types.ts, workspaceLayout.ts, workspaceMigration.ts
+  types.ts, workspaceCreate.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
   answerTrace.ts, artifacts.ts, assignment.ts, chatFrontDoor.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, reconcilePlan.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)

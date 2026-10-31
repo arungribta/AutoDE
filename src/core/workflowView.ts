@@ -29,6 +29,8 @@ export interface WorkflowViewHost {
   journey?(previewTemplate?: string): Journey | undefined;
   /** UI2: moves a journey step forward the way the panel does it. */
   journeyAction?(id: string, args?: Record<string, string>): Promise<void>;
+  /** v0.56.1: after every refresh (a problem, a fact, a decision changed): the palette follows. */
+  refreshed?(): void;
 }
 
 type Node = { kind: 'waiting'; items: WaitingItem[] } | { kind: 'waitingItem'; item: WaitingItem } | { kind: 'problem'; model: WorkflowModel } | { kind: 'stage'; stage: StageModel; model: WorkflowModel } | { kind: 'task'; label: string; done?: boolean } | { kind: 'empty'; label: string };
@@ -235,13 +237,14 @@ export function registerWorkflowView(context: vscode.ExtensionContext, host: Wor
       const m = tree.refresh();
       if (m) { bar.text = `$(checklist) ${statusBarText(m)}${tree.waitingCount() ? ` · $(bell-dot) ${tree.waitingCount()} waiting` : ''}`; bar.tooltip = m.provenance.join('\n') || 'AutoDE workflow'; bar.show(); } else bar.hide();
       WorkflowPanel.refresh();
+      host.refreshed?.();
     } catch (err) { console.warn('AutoDE: workflow view refresh failed', err); }
   };
   const refresh = () => { if (timer) clearTimeout(timer); timer = setTimeout(refreshNow, 300); };
   const disposables: vscode.Disposable[] = [bar, vscode.window.registerTreeDataProvider('autoDataEngineeringHubWorkflow', tree)];
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (root) {
-    for (const glob of ['.autode/problems/**/*.{yaml,yml,jsonl}', '.autode/decisions/*.yaml', '.autode/local/active-problem.json', '.autode/knowledge/estate.yaml', '.autode/local/turns/*.jsonl', '.autode/local/maintenance.json', '.autode/knowledge/articles/*.md']) {
+    for (const glob of ['.autode/problems/**/*.{yaml,yml,jsonl}', '.autode/decisions/*.yaml', '.autode/local/active-problem.json', '.autode/knowledge/estate.yaml', '.autode/local/turns/*.jsonl', '.autode/local/maintenance.json', '.autode/knowledge/articles/*.md', '.autode/knowledge/ledger/**', '.autode/problems/*/spec/**']) {
       const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, glob));
       w.onDidChange(refresh); w.onDidCreate(refresh); w.onDidDelete(refresh);
       disposables.push(w);

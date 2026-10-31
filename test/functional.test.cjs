@@ -12523,7 +12523,7 @@ async function main() {
     assert.ok(!/confirm\(\s*['"]/.test(html), 'no window.confirm() call in the panel: VS Code webviews never show it');
     assert.ok(html.includes("post('startNewBusinessProblem');"));
     const panel = src('src/core/webviewProvider.ts');
-    for (const t of ["case 'startNewBusinessProblem': {\n          await this.startNewBusinessProblem();", "'Start new problem', 'Open another folder…'", "executeCommand('vscode.openFolder', undefined, { forceNewWindow: true })", '**Describe the new business problem**', 'problemOverlap(root, problemStatement, this.contextFileManager.getPackSources()).message']) assert.ok(panel.replace(/\r\n/g, '\n').includes(t), t);
+    for (const t of ["case 'startNewBusinessProblem': {\n          await this.startNewBusinessProblem();", "'Start new problem', 'New workspace…', 'Open another folder…'", "executeCommand('vscode.openFolder', undefined, { forceNewWindow: true })", '**Describe the new business problem**', 'const overlap = problemOverlap(root, problemStatement, this.contextFileManager.getPackSources());']) assert.ok(panel.replace(/\r\n/g, '\n').includes(t), t);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-new-'));
     let client;
     try {
@@ -13326,6 +13326,77 @@ async function main() {
     const ext = read('src/extension.ts');
     assert.ok(/const sourcePool = new Map<string, ConnectionManager>\(\)/.test(ext) && /await pickSource\('Refresh observed lineage'\)/.test(ext) && /await pickSource\('Browse'\)/.test(ext) && /journey: \(previewTemplate\) => sidebarProvider\.journey\(previewTemplate\)/.test(ext));
     assert.ok(/'AutoDE · Workflow'/.test(read('src/core/workflowView.ts')) && /'AutoDE · Knowledge Explorer'/.test(read('src/core/knowledgeExplorer.ts')));
+  });
+
+  // ── v0.56.1: a brand-new subject area ──
+
+  await test('v0.56.1: a new workspace for a different subject — its own folder with empty knowledge, the team\'s connections and approval policy brought along unless you say not, its first problem active; a non-empty folder or the same folder refused; the same on the CLI', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const WC = fresh('../dist/engine/workspaceCreate.js');
+    const base = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-newws-'));
+    try {
+      const from = nodePath.join(base, 'retail');
+      nodeFs.mkdirSync(nodePath.join(from, '.autode', 'config'), { recursive: true });
+      nodeFs.mkdirSync(nodePath.join(from, '.autode', 'knowledge', 'ledger'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(from, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    credentials: { resolver: cli, ref: prod }\n');
+      nodeFs.writeFileSync(nodePath.join(from, '.autode', 'config', 'approvals.yaml'), 'runbooks: {}\n');
+      nodeFs.writeFileSync(nodePath.join(from, '.autode', 'knowledge', 'ledger', 'x.jsonl'), '{"knowledge":"of retail"}\n');
+      const r = WC.createWorkspace({ folder: nodePath.join(base, 'hospital'), from, statement: 'Forecast hospital bed occupancy for 14 days' });
+      assert.deepStrictEqual(r.carried, ['.autode/config/connections.yaml', '.autode/config/approvals.yaml']);
+      assert.ok(r.problemId && nodeFs.existsSync(nodePath.join(r.folder, '.autode', 'problems', r.problemId)) && /"problemId": ?"/.test(nodeFs.readFileSync(nodePath.join(r.folder, '.autode', 'local', 'active-problem.json'), 'utf8')));
+      assert.ok(!nodeFs.existsSync(nodePath.join(r.folder, '.autode', 'knowledge', 'ledger', 'x.jsonl')), 'no knowledge comes along');
+      assert.ok(nodeFs.existsSync(nodePath.join(r.folder, '.autode', '.gitignore')) || nodeFs.existsSync(nodePath.join(r.folder, '.gitignore')), 'set up like any workspace');
+      const bare = WC.createWorkspace({ folder: nodePath.join(base, 'bare'), from, carry: { connections: false, approvals: false } });
+      assert.deepStrictEqual([bare.carried, bare.problemId], [[], undefined]);
+      assert.throws(() => WC.createWorkspace({ folder: nodePath.join(base, 'hospital'), from }), /already exists and isn't empty/);
+      assert.throws(() => WC.createWorkspace({ folder: from, from }), /isn't empty|different folder/);
+      // The CLI.
+      let c = await cli(['workspace', 'new', nodePath.join(base, 'energy'), '--statement', 'Meter readings to monthly bills', '--no-connections', '--workspace', from, '--json']);
+      assert.ok(c.code === 0 && c.json().problemId && c.json().carried.join() === '.autode/config/approvals.yaml', c.out + c.err);
+      c = await cli(['workspace', 'new', nodePath.join(base, 'energy'), '--workspace', from]);
+      assert.ok(c.code === 1 && /isn't empty/.test(c.err), c.err);
+      assert.strictEqual((await cli(['workspace', 'open', 'x', '--workspace', from])).code, 2);
+    } finally { nodeFs.rmSync(base, { recursive: true, force: true }); }
+  });
+
+  await test('v0.56.1: a brand-new subject\'s facts, confirmed, are in what the Knowledge Explorer shows (overview, search, facts); the Explorer, the palette and the Workflow tab follow changes on disk; + New makes a new workspace, and a problem that matches nothing here is offered one', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-newsubject-'));
+    try {
+      const { startProblem } = fresh('../dist/engine/documents/problems.js');
+      const { AssertionLedger } = fresh('../dist/engine/context/ledger.js');
+      const { layoutPath } = fresh('../dist/engine/workspaceLayout.js');
+      const { EngineWorkspace } = fresh('../dist/mcp/workspace.js');
+      const X = fresh('../dist/engine/explore/sources.js');
+      const E = fresh('../dist/engine/explore/explore.js');
+      const pid = startProblem(ws, 'Forecast hospital bed occupancy for the next 14 days').id;
+      const ledger = new AssertionLedger(layoutPath(ws, 'ledger'));
+      await ledger.load();
+      const engine = new EngineWorkspace({ workspaceRoot: ws, resourcesRoot: root });
+      const view = async () => X.exploreSources(ws, await engine.contextSources(), pid);
+      const term = await ledger.assert({ kind: 'business_term', subject: ['term:bed-occupancy'], predicate: 'defined_as', value: { term: 'Bed occupancy', definition: 'Occupied beds / staffed beds' }, statement: 'Bed occupancy: occupied beds / staffed beds', evidence: [{ kind: 'chat', ref: 't1' }], trust: 'inferred', status: 'proposed', createdBy: 'chat:test' });
+      let o = E.exploreOverview(await view());
+      assert.deepStrictEqual([o.counts.terms, o.needsReview], [0, 1], 'proposed: waiting in the Context Inbox, not yet knowledge');
+      await ledger.confirm(term.id, 'arun');
+      const sources = await view();
+      o = E.exploreOverview(sources);
+      assert.deepStrictEqual([o.counts.terms, o.counts.facts, o.needsReview], [1, 1, 0], 'confirmed: in the knowledge layer, read again without a restart');
+      assert.ok(E.searchAssets(sources, 'bed occupancy').results.some((x) => x.assetType === 'glossary_term' && x.trust === 'confirmed'));
+      assert.strictEqual(E.listFacts(sources).total, 1);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    // The wiring.
+    const read = (f) => nodeFs.readFileSync(nodePath.join(root, f), 'utf8');
+    const ke = read('src/core/knowledgeExplorer.ts');
+    assert.ok(/public static refresh\(\)/.test(ke) && /'\.autode\/knowledge\/\*\*'/.test(ke) && /KnowledgeExplorerPanel\.refresh\(\)/.test(ke), 'the Explorer follows the knowledge files');
+    const wv = read('src/core/workflowView.ts');
+    assert.ok(/host\.refreshed\?\.\(\)/.test(wv) && /'\.autode\/knowledge\/ledger\/\*\*'/.test(wv), 'the Workflow tab watches the ledger, and every refresh reaches the palette');
+    const ext = read('src/extension.ts');
+    assert.ok(/refreshed: \(\) => sidebarProvider\.pushJourney\(\)/.test(ext) && /registerCommand\(\`\$\{EXTENSION_ID\}\.newWorkspace\`/.test(ext) && /createWorkspace\(\{ folder: path\.join\(parent\[0\]\.fsPath, name\.trim\(\)\)/.test(ext) && /'vscode\.openFolder', vscode\.Uri\.file\(r\.folder\), \{ forceNewWindow: true \}/.test(ext));
+    const sp = read('src/core/webviewProvider.ts');
+    assert.ok(/public pushJourney\(\)/.test(sp) && /'Start new problem', 'New workspace…', 'Open another folder…'/.test(sp) && /if \(overlap\.noMatch\)/.test(sp) && /New workspace for it…/.test(sp) && /public async releaseNewProblem\(id: string\)/.test(sp) && /workflow\.yaml'\)\) \|\| hasDecision/.test(sp));
+    assert.ok(/if \(palettePanel\.classList\.contains\('visible'\)\) \{ renderPaletteProblems\(\); renderPaletteSpec\(\); renderPaletteContext\(\);/.test(read('media/sidebar.html')));
+    assert.ok(JSON.parse(read('package.json')).contributes.commands.some((c) => c.command === 'autoDataEngineeringHub.newWorkspace' && c.title === 'AutoDE: New Workspace…'));
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

@@ -1052,7 +1052,8 @@ export function exploreOverview(sources: ExploreSources): ExploreOverview {
     counts: { domains: of('domain').length, articles: of('knowledge_article').length, databases: of('database').length, schemas: of('schema').length, tables: of('table').length, columns: of('column').length, terms: of('business_term').length, rules: of('business_rule').length, queries: of('verified_query').length, facts: facts.length, relationships: of('semantic_relationship').length, catalogTables: sources.catalog?.all?.().length ?? 0, semanticModels: models.length, approvedSemanticModels: models.filter((m) => m.status === 'approved').length, metrics: of('metric').length },
     facts: { byStatus, byTrust },
     conflicts: sources.conflicts.length,
-    needsReview: facts.filter((a) => a.status === 'needs_review').length,
+    // What the Context Inbox holds (v0.56.1: proposed facts too, not only those flagged after a check).
+    needsReview: facts.filter((a) => a.status === 'needs_review' || a.status === 'proposed').length,
     systems: [...systems.entries()].map(([k, tables]) => { const [system, environment] = k.split('|'); return { system, environment, tables }; }).sort((a, b) => a.system.localeCompare(b.system) || a.environment.localeCompare(b.environment)),
     semanticModels: models
   };

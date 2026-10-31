@@ -98,6 +98,8 @@ Click **Save as named connection**. AutoDE tests it first and saves it only if t
 - your user name and file paths go to `.autode/local/connections.yaml` (not committed);
 - passwords and tokens go to VS Code's secret storage. Secrets never go in files.
 
+**A different subject area is a different workspace** (since 0.56.1). A workspace is a folder with its own knowledge, estate, problems and decisions. For a problem about another subject, use *AutoDE: New Workspace…* (or ＋ New → *New workspace…*): name the folder, choose where it goes, and whether this workspace's connections and approval policy come along (settings only, never knowledge or secrets). AutoDE creates it and opens it in a new window. If you describe a problem that matches nothing in the current workspace, AutoDE offers to move it to a new workspace. In a terminal: `autode workspace new <folder> --statement "…"`.
+
 The **Saved connections** list at the top of the tab shows each connection's readiness, in AutoDE and for agent hosts. Since 0.56.0 several sources can be connected at once: *Use* connects one without disconnecting the others, the list marks which are connected (each with *Disconnect*), and commands that act on a source ask which one.
 
 **Read-only by default.** AutoDE's queries only read. **Sample data**: by default no row values reach a model, only columns and counts. To allow sample rows for a connection, set `allowSampleDataInPrompts: true` on it in `connections.yaml`. Even then, columns that look like personal data (or that you classified as personal, [§12](#12-personal-data)) are masked.
@@ -986,7 +988,7 @@ All settings start with `autoDataEngineeringHub.`.
 
 Specified and scheduled ([roadmap](../roadmap.md)):
 
-- **A planner that composes the workflow from coverage** (v0.56.1): workflows beyond the three templates, from AutoDE's approved skills only, a short clarification round when the plan needs your answers, and re-planning as the work runs.
+- **A planner that composes the workflow from coverage** (v0.56.2): workflows beyond the three templates, from AutoDE's approved skills only, a short clarification round when the plan needs your answers, and re-planning as the work runs.
 - **Platform operations** (the catalog since v0.54.0; more through v0.58.0): every interaction with a platform becomes a small declarative file, so a platform change is handled by updating files and skills, not by a new AutoDE release.
   - AutoDE reads observed lineage from Snowflake and Databricks itself (since v0.54.0), then the estate (v0.55.0), when **Redshift** also arrives, as a source through the AWS CLI.
   - A **platform catalog** (v0.57.0) shows every operation AutoDE runs on your platforms and the skills and features that rely on it. There you can try reads, and edit skills (including your own copy of AutoDE's) and operations, each reviewed before use.

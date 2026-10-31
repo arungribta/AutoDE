@@ -6,6 +6,20 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.1
+
+- **A new workspace for a different subject area** (owner's UI test, 2026-10-30). A workspace is a folder with its own `.autode/`: its estate, knowledge, problems and decisions. A problem about another subject now gets one, instead of mixing into this workspace's knowledge:
+  - **AutoDE: New Workspace…** asks the folder's name and where to create it, and whether to bring this workspace's connections and approval policy (settings only, never secrets or knowledge), then creates it, set up, and opens it in a new window.
+  - **＋ New** offers *New workspace…* beside *Start new problem* (before, *Open another folder…* only showed the folder picker).
+  - **Once you describe a problem that matches nothing here**, AutoDE offers to start it in a new workspace; the problem moves there with its statement, and nothing of it stays behind (only while it is a first draft: no workflow, no decision).
+  - In a terminal: `autode workspace new <folder> [--statement "…"] [--no-connections] [--no-approvals]`.
+- **The views follow changes as they happen:**
+  - the **palette** gets the journey after every change (a new problem, a fact confirmed, a decision, the specification) and redraws its open sections; before, it updated only when opened;
+  - the **Workflow tab** also watches the knowledge ledger and the specification;
+  - the **Knowledge Explorer** redraws the open page when knowledge changes on disk (a fact confirmed, an estate ingested, a semantic model); before, a confirmed fact showed only after navigating.
+- **Fixed:** the Knowledge Explorer's overview counted only facts flagged after a failed check as waiting for review; it now counts proposed facts too, as the Context Inbox does.
+- **Roadmap:** the planner (PLN1) moves to v0.56.2.
+
 ## 0.56.0
 
 - **UI2: the whole journey in view** (docs/specs/ui-simplification.md; requirement UI-8; owner, 2026-10-28/29).

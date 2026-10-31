@@ -1961,7 +1961,11 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
       case 'openInbox': openPalette(); break;
       case 'prerequisites': renderPrerequisites(msg.platform, msg.list || []); break;
       case 'existingConnections': renderExisting(msg.platform, msg.role, msg.result); break;
-      case 'journey': journeyState = msg.journey || null; renderPaletteJourney(); break;
+      case 'journey':
+        journeyState = msg.journey || null; renderPaletteJourney();
+        // v0.56.1: an open palette follows the change in its other sections too.
+        if (palettePanel.classList.contains('visible')) { renderPaletteProblems(); renderPaletteSpec(); renderPaletteContext(); post('listDecisions'); }
+        break;
       case 'namedConnectionResult': showToast(msg.ok ? 'Saved ' + msg.id : 'Not saved — see the log', msg.ok ? 'success' : 'error'); onbCards().forEach(function (o) { o.card.querySelectorAll('.onb-save, .onb-def-save').forEach(function (b) { b.disabled = false; }); }); break;
       case 'error': endPending(); showToast(msg.message || 'An error occurred', 'error'); break;
       case 'contextUpdate': if (msg.stats) { updateContextDrawer(msg.stats); } if (msg.dbEntities) { renderContextEntities(ctxDbGrid, msg.dbEntities, '📦'); } if (msg.bizTerms) { renderContextEntities(ctxBizGrid, msg.bizTerms, '🏷'); } if (msg.queries) { renderContextEntities(ctxQueryGrid, msg.queries, '✅'); } break;
