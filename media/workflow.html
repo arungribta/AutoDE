@@ -214,7 +214,7 @@
 
   function render() {
     const m = state.model, j = state.journey;
-    if (!m && !j) { root.innerHTML = '<p class="muted">' + esc(state.error || 'Start or open a business problem to see its journey and workflow.') + '</p>'; return; }
+    if (!m && !j) { root.innerHTML = '<p class="muted">' + esc(state.error || 'No business problem in this workspace yet. Describe it in the AutoDE chat (or use ＋ New in the palette): its journey and workflow start here as soon as it exists.') + '</p>'; return; }
     root.innerHTML = j ? journeyHtml(j, m) : (planHtml(m) + boardHtml(m));
     bind();
   }

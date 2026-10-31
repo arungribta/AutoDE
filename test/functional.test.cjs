@@ -13399,6 +13399,25 @@ async function main() {
     assert.ok(JSON.parse(read('package.json')).contributes.commands.some((c) => c.command === 'autoDataEngineeringHub.newWorkspace' && c.title === 'AutoDE: New Workspace…'));
   });
 
+  await test('v0.56.2: with no problem yet (a new workspace, or right after + New), the first chat message is the new problem\'s statement: it starts the problem and its interview, so the journey shows it as a draft at once; the empty Workflow tab says how to start', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+    const sp = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'webviewProvider.ts'), 'utf8');
+    const chat = sp.slice(sp.indexOf("case 'chat': {"), sp.indexOf("if (this.specManager && currentSpec && currentSpec.status === 'draft')"));
+    assert.ok(/if \(!this\.activeProblemId && this\.activeProblemManager\) \{\s*await this\.handleSpecDiscovery\(chatMessage\);/.test(chat), 'routed to discovery, which starts the problem');
+    assert.ok(chat.indexOf('if (!this.activeProblemId') < chat.indexOf('if (this.specManager && !currentSpec)'), 'before the spec-only routes, which need an active problem');
+    assert.ok(/if \(!previousSpec\) await this\.ensureActiveProblem\(trimmed\);/.test(sp), 'discovery starts the problem from the statement');
+    assert.ok(/No business problem in this workspace yet\. Describe it in the AutoDE chat/.test(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'workflow.html'), 'utf8')));
+    // A draft problem has its journey at once: the statement, waiting for confirmation, and the draft workflow previewed.
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-draftjourney-'));
+    try {
+      const { startProblem } = fresh('../dist/engine/documents/problems.js');
+      const J = fresh('../dist/engine/workflows/journey.js');
+      const id = startProblem(ws, 'Forecast hospital bed occupancy for the next 14 days').id;
+      const j = J.journeyFor({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..'), problemId: id });
+      assert.deepStrictEqual([j.statement, j.current.phase, j.phases[0].steps.map((x) => x.status), !!j.preview], ['Forecast hospital bed occupancy for the next 14 days', 1, ['done', 'waiting'], true]);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));

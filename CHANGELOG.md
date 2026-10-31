@@ -6,6 +6,12 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.2
+
+- **Fixed: the first message starts the problem** (owner's UI test, 2026-10-30). With no problem active (a new workspace, or right after ＋ New → *Start new problem*, which asks you to describe it), a chat message was answered as a general question and mined for facts, but no problem was created: the Workflow tab stayed empty and the facts belonged to no problem. Since v0.53.2 the panel asked for the statement and then didn't take it. The message is now the new problem's statement: the problem and its interview start, and the journey shows it as a draft right away (① with the statement waiting for confirmation, ⑤ previewing the suggested workflow). `/commands` and `@agent` messages are unchanged.
+- The empty Workflow tab says how to start: describe the problem in the chat, or ＋ New.
+- **Roadmap:** the planner (PLN1) moves to v0.56.3.
+
 ## 0.56.1
 
 - **A new workspace for a different subject area** (owner's UI test, 2026-10-30). A workspace is a folder with its own `.autode/`: its estate, knowledge, problems and decisions. A problem about another subject now gets one, instead of mixing into this workspace's knowledge:

@@ -631,6 +631,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
               scheduleExtraction();
               break;
             }
+            // v0.56.1: no problem yet (a new workspace, or right after + New): the message is the new problem's
+            // statement. It starts the problem and its interview, so the journey and the workflow follow.
+            if (!this.activeProblemId && this.activeProblemManager) {
+              await this.handleSpecDiscovery(chatMessage);
+              scheduleExtraction();
+              break;
+            }
             if (this.specManager && !currentSpec) {
               await this.handleSpecDiscovery(chatMessage);
               scheduleExtraction();

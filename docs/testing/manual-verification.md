@@ -1346,6 +1346,15 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: open the Knowledge Explorer on its overview; confirm a proposed glossary term in the Context Inbox.
   Expect: within a second the overview's glossary terms and knowledge facts count it, and *facts to review* drops; searching the term finds it.
 
+## Part 60 — v0.56.2 The first message starts the problem
+
+- [ ] **60.1 In a new workspace.**
+  Do: *AutoDE: New Workspace…* without a statement; in the new window, type the problem in the chat.
+  Expect: the interview starts; the palette and the Workflow tab show the problem as a draft (① with the statement waiting for confirmation, ⑤ previewing the suggested workflow) without approving anything.
+- [ ] **60.2 After ＋ New.**
+  Do: ＋ New → *Start new problem*; describe the problem.
+  Expect: the same: a new draft problem, its interview, its journey.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1687,5 +1696,7 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 59.2 |  |  |
 | 59.3 |  |  |
 | 59.4 |  |  |
+| 60.1 |  |  |
+| 60.2 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.
