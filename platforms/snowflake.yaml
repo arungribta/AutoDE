@@ -10,6 +10,7 @@ access:
   api: { name: Snowflake SQL API }
 versionOperation: platform.version
 dialect:
+  compile: snowflake
   identifierQuote: '"'
   unquotedCase: upper
   booleans: ['TRUE', 'FALSE']

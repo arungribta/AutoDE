@@ -11,6 +11,8 @@ import { configureMcpForClaudeCode, hintStaleMcpJson, refreshStableServer, regis
 import { EngineClient } from './core/engineClient';
 import { registerWorkflowView } from './core/workflowView';
 import { registerKnowledgeExplorer } from './core/knowledgeExplorer';
+import { PlatformCatalogPanel } from './core/platformCatalogView';
+import type { ConnectionTarget } from './engine/platform/operations/service';
 import * as articles from './engine/knowledge/articles';
 import { registerSkillsView } from './core/skillsView';
 import { PortSkillPanel } from './core/portSkillView';
@@ -997,6 +999,18 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
   });
 
   // POP1 part 2 (v0.54.1): the platform operations catalog until its own view (POP4): browse, customise a shipped file, propose a team file.
+  // POP4a: the Platform catalog tab (the capability matrix, platform, operation and skill pages); the quick pick stays as Find Platform Operation….
+  const platformCatalog = vscode.commands.registerCommand(`${EXTENSION_ID}.platformCatalog`, async (open?: { platform?: string; operation?: string }) => {
+    const live = (): Array<{ id: string; platform: string; target: ConnectionTarget }> => {
+      const managers: Array<[string, ConnectionManager]> = [...liveSources()];
+      const t = targetConnectionManager;
+      const tid = t?.isConnected() ? t.activeConnectionId() : undefined;
+      if (t && tid && !managers.some(([id]) => id === tid)) managers.push([tid, t]);
+      return managers.flatMap(([id, m]) => { const platform = m.getActivePlatform(); return platform ? [{ id, platform, target: { connectionId: id, platform, query: async (sql: string, maxRows: number) => (await m.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>> } }] : []; });
+    };
+    PlatformCatalogPanel.show(context, { workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, liveConnections: live }, open);
+  });
+
   const platformOperations = vscode.commands.registerCommand(`${EXTENSION_ID}.platformOperations`, async () => {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const scope = { resourcesRoot: context.extensionUri.fsPath, workspaceRoot: wsRoot };
@@ -1316,7 +1330,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
     openSidebar,
     testLanguageModel, listLanguageModelInfo, listLanguageModels,
     copilotHandoff,
-    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, refreshLineageCmd, platformOperations, customisePlatformOperation, proposePlatformFile, newWorkspace, reindex,
+    testConnection, testTargetConnection, sourceAssessment, reVerifySourceSchema, disconnectDataPlatform, disconnectTargetDataPlatform, browseSourceDatabase, browseTargetDatabase, ingestFileAsSourceContext, createMapping, compactContextLedger, whatTheAgentSaw, explainArtifact, openEstate, syncMetadata, refreshLineageCmd, platformCatalog, platformOperations, customisePlatformOperation, proposePlatformFile, newWorkspace, reindex,
     addPackDocument, applyPack, runConformance, verifyClaims, proposeVocabulary,
     importToolSkill, updateToolSkill, classifyPersonalData, captureCoverage, findCandidates, runToolSkill, reviewToolSkill, publishToolSkill, deprecateToolSkill, retireToolSkill, skillLog,
     newChat, chatHistory, discardChat,

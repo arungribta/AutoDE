@@ -1250,7 +1250,7 @@ Use the reference workspace in VS Code, the `autode` command, and Claude Code wi
   Do: a Snowflake connection with username and password (Settings → Connections); run a query from the panel while watching the process list (Task Manager → Details, *Command line* column, or `Get-CimInstance Win32_Process -Filter "name like 'snow%'" | select CommandLine`).
   Expect: `snow sql -x --account … --user …` with no password in it. With a Snowflake CLI too old for `-x`, the query still runs and the AutoDE Output channel says the password was passed as `--password`.
 - [ ] **54.4 Browse, customise, propose in VS Code.**
-  Do: *AutoDE: Platform Operations*; pick `lineage.objects`; *Customise*; change its row limit default; *AutoDE: Propose Platform File for Approval*; approve the decision; run *AutoDE: Platform Operations* again.
+  Do: *AutoDE: Find Platform Operation…* (named *AutoDE: Platform Operations* before 0.57.0); pick `lineage.objects`; *Customise*; change its row limit default; *AutoDE: Propose Platform File for Approval*; approve the decision; run *AutoDE: Platform Operations* again.
   Expect: the shipped file opens read-only with *Customise*; the copy opens from `.autode/config/platform-operations/lineage.objects.yaml`; it is listed as a draft until approved, then as the team's copy in effect.
 
 ## Part 55 — v0.55.0 Redshift, defined by files
@@ -1423,6 +1423,24 @@ Use a workspace that already holds another subject's knowledge (for example the 
 - [ ] **65.4 The owner's fixes.**
   Do: a question with choices in the chat; hover a chat message, a notice and a run card; run a stage agent with Copilot's model set to **Auto**.
   Expect: radio buttons and checkboxes sit beside their labels (also the palette's source systems); **Copy** copies the text (the status bar says *copied*); the run no longer fails with "Auto mode needs a prompt or a command".
+
+## Part 66 — v0.57.0 POP4a: the Platform catalog
+
+- [ ] **66.1 The matrix.**
+  Do: *AutoDE: Platform Catalog* (or the window's Platform catalog tab).
+  Expect: capabilities as rows, your connected platforms first; each cell supported, partly or not applicable; hovering a *partly* cell says what is missing.
+- [ ] **66.2 A platform's page.**
+  Do: open Snowflake (or your platform), then each tab, with the arrow keys too.
+  Expect: Overview lists your connections; Primitives and dialect shows what compiles; a catalog-type platform (a team one) has no Primitives tab.
+- [ ] **66.3 Conformance.**
+  Do: with a connection connected, Overview → **Conformance run**.
+  Expect: a summary ("supports N of M checked capabilities…"); a capability your role lacks a privilege for shows *partly* with the privilege, in the matrix and in Health.
+- [ ] **66.4 An operation and Try it.**
+  Do: open `estate.list_columns`; Preview the statement, then Run it on your connection.
+  Expect: what relies on it (the estate capability, Estate extraction, the ingestion skills); the bound statement before it runs; names shown, a data operation's rows not shown; its last run listed. A change operation only shows its runbook step.
+- [ ] **66.5 Skills and lint.**
+  Do: open a performance skill's page; `autode skills lint autode-snowflake-performance`.
+  Expect: it is flagged for querying `account_usage.query_history` itself; `autode skills lint autode-redshift-ingestion` passes.
 
 ## Results
 
@@ -1785,5 +1803,10 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 65.2 |  |  |
 | 65.3 |  |  |
 | 65.4 |  |  |
+| 66.1 |  |  |
+| 66.2 |  |  |
+| 66.3 |  |  |
+| 66.4 |  |  |
+| 66.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

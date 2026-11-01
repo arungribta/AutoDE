@@ -5886,7 +5886,7 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
@@ -5981,6 +5981,8 @@ async function main() {
       autode_lineage: [{ asset: 'shop.orders', direction: 'downstream' }, { asset: 'shop.orders', depth: 11 }],
       autode_impact: [{ change: 'remove_table', asset: 'shop.orders' }, { change: 'truncate', asset: 'shop.orders' }],
       autode_platform_operations: [{ platform: 'snowflake' }, { platform: '' }],
+      autode_platform_catalog: [{ platform: 'snowflake' }, { platform: '' }],
+      autode_platform_conformance: [{ connectionId: 'snowflake:prod' }, {}],
       autode_platform_run: [{ connectionId: 'snowflake:nope', operation: 'platform.version' }, { connectionId: 'snowflake:nope' }],
       autode_refresh_lineage: [{ connectionId: 'snowflake:nope' }, { connectionId: 'snowflake:nope', databases: ["x'; drop"] }],
       autode_record_observed_lineage: [{ connectionId: 'snowflake:nope', method: 'openlineage', edges: [{ upstream: { object: 'A.B.C' }, downstream: { object: 'A.B.D' } }] }, { connectionId: 'snowflake:nope', method: 'open lineage', edges: [] }],
@@ -12794,9 +12796,9 @@ async function main() {
     // The VS Code commands, until the catalog view (POP4).
     const pkg = JSON.parse(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'package.json'), 'utf8'));
     const ext = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
-    for (const c of ['platformOperations', 'customisePlatformOperation', 'proposePlatformFile']) {
+    for (const c of ['platformCatalog', 'platformOperations', 'customisePlatformOperation', 'proposePlatformFile']) {
       assert.ok(pkg.contributes.commands.some((x) => x.command === `autoDataEngineeringHub.${c}`), c);
-      assert.ok(ext.includes(`\`\${EXTENSION_ID}.${c}\``) && new RegExp(`refreshLineageCmd, platformOperations, customisePlatformOperation, proposePlatformFile`).test(ext), c);
+      assert.ok(ext.includes(`\`\${EXTENSION_ID}.${c}\``) && new RegExp(`refreshLineageCmd, platformCatalog, platformOperations, customisePlatformOperation, proposePlatformFile`).test(ext), c);
     }
     assert.ok(/propose\(new DecisionStore\(wsRoot\)[^\n]*'platform_operation'/.test(ext), 'Propose makes a platform_operation decision');
   });
@@ -13575,6 +13577,111 @@ async function main() {
       const done = await cli(['workflow', 'complete', 'churn-model', ...W, '--by', 'priya', '--summary', 'Model trained in the DS workspace; scores land in crm.churn_scores daily.']);
       assert.ok(done.code === 0 && /churn-model is done/.test(done.out), done.out + done.err);
     } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── v0.57.0 POP4a: the operations and skills catalog (docs/specs/platform-operations.md §6.3) ──
+
+  await test('v0.57.0 POP4a: the capability matrix and each platform\'s page come from its definition (a team platform of another category has its own tabs, primitives hidden); a conformance run without a privilege shows partly and the privilege; every operation says what relies on it (capabilities, AutoDE features, skills) and an unused one is flagged; a change operation never runs', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const C = fresh('../dist/engine/platform/operations/catalogView.js');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const S = fresh('../dist/engine/platform/operations/service.js');
+    const { loadConnectionsConfig } = fresh('../dist/engine/platform/connectionsConfig.js');
+    const repo = nodePath.join(__dirname, '..');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop4-'));
+    try {
+      const cfg = nodePath.join(ws, '.autode', 'config');
+      nodeFs.mkdirSync(nodePath.join(cfg, 'platforms'), { recursive: true });
+      nodeFs.mkdirSync(nodePath.join(cfg, 'platform-operations', 'estate'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(cfg, 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    database: RETAIL\n    schema: SHOP\n');
+      // A team platform of the catalog category, approved: no dialect, no primitives.
+      const catalogDef = 'formatVersion: 1\nid: glossary-hub\ntitle: Glossary Hub\ncategory: catalog\ntransports: [http]\ncapabilities:\n  knowledge.import:\n    support: partly\n    note: Terms only, not lineage.\n    privileges: A reader account on the glossary.\n';
+      nodeFs.writeFileSync(nodePath.join(cfg, 'platforms', 'glossary-hub.yaml'), catalogDef);
+      L.writeApproval(ws, 'platforms', 'glossary-hub', { checksum: L.checksumOf(catalogDef), by: 'priya', at: new Date().toISOString() });
+      // A team read operation nothing names: flagged as unused.
+      const unusedOp = 'formatVersion: 1\nid: estate.list_stages\ntitle: List stages\ndescription: The stages of a schema.\nkind: read\ncontent: metadata\narea: estate\nparams:\n  - { name: database, type: identifier, label: Database }\nreturns:\n  - { name: stage, label: Stage, from: STAGE_NAME }\nplatforms:\n  snowflake:\n    sql: SELECT STAGE_NAME FROM {database}.INFORMATION_SCHEMA.STAGES\nexample:\n  params: { database: RETAIL }\n  rows: [ { STAGE_NAME: RAW_FILES } ]\n';
+      nodeFs.writeFileSync(nodePath.join(cfg, 'platform-operations', 'estate', 'list_stages.yaml'), unusedOp);
+      L.writeApproval(ws, 'operations', 'estate.list_stages', { checksum: L.checksumOf(unusedOp), by: 'priya', at: new Date().toISOString() });
+      const scope = { resourcesRoot: repo, workspaceRoot: ws, home: ws };
+      // The matrix: the workspace's platform first, every capability a row, cells from the definitions.
+      const m = C.capabilityMatrix(scope);
+      assert.ok(!m.errors.length, m.errors.join(' | '));
+      assert.deepStrictEqual([m.platforms[0].id, m.platforms[0].connected], ['snowflake', true]);
+      assert.ok(m.platforms.some((p) => p.id === 'glossary-hub' && p.category === 'catalog' && !p.connected));
+      assert.strictEqual(m.cells['knowledge.import']['glossary-hub'].support, 'partly');
+      assert.strictEqual(m.cells.lineage.snowflake.support, 'supported');
+      assert.strictEqual(m.capabilities[0], 'estate', 'the capabilities people ask about first');
+      // Pages: the same tabs for every platform, those that don't apply hidden.
+      const sf = C.platformPage(scope, 'snowflake');
+      const gh = C.platformPage(scope, 'glossary-hub');
+      assert.deepStrictEqual(sf.tabs.map((t) => t.id), ['overview', 'capabilities', 'operations', 'skills', 'tools', 'primitives', 'privileges', 'health']);
+      assert.deepStrictEqual(gh.tabs.map((t) => t.id), ['overview', 'capabilities', 'operations', 'skills', 'privileges', 'health'], 'a catalog has no primitives and declares no CLI');
+      assert.ok(sf.primitives.dialect === 'snowflake' && sf.primitives.primitives.every((p) => p.compiles), JSON.stringify(sf.primitives));
+      assert.ok(sf.skills.some((k) => k.id === 'autode-snowflake-governance') && sf.operations.some((a) => a.area === 'lineage'));
+      assert.deepStrictEqual(gh.privileges, [{ capability: 'knowledge.import', privileges: 'A reader account on the glossary.' }]);
+      // A conformance run on a connection without access history: lineage partly, with the privilege it needs.
+      const connection = loadConnectionsConfig(ws).connections[0];
+      const target = { connectionId: connection.id, platform: 'snowflake', query: async (sql) => { if (/CURRENT_VERSION/i.test(sql)) return [{ VERSION: '8.40.1' }]; if (/ACCESS_HISTORY/i.test(sql)) throw new Error('SQL access control error: Insufficient privileges to operate on view ACCESS_HISTORY'); return []; } };
+      const r = await C.conformanceRun(scope, target, connection.fields);
+      assert.strictEqual(r.capabilities.lineage.status, 'partly', JSON.stringify(r.capabilities.lineage));
+      assert.ok(/lineage.columns: .*Insufficient privileges.*It needs: IMPORTED PRIVILEGES on the SNOWFLAKE database/.test(r.capabilities.lineage.detail), r.capabilities.lineage.detail);
+      assert.strictEqual(r.capabilities.estate.status, 'ok');
+      assert.strictEqual(r.capabilities.profiling.status, 'not-checked', 'served by AutoDE\'s own code');
+      assert.ok(/supports \d+ of \d+ checked capabilities; lineage partly works/.test(r.summary), r.summary);
+      const after = C.capabilityMatrix(scope).cells.lineage.snowflake.connections[0];
+      assert.deepStrictEqual([after.connection, after.status], [connection.id, 'partly'], 'the matrix shows the run');
+      assert.ok(C.platformPage(scope, 'snowflake').health.failing.some((x) => x.operation === 'lineage.columns'), 'the failing read is in Health');
+      // Traceable: what relies on each operation; the unused one is flagged.
+      const cols = C.operationPage(scope, 'estate.list_columns');
+      assert.ok(cols.reliedOnBy.capabilities.includes('snowflake: estate') && cols.reliedOnBy.engine.some((e) => /Estate extraction/.test(e)) && cols.reliedOnBy.skills.some((k) => k.id === 'autode-redshift-ingestion') && !cols.unused, JSON.stringify(cols.reliedOnBy));
+      assert.ok(cols.lastRuns.some((x) => x.connection === connection.id && x.ok), 'its conformance run is its last run');
+      assert.ok(C.operationPage(scope, 'platform.version').reliedOnBy.engine.some((e) => /Platform version/.test(e)));
+      const unused = C.operationPage(scope, 'estate.list_stages');
+      assert.ok(unused.unused && unused.origin === 'team' && unused.approvedBy === 'priya', JSON.stringify(unused).slice(0, 300));
+      for (const o of L.loadCatalog({ resourcesRoot: repo }).operations) assert.ok(!C.operationPage({ resourcesRoot: repo, home: ws }, o.item.id).unused, `${o.item.id} is shipped and something relies on it`);
+      // A change operation never runs from the catalog: it is the runbook step it would be.
+      const change = L.loadCatalog({ resourcesRoot: repo }).operations.find((o) => o.item.kind === 'change' && o.item.platforms.snowflake);
+      if (change) await assert.rejects(S.runOnConnection(scope, target, change.item.id, {}), (e) => e.code === 'CHANGE' || e.code === 'VALIDATION_FAILED');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.57.0 POP4a: skills lint flags an unknown operation id and a skill querying the platform itself (not the deliverable code it teaches); the CLI and MCP give the same catalog pages; the Platform catalog tab is wired and packaged', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const C = fresh('../dist/engine/platform/operations/catalogView.js');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const catalog = L.loadCatalog({ resourcesRoot: nodePath.join(__dirname, '..') });
+    const text = ['# Ingest', 'Read the columns with `estate.list_columns`, then `estate.list_partitions` (an operation that does not exist).', 'The YAML key `governance.columns` is a field, not an operation.', '', '## Worked example', '```sql', 'CREATE TABLE marts.fct_orders (order_id NUMBER);', "GRANT SELECT ON marts.fct_orders TO ROLE analyst;", 'SELECT * FROM snowflake.account_usage.query_history;', '```'].join('\n');
+    const r = C.skillOperations(text, catalog);
+    assert.deepStrictEqual(r.uses, [{ id: 'estate.list_columns', section: 'Ingest' }]);
+    assert.deepStrictEqual(r.unknown, ['estate.list_partitions']);
+    assert.strictEqual(r.sql.length, 1, 'DDL and the grants a runbook applies are the skill\'s own; reading account usage is an operation\'s job');
+    assert.ok(/account_usage/.test(r.sql[0]) && /Worked example/.test(r.sql[0]));
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop4-cli-'));
+    let client;
+    try {
+      const lint = await cli(['skills', 'lint', 'autode-snowflake-performance', '--workspace', ws, '--json']);
+      assert.ok(lint.code === 1 && lint.json().lint.sql.some((q) => /account_usage/.test(q)), lint.out);
+      assert.strictEqual((await cli(['skills', 'lint', 'autode-redshift-ingestion', '--workspace', ws])).code, 0, 'its SQL is deliverable code');
+      const viaCli = (await cli(['platform', 'catalog', 'redshift', '--workspace', ws, '--json'])).json().page;
+      client = await mcpSession(ws);
+      const viaMcp = (await client.callTool({ name: 'autode_platform_catalog', arguments: { platform: 'redshift' } })).structuredContent.page;
+      assert.deepStrictEqual(viaMcp, viaCli, 'the same page on both surfaces');
+      const opCli = (await cli(['platform', 'operation', 'estate.list_tables', '--workspace', ws, '--json'])).json().page;
+      const opMcp = (await client.callTool({ name: 'autode_platform_operations', arguments: { id: 'estate.list_tables' } })).structuredContent.page;
+      assert.deepStrictEqual(opMcp.reliedOnBy, opCli.reliedOnBy);
+      const listed = (await client.callTool({ name: 'autode_skills_list', arguments: { group: 'autode' } })).structuredContent.skills;
+      assert.ok(listed.find((s) => s.name === 'autode-redshift-ingestion').operations.includes('estate.list_tables'));
+      const uses = (await cli(['platform', 'operations', '--skill', 'autode-redshift-ingestion', '--workspace', ws, '--json'])).json().operations.map((o) => o.id);
+      assert.ok(uses.includes('estate.list_tables') && !uses.includes('lineage.columns'), uses.join(','));
+      const matrix = (await cli(['platform', 'catalog', '--workspace', ws])).out;
+      assert.ok(/estate\s+✓/.test(matrix) && /✓ supported · ◐ partly/.test(matrix), matrix);
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    const src = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', f), 'utf8');
+    assert.ok(/!media\/platforms\.html/.test(src('.vscodeignore')), 'packaged');
+    assert.ok(/'autoDataEngineeringHub\.platformCatalog'/.test(src('src/core/workflowView.ts')) && /'autoDataEngineeringHub\.platformCatalog'/.test(src('src/core/knowledgeExplorer.ts')), 'the window tabs open it');
+    const page = src('media/platforms.html');
+    assert.ok(/role="grid" aria-label="Capability matrix"/.test(page) && /role="tablist" class="tabs"/.test(page) && /ArrowRight/.test(page), 'keyboard and screen reader');
+    assert.ok(/Row values aren\\'t shown here/.test(page) && /never runs from here/.test(page), 'no data rows, no change runs from the view');
   });
 
   // ── v0.56.7 PLN1b: the clarification round and re-planning (docs/specs/workflow-planning.md §3.4, §3.6) ──

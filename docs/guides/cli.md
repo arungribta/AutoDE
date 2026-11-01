@@ -167,6 +167,10 @@ Every read AutoDE makes on a platform is a platform operation: a reviewed YAML f
 
 | Command | |
 |---|---|
+| `autode platform catalog [<platform>]` | The capability matrix (since 0.57.0): capabilities by platform, supported, partly or not applicable, with the last conformance run per connection; with a platform, its page (connections, capabilities, operations by area, skills, tools, primitives, privileges, health). |
+| `autode platform conformance --connection <c>` | Try each capability's read operations on a connection, one row each, read-only, with its database and schema; record which capabilities work, partly work (with the privileges they need) or weren't tried. |
+| `autode platform operation <id>` | One operation (alias of `platform show`): its statement per platform, example, last runs, and what relies on it (capabilities, AutoDE features, skills, stages). |
+| `autode skills lint <skill>` | The platform operations a skill names, an id that doesn't exist, and places where it queries the platform itself instead of naming an operation. Exits 1 when something is flagged. |
 | `autode platform operations [--platform <p>]` | Every operation: read or change, its platforms, shipped or your team's, approved or draft, and which capability uses it. Files refused as they load are listed with why. |
 | `autode platform show <id>` | One operation in full: its parameters with defaults, its result, and each platform's statement. |
 | `autode platform run <id> --connection <c> [--param name=value]… [--max-rows <n>]` | Runs a read. Parameters are bound by type, the statement is checked as read-only, and a failure says why and what ran. A change operation isn't run: you get the runbook step to propose. |

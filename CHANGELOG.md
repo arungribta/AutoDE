@@ -6,6 +6,23 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.57.0
+
+POP4a, the Platform catalog to see and try ([platform-operations.md](docs/specs/platform-operations.md) §6.3). POP4 is built in two releases; editing follows in 0.57.1.
+
+- **The Platform catalog** (*AutoDE: Platform Catalog*, the AutoDE window's Platform catalog tab, `autode platform catalog`, `autode_platform_catalog`):
+  - **The capability matrix:** capabilities as rows; the workspace's platforms first, then the others, as columns. Each cell is *supported*, *partly* (with what is missing) or *not applicable*, from the platform definition, with the last conformance run on each connection.
+  - **A platform's page**, the same tabs for every platform, those that don't apply hidden: Overview, Capabilities, Operations by area, Skills, Tools, Primitives and dialect (warehouses and lakehouses: what compiles), Privileges, Health (failing reads, drafts, recent runs, conformance).
+  - **An operation's page:** its statement or command per platform, example, origin, its last runs on each connection, and **what relies on it**: the capabilities that list it, AutoDE's own features (estate extraction, observed lineage, browsing databases and schemas, refresh on use, the version check), the skills whose text names it (with the section) and those skills' stages. An operation nothing relies on is flagged; every shipped one has something.
+  - **Try it:** the bound statement first, then a read on a connected connection. Names are shown; row values stay with `autode platform run`, which applies the sample-data consent and masking. A change operation shows the runbook step it would be and never runs.
+  - **A skill's page** and `autode skills lint <skill>`: the operations a skill relies on, an operation id it names that doesn't exist, and places where it queries the platform itself (system views, SHOW, DESCRIBE) instead of naming an operation. The deliverable code a skill teaches (DDL, the grants a runbook applies) isn't flagged. Today two skills are flagged: the Snowflake and Databricks performance skills read query history themselves, which POP3's agent-proposed operations can turn into operations.
+- **Conformance runs** (`autode platform conformance --connection <c>`, `autode_platform_conformance`, Overview in the catalog): each capability's read operations, one row each, read-only, with the connection's own database and schema. The result names what partly works and the privileges it needs ("supports 5 of 6 checked capabilities; lineage partly works").
+- Every operation run's outcome (never its rows) is recorded per machine in `.autode/local/operation-runs.jsonl`, for last runs and health.
+- A platform definition names its **compile dialect** (`dialect.compile`: Snowflake `snowflake`, Databricks `spark_sql`, Redshift `redshift`).
+- `autode platform operations --skill <s>` lists the operations a skill names; `autode platform operation <id>` (alias of `platform show`) adds what relies on it; `autode skills show` adds a skill's operations; MCP `autode_platform_operations` with `id` adds the page, and `autode_skills_list` each skill's operations.
+- *AutoDE: Platform Operations* is now *AutoDE: Find Platform Operation…* (the quick pick); the window tab opens the catalog.
+- **Not in this release:** editing (POP4b, v0.57.1): *Customise* and *Reset* for AutoDE's skills with the team copy winning everywhere, the skill and operation forms, *Request access*, `autode plugin status`. Also later: linking a vendor tool or MCP server to a platform, and opening the catalog from the Explorer's Estate view.
+
 ## 0.56.7
 
 PLN1b, the clarification round and re-planning ([workflow-planning.md](docs/specs/workflow-planning.md) §3.4, §3.6). PLN1 is complete.

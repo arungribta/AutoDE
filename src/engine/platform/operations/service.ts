@@ -1,6 +1,7 @@
 import { Catalog, loadCatalog, operationById, platformById } from './load';
 import { OperationRunner, RunResult, bindOperation, connectionVersion, runOperation } from './execute';
 import { Origin, PlatformOperation } from './types';
+import { recordOperationRun } from './runLog';
 
 /**
  * The catalog for every surface (POP1): what exists, and running one
@@ -50,7 +51,7 @@ export class OperationError extends Error {
 }
 
 /** Runs a read operation on a connection; a change operation is refused with the runbook step it would be. */
-export async function runOnConnection(scope: { resourcesRoot?: string; workspaceRoot?: string; catalog?: Catalog }, target: ConnectionTarget, operationId: string, params: Record<string, unknown>, options: { maxRows?: number } = {}): Promise<RunResult> {
+export async function runOnConnection(scope: { resourcesRoot?: string; workspaceRoot?: string; catalog?: Catalog }, target: ConnectionTarget, operationId: string, params: Record<string, unknown>, options: { maxRows?: number; via?: string } = {}): Promise<RunResult> {
   const catalog = scope.catalog ?? loadCatalog(scope);
   const loaded = operationById(catalog, operationId);
   if (!loaded) {
@@ -67,9 +68,14 @@ export async function runOnConnection(scope: { resourcesRoot?: string; workspace
   const runner: OperationRunner = { sql: (s, n) => target.query(s, n), ...(target.cli ? { cli: target.cli } : {}) };
   const versionOp = platform?.versionOperation ? operationById(catalog, platform.versionOperation)?.item : undefined;
   const version = await connectionVersion(target.connectionId, platform, versionOp, runner);
+  // POP4a: each run's outcome (never its rows) for the catalog's last runs and health.
+  const log = (ok: boolean, rows?: number, error?: string) => recordOperationRun(scope.workspaceRoot, { at: new Date().toISOString(), operation: operationId, connection: target.connectionId, platform: target.platform, ok, ...(rows !== undefined ? { rows } : {}), ...(error ? { error } : {}), ...(options.via ? { via: options.via } : {}) });
   try {
-    return await runOperation({ operation: op, platformId: target.platform, platform, params, runner, version, maxRows: options.maxRows });
+    const r = await runOperation({ operation: op, platformId: target.platform, platform, params, runner, version, maxRows: options.maxRows });
+    log(r.ok && !r.gap, r.rows.length, r.gap);
+    return r;
   } catch (err) {
+    log(false, undefined, err instanceof Error ? err.message : String(err));
     throw new OperationError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
   }
 }

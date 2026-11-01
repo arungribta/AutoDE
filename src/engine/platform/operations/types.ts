@@ -175,6 +175,8 @@ export interface PlatformDefinition {
     booleans?: [string, string];
     /** v0.54.1: the dialect fragments probes and reconciliation use. */
     fragments?: Record<string, string>;
+    /** POP4a: the SQL dialect deliverables compile to here (a warehouse or lakehouse that is a target). */
+    compile?: 'snowflake' | 'spark_sql' | 'google_sql' | 'postgres' | 'tsql' | 'redshift' | 'ansi';
   };
   /** What a read's `databases` parameter names here: databases (catalogs) by default, or schemas (Oracle's owners). */
   scopeLevel?: 'database' | 'schema';

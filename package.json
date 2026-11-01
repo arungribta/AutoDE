@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.56.7",
+  "version": "0.57.0",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -141,7 +141,11 @@
       },
       {
         "command": "autoDataEngineeringHub.platformOperations",
-        "title": "AutoDE: Platform Operations"
+        "title": "AutoDE: Find Platform Operation…"
+      },
+      {
+        "command": "autoDataEngineeringHub.platformCatalog",
+        "title": "AutoDE: Platform Catalog"
       },
       {
         "command": "autoDataEngineeringHub.customisePlatformOperation",

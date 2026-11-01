@@ -148,7 +148,8 @@ export const PLATFORM_SCHEMA = {
         identifierQuote: { enum: ['"', '`'] },
         unquotedCase: { enum: ['upper', 'lower', 'preserve'] },
         booleans: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string' } },
-        fragments: { type: 'object', additionalProperties: { type: 'string' } }
+        fragments: { type: 'object', additionalProperties: { type: 'string' } },
+        compile: { enum: ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'redshift', 'ansi'], description: 'The SQL dialect AutoDE compiles deliverables (Pipeline Specs, primitives) to for this platform, where it is a target.' }
       }
     },
     scopeLevel: { enum: ['database', 'schema'], description: 'What a read\'s databases parameter names here: databases or catalogs (default), or schemas (Oracle\'s owners).' },

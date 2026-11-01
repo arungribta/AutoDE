@@ -75,7 +75,7 @@ export class KnowledgeExplorerPanel {
   private async onMessage(m: ExplorerMessage): Promise<void> {
     // UI2: the AutoDE window's other tabs.
     const tab = (m as unknown as { type: string; tab?: string });
-    if (tab.type === 'openTab') { await vscode.commands.executeCommand(tab.tab === 'workflow' ? 'autoDataEngineeringHub.openWorkflow' : 'autoDataEngineeringHub.platformOperations'); return; }
+    if (tab.type === 'openTab') { await vscode.commands.executeCommand(tab.tab === 'workflow' ? 'autoDataEngineeringHub.openWorkflow' : 'autoDataEngineeringHub.platformCatalog'); return; }
     const answer = await answerExplorerMessage(m, { workspaceRoot: () => this.host.workspaceRoot(), sources: async () => { const root = this.host.workspaceRoot(); return root ? this.cache.get(root) : undefined; } });
     if (answer.reply) void this.panel.webview.postMessage(answer.reply);
     if (answer.action) await this.act(answer.action);

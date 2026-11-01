@@ -49,6 +49,7 @@ connection:
   roles: [source, target]
 versionOperation: platform.version
 dialect:
+  compile: redshift
   identifierQuote: '"'
   unquotedCase: lower
   booleans: ['TRUE', 'FALSE']

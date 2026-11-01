@@ -31,6 +31,8 @@ import { RefreshReport, recordLineageBatch, refreshLines } from '../engine/linea
 import { platformOperationTools } from '../mcp/platformOperationTools';
 import type { OperationSummary } from '../engine/platform/operations/service';
 import type { PlatformOperation } from '../engine/platform/operations/types';
+import type { CatalogMatrix, ConformanceResult, OperationPage, PlatformPage } from '../engine/platform/operations/catalogView';
+import { skillPage } from '../engine/platform/operations/catalogView';
 import { checksumOf, customise } from '../engine/platform/operations/load';
 import { fragmentsFor, setPlatformResourcesRoot } from '../engine/platform/dialects';
 import { problemOverlap } from '../engine/documents/problemOverlap';
@@ -259,7 +261,10 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
   explore impact <id|name> --change rename_column|drop_column|retype_column|remove_table|supersede_fact [--format md|csv] [--out <file>]   What the change would affect, each with its path, by category and domain
 
 Platform operations (POP1: every interaction with a platform, as a reviewed file):
-  platform operations [--platform p]   The catalog: each operation, read or change, its platforms, shipped or the team's, approved or draft
+  platform catalog [<platform>]   The capability matrix (capabilities by platform: supported, partly, not applicable), or one platform's page
+  platform conformance --connection <c>   Try each capability's reads on a connection (a row each, read-only) and record what works
+  platform operation <id>      One operation: what it does per platform, its example, its last runs, and what relies on it
+  platform operations [--platform p] [--skill s]   The catalog: each operation, read or change, its platforms, shipped or the team's, approved or draft (--skill: those a skill names)
   platform show <id>           One operation in full, with the statement per platform
   platform run <id> --connection <c> [--param k=v]… [--max-rows n]   Run a read operation (a change operation prints the runbook step to propose)
   platform propose <file>      Propose a team operation or platform definition (.autode/config/…) for a person's approval
@@ -321,6 +326,7 @@ Skills (AutoDE's own, this workspace's imported ones, interview packs, and the v
   skills list [--group autode|workspace|interview|external]   The catalog, with whether external skills are installed
   skills show <name>           One skill: what it does, its stage kinds and platforms, licence, source, how to install
   skills check <name>          Probe an external skill's install command on this machine (nothing is installed)
+  skills lint <name>           The platform operations a skill names: unknown ids, and SQL it carries itself instead of naming an operation
   skills install <name>        (terminal) Run the vendor's own install command after you confirm, then check it worked
   skills analyze <source> [--ref <r>] [--skill <path>]   Port a skill: what a skill in a folder, Git URL or dbt package does (nothing is copied)
   skills import <source> [--ref <r>] [--skill <path>] [--replace]   Import it into this workspace, unreviewed
@@ -1180,6 +1186,18 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
   const e = cat.entries.find((x) => x.name === name);
   if (!name) throw new CliError(EXIT.USAGE, `skills ${sub} needs a skill name.`);
   if (!e) throw new CliError(EXIT.NOT_FOUND, `No skill "${name}" (see \`autode skills list\`).`);
+  // POP4a: the platform operations a skill names, and what lint flags.
+  const page = (sub === 'show' || sub === 'lint') ? skillPage({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, home }, e.name) : undefined;
+  if (sub === 'lint') {
+    if (!page?.file) throw new CliError(EXIT.FAILED, `${e.name} is a ${e.group} skill whose text AutoDE doesn't hold: there is nothing to lint.`);
+    const bad = page.lint.unknown.length + page.lint.sql.length;
+    emit(ctx, { ok: bad === 0, skill: e.name, operations: page.operations, lint: page.lint }, [
+      `${bad ? '✗' : '✓'} ${e.name}: ${page.operations.length} operation(s) named${page.operations.length ? ` (${page.operations.map((o) => `${o.id}${o.state === 'ok' ? '' : ` ${o.state}`}`).join(', ')})` : ''}`,
+      ...page.lint.unknown.map((u) => `  ✗ names ${u}, which isn't an operation (autode platform operations lists them)`),
+      ...page.lint.sql.map((q) => `  ! queries the platform itself: ${q}. Reading the platform is an operation's job: name one, or propose one.`)
+    ].join('\n'));
+    return bad ? EXIT.FAILED : EXIT.OK;
+  }
   if (sub === 'show') {
     const lines = [
       `${e.name} (${e.group})`, e.summary,
@@ -1188,9 +1206,11 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
       e.owner ? `Owner: ${e.owner}` : '', e.status ? `State: ${e.status}` : '', e.source ? `Source: ${e.source}` : '',
       e.licence ? `Licence: ${e.licence.name}${e.licence.url ? ` (${e.licence.url})` : ''}. ${e.licence.summary ?? ''}` : '',
       e.availability ? `Availability: ${e.availability}${e.installed ? ` — ${e.installed.length ? `found: ${e.installed.join(', ')}` : 'not found on this machine'}` : ''}` : '',
-      e.installer ? `Install: ${e.installer.command.join(' ')} (last verified ${e.installer.verifiedAt ?? '—'}; \`autode skills check ${e.name}\` probes it first)` : ''
+      e.installer ? `Install: ${e.installer.command.join(' ')} (last verified ${e.installer.verifiedAt ?? '—'}; \`autode skills check ${e.name}\` probes it first)` : '',
+      page?.operations.length ? `Platform operations: ${page.operations.map((o) => `${o.id} (${o.section}${o.state === 'ok' ? '' : `, ${o.state}`})`).join(', ')}` : '',
+      page && (page.lint.unknown.length || page.lint.sql.length) ? `Lint: ${page.lint.unknown.length} unknown operation id(s), ${page.lint.sql.length} place(s) with its own SQL (autode skills lint ${e.name})` : ''
     ].filter(Boolean);
-    emit(ctx, { ok: true, skill: e }, lines.join('\n'));
+    emit(ctx, { ok: true, skill: page ? { ...e, operations: page.operations, lint: page.lint } : e }, lines.join('\n'));
     return EXIT.OK;
   }
   if (sub === 'check' || sub === 'install') {
@@ -1901,17 +1921,55 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
   const tool = (name: string) => platformOperationTools(session).find((x) => x.name === name)!;
   try {
     if (sub === 'operations') {
-      const r = await tool('autode_platform_operations').handler(ctx.values.platform ? { platform: ctx.values.platform } : {}, ws) as { operations: OperationSummary[]; errors: string[] };
+      let r: { operations: OperationSummary[]; errors: string[] };
+      try { r = await tool('autode_platform_operations').handler({ ...(ctx.values.platform ? { platform: ctx.values.platform } : {}), ...(ctx.values.skill ? { uses: ctx.values.skill } : {}) }, ws) as typeof r; }
+      catch (err) { throw new CliError(EXIT.NOT_FOUND, err instanceof Error ? err.message : String(err)); }
       const lines = r.operations.map((o) => `  ${o.status === 'draft' ? '·' : '✓'} ${o.id.padEnd(30)} ${o.kind.padEnd(6)} ${o.platforms.join(', ').padEnd(24)} ${o.origin}${o.status === 'draft' ? ' (draft: not run until approved)' : ''}${o.usedBy.length ? `  — ${o.usedBy.join('; ')}` : ''}`);
       emit(ctx, { ok: true, ...r }, [`${r.operations.length} operation(s):`, ...lines, ...(r.errors.length ? ['', 'Refused:', ...r.errors.map((e) => `  ✗ ${e}`)] : [])].join('\n'));
       return EXIT.OK;
     }
-    if (sub === 'show') {
-      if (!id) throw new CliError(EXIT.USAGE, 'platform show <operation id>.');
-      let r: { operations: Array<Record<string, unknown>> };
+    if (sub === 'catalog') {
+      // POP4a: the capability matrix, or one platform's page.
+      let r: Record<string, unknown>;
+      try { r = await tool('autode_platform_catalog').handler(id ? { platform: id } : {}, ws) as Record<string, unknown>; } catch (err) { throw new CliError(EXIT.NOT_FOUND, err instanceof Error ? err.message : String(err)); }
+      if (!id) {
+        const m = r.matrix as CatalogMatrix;
+        const mark: Record<string, string> = { supported: '✓', partly: '◐', not_applicable: '–', not_declared: ' ' };
+        const width = Math.max(...m.capabilities.map((c) => c.length), 10) + 2;
+        emit(ctx, { ok: true, ...r }, [
+          `${''.padEnd(width)}${m.platforms.map((pl) => `${pl.id}${pl.connected ? '*' : ''}`.padEnd(12)).join('')}`,
+          ...m.capabilities.map((c) => `${c.padEnd(width)}${m.platforms.map((pl) => { const cell = m.cells[c][pl.id]; const bad = cell.connections.find((x) => x.status === 'partly' || x.status === 'failing'); return `${mark[cell.support]}${bad ? ` (${bad.status})` : ''}`.padEnd(12); }).join('')}`),
+          '', '✓ supported · ◐ partly · – not applicable · * a connection in this workspace. autode platform catalog <platform> for its page.'
+        ].join('\n'));
+        return EXIT.OK;
+      }
+      const pg = r.page as PlatformPage;
+      emit(ctx, { ok: true, ...r }, [
+        `${pg.title} (${pg.id}, ${pg.category}; ${pg.overview.origin}, ${pg.overview.status}) — tabs: ${pg.tabs.map((t) => t.title).join(', ')}`,
+        `Connections: ${pg.overview.connections.map((c) => `${c.id} (${c.role}, ${c.readiness})`).join(', ') || 'none in this workspace'}`,
+        '', 'Capabilities:', ...pg.capabilities.map((c) => `  ${c.capability.padEnd(22)} ${c.support}${c.operations.length ? ` — ${c.operations.join(', ')}` : ''}${c.connections.filter((x) => x.status !== 'not-checked').map((x) => `\n      ${x.connection}: ${x.status}${x.detail ? ` (${x.detail})` : ''}`).join('')}`),
+        '', 'Operations:', ...pg.operations.flatMap((a) => [`  ${a.area}:`, ...a.operations.map((o) => `    ${o.id} (${o.kind}, ${o.transport}${o.status === 'draft' ? ', draft' : ''})${o.lastRun ? ` — last run ${o.lastRun.ok ? 'ok' : `failed: ${o.lastRun.error ?? ''}`}` : ''}`)]),
+        '', `Skills: ${pg.skills.map((k) => k.id).join(', ') || 'none'}`,
+        ...(pg.primitives ? ['', `Compiles to ${pg.primitives.dialect}: ${pg.primitives.primitives.map((x) => `${x.kind} ${x.compiles ? '✓' : '✗'}`).join(', ')}`] : []),
+        ...(pg.health.failing.length ? ['', 'Failing:', ...pg.health.failing.map((f) => `  ${f.operation} on ${f.connection}: ${f.error ?? ''}`)] : [])
+      ].join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'conformance') {
+      if (!ctx.values.connection) throw new CliError(EXIT.USAGE, 'platform conformance --connection <id>.');
+      let r: { result: ConformanceResult };
+      try { r = await tool('autode_platform_conformance').handler({ connectionId: ctx.values.connection }, ws) as unknown as typeof r; } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+      emit(ctx, { ok: true, ...r }, [r.result.summary, ...Object.entries(r.result.capabilities).map(([c, v]) => `  ${v.status === 'ok' ? '✓' : v.status === 'partly' ? '◐' : v.status === 'failing' ? '✗' : '·'} ${c.padEnd(22)} ${v.status}${v.detail ? ` — ${v.detail}` : ''}`)].join('\n'));
+      return EXIT.OK;
+    }
+    if (sub === 'show' || sub === 'operation') {
+      if (!id) throw new CliError(EXIT.USAGE, 'platform operation <operation id>.');
+      let r: { operations: Array<Record<string, unknown>>; page?: OperationPage };
       try { r = await tool('autode_platform_operations').handler({ id }, ws) as typeof r; } catch (err) { throw new CliError(EXIT.NOT_FOUND, err instanceof Error ? err.message : String(err)); }
       const o = r.operations[0] as unknown as PlatformOperation & { origin: string; status: string; file: string };
-      emit(ctx, { ok: true, ...r }, [`${o.id} — ${o.title} (${o.kind}, ${o.origin}, ${o.status}; ${o.file})`, o.description, '', 'Parameters:', ...o.params.map((p) => `  ${p.name} (${p.type})${p.default !== undefined ? ` = ${JSON.stringify(p.default)}` : ''}: ${p.label}`), 'Returns: ' + o.returns.map((x) => x.name).join(', '), ...Object.entries(o.platforms).flatMap(([pid, impl]) => ['', `${pid}${impl.since ? ` (since ${impl.since})` : ''}:`, `  ${(impl.sql ?? JSON.stringify(impl.cli ?? impl.http ?? impl.file)).trim().split('\n').join('\n  ')}`])].join('\n'));
+      const pg = r.page;
+      const relied = pg ? ['', `Relied on by: ${[...pg.reliedOnBy.capabilities.map((c) => `capability ${c}`), ...pg.reliedOnBy.engine, ...pg.reliedOnBy.skills.map((k) => `skill ${k.id} (${k.section})`)].join('; ') || 'nothing (unused)'}`, ...(pg.reliedOnBy.stages.length ? [`Stages: ${pg.reliedOnBy.stages.join(', ')}`] : []), ...(pg.lastRuns.length ? ['Last runs:', ...pg.lastRuns.map((x) => `  ${x.connection} ${x.at.slice(0, 16)} ${x.ok ? `ok, ${x.rows ?? 0} row(s)` : `failed: ${x.error ?? ''}`}`)] : [])] : [];
+      emit(ctx, { ok: true, ...r }, [`${o.id} — ${o.title} (${o.kind}, ${o.origin}, ${o.status}; ${o.file})`, o.description, '', 'Parameters:', ...o.params.map((p) => `  ${p.name} (${p.type})${p.default !== undefined ? ` = ${JSON.stringify(p.default)}` : ''}: ${p.label}`), 'Returns: ' + o.returns.map((x) => x.name).join(', '), ...Object.entries(o.platforms).flatMap(([pid, impl]) => ['', `${pid}${impl.since ? ` (since ${impl.since})` : ''}:`, `  ${(impl.sql ?? JSON.stringify(impl.cli ?? impl.http ?? impl.file)).trim().split('\n').join('\n  ')}`]), ...relied].join('\n'));
       return EXIT.OK;
     }
     if (sub === 'run') {

@@ -30,6 +30,8 @@ import { listRunbooks, runLogFile, runnableProblem } from '../engine/runner/runb
 import { loadRunbookPolicy } from '../engine/runner/policy';
 import { verifyRunLog, readRunLog } from '../engine/runner/runLog';
 import * as os from 'node:os';
+import { loadCatalog } from '../engine/platform/operations/load';
+import { skillOperations, skillTexts } from '../engine/platform/operations/catalogView';
 import { PipelineEntity, PipelineSpec, CURRENT_PIPELINE_SPEC_VERSION } from '../engine/pipelineSpec/types';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { validateTransformSpec } from '../engine/transforms/registry';
@@ -127,7 +129,11 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
       annotations: read('Skill catalog'),
       handler: async (args, ws) => {
         const r = skillCatalog({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot, home: process.env.AUTODE_HOME ?? os.homedir() });
-        return { skills: r.entries.filter((e) => !args.group || e.group === args.group), errors: r.errors } as unknown as Record<string, unknown>;
+        // POP4a: the platform operations each readable skill names (autode_platform_catalog with skill gives its page and lint).
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        const catalog = loadCatalog(scope);
+        const ops = new Map(skillTexts(scope).texts.map((t) => [t.id, skillOperations(t.text, catalog).uses.map((u) => u.id)]));
+        return { skills: r.entries.filter((e) => !args.group || e.group === args.group).map((e) => (ops.get(e.name)?.length ? { ...e, operations: ops.get(e.name) } : e)), errors: r.errors } as unknown as Record<string, unknown>;
       }
     },
     {

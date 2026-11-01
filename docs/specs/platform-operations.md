@@ -315,7 +315,9 @@ Oracle is deprioritised and its remaining platform work is in the product backlo
 
 **Resume when:** an engagement needs Oracle sources, or the driver path becomes a support burden. Then specify these items as one phase, starting from this list.
 
-### 6.3 POP4 — the operations and skills catalog (v0.57.0)
+### 6.3 POP4 — the operations and skills catalog (v0.57.0, v0.57.1)
+
+**Status:** built in two releases (2026-11-01). **POP4a shipped in v0.57.0** (CHANGELOG.md 0.57.0): the capability matrix, each platform's page (tabs from its definition), operation pages with what relies on them and their last runs, skill pages with `autode skills lint`, Try it, conformance runs, the Platform catalog tab, the CLI and MCP. **POP4b (v0.57.1):** editing: *Customise* and *Reset* for AutoDE's skills (the published team copy wins everywhere), the version-changed flag, the skill and operation forms with checks as you type, *Request access*, `autode plugin status`. Not in POP4a: linking a vendor tool or MCP server to a platform, the review queue view (decisions and Waiting for you serve it), opening the catalog from the Explorer's Estate view.
 
 A place where anyone can see what AutoDE does on each platform and what it relies on, and adjust the skills behind it, with the same answers on the CLI and over MCP. It is the first step of the platform UI the owner plans, for technical and non-technical users alike.
 

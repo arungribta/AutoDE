@@ -212,7 +212,7 @@ export class WorkflowPanel {
     try {
       switch (m.type) {
         // UI2: the window's tabs, the journey's actions, the delivery preview, coverage.
-        case 'openTab': if (m.tab === 'knowledge') await vscode.commands.executeCommand('autoDataEngineeringHub.openKnowledgeExplorer'); else if (m.tab === 'platforms') await vscode.commands.executeCommand('autoDataEngineeringHub.platformOperations'); return;
+        case 'openTab': if (m.tab === 'knowledge') await vscode.commands.executeCommand('autoDataEngineeringHub.openKnowledgeExplorer'); else if (m.tab === 'platforms') await vscode.commands.executeCommand('autoDataEngineeringHub.platformCatalog'); return;
         case 'journeyAction': if (m.id) await this.host.journeyAction?.(m.id, m.args ?? {}); break;
         case 'preview': this.previewTemplate = m.template || undefined; this.post(); return;
         case 'placeCoverage': if (m.item) await this.placeItem(m.item); break;

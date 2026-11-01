@@ -439,6 +439,18 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "compile": {
+          "enum": [
+            "snowflake",
+            "spark_sql",
+            "google_sql",
+            "postgres",
+            "tsql",
+            "redshift",
+            "ansi"
+          ],
+          "description": "The SQL dialect AutoDE compiles deliverables (Pipeline Specs, primitives) to for this platform, where it is a target."
         }
       }
     },

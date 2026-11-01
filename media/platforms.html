@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Platform catalog</title>
+<style>
+  :root {
+    --border: var(--vscode-editorWidget-border, var(--vscode-panel-border, #4446));
+    --muted: var(--vscode-descriptionForeground);
+    --surface: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+    --link: var(--vscode-textLink-foreground);
+    --ok: var(--vscode-testing-iconPassed, #2ea043);
+    --warn: var(--vscode-editorWarning-foreground, #cca700);
+    --bad: var(--vscode-editorError-foreground, #f14c4c);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0 16px 24px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+  .window-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 0 -16px 8px; padding: 0 16px; }
+  .window-tabs button { margin: 0; border: none; border-bottom: 2px solid transparent; background: transparent; color: var(--vscode-foreground); padding: 8px 12px; opacity: 0.75; cursor: pointer; font: inherit; }
+  .window-tabs button[aria-selected="true"] { border-bottom-color: var(--vscode-focusBorder); opacity: 1; font-weight: 600; }
+  h1 { font-size: 1.3em; margin: 12px 0 4px; } h2 { font-size: 1.05em; margin: 16px 0 6px; } h3 { font-size: 1em; margin: 12px 0 4px; }
+  .muted { color: var(--muted); } .mono, code, pre { font-family: var(--vscode-editor-font-family); font-size: 0.95em; }
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 8px; overflow-x: auto; white-space: pre-wrap; }
+  .crumbs { margin: 8px 0; } .crumbs button { margin-right: 4px; }
+  .link { background: none; border: none; padding: 0; color: var(--link); cursor: pointer; font: inherit; text-align: left; }
+  .link:hover { text-decoration: underline; }
+  .btn { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid transparent; border-radius: 4px; padding: 3px 10px; cursor: pointer; font: inherit; margin: 2px 4px 2px 0; }
+  .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+  table { border-collapse: collapse; margin: 6px 0; } th, td { border-bottom: 1px solid var(--border); padding: 4px 10px 4px 0; text-align: left; vertical-align: top; }
+  th { font-weight: 600; } td.cell { white-space: nowrap; }
+  .s-supported, .s-ok { color: var(--ok); } .s-partly, .s-not-checked { color: var(--warn); } .s-failing { color: var(--bad); } .s-not_applicable, .s-not_declared { color: var(--muted); }
+  [role=tablist].tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); margin: 10px 0; }
+  [role=tablist].tabs button { border: none; border-bottom: 2px solid transparent; background: none; padding: 6px 10px; cursor: pointer; color: inherit; font: inherit; }
+  [role=tablist].tabs button[aria-selected="true"] { border-bottom-color: var(--vscode-focusBorder); font-weight: 600; }
+  .notice { margin: 8px 0; padding: 6px 8px; border-left: 3px solid var(--link); background: var(--surface); }
+  .notice.error { border-left-color: var(--bad); }
+  .empty { color: var(--muted); padding: 12px 0; }
+  label { display: block; margin: 4px 0; } input[type=text], select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 4px; padding: 3px 6px; font: inherit; min-width: 220px; }
+  ul { margin: 4px 0; padding-left: 20px; }
+</style>
+</head>
+<body>
+<nav class="window-tabs" role="tablist" aria-label="AutoDE window">
+  <button role="tab" aria-selected="false" data-window-tab="workflow">Workflow</button>
+  <button role="tab" aria-selected="false" data-window-tab="knowledge">Knowledge Explorer</button>
+  <button role="tab" aria-selected="true">Platform catalog</button>
+</nav>
+<div id="notice" aria-live="polite"></div>
+<main id="root"><p class="muted">Loading the catalog…</p></main>
+<script nonce="{{nonce}}">
+(function () {
+  const vscode = acquireVsCodeApi();
+  const root = document.getElementById('root');
+  const notice = document.getElementById('notice');
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const send = (m) => vscode.postMessage(m);
+  const SUPPORT = { supported: '✓ supported', partly: '◐ partly', not_applicable: '– not applicable', not_declared: '·' };
+  const STATUS = { ok: '✓ works', partly: '◐ partly works', failing: '✗ fails', 'not-checked': '· not checked' };
+  const state = { view: 'matrix', tab: 'overview', page: null, matrix: null, live: [] };
+
+  function crumbs(extra) { return '<div class="crumbs"><button class="link" data-go="matrix">Capability matrix</button>' + (extra ? ' › ' + extra : '') + '</div>'; }
+
+  function matrixHtml(m) {
+    if (!m.platforms.length) return '<h1>Platform catalog</h1><p class="empty">No platform definitions are loaded. AutoDE ships Snowflake, Databricks, Redshift and Oracle; a team adds its own in .autode/config/platforms/.</p>';
+    let h = '<h1>Platform catalog</h1><p class="muted">What AutoDE can do on each platform, and what it needs. A cell shows the platform definition\'s answer, and the last conformance run on each of this workspace\'s connections. Choose a platform for its page.</p>';
+    h += '<table role="grid" aria-label="Capability matrix"><thead><tr><th scope="col">Capability</th>' + m.platforms.map((p) => '<th scope="col"><button class="link" data-platform="' + esc(p.id) + '">' + esc(p.title) + '</button><div class="muted">' + esc(p.category) + (p.connected ? ' · ' + p.connections.length + ' connection(s)' : ' · not connected') + '</div></th>').join('') + '</tr></thead><tbody>';
+    for (const c of m.capabilities) {
+      h += '<tr><th scope="row">' + esc(c) + '</th>' + m.platforms.map((p) => {
+        const cell = m.cells[c][p.id];
+        const conn = cell.connections.filter((x) => x.status !== 'not-checked').map((x) => '<div class="s-' + esc(x.status) + '">' + esc(x.connection) + ': ' + esc(STATUS[x.status]) + '</div>').join('');
+        const why = [cell.note, cell.support === 'partly' && cell.privileges ? 'needs: ' + cell.privileges : ''].filter(Boolean).join(' ');
+        return '<td class="cell"><span class="s-' + esc(cell.support) + '" title="' + esc(why) + '">' + esc(SUPPORT[cell.support]) + '</span>' + conn + '</td>';
+      }).join('') + '</tr>';
+    }
+    h += '</tbody></table>';
+    if (m.errors && m.errors.length) h += '<div class="notice error">Refused files: ' + m.errors.map(esc).join(' · ') + '</div>';
+    return h;
+  }
+
+  function platformHtml(p) {
+    if (!p) return crumbs() + '<p class="empty">No such platform.</p>';
+    let h = crumbs(esc(p.title)) + '<h1>' + esc(p.title) + '</h1><div class="muted">' + esc(p.category) + ' · ' + esc(p.overview.origin) + ' definition, ' + esc(p.overview.status) + '</div>';
+    if (!p.tabs.some((t) => t.id === state.tab)) state.tab = 'overview';
+    h += '<div role="tablist" class="tabs" aria-label="Platform sections">' + p.tabs.map((t) => '<button role="tab" id="tab-' + t.id + '" aria-selected="' + (state.tab === t.id) + '" data-tab="' + t.id + '">' + esc(t.title) + '</button>').join('') + '</div><section role="tabpanel" aria-labelledby="tab-' + state.tab + '">';
+    const t = state.tab;
+    if (t === 'overview') {
+      h += '<table><tr><th>Transports</th><td>' + esc(p.overview.transports.join(', ')) + '</td></tr><tr><th>Roles</th><td>' + esc(p.overview.roles.join(', ') || '—') + '</td></tr><tr><th>Version read by</th><td>' + (p.overview.versionOperation ? '<button class="link" data-op="' + esc(p.overview.versionOperation) + '">' + esc(p.overview.versionOperation) + '</button>' : '—') + '</td></tr><tr><th>Definition</th><td><button class="link" data-file="' + esc(p.overview.file) + '">' + esc(p.overview.file) + '</button>' + (p.overview.approvedBy ? ' (approved by ' + esc(p.overview.approvedBy) + ')' : '') + ' <button class="btn" data-customise="' + esc(p.id) + '">Customise…</button></td></tr></table>';
+      h += '<h2>Connections</h2>' + (p.overview.connections.length ? '<ul>' + p.overview.connections.map((c) => '<li>' + esc(c.id) + ' (' + esc(c.role) + ') — ' + esc(c.readiness) + (c.detail ? ': ' + esc(c.detail) : '') + (state.live.includes(c.id) ? ' <button class="btn" data-conformance="' + esc(c.id) + '">Conformance run</button>' : ' <span class="muted">(connect it to run a conformance check)</span>') + '</li>').join('') + '</ul>' : '<p class="empty">No connection to ' + esc(p.title) + ' in this workspace: add one in Settings → Connections, then run a conformance check here.</p>');
+    } else if (t === 'capabilities') {
+      h += '<table><thead><tr><th>Capability</th><th>Support</th><th>Operations</th><th>On your connections</th></tr></thead><tbody>' + p.capabilities.map((c) => '<tr><td>' + esc(c.capability) + '</td><td class="s-' + esc(c.support) + '">' + esc(SUPPORT[c.support]) + (c.note ? '<div class="muted">' + esc(c.note) + '</div>' : '') + '</td><td>' + (c.operations.map((o) => '<button class="link" data-op="' + esc(o) + '">' + esc(o) + '</button>').join('<br>') || '<span class="muted">AutoDE\'s own code</span>') + '</td><td>' + (c.connections.map((x) => '<div class="s-' + esc(x.status) + '">' + esc(x.connection) + ': ' + esc(STATUS[x.status]) + (x.detail && x.status !== 'not-checked' ? '<div class="muted">' + esc(x.detail) + '</div>' : '') + '</div>').join('') || '<span class="muted">no connection</span>') + '</td></tr>').join('') + '</tbody></table>';
+    } else if (t === 'operations') {
+      h += p.operations.length ? p.operations.map((a) => '<h3>' + esc(a.area) + '</h3><ul>' + a.operations.map((o) => '<li><button class="link" data-op="' + esc(o.id) + '">' + esc(o.id) + '</button> — ' + esc(o.title) + ' <span class="muted">(' + esc(o.kind) + ', ' + esc(o.transport) + ', ' + esc(o.origin) + (o.status === 'draft' ? ', draft' : '') + (o.since ? ', since ' + esc(o.since) : '') + ')</span>' + (o.lastRun ? ' <span class="' + (o.lastRun.ok ? 's-ok' : 's-failing') + '">last run ' + (o.lastRun.ok ? 'ok' : 'failed') + '</span>' : '') + '</li>').join('') + '</ul>').join('') : '<p class="empty">No operations for this platform yet.</p>';
+    } else if (t === 'skills') {
+      h += p.skills.length ? '<ul>' + p.skills.map((k) => '<li><button class="link" data-skill="' + esc(k.id) + '">' + esc(k.id) + '</button> <span class="muted">(' + esc(k.group) + (k.availability ? ', ' + esc(k.availability) : '') + ')</span> — ' + esc(k.summary) + (k.operations && k.operations.length ? '<div class="muted">operations: ' + k.operations.map(esc).join(', ') + '</div>' : '') + '</li>').join('') + '</ul>' : '<p class="empty">No skill names this platform. A team imports one through Port a Skill.</p>';
+    } else if (t === 'tools') {
+      const cli = p.tools && p.tools.cli;
+      h += cli ? '<table><tr><th>CLI</th><td class="mono">' + esc(cli.command) + '</td></tr><tr><th>Minimum version</th><td>' + esc(cli.minVersion || '—') + '</td></tr><tr><th>Install</th><td>' + esc(cli.install || '—') + '</td></tr><tr><th>Profiles</th><td>' + (cli.profiles ? 'listed from the CLI' : '—') + '</td></tr></table>' : '<p class="empty">No CLI declared.</p>';
+      if (p.tools && p.tools.api) h += '<p>API: ' + esc(p.tools.api) + '</p>';
+      h += '<p class="muted">Installed? <code>autode doctor</code> and Settings → Connections check the CLI on this machine; AutoDE never installs it for you.</p>';
+    } else if (t === 'primitives') {
+      h += '<p>Deliverables compile to the <code>' + esc(p.primitives.dialect) + '</code> dialect.</p><ul>' + p.primitives.primitives.map((x) => '<li class="' + (x.compiles ? 's-ok' : 's-failing') + '">' + (x.compiles ? '✓ ' : '✗ ') + esc(x.kind) + ' <span class="muted">— ' + esc(x.description) + (x.reason ? ' (' + esc(x.reason) + ')' : '') + '</span></li>').join('') + '</ul>';
+    } else if (t === 'privileges') {
+      h += p.privileges.length ? '<table><thead><tr><th>Capability</th><th>What AutoDE\'s role needs</th></tr></thead><tbody>' + p.privileges.map((x) => '<tr><td>' + esc(x.capability) + '</td><td>' + esc(x.privileges) + '</td></tr>').join('') + '</tbody></table>' : '<p class="empty">The definition names no privileges.</p>';
+    } else if (t === 'health') {
+      h += '<h3>Conformance</h3>' + (p.health.conformance.length ? '<ul>' + p.health.conformance.map((c) => '<li>' + esc(c.connection) + ' (' + esc(c.at.slice(0, 16).replace('T', ' ')) + '): ' + esc(c.summary) + '</li>').join('') + '</ul>' : '<p class="empty">No conformance run yet: run one from Overview on a connected connection.</p>');
+      h += '<h3>Failing now</h3>' + (p.health.failing.length ? '<ul>' + p.health.failing.map((r) => '<li class="s-failing"><button class="link" data-op="' + esc(r.operation) + '">' + esc(r.operation) + '</button> on ' + esc(r.connection) + ': ' + esc(r.error || '') + '</li>').join('') + '</ul>' : '<p class="empty">Nothing failing.</p>');
+      h += '<h3>Drafts waiting for approval</h3>' + (p.health.drafts.length ? '<ul>' + p.health.drafts.map((d) => '<li>' + esc(d) + '</li>').join('') + '</ul>' : '<p class="empty">None.</p>');
+      h += '<h3>Recent runs</h3>' + (p.health.recent.length ? '<ul>' + p.health.recent.map((r) => '<li>' + esc(r.at.slice(0, 16).replace('T', ' ')) + ' ' + esc(r.operation) + ' on ' + esc(r.connection) + ' — ' + (r.ok ? esc((r.rows || 0) + ' row(s)') : '<span class="s-failing">' + esc(r.error || 'failed') + '</span>') + (r.via ? ' <span class="muted">(' + esc(r.via) + ')</span>' : '') + '</li>').join('') + '</ul>' : '<p class="empty">No runs recorded yet.</p>');
+    }
+    return h + '</section>';
+  }
+
+  function operationHtml(o) {
+    if (!o) return crumbs() + '<p class="empty">No such operation.</p>';
+    let h = crumbs(esc(o.id)) + '<h1>' + esc(o.id) + '</h1><div>' + esc(o.title) + '</div><p class="muted">' + esc(o.description) + '</p>';
+    h += '<p>' + esc(o.kind) + ' · ' + esc(o.area) + ' · ' + esc(o.origin) + (o.status === 'draft' ? ' · draft (never runs until approved)' : '') + (o.approvedBy ? ' · approved by ' + esc(o.approvedBy) : '') + ' · <button class="link" data-file="' + esc(o.file) + '">' + esc(o.file) + '</button> <button class="btn" data-customise="' + esc(o.id) + '">Customise…</button></p>';
+    if (o.unused) h += '<div class="notice error">Nothing relies on this operation: no capability, AutoDE feature or skill names it.</div>';
+    const r = o.reliedOnBy;
+    h += '<h2>What relies on it</h2><ul>' + [...r.capabilities.map((c) => '<li>capability ' + esc(c) + '</li>'), ...r.engine.map((e) => '<li>AutoDE: ' + esc(e) + '</li>'), ...r.skills.map((k) => '<li>skill <button class="link" data-skill="' + esc(k.id) + '">' + esc(k.id) + '</button> <span class="muted">(' + esc(k.section) + ')</span></li>')].join('') + '</ul>' + (r.stages.length ? '<p class="muted">Stages whose skills use it: ' + r.stages.map(esc).join(', ') + '</p>' : '');
+    h += '<h2>Parameters</h2>' + (o.params.length ? '<ul>' + o.params.map((p) => '<li>' + esc(p.label) + ' <code>' + esc(p.name) + '</code> <span class="muted">(' + esc(p.type) + (p.required ? ', required' : '') + (p.default !== undefined ? ', default ' + esc(JSON.stringify(p.default)) : '') + ')</span></li>').join('') + '</ul>' : '<p class="muted">None.</p>') + '<p class="muted">Returns: ' + o.returns.map(esc).join(', ') + '</p>';
+    h += '<h2>Per platform</h2>' + o.implementations.map((i) => '<h3>' + esc(i.platform) + ' <span class="muted">(' + esc(i.transport) + (i.since ? ', since ' + esc(i.since) : '') + (i.until ? ', until ' + esc(i.until) : '') + ')</span></h3><pre>' + esc(i.statement || (i.argv || []).join(' ')) + '</pre>').join('');
+    if (o.example) h += '<h2>Recorded example</h2><pre>' + esc(JSON.stringify(o.example, null, 2)) + '</pre>';
+    h += '<h2>Last runs</h2>' + (o.lastRuns.length ? '<ul>' + o.lastRuns.map((x) => '<li>' + esc(x.connection) + ' ' + esc(x.at.slice(0, 16).replace('T', ' ')) + ' — ' + (x.ok ? esc((x.rows || 0) + ' row(s)') : '<span class="s-failing">' + esc(x.error || 'failed') + '</span>') + '</li>').join('') + '</ul>' : '<p class="empty">Not run yet on this machine.</p>');
+    const live = (state.live || []).filter((c) => o.platforms.includes(c.platform));
+    h += '<h2>Try it</h2>';
+    if (o.kind === 'change') h += '<p class="muted">A change operation never runs from here: Preview shows the runbook step it would be, which a person approves.</p>';
+    if (!live.length && o.kind !== 'change') h += '<p class="empty">Connect to ' + esc(o.platforms.join(' or ')) + ' (Settings → Connections) to try it.</p>';
+    h += '<form id="try">' + o.params.map((p) => '<label>' + esc(p.label) + (p.required ? ' *' : '') + ' <input type="text" name="' + esc(p.name) + '" placeholder="' + esc(p.type.endsWith('_list') ? 'comma-separated' : p.type) + '"></label>').join('') +
+      '<label>Platform <select name="__platform">' + o.platforms.map((pl) => '<option>' + esc(pl) + '</option>').join('') + '</select></label>' +
+      (live.length && o.kind !== 'change' ? '<label>Connection <select name="__connection">' + live.map((c) => '<option value="' + esc(c.id) + '">' + esc(c.id) + '</option>').join('') + '</select></label>' : '') +
+      '<button class="btn" type="button" data-preview>Preview the statement</button>' + (live.length && o.kind !== 'change' ? '<button class="btn primary" type="button" data-try>Run it (read-only)</button>' : '') + '</form><div id="tryOut" aria-live="polite"></div>';
+    return h;
+  }
+
+  function skillHtml(k) {
+    if (!k) return crumbs() + '<p class="empty">No such skill.</p>';
+    let h = crumbs(esc(k.id)) + '<h1>' + esc(k.id) + '</h1><p>' + esc(k.summary) + '</p><p class="muted">' + esc(k.group) + (k.version !== undefined ? ' · version ' + esc(k.version) : '') + (k.maturity ? ' · ' + esc(k.maturity) : '') + (k.status ? ' · ' + esc(k.status) : '') + ' · stages: ' + esc(k.stageKinds.join(', ') || '—') + ' · platforms: ' + esc(k.platforms.join(', ') || '—') + '</p>' + (k.file ? '<p><button class="link" data-file="' + esc(k.file) + '">Open SKILL.md</button></p>' : '');
+    h += '<h2>Operations it relies on</h2>' + (k.operations.length ? '<ul>' + k.operations.map((o) => '<li><button class="link" data-op="' + esc(o.id) + '">' + esc(o.id) + '</button> <span class="muted">(' + esc(o.section) + ')</span>' + (o.state !== 'ok' ? ' <span class="s-failing">' + esc(o.state) + '</span>' : '') + '</li>').join('') + '</ul>' : '<p class="empty">It names no platform operation.</p>');
+    h += '<h2>Lint</h2>' + (k.lint.unknown.length || k.lint.sql.length ? '<ul>' + k.lint.unknown.map((u) => '<li class="s-failing">names ' + esc(u) + ', which isn\'t an operation</li>').join('') + k.lint.sql.map((q) => '<li class="s-partly">queries the platform itself: ' + esc(q) + '. Reading the platform is an operation\'s job.</li>').join('') + '</ul>' : '<p class="s-ok">Nothing flagged.</p>');
+    return h;
+  }
+
+  function render() {
+    root.innerHTML = state.view === 'matrix' ? (state.matrix ? matrixHtml(state.matrix) : '<p class="muted">Loading…</p>') : state.view === 'platform' ? platformHtml(state.page) : state.view === 'operation' ? operationHtml(state.page) : skillHtml(state.page);
+    const h1 = root.querySelector('h1'); if (h1) h1.setAttribute('tabindex', '-1');
+  }
+
+  function formValues() {
+    const f = document.getElementById('try'); const out = {}; let platform = '', connection = '';
+    f.querySelectorAll('input, select').forEach((el) => { if (el.name === '__platform') platform = el.value; else if (el.name === '__connection') connection = el.value; else if (el.value.trim()) out[el.name] = el.value.trim(); });
+    return { params: out, platform, connection };
+  }
+
+  root.addEventListener('click', (e) => {
+    const t = e.target.closest('button'); if (!t) return;
+    const d = t.dataset;
+    if (d.go === 'matrix') { state.view = 'matrix'; send({ type: 'matrix' }); render(); }
+    else if (d.platform) { state.tab = 'overview'; send({ type: 'platform', id: d.platform }); }
+    else if (d.op) send({ type: 'operation', id: d.op });
+    else if (d.skill) send({ type: 'skill', id: d.skill });
+    else if (d.tab) { state.tab = d.tab; render(); const b = document.getElementById('tab-' + d.tab); if (b) b.focus(); }
+    else if (d.file) send({ type: 'openFile', file: d.file });
+    else if (d.customise) send({ type: 'customise', id: d.customise });
+    else if (d.conformance) send({ type: 'conformance', connection: d.conformance });
+    else if (t.hasAttribute('data-preview')) { const v = formValues(); send({ type: 'preview', operation: state.page.id, platform: v.platform, params: v.params }); }
+    else if (t.hasAttribute('data-try')) { const v = formValues(); document.getElementById('tryOut').innerHTML = '<p class="muted">Running…</p>'; send({ type: 'try', operation: state.page.id, connection: v.connection, params: v.params }); }
+  });
+  root.addEventListener('keydown', (e) => {
+    const tab = e.target.closest && e.target.closest('[role=tablist].tabs [role=tab]');
+    if (!tab || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return;
+    const tabs = [...root.querySelectorAll('[role=tablist].tabs [role=tab]')]; const i = tabs.indexOf(tab);
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; next.click(); e.preventDefault();
+  });
+  document.querySelectorAll('[data-window-tab]').forEach((b) => { b.onclick = () => send({ type: 'openTab', tab: b.getAttribute('data-window-tab') }); });
+
+  window.addEventListener('message', (ev) => {
+    const m = ev.data;
+    if (m.type === 'matrix') { state.matrix = m.matrix; state.live = m.live || []; if (state.view === 'matrix') render(); }
+    else if (m.type === 'platform') { state.view = 'platform'; state.page = m.page; state.live = m.live || []; render(); }
+    else if (m.type === 'operation') { state.view = 'operation'; state.page = m.page; state.live = m.live || []; const out = document.getElementById('tryOut'); const keep = out ? out.innerHTML : ''; render(); if (keep) document.getElementById('tryOut').innerHTML = keep; }
+    else if (m.type === 'skill') { state.view = 'skill'; state.page = m.page; render(); }
+    else if (m.type === 'preview') { const out = document.getElementById('tryOut'); if (out) out.innerHTML = m.error ? '<div class="notice error">' + esc(m.error) + '</div>' : '<h3>' + (m.kind === 'change' ? 'The runbook step it would be' : 'The statement that would run') + '</h3><pre>' + esc(m.statement) + '</pre>'; }
+    else if (m.type === 'tried') {
+      const out = document.getElementById('tryOut'); if (!out) return;
+      out.innerHTML = m.error ? '<div class="notice error">' + esc(m.error) + '</div>' : m.change ? '<div class="notice">' + esc(m.message) + '</div><pre>' + esc(JSON.stringify(m.step, null, 2)) + '</pre>' :
+        '<h3>' + (m.ok ? '✓ Ran' : '✗ ' + esc(m.gap || 'failed')) + '</h3>' + (m.statement ? '<pre>' + esc(m.statement) + '</pre>' : '') + '<p>' + esc(m.count) + ' row(s).' + (m.withheld ? ' Row values aren\'t shown here: run it with <code>autode platform run</code>, which applies the connection\'s sample-data consent and masking.' : '') + '</p>' +
+        (m.rows && m.rows.length ? '<table><thead><tr>' + Object.keys(m.rows[0]).map((k) => '<th>' + esc(k) + '</th>').join('') + '</tr></thead><tbody>' + m.rows.map((r) => '<tr>' + Object.keys(m.rows[0]).map((k) => '<td>' + esc(r[k]) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' : '');
+    }
+    else if (m.type === 'notice') { notice.innerHTML = '<div class="notice' + (m.error ? ' error' : '') + '">' + esc(m.text) + '</div>'; }
+  });
+  send({ type: 'ready' });
+})();
+</script>
+</body>
+</html>

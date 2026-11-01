@@ -8,6 +8,7 @@ import { loadCatalog, operationById } from '../engine/platform/operations/load';
 import { ConnectionTarget, OperationError, runOnConnection, summarize } from '../engine/platform/operations/service';
 import { openContext } from '../engine/context/estateIngest';
 import { refreshLineage } from '../engine/lineage/record';
+import { capabilityMatrix, conformanceRun, operationPage, platformPage, skillOperations, skillPage, skillTexts } from '../engine/platform/operations/catalogView';
 
 /**
  * Platform operations over MCP (POP1; docs/specs/platform-operations.md §4):
@@ -34,16 +35,21 @@ export function platformOperationTools(session: PlatformSession): EngineTool[] {
     {
       name: 'autode_platform_operations',
       description: 'The platform operations catalog: every interaction AutoDE has with a platform, as a reviewed file (id, what it does, read or change, its parameters and results, the platforms it has an implementation for, shipped or the team\'s, approved or draft), and each platform\'s definition (category, capabilities and the operations and privileges each needs). With id: one operation in full, including the statement or command per platform. Use these ids instead of writing platform SQL yourself.',
-      inputSchema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', minLength: 1 }, platform: { type: 'string', minLength: 1 }, area: { type: 'string', minLength: 1 } } },
+      inputSchema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', minLength: 1 }, platform: { type: 'string', minLength: 1 }, area: { type: 'string', minLength: 1 }, uses: { type: 'string', minLength: 1, description: 'Only the operations this skill names.' } } },
       annotations: read('Platform operations catalog'),
       handler: async (args, ws: EngineWorkspace) => {
-        const catalog = loadCatalog({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot });
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        const catalog = loadCatalog(scope);
         if (args.id) {
           const found = catalog.operations.filter((o) => o.item.id === String(args.id));
           if (!found.length) throw new EngineToolError('NOT_FOUND', `No operation ${String(args.id)}.`);
-          return { operations: found.map((o) => ({ ...o.item, origin: o.origin, status: o.status, file: o.file, checksum: o.checksum })) };
+          // POP4a: its page: what relies on it (capabilities, engine features, skills and their stages) and its last runs.
+          return { operations: found.map((o) => ({ ...o.item, origin: o.origin, status: o.status, file: o.file, checksum: o.checksum })), page: operationPage(scope, String(args.id), catalog) as unknown as Record<string, unknown> };
         }
-        const ops = summarize(catalog).filter((o) => (!args.platform || o.platforms.includes(String(args.platform))) && (!args.area || o.area === String(args.area)));
+        const usedBySkill = args.uses ? skillTexts(scope).texts.find((t) => t.id === String(args.uses)) : undefined;
+        if (args.uses && !usedBySkill) throw new EngineToolError('NOT_FOUND', `No skill ${String(args.uses)} whose text AutoDE can read.`);
+        const used = usedBySkill ? new Set(skillOperations(usedBySkill.text, catalog).uses.map((u) => u.id)) : undefined;
+        const ops = summarize(catalog).filter((o) => (!args.platform || o.platforms.includes(String(args.platform))) && (!args.area || o.area === String(args.area)) && (!used || used.has(o.id)));
         const platforms = catalog.platforms.filter((p) => !args.platform || p.item.id === String(args.platform)).map((p) => ({ id: p.item.id, title: p.item.title, category: p.item.category, transports: p.item.transports, access: p.item.access, capabilities: p.item.capabilities, origin: p.origin, status: p.status, file: p.file }));
         return { operations: ops, platforms, errors: catalog.errors };
       }
@@ -62,7 +68,7 @@ export function platformOperationTools(session: PlatformSession): EngineTool[] {
         const op = operationById(catalog, String(args.operation))?.item;
         const { target, allowSampleData } = await connectionTarget(session, String(args.connectionId));
         try {
-          const r = await runOnConnection({ catalog }, target, String(args.operation), (args.params as Record<string, unknown>) ?? {}, { maxRows: (args.maxRows as number | undefined) ?? 200 });
+          const r = await runOnConnection({ ...scope, catalog }, target, String(args.operation), (args.params as Record<string, unknown>) ?? {}, { maxRows: (args.maxRows as number | undefined) ?? 200, via: 'autode_platform_run' });
           if (!r.ok || !op || op.content === 'metadata') return r as unknown as Record<string, unknown>;
           const classified = allowSampleData ? governanceFacts((await ws.contextSources()).assertions).filter((f) => f.classification === 'pii' || f.classification === 'sensitive-pii').map((f) => f.column) : [];
           const gated = gateQueryResult({ columns: op.returns.map((x) => x.name), rows: r.rows, rowCount: r.rows.length, executionTimeMs: 0 }, { allowSampleData, metadata: false, connectionId: target.connectionId, classified });
@@ -74,6 +80,37 @@ export function platformOperationTools(session: PlatformSession): EngineTool[] {
           }
           throw err;
         }
+      }
+    },
+    {
+      name: 'autode_platform_catalog',
+      description: 'The platform catalog (POP4a): with no arguments, the capability matrix (capabilities as rows; the workspace\'s platforms, then the others, as columns), each cell supported, partly (with what is missing) or not applicable, with the last conformance run on each connection. With platform: that platform\'s page, with only the tabs that apply (overview, capabilities, operations by area, skills, tools, primitives and dialect, privileges, health). With skill: that skill\'s page, the operations it relies on and what skills lint flags (unknown operation ids, SQL it carries itself).',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { platform: { type: 'string', minLength: 1 }, skill: { type: 'string', minLength: 1 } } },
+      annotations: read('Platform catalog'),
+      handler: async (args, ws: EngineWorkspace) => {
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        if (args.platform) {
+          const page = platformPage(scope, String(args.platform));
+          if (!page) throw new EngineToolError('NOT_FOUND', `No platform ${String(args.platform)}.`);
+          return { page } as unknown as Record<string, unknown>;
+        }
+        if (args.skill) {
+          const page = skillPage(scope, String(args.skill));
+          if (!page) throw new EngineToolError('NOT_FOUND', `No skill ${String(args.skill)}.`);
+          return { page } as unknown as Record<string, unknown>;
+        }
+        return { matrix: capabilityMatrix(scope) } as unknown as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_platform_conformance',
+      description: 'A conformance run on a connection (POP4a): tries each capability\'s read operations, one row at most each, with values from the connection\'s own fields (its database and schema), and records which capabilities work, partly work (with the privileges they need) or weren\'t tried. Read-only; nothing is changed on the platform.',
+      inputSchema: { type: 'object', required: ['connectionId'], additionalProperties: false, properties: { connectionId: { type: 'string', minLength: 1 } } },
+      annotations: read('Conformance run', true),
+      handler: async (args, ws: EngineWorkspace) => {
+        const entry = session.entry(String(args.connectionId));
+        const { target } = await connectionTarget(session, entry.id);
+        return { result: await conformanceRun({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, target, entry.fields) } as unknown as Record<string, unknown>;
       }
     },
     {
