@@ -6,6 +6,29 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.7
+
+PLN1b, the clarification round and re-planning ([workflow-planning.md](docs/specs/workflow-planning.md) §3.4, §3.6). PLN1 is complete.
+
+- **The planner asks before it guesses.** When placing an item needs the stakeholder's answer, the planner opens a clarification round (`autode_ask_planning_questions`):
+  - at most seven questions a round, each naming the coverage items it blocks and the assumption the planner would make;
+  - a later round only follows an answer that raised a new question; three rounds at most;
+  - the items a question blocks can't be approved, or proposed by the planner, until it is answered.
+- **Answers, by a person:** in the plan step (**Answer**, **Assume…**, **Scope changes…**), `autode workflow questions answer | assume | scope-change`, or by an agent recording what the person said (`autode_record_planning_answer`, as them).
+  - A clarification becomes a confirmed decision fact on the items.
+  - An accepted assumption becomes a confirmed fact flagged as an assumption, and the coverage lists the items resting on it.
+  - A scope change makes the coverage wait until the specification is revised.
+- **The plan follows the work.** A stage reports what changes coverage (`autode_report_coverage_change`, any stage's agent; `autode workflow report` in a terminal): a source the specification didn't name, an item it can't deliver, or other. An answer after the coverage was approved is reported too.
+  - While a report is open, the journey shows *Re-plan* and `autode_workflow_next` sends the planner back to the plan.
+  - In VS Code, **Ask the planner to re-plan** runs the planner from the plan step.
+  - Approving the revised workflow resolves the reports; a person may dismiss one, with the reason (`autode workflow reports dismiss`).
+  - A revision can't drop a stage that is done; its record stays.
+- The planning skill is at version 3; the planner may also propose the specification's revision after a scope change.
+- **Fixed** (owner's UI tests, 2026-11-01):
+  - **Checkboxes and radio buttons sat away from their labels:** a panel-wide rule stretched every input across its row. They now sit beside their labels, in the chat's questions and the palette's lists alike.
+  - **Copying from the chat:** each message, notice and run card has a **Copy** button on hover, which copies its text through VS Code's clipboard; chat text is selectable.
+  - **"Auto mode needs a prompt or a command to route a request"** with Copilot's model set to *Auto*: Auto picks a model from each request's prompt, and a stage agent's request after a tool call held only the tool results. It now carries a line of text for Auto; other models are unchanged.
+
 ## 0.56.6
 
 PLN1a, the planner composing the workflow from coverage ([workflow-planning.md](docs/specs/workflow-planning.md) §3.1–§3.3, §3.5, §3.7).

@@ -48,6 +48,8 @@ button.danger { color: var(--error); }
 button.danger:hover { background: var(--error-subtle); border-color: var(--error); }
 input, textarea, select { width: 100%; background: var(--surface-hover); color: var(--text); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 6px 8px; font: inherit; font-size: var(--font-size); transition: border-color var(--transition-fast); }
 input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+/* v0.56.7: the rule above stretched every checkbox and radio button across its row, away from its label. */
+input[type="checkbox"], input[type="radio"] { width: auto; flex: none; padding: 0; }
 textarea { resize: vertical; min-height: 40px; max-height: 100px; }
 label { font-size: var(--font-size-sm); color: var(--text-muted); display: block; margin-bottom: 4px; }
 .app { display: flex; flex-direction: column; height: 100vh; position: relative; }
@@ -93,6 +95,10 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 /* v0.52.5: notices (one line, by what they ask of you) and a run's activity card (updated in place). */
 .notice { display: flex; gap: 6px; align-items: baseline; font-size: 11.5px; padding: 2px 4px; color: var(--text-muted); }
 .notice-icon { flex: none; width: 1em; text-align: center; }
+/* v0.56.7: chat text is selectable, and each message, notice and run card has a Copy button on hover. */
+.message, .notice, .activity { user-select: text; -webkit-user-select: text; position: relative; }
+.copy-btn { position: absolute; top: 2px; right: 2px; display: none; padding: 0 5px; font-size: 11px; line-height: 16px; background: var(--surface-active); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); color: var(--text-muted); cursor: pointer; user-select: none; }
+.message:hover > .copy-btn, .notice:hover > .copy-btn, .activity:hover > .copy-btn, .copy-btn:focus { display: block; }
 .notice-warn { color: var(--vscode-editorWarning-foreground, var(--warning)); }
 .notice-action { color: var(--vscode-textLink-foreground); }
 .activity { align-self: stretch; font-size: 11.5px; border: 1px solid var(--border-soft); border-left: 3px solid var(--vscode-progressBar-background, var(--vscode-textLink-foreground)); border-radius: 4px; padding: 4px 8px; background: var(--surface-elevated); }
@@ -369,7 +375,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
 .spec-q-submit { margin-top: 4px; width: 100%; }
 .spec-q-choices { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
 .spec-q-choice { display: flex; align-items: flex-start; gap: 6px; font-size: var(--font-size-sm); cursor: pointer; line-height: 1.4; }
-.spec-q-choice input { margin: 2px 0 0; accent-color: var(--accent); }
+.spec-q-choice input { margin: 3px 0 0; accent-color: var(--accent); }
 
 /* ── Artifact Cards ── */
 .artifact-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-hover); margin-top: 6px; overflow: hidden; }
@@ -639,7 +645,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     }
     row.appendChild(b); div.appendChild(row); chatStream.scrollTop = chatStream.scrollHeight;
   }
-  function addMessage(role, content, label, citations) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + withCitations(formatContent(content), citations) + '</div>'; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
+  function addMessage(role, content, label, citations) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + withCitations(formatContent(content), citations) + '</div>' + COPY_BTN; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
   // C4b: [fact:<id>] in an answer becomes a chip; hovering shows the fact it rests on.
   function withCitations(html, citations) { var n = 0; return html.replace(/\[fact:([0-9A-Z]{26})\]/g, function (_, id) { n++; var t = citations && citations[id] ? citations[id] : 'fact ' + id + ' (not found)'; return '<span class="fact-chip" title="' + escapeHtml(t) + '">fact ' + n + '</span>'; }); }
   function formatContent(text) { var escaped = escapeHtml(String(text)); escaped = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) { return '<pre><code>' + escapeHtml(code.trim()) + '</code></pre>'; }); escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>'); return escaped; }
@@ -657,10 +663,24 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     if (/(waits? for (your )?approval|approve it|review it|to approve|waits for you|needs your)/i.test(m)) return 'action';
     return 'info';
   }
+  var COPY_BTN = '<button type="button" class="copy-btn" title="Copy">Copy</button>';
+  /** The text of a message, notice or run card, without its buttons. */
+  function copyableText(el) {
+    var c = el.cloneNode(true);
+    c.querySelectorAll('button').forEach(function (b) { b.remove(); });
+    return (c.innerText || c.textContent || '').trim();
+  }
+  chatStream.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('.copy-btn');
+    if (!b) return;
+    e.stopPropagation();
+    var el = b.closest('.message, .notice, .activity');
+    if (el) post('copyText', { text: copyableText(el) });
+  });
   function addLogEntry(message) {
     var level = noticeLevel(message);
     var div = document.createElement('div'); div.className = 'notice notice-' + level;
-    div.innerHTML = '<span class="notice-icon">' + (level === 'warn' ? '⚠' : level === 'action' ? '●' : 'ℹ') + '</span><span class="notice-text">' + escapeHtml(message) + '</span>';
+    div.innerHTML = '<span class="notice-icon">' + (level === 'warn' ? '⚠' : level === 'action' ? '●' : 'ℹ') + '</span><span class="notice-text">' + escapeHtml(message) + '</span>' + COPY_BTN;
     chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight;
   }
 
@@ -675,7 +695,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var c = activityCards[m.runId];
     if (c) return c;
     var el = document.createElement('div'); el.className = 'activity running';
-    el.innerHTML = '<div class="activity-head"><span class="activity-icon">⟳</span><span class="activity-title"></span><span class="activity-meta"></span><span class="activity-time">0:00</span><button type="button" class="activity-stop" title="Stop this run: it ends at its next step; what it already recorded stays">Stop</button></div><ol class="activity-steps"></ol>';
+    el.innerHTML = '<div class="activity-head"><span class="activity-icon">⟳</span><span class="activity-title"></span><span class="activity-meta"></span><span class="activity-time">0:00</span><button type="button" class="activity-stop" title="Stop this run: it ends at its next step; what it already recorded stays">Stop</button></div><ol class="activity-steps"></ol>' + COPY_BTN;
     el.querySelector('.activity-title').textContent = m.title || 'AutoDE';
     // v0.53.1: Stop ends the run at its next step (Claude Code's process at once); the card says how it ended.
     var stopBtn = el.querySelector('.activity-stop');
@@ -1464,7 +1484,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var ab = $('#pjAction');
     if (ab) ab.onclick = function () {
       // Approvals and coverage are made in the Workflow tab, where what is approved is in view.
-      if (a.id === 'approve-workflow' || a.id === 'place-coverage' || a.id === 'approve-coverage' || a.id === 'approve-stage') { post('openWorkflowView'); return; }
+      if (a.id === 'approve-workflow' || a.id === 'place-coverage' || a.id === 'approve-coverage' || a.id === 'answer-planning' || a.id === 'approve-stage') { post('openWorkflowView'); return; }
       post('journeyAction', { id: a.id, args: a.args || {} });
     };
   }

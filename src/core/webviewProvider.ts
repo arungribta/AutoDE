@@ -90,10 +90,10 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 
 
 import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
-import { WorkflowScope, approveCoverageNow, coverageToApproveFirst, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
+import { WorkflowScope, approveCoverageNow, coverageToApproveFirst, ensureWorkflow, planningStatus, proposeWorkflow, redraft } from '../engine/workflows/service';
 import { specCoverage } from '../engine/workflows/coverage';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
-import { ExecutorHost, runHandoff, runMaintenance, runStage } from './agentExecutor';
+import { ExecutorHost, runHandoff, runMaintenance, runPlanner, runStage } from './agentExecutor';
 import { RunStoppedError } from './llmAdapter';
 import { knowledgeLine, problemOverlap, workspaceKnowledge } from '../engine/documents/problemOverlap';
 import { RoleTemplate, loadRoles } from '../engine/agents/definitions';
@@ -841,6 +841,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'openCopilotHandoff': { try { const prompt = typeof (message.prompt) === 'string' ? message.prompt : undefined; await vscode.commands.executeCommand(`${EXTENSION_ID}.copilotHandoff`, prompt); } catch { this.postLog('Failed to open Copilot handoff editor.'); } break; }
         case 'reindex': { this.postLog('Re-index requested from webview.'); try { await vscode.commands.executeCommand(`${EXTENSION_ID}.reindex`); } catch { this.postLog('Re-index command not yet registered.'); } break; }
+        // v0.56.7: Copy on a chat message, notice or run card, through VS Code's clipboard.
+        case 'copyText': {
+          const text = typeof message.text === 'string' ? message.text : '';
+          if (text) { await vscode.env.clipboard.writeText(text); void vscode.window.setStatusBarMessage('AutoDE: copied', 2000); }
+          break;
+        }
         case 'openContextFolder': {
           const contextUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri, ...LAYOUT.root);
           try { await vscode.commands.executeCommand('revealFileInOS', contextUri); } catch { await vscode.commands.executeCommand('workbench.files.action.showActiveFileInExplorer'); }
@@ -1978,9 +1984,27 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       case 'draft-semantic': await vscode.commands.executeCommand(`${EXTENSION_ID}.newSemanticModel`); return;
       case 'propose-workflow': await this.workflowAction('propose', undefined, args.template); return;
       case 'approve-coverage': await this.approveCoverage(); return;
+      case 'answer-planning': await vscode.commands.executeCommand(`${EXTENSION_ID}.openWorkflow`); return;
+      case 'replan': await this.replan(); return;
       case 'run-stage': await this.workflowAction('run', args.stage, undefined); return;
       default: this.postLog(`No panel action for "${id}" here: use the Workflow tab.`);
     }
+  }
+
+  /** PLN1b: the planner re-plans for the work's open reports; what it proposes waits in the plan step. */
+  private async replan(): Promise<void> {
+    const scope = this.workflowScope();
+    if (!scope) return;
+    const reports = planningStatus(scope).reports.filter((r) => r.status === 'open');
+    if (!reports.length) { this.postLog('No report waits for a re-plan.'); return; }
+    const task = `Re-plan this problem's workflow and coverage for what the work reported:\n${reports.map((r) => `- ${r.id} from ${r.stage} (${r.kind}): ${r.detail}${r.items.length ? ` [items: ${r.items.join(', ')}]` : ''}`).join('\n')}\nRead the reports and the coverage, propose the revised workflow (stages already done stay), then the revised coverage. If a report needs the stakeholder's answer, ask it in a clarification round instead of guessing.`;
+    const runId = this.newRunId();
+    this.activity(runId, { phase: 'note', title: 'planner', text: `Re-planning for ${reports.length} report(s)…` });
+    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'AutoDE: the planner is re-planning', cancellable: true },
+      (_p, token) => { token.onCancellationRequested(() => this.stopRun(runId)); return runPlanner(this.runHost(runId, 'planner'), { ...scope, resourcesRoot: this.context.extensionPath }, task); });
+    this.activity(runId, { phase: 'end', title: 'planner', status: r.ok ? 'ok' : r.stopped ? 'stopped' : 'error', ...(r.ok ? { replace: true } : { summary: r.stopped ? 'Stopped by you' : r.message.split('\n')[0] }) });
+    this.postMessage('chatResponse', { message: r.message, error: !r.ok && !r.stopped });
+    this.postDecisions();
   }
 
   /** PLN1a: a person approves the coverage (what will be delivered) before the workflow (how). */

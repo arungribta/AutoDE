@@ -5,6 +5,14 @@ import { LlmHistoryTurn } from './llmAdapter';
 
 const MAX_TOOL_LOOP_TURNS = 12;
 
+/** The text that goes with tool results for a model that routes by prompt (Copilot's Auto). */
+export const TOOL_RESULTS_PROMPT = 'Here are the tool results. Continue the task: call the next tool you need, or give your answer.';
+
+/** Copilot's Auto model chooses a model per request from its prompt (v0.56.7). */
+export function isAutoRouted(model: { id?: string; family?: string; name?: string }): boolean {
+  return [model.id, model.family, model.name].some((x) => typeof x === 'string' && /^(copilot[-/ ]?)?auto$/i.test(x.trim()));
+}
+
 /** Real alternating User/Assistant messages for prior turns — `vscode.lm` has no distinct
  *  "history" concept, just a message array, so this is the whole of the wiring. */
 function buildHistoryMessages(history?: LlmHistoryTurn[]): vscode.LanguageModelChatMessage[] {
@@ -292,7 +300,9 @@ export class LanguageModelAdapter {
         const outcome = await executeAgenticTool(toolCall, workspaceRoot, audit, offered, opts.engineTools, opts.onStep);
         resultParts.push(new vscode.LanguageModelToolResultPart(call.callId, [new vscode.LanguageModelTextPart(outcome)]));
       }
-      messages.push(vscode.LanguageModelChatMessage.User(resultParts));
+      // v0.56.7: Copilot's Auto model picks a model from the request's prompt text, and a message of tool results
+      // alone has none ("Auto mode needs a prompt or a command to route a request"): give it one.
+      messages.push(vscode.LanguageModelChatMessage.User(isAutoRouted(model) ? [...resultParts, new vscode.LanguageModelTextPart(TOOL_RESULTS_PROMPT)] : resultParts));
     }
 
     if (!finalText.trim() && audit.length === 0) {

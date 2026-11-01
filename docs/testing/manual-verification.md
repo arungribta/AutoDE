@@ -1409,6 +1409,21 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: once it is ready, **Mark done…** on the manual stage.
   Expect: a note is required, evidence files optional; the stage is done with your note in its history. Asking the agent to complete it is refused.
 
+## Part 65 — v0.56.7 PLN1b: the clarification round and re-planning; the owner's UI fixes
+
+- [ ] **65.1 The planner asks.**
+  Do: ask the planner (Claude Code with the plugin) to plan a problem whose scope says *near real time*.
+  Expect: it asks a round (at most seven questions), each with the items it blocks and its assumption; the plan step shows them; the coverage can't be approved while one is open.
+- [ ] **65.2 Answer, assume, scope change.**
+  Do: answer one in the plan step, **Assume…** another, **Scope changes…** a third.
+  Expect: the answer and the assumption are facts (the assumption flagged); the coverage lists what rests on the assumption; after the scope change it waits until the specification is revised.
+- [ ] **65.3 Re-plan.**
+  Do: with the workflow approved, `autode workflow report sources --kind new-source --summary "a marketplace feed"`; then **Ask the planner to re-plan** in the plan step.
+  Expect: the journey shows *Re-plan*; the planner proposes a revised coverage and workflow; approving them resolves the report; stages already done stay done. **Dismiss…** another report needs a reason.
+- [ ] **65.4 The owner's fixes.**
+  Do: a question with choices in the chat; hover a chat message, a notice and a run card; run a stage agent with Copilot's model set to **Auto**.
+  Expect: radio buttons and checkboxes sit beside their labels (also the palette's source systems); **Copy** copies the text (the status bar says *copied*); the run no longer fails with "Auto mode needs a prompt or a command".
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1766,5 +1781,9 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 64.2 |  |  |
 | 64.3 |  |  |
 | 64.4 |  |  |
+| 65.1 |  |  |
+| 65.2 |  |  |
+| 65.3 |  |  |
+| 65.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

@@ -53,6 +53,7 @@ import { ProposalValidationError, applyDecision, approvalBlockers, propose } fro
 import { journeyContext, journeyFor, journeyLines } from '../engine/workflows/journey';
 import { CreatedWorkspace, createWorkspace } from '../engine/workspaceCreate';
 import { CoverageStatus, placeCoverageItem, specCoverage } from '../engine/workflows/coverage';
+import { ReportKind, dismissReport } from '../engine/workflows/planning';
 import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocument } from '../engine/documents/problemDocuments';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { conformanceFailures, loadProfiles, packConformance, probeCandidates, readPackDocument, readPackFile, sampleProbeExecutor } from '../engine/context/packChecks';
@@ -71,7 +72,7 @@ import { DOCUMENT_ROLES, DocumentAuthority, DocumentRole } from '../engine/conte
 import { buildVocabulary, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, VocabularyProposal } from '../engine/context/vocabulary';
 import { isMirror } from '../engine/context/projection';
 import { platformTools } from '../mcp/platform';
-import { CoveragePlacement, WorkflowScope, approveCoverageNow, coverageToApproveFirst, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeCoverage, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { CoveragePlacement, WorkflowScope, answerPlanningQuestion, approveCoverageNow, coverageToApproveFirst, diffWorkflow, planningStatus, reportCoverageChange, draftFrom, ensureWorkflow, historyFor, proposeCoverage, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
 import { Actor, actorLabel } from '../engine/workflows/events';
 import { readWorkflow } from '../engine/workflows/instance';
@@ -214,6 +215,11 @@ Workflow (the planned stages of a problem; approving is a person's: interactive 
   workflow templates           The workflow templates (bundled and this workspace's)
   workflow status              The whole journey (problem, discovery, specification, plan, delivery: where you are and
                                the next step), then each stage: done, ready, waiting (and for what), stale, skipped
+  workflow questions [show | answer <question> "<answer>" | assume <question> | scope-change <question> "<answer>"]
+                               The planner's clarification questions; answer, accept its assumption, or say the scope changes
+  workflow report <stage> --kind new-source|cannot-deliver|other --summary "<what was found>" [--item <id>]…
+                               Report what changes the plan's coverage; the planner re-plans
+  workflow reports [dismiss <id> --reason <text>]   The stages' reports, open and settled
   workflow coverage [show|check|place <item> --status <s> [--stage <id>]… [--reason <text>]|propose <file>|approve]
                                The specification's coverage by the workflow, approved before the workflow (what, then how); an open item blocks it
   workflow plan [--template <id>]   Draft the workflow from a template (default: AutoDE's suggestion) and propose it for approval
@@ -426,13 +432,14 @@ const OPTIONS = {
   method: { type: 'string' },
   param: { type: 'string', multiple: true },
   stage: { type: 'string', multiple: true },
+  item: { type: 'string', multiple: true },
   days: { type: 'string' },
   complete: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
 
-type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output' | 'param' | 'stage'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[]; param?: string[]; stage?: string[] };
+type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output' | 'param' | 'stage' | 'item'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[]; param?: string[]; stage?: string[]; item?: string[] };
 
 class CliError extends Error {
   public constructor(public readonly exit: number, message: string) { super(message); }
@@ -1320,6 +1327,41 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
   const by = (ctx.values.by ?? safeUsername()).trim();
   const who: Actor = { kind: 'person', name: by };
   try {
+    if (sub === 'questions') {
+      // PLN1b: the planner's clarification round, answered by a person at a terminal.
+      const [action = 'show', qid, ...words] = args;
+      if (action !== 'show') {
+        const outcome = action === 'answer' ? 'clarifies' : action === 'assume' ? 'assumed' : action === 'scope-change' ? 'scope-change' : undefined;
+        if (!outcome || !qid) throw new CliError(EXIT.USAGE, 'workflow questions answer <question> "<answer>" | assume <question> | scope-change <question> "<answer>".');
+        try {
+          const r = await answerPlanningQuestion(scope, qid, { value: words.join(' ').trim() || undefined, outcome }, who, 'cli');
+          emit(ctx, { ok: true, answered: r.question, report: r.report }, `Recorded ${qid} (${outcome}).${outcome === 'scope-change' ? ' Revise the specification next: the coverage waits for it.' : r.report ? ' The coverage was approved already: the planner re-plans.' : ''}`);
+        } catch (err) { throw new CliError(EXIT.USAGE, err instanceof Error ? err.message : String(err)); }
+        return EXIT.OK;
+      }
+      const ps = planningStatus(scope);
+      emit(ctx, { ok: true, ...ps }, ps.rounds.length ? ps.rounds.flatMap((r) => [`Round ${r.n} (asked by ${r.openedBy}):`, ...r.questions.map((q) => `  ${q.answer ? '✓' : '?'} ${q.id} ${q.prompt}${q.options?.length ? ` (${q.options.join(' / ')})` : ''}\n      blocks ${q.items.join(', ')}\n      ${q.answer ? `${q.answer.outcome}: ${q.answer.value} — ${q.answer.by}` : `or assume: ${q.assumption}`}`)]).join('\n') : 'The planner has asked no questions.');
+      return EXIT.OK;
+    }
+    if (sub === 'report') {
+      const [stage] = args;
+      if (!stage || !ctx.values.kind || !ctx.values.summary) throw new CliError(EXIT.USAGE, 'workflow report <stage> --kind new-source|cannot-deliver|other --summary "<what was found>" [--item <id>]…');
+      try {
+        const r = reportCoverageChange(scope, { stage, kind: ctx.values.kind as ReportKind, items: ctx.values.item, detail: ctx.values.summary }, who, 'cli');
+        emit(ctx, { ok: true, report: r }, `Reported as ${r.id}: the planner re-plans, and a person approves the revision.`);
+      } catch (err) { throw new CliError(EXIT.USAGE, err instanceof Error ? err.message : String(err)); }
+      return EXIT.OK;
+    }
+    if (sub === 'reports') {
+      const [action = 'show', id] = args;
+      if (action === 'dismiss') {
+        if (!id || !ctx.values.reason) throw new CliError(EXIT.USAGE, 'workflow reports dismiss <id> --reason <why the plan doesn\'t change>.');
+        try { dismissReport(rctx.problemRoot, id, ctx.values.reason, by); } catch (err) { throw new CliError(EXIT.USAGE, err instanceof Error ? err.message : String(err)); }
+      } else if (action !== 'show') throw new CliError(EXIT.USAGE, 'workflow reports [dismiss <id> --reason <text>].');
+      const reports = planningStatus(scope).reports;
+      emit(ctx, { ok: true, reports }, reports.length ? reports.map((r) => `  ${r.status === 'open' ? '!' : '✓'} ${r.id} ${r.stage} ${r.kind}: ${r.detail}${r.items.length ? ` [${r.items.join(', ')}]` : ''} — ${r.status}${r.resolution ? ` (${r.resolution.decisionId ?? r.resolution.reason}, ${r.resolution.by})` : ''}`).join('\n') : 'No reports.');
+      return EXIT.OK;
+    }
     if (sub === 'coverage') {
       // PLN0: the specification's coverage by the workflow.
       const [action = 'show', item] = args;

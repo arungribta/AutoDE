@@ -34,7 +34,7 @@ export function toolTier(t: ToolInfo): Tier | 'never' {
 const HUB_ONLY = /^autode_(workflow_(start_stage|complete_stage|skip_stage|reopen_stage)|propose_workflow|resolve_decision|apply_decision|review_assertion|start_problem|select_problem)$/;
 
 /** Every stage records its own deliverables (drafts in its own folder, approved at its gate), whatever its tier. */
-const ANY_TIER = new Set(['autode_record_artifact']);
+const ANY_TIER = new Set(['autode_record_artifact', 'autode_report_coverage_change']);
 
 export function toolsForTier(tools: readonly ToolInfo[], tier: Tier, roleTools: readonly string[], kind?: StageKind): string[] {
   const allow = roleTools.length ? new Set(roleTools) : undefined;
@@ -45,7 +45,8 @@ export function toolsForTier(tools: readonly ToolInfo[], tier: Tier, roleTools: 
     const need = ANY_TIER.has(t.name) ? 'read' : toolTier(t);
     if (need === 'never' || tierRank(need) > tierRank(tier)) return false;
     // C4c: a role that may propose facts may also record an assumption (refused outside exploration mode).
-    return !allow || allow.has(t.name) || (t.name === 'autode_record_assumption' && allow.has('autode_propose_assertion'));
+    // PLN1b: every stage may report what changes the plan's coverage; the planner re-plans.
+    return !allow || allow.has(t.name) || t.name === 'autode_report_coverage_change' || (t.name === 'autode_record_assumption' && allow.has('autode_propose_assertion'));
   }).map((t) => t.name).sort();
 }
 

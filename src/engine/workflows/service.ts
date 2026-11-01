@@ -3,6 +3,7 @@ import { parseBusinessProblemSpec, readProblemDocument } from '../documents/prob
 import { Decision, DecisionStore, Proposer } from '../decisions/decisionStore';
 import { ProposalContext, applyDecision, approvalBlockers, propose } from '../decisions/proposals';
 import { CoverageEntry, CoverageProposal, CoverageStatus, specCoverage } from './coverage';
+import { CoverageReport, MAX_QUESTIONS, PlanningOutcome, PlanningQuestion, PlanningRound, QuestionInput, ReportKind, answerQuestion, openQuestions, openRound, readPlanning, reportChange } from './planning';
 import { layoutPath } from '../workspaceLayout';
 import { WorkflowInstance, diffWorkflow, draftWorkflow, readWorkflow, sourceSystems, workflowFacts, writeWorkflow } from './instance';
 import { WorkflowTemplate, loadTemplates, suggestTemplate } from './templates';
@@ -137,6 +138,30 @@ export async function approveWorkflow(scope: WorkflowScope, decisionId: string, 
 }
 
 export { diffWorkflow };
+
+/** PLN1b: the clarification rounds and the stages' reports, as every surface shows them. */
+export function planningStatus(scope: WorkflowScope): { rounds: PlanningRound[]; open: PlanningQuestion[]; reports: CoverageReport[]; maxQuestions: number } {
+  const p = readPlanning(problemRootOf(scope));
+  return { rounds: p.rounds, open: openQuestions(p), reports: p.reports, maxQuestions: MAX_QUESTIONS };
+}
+
+const coverageItemIds = (scope: WorkflowScope): string[] => specCoverage(scope.workspaceRoot, scope.problemId)?.coverage.entries.map((e) => e.id) ?? [];
+
+/** PLN1b: the planner asks what blocks coverage (a round of at most seven questions). */
+export function askPlanningQuestions(scope: WorkflowScope, questions: readonly QuestionInput[], by: Actor, channel: string): PlanningRound {
+  return openRound(problemRootOf(scope), { questions, knownItems: coverageItemIds(scope), by, channel });
+}
+
+/** PLN1b: a person's answer to a planning question; after the coverage was approved, it is also reported for re-planning. */
+export async function answerPlanningQuestion(scope: WorkflowScope, question: string, input: { value?: string; outcome: PlanningOutcome }, by: Actor, channel: string): Promise<{ question: PlanningQuestion; report?: CoverageReport }> {
+  const c = specCoverage(scope.workspaceRoot, scope.problemId);
+  return answerQuestion(scope.workspaceRoot, problemRootOf(scope), { question, value: input.value, outcome: input.outcome, by, channel, coverageApproved: !!c?.coverage.approvedBy && !c.pendingDecision });
+}
+
+/** PLN1b: a stage reports what changes coverage. */
+export function reportCoverageChange(scope: WorkflowScope, input: { stage: string; kind: ReportKind; items?: string[]; detail: string }, by: Actor, channel: string): CoverageReport {
+  return reportChange(problemRootOf(scope), { ...input, knownItems: coverageItemIds(scope), by, channel });
+}
 
 export interface CoveragePlacement { item: string; status: Exclude<CoverageStatus, 'question'>; stages?: string[]; reason?: string }
 

@@ -2,7 +2,8 @@ import { problemMaintenance } from '../engine/maintenance/queue';
 import { EngineTool, ToolAnnotations } from './tools';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
-import { WorkflowScope, computeDraft, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeCoverage, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowScope, answerPlanningQuestion, askPlanningQuestions, computeDraft, diffWorkflow, draftFrom, ensureWorkflow, historyFor, planningStatus, proposeCoverage, proposeWorkflow, redraft, reportCoverageChange, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { PlanningOutcome, REPORT_KINDS, ReportKind } from '../engine/workflows/planning';
 import { ProposalValidationError } from '../engine/decisions/proposals';
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
 import { COMPOSED, MAX_BRIEF, WorkflowInstance, readWorkflow, templateOf } from '../engine/workflows/instance';
@@ -155,6 +156,53 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
       })
     },
     {
+      name: 'autode_planning_questions',
+      description: 'The planner\'s clarification rounds (PLN1b): every question with the coverage items it blocks, the planner\'s assumption, and its answer (clarifies, assumed, or scope-change), and the stages\' reports of what changes coverage (open, resolved by a revised workflow, or dismissed).',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: read('Planning questions'),
+      handler: async (_args, ws) => wrap(() => planningStatus(scopeOf(ws)) as unknown as Record<string, unknown>)
+    },
+    {
+      name: 'autode_ask_planning_questions',
+      description: 'As the planner, ask the person what blocks coverage (PLN1b, a clarification round): at most seven questions, most important first, each naming the coverage items it blocks and the assumption you would make (offered as "assume and flag"). Ask only what you can\'t settle from the specification, the estate or the facts. A later round only follows an answer that raised a new question ("after": that question\'s id). Items a question blocks can\'t be placed until it is answered. Tell the user the questions; record their answers with autode_record_planning_answer.',
+      inputSchema: {
+        type: 'object', additionalProperties: false, required: ['questions'],
+        properties: {
+          questions: {
+            type: 'array', minItems: 1, maxItems: 7,
+            items: { type: 'object', additionalProperties: false, required: ['prompt', 'items', 'assumption'], properties: { prompt: { type: 'string', minLength: 1, maxLength: 600 }, items: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, assumption: { type: 'string', minLength: 1, maxLength: 600 }, kind: { type: 'string', enum: ['text', 'single-select', 'multi-select', 'boolean'] }, options: { type: 'array', items: { type: 'string' } }, after: { type: 'string' } } }
+          }
+        }
+      },
+      annotations: records('Ask planning questions'),
+      handler: async (args, ws) => wrap(() => {
+        try { return { round: askPlanningQuestions(scopeOf(ws), args.questions as never, agent(), 'tool') } as unknown as Record<string, unknown>; }
+        catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+      })
+    },
+    {
+      name: 'autode_record_planning_answer',
+      description: 'Record the person\'s answer to a planning question, exactly as they gave it, as them (the person you work for; never your own answer). outcome: "clarifies" (a fact on the items; place them next), "assumed" (they accept your assumption: a flagged assumption the items rest on), or "scope-change" (it adds or drops scope: propose the specification\'s revision with autode_propose_spec_change; the coverage waits for it).',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['question', 'outcome', 'person'], properties: { question: { type: 'string', minLength: 1 }, outcome: { type: 'string', enum: ['clarifies', 'assumed', 'scope-change'] }, value: { type: 'string', minLength: 1, maxLength: 2000, description: 'Their answer (not needed for "assumed").' }, person: { type: 'string', minLength: 1, description: 'Who answered.' } } },
+      annotations: records('Record a planning answer'),
+      handler: async (args, ws) => {
+        try {
+          const r = await answerPlanningQuestion(scopeOf(ws), String(args.question), { value: args.value as string | undefined, outcome: args.outcome as PlanningOutcome }, { kind: 'person', name: String(args.person) }, 'tool');
+          return { answered: r.question, ...(r.report ? { reported: r.report, next: 'The coverage was approved before this answer: the planner re-plans.' } : {}) } as unknown as Record<string, unknown>;
+        } catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+      }
+    },
+    {
+      name: 'autode_report_coverage_change',
+      description: 'From the stage you were assigned: report what changes the plan\'s coverage (PLN1b): a source system the specification didn\'t name (new-source), an item this stage can\'t deliver (cannot-deliver, with the items), or other. The planner re-plans and a person approves the revision; stages already done stay done. Don\'t work around it in your stage.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['stage', 'kind', 'detail'], properties: { stage: { type: 'string', minLength: 1 }, kind: { type: 'string', enum: [...REPORT_KINDS] }, items: { type: 'array', items: { type: 'string', minLength: 1 } }, detail: { type: 'string', minLength: 5, maxLength: 2000 } } },
+      annotations: records('Report a change to coverage'),
+      handler: async (args, ws) => wrap(() => {
+        try { return { report: reportCoverageChange(scopeOf(ws), { stage: String(args.stage), kind: args.kind as ReportKind, items: args.items as string[] | undefined, detail: String(args.detail) }, agent(), 'tool') } as unknown as Record<string, unknown>; }
+        catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+      })
+    },
+    {
       name: 'autode_workflow_next',
       description: 'The next assignment from the workflow (the hub): which stage, which role, its tier, what it consumes and produces, and instructions. Do it, then hand it in with autode_workflow_complete_stage. Never run another agent from inside an assignment.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
@@ -164,6 +212,12 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         return wrap(() => {
         const scope = scopeOf(ws);
         ensureWorkflow(scope);
+        // PLN1b: while a stage's report is open, the plan comes first: the planner re-plans, a person approves.
+        const reports = planningStatus(scope).reports.filter((r) => r.status === 'open');
+        if (reports.length) {
+          const plan = assignmentFor(scope, readWorkflow(rctx(ws).problemRoot)?.stages.find((s) => s.kind === 'plan')?.id ?? 'plan', allTools());
+          return { next: { replan: true, reports, instructions: 'The work reported something that changes coverage. As the planner: read the reports (autode_planning_questions), revise the workflow (autode_propose_workflow) and the coverage (autode_propose_coverage); a person approves both. Stages already done stay done.' }, assignment: plan.assignment ?? null, ...(plan.reason ? { noAssignment: plan.reason } : {}) } as unknown as Record<string, unknown>;
+        }
         const next = nextAssignment(rctx(ws));
         if (!next) return { next: null };
         // PA3b: the full assignment when a skill does the stage's kind; otherwise why not (a person does it).

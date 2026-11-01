@@ -107,6 +107,31 @@ export async function runStage(host: ExecutorHost, scope: StageRunScope, stageId
 }
 
 /**
+ * PLN1b: the planner, from the panel, to re-plan after the work reported a change (or to plan). Its output is
+ * proposals (the workflow and the coverage) a person approves, so the plan stage isn't started or handed in.
+ */
+export async function runPlanner(host: ExecutorHost, scope: StageRunScope, task: string): Promise<StageRunResult> {
+  const problemRoot = layoutPath(scope.workspaceRoot, 'problems', scope.problemId);
+  const plan = readWorkflow(problemRoot)?.stages.find((s) => s.kind === 'plan');
+  if (!plan) return { ok: false, message: 'This problem has no workflow to plan yet: propose the workflow first.', outputs: [] };
+  const engine = host.createEngine('planner (VS Code)');
+  if (!engine?.listTools || !engine.toolSetNamed) return { ok: false, message: 'AutoDE\'s engine is not available (open a workspace folder).', outputs: [] };
+  try {
+    const a = assignmentFor(scope, plan.id, await engine.listTools());
+    if (!a.assignment) return { ok: false, message: a.reason ?? 'No planner assignment.', outputs: [] };
+    host.log(`planner: ${task}`);
+    const { text } = await host.runAgentWithTools(task, { systemPrompt: a.assignment.text, agentName: 'planner', toolExecutionMode: 'read-only', engineTools: await engine.toolSetNamed(a.assignment.engineTools), justification: 'AutoDE planner: re-plan the workflow', signal: host.signal });
+    if (host.signal?.aborted) return { ok: false, stopped: true, outputs: [], message: `You stopped the planner. ${STOPPED_PROPOSALS}` };
+    return { ok: true, outputs: [], summary: text.trim(), message: `${text.trim().slice(0, 4000) || 'The planner finished.'}\n\nWhat it proposed waits for you in the plan step: the coverage first, then the workflow.` };
+  } catch (err) {
+    if (host.signal?.aborted) return { ok: false, stopped: true, outputs: [], message: `You stopped the planner. ${STOPPED_PROPOSALS}` };
+    return { ok: false, outputs: [], message: `The planner couldn't finish: ${err instanceof Error ? err.message : String(err)}` };
+  } finally {
+    await engine.dispose();
+  }
+}
+
+/**
  * v0.53.1: a stopped stage is never handed in. It stays in progress; what the agent recorded before the stop stays
  * as it is (a draft until a person approves it), and nothing is rolled back.
  */

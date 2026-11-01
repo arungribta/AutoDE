@@ -21,6 +21,7 @@ import { COMPOSED, WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, 
 import { skillFits, targetPlatform } from '../agents/assignment';
 import { CoverageProposal, approveCoverage, checkCoverage, effectiveCoverage, pendingCoverage, plannedWorkflow, readCoverage } from '../workflows/coverage';
 import { appendEvent } from '../workflows/events';
+import { readPlanning, resolveReports } from '../workflows/planning';
 import { loadTemplates } from '../workflows/templates';
 
 export interface VocabularyProposalPayload { entries: Array<Pick<VocabularyProposal, 'kind' | 'from' | 'to'>> }
@@ -229,6 +230,8 @@ export function validateWorkflowProposal(w: WorkflowInstance, ctx: ProposalConte
   for (const x of d.included) r.warnings.push(`Included: ${x.id} (${x.inclusion})${x.reason ? ` — ${x.reason}` : ''}.`);
   const current = ctx.problemRoot ? readWorkflow(ctx.problemRoot) : undefined;
   if (current && current.status === 'approved' && current.template.id !== w.template.id) r.warnings.push(`It changes the template from ${current.template.id} to ${w.template.id}: the workflow restarts after the specification (owner's decision 2026-10-21).`);
+  // PLN1b: a revision never removes a completed stage's record (workflow-planning.md §3.6).
+  if (current && current.status === 'approved' && current.template.id === w.template.id) for (const s of current.stages.filter((x) => x.included && x.record.status === 'done')) { const n = w.stages.find((x) => x.id === s.id); if (!n || !n.included) r.errors.push(`${s.id} is done: a revision keeps it (its record stays; re-open it instead of removing it).`); }
   return finish(r);
 }
 
@@ -323,7 +326,7 @@ export function validateCoverageProposal(c: CoverageProposal, ctx: ProposalConte
   if (c.specVersion !== undefined && c.specVersion !== spec.version) r.errors.push(`The coverage is for specification version ${c.specVersion}; the current one is ${spec.version}. Re-read the coverage and propose again.`);
   const planned = plannedWorkflow(ctx.workspaceRoot, problemId);
   if (!planned) { r.errors.push('There is no workflow to cover the specification with: propose the workflow first.'); return finish(r); }
-  const check = checkCoverage(c, spec, planned.workflow);
+  const check = checkCoverage(c, spec, planned.workflow, readPlanning(root));
   r.errors.push(...check.errors);
   r.warnings.push(...check.warnings, ...(check.teamGaps.length ? [`Work AutoDE can't do yet: ${check.teamGaps.join('; ')}.`] : []));
   return finish(r);
@@ -415,7 +418,7 @@ export function approvalBlockers(store: DecisionStore, id: string, ctx: Pick<Pro
   let spec: BusinessProblemSpec | undefined;
   try { spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? ''); } catch { return []; }
   const c = effectiveCoverage(spec, p, pendingCoverage(ctx.workspaceRoot, p.problemId)?.coverage ?? readCoverage(root));
-  const check = checkCoverage(c, spec, p);
+  const check = checkCoverage(c, spec, p, readPlanning(root));
   if (!check.ok) return [`The specification's coverage isn't complete (${check.counts.question} item(s) to place): ${check.errors.join(' ')} Place them in the plan step (or autode workflow coverage place), then approve the coverage and the workflow.`];
   // PLN1a: two approvals, in order (workflow-planning.md §3.5): what will be delivered, then how.
   // A person approving on the plan step (panel, CLI) approves a complete coverage first, as its own decision (coverageFirst).
@@ -509,6 +512,8 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         writeWorkflow(root, next);
         const resolved = [...d.events].reverse().find((e) => e.type === 'approved');
         appendEvent(root, { at: now.toISOString(), type: 'approved', actor: { kind: 'person', name: approver }, channel: resolved?.channel, decisionId: id, template: p.template.id, reason: keep.size ? 'the stages both workflows share keep their state' : current ? 'a new template restarts the workflow' : undefined });
+        // PLN1b: the reports the planner re-planned for are resolved by this revision.
+        resolveReports(root, id, approver, d.proposedAt, now.toISOString());
         break;
       }
       case 'coverage': {

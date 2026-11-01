@@ -7,6 +7,7 @@ import { WorkflowInstance, readWorkflow } from './instance';
 import { DecisionStore } from '../decisions/decisionStore';
 import { parseBusinessProblemSpec, readProblemDocument } from '../documents/problemDocuments';
 import { layoutPath } from '../workspaceLayout';
+import { PlanningFile, planningState, readPlanning } from './planning';
 
 /**
  * Coverage of the approved specification by the workflow (PLN0;
@@ -63,6 +64,8 @@ export interface CoverageCheck {
   counts: Record<CoverageStatus, number>;
   /** PLN1a: work AutoDE can't do yet (gaps, and items done by hand outside it): the team's list for new skills. */
   teamGaps: string[];
+  /** PLN1b: items that rest on an assumption a person accepted in the clarification round, with it. */
+  assumptions: string[];
 }
 
 const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'item';
@@ -187,7 +190,7 @@ export function effectiveCoverage(spec: CoverageSpec & Pick<BusinessProblemSpec,
 }
 
 /** The deterministic checks (§3.1). */
-export function checkCoverage(c: Coverage, spec: CoverageSpec, w: Pick<WorkflowInstance, 'stages'>): CoverageCheck {
+export function checkCoverage(c: Coverage, spec: CoverageSpec & Partial<Pick<BusinessProblemSpec, 'version'>>, w: Pick<WorkflowInstance, 'stages'>, planning?: PlanningFile): CoverageCheck {
   const errors: string[] = []; const warnings: string[] = [];
   const items = new Map(coverageItems(spec).map((i) => [i.id, i]));
   const seen = new Map<string, number>();
@@ -215,13 +218,18 @@ export function checkCoverage(c: Coverage, spec: CoverageSpec, w: Pick<WorkflowI
   for (const s of w.stages.filter((x) => x.included && x.inclusion !== 'mandatory' && !support.has(x.kind) && !delivering.has(x.id))) {
     warnings.push(`Stage ${s.id} (${s.title}) delivers no in-scope item.`);
   }
+  // PLN1b: ask, don't guess. An item a clarification question blocks waits for its answer; a scope change waits for the revision.
+  const plan = planning ? planningState(planning, spec.version) : undefined;
+  for (const [item, qid] of plan?.blocked ?? []) { const e = c.entries.find((x) => x.id === item); if (e) errors.push(`"${e.text}" waits for the answer to planning question ${qid}.`); }
+  for (const q of plan?.scopeChanges ?? []) errors.push(`The answer to ${q.id} changes the scope ("${q.answer!.value}"): the coverage waits for the specification's revision.`);
   const counts = { covered: 0, manual: 0, 'out-of-scope': 0, gap: 0, question: 0 } as Record<CoverageStatus, number>;
   for (const e of c.entries) counts[e.status]++;
   const teamGaps = [
     ...c.entries.filter((e) => e.status === 'gap').map((e) => `"${e.text}": ${e.reason ?? 'no approved skill delivers it'}`),
     ...c.entries.filter((e) => e.status === 'manual').map((e) => `"${e.text}": done outside AutoDE (${(e.stages ?? []).map((id) => { const s = stages.get(id); return s?.owner ? `${id}, ${s.owner}` : id; }).join('; ')})`)
   ];
-  return { ok: errors.length === 0, errors, warnings, counts, teamGaps };
+  const assumptions = [...(plan?.assumed ?? [])].flatMap(([item, list]) => { const e = c.entries.find((x) => x.id === item); return e ? [`"${e.text}" rests on: ${list.join('; ')}`] : []; });
+  return { ok: errors.length === 0, errors, warnings, counts, teamGaps, assumptions };
 }
 
 /**
@@ -293,5 +301,5 @@ export function specCoverage(workspaceRoot: string, problemId: string): { covera
   const w = planned.workflow;
   const pending = pendingCoverage(workspaceRoot, problemId);
   const coverage = effectiveCoverage(spec, w, pending?.coverage ?? readCoverage(problemRoot));
-  return { coverage, check: checkCoverage(coverage, spec, w), against: planned.against, problemRoot, stages: w.stages.filter((s) => s.included).map((s) => ({ id: s.id, title: s.title, kind: s.kind })), ...(pending ? { pendingDecision: pending.id } : {}) };
+  return { coverage, check: checkCoverage(coverage, spec, w, readPlanning(problemRoot)), against: planned.against, problemRoot, stages: w.stages.filter((s) => s.included).map((s) => ({ id: s.id, title: s.title, kind: s.kind })), ...(pending ? { pendingDecision: pending.id } : {}) };
 }

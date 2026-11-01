@@ -64,6 +64,8 @@
   button:disabled { opacity: 0.5; cursor: default; }
   select { font-family: inherit; font-size: 12px; padding: 3px; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); }
   a { color: var(--vscode-textLink-foreground); cursor: pointer; }
+  .pq { margin: 10px 0; padding: 8px 0; border-top: 1px solid var(--vscode-editorWidget-border, #555); }
+  .pq .pq-in { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 4px 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #555); }
   .guide { margin: 8px 0; padding: 6px 8px; border-radius: 4px; background: var(--vscode-textBlockQuote-background); font-size: 12px; }
   table.t { border-collapse: collapse; width: 100%; }
   table.t td, table.t th { text-align: left; font-size: 12px; padding: 3px 8px 3px 0; vertical-align: top; }
@@ -102,6 +104,7 @@
     const m = state.model;
     if (id === 'approve-workflow' && m && m.pendingWorkflowDecision) { send({ type: 'approve', decisionId: m.pendingWorkflowDecision.id }); return; }
     if (id === 'place-coverage') { state.phase = 4; state.step = 'coverage'; render(); return; }
+    if (id === 'answer-planning') { state.phase = 4; state.step = 'clarify'; render(); return; }
     if (id === 'approve-stage' || id === 'run-stage') { state.phase = 5; state.selected = args.stage; render(); if (id === 'run-stage') send({ type: 'run', stage: args.stage }); return; }
     send({ type: 'journeyAction', id: id, args: args });
   }
@@ -172,6 +175,23 @@
     else if (c.check.ok) h += '<div class="guide">' + (c.pendingDecision ? 'Proposed by the planner. ' : '') + 'Approve what will be delivered, then the workflow (how).</div>' + actionButton({ id: 'approve-coverage', label: 'Approve the coverage…', cli: 'autode workflow coverage approve' }, true);
     return h;
   }
+  // PLN1b: the planner's questions (answer, accept its assumption, or say the scope changes) and the stages' reports.
+  function planningHtml(j) {
+    const p = j.planning;
+    if (!p) return '';
+    let h = '';
+    if (p.questions.length) {
+      h += '<div class="panel section"><h2>The planner asks</h2><div class="muted">Only what blocks the coverage. Answer, accept its assumption (flagged where it is used), or say the scope changes (then revise the specification).</div>' +
+        p.questions.map((q) => '<div class="pq" data-q="' + esc(q.id) + '"><div><b>' + esc(q.id) + '</b> ' + esc(q.prompt) + '</div><div class="muted">Blocks ' + q.items.map(esc).join(', ') + '. Assumption: ' + esc(q.assumption) + '</div>' +
+          (q.options && q.options.length ? '<select class="pq-in">' + q.options.map((o) => '<option value="' + esc(o) + '">' + esc(o) + '</option>').join('') + '</select>' : '<input class="pq-in" type="text" placeholder="Your answer">') +
+          '<div><button class="primary" data-pq="clarifies">Answer</button><button data-pq="assumed">Assume…</button><button data-pq="scope-change">Scope changes…</button></div></div>').join('') + '</div>';
+    }
+    if (p.reports.length) {
+      h += '<div class="panel section"><h2>The work reported changes</h2><ul class="hist">' + p.reports.map((r) => '<li><b>' + esc(r.stage) + '</b> (' + esc(r.kind) + '): ' + esc(r.detail) + (r.items.length ? ' <span class="muted">[' + r.items.map(esc).join(', ') + ']</span>' : '') + ' <button data-dismiss="' + esc(r.id) + '">Dismiss…</button></li>').join('') + '</ul>' +
+        '<div class="guide">The planner proposes a revised coverage and workflow; you approve them as before, and stages already done stay done.</div>' + actionButton({ id: 'replan', label: 'Ask the planner to re-plan', cli: 'autode workflow reports' }, true) + '</div>';
+    }
+    return h;
+  }
   function previewHtml(j) {
     const p = j.preview;
     if (!p) return '<div class="muted">No template to preview.</div>';
@@ -209,6 +229,7 @@
     h += '<div class="layout"><div class="steps" role="list">' + phase.steps.map((s) =>
       '<div class="step st-' + esc(s.status) + (sel && sel.id === s.id ? ' sel' : '') + '" tabindex="0" role="listitem" data-step="' + esc(s.id) + '" aria-label="' + esc(s.title + ', ' + s.status) + '"><div class="t">' + esc(MARK[s.status] || '') + ' ' + esc(s.title) + '<span class="who">' + esc(s.who) + '</span>' + (s.checkpoint ? '<span class="tag">checkpoint, not a gate</span>' : '') + '</div><div class="s">' + esc(s.line) + '</div>' + (s.action ? actionButton(s.action, sel && sel.id === s.id) : '') + '</div>').join('') + '</div>' + stepAbout(sel) + '</div>';
     if (phase.n === 4) {
+      h += planningHtml(j);
       h += '<div class="panel section"><h2>Coverage of the specification</h2>' + coverageHtml(j) + '</div>';
       if (m) h += planHtml(m);
     }
@@ -235,6 +256,8 @@
     });
     root.querySelectorAll('[data-jact]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); let args = {}; try { args = JSON.parse(b.getAttribute('data-jargs') || '{}'); } catch (x) { args = {}; } doAction(b.getAttribute('data-jact'), args); }; });
     root.querySelectorAll('[data-place]').forEach((b) => { b.onclick = () => send({ type: 'placeCoverage', item: b.getAttribute('data-place') }); });
+    root.querySelectorAll('[data-pq]').forEach((b) => { b.onclick = () => { const box = b.closest('[data-q]'); const v = (box.querySelector('.pq-in') || {}).value || ''; send({ type: 'answerPlanning', id: box.getAttribute('data-q'), action: b.getAttribute('data-pq'), args: { value: v.trim() } }); }; });
+    root.querySelectorAll('[data-dismiss]').forEach((b) => { b.onclick = () => send({ type: 'dismissReport', id: b.getAttribute('data-dismiss') }); });
     root.querySelectorAll('[data-decide]').forEach((b) => { b.onclick = () => send({ type: b.getAttribute('data-decide'), decisionId: b.getAttribute('data-id') }); });
     root.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => send({ type: b.getAttribute('data-act'), stage: b.getAttribute('data-stage') }); });
     root.querySelectorAll('[data-open-decision]').forEach((b) => { b.onclick = () => send({ type: 'openDecision', decisionId: b.getAttribute('data-open-decision') }); });

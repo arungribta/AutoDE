@@ -17,7 +17,9 @@ export type WorkflowEventType =
   | 'approved'       // a workflow or stage approval
   | 'rejected'
   | 'started' | 'handed-in' | 'done' | 'stale' | 'skipped' | 'reopened'
-  | 'recorded';      // a deliverable recorded by the agent doing the stage (PA3b)
+  | 'recorded'       // a deliverable recorded by the agent doing the stage (PA3b)
+  | 'planning-round' | 'planning-answer' // PLN1b: the clarification round, asked and answered
+  | 'coverage-report';  // PLN1b: a stage reported what changes coverage
 
 /** Who did it: the engine's deterministic rules, a person, or an agent. */
 export type Actor = { kind: 'engine'; rule?: string } | { kind: 'person'; name: string } | { kind: 'agent'; name: string; host?: string };

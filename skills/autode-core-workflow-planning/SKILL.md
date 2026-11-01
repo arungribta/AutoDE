@@ -1,12 +1,12 @@
 ---
 name: autode-core-workflow-planning
 description: Plan an AutoDE business problem's workflow from the coverage of its approved specification - refine the deterministic draft, combine templates or compose from stage kinds where none fits, add manual stages for work done outside AutoDE, write each stage's brief, then propose the workflow and the coverage for a person's approval. Use it for the plan stage of an AutoDE workflow.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_workflow_templates, mcp__autode__autode_workflow_draft, mcp__autode__autode_workflow_status, mcp__autode__autode_coverage, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_assertions, mcp__autode__autode_resolve, mcp__autode__autode_skills_list, mcp__autode__autode_propose_workflow, mcp__autode__autode_propose_coverage]
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_workflow_templates, mcp__autode__autode_workflow_draft, mcp__autode__autode_workflow_status, mcp__autode__autode_coverage, mcp__autode__autode_get_context_pack, mcp__autode__autode_list_assertions, mcp__autode__autode_resolve, mcp__autode__autode_skills_list, mcp__autode__autode_propose_workflow, mcp__autode__autode_propose_coverage, mcp__autode__autode_planning_questions, mcp__autode__autode_ask_planning_questions, mcp__autode__autode_record_planning_answer, mcp__autode__autode_propose_spec_change]
 metadata:
   scope: core
   stageKinds: [plan]
   platforms: [any]
-  version: 2
+  version: 3
   owner: AutoDE
   maturity: tested
 ---
@@ -68,7 +68,22 @@ A brief never names tools or skills, and never says how to do the work: the role
 
 A person approves the coverage first, then the workflow (the panel's plan step, `autode workflow coverage approve` and `autode workflow approve`, or the decision files). Tell the user what you changed from the draft and why, and list the gaps and the manual work.
 
-If an item can't be placed without an answer only the stakeholder has, don't guess: tell the user the question and leave the item for them to place.
+## 6. Ask, don't guess
+
+When placing an item needs an answer only the stakeholder has ("near real time": minutes or hours? which source feeds this item? a semantic layer or plain marts?), open a **clarification round** with `autode_ask_planning_questions`:
+- only questions that block coverage, at most seven, most important first;
+- each names the items it blocks and **the assumption you would make**: the person may accept it ("assume and flag") instead of answering;
+- tell the user the questions, in plain words, and record each answer as they gave it with `autode_record_planning_answer` (never your own answer):
+  - **clarifies:** a fact on the items; place them next;
+  - **assumed:** they accept your assumption; the items rest on it, and the coverage says so;
+  - **scope-change:** it adds or drops scope; propose the specification's revision (`autode_propose_spec_change`), and propose the coverage once it is approved.
+- Ask a second round only if an answer raised a new blocking question (name it in `after`); after three rounds, a person places what is left.
+
+Items an open question blocks can't be placed: the engine refuses the coverage until it is answered.
+
+## 7. Re-plan when the work reports a change
+
+A stage reports what changes coverage (`autode_report_coverage_change`: a source system the specification didn't name, an item it can't deliver), or an answer arrives after the coverage was approved. `autode_workflow_next` then sends you back to the plan. Read the reports (`autode_planning_questions`), propose the revised workflow (same template: stages already done stay, with their records) and then the revised coverage. Approving the revision resolves the reports; a person may instead dismiss a report that changes nothing.
 
 ## Worked example (the reference problem: retail orders)
 

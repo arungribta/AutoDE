@@ -3,7 +3,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { WorkflowModel, StageModel, STATUS_ICON, buildWorkflowModel, statusBarText } from './workflowViewModel';
 import { WaitingItem } from '../engine/approvals/waiting';
-import { coverageToApproveFirst, stageDetail, WorkflowScope } from '../engine/workflows/service';
+import { answerPlanningQuestion, coverageToApproveFirst, planningStatus, stageDetail, WorkflowScope } from '../engine/workflows/service';
+import { dismissReport } from '../engine/workflows/planning';
 import { DecisionStore } from '../engine/decisions/decisionStore';
 import { actorLabel } from '../engine/workflows/events';
 import { layoutPath } from '../engine/workspaceLayout';
@@ -160,6 +161,23 @@ export class WorkflowPanel {
     void this.panel.webview.postMessage({ type: 'model', model, journey, details, selected: this.selected ?? model.next?.id ?? model.stages[0]?.id, exploration: exploration ? EXPLORATION_LABEL : undefined });
   }
 
+  /** PLN1b: the person's answer to a planning question, in the plan step. */
+  private async answerPlanning(scope: WorkflowScope, id: string, action: string, typed: string): Promise<void> {
+    const outcome = action === 'assumed' ? 'assumed' : action === 'scope-change' ? 'scope-change' : 'clarifies';
+    let value = typed;
+    if (outcome === 'assumed') {
+      const q = planningStatus(scope).open.find((x) => x.id === id);
+      const ok = await vscode.window.showWarningMessage(`Accept the planner's assumption for ${id}?`, { modal: true, detail: `${q?.assumption ?? ''}\n\nIt is recorded as an assumption, and the items it blocks are flagged as resting on it.` }, 'Accept');
+      if (ok !== 'Accept') return;
+    } else if (!value) {
+      value = await vscode.window.showInputBox({ title: `Answer ${id}`, prompt: outcome === 'scope-change' ? 'How the scope changes (then revise the specification)' : 'Your answer', ignoreFocusOut: true }) ?? '';
+      if (!value.trim()) return;
+    }
+    const r = await answerPlanningQuestion(scope, id, { value, outcome }, { kind: 'person', name: this.host.user() }, 'panel');
+    if (outcome === 'scope-change') void vscode.window.showInformationMessage(`Recorded. The scope changes: revise the specification (the panel's Revise), and the coverage waits for it.`);
+    else if (r.report) void vscode.window.showInformationMessage('Recorded. The coverage was approved already, so the planner re-plans.');
+  }
+
   /** PLN0: a person places a coverage item: a stage that delivers it, done outside AutoDE, out of scope, or a gap. */
   private async placeItem(itemId: string): Promise<void> {
     const scope = this.host.scope();
@@ -198,6 +216,15 @@ export class WorkflowPanel {
         case 'journeyAction': if (m.id) await this.host.journeyAction?.(m.id, m.args ?? {}); break;
         case 'preview': this.previewTemplate = m.template || undefined; this.post(); return;
         case 'placeCoverage': if (m.item) await this.placeItem(m.item); break;
+        // PLN1b: a person answers the planner, accepts its assumption, or says the scope changes; dismisses a report.
+        case 'answerPlanning': if (scope && m.id && m.action) await this.answerPlanning(scope, m.id, m.action, m.args?.value ?? ''); break;
+        case 'dismissReport': {
+          if (!scope || !m.id) return;
+          const reason = await vscode.window.showInputBox({ title: `Dismiss report ${m.id}`, prompt: 'Why the plan doesn\'t change (recorded)', validateInput: (v) => (v.trim() ? undefined : 'Give a reason.') });
+          if (!reason) return;
+          dismissReport(layoutPath(scope.workspaceRoot, 'problems', scope.problemId), m.id, reason, this.host.user());
+          break;
+        }
         case 'ready': this.post(); return;
         case 'select': this.selected = m.stage; return;
         case 'approve': case 'reject': {

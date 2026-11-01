@@ -16,6 +16,7 @@ import { readWorkflow, WorkflowInstance } from './instance';
 import { actorLabel, readEvents, WorkflowEvent } from './events';
 import { WorkflowScope, computeDraft, problemRootOf, statusFor, suggestFor, templatesFor } from './service';
 import { CoverageCheck, checkCoverage, effectiveCoverage, pendingCoverage, readCoverage, Coverage } from './coverage';
+import { CoverageReport, PlanningQuestion, openQuestions, openReports, readPlanning } from './planning';
 
 /**
  * The whole journey of a business problem, in five phases (UI2; docs/specs/
@@ -84,6 +85,8 @@ export interface Journey {
   preview?: DeliveryPreview;
   /** PLN0: the specification's coverage by the workflow, with the engine's checks. */
   coverage?: Coverage & { check: CoverageCheck; pendingDecision?: string };
+  /** PLN1b: the planner's open questions and the stages' open reports, to answer and act on. */
+  planning?: { questions: PlanningQuestion[]; reports: CoverageReport[] };
   /** What waits for you, in a line. */
   waiting: string[];
 }
@@ -221,13 +224,34 @@ export function journeyFor(input: JourneyInput): Journey {
   let coverage: Journey['coverage'];
   const planned: WorkflowInstance | undefined = planApproved ? workflow : (pendingWorkflow ? store.proposal<WorkflowInstance>(pendingWorkflow.id) : workflow);
   const pendingCov = pendingCoverage(input.workspaceRoot, input.problemId);
+  const planning = readPlanning(root);
+  const asked = openQuestions(planning);
+  const reports = openReports(planning);
   if (spec && planned) {
     const c = effectiveCoverage(spec, planned, pendingCov?.coverage ?? readCoverage(root));
-    coverage = { ...c, check: checkCoverage(c, spec, planned), ...(pendingCov ? { pendingDecision: pendingCov.id } : {}) };
+    coverage = { ...c, check: checkCoverage(c, spec, planned, planning), ...(pendingCov ? { pendingDecision: pendingCov.id } : {}) };
   }
   // PLN1a: two approvals in order: the coverage (what), then the workflow (how).
   const coverageApproved = !!coverage?.approvedBy && !pendingCov;
   const planEvents = (e: WorkflowEvent) => !e.stage || e.stage === 'plan';
+  // PLN1b: the clarification round (when the planner asked) and the stages' reports (when the work found something).
+  const clarify: JourneyStep[] = planning.rounds.length ? [{
+    id: 'clarify', title: 'Clarification round', who: 'You', status: asked.length ? 'waiting' : 'done',
+    line: asked.length ? `${plural(asked.length, 'question')} from the planner (round ${planning.rounds[planning.rounds.length - 1].n})` : `${plural(planning.rounds.length, 'round')} answered`,
+    why: 'The planner asks only what blocks coverage, at most seven questions a round; you answer, accept its assumption (flagged), or say the scope changes (workflow-planning.md §3.4).',
+    ...(asked.length ? { waitsOn: 'Your answers to the planner\'s questions.', action: { id: 'answer-planning', label: `Answer ${plural(asked.length, 'question')}`, cli: 'autode workflow questions', mcp: 'autode_planning_questions' } } : {}),
+    parts: planning.rounds.flatMap((r) => r.questions).map((q) => ({ name: q.prompt, status: q.answer ? q.answer.outcome : 'open', detail: q.answer ? q.answer.value : `blocks ${q.items.join(', ')}` })),
+    history: historyOf(events, (e) => e.type === 'planning-round' || e.type === 'planning-answer')
+  }] : [];
+  const replan: JourneyStep[] = reports.length ? [{
+    id: 'replan', title: 'Re-plan', who: 'Planner', status: 'waiting',
+    line: `${plural(reports.length, 'report')} from the work: ${reports.map((r) => `${r.stage} (${r.kind})`).join(', ')}`,
+    why: 'A stage found something that changes coverage; the planner proposes a revised coverage and workflow, approved like the first (workflow-planning.md §3.6).',
+    waitsOn: 'The planner\'s revision (or your dismissal, with a reason).',
+    parts: reports.map((r) => ({ name: `${r.stage}: ${r.detail}`, status: r.kind, detail: r.items.join(', ') || undefined })),
+    action: { id: 'replan', label: 'Re-plan', cli: 'autode workflow reports', mcp: 'autode_planning_questions' },
+    history: historyOf(events, (e) => e.type === 'coverage-report')
+  }] : [];
   const p4: JourneyStep[] = [
     { id: 'template', title: 'Template suggested', who: 'AutoDE', status: suggestion ? 'done' : 'todo', line: suggestion ? `${suggestion.id}: ${suggestion.reason}` : 'Waits for the specification.', why: 'The template is the stage catalogue for this kind of engagement.', history: historyOf(events, (e) => e.type === 'suggested') },
     {
@@ -243,6 +267,8 @@ export function journeyFor(input: JourneyInput): Journey {
     },
     { id: 'approved', title: 'Plan approved', who: 'You', status: planApproved ? 'done' : pendingWorkflow ? 'waiting' : specApproved ? 'now' : 'todo', line: planApproved ? `${workflow!.template.id}, approved by ${workflow!.approvedBy ?? 'unknown'}.` : pendingWorkflow ? `Proposed: ${pendingWorkflow.title}.${coverageApproved ? '' : ' Approve the coverage first.'}` : 'Choose a template and propose the workflow.', why: 'The approved plan decides the delivery stages.', ...(planApproved ? {} : pendingWorkflow && !coverageApproved ? {} : pendingWorkflow ? { action: { id: 'approve-workflow', label: 'Approve the plan', cli: 'autode workflow approve' } } : specApproved ? { action: { id: 'propose-workflow', label: 'Propose the workflow', cli: 'autode workflow propose', mcp: 'autode_propose_workflow' } } : {}), history: historyOf(events, planEvents) }
   ];
+  p4.splice(1, 0, ...clarify);
+  p4.push(...replan);
 
   // ⑤ Delivery
   const p5: JourneyStep[] = [];
@@ -276,19 +302,19 @@ export function journeyFor(input: JourneyInput): Journey {
     { n: 1, id: 'problem', title: 'Problem', status: phaseStatus(p1), summary: p1[1].status === 'done' ? 'Statement confirmed' : p1[0].status === 'done' ? 'Statement waits for confirmation' : 'No statement yet', steps: p1 },
     { n: 2, id: 'discovery', title: 'Discovery', status: specApproved ? 'done' : phaseStatus(p2), summary: [interviewStep.parts ? `${interviewStep.parts.filter((x) => x.status === 'addressed').length} of ${interviewStep.parts.length} interview parts` : '', facts.total ? `${plural(facts.total, 'fact')} to review` : '', sources.length ? `${plural(sourceTables, 'table')} in ${plural(sources.length, 'source')}` : ''].filter(Boolean).join(' · ') || 'Not started', steps: p2 },
     { n: 3, id: 'specification', title: 'Specification', status: phaseStatus(p3), summary: specApproved ? 'Approved' : spec?.objectives?.length ? 'Drafted, waits for approval' : 'Not drafted', steps: p3 },
-    { n: 4, id: 'plan', title: 'Workflow plan', status: planApproved ? 'done' : specApproved || pendingWorkflow ? phaseStatus(p4) : 'todo', summary: planApproved ? `${workflow!.template.id} approved` : pendingWorkflow ? 'Proposed, waits for approval' : suggestion ? `${suggestion.id} suggested` : 'Not planned', steps: p4 },
+    { n: 4, id: 'plan', title: 'Workflow plan', status: planApproved && !reports.length ? 'done' : specApproved || pendingWorkflow || planApproved ? phaseStatus(p4) : 'todo', summary: reports.length ? `Re-plan: ${plural(reports.length, 'report')} from the work` : planApproved ? `${workflow!.template.id} approved` : pendingWorkflow ? 'Proposed, waits for approval' : suggestion ? `${suggestion.id} suggested` : 'Not planned', steps: p4 },
     { n: 5, id: 'delivery', title: 'Delivery', status: planApproved ? (p5.length ? phaseStatus(p5) : 'done') : 'todo', summary: planApproved ? `${p5.filter((s) => s.status === 'done').length} of ${p5.filter((s) => s.status !== 'skipped').length} stages done` : preview ? `Preview: ${preview.stages.filter((s) => s.included).length} stages (${preview.template})` : 'Waits for the plan', steps: p5 }
   ];
   // Where you are: the first phase not done, at its first step that isn't done.
   const phase = phases.find((p) => p.status !== 'done') ?? phases[phases.length - 1];
   const step = phase.steps.find((s) => !s.checkpoint && s.status !== 'done' && s.status !== 'skipped') ?? phase.steps.find((s) => s.status !== 'done' && s.status !== 'skipped');
   const holdsTables = (ctx?.systems ?? []).reduce((n, s) => n + s.tables, 0);
-  const waiting = [facts.total ? `${plural(facts.total, 'fact')} wait for you` : '', coverage?.check.ok && !coverageApproved ? 'the coverage waits for your approval' : '', pendingWorkflow ? 'the plan waits for your approval' : '', coverage?.check.counts.question ? `${plural(coverage.check.counts.question, 'scope item')} to place` : ''].filter(Boolean);
+  const waiting = [facts.total ? `${plural(facts.total, 'fact')} wait for you` : '', asked.length ? `${plural(asked.length, 'planning question')} wait for your answer` : '', reports.length ? `${plural(reports.length, 'report')} from the work wait for a re-plan` : '', coverage?.check.ok && !coverageApproved ? 'the coverage waits for your approval' : '', pendingWorkflow ? 'the plan waits for your approval' : '', coverage?.check.counts.question ? `${plural(coverage.check.counts.question, 'scope item')} to place` : ''].filter(Boolean);
   return {
     problemId: input.problemId, statement, mode: problemMode(root),
     holds: { systems: ctx?.systems.length ?? 0, tables: holdsTables, facts: facts.total },
     current: { phase: phase.n, phaseTitle: phase.title, step: step?.id, line: step ? `${step.title}: ${step.line}` : phase.summary, action: step?.action },
-    phases, ...(preview ? { preview } : {}), ...(coverage ? { coverage } : {}), waiting
+    phases, ...(preview ? { preview } : {}), ...(coverage ? { coverage } : {}), ...(asked.length || reports.length ? { planning: { questions: asked, reports } } : {}), waiting
   };
 }
 
