@@ -487,6 +487,13 @@
           "privileges": {
             "type": "string"
           },
+          "grants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The change operations that grant these privileges (Request access drafts a runbook from them), in the order they apply."
+          },
           "note": {
             "type": "string"
           }

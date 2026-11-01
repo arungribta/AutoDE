@@ -36,6 +36,8 @@ export interface PackSkill {
   resources: string[];
   /** The registry fields from the skill's `metadata` (v0.45.5). */
   meta: SkillMeta;
+  /** POP4b: this is the team's published copy of AutoDE's skill, in effect in its place. */
+  teamCopy?: { teamVersion: number; baseVersion: number; autodeVersion: number; upstreamChanged: boolean };
 }
 
 /** AutoDE's registry fields, in the Agent Skills `metadata` map so the files stay standard. */
@@ -158,17 +160,23 @@ export function loadSkillPack(resourcesRoot: string): { skills: PackSkill[]; err
   let entries: fs.Dirent[] = [];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()); } catch { return { skills, errors }; }
   for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    const file = path.join(dir, e.name, 'SKILL.md');
-    if (!fs.existsSync(file)) { errors.push(`skills/${e.name}: no SKILL.md.`); continue; }
-    const text = fs.readFileSync(file, 'utf8');
-    const p = parseSkillMarkdown(text);
-    const problems = checkSkillFormat(e.name, p.name, p.description, p.body);
-    if (problems.length) { errors.push(...problems.map((x) => `skills/${e.name}: ${x}`)); continue; }
-    const sm = skillMeta(e.name, p.metadata, Object.keys(STAGE_KINDS));
-    if (sm.errors.length) { errors.push(...sm.errors.map((x) => `skills/${e.name}: ${x}`)); continue; }
-    skills.push({ id: e.name, name: p.name!, description: p.description!, allowedTools: p.allowedTools ?? [], instructions: p.body, dir: path.join(dir, e.name), resources: filesUnder(path.join(dir, e.name)).filter((f) => f !== 'SKILL.md'), meta: sm.meta });
+    const r = readPackSkill(path.join(dir, e.name), e.name);
+    if (r.skill) skills.push(r.skill); else errors.push(...r.errors.map((x) => `skills/${e.name}: ${x}`));
   }
   return { skills, errors };
+}
+
+/** One skill folder in AutoDE's format (a bundled skill, or a team copy of one: POP4b), or what is wrong with it. */
+export function readPackSkill(skillDir: string, id: string): { skill?: PackSkill; errors: string[] } {
+  const file = path.join(skillDir, 'SKILL.md');
+  if (!fs.existsSync(file)) return { errors: ['no SKILL.md.'] };
+  const p = parseSkillMarkdown(fs.readFileSync(file, 'utf8'));
+  const problems = checkSkillFormat(id, p.name, p.description, p.body);
+  if (problems.length) return { errors: problems };
+  const sm = skillMeta(id, p.metadata, Object.keys(STAGE_KINDS));
+  if (sm.errors.length) return { errors: sm.errors };
+  const resources = filesUnder(skillDir).filter((f) => f !== 'SKILL.md' && !f.startsWith('.autode'));
+  return { skill: { id, name: p.name!, description: p.description!, allowedTools: p.allowedTools ?? [], instructions: p.body, dir: skillDir, resources, meta: sm.meta }, errors: [] };
 }
 
 /** The Agent Skills format rules a skill must meet to be portable to other hosts. */

@@ -17,6 +17,8 @@ import * as articles from './engine/knowledge/articles';
 import { registerSkillsView } from './core/skillsView';
 import { PortSkillPanel } from './core/portSkillView';
 import * as port from './engine/skills/port';
+import { isTeamCopy } from './engine/skills/customise';
+import { registerSkillDiagnostics } from './core/skillDiagnostics';
 import type { Classification } from './engine/governance/governance';
 import { registerRunbookView, RunbookPanel } from './core/runbookView';
 import { getCredentialResolver } from './engine/platform/credentials';
@@ -74,6 +76,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Tool-skill imports, reviews and lifecycle transitions (Phase S2); the durable record is each skill's sidecar.
   const skillLog = vscode.window.createOutputChannel('AutoDE: Tool Skills');
   const skillActor = (): string => { try { return os.userInfo().username || 'user'; } catch { return 'user'; } };
+  const wsRootForSkills = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   registerDefaultCredentialResolvers(context.secrets);
 
   // Which VS Code Language Model provider the user has selected (Copilot or
@@ -247,6 +250,8 @@ export function activate(context: vscode.ExtensionContext): void {
   if (mcpProvider) context.subscriptions.push(mcpProvider);
   // v0.44.1: the Workflow view — tree, editor tab, status bar — over the engine's runtime and history.
   context.subscriptions.push(...registerSkillsView(context, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath));
+  // POP4b: a team skill's SKILL.md is checked as it is typed.
+  context.subscriptions.push(...registerSkillDiagnostics(context, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath));
   // v0.45.6: the Runbook tab: approved platform changes, run step by step by AutoDE's runner.
   context.subscriptions.push(...registerRunbookView(context, {
     scope: () => sidebarProvider.currentWorkflowScope(),
@@ -1008,7 +1013,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
       if (t && tid && !managers.some(([id]) => id === tid)) managers.push([tid, t]);
       return managers.flatMap(([id, m]) => { const platform = m.getActivePlatform(); return platform ? [{ id, platform, target: { connectionId: id, platform, query: async (sql: string, maxRows: number) => (await m.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>> } }] : []; });
     };
-    PlatformCatalogPanel.show(context, { workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, liveConnections: live }, open);
+    PlatformCatalogPanel.show(context, { workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, liveConnections: live, actor: skillActor }, open);
   });
 
   const platformOperations = vscode.commands.registerCommand(`${EXTENSION_ID}.platformOperations`, async () => {
@@ -1210,7 +1215,9 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
   });
 
   const lifecycleCommand = (action: 'publish' | 'deprecate' | 'retire') => async (skillId?: unknown) => {
-    if (!configManager.getSettings().toolSkillManagementEnabled) {
+    // POP4b: a team copy of an AutoDE skill always starts as a draft, so publishing it needs no lifecycle-management setting.
+    const copyId = typeof skillId === 'string' && wsRootForSkills() && isTeamCopy(path.join(port.toolSkillsDir(wsRootForSkills()!), skillId)) ? skillId : undefined;
+    if (!configManager.getSettings().toolSkillManagementEnabled && !(action === 'publish' && copyId)) {
       vscode.window.showErrorMessage('Tool-skill lifecycle management is off. Enable "autoDataEngineeringHub.toolSkillManagementEnabled".');
       return;
     }

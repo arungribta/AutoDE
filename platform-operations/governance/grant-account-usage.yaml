@@ -1,0 +1,15 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.3, Request access): let a role read Snowflake's
+# own history (access history and object dependencies, for lineage). A change: it becomes a runbook step a person
+# approves. The narrower alternative is the GOVERNANCE_VIEWER and OBJECT_VIEWER database roles.
+formatVersion: 1
+id: governance.grant_account_usage
+title: Grant reading the account's usage views
+description: Lets a role read the SNOWFLAKE database's ACCOUNT_USAGE views (access history, object dependencies), which observed lineage reads. A change, run only as an approved runbook step. Narrower, by hand - the database roles SNOWFLAKE.GOVERNANCE_VIEWER and SNOWFLAKE.OBJECT_VIEWER.
+kind: change
+area: governance
+params:
+  - { name: role, type: identifier, label: Role }
+returns: []
+platforms:
+  snowflake:
+    sql: GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE {role}

@@ -1442,6 +1442,31 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: open a performance skill's page; `autode skills lint autode-snowflake-performance`.
   Expect: it is flagged for querying `account_usage.query_history` itself; `autode skills lint autode-redshift-ingestion` passes.
 
+## Part 67 — v0.57.1 POP4b: editing in the Platform catalog
+
+- [ ] **67.1 Customise.**
+  Do: open `autode-de-mapping`'s page → **Customise…**.
+  Expect: the team copy opens in the editor (`.autode/config/skills/tool-skills/autode-de-mapping/SKILL.md`); the page says *Not in effect: it is a draft*; actions Edit, Publish, Reset.
+- [ ] **67.2 Checks as you type.**
+  Do: in the copy, type `` `estate.list_nopes` `` in a line, and change a stage kind to `warp`.
+  Expect: red squiggles on those lines within a moment (*isn't a platform operation*, *unknown stage kind*), in the Problems panel too; `autode skills lint autode-de-mapping` lists the same with line numbers. Undo them.
+- [ ] **67.3 The metadata form.**
+  Do: on the page, untick a stage kind, edit the description, and watch the checks under the form; **Save**.
+  Expect: the checks update as you type; after Save only the description and that line changed in the file (`git diff`).
+- [ ] **67.4 Review, publish, in effect.**
+  Do: **Review…** → Reviewed, then **Publish**.
+  Expect: *✓ In effect*; a stage of that kind (or `autode workflow next`) carries the team's text; if you installed for Claude Code before, VS Code offers *Update Claude Code (project)* and `autode plugin status` says the install is behind until you do.
+- [ ] **67.5 AutoDE's version changed, Keep, Reset.**
+  Do: simulate a new release by editing AutoDE's own `skills/autode-de-mapping/SKILL.md` in the extension folder (a dev checkout), then reopen the page. Then **Keep the team copy**, and finally **Reset to AutoDE's…**.
+  Expect: the red note *AutoDE's version changed* with the files on each side; after Keep it is gone and the copy stays in effect; after Reset AutoDE's is in effect and the copy is under `.autode/local/reset-skills/`. Undo the edit to AutoDE's file.
+- [ ] **67.6 The operation form.**
+  Do: open `estate.list_tables` → **Edit in a form…**; put `DROP TABLE x` in Snowflake's statement.
+  Expect: every field has a label and an explanation; the checks say a read must be read-only; Save is refused. Restore the statement, change the title, **Save as a team draft**, then **Propose for approval**.
+  Expect: the team file under `.autode/config/platform-operations/`; the operation's page says draft; AutoDE's still runs until the decision is approved.
+- [ ] **67.7 Request access.**
+  Do: Snowflake's page → Privileges; with a problem active, **Draft the runbook** for your connection (tick lineage).
+  Expect: the grant on the SNOWFLAKE database for your role, proposed as a runbook decision; a capability without grant operations is listed in words. `autode platform request-access --connection <c>` gives the same steps.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1808,5 +1833,12 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 66.3 |  |  |
 | 66.4 |  |  |
 | 66.5 |  |  |
+| 67.1 |  |  |
+| 67.2 |  |  |
+| 67.3 |  |  |
+| 67.4 |  |  |
+| 67.5 |  |  |
+| 67.6 |  |  |
+| 67.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

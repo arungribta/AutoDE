@@ -8,7 +8,9 @@ import { loadCatalog, operationById } from '../engine/platform/operations/load';
 import { ConnectionTarget, OperationError, runOnConnection, summarize } from '../engine/platform/operations/service';
 import { openContext } from '../engine/context/estateIngest';
 import { refreshLineage } from '../engine/lineage/record';
-import { capabilityMatrix, conformanceRun, operationPage, platformPage, skillOperations, skillPage, skillTexts } from '../engine/platform/operations/catalogView';
+import { accessRunbook, capabilityMatrix, conformanceRun, operationPage, platformPage, skillOperations, skillPage, skillTexts } from '../engine/platform/operations/catalogView';
+import { DecisionStore } from '../engine/decisions/decisionStore';
+import { ProposalValidationError, propose } from '../engine/decisions/proposals';
 
 /**
  * Platform operations over MCP (POP1; docs/specs/platform-operations.md §4):
@@ -32,6 +34,34 @@ export async function connectionTarget(session: PlatformSession, connectionId: s
 
 export function platformOperationTools(session: PlatformSession): EngineTool[] {
   return [
+    {
+      name: 'autode_platform_request_access',
+      description: "Request access (POP4b): a runbook that grants AutoDE's role what its capabilities need on a connection (default: those its last conformance run found short, else every capability with grant operations), built from the platform definition's grant operations, bound to the role, databases and schemas in scope. With an active problem it is proposed as a runbook decision for a person who administers the platform to approve and run; without one it comes back to show. Privileges no grant operation covers come back as warnings, in words.",
+      inputSchema: { type: 'object', required: ['connectionId'], additionalProperties: false, properties: {
+        connectionId: { type: 'string', minLength: 1 },
+        role: { type: 'string', minLength: 1, description: "The role AutoDE connects as; default: the connection's role field." },
+        capabilities: { type: 'array', items: { type: 'string', minLength: 1 } },
+        databases: { type: 'array', items: { type: 'string', minLength: 1 }, description: "Databases (catalogs) in scope; default: the connection's." },
+        schemas: { type: 'array', items: { type: 'string', minLength: 1 }, description: "Schemas in scope; default: the connection's." },
+        propose: { type: 'boolean', description: 'Propose it as a runbook decision (default true when a problem is active).' }
+      } },
+      annotations: { title: 'Request access', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws: EngineWorkspace) => {
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        let draft;
+        try { draft = accessRunbook(scope, { connection: String(args.connectionId), role: args.role as string | undefined, capabilities: args.capabilities as string[] | undefined, databases: args.databases as string[] | undefined, schemas: args.schemas as string[] | undefined }); }
+        catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+        const problemRoot = ws.problemRoot();
+        if (args.propose === false || !problemRoot) return { ...draft, proposed: false, next: problemRoot ? 'Propose it with autode_propose_runbook when it is right.' : 'No active problem: a runbook is proposed within a problem. Start or select one, then ask again; or give these steps to the platform administrator.' } as unknown as Record<string, unknown>;
+        try {
+          const d = propose(new DecisionStore(ws.options.workspaceRoot), { workspaceRoot: ws.options.workspaceRoot, problemRoot, problemId: ws.activeProblemId(), connections: session.config().connections, resourcesRoot: ws.options.resourcesRoot }, 'runbook', draft.runbook, { proposedBy: { host: 'mcp', client: 'request-access' } });
+          return { ...draft, proposed: true, decision: { id: d.id, title: d.title }, next: `A person who administers the platform approves it (autode decisions approve ${d.id}, or the panel), then runs it in AutoDE's runner.` } as unknown as Record<string, unknown>;
+        } catch (err) {
+          if (err instanceof ProposalValidationError) throw new EngineToolError('VALIDATION_FAILED', `The runbook did not pass its checks: ${err.report.errors.join('; ')}`, { errors: err.report.errors });
+          throw err;
+        }
+      }
+    },
     {
       name: 'autode_platform_operations',
       description: 'The platform operations catalog: every interaction AutoDE has with a platform, as a reviewed file (id, what it does, read or change, its parameters and results, the platforms it has an implementation for, shipped or the team\'s, approved or draft), and each platform\'s definition (category, capabilities and the operations and privileges each needs). With id: one operation in full, including the statement or command per platform. Use these ids instead of writing platform SQL yourself.',

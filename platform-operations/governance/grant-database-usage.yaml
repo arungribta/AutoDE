@@ -1,0 +1,18 @@
+# AutoDE platform operation (docs/specs/platform-operations.md §6.3, Request access): let a role use a database
+# (Snowflake) or a catalog (Databricks), before the grants on its schemas. A change: it becomes a runbook step a
+# person approves.
+formatVersion: 1
+id: governance.grant_database_usage
+title: Grant use of a database
+description: Lets a role use a database (a catalog on Databricks), the first grant before its schemas (governance.grant_usage). A change, run only as an approved runbook step.
+kind: change
+area: governance
+params:
+  - { name: database, type: identifier, label: Database or catalog }
+  - { name: role, type: identifier, label: Role, description: "The role AutoDE connects as (on Databricks: the user, group or service principal)." }
+returns: []
+platforms:
+  snowflake:
+    sql: GRANT USAGE ON DATABASE {database} TO ROLE {role}
+  databricks:
+    sql: GRANT USE CATALOG ON CATALOG {database} TO {role}

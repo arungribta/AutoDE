@@ -8,7 +8,7 @@ import { parseBusinessProblemSpec, readProblemDocument } from '../documents/prob
 import { problemMode } from '../documents/problemMode';
 import { readInterview, summarizeInterview } from '../interview/state';
 import { interviewSkills } from '../skills/skillRegistry';
-import { loadSkillPack } from '../agents/definitions';
+import { skillsInEffect } from '../skills/customise';
 import { listComposites, listShared } from '../semantic/store';
 import { DecisionStore } from '../decisions/decisionStore';
 import { layoutPath } from '../workspaceLayout';
@@ -169,7 +169,7 @@ export function journeyFor(input: JourneyInput): Journey {
   let interviewStep: JourneyStep;
   try {
     const s = readInterview(root, input.workspaceRoot);
-    const skills = interviewSkills(loadSkillPack(input.resourcesRoot).skills, fs.existsSync(layoutPath(input.workspaceRoot, 'skills')) ? layoutPath(input.workspaceRoot, 'skills') : undefined);
+    const skills = interviewSkills(skillsInEffect(input.resourcesRoot, input.workspaceRoot).skills, fs.existsSync(layoutPath(input.workspaceRoot, 'skills')) ? layoutPath(input.workspaceRoot, 'skills') : undefined);
     const sum = s ? summarizeInterview(s, skills) : undefined;
     const addressed = sum ? sum.parts.filter((x) => x.status === 'addressed').length : 0;
     const done = specApproved || sum?.status === 'done';

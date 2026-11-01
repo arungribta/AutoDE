@@ -26,14 +26,17 @@ capabilities:
     support: supported
     operations: [estate.list_tables, estate.list_columns, estate.list_views, estate.list_foreign_keys, estate.last_altered]
     privileges: USAGE on the databases and schemas in scope; their INFORMATION_SCHEMA views.
+    grants: [governance.grant_database_usage, governance.grant_usage]
     note: Databases and schemas to pick from, and profiling, are still read by the adapter. Snowflake's INFORMATION_SCHEMA has no primary-key columns.
   profiling:
     support: supported
     privileges: SELECT on the tables profiled (sampled, within a query budget).
+    grants: [governance.grant_database_usage, governance.grant_usage, governance.grant_select]
   lineage:
     support: supported
     operations: [lineage.columns, lineage.objects]
     privileges: IMPORTED PRIVILEGES on the SNOWFLAKE database, or its GOVERNANCE_VIEWER (access history) and OBJECT_VIEWER (object dependencies) database roles. Access history needs Enterprise Edition or higher and is up to three hours behind.
+    grants: [governance.grant_account_usage]
   governance.tags:
     support: supported
     privileges: APPLY TAG, or ownership of the objects tagged.

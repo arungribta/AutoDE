@@ -6,6 +6,48 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.57.1
+
+POP4b, the Platform catalog to edit ([platform-operations.md](docs/specs/platform-operations.md) §6.3). POP4 is complete.
+
+- **Customise AutoDE's skills** (*Customise…* on a skill's page in the Platform catalog, `autode skills customise <id>`, MCP `autode_skill_customise`):
+  - It makes a **team copy** under the same id in `.autode/config/skills/tool-skills/<id>/`, a draft. It records the AutoDE version it came from, and keeps that content beside it so later changes can be compared.
+  - The copy follows the skills' lifecycle (PA4). Once edited it is unreviewed, so a person reviews it (`autode skills review`) and publishes it (`autode skills publish`); only then is it in effect. A stage never runs a draft.
+  - In VS Code, a team copy can be published without the lifecycle-management setting, because a copy always starts as a draft.
+- **The published team copy wins everywhere AutoDE picks a skill**: stage assignments, the interview's parts, maintenance work orders, MCP role prompts and `autode plugin install`. Before, AutoDE's skill won a name clash.
+  - This includes skills with no stage kinds, such as the orchestrator.
+  - A copy with broken metadata is not used: AutoDE's skill stays in effect, and the catalog says why.
+- **"AutoDE's version changed":** when a later release changes the original skill, the copy is flagged with both differences: what AutoDE changed, and what the team changed.
+  - The flag shows on `autode skills show`, `skills list`, the skill's page and `plugin status`.
+  - `autode skills keep <id>` (or *Keep the team copy*) keeps the team's text and records AutoDE's new version as the one it is compared with. Its review and publication stand.
+  - `autode skills reset <id>` (a person at a terminal, or *Reset to AutoDE's…*) archives the copy under `.autode/local/reset-skills/` and puts AutoDE's skill back in effect. Imported skills are retired instead, not reset.
+- **Checks as you type:**
+  - A team skill's `SKILL.md` gets diagnostics in the VS Code editor, line by line. They cover:
+    - the Agent Skills format (including frontmatter that isn't valid YAML);
+    - the metadata: stage kinds and platforms that exist, and AutoDE's registry fields for `autode-` names;
+    - operation ids that don't exist;
+    - places where the skill queries the platform itself, with the operation to name instead (for example `estate.list_columns` for a query on `information_schema.columns`).
+  - The same checks run in `autode skills lint <id>` (now with line numbers, and on the team copy's text when there is one) and in MCP `autode_skill_check` (which also takes a draft's text).
+  - The skill's page has a **metadata form** (description, stage kinds, platforms) that is checked as you type. Saving changes only those lines, so the rest of the frontmatter keeps its layout.
+- **The operation form** (*Edit in a form…* on an operation's page): the fields are generated from the operation format's JSON Schema, each with a label and a description. It covers the parameters as rows, and the statement or argument list per platform.
+  - The form is checked as you type, the way the loader checks a file: the schema, the read-only guard for reads, and the example's binding.
+  - Saving writes the team's file. A shipped operation is copied first; AutoDE's own file is never written. The team file stays a draft until a person approves it (*Propose for approval*, decision kind `platform_operation`).
+- **Request access** (the Privileges tab, `autode platform request-access --connection <c>`, MCP `autode_platform_request_access`): drafts a runbook that grants AutoDE's role what its capabilities need.
+  - The steps come from the **grant operations** each capability names in its platform definition (new field `grants`, in `docs/schemas/platform.schema.json`). They are bound to the role (by default the connection's role field, else its user), its databases and its schemas.
+  - Which capabilities are covered: by default, those the last conformance run found short; with no run, every capability that has grants.
+  - With an active problem, the runbook is proposed as a runbook decision for a person who administers the platform to approve and run. Without one, the steps are shown.
+  - A capability without grant operations comes back as a warning that gives its privileges in words. AutoDE never guesses a statement.
+- **New and extended grant operations:**
+  - new: `governance.grant_database_usage` (Snowflake, Databricks) and `governance.grant_account_usage` (Snowflake's `ACCOUNT_USAGE`, for lineage);
+  - extended: `governance.grant_usage` and `governance.grant_select` now have Snowflake and Databricks implementations.
+  - Grants are declared for estate and profiling on Snowflake, Databricks and Redshift, and for lineage on Snowflake. An operation's page counts *Request access* among what relies on it.
+- **`autode plugin status`** (MCP `autode_plugin_status`): checks each host folder that AutoDE installed into (Claude Code, Cortex Code, Copilot CLI; project and user) against the skills in effect.
+  - It reports a team copy published or reset since the install, AutoDE's own skill changed, and skills added or retired, with the install command that fixes each.
+  - `plugin install` now writes the skills in effect, without AutoDE's sidecar and history files, and records what each skill was. An install from before 0.57.1 is asked to reinstall once.
+  - Publishing or resetting a skill says when installs are behind. In VS Code it also offers to update Claude Code's project install.
+- **Deviation from the spec:** the spec asks for a maintenance item when the plugin is behind. Maintenance items are work orders for agents, while updating a host's plugin is a person's command, so the reminder is `autode plugin status`, the note after publish or reset, and the VS Code offer instead.
+- **Still to come:** linking a vendor tool or MCP server to a platform, the review queue view (decisions and *Waiting for you* serve it), opening the catalog from the Explorer's Estate view, and Databricks lineage grants (system tables). Lineage grants for Databricks remain in words.
+
 ## 0.57.0
 
 POP4a, the Platform catalog to see and try ([platform-operations.md](docs/specs/platform-operations.md) §6.3). POP4 is built in two releases; editing follows in 0.57.1.

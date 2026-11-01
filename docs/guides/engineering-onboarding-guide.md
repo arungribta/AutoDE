@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.57.0 (2026-11-01). This guide orients; it does not duplicate. Details live in [technical-design.md](../design/technical-design.md) (HOW), [requirements.md](../requirements.md) (WHAT and WHY) and [roadmap.md](../roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.57.1 (2026-11-01). This guide orients; it does not duplicate. Details live in [technical-design.md](../design/technical-design.md) (HOW), [requirements.md](../requirements.md) (WHAT and WHY) and [roadmap.md](../roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -143,7 +143,7 @@ The same process holds in VS Code, in a terminal (`autode`), and in any agent ho
 |---|---|---|
 | Workflow templates | The stages of an engagement | `.autode/config/workflows/` |
 | Role templates (agents) | What each agent may do | `.autode/config/agents/` |
-| Skills | How a stage is done | ported through the Skills view or `autode skills import` (reviewed, then published); see [skills-authoring.md](skills-authoring.md) |
+| Skills | How a stage is done | ported through the Skills view or `autode skills import` (reviewed, then published); see [skills-authoring.md](skills-authoring.md); AutoDE's own are adapted with *Customise* (a team copy under the same id that wins everywhere once reviewed and published: `skillsInEffect` in `src/engine/skills/customise.ts`, since v0.57.1) |
 | Primitives | The vetted transforms the compiler uses | `.autode/config/primitives/` |
 | Policy | Who approves runbooks per environment | `.autode/config/approvals.yaml` |
 | Connections | Which platforms, and how to reach them (never secrets) | `.autode/config/connections.yaml` |

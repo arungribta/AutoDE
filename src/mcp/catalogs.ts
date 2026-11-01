@@ -5,7 +5,8 @@ import { EngineToolError } from './errors';
 import { buildChatExtractionPrompt } from '../engine/context/chatExtraction';
 import { EngineWorkspace, PROBLEM_DOCUMENTS } from './workspace';
 import { layoutRel } from '../engine/workspaceLayout';
-import { loadRoles, loadSkillPack } from '../engine/agents/definitions';
+import { loadRoles } from '../engine/agents/definitions';
+import { skillsInEffect } from '../engine/skills/customise';
 import { ToolInfo, assignmentFor } from '../engine/agents/assignment';
 import { semanticResources } from './semanticTools';
 import { exploreResources, readExploreResource } from './exploreTools';
@@ -96,7 +97,7 @@ export function getPrompt(ws: EngineWorkspace, name: string, args: Record<string
       if (a.assignment.role !== r.name) throw new EngineToolError('VALIDATION_FAILED', `Stage ${args.stage} is assigned to ${a.assignment.role}, not ${r.name}.`);
       return { description: r.description, text: a.assignment.text };
     }
-    const pack = loadSkillPack(ws.options.resourcesRoot).skills.filter((k) => r.skills.includes(k.id));
+    const pack = skillsInEffect(ws.options.resourcesRoot, ws.options.workspaceRoot).skills.filter((k) => r.skills.includes(k.id));
     const text = [
       `You are AutoDE's ${r.name}: ${r.description}`, r.instructions,
       'Take your work from the workflow: autode_workflow_next gives the stage, its brief, your permission tier and the AutoDE tools you may call. Record deliverables with autode_record_artifact. Never call another agent and never approve anything.',

@@ -35,8 +35,8 @@ export type TrustTier = 'unreviewed' | 'reviewed' | 'trusted';
 export const TRUST_TIERS: readonly TrustTier[] = ['unreviewed', 'reviewed', 'trusted'];
 
 export interface ToolSkillProvenance {
-  /** `dbt`: a skill found in a dbt package (PA4). */
-  source: 'local' | 'git' | 'dbt';
+  /** `dbt`: a skill found in a dbt package (PA4). `autode`: a team copy of one of AutoDE's skills (POP4b, Customise). */
+  source: 'local' | 'git' | 'dbt' | 'autode';
   /** The local folder it was imported from (for Update Skill). */
   location?: string;
   /** SPDX id or name of the licence it carries. */
@@ -47,9 +47,11 @@ export interface ToolSkillProvenance {
   subpath?: string;
   contentChecksum: string;
   importedAt: string;
+  /** A team copy (`source: autode`): the AutoDE version it was copied from or last kept against, and that content's checksum. */
+  base?: { version: number; checksum: string };
 }
 
-export type ToolSkillAction = 'import' | 'update' | 'migrate' | 'review' | 'publish' | 'deprecate' | 'retire';
+export type ToolSkillAction = 'import' | 'update' | 'migrate' | 'review' | 'publish' | 'deprecate' | 'retire' | 'customise' | 'keep';
 
 export interface ToolSkillTransition {
   at: string;

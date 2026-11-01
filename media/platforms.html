@@ -40,6 +40,11 @@
   .empty { color: var(--muted); padding: 12px 0; }
   label { display: block; margin: 4px 0; } input[type=text], select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 4px; padding: 3px 6px; font: inherit; min-width: 220px; }
   ul { margin: 4px 0; padding-left: 20px; }
+  textarea { width: 100%; min-height: 4em; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 4px; padding: 4px 6px; font-family: var(--vscode-editor-font-family); font-size: 0.95em; }
+  fieldset { border: 1px solid var(--border); border-radius: 4px; margin: 8px 0; padding: 6px 10px; } legend { padding: 0 4px; }
+  .field-help { display: block; color: var(--muted); font-size: 0.9em; }
+  .check-inline { display: inline-flex; align-items: center; gap: 4px; margin: 2px 12px 2px 0; }
+  .findings li.error { color: var(--bad); } .findings li.warning { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -103,7 +108,17 @@
     } else if (t === 'primitives') {
       h += '<p>Deliverables compile to the <code>' + esc(p.primitives.dialect) + '</code> dialect.</p><ul>' + p.primitives.primitives.map((x) => '<li class="' + (x.compiles ? 's-ok' : 's-failing') + '">' + (x.compiles ? '✓ ' : '✗ ') + esc(x.kind) + ' <span class="muted">— ' + esc(x.description) + (x.reason ? ' (' + esc(x.reason) + ')' : '') + '</span></li>').join('') + '</ul>';
     } else if (t === 'privileges') {
-      h += p.privileges.length ? '<table><thead><tr><th>Capability</th><th>What AutoDE\'s role needs</th></tr></thead><tbody>' + p.privileges.map((x) => '<tr><td>' + esc(x.capability) + '</td><td>' + esc(x.privileges) + '</td></tr>').join('') + '</tbody></table>' : '<p class="empty">The definition names no privileges.</p>';
+      h += p.privileges.length ? '<table><thead><tr><th>Capability</th><th>What AutoDE\'s role needs</th><th>Granted by</th></tr></thead><tbody>' + p.privileges.map((x) => '<tr><td>' + esc(x.capability) + '</td><td>' + esc(x.privileges) + '</td><td>' + ((x.grants || []).map((g) => '<button class="link" data-op="' + esc(g) + '">' + esc(g) + '</button>').join('<br>') || '<span class="muted">no grant operation: ask in words</span>') + '</td></tr>').join('') + '</tbody></table>' : '<p class="empty">The definition names no privileges.</p>';
+      const conns = p.overview.connections;
+      h += '<h2>Request access</h2>';
+      if (!conns.length) h += '<p class="empty">Add a connection to ' + esc(p.title) + ' (Settings → Connections) to request access for it.</p>';
+      else if (!p.privileges.some((x) => x.grants && x.grants.length)) h += '<p class="empty">No capability here names grant operations, so there is no runbook to draft: send the privileges above to whoever administers the platform.</p>';
+      else h += '<p class="muted">Drafts a runbook that grants AutoDE\'s role these privileges, from the grant operations above. With an active problem it is proposed for a person who administers the platform to approve and run; nothing is granted from here.</p><form id="access">' +
+        '<label>Connection <select name="connection">' + conns.map((c) => '<option>' + esc(c.id) + '</option>').join('') + '</select><span class="field-help">The connection whose role needs the access.</span></label>' +
+        '<label>Role <input type="text" name="role" placeholder="the connection\'s role"><span class="field-help">The role AutoDE connects as (on Databricks the user, group or service principal). Empty: the connection\'s role field.</span></label>' +
+        '<label>Schemas <input type="text" name="schemas" placeholder="comma-separated"><span class="field-help">The schemas in scope. Empty: the connection\'s schema.</span></label>' +
+        '<fieldset><legend>Capabilities</legend>' + p.privileges.filter((x) => x.grants && x.grants.length).map((x) => '<label class="check-inline"><input type="checkbox" name="cap" value="' + esc(x.capability) + '"> ' + esc(x.capability) + '</label>').join('') + '<span class="field-help">None ticked: those the last conformance run found short, else all of them.</span></fieldset>' +
+        '<button class="btn primary" type="button" data-request-access>Draft the runbook</button></form><div id="accessOut" aria-live="polite"></div>';
     } else if (t === 'health') {
       h += '<h3>Conformance</h3>' + (p.health.conformance.length ? '<ul>' + p.health.conformance.map((c) => '<li>' + esc(c.connection) + ' (' + esc(c.at.slice(0, 16).replace('T', ' ')) + '): ' + esc(c.summary) + '</li>').join('') + '</ul>' : '<p class="empty">No conformance run yet: run one from Overview on a connected connection.</p>');
       h += '<h3>Failing now</h3>' + (p.health.failing.length ? '<ul>' + p.health.failing.map((r) => '<li class="s-failing"><button class="link" data-op="' + esc(r.operation) + '">' + esc(r.operation) + '</button> on ' + esc(r.connection) + ': ' + esc(r.error || '') + '</li>').join('') + '</ul>' : '<p class="empty">Nothing failing.</p>');
@@ -116,7 +131,7 @@
   function operationHtml(o) {
     if (!o) return crumbs() + '<p class="empty">No such operation.</p>';
     let h = crumbs(esc(o.id)) + '<h1>' + esc(o.id) + '</h1><div>' + esc(o.title) + '</div><p class="muted">' + esc(o.description) + '</p>';
-    h += '<p>' + esc(o.kind) + ' · ' + esc(o.area) + ' · ' + esc(o.origin) + (o.status === 'draft' ? ' · draft (never runs until approved)' : '') + (o.approvedBy ? ' · approved by ' + esc(o.approvedBy) : '') + ' · <button class="link" data-file="' + esc(o.file) + '">' + esc(o.file) + '</button> <button class="btn" data-customise="' + esc(o.id) + '">Customise…</button></p>';
+    h += '<p>' + esc(o.kind) + ' · ' + esc(o.area) + ' · ' + esc(o.origin) + (o.status === 'draft' ? ' · draft (never runs until approved)' : '') + (o.approvedBy ? ' · approved by ' + esc(o.approvedBy) : '') + ' · <button class="link" data-file="' + esc(o.file) + '">' + esc(o.file) + '</button> <button class="btn" data-customise="' + esc(o.id) + '">Customise…</button> <button class="btn" data-opform="' + esc(o.id) + '">Edit in a form…</button></p>';
     if (o.unused) h += '<div class="notice error">Nothing relies on this operation: no capability, AutoDE feature or skill names it.</div>';
     const r = o.reliedOnBy;
     h += '<h2>What relies on it</h2><ul>' + [...r.capabilities.map((c) => '<li>capability ' + esc(c) + '</li>'), ...r.engine.map((e) => '<li>AutoDE: ' + esc(e) + '</li>'), ...r.skills.map((k) => '<li>skill <button class="link" data-skill="' + esc(k.id) + '">' + esc(k.id) + '</button> <span class="muted">(' + esc(k.section) + ')</span></li>')].join('') + '</ul>' + (r.stages.length ? '<p class="muted">Stages whose skills use it: ' + r.stages.map(esc).join(', ') + '</p>' : '');
@@ -140,11 +155,67 @@
     let h = crumbs(esc(k.id)) + '<h1>' + esc(k.id) + '</h1><p>' + esc(k.summary) + '</p><p class="muted">' + esc(k.group) + (k.version !== undefined ? ' · version ' + esc(k.version) : '') + (k.maturity ? ' · ' + esc(k.maturity) : '') + (k.status ? ' · ' + esc(k.status) : '') + ' · stages: ' + esc(k.stageKinds.join(', ') || '—') + ' · platforms: ' + esc(k.platforms.join(', ') || '—') + '</p>' + (k.file ? '<p><button class="link" data-file="' + esc(k.file) + '">Open SKILL.md</button></p>' : '');
     h += '<h2>Operations it relies on</h2>' + (k.operations.length ? '<ul>' + k.operations.map((o) => '<li><button class="link" data-op="' + esc(o.id) + '">' + esc(o.id) + '</button> <span class="muted">(' + esc(o.section) + ')</span>' + (o.state !== 'ok' ? ' <span class="s-failing">' + esc(o.state) + '</span>' : '') + '</li>').join('') + '</ul>' : '<p class="empty">It names no platform operation.</p>');
     h += '<h2>Lint</h2>' + (k.lint.unknown.length || k.lint.sql.length ? '<ul>' + k.lint.unknown.map((u) => '<li class="s-failing">names ' + esc(u) + ', which isn\'t an operation</li>').join('') + k.lint.sql.map((q) => '<li class="s-partly">queries the platform itself: ' + esc(q) + '. Reading the platform is an operation\'s job.</li>').join('') + '</ul>' : '<p class="s-ok">Nothing flagged.</p>');
+    const c = k.teamCopy;
+    const ACT = { customise: 'Customise…', edit: c ? 'Edit the team copy' : 'Edit', review: 'Review…', publish: 'Publish', keep: 'Keep the team copy', reset: 'Reset to AutoDE\'s…' };
+    if (k.group === 'autode') {
+      h += '<h2>Team copy</h2>';
+      if (!c) h += '<p class="muted">AutoDE\'s skill is in effect. Customise makes a team copy under the same id to adapt it; it is a draft, and AutoDE\'s stays in effect until a person reviews and publishes the copy.</p>';
+      else {
+        h += '<p>' + (c.inEffect ? '<span class="s-ok">✓ In effect</span> in place of AutoDE\'s' : '<span class="s-partly">◐ Not in effect</span>: ' + esc(c.why) + '. AutoDE\'s is used.') + ' <span class="muted">(v' + esc(c.version) + ', ' + esc(c.status) + ', ' + esc(c.tier) + ')</span></p>';
+        if (c.upstreamChanged) h += '<div class="notice error">AutoDE\'s version changed: v' + esc(c.baseVersion) + ' → ' + (c.autodeVersion !== undefined ? 'v' + esc(c.autodeVersion) : 'no longer shipped') + (c.autodeChanges.length ? ' (' + c.autodeChanges.map((x) => esc(x.path) + ' ' + esc(x.change)).join(', ') + ')' : '') + '. Merge what you want into the copy, then Keep; or Reset to take AutoDE\'s.</div>';
+        h += '<p class="muted">' + (c.teamChanges.length ? 'The team changed: ' + c.teamChanges.map((x) => esc(x.path) + ' ' + esc(x.change)).join(', ') : 'The copy is still AutoDE\'s text.') + ' Next: ' + esc(c.next) + '.</p>';
+        h += '<h3>Checks</h3>' + (c.findings.length ? '<ul class="findings">' + c.findings.map((f) => '<li class="' + esc(f.severity) + '">line ' + esc(f.line) + ': ' + esc(f.message) + '</li>').join('') + '</ul>' : '<p class="s-ok">Nothing flagged. The editor checks as you type.</p>');
+        h += '<details><summary>History</summary><ul>' + c.history.map((x) => '<li>' + esc(x.at.slice(0, 16).replace('T', ' ')) + ' ' + esc(x.by) + ': ' + esc(x.action) + ' → ' + esc(x.to) + ' (v' + esc(x.version) + ')</li>').join('') + '</ul></details>';
+      }
+    }
+    if (k.actions && k.actions.length) h += '<p>' + k.actions.map((a) => '<button class="btn' + (a === 'customise' || a === 'publish' ? ' primary' : '') + '" data-skill-action="' + esc(a) + '">' + esc(ACT[a]) + '</button>').join('') + '</p>';
+    if (k.meta) {
+      h += '<h2>Metadata</h2><form id="meta"><label>Description <textarea name="description" aria-describedby="d-desc">' + esc(k.meta.description) + '</textarea><span class="field-help" id="d-desc">What the skill does and when to use it: hosts pick a skill by this text (at most 1024 characters).</span></label>' +
+        '<fieldset><legend>Stage kinds</legend>' + k.meta.allStageKinds.map((s) => '<label class="check-inline"><input type="checkbox" name="stageKinds" value="' + esc(s) + '"' + (k.meta.stageKinds.includes(s) ? ' checked' : '') + '> ' + esc(s) + '</label>').join('') + '<span class="field-help">The workflow stages it serves: a stage of that kind gets it in its assignment.</span></fieldset>' +
+        '<fieldset><legend>Platforms</legend>' + k.meta.allPlatforms.map((s) => '<label class="check-inline"><input type="checkbox" name="platforms" value="' + esc(s) + '"' + (k.meta.platforms.includes(s) ? ' checked' : '') + '> ' + esc(s) + '</label>').join('') + '<span class="field-help">any, or the target platforms it is for.</span></fieldset>' +
+        '<p class="muted">Operations it uses come from its text: ' + (k.operations.map((o) => esc(o.id)).join(', ') || 'none') + '.</p><div id="metaChecks" aria-live="polite"></div><button class="btn primary" type="button" data-save-meta>Save</button></form>';
+    }
     return h;
   }
 
+  function opFormHtml(f) {
+    if (!f) return crumbs() + '<p class="empty">No such operation.</p>';
+    const ctl = (x, prefix) => {
+      const id = prefix + x.key; const help = x.description ? '<span class="field-help" id="h-' + esc(id) + '">' + esc(x.description) + '</span>' : '';
+      const attrs = ' name="' + esc(prefix + x.key) + '" id="' + esc(id) + '" aria-describedby="h-' + esc(id) + '"';
+      const input = x.control === 'readonly' ? '<code>' + esc(x.value) + '</code>' : x.control === 'textarea' ? '<textarea' + attrs + '>' + esc(x.value) + '</textarea>' : x.control === 'select' ? '<select' + attrs + '>' + (x.required ? '' : '<option value=""></option>') + x.options.map((o) => '<option' + (o === x.value ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>' : x.control === 'checkbox' ? '<input type="checkbox"' + attrs + (x.value === 'true' ? ' checked' : '') + '>' : '<input type="text"' + attrs + ' value="' + esc(x.value) + '">';
+      return '<label for="' + esc(id) + '">' + esc(x.label) + (x.required ? ' *' : '') + ' ' + input + help + '</label>';
+    };
+    let h = crumbs('<button class="link" data-op="' + esc(f.id) + '">' + esc(f.id) + '</button> › form') + '<h1>Edit ' + esc(f.id) + '</h1><p class="muted">Saves to ' + esc(f.file) + '. ' + esc(f.next) + ' The form comes from the operation format\'s schema; fields marked * are required.</p><form id="opform">';
+    h += f.fields.map((x) => ctl(x, 'f.')).join('');
+    h += '<h2>Parameters</h2>' + (f.params.rows.length ? f.params.rows.map((row, i) => '<fieldset><legend>Parameter ' + (i + 1) + '</legend>' + f.params.columns.map((col) => ctl({ ...col, value: row[col.key] || '' }, 'p' + i + '.')).join('') + '</fieldset>').join('') : '<p class="muted">None.</p>');
+    h += '<h2>Per platform</h2>' + f.platforms.map((p) => '<label for="s.' + esc(p.platform) + '">' + esc(p.label) + ' <span class="muted">(' + esc(p.transport) + ')</span>' + (p.transport === 'other' ? '<pre>' + esc(p.value) + '</pre>' : '<textarea id="s.' + esc(p.platform) + '" name="s.' + esc(p.platform) + '" rows="5">' + esc(p.value) + '</textarea>') + '<span class="field-help">' + esc(p.description) + '</span></label>').join('');
+    h += '<div id="opChecks" aria-live="polite"></div><button class="btn primary" type="button" data-save-op>Save as a team draft</button><button class="btn" type="button" data-propose-op>Propose for approval</button></form>';
+    return h;
+  }
+
+  function opEdit() {
+    const f = document.getElementById('opform'); const edit = { fields: {}, params: [], platforms: {} };
+    f.querySelectorAll('input, select, textarea').forEach((el) => {
+      const v = el.type === 'checkbox' ? String(el.checked) : el.value;
+      if (el.name.startsWith('f.')) edit.fields[el.name.slice(2)] = v;
+      else if (el.name.startsWith('s.')) edit.platforms[el.name.slice(2)] = v;
+      else { const m = /^p(\d+)\.(.+)$/.exec(el.name); if (m) { const i = Number(m[1]); edit.params[i] = edit.params[i] || {}; edit.params[i][m[2]] = v; } }
+    });
+    return edit;
+  }
+
+  function metaEdit() {
+    const f = document.getElementById('meta');
+    return { description: f.querySelector('[name=description]').value, stageKinds: [...f.querySelectorAll('[name=stageKinds]:checked')].map((x) => x.value), platforms: [...f.querySelectorAll('[name=platforms]:checked')].map((x) => x.value) };
+  }
+
+  function findingsHtml(list, ok) {
+    return list.length ? '<ul class="findings">' + list.map((f) => '<li class="' + esc(f.severity || 'error') + '">' + (f.line ? 'line ' + esc(f.line) + ': ' : '') + esc(f.message || f) + '</li>').join('') + '</ul>' : '<p class="s-ok">' + esc(ok) + '</p>';
+  }
+
   function render() {
-    root.innerHTML = state.view === 'matrix' ? (state.matrix ? matrixHtml(state.matrix) : '<p class="muted">Loading…</p>') : state.view === 'platform' ? platformHtml(state.page) : state.view === 'operation' ? operationHtml(state.page) : skillHtml(state.page);
+    root.innerHTML = state.view === 'matrix' ? (state.matrix ? matrixHtml(state.matrix) : '<p class="muted">Loading…</p>') : state.view === 'platform' ? platformHtml(state.page) : state.view === 'operation' ? operationHtml(state.page) : state.view === 'opform' ? opFormHtml(state.page) : skillHtml(state.page);
     const h1 = root.querySelector('h1'); if (h1) h1.setAttribute('tabindex', '-1');
   }
 
@@ -164,6 +235,16 @@
     else if (d.tab) { state.tab = d.tab; render(); const b = document.getElementById('tab-' + d.tab); if (b) b.focus(); }
     else if (d.file) send({ type: 'openFile', file: d.file });
     else if (d.customise) send({ type: 'customise', id: d.customise });
+    else if (d.opform) send({ type: 'operationForm', id: d.opform });
+    else if (d.skillAction) send({ type: 'skillAction', id: state.page.id, action: d.skillAction });
+    else if (t.hasAttribute('data-save-meta')) send({ type: 'saveMeta', id: state.page.id, edit: metaEdit() });
+    else if (t.hasAttribute('data-save-op')) send({ type: 'saveOperation', id: state.page.id, edit: opEdit() });
+    else if (t.hasAttribute('data-propose-op')) send({ type: 'proposeOperation', id: state.page.id });
+    else if (t.hasAttribute('data-request-access')) {
+      const f = document.getElementById('access');
+      document.getElementById('accessOut').innerHTML = '<p class="muted">Drafting…</p>';
+      send({ type: 'requestAccess', connection: f.querySelector('[name=connection]').value, role: f.querySelector('[name=role]').value.trim(), schemas: f.querySelector('[name=schemas]').value.split(',').map((x) => x.trim()).filter(Boolean), capabilities: [...f.querySelectorAll('[name=cap]:checked')].map((x) => x.value) });
+    }
     else if (d.conformance) send({ type: 'conformance', connection: d.conformance });
     else if (t.hasAttribute('data-preview')) { const v = formValues(); send({ type: 'preview', operation: state.page.id, platform: v.platform, params: v.params }); }
     else if (t.hasAttribute('data-try')) { const v = formValues(); document.getElementById('tryOut').innerHTML = '<p class="muted">Running…</p>'; send({ type: 'try', operation: state.page.id, connection: v.connection, params: v.params }); }
@@ -174,6 +255,13 @@
     const tabs = [...root.querySelectorAll('[role=tablist].tabs [role=tab]')]; const i = tabs.indexOf(tab);
     const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; next.click(); e.preventDefault();
   });
+  // Checks as you type: the metadata and operation forms are checked by the engine after a short pause.
+  let checkTimer;
+  root.addEventListener('input', (e) => {
+    const form = e.target.closest && e.target.closest('form'); if (!form || (form.id !== 'meta' && form.id !== 'opform')) return;
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(() => send(form.id === 'meta' ? { type: 'checkMeta', id: state.page.id, edit: metaEdit() } : { type: 'checkOperation', id: state.page.id, edit: opEdit() }), 300);
+  });
   document.querySelectorAll('[data-window-tab]').forEach((b) => { b.onclick = () => send({ type: 'openTab', tab: b.getAttribute('data-window-tab') }); });
 
   window.addEventListener('message', (ev) => {
@@ -182,6 +270,13 @@
     else if (m.type === 'platform') { state.view = 'platform'; state.page = m.page; state.live = m.live || []; render(); }
     else if (m.type === 'operation') { state.view = 'operation'; state.page = m.page; state.live = m.live || []; const out = document.getElementById('tryOut'); const keep = out ? out.innerHTML : ''; render(); if (keep) document.getElementById('tryOut').innerHTML = keep; }
     else if (m.type === 'skill') { state.view = 'skill'; state.page = m.page; render(); }
+    else if (m.type === 'operationForm') { state.view = 'opform'; state.page = m.form; render(); }
+    else if (m.type === 'metaChecks') { const out = document.getElementById('metaChecks'); if (out) out.innerHTML = findingsHtml(m.findings, 'Nothing flagged.'); }
+    else if (m.type === 'opChecks') { const out = document.getElementById('opChecks'); if (out) out.innerHTML = findingsHtml(m.problems, m.saved ? 'Saved as a draft: ' + m.file + '. Propose it for approval when it is ready.' : 'The operation would load.'); }
+    else if (m.type === 'access') {
+      const out = document.getElementById('accessOut'); if (!out) return;
+      out.innerHTML = m.error ? '<div class="notice error">' + esc(m.error) + '</div>' : '<h3>' + esc(m.runbook.title) + '</h3><ol>' + m.runbook.steps.map((s) => '<li>' + esc(s.title) + '<pre>' + esc(s.sql) + '</pre></li>').join('') + '</ol>' + (m.warnings.length ? '<ul class="findings">' + m.warnings.map((w) => '<li class="warning">' + esc(w) + '</li>').join('') + '</ul>' : '') + '<div class="notice">' + esc(m.next) + '</div>';
+    }
     else if (m.type === 'preview') { const out = document.getElementById('tryOut'); if (out) out.innerHTML = m.error ? '<div class="notice error">' + esc(m.error) + '</div>' : '<h3>' + (m.kind === 'change' ? 'The runbook step it would be' : 'The statement that would run') + '</h3><pre>' + esc(m.statement) + '</pre>'; }
     else if (m.type === 'tried') {
       const out = document.getElementById('tryOut'); if (!out) return;

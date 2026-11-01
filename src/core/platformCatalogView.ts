@@ -1,8 +1,16 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { capabilityMatrix, conformanceRun, operationPage, platformPage, skillPage } from '../engine/platform/operations/catalogView';
-import { loadCatalog, operationById, platformById } from '../engine/platform/operations/load';
+import { accessRunbook, capabilityMatrix, conformanceRun, lintSkillText, operationPage, platformPage, skillPage } from '../engine/platform/operations/catalogView';
+import { checksumOf, loadCatalog, operationById, platformById } from '../engine/platform/operations/load';
+import { OperationEdit, checkOperationEdit, operationForm, saveOperationEdit } from '../engine/platform/operations/form';
+import { SkillFrontmatterEdit, customiseSkill, keepTeamCopy, resetSkill, setSkillFrontmatter, teamCopy } from '../engine/skills/customise';
+import { installPlugin, pluginStatus, serverEntry } from '../engine/agents/plugin';
+import { DecisionStore } from '../engine/decisions/decisionStore';
+import { ProposalValidationError, propose } from '../engine/decisions/proposals';
+import { activeProblemId } from '../engine/documents/problems';
+import { layoutPath } from '../engine/workspaceLayout';
 import { bindOperation } from '../engine/platform/operations/execute';
 import { ConnectionTarget, OperationError, runOnConnection } from '../engine/platform/operations/service';
 import { loadConnectionsConfig } from '../engine/platform/connectionsConfig';
@@ -17,6 +25,8 @@ export interface PlatformCatalogHost {
   workspaceRoot(): string | undefined;
   /** The panel's live connections: what Try it and a conformance run use. */
   liveConnections(): Array<{ id: string; platform: string; target: ConnectionTarget }>;
+  /** Who acts, for the skills' lifecycle and decisions. */
+  actor(): string;
 }
 
 type Message =
@@ -24,7 +34,11 @@ type Message =
   | { type: 'platform'; id: string } | { type: 'operation'; id: string } | { type: 'skill'; id: string }
   | { type: 'conformance'; connection: string } | { type: 'preview'; operation: string; platform: string; params: Record<string, string> }
   | { type: 'try'; operation: string; connection: string; params: Record<string, string> }
-  | { type: 'openFile'; file: string } | { type: 'customise'; id: string } | { type: 'openTab'; tab: string };
+  | { type: 'openFile'; file: string } | { type: 'customise'; id: string } | { type: 'openTab'; tab: string }
+  | { type: 'skillAction'; id: string; action: 'customise' | 'edit' | 'review' | 'publish' | 'keep' | 'reset' }
+  | { type: 'checkMeta' | 'saveMeta'; id: string; edit: SkillFrontmatterEdit }
+  | { type: 'operationForm' | 'proposeOperation'; id: string } | { type: 'checkOperation' | 'saveOperation'; id: string; edit: OperationEdit }
+  | { type: 'requestAccess'; connection: string; role?: string; schemas: string[]; capabilities: string[] };
 
 export class PlatformCatalogPanel {
   private static current: PlatformCatalogPanel | undefined;
@@ -49,6 +63,55 @@ export class PlatformCatalogPanel {
   }
 
   private scope() { return { resourcesRoot: this.resourcesRoot, workspaceRoot: this.host.workspaceRoot() }; }
+
+  private workspace(): { resourcesRoot: string; workspaceRoot: string } {
+    const root = this.host.workspaceRoot();
+    if (!root) throw new Error('Open a workspace folder first.');
+    return { resourcesRoot: this.resourcesRoot, workspaceRoot: root };
+  }
+
+  /** POP4b: Customise, edit, review, publish, keep and reset a skill; each a person's click (reset and keep confirmed). */
+  private async skillAction(id: string, action: 'customise' | 'edit' | 'review' | 'publish' | 'keep' | 'reset'): Promise<void> {
+    const ws = this.workspace();
+    const open = async (file: string) => { await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false }); };
+    if (action === 'customise') {
+      const r = customiseSkill(ws, id, this.host.actor());
+      await open(path.join(r.dir, 'SKILL.md'));
+      this.post({ type: 'notice', text: `${r.created ? 'Made' : 'Opened'} the team copy of ${id} (a draft). Edit it here: the editor checks as you type. AutoDE's stays in effect until a person reviews and publishes the copy.` });
+    } else if (action === 'edit') {
+      const file = skillPage(ws, id)?.meta?.file;
+      if (file) await open(file);
+    } else if (action === 'review') {
+      await vscode.commands.executeCommand('autoDataEngineeringHub.reviewToolSkill', id);
+    } else if (action === 'publish') {
+      await vscode.commands.executeCommand('autoDataEngineeringHub.publishToolSkill', id);
+    } else if (action === 'keep') {
+      const c = teamCopy(ws, id);
+      const ok = await vscode.window.showWarningMessage(`Keep the team copy of ${id}? AutoDE's v${c?.autodeVersion ?? '?'} becomes what it is compared with; merge anything you want from it first.`, { modal: true, detail: c?.autodeChanges.map((x) => `${x.path} ${x.change}`).join('\n') }, 'Keep');
+      if (ok !== 'Keep') return;
+      keepTeamCopy(ws, id, this.host.actor());
+    } else {
+      const c = teamCopy(ws, id);
+      const ok = await vscode.window.showWarningMessage(`Reset ${id} to AutoDE's? The team copy (v${c?.state.sidecar.version ?? '?'}) is removed and archived under .autode/local/reset-skills/.`, { modal: true }, 'Reset');
+      if (ok !== 'Reset') return;
+      resetSkill(ws, id);
+    }
+    await this.onMessage({ type: 'skill', id });
+    if (action === 'publish' || action === 'reset') await this.offerPluginUpdate();
+  }
+
+  /** After the skills in effect change: say when a host's installed skills are behind, and offer the install. */
+  private async offerPluginUpdate(): Promise<void> {
+    const ws = this.workspace();
+    const s = pluginStatus({ ...ws, home: os.homedir() });
+    if (!s.behind) return;
+    const claude = s.folders.find((f) => f.behind.length && f.host === 'claude' && f.scope === 'project');
+    const pick = await vscode.window.showInformationMessage(s.summary, ...(claude ? ['Update Claude Code (project)'] : []));
+    if (pick) {
+      const r = installPlugin({ host: 'claude', scope: 'project', resourcesRoot: this.resourcesRoot, workspaceRoot: ws.workspaceRoot, home: os.homedir(), entry: serverEntry(this.resourcesRoot) });
+      vscode.window.showInformationMessage(r.errors.length ? `Installed with problems: ${r.errors.join(' ')}` : `Claude Code now has the skills in effect (${r.written.length} files).`);
+    }
+  }
 
   private post(m: Record<string, unknown>): void { void this.panel.webview.postMessage(m); }
 
@@ -104,6 +167,49 @@ export class PlatformCatalogPanel {
         }
         case 'customise': await vscode.commands.executeCommand('autoDataEngineeringHub.customisePlatformOperation', m.id); return;
         case 'openTab': await vscode.commands.executeCommand(m.tab === 'workflow' ? 'autoDataEngineeringHub.openWorkflow' : 'autoDataEngineeringHub.openKnowledgeExplorer'); return;
+        case 'skillAction': await this.skillAction(m.id, m.action); return;
+        case 'checkMeta': case 'saveMeta': {
+          const file = skillPage(this.scope(), m.id)?.meta?.file;
+          if (!file) { this.post({ type: 'notice', text: `${m.id} has no editable copy: customise it first.`, error: true }); return; }
+          const text = setSkillFrontmatter(fs.readFileSync(file, 'utf8'), m.edit);
+          const findings = lintSkillText(text, m.id, loadCatalog(this.scope()));
+          if (m.type === 'checkMeta' || findings.some((f) => f.severity === 'error')) { this.post({ type: 'metaChecks', findings }); return; }
+          fs.writeFileSync(file, text);
+          this.post({ type: 'notice', text: `Saved ${m.id}'s metadata. ${teamCopy(this.workspace(), m.id) ? 'The copy changed, so it waits for a review and publish before it is in effect.' : 'Review and publish it to use it.'}` });
+          await this.onMessage({ type: 'skill', id: m.id });
+          return;
+        }
+        case 'operationForm': this.post({ type: 'operationForm', form: operationForm(this.workspace(), m.id) }); return;
+        case 'checkOperation': this.post({ type: 'opChecks', problems: checkOperationEdit(this.workspace(), m.id, m.edit) }); return;
+        case 'saveOperation': {
+          const r = saveOperationEdit(this.workspace(), m.id, m.edit);
+          this.post({ type: 'opChecks', ...r });
+          return;
+        }
+        case 'proposeOperation': {
+          const ws = this.workspace();
+          const full = layoutPath(ws.workspaceRoot, 'platformOperations', `${m.id}.yaml`);
+          if (!fs.existsSync(full)) { this.post({ type: 'opChecks', problems: ['Save the form first: there is no team draft of this operation yet.'] }); return; }
+          const file = path.relative(ws.workspaceRoot, full).split(path.sep).join('/');
+          const d = propose(new DecisionStore(ws.workspaceRoot), { workspaceRoot: ws.workspaceRoot, resourcesRoot: this.resourcesRoot }, 'platform_operation', { file, checksum: checksumOf(fs.readFileSync(full, 'utf8')) }, { proposedBy: { host: 'vscode', client: this.host.actor() } });
+          this.post({ type: 'notice', text: `Proposed ${file} as ${d.id}. A person approves it in Decisions; until then it is a draft and never runs.` });
+          return;
+        }
+        case 'requestAccess': {
+          const ws = this.workspace();
+          let draft: ReturnType<typeof accessRunbook>;
+          try { draft = accessRunbook(ws, { connection: m.connection, role: m.role || undefined, schemas: m.schemas, capabilities: m.capabilities }); }
+          catch (err) { this.post({ type: 'access', error: err instanceof Error ? err.message : String(err) }); return; }
+          const problemId = activeProblemId(ws.workspaceRoot);
+          if (!problemId) { this.post({ type: 'access', ...draft, next: 'No active problem: a runbook is proposed within a problem. Start or select one and draft it again, or give these steps to whoever administers the platform.' }); return; }
+          try {
+            const d = propose(new DecisionStore(ws.workspaceRoot), { workspaceRoot: ws.workspaceRoot, problemRoot: layoutPath(ws.workspaceRoot, 'problems', problemId), problemId, connections: loadConnectionsConfig(ws.workspaceRoot).connections, resourcesRoot: this.resourcesRoot }, 'runbook', draft.runbook, { proposedBy: { host: 'vscode', client: this.host.actor() } });
+            this.post({ type: 'access', ...draft, next: `Proposed as ${d.id} in ${problemId}. A person who administers the platform approves it in Decisions, then runs it in AutoDE's runner.` });
+          } catch (err) {
+            this.post({ type: 'access', error: err instanceof ProposalValidationError ? `The runbook did not pass its checks: ${err.report.errors.join('; ')}` : err instanceof Error ? err.message : String(err) });
+          }
+          return;
+        }
       }
     } catch (err) {
       this.post({ type: 'notice', text: err instanceof Error ? err.message : String(err), error: true });

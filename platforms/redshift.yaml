@@ -64,10 +64,12 @@ capabilities:
   estate:
     support: supported
     operations: [estate.list_tables, estate.table_stats, estate.list_columns, estate.list_views, estate.list_primary_keys, estate.list_foreign_keys]
+    grants: [governance.grant_usage, governance.grant_select]
     privileges: USAGE on the schemas in scope and SELECT on their tables (SVV_ALL_TABLES and SVV_ALL_COLUMNS list only what the user can access). Row counts come from SVV_TABLE_INFO, which shows a regular user only some tables; without them the tables still come in. View definitions and keys are read for the connected database only.
   profiling:
     support: supported
     privileges: SELECT on the tables profiled (sampled, within a query budget).
+    grants: [governance.grant_usage, governance.grant_select]
   performance.assess:
     support: supported
     operations: [performance.table_design]

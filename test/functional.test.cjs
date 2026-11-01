@@ -5886,12 +5886,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5983,6 +5983,10 @@ async function main() {
       autode_platform_operations: [{ platform: 'snowflake' }, { platform: '' }],
       autode_platform_catalog: [{ platform: 'snowflake' }, { platform: '' }],
       autode_platform_conformance: [{ connectionId: 'snowflake:prod' }, {}],
+      autode_platform_request_access: [{ connectionId: 'snowflake:nope' }, { connectionId: 'snowflake:nope', schemas: [''] }],
+      autode_skill_check: [{ id: 'autode-de-mapping' }, { id: '' }],
+      autode_skill_customise: [{ id: 'autode-de-mapping' }, { id: '' }],
+      autode_plugin_status: [{}, { x: 1 }],
       autode_platform_run: [{ connectionId: 'snowflake:nope', operation: 'platform.version' }, { connectionId: 'snowflake:nope' }],
       autode_refresh_lineage: [{ connectionId: 'snowflake:nope' }, { connectionId: 'snowflake:nope', databases: ["x'; drop"] }],
       autode_record_observed_lineage: [{ connectionId: 'snowflake:nope', method: 'openlineage', edges: [{ upstream: { object: 'A.B.C' }, downstream: { object: 'A.B.D' } }] }, { connectionId: 'snowflake:nope', method: 'open lineage', edges: [] }],
@@ -7598,10 +7602,12 @@ async function main() {
       const packed = pack(dir, tmp);
       assert.ok(nodeFs.existsSync(packed.tarball));
       // v0.55.0: 600 → 650 KB for Redshift's platform definition, its operations and its five skills (data files, not code).
-      assert.ok(packed.size < 650 * 1024, `tarball ${Math.round(packed.size / 1024)} KB (budget 650 KB)`);
+      // v0.57.1: 650 → 700 KB for the Platform catalog (POP4a, POP4b: team copies of skills, the operation form, Request access, plugin status).
+      assert.ok(packed.size < 700 * 1024, `tarball ${Math.round(packed.size / 1024)} KB (budget 700 KB)`);
       // The development build is not minified (the published one is, at well under half): this budget guards growth, not the shipped size.
       // v0.56.6: 2.5 → 2.6 MB for PLN1a (the coverage decision, the composition rules, the planning skill v2).
-      assert.ok(packed.unpackedSize < 2.6 * 1024 * 1024, `unpacked ${Math.round(packed.unpackedSize / 1024)} KB (budget 2.6 MB)`);
+      // v0.57.1: 2.6 → 2.8 MB for the Platform catalog (POP4a and POP4b).
+      assert.ok(packed.unpackedSize < 2.8 * 1024 * 1024, `unpacked ${Math.round(packed.unpackedSize / 1024)} KB (budget 2.8 MB)`);
       for (const want of ['package.json', 'README.md', 'LICENSE', 'dist/autode.js', 'dist/mcp-server.js', 'dist/THIRD-PARTY-NOTICES.md', 'media/autode-icon-64.png', 'skills/autode-de-interview-requirements/SKILL.md']) assert.ok(packed.files.includes(want), `missing ${want}`);
       for (const rel of packed.files) {
         const text = nodeFs.readFileSync(nodePath.join(dir, rel), 'utf8');
@@ -13682,6 +13688,276 @@ async function main() {
     const page = src('media/platforms.html');
     assert.ok(/role="grid" aria-label="Capability matrix"/.test(page) && /role="tablist" class="tabs"/.test(page) && /ArrowRight/.test(page), 'keyboard and screen reader');
     assert.ok(/Row values aren\\'t shown here/.test(page) && /never runs from here/.test(page), 'no data rows, no change runs from the view');
+  });
+
+  // ── v0.57.1 POP4b: the catalog, to edit (docs/specs/platform-operations.md §6.3) ──
+
+  await test('v0.57.1 POP4b: Customise makes a team copy that is a draft (AutoDE\'s stays in effect); edited it is unreviewed; reviewed and published it wins everywhere a skill is picked (stages, interview parts, briefs, the plugin), the orchestrator too; a broken copy leaves AutoDE\'s in place with the reason; a later AutoDE change is flagged with both differences; Keep clears it; Reset restores AutoDE\'s and archives the copy', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const K = fresh('../dist/engine/skills/customise.js');
+    const LC = fresh('../dist/engine/skills/lifecycle.js');
+    const P = fresh('../dist/engine/skills/port.js');
+    const PL = fresh('../dist/engine/agents/plugin.js');
+    const SC = fresh('../dist/engine/agents/skillCatalog.js');
+    const tmp = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop4b-'));
+    try {
+      // AutoDE's resources, copied so a later "release" can change a bundled skill.
+      const res = nodePath.join(tmp, 'res'); const ws = nodePath.join(tmp, 'ws'); const home = nodePath.join(tmp, 'home');
+      nodeFs.cpSync(nodePath.join(__dirname, '..', 'skills'), nodePath.join(res, 'skills'), { recursive: true });
+      nodeFs.cpSync(nodePath.join(__dirname, '..', 'agents'), nodePath.join(res, 'agents'), { recursive: true });
+      nodeFs.mkdirSync(ws, { recursive: true });
+      const scope = { resourcesRoot: res, workspaceRoot: ws };
+      const id = 'autode-snowflake-performance';
+      const inEffect = () => K.skillsInEffect(res, ws).skills.find((k) => k.id === id);
+      const staged = () => P.stageSkills(res, ws).filter((k) => k.id === id);
+      // Customise: a draft copy under the same id; AutoDE's is still the one used.
+      const c = K.customiseSkill(scope, id, 'user:priya');
+      assert.ok(c.created && c.sidecar.status === 'draft' && c.sidecar.provenance.source === 'autode' && c.sidecar.provenance.base.version === 1, JSON.stringify(c.sidecar));
+      assert.ok(nodeFs.existsSync(nodePath.join(c.dir, 'SKILL.md')));
+      assert.strictEqual(K.customiseSkill(scope, id, 'user:priya').created, false, 'an existing copy is kept');
+      assert.ok(!inEffect().teamCopy && staged().length === 1 && !staged()[0].teamCopy, 'a draft never runs');
+      assert.ok(/not in effect \(it is a draft\)/.test(SC.skillCatalog({ resourcesRoot: res, workspaceRoot: ws, home }).entries.find((e) => e.name === id && e.group === 'autode').customised.status));
+      assert.ok(!SC.skillCatalog({ resourcesRoot: res, workspaceRoot: ws, home }).entries.some((e) => e.name === id && e.group === 'workspace'), 'listed once, on AutoDE\'s entry');
+      // Edit it: unreviewed; published unreviewed it still doesn't run.
+      const file = nodePath.join(c.dir, 'SKILL.md');
+      nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('# Snowflake performance', '# Snowflake performance\n\nTeam rule: every warehouse auto-suspends after 60 seconds.'));
+      let tc = K.teamCopy(scope, id);
+      assert.ok(tc.state.effectiveTier === 'unreviewed' && /review/.test(tc.next) && tc.teamChanges.some((x) => x.path === 'SKILL.md'), tc.next);
+      LC.publishToolSkill(c.dir, 'user:priya');
+      assert.ok(!inEffect().teamCopy && /reviewed/.test(K.teamCopy(scope, id).why), 'published but unreviewed: still AutoDE\'s');
+      LC.setTrustTier(c.dir, 'reviewed', 'user:priya');
+      // In effect everywhere a skill is picked.
+      const k = inEffect();
+      assert.ok(k.teamCopy && k.meta.owner === 'team' && /Team rule/.test(k.instructions), JSON.stringify(k.teamCopy));
+      assert.ok(/Team rule/.test(staged()[0].instructions) && staged().length === 1, 'stage assignments');
+      assert.ok(!k.resources.some((r) => r.startsWith('.autode')), 'AutoDE\'s sidecar and history are not resources');
+      const installed = PL.installPlugin({ host: 'claude', scope: 'project', resourcesRoot: res, workspaceRoot: ws, home, entry: { command: 'autode', args: ['mcp'] } });
+      assert.ok(!installed.errors.length, installed.errors.join(' '));
+      const hostSkill = nodePath.join(ws, '.claude', 'skills', id);
+      assert.ok(/Team rule/.test(nodeFs.readFileSync(nodePath.join(hostSkill, 'SKILL.md'), 'utf8')) && !nodeFs.existsSync(nodePath.join(hostSkill, '.autode-skill.json')) && !nodeFs.existsSync(nodePath.join(hostSkill, '.autode-history')), 'Claude Code gets the team text, not AutoDE\'s records');
+      // The orchestrator (no stage kinds) and an interview part can be customised and win too.
+      for (const x of ['autode-core-orchestrator', 'autode-de-interview-quality']) {
+        const r = K.customiseSkill(scope, x, 'user:priya');
+        const f = nodePath.join(r.dir, 'SKILL.md');
+        nodeFs.writeFileSync(f, nodeFs.readFileSync(f, 'utf8') + '\nTeam addition.\n');
+        LC.setTrustTier(r.dir, 'reviewed', 'user:priya'); LC.publishToolSkill(r.dir, 'user:priya');
+        assert.ok(/Team addition/.test(K.skillsInEffect(res, ws).skills.find((s) => s.id === x).instructions), x);
+      }
+      const { interviewSkills } = fresh('../dist/engine/skills/skillRegistry.js');
+      assert.ok(interviewSkills(K.skillsInEffect(res, ws).skills).some((s) => s.id === 'quality' || /quality/.test(s.id)), 'the interview still has the part');
+      // A copy with broken metadata leaves AutoDE's in place, with the reason.
+      const bad = K.customiseSkill(scope, 'autode-dbt-project', 'user:priya');
+      const bf = nodePath.join(bad.dir, 'SKILL.md');
+      nodeFs.writeFileSync(bf, nodeFs.readFileSync(bf, 'utf8').replace(/stageKinds: \[[^\]]*\]/, 'stageKinds: [nonsense]'));
+      LC.setTrustTier(bad.dir, 'reviewed', 'user:priya'); LC.publishToolSkill(bad.dir, 'user:priya');
+      const eff = K.skillsInEffect(res, ws);
+      assert.ok(!eff.skills.find((s) => s.id === 'autode-dbt-project').teamCopy && eff.errors.some((e) => /team copy of autode-dbt-project isn't used.*unknown stage kind "nonsense"/.test(e)), eff.errors.join(' | '));
+      // A later AutoDE release changes the original: flagged, with AutoDE's change and the team's.
+      const bundled = nodePath.join(res, 'skills', id, 'SKILL.md');
+      nodeFs.writeFileSync(bundled, nodeFs.readFileSync(bundled, 'utf8').replace('version: 1', 'version: 2').replace('## 1. Evidence first', '## 1. Evidence first\n\nNew in AutoDE v2: check the warehouse generation.'));
+      tc = K.teamCopy(scope, id);
+      assert.ok(tc.upstreamChanged && tc.baseVersion === 1 && tc.autodeVersion === 2 && tc.autodeChanges.some((x) => x.path === 'SKILL.md') && tc.inEffect, JSON.stringify({ u: tc.upstreamChanged, b: tc.baseVersion, a: tc.autodeVersion }));
+      assert.ok(/compare AutoDE's change/.test(tc.next) && inEffect().teamCopy.upstreamChanged, 'the team copy stays in effect, flagged');
+      assert.ok(/AutoDE's version changed \(v1 → v2\)/.test(SC.skillCatalog({ resourcesRoot: res, workspaceRoot: ws, home }).entries.find((e) => e.name === id && e.group === 'autode').customised.status));
+      // plugin status: AutoDE's skill changed under the install's team copy? No: the team copy is what's installed and it didn't change.
+      assert.ok(!PL.pluginStatus({ resourcesRoot: res, workspaceRoot: ws, home }).folders[0].behind.some((b) => b.id === id));
+      // Keep: AutoDE's new version becomes the base; trust and publication stand.
+      const kept = K.keepTeamCopy(scope, id, 'user:priya');
+      assert.ok(kept.provenance.base.version === 2 && !K.teamCopy(scope, id).upstreamChanged && K.teamCopy(scope, id).inEffect && kept.transitions.at(-1).action === 'keep');
+      assert.throws(() => K.keepTeamCopy(scope, id, 'user:priya'), /hasn't changed/);
+      // Reset: AutoDE's again, the copy archived; an imported skill isn't reset.
+      const r = K.resetSkill(scope, id);
+      assert.ok(!nodeFs.existsSync(c.dir) && nodeFs.existsSync(nodePath.join(r.archived, 'SKILL.md')) && /reset-skills/.test(r.archived));
+      assert.ok(!inEffect().teamCopy && /New in AutoDE v2/.test(inEffect().instructions));
+      assert.throws(() => K.resetSkill(scope, id), /no copy/);
+      const st = PL.pluginStatus({ resourcesRoot: res, workspaceRoot: ws, home });
+      assert.ok(st.behind && st.folders[0].behind.some((b) => b.id === id && /team copy was reset/.test(b.reason)), JSON.stringify(st.folders[0].behind));
+      nodeFs.mkdirSync(nodePath.join(P.toolSkillsDir(ws), 'imported-one'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(P.toolSkillsDir(ws), 'imported-one', 'SKILL.md'), '---\nname: imported-one\ndescription: A team skill.\n---\nDo it.\n');
+      assert.throws(() => K.resetSkill(scope, 'imported-one'), /imported skill/);
+      assert.throws(() => K.customiseSkill(scope, 'not-a-skill', 'x'), /No AutoDE skill/);
+    } finally { nodeFs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
+  await test('v0.57.1 POP4b: the skill editor checks as you type — format, metadata, unknown operation ids and a skill\'s own platform query (with the operation to name instead), each on its line; the metadata form changes only its lines; plugin status says when an install is behind and install brings it up to date', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const C = fresh('../dist/engine/platform/operations/catalogView.js');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const K = fresh('../dist/engine/skills/customise.js');
+    const LC = fresh('../dist/engine/skills/lifecycle.js');
+    const PL = fresh('../dist/engine/agents/plugin.js');
+    const repo = nodePath.join(__dirname, '..');
+    const catalog = L.loadCatalog({ resourcesRoot: repo });
+    const text = ['---', 'name: autode-snowflake-tuning', 'description: Tune it.', 'metadata:', '  scope: snowflake', '  stageKinds: [build, warp]', '  platforms: [snowflake]', '  version: 1', '  owner: team', '  maturity: tested', '---', '# Tune', 'Read the tables with `estate.list_tablez`.', '```sql', 'SELECT column_name FROM retail.information_schema.columns WHERE table_name = \'ORDERS\';', '```'].join('\n');
+    const f = C.lintSkillText(text, 'autode-snowflake-tuning', catalog);
+    const at = (re) => f.find((x) => re.test(x.message));
+    assert.ok(at(/unknown stage kind "warp"/) && at(/unknown stage kind "warp"/).line === 6 && at(/unknown stage kind/).severity === 'error', JSON.stringify(f));
+    assert.ok(at(/estate\.list_tablez isn't a platform operation/) && at(/list_tablez/).line === 13);
+    const q = at(/queries the platform itself/);
+    assert.ok(q && q.line === 15 && q.severity === 'warning' && /Name `estate\.list_columns` instead/.test(q.message), JSON.stringify(q));
+    assert.ok(C.lintSkillText(text.replace('name: autode-snowflake-tuning', 'name: other'), 'autode-snowflake-tuning', catalog).some((x) => /must equal the folder name/.test(x.message) && x.line === 2));
+    assert.ok(C.lintSkillText('no frontmatter', 'x', catalog).some((x) => /starts with frontmatter/.test(x.message)));
+    assert.ok(C.lintSkillText('---\nname: [\n---\nbody', 'x', catalog).some((x) => /isn't valid YAML/.test(x.message)));
+    // A team skill (not autode-) is checked for stage kinds and platforms that exist, not AutoDE's naming.
+    assert.deepStrictEqual(C.lintSkillText('---\nname: team-thing\ndescription: Something useful for the team.\nmetadata:\n  stageKinds: [build]\n  platforms: [snowflake]\n---\nDo it with `estate.list_tables`.\n', 'team-thing', catalog), []);
+    // The metadata form: description, stage kinds and platforms; the rest of the frontmatter keeps its layout.
+    const edited = K.setSkillFrontmatter(text, { description: 'Tune Snowflake: warehouses, clustering.', stageKinds: ['build', 'platform-setup'], platforms: ['snowflake'] });
+    assert.ok(/^description: "Tune Snowflake: warehouses, clustering\."$/m.test(edited) && /^  stageKinds: \[build, platform-setup\]$/m.test(edited) && /^  version: 1$/m.test(edited) && edited.endsWith(text.split('---').slice(2).join('---')), edited);
+    assert.ok(!C.lintSkillText(edited, 'autode-snowflake-tuning', catalog).some((x) => /stage kind/.test(x.message)));
+    const crlf = K.setSkillFrontmatter('---\r\nname: x\r\ndescription: old\r\n---\r\nbody\r\n', { stageKinds: ['build'] });
+    assert.ok(/description: old\r\nmetadata:\r\n  stageKinds: \[build\]\r\n---\r\nbody/.test(crlf), JSON.stringify(crlf));
+    // plugin status.
+    const tmp = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop4b-plugin-'));
+    try {
+      const ws = nodePath.join(tmp, 'ws'); const home = nodePath.join(tmp, 'home'); nodeFs.mkdirSync(ws, { recursive: true });
+      const input = { resourcesRoot: repo, workspaceRoot: ws, home };
+      assert.ok(!PL.pluginStatus(input).folders.length && /not installed/.test(PL.pluginStatus(input).summary));
+      const entry = { command: 'autode', args: ['mcp'] };
+      PL.installPlugin({ ...input, host: 'claude', scope: 'project', entry });
+      PL.installPlugin({ ...input, host: 'copilot', scope: 'user', entry });
+      let s = PL.pluginStatus(input);
+      assert.ok(!s.behind && s.folders.length === 2 && s.folders.every((x) => x.upToDate > 30), JSON.stringify(s.folders.map((x) => [x.host, x.upToDate])));
+      const id = 'autode-de-mapping';
+      const c = K.customiseSkill({ resourcesRoot: repo, workspaceRoot: ws }, id, 'user:priya');
+      nodeFs.appendFileSync(nodePath.join(c.dir, 'SKILL.md'), '\nTeam mapping rule.\n');
+      LC.setTrustTier(c.dir, 'reviewed', 'user:priya'); LC.publishToolSkill(c.dir, 'user:priya');
+      s = PL.pluginStatus(input);
+      assert.ok(s.behind && s.folders.every((x) => x.behind.some((b) => b.id === id && /team's copy \(v1\) was published/.test(b.reason))) && /autode plugin install --host claude --scope project/.test(s.summary), s.summary);
+      PL.installPlugin({ ...input, host: 'claude', scope: 'project', entry });
+      s = PL.pluginStatus(input);
+      assert.ok(!s.folders.find((x) => x.host === 'claude').behind.length && s.folders.find((x) => x.host === 'copilot').behind.length === 1, 'the reinstalled folder is up to date, the other still behind');
+      nodeFs.appendFileSync(nodePath.join(c.dir, 'SKILL.md'), 'And another.\n');
+      LC.setTrustTier(c.dir, 'reviewed', 'user:priya'); LC.publishToolSkill(c.dir, 'user:priya');
+      assert.ok(PL.pluginStatus(input).folders.find((x) => x.host === 'claude').behind.some((b) => /new version \(v2\)/.test(b.reason)));
+      // An install from before 0.57.1 has no record of what each skill was.
+      const manifest = nodePath.join(home, '.copilot', 'skills', '.autode-installed.json');
+      nodeFs.writeFileSync(manifest, JSON.stringify({ installedBy: 'autode', skills: [id] }));
+      assert.ok(/before AutoDE 0\.57\.1/.test(PL.pluginStatus(input).folders.find((x) => x.host === 'copilot').behind[0].reason));
+    } finally { nodeFs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
+  await test('v0.57.1 POP4b: Request access drafts a runbook from the platform definition\'s grant operations (Snowflake: database, schema, select, account usage; Redshift schemas unqualified; defaults from the connection and the conformance run), proposed in the active problem over MCP and the CLI; a capability without grants is a warning, never a guessed statement; the runbook passes the engine\'s checks', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const C = fresh('../dist/engine/platform/operations/catalogView.js');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const RB = fresh('../dist/engine/runner/runbook.js');
+    const { loadConnectionsConfig } = fresh('../dist/engine/platform/connectionsConfig.js');
+    const repo = nodePath.join(__dirname, '..');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop4b-access-'));
+    let client;
+    try {
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'config'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), 'connections:\n  - platform: snowflake\n    account: ACME\n    database: RETAIL\n    schema: SHOP\n    snowflakeRole: AUTODE_READER\n  - platform: redshift\n    database: dev\n    schema: sales\n');
+      const conns = loadConnectionsConfig(ws).connections;
+      const sf = conns.find((c) => c.platform === 'snowflake'); const rs = conns.find((c) => c.platform === 'redshift');
+      const scope = { resourcesRoot: repo, workspaceRoot: ws };
+      assert.ok(!L.loadCatalog(scope).errors.length, L.loadCatalog(scope).errors.join(' | '));
+      const d = C.accessRunbook(scope, { connection: sf.id });
+      const sql = d.runbook.steps.map((s) => s.sql);
+      assert.deepStrictEqual(sql, ['GRANT USAGE ON DATABASE RETAIL TO ROLE AUTODE_READER', 'GRANT USAGE ON SCHEMA RETAIL.SHOP TO ROLE AUTODE_READER', 'GRANT SELECT ON ALL TABLES IN SCHEMA RETAIL.SHOP TO ROLE AUTODE_READER', 'GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE AUTODE_READER'], sql.join(' | '));
+      assert.ok(d.runbook.steps.every((s) => s.kind === 'sql' && s.rollback.procedure && /AUTODE_READER gets what/.test(s.expect)) && d.runbook.connectionId === sf.id);
+      const check = RB.checkRunbook(d.runbook, { workspaceRoot: ws, connections: conns, policy: fresh('../dist/engine/runner/policy.js').loadRunbookPolicy(ws) });
+      assert.ok(check.ok && check.steps.every((s) => s.class === 'change'), JSON.stringify(check.errors));
+      // Only the capabilities asked for; Redshift has no databases above its schemas; a capability without grants is a warning.
+      const r = C.accessRunbook(scope, { connection: rs.id, role: 'autode', capabilities: ['estate', 'performance.assess'] });
+      assert.deepStrictEqual(r.runbook.steps.map((s) => s.sql), ['GRANT USAGE ON SCHEMA sales TO ROLE autode', 'GRANT SELECT ON ALL TABLES IN SCHEMA sales TO ROLE autode']);
+      assert.ok(r.warnings.some((w) => /performance\.assess: no grant operation; ask for it in words: SELECT on SVV_TABLE_INFO/.test(w)), r.warnings.join(' | '));
+      assert.throws(() => C.accessRunbook(scope, { connection: rs.id }), /Name the role/);
+      assert.throws(() => C.accessRunbook(scope, { connection: rs.id, role: 'x', capabilities: ['performance.assess'] }), /Nothing to grant/);
+      // After a conformance run, only what it found short.
+      nodeFs.mkdirSync(nodePath.join(ws, '.autode', 'local'), { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'local', 'conformance.json'), JSON.stringify({ [sf.id]: { connection: sf.id, platform: 'snowflake', at: '2026-11-01T10:00:00Z', summary: 's', capabilities: { estate: { status: 'ok', operations: [] }, lineage: { status: 'partly', operations: [] } } } }));
+      const short = C.accessRunbook(scope, { connection: sf.id });
+      assert.deepStrictEqual(short.runbook.steps.map((s) => s.sql), ['GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE AUTODE_READER']);
+      assert.ok(/found them short/.test(short.runbook.reason));
+      // The Privileges tab shows each capability's grant operations; the operations say what relies on them.
+      assert.ok(C.platformPage(scope, 'snowflake').privileges.find((x) => x.capability === 'lineage').grants.includes('governance.grant_account_usage'));
+      assert.ok(C.operationPage(scope, 'governance.grant_database_usage').reliedOnBy.engine.some((e) => /Request access.*snowflake estate/.test(e)));
+      // Surfaces: without a problem it comes back to show; with one it is proposed as a runbook decision.
+      client = await mcpSession(ws);
+      let m = (await client.callTool({ name: 'autode_platform_request_access', arguments: { connectionId: sf.id } })).structuredContent;
+      assert.ok(m.proposed === false && /No active problem/.test(m.next) && m.runbook.steps.length === 1, JSON.stringify(m).slice(0, 300));
+      await client.close(); client = undefined;
+      await cli(['problems', 'new', 'Lineage for the shop', '--workspace', ws]);
+      const viaCli = await cli(['platform', 'request-access', '--connection', sf.id, '--capability', 'estate', '--workspace', ws, '--json']);
+      assert.strictEqual(viaCli.code, 0, viaCli.out);
+      const j = viaCli.json();
+      assert.ok(j.proposed && j.decision && j.decision.id, viaCli.out.slice(0, 600));
+      const human = await cli(['platform', 'request-access', '--connection', rs.id, '--role', 'autode', '--workspace', ws]);
+      assert.ok(/GRANT USAGE ON SCHEMA sales TO ROLE autode/.test(human.out) && /Proposed as/.test(human.out), human.out);
+      const listed = await cli(['decisions', 'list', '--workspace', ws, '--json']);
+      assert.ok(listed.out.includes('Access for AutoDE'), listed.out.slice(0, 500));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.57.1 POP4b: the operation form comes from the JSON Schema (labels and descriptions for every field); saving checks it as the loader does and writes a team draft (a shipped operation is copied first, AutoDE\'s file never written); a read that writes is refused; the CLI customise, lint, keep and reset and the MCP tools; the catalog view is wired', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const F = fresh('../dist/engine/platform/operations/form.js');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const repo = nodePath.join(__dirname, '..');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop4b-form-'));
+    let client;
+    try {
+      const scope = { resourcesRoot: repo, workspaceRoot: ws };
+      const shipped = nodeFs.readFileSync(nodePath.join(repo, 'platform-operations', 'estate', 'list-tables.yaml'), 'utf8');
+      const form = F.operationForm(scope, 'estate.list_tables');
+      assert.ok(form.origin === 'shipped' && /team copy/.test(form.next));
+      assert.deepStrictEqual(form.fields.map((x) => x.key), ['id', 'title', 'description', 'kind', 'content', 'area']);
+      assert.ok(form.fields.every((x) => x.label && x.description), 'every field has a label and a description');
+      assert.ok(form.fields.find((x) => x.key === 'kind').control === 'select' && form.fields.find((x) => x.key === 'id').control === 'readonly');
+      assert.ok(form.params.columns.some((x) => x.key === 'type' && x.options.includes('identifier')) && form.params.rows.length > 0);
+      assert.ok(form.platforms.some((p) => p.platform === 'snowflake' && p.transport === 'sql' && /SELECT/i.test(p.value)));
+      const edit = { fields: { title: 'List tables (team)' }, params: form.params.rows, platforms: {} };
+      // A read whose statement writes is refused; nothing is written.
+      const bad = F.saveOperationEdit(scope, 'estate.list_tables', { ...edit, platforms: { snowflake: 'DROP TABLE x' } });
+      assert.ok(!bad.saved && bad.problems.some((p) => /snowflake: a read operation must be one read-only statement/.test(p)), bad.problems.join(' | '));
+      assert.ok(!nodeFs.existsSync(nodePath.join(ws, bad.file)));
+      assert.ok(F.checkOperationEdit(scope, 'estate.list_tables', { ...edit, fields: { title: 'x' } }).some((p) => /title/.test(p)), 'the schema\'s rules as you type');
+      const ok = F.saveOperationEdit(scope, 'estate.list_tables', edit);
+      assert.ok(ok.saved && !ok.problems.length, ok.problems.join(' | '));
+      const team = L.loadCatalog(scope).operations.find((o) => o.item.id === 'estate.list_tables' && o.origin === 'team');
+      assert.ok(team && team.status === 'draft' && team.item.title === 'List tables (team)', 'a draft until approved');
+      assert.strictEqual(L.operationById(L.loadCatalog(scope), 'estate.list_tables').origin, 'shipped', 'the shipped one runs meanwhile');
+      assert.strictEqual(nodeFs.readFileSync(nodePath.join(repo, 'platform-operations', 'estate', 'list-tables.yaml'), 'utf8'), shipped, 'AutoDE\'s file untouched');
+      assert.strictEqual(F.operationForm(scope, 'estate.list_tables').origin, 'team');
+      // CLI: customise, lint (the copy's text, by line), keep refused without a change, reset a person's act.
+      const W = ['--workspace', ws];
+      const cu = await cli(['skills', 'customise', 'autode-de-mapping', ...W]);
+      assert.ok(cu.code === 0 && /Copied autode-de-mapping to \.autode\/config\/skills\/tool-skills\/autode-de-mapping\/SKILL\.md \(draft\)/.test(cu.out), cu.out);
+      const skillFile = nodePath.join(ws, '.autode', 'config', 'skills', 'tool-skills', 'autode-de-mapping', 'SKILL.md');
+      nodeFs.appendFileSync(skillFile, '\nCheck with `estate.list_partitions` first.\n');
+      const lint = await cli(['skills', 'lint', 'autode-de-mapping', ...W]);
+      assert.ok(lint.code === 1 && /\(team copy\)/.test(lint.out) && /SKILL\.md:\d+ estate\.list_partitions isn't a platform operation/.test(lint.out), lint.out);
+      const show = await cli(['skills', 'show', 'autode-de-mapping', ...W]);
+      assert.ok(/Team copy: .* not in effect \(it changed since it was reviewed\)/.test(show.out) && /The team changed: SKILL\.md changed/.test(show.out) && /Next: autode skills review autode-de-mapping/.test(show.out), show.out);
+      assert.ok(/To adapt it: autode skills customise autode-de-modelling/.test((await cli(['skills', 'show', 'autode-de-modelling', ...W])).out));
+      assert.strictEqual((await cli(['skills', 'keep', 'autode-de-mapping', ...W])).code, 4);
+      assert.strictEqual((await cli(['skills', 'reset', 'autode-de-mapping', ...W])).code, 4, 'reset is a person\'s act at a terminal');
+      const reset = await cli(['skills', 'reset', 'autode-de-mapping', ...W], { interactive: true, answers: ['reset'] });
+      assert.ok(reset.code === 0 && /AutoDE's skill is in effect/.test(reset.out) && !nodeFs.existsSync(skillFile), reset.out);
+      assert.strictEqual((await cli(['plugin', 'status', ...W])).code, 0);
+      // MCP: check, customise (a draft), plugin status.
+      client = await mcpSession(ws);
+      const call = async (name, args) => { const r = await client.callTool({ name, arguments: args }); return r.isError ? { error: r.content[0].text } : r.structuredContent; };
+      const chk = await call('autode_skill_check', { id: 'autode-de-mapping', text: '---\nname: autode-de-mapping\ndescription: d\n---\nUse `estate.list_nopes`.\n' });
+      assert.ok(!chk.ok && chk.findings.some((x) => /list_nopes/.test(x.message)), JSON.stringify(chk));
+      const made = await call('autode_skill_customise', { id: 'autode-de-mapping' });
+      assert.ok(made.created && made.status === 'draft' && /stays in effect until a person reviews/.test(made.next), JSON.stringify(made));
+      assert.ok(/not installed/.test((await call('autode_plugin_status', {})).summary));
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    const src = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', f), 'utf8');
+    const page = src('media/platforms.html');
+    assert.ok(/data-skill-action/.test(page) && /data-save-meta/.test(page) && /data-opform/.test(page) && /data-request-access/.test(page) && /checkMeta/.test(page) && /checkOperation/.test(page), 'the view has the actions and checks as you type');
+    assert.ok(/field-help/.test(page) && /aria-describedby/.test(page), 'every field has a description, read by screen readers');
+    assert.ok(/registerSkillDiagnostics/.test(src('src/extension.ts')), 'SKILL.md is checked as it is typed');
+    // The one rule: no caller picks AutoDE's bundled skills directly where a team copy could win.
+    const allowed = new Set(['src/engine/agents/definitions.ts', 'src/engine/skills/customise.ts', 'src/engine/agents/skillCatalog.ts', 'src/engine/skills/port.ts', 'src/engine/agents/plugin.ts']);
+    const walk = (d) => nodeFs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(nodePath.join(d, e.name)) : e.name.endsWith('.ts') ? [nodePath.join(d, e.name)] : []);
+    for (const f of walk(nodePath.join(__dirname, '..', 'src'))) {
+      const rel = nodePath.relative(nodePath.join(__dirname, '..'), f).split(nodePath.sep).join('/');
+      if (!allowed.has(rel)) assert.ok(!/loadSkillPack\(/.test(nodeFs.readFileSync(f, 'utf8')), `${rel} picks skills with loadSkillPack: use skillsInEffect so a published team copy wins`);
+    }
+    assert.ok(!/loadSkillPack\(/.test(src('src/engine/agents/plugin.ts')), 'the plugin installs the skills in effect');
   });
 
   // ── v0.56.7 PLN1b: the clarification round and re-planning (docs/specs/workflow-planning.md §3.4, §3.6) ──

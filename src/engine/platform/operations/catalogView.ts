@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Catalog, loadCatalog } from './load';
+import { Catalog, loadCatalog, operationById, platformById } from './load';
+import { bindOperation } from './execute';
+import type { Runbook, RunbookStep } from '../../runner/runbook';
 import { ConnectionTarget, OperationSummary, runOnConnection, summarize } from './service';
 import { Loaded, PlatformCapability, PlatformDefinition, PlatformOperation } from './types';
 import { OperationRun, lastRuns, readOperationRuns } from './runLog';
@@ -10,6 +12,11 @@ import { CatalogEntry, skillCatalog } from '../../agents/skillCatalog';
 import { listPrimitives } from '../../transforms/registry';
 import { SqlDialect } from '../../transforms/types';
 import { layoutPath } from '../../workspaceLayout';
+import { parseYaml } from '../../context/Yaml';
+import { parseSkillMarkdown } from '../../skills/toolSkills';
+import { AUTODE_SKILL_NAME, SKILL_PLATFORMS, checkSkillFormat, skillMeta } from '../../agents/definitions';
+import { STAGE_KINDS } from '../../workflows/stageKinds';
+import { TeamCopyState, teamCopy } from '../../skills/customise';
 
 /**
  * POP4a, the operations and skills catalog (docs/specs/platform-operations.md §6.3): what AutoDE does on each
@@ -191,7 +198,9 @@ export function skillTexts(scope: CatalogScope): { texts: SkillText[]; entries: 
   try { entries = skillCatalog({ resourcesRoot: scope.resourcesRoot, workspaceRoot: scope.workspaceRoot ?? scope.resourcesRoot, home: scope.home ?? '' }).entries; } catch { /* no skills */ }
   const texts: SkillText[] = [];
   for (const e of entries) {
-    const dirs = e.group === 'autode' ? [path.join(scope.resourcesRoot, 'skills', e.name)] : e.group === 'workspace' && scope.workspaceRoot ? [path.join(layoutPath(scope.workspaceRoot, 'toolSkills'), e.name)] : [];
+    // An AutoDE skill's text is the one in effect: the team's published copy where there is one (POP4b).
+    const own = e.customised?.inEffect && scope.workspaceRoot ? path.join(layoutPath(scope.workspaceRoot, 'toolSkills'), e.name) : path.join(scope.resourcesRoot, 'skills', e.name);
+    const dirs = e.group === 'autode' ? [own] : e.group === 'workspace' && scope.workspaceRoot ? [path.join(layoutPath(scope.workspaceRoot, 'toolSkills'), e.name)] : [];
     for (const d of dirs) {
       const file = path.join(d, 'SKILL.md');
       try { texts.push({ id: e.name, group: e.group, text: fs.readFileSync(file, 'utf8'), stageKinds: e.stageKinds, platforms: e.platforms, file }); } catch { /* not readable */ }
@@ -206,33 +215,101 @@ export function skillTexts(scope: CatalogScope): { texts: SkillText[]; entries: 
  */
 const PLATFORM_QUERY = /\b(information_schema|account_usage|pg_catalog|(svv|stv|stl|sys)_[a-z_]+|system\.(query|access|information_schema|billing|compute|lakeflow)\b|show\s+(tables|grants|schemas|databases|columns|views|warehouses)|describe\s|desc\s+table)/i;
 
+/** A line of a skill's text the checks flag: an operation id that doesn't exist, or a platform query it carries itself. */
+export interface SkillTextFinding { line: number; kind: 'unknown' | 'sql'; text: string; id?: string; suggestion?: string }
+
 /** The operations a skill's text names (each with the section that does), the unknown ids it names, and platform queries it carries itself. */
-export function skillOperations(text: string, catalog: Catalog): { uses: Array<{ id: string; section: string }>; unknown: string[]; sql: string[] } {
+export function skillOperations(text: string, catalog: Catalog): { uses: Array<{ id: string; section: string }>; unknown: string[]; sql: string[]; findings: SkillTextFinding[] } {
   const known = new Set(catalog.operations.map((o) => o.item.id));
   const uses = new Map<string, string>();
   const unknown = new Set<string>();
+  const findings: SkillTextFinding[] = [];
   let section = '(top)';
   let inSql = false;
   const sql: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
+  const query = (line: string, n: number) => {
+    sql.push(`"${line.trim().slice(0, 80)}" under "${section}"`);
+    const suggestion = suggestOperation(line, catalog);
+    findings.push({ line: n, kind: 'sql', text: line.trim().slice(0, 120), ...(suggestion ? { suggestion } : {}) });
+  };
+  text.split(/\r?\n/).forEach((line, i) => {
+    const n = i + 1;
     const h = /^#{1,6}\s+(.+)$/.exec(line);
     if (h && !inSql) section = h[1].trim();
-    if (/^```\s*sql\b/i.test(line.trim())) { inSql = true; continue; }
+    if (/^```\s*sql\b/i.test(line.trim())) { inSql = true; return; }
     if (inSql) {
       if (line.trim().startsWith('```')) inSql = false;
-      else if (PLATFORM_QUERY.test(line)) sql.push(`"${line.trim().slice(0, 80)}" under "${section}"`);
-      continue;
+      else if (PLATFORM_QUERY.test(line)) query(line, n);
+      return;
     }
-    if (/^\s*(SELECT|SHOW|DESCRIBE)\b/i.test(line) && PLATFORM_QUERY.test(line)) sql.push(`"${line.trim().slice(0, 80)}" under "${section}"`);
+    if (/^\s*(SELECT|SHOW|DESCRIBE)\b/i.test(line) && PLATFORM_QUERY.test(line)) query(line, n);
     for (const m of line.matchAll(/`([a-z][a-z0-9_.]*)`/g)) {
       const id = m[1];
       if (known.has(id)) { if (!uses.has(id)) uses.set(id, section); }
       // Shaped like an operation id (estate.list_tables: an area, then a verb_noun); a dotted field name (governance.columns) isn't.
-      else if (OPERATION_ID.test(id) && id.includes('_')) unknown.add(id);
+      else if (OPERATION_ID.test(id) && id.includes('_')) { unknown.add(id); findings.push({ line: n, kind: 'unknown', text: id, id }); }
     }
     for (const id of known) if (!uses.has(id) && new RegExp(`(^|[^\\w.])${id.replace(/\./g, '\\.')}([^\\w.]|$)`).test(line)) uses.set(id, section);
+  });
+  return { uses: [...uses].map(([id, s]) => ({ id, section: s })), unknown: [...unknown].sort(), sql, findings };
+}
+
+/**
+ * The read operation that already does what a line of a skill queries itself: the one whose statements name the
+ * same system views (the line's dotted names, then its SHOW or DESCRIBE), so the skill can name it instead.
+ */
+export function suggestOperation(line: string, catalog: Catalog): string | undefined {
+  const lower = line.toLowerCase();
+  const names = (lower.match(/[a-z_][a-z0-9_$]*(\.[a-z_][a-z0-9_$]*)+/g) ?? []).map((n) => n.split('.').slice(-2).join('.'));
+  const show = /\b(show\s+\w+|describe\s+\w+)/.exec(lower)?.[1].replace(/\s+/g, ' ');
+  let best: { id: string; score: number } | undefined;
+  for (const o of catalog.operations) {
+    if (o.item.kind !== 'read' || o.status !== 'approved') continue;
+    const text = Object.values(o.item.platforms).map((p) => `${p.sql ?? ''} ${(p.cli ?? []).join(' ')}`).join(' ').toLowerCase().replace(/\s+/g, ' ');
+    const score = names.filter((n) => text.includes(n)).length * 2 + (show && text.includes(show) ? 1 : 0);
+    if (score && (!best || score > best.score)) best = { id: o.item.id, score };
   }
-  return { uses: [...uses].map(([id, s]) => ({ id, section: s })), unknown: [...unknown].sort(), sql };
+  return best?.id;
+}
+
+export interface SkillLintFinding { line: number; severity: 'error' | 'warning'; message: string }
+
+/**
+ * Checks a skill's text as it is typed (POP4b): the Agent Skills format, AutoDE's metadata (stage kinds and
+ * platforms that exist; for an `autode-` name, the registry fields), operation ids that don't exist, and platform
+ * queries the skill carries itself, with the operation to name instead. `folder` is the skill's folder name.
+ */
+export function lintSkillText(text: string, folder: string, catalog: Catalog): SkillLintFinding[] {
+  const out: SkillLintFinding[] = [];
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const lineOf = (key: string) => { const i = lines.findIndex((l) => new RegExp(`^\\s*${key}\\s*:`).test(l)); return i >= 0 ? i + 1 : 1; };
+  const fm = /^---\n([\s\S]*?)\n---/.exec(lines.join('\n'));
+  if (!fm) out.push({ line: 1, severity: 'error', message: 'A skill starts with frontmatter between --- lines (name, description, metadata).' });
+  else {
+    let parsed: unknown;
+    try { parsed = parseYaml(fm[1]); } catch (err) { out.push({ line: 2, severity: 'error', message: `The frontmatter isn't valid YAML: ${err instanceof Error ? err.message : String(err)}` }); }
+    if (parsed !== undefined) {
+      const p = parseSkillMarkdown(text);
+      for (const e of checkSkillFormat(folder, p.name, p.description, p.body)) out.push({ line: /^name|"name|name /.test(e) ? lineOf('name') : /description/.test(e) ? lineOf('description') : fm[0].split('\n').length + 1, severity: 'error', message: e });
+      const meta = p.metadata;
+      if (AUTODE_SKILL_NAME.test(folder)) {
+        for (const e of skillMeta(folder, meta, Object.keys(STAGE_KINDS)).errors) {
+          const key = /metadata\.(\w+)/.exec(e)?.[1];
+          out.push({ line: key ? lineOf(key) : lineOf('metadata'), severity: 'error', message: e });
+        }
+      } else {
+        const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+        for (const k of list(meta?.stageKinds)) if (!(k in STAGE_KINDS)) out.push({ line: lineOf('stageKinds'), severity: 'error', message: `metadata.stageKinds: unknown stage kind "${k}" (one of ${Object.keys(STAGE_KINDS).join(', ')}).` });
+        for (const x of list(meta?.platforms)) if (!(SKILL_PLATFORMS as readonly string[]).includes(x)) out.push({ line: lineOf('platforms'), severity: 'error', message: `metadata.platforms: unknown platform "${x}" (one of ${SKILL_PLATFORMS.join(', ')}).` });
+      }
+    }
+  }
+  for (const f of skillOperations(text, catalog).findings) {
+    out.push(f.kind === 'unknown'
+      ? { line: f.line, severity: 'error', message: `${f.text} isn't a platform operation (autode platform operations lists them; propose one if it is missing).` }
+      : { line: f.line, severity: 'warning', message: `This queries the platform itself; reading the platform is an operation's job. ${f.suggestion ? `Name \`${f.suggestion}\` instead.` : 'Name an operation, or propose one.'}` });
+  }
+  return out.sort((a, b) => a.line - b.line);
 }
 
 export interface OperationPage extends OperationSummary {
@@ -255,7 +332,9 @@ export function operationPage(scope: CatalogScope, id: string, catalog: Catalog 
   const defs = catalog.platforms.filter((p) => p.status === 'approved').map((p) => p.item);
   const engine = [
     ...ENGINE_FEATURES.filter((f) => f.operations?.includes(id) || (f.capability && defs.some((d) => (d.capabilities[f.capability!]?.operations ?? []).includes(id)))).map((f) => f.feature),
-    ...(defs.some((d) => d.versionOperation === id) ? ['Platform version (read before each run, to pick the implementation)'] : [])
+    ...(defs.some((d) => d.versionOperation === id) ? ['Platform version (read before each run, to pick the implementation)'] : []),
+    // POP4b: a capability's grant operations are what Request access drafts its runbook from.
+    ...(defs.some((d) => Object.values(d.capabilities).some((c) => c.grants?.includes(id))) ? [`Request access (the Privileges tab, autode platform request-access): ${defs.flatMap((d) => Object.entries(d.capabilities).filter(([, c]) => c.grants?.includes(id)).map(([cap]) => `${d.id} ${cap}`)).join(', ')}`] : [])
   ];
   const { texts } = skillTexts(scope);
   const skills = texts.flatMap((t) => { const u = skillOperations(t.text, catalog).uses.find((x) => x.id === id); return u ? [{ id: t.id, section: u.section }] : []; });
@@ -284,6 +363,12 @@ export interface SkillPage {
   operations: Array<{ id: string; section: string; state: 'ok' | 'draft' | 'failing' }>;
   /** `skills lint`: operation ids it names that don't exist, and SQL it carries itself. */
   lint: { unknown: string[]; sql: string[] };
+  /** POP4b: the team's copy of an AutoDE skill: whether it is in effect, AutoDE's change since, the next step, and its checks. */
+  teamCopy?: Omit<TeamCopyState, 'state' | 'dir'> & { status: string; tier: string; version: number; history: Array<{ at: string; by: string; action: string; to: string; version: number }>; findings: SkillLintFinding[] };
+  /** What a person can do here: customise (AutoDE's, no copy yet), edit (a team skill or copy), reset, keep. */
+  actions: Array<'customise' | 'edit' | 'reset' | 'keep' | 'review' | 'publish'>;
+  /** The metadata form of an editable skill (a team copy or a team skill): its values and the choices. */
+  meta?: { file: string; description: string; stageKinds: string[]; platforms: string[]; allStageKinds: string[]; allPlatforms: string[] };
 }
 
 /** A skill's page: its operations (with their state), and what `skills lint` flags. */
@@ -295,10 +380,30 @@ export function skillPage(scope: CatalogScope, id: string, catalog: Catalog = lo
   const found = t ? skillOperations(t.text, catalog) : { uses: [], unknown: [], sql: [] };
   const last = lastRuns(readOperationRuns(scope.workspaceRoot));
   const failing = (op: string) => [...last.values()].some((r) => r.operation === op && !r.ok);
+  const copy = e.group === 'autode' && scope.workspaceRoot ? teamCopy({ resourcesRoot: scope.resourcesRoot, workspaceRoot: scope.workspaceRoot }, id) : undefined;
+  let tc: SkillPage['teamCopy'];
+  if (copy) {
+    const { state, dir: _dir, ...rest } = copy;
+    const sc = state.sidecar;
+    tc = { ...rest, status: sc.status, tier: state.effectiveTier, version: sc.version, history: sc.transitions.map((x) => ({ at: x.at, by: x.by, action: x.action, to: x.to, version: x.version })), findings: lintSkillText(fs.readFileSync(copy.file, 'utf8'), id, catalog) };
+  }
+  const actions: SkillPage['actions'] = e.group === 'autode'
+    ? (copy ? ['edit', ...(copy.state.effectiveTier === 'unreviewed' ? ['review' as const] : []), ...(copy.state.sidecar.status !== 'published' || copy.state.sidecar.publishedChecksum !== copy.state.checksum ? ['publish' as const] : []), ...(copy.upstreamChanged ? ['keep' as const] : []), 'reset'] : ['customise'])
+    : e.group === 'workspace' ? ['edit'] : [];
+  const editable = copy?.file ?? (e.group === 'workspace' ? t?.file : undefined);
+  let meta: SkillPage['meta'];
+  if (editable) {
+    const p = parseSkillMarkdown(fs.readFileSync(editable, 'utf8'));
+    const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+    meta = { file: editable, description: p.description ?? '', stageKinds: list(p.metadata?.stageKinds), platforms: list(p.metadata?.platforms), allStageKinds: Object.keys(STAGE_KINDS), allPlatforms: [...SKILL_PLATFORMS] };
+  }
   return {
+    ...(meta ? { meta } : {}),
     id, group: e.group, summary: e.summary, stageKinds: e.stageKinds, platforms: e.platforms, ...(e.version !== undefined ? { version: e.version } : {}), ...(e.maturity ? { maturity: e.maturity } : {}), ...(e.status ? { status: e.status } : {}), ...(t?.file ? { file: t.file } : {}),
     operations: found.uses.map((u) => ({ ...u, state: catalog.operations.some((o) => o.item.id === u.id && o.status === 'approved') ? (failing(u.id) ? 'failing' as const : 'ok' as const) : 'draft' as const })),
-    lint: { unknown: found.unknown, sql: found.sql }
+    lint: { unknown: found.unknown, sql: found.sql },
+    ...(tc ? { teamCopy: tc } : {}),
+    actions
   };
 }
 
@@ -318,7 +423,7 @@ export interface PlatformPage {
   skills: Array<{ id: string; group: string; summary: string; stageKinds: string[]; operations?: string[]; availability?: string }>;
   tools?: { cli?: { command: string; minVersion?: string; install?: string; versionArgs?: string[]; profiles: boolean }; api?: string };
   primitives?: { dialect: string; primitives: Array<{ kind: string; description: string; compiles: boolean; reason?: string }> };
-  privileges: Array<{ capability: string; privileges: string }>;
+  privileges: Array<{ capability: string; privileges: string; grants?: string[] }>;
   health: { failing: OperationRun[]; recent: OperationRun[]; drafts: string[]; conformance: Array<{ connection: string; at: string; summary: string }> };
 }
 
@@ -377,12 +482,96 @@ export function platformPage(scope: CatalogScope, id: string, catalog: Catalog =
     skills: forPlatform.map((e) => { const t = texts.find((x) => x.id === e.name); return { id: e.name, group: e.group, summary: e.summary, stageKinds: e.stageKinds, ...(t ? { operations: skillOperations(t.text, catalog).uses.map((u) => u.id) } : {}), ...(e.availability ? { availability: e.availability } : {}) }; }),
     ...(def.access ? { tools: { ...(def.access.cli ? { cli: { command: def.access.cli.command, ...(def.access.cli.minVersion ? { minVersion: def.access.cli.minVersion } : {}), ...(def.access.cli.install ? { install: def.access.cli.install } : {}), ...(def.access.cli.versionArgs ? { versionArgs: def.access.cli.versionArgs } : {}), profiles: !!def.access.cli.listProfiles } } : {}), ...(def.access.api ? { api: def.access.api.name } : {}) } } : {}),
     ...(compiles ? { primitives: { dialect: def.dialect!.compile!, primitives: primitivesFor(def.dialect!.compile as SqlDialect) } } : {}),
-    privileges: Object.entries(def.capabilities).filter(([, c]) => c.privileges).map(([cap, c]) => ({ capability: cap, privileges: c.privileges! })),
+    privileges: Object.entries(def.capabilities).filter(([, c]) => c.privileges).map(([cap, c]) => ({ capability: cap, privileges: c.privileges!, ...(c.grants?.length ? { grants: c.grants } : {}) })),
     health: {
       failing: [...last.values()].filter((r) => !r.ok),
       recent: runs.slice(-20).reverse(),
       drafts: catalog.operations.filter((o) => o.status === 'draft' && o.item.platforms[id]).map((o) => o.item.id).concat(catalog.platforms.filter((p) => p.item.id === id && p.status === 'draft').map((p) => `${p.item.id} (the platform definition)`)),
       conformance: conns.map((c) => conformance[c.id]).filter((x): x is ConformanceResult => !!x).map((x) => ({ connection: x.connection, at: x.at, summary: x.summary }))
     }
+  };
+}
+
+// ── Request access (POP4b) ──────────────────────────────────────────────────
+
+export interface AccessRequest {
+  connection: string;
+  /** The role AutoDE connects as; defaults to the connection's role field (a field named …role), else its user. */
+  role?: string;
+  /** The capabilities to grant; default: those a conformance run found short, else every one with grants. */
+  capabilities?: string[];
+  /** Databases (catalogs) and schemas in scope; default: the connection's own. */
+  databases?: string[];
+  schemas?: string[];
+}
+
+export interface AccessDraft {
+  runbook: Runbook;
+  capabilities: Array<{ capability: string; privileges?: string; grants: string[] }>;
+  /** What the runbook can't grant (no grant operation, or no implementation for the platform), and missing names. */
+  warnings: string[];
+}
+
+/**
+ * *Request access* (docs/specs/platform-operations.md §6.3, the Privileges tab): a runbook that grants AutoDE's role
+ * what its capabilities need, for a person who administers the platform to review and run. The steps are the grant
+ * operations each capability names in its platform definition (`grants`), bound to the role, databases and schemas
+ * in scope: no statement is written here. A capability without grant operations stays a warning with its privileges
+ * in words, never a guessed statement.
+ */
+export function accessRunbook(scope: CatalogScope, req: AccessRequest, catalog: Catalog = loadCatalog(scope)): AccessDraft {
+  const conn = connectionsOf(scope).find((c) => c.id === req.connection);
+  if (!conn) throw new Error(`No connection ${req.connection} in this workspace.`);
+  const def = platformById(catalog, conn.platform);
+  if (!def) throw new Error(`No platform definition for ${conn.platform}.`);
+  const fieldRole = Object.entries(conn.fields).find(([k, v]) => /role$/i.test(k) && v)?.[1] ?? conn.fields.username;
+  const role = (req.role ?? fieldRole ?? '').trim();
+  if (!role) throw new Error(`Name the role AutoDE connects as on ${conn.id} (its connection names no role or user).`);
+  const withGrants = Object.entries(def.capabilities).filter(([, c]) => c.support !== 'not_applicable' && c.grants?.length).map(([k]) => k);
+  const conformance = readConformance(scope.workspaceRoot)[conn.id];
+  const short = conformance ? withGrants.filter((k) => conformance.capabilities[k] && conformance.capabilities[k].status !== 'ok') : [];
+  const caps = req.capabilities?.length ? req.capabilities : short.length ? short : withGrants;
+  const warnings: string[] = [];
+  const databases = (req.databases?.length ? req.databases : [conn.fields.database ?? conn.fields.catalog]).filter((x): x is string => !!x);
+  const rawSchemas = (req.schemas?.length ? req.schemas : [conn.fields.schema]).filter((x): x is string => !!x);
+  const steps: RunbookStep[] = [];
+  const seen = new Set<string>();
+  const out: AccessDraft['capabilities'] = [];
+  for (const cap of caps) {
+    const c = def.capabilities[cap];
+    if (!c) { warnings.push(`${def.title} has no capability ${cap}.`); continue; }
+    if (!c.grants?.length) { warnings.push(`${cap}: no grant operation; ask for it in words: ${c.privileges ?? 'see the platform\'s documentation'}`); continue; }
+    out.push({ capability: cap, ...(c.privileges ? { privileges: c.privileges } : {}), grants: c.grants });
+    // A platform whose grants name databases has schemas under them: qualify a bare schema with each database.
+    const hasDatabases = c.grants.some((g) => operationById(catalog, g)?.item.params.some((p) => p.name === 'database'));
+    const schemas = hasDatabases ? rawSchemas.flatMap((s) => s.includes('.') ? [s] : databases.map((d) => `${d}.${s}`)) : rawSchemas;
+    for (const g of c.grants) {
+      const op = operationById(catalog, g)?.item;
+      if (!op) { warnings.push(`${cap}: ${g} isn't an approved operation.`); continue; }
+      if (op.kind !== 'change') { warnings.push(`${cap}: ${g} is a read, not a grant.`); continue; }
+      if (!op.platforms[conn.platform]) { warnings.push(`${cap}: ${g} has no ${def.title} implementation.`); continue; }
+      const names = op.params.map((p) => p.name);
+      const sets: Array<Record<string, unknown>> = names.includes('schema') ? schemas.map((schema) => ({ schema })) : names.includes('database') ? databases.map((database) => ({ database })) : [{}];
+      if (!sets.length) { warnings.push(`${cap}: ${op.title} needs ${names.includes('schema') ? 'the schemas' : 'the databases'} in scope: name them.`); continue; }
+      for (const values of sets) {
+        let sql: string | undefined;
+        try { sql = bindOperation(op, conn.platform, { ...values, role }, def).statement; } catch (err) { warnings.push(`${cap}: ${g}: ${err instanceof Error ? err.message : String(err)}`); continue; }
+        if (!sql || seen.has(sql)) continue;
+        seen.add(sql);
+        const target = String(values.schema ?? values.database ?? '');
+        steps.push({ id: `grant-${steps.length + 1}`, title: `${op.title}${target ? `: ${target}` : ''}`, kind: 'sql', sql, expect: `${role} gets what ${cap} needs${c.privileges ? ` (${c.privileges})` : ''}.`, rollback: { procedure: `Revoke the same privilege from ${role}.` } });
+      }
+    }
+  }
+  if (!steps.length) throw new Error(`Nothing to grant on ${conn.id}: ${warnings.join(' ') || 'no capability names grant operations.'}`);
+  const slug = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return {
+    runbook: {
+      id: `access-${slug(conn.id)}-${slug(role)}`.slice(0, 64), title: `Access for AutoDE's role ${role} on ${conn.id}`,
+      reason: `AutoDE needs these privileges for ${out.map((x) => x.capability).join(', ')}${conformance && short.length && !req.capabilities?.length ? ` (the conformance run of ${conformance.at.slice(0, 10)} found them short)` : ''}.`,
+      connectionId: conn.id, stage: 'platform-setup', steps,
+      explanation: `Drafted by AutoDE from the platform definition's grant operations (Request access). Run it as a role that can grant these privileges.`
+    },
+    capabilities: out, warnings
   };
 }

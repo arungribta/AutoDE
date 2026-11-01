@@ -69,6 +69,18 @@ And an agent in another host can analyse a source with `autode_skills_analyze` (
 
 *Update Skill from Its Source* (the sync button on an imported skill, or `autode skills update <name>`) fetches the source again, shows what changed file by file, and applies it only when you confirm. The new content is **unreviewed**: it stops running, and leaves assignments and context packs, until someone reviews it again. Trust always belongs to the content that was read.
 
+## Adapting one of AutoDE's skills
+
+To change how one of AutoDE's own skills works for your team, don't edit AutoDE's file: **customise** it (since v0.57.1).
+
+1. Make the copy: *Customise…* on the skill's page in the Platform catalog, or `autode skills customise <id>`. AutoDE puts a team copy under the same id in `.autode/config/skills/tool-skills/<id>/`. It is a draft.
+2. Edit the copy. VS Code checks it as you type; `autode skills lint <id>` and the agents' `autode_skill_check` run the same checks. They cover the format, stage kinds and platforms that exist, operation ids that don't exist, and platform queries the skill should leave to an operation.
+3. Review and publish it, as for any team skill (`autode skills review <id>`, `autode skills publish <id>`).
+
+From then on your copy is used in AutoDE's place everywhere: stage assignments, the interview, agents over MCP, and Claude Code once the plugin is reinstalled (`autode plugin status` tells you when it is behind). Until then, AutoDE's skill is used.
+
+When a later AutoDE release changes the original, the copy is flagged *AutoDE's version changed*, and `autode skills show <id>` lists what changed on each side. Merge what you want into your copy, then `autode skills keep <id>`. Or reset to AutoDE's with `autode skills reset <id>`, which archives your copy.
+
 ## The limit
 
 AutoDE enforces a skill's tools where AutoDE runs it: VS Code and the CLI. In another host (Claude Code, Cortex Code, the Copilot CLI) the host's own tools run, and what protects AutoDE's state there is that every change goes through a decision a person approves. The capability report says so for every skill that writes or runs commands.

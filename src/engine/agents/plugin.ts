@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { PackSkill, RoleTemplate, loadRoles, loadSkillPack } from './definitions';
+import { PackSkill, RoleTemplate, loadRoles } from './definitions';
+import { skillsInEffect } from '../skills/customise';
+import { skillContentChecksum } from '../skills/lifecycle';
 
 /**
  * AutoDE for agent hosts (PA3b): the role templates and skills, rendered in
@@ -126,17 +128,20 @@ function write(file: string, text: string, written: string[]): void {
   written.push(file);
 }
 
+/** Copies a skill's content; AutoDE's sidecar, history and analysis (a team copy's) stay in the workspace. */
 function copyDir(from: string, to: string, written: string[]): void {
   for (const e of fs.readdirSync(from, { withFileTypes: true })) {
+    if (e.name.startsWith('.autode')) continue;
     const a = path.join(from, e.name), b = path.join(to, e.name);
     if (e.isDirectory()) copyDir(a, b, written);
     else { fs.mkdirSync(to, { recursive: true }); fs.copyFileSync(a, b); written.push(b); }
   }
 }
 
+/** The roles and the skills in effect: with a workspace, the team's published copies in place of AutoDE's (POP4b). */
 function definitions(resourcesRoot: string, workspaceRoot?: string): { roles: RoleTemplate[]; skills: PackSkill[]; errors: string[] } {
   const r = loadRoles(resourcesRoot, workspaceRoot);
-  const s = loadSkillPack(resourcesRoot);
+  const s = skillsInEffect(resourcesRoot, workspaceRoot);
   return { roles: r.roles, skills: s.skills, errors: [...r.errors, ...s.errors] };
 }
 
@@ -166,7 +171,8 @@ const INSTALLED_MANIFEST = '.autode-installed.json';
  * and AutoDE's pre-v0.45.5 names (only when the folder's SKILL.md is AutoDE's: it names AutoDE's MCP
  * tools). Never touches anything else. Then records what is installed now.
  */
-function pruneSkills(skillsDir: string, keep: readonly string[], removed: string[]): void {
+function pruneSkills(skillsDir: string, skills: readonly PackSkill[], removed: string[]): void {
+  const keep = skills.map((k) => k.id);
   const manifest = path.join(skillsDir, INSTALLED_MANIFEST);
   let before: string[] = [];
   try { before = (JSON.parse(fs.readFileSync(manifest, 'utf8')) as { skills?: string[] }).skills ?? []; } catch { /* none yet */ }
@@ -177,7 +183,14 @@ function pruneSkills(skillsDir: string, keep: readonly string[], removed: string
     if (fs.existsSync(dir) && (before.includes(id) || isAutode(id))) { fs.rmSync(dir, { recursive: true, force: true }); removed.push(dir); }
   }
   fs.mkdirSync(skillsDir, { recursive: true });
-  fs.writeFileSync(manifest, JSON.stringify({ installedBy: 'autode', skills: [...keep].sort() }, null, 2) + '\n');
+  fs.writeFileSync(manifest, JSON.stringify({ installedBy: 'autode', skills: [...keep].sort(), sources: installedSources(skills) }, null, 2) + '\n');
+}
+
+interface InstalledSource { origin: 'autode' | 'team'; checksum: string; version: number }
+
+/** What each installed skill was (POP4b): AutoDE's or the team's copy, and its content, so `plugin status` can say when it is behind. */
+function installedSources(skills: readonly PackSkill[]): Record<string, InstalledSource> {
+  return Object.fromEntries([...skills].sort((a, b) => a.id.localeCompare(b.id)).map((k) => [k.id, { origin: k.teamCopy ? 'team' : 'autode', checksum: skillContentChecksum(k.dir), version: k.teamCopy?.teamVersion ?? k.meta.version }]));
 }
 
 /** The `.mcp.json`-style text with the `autode` server set; other servers and keys are kept. */
@@ -201,13 +214,12 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
   const written: string[] = [];
   const notes: string[] = [];
   const removed: string[] = [];
-  const ids = skills.map((k) => k.id);
   const base = input.scope === 'project' ? input.workspaceRoot : input.home;
   let mcp: InstallResult['mcp'];
   if (input.host === 'claude') {
     const dir = path.join(base, '.claude');
     for (const r of roles) write(path.join(dir, 'agents', `${r.name}.md`), claudeAgent(r, skills), written);
-    pruneSkills(path.join(dir, 'skills'), ids, removed);
+    pruneSkills(path.join(dir, 'skills'), skills, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, 'skills', k.id), written);
     for (const [name, text] of Object.entries(COMMANDS)) write(path.join(dir, 'commands', `${name}.md`), text, written);
     if (input.scope === 'project') {
@@ -227,7 +239,7 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
     }
   } else if (input.host === 'cortex') {
     const dir = input.scope === 'project' ? path.join(base, '.cortex', 'skills') : path.join(input.home, '.snowflake', 'cortex', 'skills');
-    pruneSkills(dir, ids, removed);
+    pruneSkills(dir, skills, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, k.id), written);
     notes.push('Cortex Code takes sub-agents from plugins: for AutoDE\'s agents as sub-agents, install the plugin folder (`autode plugin path`). Without it, the orchestrator skill follows each assignment itself.');
     notes.push('The guard hook (platform-changing snow/databricks commands go through runbooks) comes with the plugin folder (hooks/hooks.json). Copied skills alone don\'t bring it: there it is a convention the skills state, not a guarantee.');
@@ -235,11 +247,74 @@ export function installPlugin(input: { host: PluginHost; scope: 'project' | 'use
   } else {
     const dir = input.scope === 'project' ? path.join(base, '.github') : path.join(input.home, '.copilot');
     for (const r of roles) write(path.join(dir, 'agents', `${r.name}.agent.md`), copilotAgent(r, skills), written);
-    pruneSkills(path.join(dir, 'skills'), ids, removed);
+    pruneSkills(path.join(dir, 'skills'), skills, removed);
     for (const k of skills) copyDir(k.dir, path.join(dir, 'skills', k.id), written);
     mcp = { instruction: `In the Copilot CLI: /mcp add — name autode, type local, command: ${shellLine(input.entry)}` };
     notes.push('The Copilot CLI gets no guard hook from AutoDE: that platform changes go through runbooks is a convention the skills state, not a guarantee.');
   }
   if (removed.length) notes.push(`Removed ${removed.length} AutoDE skill folder(s) from an earlier install (renamed or retired).`);
   return { written, mcp, errors, notes, removed };
+}
+
+// ── Plugin status (POP4b) ───────────────────────────────────────────────────
+
+export interface InstalledFolder {
+  host: PluginHost;
+  scope: 'project' | 'user';
+  dir: string;
+  /** Skills that differ from the skills in effect, each with why. */
+  behind: Array<{ id: string; reason: string }>;
+  upToDate: number;
+  /** The command that brings it up to date. */
+  fix: string;
+}
+
+export interface PluginStatus { folders: InstalledFolder[]; behind: boolean; summary: string }
+
+/** The hosts' skills folders AutoDE installs into, by host and scope. */
+function skillFolders(workspaceRoot: string, home: string): Array<{ host: PluginHost; scope: 'project' | 'user'; dir: string }> {
+  return [
+    { host: 'claude', scope: 'project', dir: path.join(workspaceRoot, '.claude', 'skills') },
+    { host: 'claude', scope: 'user', dir: path.join(home, '.claude', 'skills') },
+    { host: 'cortex', scope: 'project', dir: path.join(workspaceRoot, '.cortex', 'skills') },
+    { host: 'cortex', scope: 'user', dir: path.join(home, '.snowflake', 'cortex', 'skills') },
+    { host: 'copilot', scope: 'project', dir: path.join(workspaceRoot, '.github', 'skills') },
+    { host: 'copilot', scope: 'user', dir: path.join(home, '.copilot', 'skills') }
+  ];
+}
+
+/**
+ * Whether each install of AutoDE's skills (every host folder with AutoDE's install record) matches the skills in
+ * effect: a team copy published or reset since, AutoDE's own skill changed, a skill added or retired. Claude Code
+ * picks skills by reading these files, so a stale folder means the host runs yesterday's skills.
+ */
+export function pluginStatus(input: { resourcesRoot: string; workspaceRoot: string; home: string }): PluginStatus {
+  const now = new Map(definitions(input.resourcesRoot, input.workspaceRoot).skills.map((k) => [k.id, k] as const));
+  const folders: InstalledFolder[] = [];
+  for (const f of skillFolders(input.workspaceRoot, input.home)) {
+    let m: { skills?: string[]; sources?: Record<string, InstalledSource> };
+    try { m = JSON.parse(fs.readFileSync(path.join(f.dir, INSTALLED_MANIFEST), 'utf8')); } catch { continue; }
+    const fix = `autode plugin install --host ${f.host} --scope ${f.scope}`;
+    if (!m.sources) {
+      folders.push({ ...f, behind: [{ id: '*', reason: 'installed before AutoDE 0.57.1, which records what each skill was: reinstall once to track it' }], upToDate: 0, fix });
+      continue;
+    }
+    const behind: InstalledFolder['behind'] = [];
+    let upToDate = 0;
+    for (const [id, k] of now) {
+      const was = m.sources[id];
+      const origin = k.teamCopy ? 'team' : 'autode';
+      if (!was) { behind.push({ id, reason: 'not installed yet (new since the last install)' }); continue; }
+      if (was.origin !== origin) { behind.push({ id, reason: origin === 'team' ? `the team's copy (v${k.teamCopy!.teamVersion}) was published; the folder has AutoDE's` : 'the team copy was reset; the folder still has it' }); continue; }
+      if (was.checksum !== skillContentChecksum(k.dir)) { behind.push({ id, reason: origin === 'team' ? `the team published a new version (v${k.teamCopy!.teamVersion})` : `AutoDE's skill changed (v${was.version} installed, v${k.meta.version} now)` }); continue; }
+      upToDate++;
+    }
+    for (const id of Object.keys(m.sources)) if (!now.has(id)) behind.push({ id, reason: 'AutoDE no longer ships it' });
+    folders.push({ ...f, behind, upToDate, fix });
+  }
+  const stale = folders.filter((f) => f.behind.length);
+  const summary = !folders.length ? "AutoDE's skills are not installed in any host folder (autode plugin install --host claude)."
+    : stale.length ? `${stale.length} of ${folders.length} install(s) behind: ${stale.map((f) => `${f.host} (${f.scope}) ${f.behind.length} skill(s)`).join('; ')}. Run ${stale.map((f) => f.fix).join(' and ')}.`
+    : `${folders.length} install(s) up to date with the skills in effect.`;
+  return { folders, behind: stale.length > 0, summary };
 }

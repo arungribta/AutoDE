@@ -22,6 +22,9 @@ import { reconcilePlan } from '../engine/agents/reconcilePlan';
 import { targetPlatform } from '../engine/agents/assignment';
 import { skillCatalog } from '../engine/agents/skillCatalog';
 import * as port from '../engine/skills/port';
+import { customiseSkill, teamCopy } from '../engine/skills/customise';
+import { pluginStatus } from '../engine/agents/plugin';
+import { lintSkillText } from '../engine/platform/operations/catalogView';
 import { governanceCandidates, governanceFacts, governanceGaps } from '../engine/governance/governance';
 import { waitingForYou } from '../engine/approvals/waiting';
 import { factView } from '../engine/context/factReview';
@@ -135,6 +138,44 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
         const ops = new Map(skillTexts(scope).texts.map((t) => [t.id, skillOperations(t.text, catalog).uses.map((u) => u.id)]));
         return { skills: r.entries.filter((e) => !args.group || e.group === args.group).map((e) => (ops.get(e.name)?.length ? { ...e, operations: ops.get(e.name) } : e)), errors: r.errors } as unknown as Record<string, unknown>;
       }
+    },
+    {
+      name: 'autode_skill_check',
+      description: "Checks a skill's text as AutoDE's editor does (POP4b): the Agent Skills format, AutoDE's metadata (stage kinds, platforms; for autode- names the registry fields), platform operation ids that don't exist, and platform queries the skill carries itself (with the operation to name instead). Pass `text` to check a draft, or only `id` to check the workspace's copy (or AutoDE's skill).",
+      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1, description: 'The skill id (its folder name).' }, text: { type: 'string', description: 'The SKILL.md text to check; default: the file in effect.' } } },
+      annotations: read('Check a skill'),
+      handler: async (args, ws) => {
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        const id = String(args.id);
+        let text = args.text as string | undefined;
+        if (text === undefined) {
+          const file = [teamCopy(scope, id)?.file, path.join(port.toolSkillsDir(ws.options.workspaceRoot), id, 'SKILL.md'), path.join(ws.options.resourcesRoot, 'skills', id, 'SKILL.md')].find((f) => f && fs.existsSync(f));
+          if (!file) throw new EngineToolError('NOT_FOUND', `No skill ${id} whose text AutoDE holds.`);
+          text = fs.readFileSync(file, 'utf8');
+        }
+        const findings = lintSkillText(text, id, loadCatalog(scope));
+        return { ok: !findings.some((f) => f.severity === 'error'), findings } as unknown as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_skill_customise',
+      description: "Makes the workspace's team copy of one of AutoDE's skills (POP4b, Customise), to adapt it to the team's practice. The copy is a draft and changes nothing: AutoDE's skill stays in effect until a person reviews and publishes the copy (`autode skills review` and `publish` in a terminal, or the Platform catalog). An existing copy is kept. Edit the copy's SKILL.md (its path is returned), check it with autode_skill_check, then tell the user it waits for their review.",
+      inputSchema: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', minLength: 1, description: "AutoDE's skill id (autode-<scope>-<capability>)." } } },
+      annotations: { title: 'Customise an AutoDE skill', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      handler: async (args, ws) => {
+        try {
+          const r = customiseSkill({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, String(args.id), 'mcp');
+          const file = path.relative(ws.options.workspaceRoot, path.join(r.dir, 'SKILL.md')).split(path.sep).join('/');
+          return { created: r.created, file, status: r.sidecar.status, next: `Edit ${file}; AutoDE's skill stays in effect until a person reviews and publishes the copy (autode skills review ${String(args.id)}, then publish).` };
+        } catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+      }
+    },
+    {
+      name: 'autode_plugin_status',
+      description: "Whether the hosts' installed copies of AutoDE's skills (Claude Code, Cortex Code, Copilot CLI folders, project and user) match the skills in effect: a team copy published or reset since, AutoDE's own skill changed, a skill added or retired. Hosts read skills from these files, so a stale install runs older skills. Updating is a person's command: `autode plugin install --host <host>`.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: read('Plugin status'),
+      handler: async (_args, ws) => pluginStatus({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot, home: process.env.AUTODE_HOME ?? os.homedir() }) as unknown as Record<string, unknown>
     },
     {
       name: 'autode_skills_analyze',

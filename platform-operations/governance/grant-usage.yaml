@@ -8,8 +8,12 @@ kind: change
 area: governance
 params:
   - { name: schema, type: identifier, label: Schema }
-  - { name: role, type: identifier, label: Role }
+  - { name: role, type: identifier, label: Role, description: "The role AutoDE connects as (on Databricks: the user, group or service principal)." }
 returns: []
 platforms:
   redshift:
     sql: GRANT USAGE ON SCHEMA {schema} TO ROLE {role}
+  snowflake:
+    sql: GRANT USAGE ON SCHEMA {schema} TO ROLE {role}
+  databricks:
+    sql: GRANT USE SCHEMA ON SCHEMA {schema} TO {role}

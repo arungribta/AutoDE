@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { PLUGIN_HOSTS, PluginHost, buildPlugin, installPlugin, serverEntry } from '../engine/agents/plugin';
+import { PLUGIN_HOSTS, PluginHost, buildPlugin, installPlugin, pluginStatus, serverEntry } from '../engine/agents/plugin';
 import { spawnSync } from 'node:child_process';
 import { waitingForYou } from '../engine/approvals/waiting';
 import { Runbook, approveRunbook, checkRunbook, listRunbooks } from '../engine/runner/runbook';
@@ -32,8 +32,8 @@ import { platformOperationTools } from '../mcp/platformOperationTools';
 import type { OperationSummary } from '../engine/platform/operations/service';
 import type { PlatformOperation } from '../engine/platform/operations/types';
 import type { CatalogMatrix, ConformanceResult, OperationPage, PlatformPage } from '../engine/platform/operations/catalogView';
-import { skillPage } from '../engine/platform/operations/catalogView';
-import { checksumOf, customise } from '../engine/platform/operations/load';
+import { lintSkillText, skillPage } from '../engine/platform/operations/catalogView';
+import { checksumOf, customise, loadCatalog } from '../engine/platform/operations/load';
 import { fragmentsFor, setPlatformResourcesRoot } from '../engine/platform/dialects';
 import { problemOverlap } from '../engine/documents/problemOverlap';
 import type { ObservedEdge } from '../engine/lineage/observed';
@@ -95,7 +95,7 @@ import { dismissItem, scanWorkspace } from '../engine/maintenance/scan';
 import { dismissStatements } from '../engine/context/sessionReview';
 import { isOpenInterview, readInterview, recordInterview, startInterview, summarizeInterview, writeInterview } from '../engine/interview/state';
 import { interviewSkills } from '../engine/skills/skillRegistry';
-import { loadSkillPack } from '../engine/agents/definitions';
+import { customiseSkill, keepTeamCopy, resetSkill, skillsInEffect, teamCopy } from '../engine/skills/customise';
 
 /**
  * The `autode` command line (docs/specs/mcp-engine.md §9.2, PA2;
@@ -268,6 +268,7 @@ Platform operations (POP1: every interaction with a platform, as a reviewed file
   platform show <id>           One operation in full, with the statement per platform
   platform run <id> --connection <c> [--param k=v]… [--max-rows n]   Run a read operation (a change operation prints the runbook step to propose)
   platform propose <file>      Propose a team operation or platform definition (.autode/config/…) for a person's approval
+  platform request-access --connection <c> [--role r] [--capability a,b] [--database d] [--schema s]…   Draft a runbook granting AutoDE's role what its capabilities need (proposed when a problem is active)
 
 Lineage (LIN):
   lineage refresh --connection <id> [--database <db,…>] [--days 30]   Read the platform's observed lineage through its lineage operations (read-only) into the facts
@@ -326,7 +327,10 @@ Skills (AutoDE's own, this workspace's imported ones, interview packs, and the v
   skills list [--group autode|workspace|interview|external]   The catalog, with whether external skills are installed
   skills show <name>           One skill: what it does, its stage kinds and platforms, licence, source, how to install
   skills check <name>          Probe an external skill's install command on this machine (nothing is installed)
-  skills lint <name>           The platform operations a skill names: unknown ids, and SQL it carries itself instead of naming an operation
+  skills lint <name>           Check a skill: its format and metadata, the platform operations it names (unknown ids), and SQL it carries itself (with the operation to name instead); a team copy's text when there is one
+  skills customise <id>        Make the team's copy of an AutoDE skill to edit (a draft; AutoDE's stays in effect until the copy is reviewed and published)
+  skills keep <id>             After AutoDE's skill changed: keep the team copy (AutoDE's new version becomes what it is compared with)
+  skills reset <id>            (terminal) Remove the team copy (archived under .autode/local/reset-skills/): AutoDE's skill is in effect again
   skills install <name>        (terminal) Run the vendor's own install command after you confirm, then check it worked
   skills analyze <source> [--ref <r>] [--skill <path>]   Port a skill: what a skill in a folder, Git URL or dbt package does (nothing is copied)
   skills import <source> [--ref <r>] [--skill <path>] [--replace]   Import it into this workspace, unreviewed
@@ -351,7 +355,8 @@ Runbooks (platform changes, approved by a person; they run in VS Code's Runbook 
 
 Agent hosts (Claude Code, Cortex Code, GitHub Copilot CLI):
   plugin path [--out <folder>]   Build AutoDE's plugin folder (agents, skills, commands, .mcp.json) and print where it is
-  plugin install --host claude|cortex|copilot [--scope project|user]   Copy AutoDE's agents and skills into the host's folders
+  plugin install --host claude|cortex|copilot [--scope project|user]   Copy AutoDE's agents and the skills in effect (the team's published copies in place of AutoDE's) into the host's folders
+  plugin status                Whether each host install has the skills in effect (a team copy published or reset since, AutoDE's own skill changed)
                                and wire its MCP server (or print the step, where the host has no file for it)
   hook guard                   The plugin's PreToolUse hook: blocks platform-changing snow/databricks commands (host event JSON on stdin; exit 2 = blocked)
   hook turn                    The plugin's UserPromptSubmit hook: records the message for review (MM2); prints nothing, never blocks
@@ -418,6 +423,7 @@ const OPTIONS = {
   record: { type: 'boolean' },
   tables: { type: 'string' },
   database: { type: 'string' },
+  capability: { type: 'string' },
   models: { type: 'string' },
   hops: { type: 'string' },
   type: { type: 'string' },
@@ -1026,7 +1032,7 @@ async function cmdApprovals(ctx: Ctx, rest: string[]): Promise<number> {
 /** The interview's parts: AutoDE's interview skills, and the workspace's own JSON parts by id. */
 function interviewParts(ctx: Ctx): SkillDefinition[] {
   const overrides = layoutPath(ctx.workspaceRoot, 'skills');
-  return interviewSkills(loadSkillPack(ctx.resourcesRoot).skills, fs.existsSync(overrides) ? overrides : undefined);
+  return interviewSkills(skillsInEffect(ctx.resourcesRoot, ctx.workspaceRoot).skills, fs.existsSync(overrides) ? overrides : undefined);
 }
 
 /** v0.56.4: an open question's choices, saying whether one or several are picked (several: answer them comma-separated). */
@@ -1183,6 +1189,7 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
     return cat.errors.length ? EXIT.FAILED : EXIT.OK;
   }
   if (['analyze', 'import', 'update', 'review', 'publish'].includes(sub)) return cmdPortSkill(ctx, sub, name);
+  if (sub === 'customise' || sub === 'customize' || sub === 'keep' || sub === 'reset') return cmdTeamCopy(ctx, sub === 'customize' ? 'customise' : sub, name);
   const e = cat.entries.find((x) => x.name === name);
   if (!name) throw new CliError(EXIT.USAGE, `skills ${sub} needs a skill name.`);
   if (!e) throw new CliError(EXIT.NOT_FOUND, `No skill "${name}" (see \`autode skills list\`).`);
@@ -1190,13 +1197,16 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
   const page = (sub === 'show' || sub === 'lint') ? skillPage({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, home }, e.name) : undefined;
   if (sub === 'lint') {
     if (!page?.file) throw new CliError(EXIT.FAILED, `${e.name} is a ${e.group} skill whose text AutoDE doesn't hold: there is nothing to lint.`);
-    const bad = page.lint.unknown.length + page.lint.sql.length;
-    emit(ctx, { ok: bad === 0, skill: e.name, operations: page.operations, lint: page.lint }, [
-      `${bad ? '✗' : '✓'} ${e.name}: ${page.operations.length} operation(s) named${page.operations.length ? ` (${page.operations.map((o) => `${o.id}${o.state === 'ok' ? '' : ` ${o.state}`}`).join(', ')})` : ''}`,
-      ...page.lint.unknown.map((u) => `  ✗ names ${u}, which isn't an operation (autode platform operations lists them)`),
-      ...page.lint.sql.map((q) => `  ! queries the platform itself: ${q}. Reading the platform is an operation's job: name one, or propose one.`)
+    // POP4b: the text being edited (the team copy when there is one), with the format and metadata checks and a line per finding.
+    const file = page.teamCopy?.file ?? page.file;
+    const findings = page.teamCopy?.findings ?? lintSkillText(fs.readFileSync(page.file, 'utf8'), e.name, loadCatalog({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot }));
+    const errors = findings.filter((f) => f.severity === 'error').length;
+    const rel = path.relative(ctx.workspaceRoot, file).split(path.sep).join('/');
+    emit(ctx, { ok: errors === 0, skill: e.name, file: rel, operations: page.operations, lint: page.lint, findings }, [
+      `${errors ? '✗' : findings.length ? '!' : '✓'} ${e.name}${page.teamCopy ? ' (team copy)' : ''}: ${page.operations.length} operation(s) named${page.operations.length ? ` (${page.operations.map((o) => `${o.id}${o.state === 'ok' ? '' : ` ${o.state}`}`).join(', ')})` : ''}${findings.length ? `; ${errors} error(s), ${findings.length - errors} warning(s)` : ''}`,
+      ...findings.map((f) => `  ${f.severity === 'error' ? '✗' : '!'} ${rel}:${f.line} ${f.message}`)
     ].join('\n'));
-    return bad ? EXIT.FAILED : EXIT.OK;
+    return findings.length || page.lint.unknown.length ? EXIT.FAILED : EXIT.OK;
   }
   if (sub === 'show') {
     const lines = [
@@ -1208,7 +1218,8 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
       e.availability ? `Availability: ${e.availability}${e.installed ? ` — ${e.installed.length ? `found: ${e.installed.join(', ')}` : 'not found on this machine'}` : ''}` : '',
       e.installer ? `Install: ${e.installer.command.join(' ')} (last verified ${e.installer.verifiedAt ?? '—'}; \`autode skills check ${e.name}\` probes it first)` : '',
       page?.operations.length ? `Platform operations: ${page.operations.map((o) => `${o.id} (${o.section}${o.state === 'ok' ? '' : `, ${o.state}`})`).join(', ')}` : '',
-      page && (page.lint.unknown.length || page.lint.sql.length) ? `Lint: ${page.lint.unknown.length} unknown operation id(s), ${page.lint.sql.length} place(s) with its own SQL (autode skills lint ${e.name})` : ''
+      page && (page.lint.unknown.length || page.lint.sql.length) ? `Lint: ${page.lint.unknown.length} unknown operation id(s), ${page.lint.sql.length} place(s) with its own SQL (autode skills lint ${e.name})` : '',
+      ...(page?.teamCopy ? teamCopyLines(ctx, page.teamCopy) : e.group === 'autode' ? [`To adapt it: autode skills customise ${e.name}`] : [])
     ].filter(Boolean);
     emit(ctx, { ok: true, skill: page ? { ...e, operations: page.operations, lint: page.lint } : e }, lines.join('\n'));
     return EXIT.OK;
@@ -1230,7 +1241,51 @@ async function cmdSkills(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: found.length > 0, skill: e.name, exitCode: r.code, installed: found }, found.length ? `✓ ${e.name} is installed: ${found.join(', ')}` : `✗ ${e.installer.command.join(' ')} ${r.code === 0 ? 'finished' : `exited with ${r.code ?? r.error}`}, but ${e.name} wasn't found in a host's skills folder. Check the vendor's output above${e.installer.docs ? `, or ${e.installer.docs}` : ''}.`);
     return found.length ? EXIT.OK : EXIT.FAILED;
   }
-  throw new CliError(EXIT.USAGE, 'skills list | show <name> | check <name> | install <name> | analyze <source> | import <source> | update <id> | review <id> | publish <id>');
+  throw new CliError(EXIT.USAGE, 'skills list | show <name> | lint <name> | customise <id> | keep <id> | reset <id> | check <name> | install <name> | analyze <source> | import <source> | update <id> | review <id> | publish <id>');
+}
+
+type TeamCopyPage = NonNullable<ReturnType<typeof skillPage>>['teamCopy'];
+
+/** A team copy's state on `skills show`: in effect or why not, AutoDE's change since, the team's, and the next step. */
+function teamCopyLines(ctx: Ctx, c: NonNullable<TeamCopyPage>): string[] {
+  const rel = path.relative(ctx.workspaceRoot, c.file).split(path.sep).join('/');
+  const files = (xs: Array<{ path: string; change: string }>) => xs.map((x) => `${x.path} ${x.change}`).join(', ');
+  return [
+    `Team copy: ${rel} — v${c.version}, ${c.status}, ${c.tier}; ${c.inEffect ? 'in effect in place of AutoDE\'s' : `not in effect (${c.why}): AutoDE's is used`}`,
+    c.upstreamChanged ? `AutoDE's version changed: v${c.baseVersion} → ${c.autodeVersion !== undefined ? `v${c.autodeVersion}` : 'no longer shipped'}${c.autodeChanges.length ? ` (${files(c.autodeChanges)})` : ''}` : '',
+    c.teamChanges.length ? `The team changed: ${files(c.teamChanges)}` : 'The team copy is still AutoDE\'s text.',
+    c.findings.length ? `Checks: ${c.findings.filter((f) => f.severity === 'error').length} error(s), ${c.findings.filter((f) => f.severity === 'warning').length} warning(s) (autode skills lint ${c.id})` : '',
+    `Next: ${c.next}`
+  ];
+}
+
+/** POP4b: Customise (a team copy of an AutoDE skill), Keep (after AutoDE's changed) and Reset (a person's act). */
+async function cmdTeamCopy(ctx: Ctx, sub: string, id: string | undefined): Promise<number> {
+  if (!id) throw new CliError(EXIT.USAGE, `skills ${sub} <AutoDE skill id>.`);
+  const scope = { resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot };
+  const by = `user:${(ctx.values.by ?? safeUsername()).trim()}`;
+  if (sub === 'customise') {
+    let r: ReturnType<typeof customiseSkill>;
+    try { r = customiseSkill(scope, id, by); } catch (err) { throw new CliError(EXIT.REFUSED, err instanceof Error ? err.message : String(err)); }
+    const rel = path.relative(ctx.workspaceRoot, path.join(r.dir, 'SKILL.md')).split(path.sep).join('/');
+    emit(ctx, { ok: true, created: r.created, file: rel, sidecar: r.sidecar }, `${r.created ? '✓ Copied' : 'Already copied:'} ${id} to ${rel} (${r.sidecar.status}). Edit it and check it (autode skills lint ${id}); then a person reviews and publishes it (autode skills review ${id}, autode skills publish ${id}). Until then AutoDE's skill stays in effect.`);
+    return EXIT.OK;
+  }
+  if (sub === 'keep') {
+    let sc: ReturnType<typeof keepTeamCopy>;
+    try { sc = keepTeamCopy(scope, id, by); } catch (err) { throw new CliError(EXIT.REFUSED, err instanceof Error ? err.message : String(err)); }
+    emit(ctx, { ok: true, sidecar: sc }, `✓ Kept the team copy of ${id}; it is now compared with AutoDE's v${sc.provenance.base?.version}.`);
+    return EXIT.OK;
+  }
+  const c = teamCopy(scope, id);
+  if (!c) throw new CliError(EXIT.NOT_FOUND, `The workspace has no copy of ${id}: AutoDE's is already in effect.`);
+  requirePerson(ctx, 'Resetting a skill', `Run \`autode skills reset ${id}\` in a terminal, or use Reset in the Platform catalog.`);
+  (ctx.json ? ctx.io.err : ctx.io.out)(`The team copy (v${c.state.sidecar.version}, ${c.state.sidecar.status}${c.teamChanges.length ? `; changed: ${c.teamChanges.map((x) => x.path).join(', ')}` : ''}) is removed and archived; AutoDE's ${id} is in effect again.`);
+  if ((await ctx.io.prompt('Type reset to confirm: ')).trim().toLowerCase() !== 'reset') { (ctx.json ? ctx.io.err : ctx.io.out)('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+  let r: ReturnType<typeof resetSkill>;
+  try { r = resetSkill(scope, id); } catch (err) { throw new CliError(EXIT.REFUSED, err instanceof Error ? err.message : String(err)); }
+  emit(ctx, { ok: true, archived: r.archived }, `✓ Reset ${id}: AutoDE's skill is in effect. The copy is archived in ${path.relative(ctx.workspaceRoot, r.archived).split(path.sep).join('/')}.${pluginStatus({ ...scope, home: ctx.io.env.AUTODE_HOME ?? os.homedir() }).behind ? ' Installed hosts are behind: autode plugin status.' : ''}`);
+  return EXIT.OK;
 }
 
 /**
@@ -1298,7 +1353,8 @@ async function cmdPortSkill(ctx: Ctx, sub: string, arg: string | undefined): Pro
   if ((await ctx.io.prompt(`Publish ${arg} (${state.effectiveTier})? Type publish: `)).trim().toLowerCase() !== 'publish') { say('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
   try {
     const r = lifecycle.publishToolSkill(dir, `user:${by}`);
-    emit(ctx, { ok: true, sidecar: r.sidecar }, `✓ ${arg} published as version ${r.sidecar.version}.`);
+    const stale = pluginStatus({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, home: ctx.io.env.AUTODE_HOME ?? os.homedir() });
+    emit(ctx, { ok: true, sidecar: r.sidecar, plugin: stale }, `✓ ${arg} published as version ${r.sidecar.version}.${stale.behind ? ` ${stale.summary}` : ''}`);
     return EXIT.OK;
   } catch (err) { throw new CliError(EXIT.REFUSED, err instanceof Error ? err.message : String(err)); }
 }
@@ -1329,7 +1385,12 @@ function cmdPlugin(ctx: Ctx, rest: string[]): number {
     emit(ctx, { ok: r.errors.length === 0, host, scope, written: r.written, mcp: r.mcp, notes: r.notes, errors: r.errors }, lines.join('\n'));
     return r.errors.length ? EXIT.FAILED : EXIT.OK;
   }
-  throw new CliError(EXIT.USAGE, 'plugin path | install --host claude|cortex|copilot [--scope project|user]');
+  if (sub === 'status') {
+    const s = pluginStatus({ resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot, home: ctx.io.env.AUTODE_HOME ?? os.homedir() });
+    emit(ctx, { ok: !s.behind, ...s }, [s.summary, ...s.folders.flatMap((f) => [`${f.behind.length ? '✗' : '✓'} ${f.host} (${f.scope}) ${f.dir}: ${f.upToDate} up to date${f.behind.length ? `, ${f.behind.length} behind — ${f.fix}` : ''}`, ...f.behind.map((b) => `    ${b.id}: ${b.reason}`)])].join('\n'));
+    return s.behind ? EXIT.FAILED : EXIT.OK;
+  }
+  throw new CliError(EXIT.USAGE, 'plugin path | install --host claude|cortex|copilot [--scope project|user] | status');
 }
 
 async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
@@ -2005,7 +2066,17 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: true, decision: d }, `Proposed ${file} as ${d.id}. A person approves it: autode decisions approve ${d.id} (or the panel). Until then it is a draft and never runs.`);
       return EXIT.OK;
     }
-    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, or propose <file>.');
+    if (sub === 'request-access') {
+      if (!ctx.values.connection) throw new CliError(EXIT.USAGE, 'platform request-access --connection <id> [--role r] [--capability a,b] [--database d,e] [--schema s]….');
+      const list = (v?: string) => v ? v.split(',').map((x) => x.trim()).filter(Boolean) : undefined;
+      let r: Record<string, unknown>;
+      try { r = await tool('autode_platform_request_access').handler({ connectionId: ctx.values.connection, ...(ctx.values.role ? { role: ctx.values.role } : {}), ...(list(ctx.values.capability) ? { capabilities: list(ctx.values.capability) } : {}), ...(list(ctx.values.database) ? { databases: list(ctx.values.database) } : {}), ...(ctx.values.schema?.length ? { schemas: ctx.values.schema } : {}) }, ws) as Record<string, unknown>; }
+      catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+      const rb = r.runbook as { title: string; steps: Array<{ title: string; sql?: string }> };
+      emit(ctx, { ok: true, ...r }, [rb.title, ...rb.steps.map((s) => `  ${s.title}\n    ${s.sql ?? ''}`), ...((r.warnings as string[]) ?? []).map((w) => `! ${w}`), r.proposed ? `Proposed as ${(r.decision as { id: string }).id}. ${String(r.next)}` : String(r.next)].join('\n'));
+      return EXIT.OK;
+    }
+    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, propose <file>, or request-access --connection <c>.');
   } finally { session.dispose(); }
 }
 

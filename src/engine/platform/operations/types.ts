@@ -80,6 +80,8 @@ export interface PlatformCapability {
   operations?: string[];
   /** What the role needs, in plain language. */
   privileges?: string;
+  /** The change operations that grant them, in order (POP4b: Request access drafts a runbook from these). */
+  grants?: string[];
   note?: string;
 }
 

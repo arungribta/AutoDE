@@ -13,7 +13,7 @@ import { WebviewMessage, DataAgentHubSettings, SpecEngineAction, SpecIntakeQuest
 import { EXTENSION_ID } from './extensionIdentity';
 import { SpecOpsEngine, createIntakeSession } from '../engine/interview/specOps';
 import { SkillRegistry, interviewSkills } from '../engine/skills/skillRegistry';
-import { loadSkillPack } from '../engine/agents/definitions';
+import { skillsInEffect } from '../engine/skills/customise';
 import { composeSynthesisPrompt } from './specOpsPrompts';
 import { buildDiscoveryProgress as buildDiscoveryProgressPure, skillNameForField, DiscoveryProgress } from './discoveryProgress';
 import { GraphManager } from '../context/GraphManager';
@@ -3161,7 +3161,7 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
     // v0.45.12: the interview's parts are AutoDE's interview skills; a team's JSON parts replace them by id.
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri ?? this.context.extensionUri;
     const overrideDir = vscode.Uri.joinPath(workspaceRoot, ...LAYOUT.skills).fsPath;
-    this.skillRegistry = new SkillRegistry(interviewSkills(loadSkillPack(this.context.extensionUri.fsPath).skills, overrideDir));
+    this.skillRegistry = new SkillRegistry(interviewSkills(skillsInEffect(this.context.extensionUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath).skills, overrideDir));
     return this.skillRegistry.list();
   }
 

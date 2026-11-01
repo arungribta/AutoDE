@@ -14,7 +14,7 @@ import { createDeclarativePrimitive } from '../engine/transforms/declarative/ada
 import { PrimitiveDefinition } from '../engine/transforms/declarative/types';
 import { registerPrimitiveVersion, registerPrimitives, resetDeclarativePrimitives, resetVersionedPrimitives } from '../engine/transforms/registry';
 import { interviewSkills } from '../engine/skills/skillRegistry';
-import { loadSkillPack } from '../engine/agents/definitions';
+import { skillsInEffect } from '../engine/skills/customise';
 import { ToolSkillState, loadToolSkillStates } from '../engine/skills/lifecycle';
 import { knowledgeSkills } from '../engine/skills/port';
 import { loadSemanticLayer, semanticLayerFiles, semanticPaths } from '../engine/semantic/store';
@@ -179,7 +179,7 @@ export class EngineWorkspace {
   /** The interview's parts (v0.45.12): AutoDE's interview skills, replaced by id by the workspace's `.autode/config/skills/*.json`. */
   public interviewSkills(): SkillDefinition[] {
     const overrideDir = this.at('skills');
-    return interviewSkills(loadSkillPack(this.options.resourcesRoot).skills, fs.existsSync(overrideDir) ? overrideDir : undefined);
+    return interviewSkills(skillsInEffect(this.options.resourcesRoot, this.options.workspaceRoot).skills, fs.existsSync(overrideDir) ? overrideDir : undefined);
   }
 
   /** Imported tool skills with their S2 state — never migrated here (the server does not write). */

@@ -9,6 +9,7 @@ import { ToolGuide, loadToolGuides } from '../platform/prerequisites';
 import { layoutPath } from '../workspaceLayout';
 import { PackSkill, SKILL_PLATFORMS, loadSkillPack } from '../agents/definitions';
 import { STAGE_KINDS } from '../workflows/stageKinds';
+import { skillsInEffect } from './customise';
 
 /**
  * Port a skill (PA4, mcp-engine §9.2): bring a skill written for any agent into
@@ -473,6 +474,7 @@ export function stageUpdate(skillDir: string, git: GitRunner = gitRunner): { sta
   const sc = readSidecar(skillDir);
   if (!sc) throw new PortError('This skill has no import record.');
   const p = sc.provenance;
+  if (p.source === 'autode') throw new PortError('This is a team copy of an AutoDE skill: AutoDE\'s changes are flagged on it (autode skills show), kept with autode skills keep or taken with autode skills reset.');
   const src: PortSource | undefined = p.source === 'git' && p.repoUrl ? { kind: 'git', location: p.repoUrl, ref: p.ref } : p.location ? { kind: p.source === 'dbt' ? 'dbt' : 'local', location: p.location } : undefined;
   if (!src) throw new PortError('Its source was not recorded (imported before v0.46.0): import it again from its source.');
   const staged = stageSource(src, SOURCE_CAPS, git);
@@ -528,7 +530,7 @@ export function knowledgeSkills(workspaceRoot: string): KnowledgeSkill[] {
 export function teamSkillPack(workspaceRoot: string, stageKinds: readonly string[]): PackSkill[] {
   const out: PackSkill[] = [];
   for (const s of loadToolSkillStates(toolSkillsDir(workspaceRoot), 'assignment', { migrate: false })) {
-    if (s.sidecar.status !== 'published' || s.effectiveTier === 'unreviewed') continue;
+    if (s.sidecar.status !== 'published' || s.effectiveTier === 'unreviewed' || s.sidecar.provenance.source === 'autode') continue;
     const meta = parseSkillMarkdown(fs.readFileSync(path.join(s.skill.sourceDir, 'SKILL.md'), 'utf8')).metadata ?? {};
     const kinds = (Array.isArray(meta.stageKinds) ? meta.stageKinds : []).map(String).filter((k) => stageKinds.includes(k));
     if (!kinds.length) continue;
@@ -542,9 +544,13 @@ export function teamSkillPack(workspaceRoot: string, stageKinds: readonly string
   return out;
 }
 
-/** AutoDE's skills and the team's published, reviewed imported ones (AutoDE's win a name clash): what plans and assignments choose from. */
+/**
+ * AutoDE's skills (each replaced by the team's published copy where there is one: POP4b) and the team's published,
+ * reviewed imported ones: what plans and assignments choose from. An imported skill can't take an AutoDE skill's id
+ * (Customise makes the copy that can).
+ */
 export function stageSkills(resourcesRoot: string, workspaceRoot: string): PackSkill[] {
-  const autode = loadSkillPack(resourcesRoot).skills;
+  const autode = skillsInEffect(resourcesRoot, workspaceRoot).skills;
   return [...autode, ...teamSkillPack(workspaceRoot, Object.keys(STAGE_KINDS)).filter((t) => !autode.some((k) => k.id === t.id))];
 }
 

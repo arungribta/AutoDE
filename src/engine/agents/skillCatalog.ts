@@ -8,6 +8,7 @@ import { loadSkillsFromDirectory } from '../skills/skillRegistry';
 import { loadToolSkillStates } from '../skills/lifecycle';
 import { parseSkillMarkdown } from '../skills/toolSkills';
 import { readAnalysis } from '../skills/port';
+import { teamCopies } from '../skills/customise';
 
 /**
  * The skill catalog (v0.45.5; owner, 2026-10-22): one view of every skill
@@ -51,6 +52,8 @@ export interface CatalogEntry {
   installer?: Installer;
   /** External skills: where they were found (host skills folders), or that the host's command is on PATH. */
   installed?: string[];
+  /** AutoDE skills with a team copy (POP4b): whether the copy is in effect, AutoDE's version changed since, and the next step. */
+  customised?: { inEffect: boolean; status: string; upstreamChanged: boolean; teamVersion: number; next: string };
 }
 
 interface ExternalFile {
@@ -119,8 +122,13 @@ export function skillCatalog(input: CatalogInput): { entries: CatalogEntry[]; er
     version: k.meta.version, maturity: k.meta.maturity, owner: k.meta.owner, roles: roles.filter((r) => r.skills.includes(k.id)).map((r) => r.name)
   }));
   errors.push(...checkDefinitions(roles, pack.skills));
+  const copies = teamCopies({ resourcesRoot: input.resourcesRoot, workspaceRoot: input.workspaceRoot });
+  for (const c of copies) {
+    const e = own.find((x) => x.name === c.id);
+    if (e) e.customised = { inEffect: c.inEffect, status: `team copy v${c.state.sidecar.version}: ${c.inEffect ? 'in effect' : `not in effect (${c.why})`}${c.upstreamChanged ? `; AutoDE's version changed (v${c.baseVersion} → v${c.autodeVersion ?? 'retired'})` : ''}`, upstreamChanged: c.upstreamChanged, teamVersion: c.state.sidecar.version, next: c.next };
+  }
   // Imported skills carry the same fields as AutoDE's (PA4: one lifecycle): stage kinds and platforms from their metadata, kind and licence from their analysis.
-  const workspace: CatalogEntry[] = loadToolSkillStates(layoutPath(input.workspaceRoot, 'toolSkills'), 'catalog', { migrate: false }).map((t) => {
+  const workspace: CatalogEntry[] = loadToolSkillStates(layoutPath(input.workspaceRoot, 'toolSkills'), 'catalog', { migrate: false }).filter((t) => t.sidecar.provenance.source !== 'autode').map((t) => {
     let meta: Record<string, unknown> = {};
     try { meta = parseSkillMarkdown(fs.readFileSync(path.join(t.skill.sourceDir, 'SKILL.md'), 'utf8')).metadata ?? {}; } catch { /* unreadable: no metadata */ }
     const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);

@@ -1,4 +1,5 @@
-import { loadRoles, loadSkillPack } from '../agents/definitions';
+import { loadRoles } from '../agents/definitions';
+import { skillsInEffect } from '../skills/customise';
 import { ToolInfo, toolsForTier } from '../agents/assignment';
 import { MaintenanceItem } from './queue';
 
@@ -31,7 +32,7 @@ export interface WorkTask {
 export function workOrder(resourcesRoot: string, workspaceRoot: string, roleName: string, task: WorkTask, tools: readonly ToolInfo[]): { order?: WorkOrder; reason?: string } {
   const role = loadRoles(resourcesRoot, workspaceRoot).roles.find((r) => r.name === roleName);
   if (!role) return { reason: `No role template ${roleName}.` };
-  const pack = loadSkillPack(resourcesRoot).skills.filter((k) => role.skills.includes(k.id));
+  const pack = skillsInEffect(resourcesRoot, workspaceRoot).skills.filter((k) => role.skills.includes(k.id));
   const engineTools = toolsForTier(tools, 'propose', role.tools);
   const text = [
     `# ${task.title}`,

@@ -158,7 +158,7 @@ export const PLATFORM_SCHEMA = {
       description: 'For each AutoDE capability: supported, partly or not applicable; its operations; the privileges it needs.',
       additionalProperties: {
         type: 'object', additionalProperties: false, required: ['support'],
-        properties: { support: { enum: ['supported', 'partly', 'not_applicable'] }, operations: { type: 'array', items: { type: 'string' } }, privileges: { type: 'string' }, note: { type: 'string' } }
+        properties: { support: { enum: ['supported', 'partly', 'not_applicable'] }, operations: { type: 'array', items: { type: 'string' } }, privileges: { type: 'string' }, grants: { type: 'array', items: { type: 'string' }, description: 'The change operations that grant these privileges (Request access drafts a runbook from them), in the order they apply.' }, note: { type: 'string' } }
       }
     },
     objectKinds: { type: 'array', items: { type: 'string' } }
