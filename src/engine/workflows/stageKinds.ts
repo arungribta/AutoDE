@@ -9,7 +9,9 @@
 export type StageKind =
   | 'specify' | 'plan' | 'target-context' | 'source-assessment' | 'conformance' | 'quality-rules'
   | 'mapping' | 'entity-resolution' | 'modelling' | 'code-conversion' | 'build' | 'reconcile'
-  | 'validate' | 'deploy' | 'document' | 'platform-setup' | 'bi-migration';
+  | 'validate' | 'deploy' | 'document' | 'platform-setup' | 'bi-migration'
+  /** PLN1: work a person does outside AutoDE (an ML feature pipeline, a streaming service, a sign-off in another tool). No agent, nothing run. */
+  | 'manual';
 
 /** Permission tiers, lowest first. No tier resolves or applies decisions. */
 export const TIERS = ['read', 'propose', 'platform-read', 'workspace-write'] as const;
@@ -55,8 +57,13 @@ export const STAGE_KINDS: Readonly<Record<StageKind, StageKindSpec>> = {
   'deploy': k('deploy', ['pipeline-engineer'], 'propose', ['artifacts'], ['deployment'], ['approve'], 'the platform changes are approved and applied'),
   'document': k('document', ['documenter'], 'workspace-write', ['artifacts'], ['documentation'], ['check'], 'the documents are generated and linked to their artifacts'),
   'platform-setup': k('platform-setup', ['target-architect'], 'propose', ['target-context'], ['platform-setup-plan'], ['approve'], 'the plan covers every environment of the estate'),
-  'bi-migration': k('bi-migration', ['documenter', 'data-modeler'], 'read', ['estate'], ['bi-migration-plan'], ['approve'], 'every report in scope is mapped or listed as a gap')
+  'bi-migration': k('bi-migration', ['documenter', 'data-modeler'], 'read', ['estate'], ['bi-migration-plan'], ['approve'], 'every report in scope is mapped or listed as a gap'),
+  // No role: AutoDE assigns no agent. No gate: its owner marks it done, with a note (workflow-planning.md §3.3).
+  'manual': k('manual', [], 'read', [], [], [], 'its owner marks it done outside AutoDE, with a note')
 };
+
+/** PLN1: a stage only a person does, outside AutoDE. */
+export const isManualKind = (kind: StageKind): boolean => kind === 'manual';
 
 export function tierRank(t: Tier): number {
   return TIERS.indexOf(t);

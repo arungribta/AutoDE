@@ -49,10 +49,10 @@ import { EngineToolError, redact, toEnvelope } from '../mcp/errors';
 import { PlatformSession } from '../mcp/platform';
 import { findResourcesRoot, main as mcpMain, readVersion } from '../mcp/server';
 import { Decision, DecisionError, DecisionStatus, DecisionStore, stakesFor } from '../engine/decisions/decisionStore';
-import { applyDecision, approvalBlockers, propose } from '../engine/decisions/proposals';
+import { ProposalValidationError, applyDecision, approvalBlockers, propose } from '../engine/decisions/proposals';
 import { journeyContext, journeyFor, journeyLines } from '../engine/workflows/journey';
 import { CreatedWorkspace, createWorkspace } from '../engine/workspaceCreate';
-import { CoverageStatus, placeCoverage, specCoverage } from '../engine/workflows/coverage';
+import { CoverageStatus, placeCoverageItem, specCoverage } from '../engine/workflows/coverage';
 import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocument } from '../engine/documents/problemDocuments';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { conformanceFailures, loadProfiles, packConformance, probeCandidates, readPackDocument, readPackFile, sampleProbeExecutor } from '../engine/context/packChecks';
@@ -71,7 +71,7 @@ import { DOCUMENT_ROLES, DocumentAuthority, DocumentRole } from '../engine/conte
 import { buildVocabulary, mergeVocabularyFile, mineAbbreviations, parseVocabularyFile, VocabularyProposal } from '../engine/context/vocabulary';
 import { isMirror } from '../engine/context/projection';
 import { platformTools } from '../mcp/platform';
-import { WorkflowScope, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { CoveragePlacement, WorkflowScope, approveCoverageNow, coverageToApproveFirst, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeCoverage, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
 import { Actor, actorLabel } from '../engine/workflows/events';
 import { readWorkflow } from '../engine/workflows/instance';
@@ -214,8 +214,8 @@ Workflow (the planned stages of a problem; approving is a person's: interactive 
   workflow templates           The workflow templates (bundled and this workspace's)
   workflow status              The whole journey (problem, discovery, specification, plan, delivery: where you are and
                                the next step), then each stage: done, ready, waiting (and for what), stale, skipped
-  workflow coverage [show|check|place <item> --status <s> [--stage <id>]… [--reason <text>]]
-                               The specification's coverage by the workflow; an open item blocks approving the plan
+  workflow coverage [show|check|place <item> --status <s> [--stage <id>]… [--reason <text>]|propose <file>|approve]
+                               The specification's coverage by the workflow, approved before the workflow (what, then how); an open item blocks it
   workflow plan [--template <id>]   Draft the workflow from a template (default: AutoDE's suggestion) and propose it for approval
   workflow next                What to do now, and by which role
   workflow start <stage>       Mark a stage in progress (working ahead of its dependencies is allowed, with a warning)
@@ -841,15 +841,20 @@ async function cmdDecisions(ctx: Ctx, rest: string[]): Promise<number> {
   const by = (ctx.values.by ?? safeUsername()).trim();
   ctx.io.out(describeDecision(d, store.proposal(d.id)));
   if (sub === 'approve' && d.kind === 'gate' && d.problemId) await gateMaintenanceCheck(ctx, d.problemId);
+  let coverageFirst: { summary: string } | undefined;
   if (sub === 'approve') {
     // PLN0: a workflow whose coverage of the specification isn't complete can't be approved yet.
-    const blockers = approvalBlockers(store, d.id, { workspaceRoot: ctx.workspaceRoot, problemRoot: d.problemId ? layoutPath(ctx.workspaceRoot, 'problems', d.problemId) : undefined });
+    // PLN1a: a complete coverage not yet approved is approved first, as its own decision, in the same confirmation.
+    coverageFirst = d.kind === 'workflow' && d.problemId ? coverageToApproveFirst({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId: d.problemId }) : undefined;
+    const blockers = approvalBlockers(store, d.id, { workspaceRoot: ctx.workspaceRoot, problemRoot: d.problemId ? layoutPath(ctx.workspaceRoot, 'problems', d.problemId) : undefined }, { coverageFirst: !!coverageFirst });
     if (blockers.length) throw new CliError(EXIT.FAILED, blockers.join(' '));
+    if (coverageFirst) ctx.io.out(coverageFirst.summary);
   }
   // C4c: in an exploration problem a stage gate takes one step (y), not a typed word.
   const oneStep = d.kind === 'gate' && !!d.problemId && problemMode(layoutPath(ctx.workspaceRoot, 'problems', d.problemId)) === 'exploration';
   const answer = (await ctx.io.prompt(oneStep ? `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}" (exploration mode)? [y/N] ` : `\n${sub === 'approve' ? 'Approve' : 'Reject'} ${d.id} as "${by}"? Type ${sub} to confirm: `)).trim().toLowerCase();
   if (oneStep ? answer !== 'y' && answer !== 'yes' : answer !== sub) { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+  if (coverageFirst && d.problemId) ctx.io.out(await approveCoverageNow({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot, problemId: d.problemId }, by, 'cli'));
   const resolved = store.resolve(d.id, { decision, by, channel: 'cli', note: ctx.values.note });
   if (resolved.status !== 'approved') { emit(ctx, { ok: true, decision: decisionView(resolved) }, `Rejected ${d.id}.`); return EXIT.OK; }
   const problemRoot = resolved.problemId ? layoutPath(ctx.workspaceRoot, 'problems', resolved.problemId) : undefined;
@@ -1324,9 +1329,28 @@ async function cmdWorkflow(ctx: Ctx, rest: string[]): Promise<number> {
         if (!item) throw new CliError(EXIT.USAGE, 'workflow coverage place <item id> --status covered|manual|out-of-scope|gap [--stage <id>]… [--reason <text>].');
         const status = ctx.values.status as Exclude<CoverageStatus, 'question'> | undefined;
         if (!status || !['covered', 'manual', 'out-of-scope', 'gap'].includes(status)) throw new CliError(EXIT.USAGE, '--status is covered, manual, out-of-scope or gap.');
-        try { placeCoverage(c.problemRoot, c.coverage, item, { status, stages: ctx.values.stage, reason: ctx.values.reason }, `person: ${by}`); }
+        try { placeCoverageItem(ctx.workspaceRoot, problemId, item, { status, stages: ctx.values.stage, reason: ctx.values.reason }, `person: ${by}`); }
         catch (err) { throw new CliError(EXIT.USAGE, err instanceof Error ? err.message : String(err)); }
-      } else if (action !== 'show' && action !== 'check') throw new CliError(EXIT.USAGE, 'workflow coverage takes show, check, or place <item>.');
+      } else if (action === 'propose') {
+        // PLN1a: a whole placement from a file (YAML or JSON: a list of { item, status, stages, reason }), as a coverage decision.
+        if (!item) throw new CliError(EXIT.USAGE, 'workflow coverage propose <file>: YAML or JSON, a list of { item, status, stages, reason }.');
+        let raw: unknown;
+        try { raw = parseYaml(fs.readFileSync(path.resolve(ctx.io.cwd, item), 'utf8')); } catch (err) { throw new CliError(EXIT.USAGE, `Can't read ${item}: ${err instanceof Error ? err.message : String(err)}`); }
+        const list = Array.isArray(raw) ? raw : (raw as { entries?: unknown })?.entries;
+        if (!Array.isArray(list)) throw new CliError(EXIT.USAGE, `${item} must hold a list of { item, status, stages, reason } (or { entries: [...] }).`);
+        let d;
+        try { d = proposeCoverage(scope, list.map((x: Record<string, unknown>) => ({ item: String(x.item ?? x.id ?? ''), status: x.status as CoveragePlacement['status'], stages: Array.isArray(x.stages) ? x.stages.map(String) : undefined, reason: typeof x.reason === 'string' ? x.reason : undefined })), { host: 'cli', client: by }); }
+        catch (err) { throw new CliError(EXIT.FAILED, err instanceof ProposalValidationError ? err.report.errors.join(' ') : err instanceof Error ? err.message : String(err)); }
+        emit(ctx, { ok: true, decision: { id: d.id, title: d.title, validation: d.validation } }, `Proposed as decision ${d.id}: ${d.title}. A person approves it: autode workflow coverage approve (or in the panel).`);
+        return EXIT.OK;
+      } else if (action === 'approve') {
+        requirePerson(ctx, 'Approving the coverage', 'Approve it in the AutoDE panel (the plan step) instead.');
+        if (!c.check.ok) throw new CliError(EXIT.FAILED, `The coverage can't be approved yet: ${c.check.errors.join(' ')}`);
+        const answer = (await ctx.io.prompt(`Approve the coverage (${c.coverage.entries.length} items${c.pendingDecision ? `, proposed as ${c.pendingDecision}` : ''}) as "${by}"? Type approve to confirm: `)).trim().toLowerCase();
+        if (answer !== 'approve') { ctx.io.out('Not confirmed; nothing changed.'); return EXIT.REFUSED; }
+        try { emit(ctx, { ok: true }, await approveCoverageNow(scope, by, 'cli')); } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+        return EXIT.OK;
+      } else if (action !== 'show' && action !== 'check') throw new CliError(EXIT.USAGE, 'workflow coverage takes show, check, place <item>, propose <file>, or approve.');
       const now = specCoverage(ctx.workspaceRoot, problemId)!;
       const mark: Record<string, string> = { covered: '✓', manual: '✋', 'out-of-scope': '–', gap: '!', question: '?' };
       emit(ctx, { ok: now.check.ok, against: now.against, ...now.coverage, check: now.check }, [

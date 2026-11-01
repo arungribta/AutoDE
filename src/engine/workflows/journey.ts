@@ -15,7 +15,7 @@ import { layoutPath } from '../workspaceLayout';
 import { readWorkflow, WorkflowInstance } from './instance';
 import { actorLabel, readEvents, WorkflowEvent } from './events';
 import { WorkflowScope, computeDraft, problemRootOf, statusFor, suggestFor, templatesFor } from './service';
-import { CoverageCheck, checkCoverage, effectiveCoverage, readCoverage, Coverage } from './coverage';
+import { CoverageCheck, checkCoverage, effectiveCoverage, pendingCoverage, readCoverage, Coverage } from './coverage';
 
 /**
  * The whole journey of a business problem, in five phases (UI2; docs/specs/
@@ -83,7 +83,7 @@ export interface Journey {
   /** Before the plan is approved: the delivery stages as they would be, for a template. */
   preview?: DeliveryPreview;
   /** PLN0: the specification's coverage by the workflow, with the engine's checks. */
-  coverage?: Coverage & { check: CoverageCheck };
+  coverage?: Coverage & { check: CoverageCheck; pendingDecision?: string };
   /** What waits for you, in a line. */
   waiting: string[];
 }
@@ -220,24 +220,28 @@ export function journeyFor(input: JourneyInput): Journey {
   const planApproved = workflow?.status === 'approved';
   let coverage: Journey['coverage'];
   const planned: WorkflowInstance | undefined = planApproved ? workflow : (pendingWorkflow ? store.proposal<WorkflowInstance>(pendingWorkflow.id) : workflow);
+  const pendingCov = pendingCoverage(input.workspaceRoot, input.problemId);
   if (spec && planned) {
-    const c = effectiveCoverage(spec, planned, readCoverage(root));
-    coverage = { ...c, check: checkCoverage(c, spec, planned) };
+    const c = effectiveCoverage(spec, planned, pendingCov?.coverage ?? readCoverage(root));
+    coverage = { ...c, check: checkCoverage(c, spec, planned), ...(pendingCov ? { pendingDecision: pendingCov.id } : {}) };
   }
+  // PLN1a: two approvals in order: the coverage (what), then the workflow (how).
+  const coverageApproved = !!coverage?.approvedBy && !pendingCov;
   const planEvents = (e: WorkflowEvent) => !e.stage || e.stage === 'plan';
   const p4: JourneyStep[] = [
     { id: 'template', title: 'Template suggested', who: 'AutoDE', status: suggestion ? 'done' : 'todo', line: suggestion ? `${suggestion.id}: ${suggestion.reason}` : 'Waits for the specification.', why: 'The template is the stage catalogue for this kind of engagement.', history: historyOf(events, (e) => e.type === 'suggested') },
     {
-      id: 'coverage', title: 'Coverage of the specification', who: coverage?.check.counts.question ? 'You' : 'AutoDE',
-      status: !coverage ? 'todo' : coverage.approvedBy ? 'done' : coverage.check.ok ? 'now' : 'waiting',
-      line: !coverage ? 'Waits for the specification and a plan.' : `${coverage.check.counts.covered} covered · ${coverage.check.counts.question} to place · ${coverage.check.counts['out-of-scope']} out of scope · ${coverage.check.counts.gap} gaps${coverage.approvedBy ? ` · approved by ${coverage.approvedBy}` : ''}`,
-      why: 'Every in-scope item and objective is delivered by named stages, out of scope with a reason, or a gap: nothing drops silently (workflow-planning.md).',
-      waitsOn: coverage?.check.counts.question ? 'Items no stage delivers: place them before the workflow can be approved.' : undefined,
+      id: 'coverage', title: 'Coverage of the specification', who: 'You',
+      status: !coverage ? 'todo' : coverageApproved ? 'done' : 'waiting',
+      line: !coverage ? 'Waits for the specification and a plan.' : `${coverage.check.counts.covered} covered · ${coverage.check.counts.manual} outside AutoDE · ${coverage.check.counts.question} to place · ${coverage.check.counts['out-of-scope']} out of scope · ${coverage.check.counts.gap} gaps${coverageApproved ? ` · approved by ${coverage.approvedBy}` : pendingCov ? ' · proposed, waits for your approval' : ''}`,
+      why: 'Every in-scope item, objective, constraint and acceptance criterion is delivered by named stages, done outside AutoDE, out of scope with a reason, or a gap: nothing drops silently. You approve it before the workflow (workflow-planning.md).',
+      waitsOn: coverage && !coverage.check.ok ? 'Items still to place: place them, then approve the coverage.' : coverage && !coverageApproved ? 'Your approval of what will be delivered.' : undefined,
       parts: coverage?.entries.map((e) => ({ name: e.text, status: e.status, detail: e.stages?.join(', ') ?? e.reason })),
-      ...(coverage?.check.counts.question ? { action: { id: 'place-coverage', label: `Place ${plural(coverage.check.counts.question, 'item')}`, cli: 'autode workflow coverage', mcp: 'autode_coverage' } } : {}),
-      history: []
+      ...(coverage && !coverage.check.ok ? { action: { id: 'place-coverage', label: `Place ${plural(coverage.check.counts.question || coverage.check.errors.length, 'item')}`, cli: 'autode workflow coverage', mcp: 'autode_coverage' } }
+        : coverage && !coverageApproved ? { action: { id: 'approve-coverage', label: 'Approve the coverage', cli: 'autode workflow coverage approve' } } : {}),
+      history: historyOf(events, (e) => e.reason === 'the coverage of the specification')
     },
-    { id: 'approved', title: 'Plan approved', who: 'You', status: planApproved ? 'done' : pendingWorkflow ? 'waiting' : specApproved ? 'now' : 'todo', line: planApproved ? `${workflow!.template.id}, approved by ${workflow!.approvedBy ?? 'unknown'}.` : pendingWorkflow ? `Proposed: ${pendingWorkflow.title}.` : 'Choose a template and propose the workflow.', why: 'The approved plan decides the delivery stages.', ...(planApproved ? {} : pendingWorkflow ? { action: { id: 'approve-workflow', label: 'Approve the plan', cli: 'autode workflow approve' } } : specApproved ? { action: { id: 'propose-workflow', label: 'Propose the workflow', cli: 'autode workflow propose', mcp: 'autode_propose_workflow' } } : {}), history: historyOf(events, planEvents) }
+    { id: 'approved', title: 'Plan approved', who: 'You', status: planApproved ? 'done' : pendingWorkflow ? 'waiting' : specApproved ? 'now' : 'todo', line: planApproved ? `${workflow!.template.id}, approved by ${workflow!.approvedBy ?? 'unknown'}.` : pendingWorkflow ? `Proposed: ${pendingWorkflow.title}.${coverageApproved ? '' : ' Approve the coverage first.'}` : 'Choose a template and propose the workflow.', why: 'The approved plan decides the delivery stages.', ...(planApproved ? {} : pendingWorkflow && !coverageApproved ? {} : pendingWorkflow ? { action: { id: 'approve-workflow', label: 'Approve the plan', cli: 'autode workflow approve' } } : specApproved ? { action: { id: 'propose-workflow', label: 'Propose the workflow', cli: 'autode workflow propose', mcp: 'autode_propose_workflow' } } : {}), history: historyOf(events, planEvents) }
   ];
 
   // ⑤ Delivery
@@ -279,7 +283,7 @@ export function journeyFor(input: JourneyInput): Journey {
   const phase = phases.find((p) => p.status !== 'done') ?? phases[phases.length - 1];
   const step = phase.steps.find((s) => !s.checkpoint && s.status !== 'done' && s.status !== 'skipped') ?? phase.steps.find((s) => s.status !== 'done' && s.status !== 'skipped');
   const holdsTables = (ctx?.systems ?? []).reduce((n, s) => n + s.tables, 0);
-  const waiting = [facts.total ? `${plural(facts.total, 'fact')} wait for you` : '', pendingWorkflow ? 'the plan waits for your approval' : '', coverage?.check.counts.question ? `${plural(coverage.check.counts.question, 'scope item')} to place` : ''].filter(Boolean);
+  const waiting = [facts.total ? `${plural(facts.total, 'fact')} wait for you` : '', coverage?.check.ok && !coverageApproved ? 'the coverage waits for your approval' : '', pendingWorkflow ? 'the plan waits for your approval' : '', coverage?.check.counts.question ? `${plural(coverage.check.counts.question, 'scope item')} to place` : ''].filter(Boolean);
   return {
     problemId: input.problemId, statement, mode: problemMode(root),
     holds: { systems: ctx?.systems.length ?? 0, tables: holdsTables, facts: facts.total },

@@ -90,7 +90,8 @@ export function describeActions(audit: ReadonlyArray<{ tool: string; input: Reco
 
 
 import { bulkConfirmDocumented, inbox, reviewFact } from '../engine/context/factReview';
-import { WorkflowScope, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
+import { WorkflowScope, approveCoverageNow, coverageToApproveFirst, ensureWorkflow, proposeWorkflow, redraft } from '../engine/workflows/service';
+import { specCoverage } from '../engine/workflows/coverage';
 import { WorkflowError, completeStage, reopenStage, skipStage } from '../engine/workflows/runtime';
 import { ExecutorHost, runHandoff, runMaintenance, runStage } from './agentExecutor';
 import { RunStoppedError } from './llmAdapter';
@@ -1753,8 +1754,12 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       const pending = store.get(id);
       if (decision === 'approved' && pending?.kind === 'gate' && pending.problemId && await this.maintenanceHoldsGate(pending.problemId)) return;
       // PLN0: a workflow whose coverage isn't complete can't be approved yet: say what to place.
-      const blockers = decision === 'approved' ? approvalBlockers(store, id, ctx) : [];
+      // PLN1a: a complete coverage not yet approved is approved first, as its own decision (the confirmation named it).
+      const scope = pending.kind === 'workflow' && pending.problemId && this.workspaceRoot ? { workspaceRoot: this.workspaceRoot.fsPath, resourcesRoot: this.context.extensionUri.fsPath, problemId: pending.problemId } : undefined;
+      const coverageFirst = decision === 'approved' && scope ? coverageToApproveFirst(scope) : undefined;
+      const blockers = decision === 'approved' ? approvalBlockers(store, id, ctx, { coverageFirst: !!coverageFirst }) : [];
       if (blockers.length) { vscode.window.showWarningMessage(blockers.join(' ')); this.postLog(blockers.join(' ')); return; }
+      if (coverageFirst && scope) this.postLog(await approveCoverageNow(scope, this.panelUser(), 'panel'));
       const resolved = store.resolve(id, { decision, by: this.panelUser(), channel: 'panel', note });
       if (resolved.status === 'approved') {
         const result = await applyDecision(store, id, ctx);
@@ -1972,9 +1977,33 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
       case 'structure-glossary': await chat('Ask the knowledge engineer in the chat to structure the glossary (categories, broader and related terms): it proposes, you approve.'); return;
       case 'draft-semantic': await vscode.commands.executeCommand(`${EXTENSION_ID}.newSemanticModel`); return;
       case 'propose-workflow': await this.workflowAction('propose', undefined, args.template); return;
+      case 'approve-coverage': await this.approveCoverage(); return;
       case 'run-stage': await this.workflowAction('run', args.stage, undefined); return;
       default: this.postLog(`No panel action for "${id}" here: use the Workflow tab.`);
     }
+  }
+
+  /** PLN1a: a person approves the coverage (what will be delivered) before the workflow (how). */
+  private async approveCoverage(): Promise<void> {
+    const scope = this.workflowScope();
+    if (!scope) return;
+    const c = specCoverage(scope.workspaceRoot, scope.problemId);
+    if (!c) { void vscode.window.showWarningMessage('No coverage yet: it needs the specification and a proposed workflow.'); return; }
+    const by = this.panelUser();
+    if (problemMode(layoutPath(scope.workspaceRoot, 'problems', scope.problemId)) !== 'exploration') {
+      const n = (st: string) => c.coverage.entries.filter((e) => e.status === st).length;
+      const ok = await vscode.window.showWarningMessage(`Approve the coverage as ${by}?`, { modal: true, detail: `${n('covered')} item(s) delivered by stages, ${n('manual')} done outside AutoDE, ${n('out-of-scope')} out of scope, ${n('gap')} gap(s). Recorded with your name; the workflow is approved next.` }, 'Approve');
+      if (ok !== 'Approve') return;
+    }
+    try {
+      this.postLog(await approveCoverageNow(scope, by, 'panel'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.postMessage('error', { message });
+      void vscode.window.showErrorMessage(message);
+    }
+    this.postDecisions();
+    this.postContextGateStatus();
   }
 
   /** SIMP-1: everything that waits for a person, from the panel's own ledger and the workspace. */
@@ -2740,6 +2769,13 @@ export class DataAgentHubWebviewProvider implements vscode.WebviewViewProvider {
               : 'Build the source context in the panel (Source Context: Pick from the Estate, which also brings in source files found in the workspace, or Describe Source), then approve it there or from the Workflow view.');
           }
         }
+      } else if (action === 'complete' && stage && readWorkflow(rctx.problemRoot)?.stages.find((x) => x.id === stage)?.kind === 'manual') {
+        // PLN1a: a stage done outside AutoDE: the note is its record; files are optional evidence.
+        const note = await vscode.window.showInputBox({ title: `Mark ${stage} done`, prompt: 'What was done outside AutoDE, and where (the record of this stage)', ignoreFocusOut: true, validateInput: (v) => (v.trim() ? undefined : 'Say what was done.') });
+        if (!note) return;
+        const evidence = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Attach as evidence', title: `Evidence for ${stage} (optional: Cancel for none)`, defaultUri: this.workspaceRoot });
+        const r = completeStage(rctx, stage, { outputs: (evidence ?? []).map((f) => path.relative(scope.workspaceRoot, f.fsPath).split(path.sep).join('/')), summary: note, who: { kind: 'person', name: by }, channel: 'panel' });
+        this.postLog(r.message);
       } else if (action === 'complete' && stage) {
         const files = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Hand in', title: `What did stage ${stage} produce?`, defaultUri: this.workspaceRoot });
         if (!files) return;

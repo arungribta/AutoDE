@@ -147,6 +147,7 @@ export function buildWorkflowModel(scope: WorkflowScope): WorkflowModel {
       : v.status === 'skipped' ? `Skipped${v.why ? `: ${v.why}` : '.'}`
       : w.status !== 'approved' ? 'Waits for the workflow to be approved.'
       : v.status === 'pending' ? `Waits: ${v.why ?? 'its dependencies are not done'}.`
+      : s.kind === 'manual' ? `Done outside AutoDE${s.owner ? ` by ${s.owner}` : ''}: mark it done with a note when it is (files as evidence are optional).`
       : v.status === 'stale' ? 'Its inputs changed since it was approved: review the output, then approve it again.'
       : v.status === 'awaiting-approval' && s.record.decisionId ? 'Waits for your approval.'
       : notReady.length ? `${v.status === 'in-progress' ? 'Started, but blocked' : 'Not ready yet'}: ${notReady.join(' ')}`

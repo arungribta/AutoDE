@@ -107,6 +107,7 @@ export function assignmentFor(scope: AssignmentScope, stageId: string, tools: re
   const s = w?.stages.find((x) => x.id === stageId);
   if (!w || !s) return { reason: `No stage "${stageId}".` };
   if (!s.included) return { reason: `${stageId} is not in this workflow.` };
+  if (s.kind === 'manual') return { reason: `${stageId} is done outside AutoDE${s.owner ? ` by ${s.owner}` : ''}: no agent is assigned; a person marks it done.` };
   const kind = STAGE_KINDS[s.kind];
   const roleName = s.agent?.role ?? kind.roles[0];
   const { roles } = loadRoles(scope.resourcesRoot, scope.workspaceRoot);

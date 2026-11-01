@@ -262,6 +262,11 @@ export function completeStage(ctx: RuntimeContext, id: string, input: { outputs:
   if (s.record.status === 'done') throw new WorkflowError('NOT_ALLOWED', `${id} is already done.`);
   const unmet = s.after.filter((d) => { const dep = w.stages.find((x) => x.id === d.stage); return dep && dep.included && dep.record.status !== 'skipped' && !(d.approved ? isDone(dep) : isDrafted(dep)); });
   if (unmet.length) throw new WorkflowError('NOT_READY', `${id} can't be handed in yet: it waits for ${unmet.map((d) => d.stage).join(', ')}.`);
+  // PLN1a: a manual stage is done outside AutoDE; only a person says it is, with a note (workflow-planning.md §3.3).
+  if (s.kind === 'manual') {
+    if (input.who.kind !== 'person') throw new WorkflowError('NOT_ALLOWED', `${id} is done outside AutoDE${s.owner ? ` by ${s.owner}` : ''}: a person marks it done (the Workflow tab, or autode workflow complete ${id} --summary "…").`);
+    if (!input.summary.trim()) throw new WorkflowError('CHECK_FAILED', `Say what was done for ${id}: the note is its record.`);
+  }
   if (DOCUMENT_STAGES[s.kind] && s.record.status !== 'stale') {
     return { stage: view(s), message: `${id} completes when its document is approved: ${DOCUMENT_STAGES[s.kind]!.join('/')} (AutoDE panel, or the matching proposal and its decision).` };
   }
@@ -337,7 +342,9 @@ export function nextAssignment(ctx: RuntimeContext): { stage: StageView; consume
   const w = readWorkflow(ctx.problemRoot)!;
   const s = w.stages.find((x) => x.id === status.next!.id)!;
   const kind = STAGE_KINDS[s.kind];
-  const instructions = s.record.status === 'awaiting-approval'
+  const instructions = s.kind === 'manual'
+    ? `Stage ${s.id} is done outside AutoDE${s.owner ? ` by ${s.owner}` : ''}: no agent does it. Tell the user it is next, and that a person marks it done with a note once it is.`
+    : s.record.status === 'awaiting-approval'
     ? `Stage ${s.id} waits for a person's approval${s.record.decisionId ? ` (decision ${s.record.decisionId})` : ''}: tell the user how to approve it.`
     : s.record.status === 'stale'
       ? `Stage ${s.id} is stale (${s.record.reason}). Review its output against the changed inputs, update it, and hand it in again.`

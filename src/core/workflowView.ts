@@ -3,12 +3,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { WorkflowModel, StageModel, STATUS_ICON, buildWorkflowModel, statusBarText } from './workflowViewModel';
 import { WaitingItem } from '../engine/approvals/waiting';
-import { stageDetail, WorkflowScope } from '../engine/workflows/service';
+import { coverageToApproveFirst, stageDetail, WorkflowScope } from '../engine/workflows/service';
+import { DecisionStore } from '../engine/decisions/decisionStore';
 import { actorLabel } from '../engine/workflows/events';
 import { layoutPath } from '../engine/workspaceLayout';
 import { EXPLORATION_LABEL, problemMode } from '../engine/documents/problemMode';
 import { Journey } from '../engine/workflows/journey';
-import { CoverageStatus, placeCoverage, specCoverage } from '../engine/workflows/coverage';
+import { CoverageStatus, placeCoverageItem, specCoverage } from '../engine/workflows/coverage';
 
 /**
  * The Workflow view (v0.44.1): a tree in AutoDE's activity bar, a full editor
@@ -175,14 +176,17 @@ export class WorkflowPanel {
     if (!how) return;
     let stages: string[] | undefined; let reason: string | undefined;
     if (how.status === 'covered' || how.status === 'manual') {
-      const picked = await vscode.window.showQuickPick(c.stages.map((x) => ({ label: x.title, description: `${x.id} · ${x.kind}`, id: x.id, picked: e.stages?.includes(x.id) })), { canPickMany: true, title: `Which stages ${how.status === 'manual' ? 'track' : 'deliver'} "${e.text}"?` });
+      // PLN1a: a manual item is tracked by a manual stage; AutoDE's own stages deliver the rest.
+      const offered = c.stages.filter((x) => (how.status === 'manual') === (x.kind === 'manual'));
+      if (!offered.length) { void vscode.window.showWarningMessage(how.status === 'manual' ? 'The workflow has no manual stage (work done outside AutoDE) yet: the planner adds one, with its owner, when it proposes the workflow.' : 'The workflow has no stage AutoDE does yet.'); return; }
+      const picked = await vscode.window.showQuickPick(offered.map((x) => ({ label: x.title, description: `${x.id} · ${x.kind}`, id: x.id, picked: e.stages?.includes(x.id) })), { canPickMany: true, title: `Which stages ${how.status === 'manual' ? 'track' : 'deliver'} "${e.text}"?` });
       if (!picked?.length) return;
       stages = picked.map((x) => x.id);
     } else {
       reason = await vscode.window.showInputBox({ title: `"${e.text}" is ${how.status}: why?`, prompt: how.status === 'gap' ? 'What is missing (a stage kind, a platform skill, a capability)?' : 'Why is it not delivered by this problem?', validateInput: (v) => (v.trim() ? undefined : 'Give a reason.') });
       if (!reason) return;
     }
-    placeCoverage(c.problemRoot, c.coverage, itemId, { status: how.status as Exclude<CoverageStatus, 'question'>, stages, reason }, `person: ${this.host.user()}`);
+    placeCoverageItem(scope.workspaceRoot, scope.problemId, itemId, { status: how.status as Exclude<CoverageStatus, 'question'>, stages, reason }, `person: ${this.host.user()}`);
   }
 
   private async onMessage(m: { type: string; stage?: string; decisionId?: string; template?: string; action?: string; file?: string; id?: string; args?: Record<string, string>; item?: string; tab?: string }): Promise<void> {
@@ -202,7 +206,8 @@ export class WorkflowPanel {
           // C4c: in exploration mode a gate takes one click (still a person, still recorded).
           const oneClick = !!scope && problemMode(layoutPath(scope.workspaceRoot, 'problems', scope.problemId)) === 'exploration';
           if (!oneClick) {
-            const ok = await vscode.window.showWarningMessage(`${verb} this as ${this.host.user()}?`, { modal: true, detail: 'You are approving as a person in VS Code (the panel channel). It is recorded with your name in the decision and the workflow history.' }, verb);
+            const first = m.type === 'approve' && scope && new DecisionStore(scope.workspaceRoot).get(m.decisionId).kind === 'workflow' ? coverageToApproveFirst(scope) : undefined;
+            const ok = await vscode.window.showWarningMessage(`${verb} this as ${this.host.user()}?`, { modal: true, detail: `${first ? `${first.summary} ` : ''}You are approving as a person in VS Code (the panel channel). It is recorded with your name in the decision and the workflow history.` }, verb);
             if (ok !== verb) return;
           }
           await this.host.resolve(m.decisionId, m.type === 'approve' ? 'approved' : 'rejected');

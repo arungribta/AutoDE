@@ -6,6 +6,23 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.56.6
+
+PLN1a, the planner composing the workflow from coverage ([workflow-planning.md](docs/specs/workflow-planning.md) §3.1–§3.3, §3.5, §3.7).
+
+- **More of the specification is covered.** Besides the in-scope items and objectives, coverage lists the specification's **constraints**, its **acceptance criteria**, and, when personal data is involved, its **protection** (owner, 2026-10-30). The engine places what it can: acceptance criteria on the validate stage, personal data where access is set up or the pipelines are built. It leaves a constraint, and work AutoDE may not do (machine learning, streaming, a handover or sign-off), as a question rather than guess.
+- **Two approvals, in order:** the coverage (*what* will be delivered), then the workflow (*how*). The coverage is its own decision (kind `coverage`). **Approve the coverage…** in the plan step, or `autode workflow coverage approve`. Approving the workflow on the same screen (panel or `autode workflow approve`) approves a complete coverage first, as its own decision, and the confirmation says so. A workflow approved through its decision file, or anything an agent does, can't skip it. Before, approving the plan approved the coverage with it.
+- **The `manual` stage kind** (owner confirmed, 2026-10-30): work a person or team does outside AutoDE. It names its owner; no agent is assigned; only a person marks it done, with a note (**Mark done…**, or `autode workflow complete <stage> --summary "…"`), with files as optional evidence. A manual item is tracked on a manual stage, and *Work AutoDE can't do yet* lists the manual work and the gaps for the team.
+- **Composed workflows.** The planner may take a stage from another template (`origin: combined`, `fromTemplate`), keeping that template's kind, gates and dependencies, or compose from stage kinds alone where no template fits (template `composed`). The engine checks the composition rules: a model after the mapping and deployment after validation (where the planner placed either), and reconciliation and validation in a composed workflow that moves data between systems. A stage no AutoDE skill does on the target platform is flagged before approval.
+- **The planner proposes both:** `autode_propose_coverage` (MCP), checked item by item against the workflow it proposed; `autode workflow coverage propose <file>` in a terminal. `autode_workflow_draft` lists every stage kind with the skills that do it. The planning skill is at version 2.
+- **Eval:** four reference problems with the coverage a good plan gives them (`test/reference/planning/coverage-cases.yaml`: one per template and a modernization with BI and an ML handover). Offline, the engine's starting coverage: 15 of 20 items placed as expected, 5 left for the planner, 0 placed wrongly (the eval found two misplacements, a deadline on the deploy stage and a handover on the build stage, both fixed). The planner's own coverage needs a recorded model run. Baseline `v0.56.6-offline.md`.
+- **Deviations:**
+  - The ordering rules apply to stages the planner placed; a template's own order stands (a team's template sets it, through review).
+  - An existing coverage gains items: a problem planned before 0.56.6 shows its constraints and acceptance criteria to place, and its coverage to approve again, before its next workflow approval.
+  - A manual item placed on a stage of another kind before 0.56.6 is now an error to fix.
+  - The CLI package's unminified development build grew past its 2.5 MB guard, now 2.6 MB.
+- **Not in this release (PLN1b, v0.56.7):** the clarification round and re-planning from stage reports. Until then, an item that needs the stakeholder's answer stays a question for a person to place.
+
 ## 0.56.5
 
 - **Fixed: AutoDE kept a workspace in its own folder when VS Code had no folder open** (owner's UI test, 2026-10-30). With no folder open, the panel fell back to the extension's install folder (in the development host, the AutoDE repository) and wrote `.autode/` there, so a session's facts, problems and chats ended up where the person never looked, and a workspace they had prepared stayed empty. With no folder open the panel now says so and offers **New Workspace…** and **Open Folder…**; nothing is written anywhere.

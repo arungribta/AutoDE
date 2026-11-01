@@ -17,8 +17,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { checksumOf, loadCatalog, writeApproval } from '../platform/operations/load';
 
-import { WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, writeWorkflow } from '../workflows/instance';
-import { approveCoverage, checkCoverage, effectiveCoverage, readCoverage } from '../workflows/coverage';
+import { COMPOSED, WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, templateOf, writeWorkflow } from '../workflows/instance';
+import { skillFits, targetPlatform } from '../agents/assignment';
+import { CoverageProposal, approveCoverage, checkCoverage, effectiveCoverage, pendingCoverage, plannedWorkflow, readCoverage } from '../workflows/coverage';
 import { appendEvent } from '../workflows/events';
 import { loadTemplates } from '../workflows/templates';
 
@@ -47,7 +48,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  */
 
 /** What can be proposed. `mapping` and `platform_change` decisions were retired in v0.45.8 (SIMP-2): mappings are drafted into the mapping document, platform changes are runbooks; their old decision files still read. */
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'runbook' | 'semantic_model' | 'article' | 'platform_operation'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'coverage' | 'runbook' | 'semantic_model' | 'article' | 'platform_operation'>;
 
 /** POP1: a team file under .autode/config/platform-operations/ or platforms/, by its workspace-relative path and checksum. */
 export interface PlatformFilePayload { file: string; checksum: string }
@@ -209,10 +210,18 @@ export function validateWorkflowProposal(w: WorkflowInstance, ctx: ProposalConte
   if (ctx.problemId && w.problemId !== ctx.problemId) r.errors.push(`The workflow is for problem ${w.problemId}, not the active ${ctx.problemId}.`);
   const { templates, errors } = loadTemplates(ctx.resourcesRoot ?? ctx.workspaceRoot, ctx.workspaceRoot);
   r.warnings.push(...errors);
-  const template = templates.find((t) => t.id === w.template?.id);
-  if (!template) { r.errors.push(`No workflow template "${w.template?.id}" (known: ${templates.map((t) => t.id).join(', ') || 'none'}).`); return finish(r); }
-  const skills = ctx.resourcesRoot ? stageSkills(ctx.resourcesRoot, ctx.workspaceRoot).map((k) => ({ id: k.id, stageKinds: k.meta.stageKinds })) : undefined;
-  const c = checkWorkflow(w, template, { skills });
+  const template = templateOf(templates, w.template?.id);
+  if (!template) { r.errors.push(`No workflow template "${w.template?.id}" (known: ${[...templates.map((t) => t.id), COMPOSED].join(', ')}).`); return finish(r); }
+  const pack = ctx.resourcesRoot ? stageSkills(ctx.resourcesRoot, ctx.workspaceRoot) : undefined;
+  const skills = pack?.map((k) => ({ id: k.id, stageKinds: k.meta.stageKinds }));
+  const c = checkWorkflow(w, template, { skills, templates });
+  // PLN1a: a stage no approved skill does on this problem's platform is a person's to do: a gap for the team, shown before approval.
+  if (pack && ctx.problemRoot) {
+    const platform = targetPlatform(ctx.problemRoot);
+    for (const s of w.stages.filter((x) => x.included && x.kind !== 'manual' && x.kind !== 'specify' && x.kind !== 'plan')) {
+      if (!pack.some((k) => skillFits(k, s.kind, { platform }))) r.warnings.push(`No AutoDE skill does ${s.kind} stages${platform ? ` on ${platform}` : ''}: a person does ${s.id} and hands it in.`);
+    }
+  }
   r.errors.push(...c.errors);
   r.warnings.push(...c.warnings);
   const d = diffWorkflow(w, template);
@@ -244,6 +253,11 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'spec_revision': { const s = payload as BusinessProblemSpec; return { title: 'Revise the Business Problem Specification', summary: s.problemStatement }; }
     case 'pipeline_spec': { const s = payload as PipelineSpec; return { title: `Pipeline Spec: ${s.entities?.length ?? 0} entities`, summary: `Pipeline Spec derived from ${s.derivedFromBpsId ?? 'the active problem'} v${s.derivedFromBpsVersion ?? '?'}` }; }
     case 'workflow': { const w = payload as WorkflowInstance; const n = (w.stages ?? []).filter((s) => s.included).length; return { title: `Workflow: ${w.template?.id} with ${n} stages`, summary: (w.stages ?? []).filter((s) => s.included).map((s) => s.id).join(' → ') }; }
+    case 'coverage': {
+      const c = payload as CoverageProposal;
+      const n = (st: string) => (c.entries ?? []).filter((e) => e.status === st).length;
+      return { title: `Coverage of the specification: ${(c.entries ?? []).length} items`, summary: `${n('covered')} covered, ${n('manual')} done outside AutoDE, ${n('out-of-scope')} out of scope, ${n('gap')} gaps` };
+    }
     case 'vocabulary': { const v = payload as VocabularyProposalPayload; return { title: `Vocabulary: ${v.entries.map((e) => e.kind === 'abbreviation' ? `${e.from.toUpperCase()}=${e.to}` : `${e.from}~${e.to}`).join(', ')}`.slice(0, 160), summary: `${v.entries.length} retrieval vocabulary entr${v.entries.length === 1 ? 'y' : 'ies'}.` }; }
     case 'runbook': { const r = payload as Runbook; return { title: `Runbook ${r.id}: ${r.title} (${r.steps?.length ?? 0} steps on ${r.connectionId})`.slice(0, 160), summary: r.reason ?? '' }; }
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
@@ -290,6 +304,31 @@ export function validateRunbookProposal(rb: Runbook, ctx: ProposalContext): Vali
   return finish(r);
 }
 
+/**
+ * PLN1a: a coverage (workflow-planning.md §3.1, §3.5) is checked against the current specification and the
+ * workflow it plans for (the one waiting for approval, else the current one): every item placed, stages that
+ * exist, manual items on manual stages, reasons for gaps and out-of-scope items.
+ */
+export function validateCoverageProposal(c: CoverageProposal, ctx: ProposalContext): ValidationReport {
+  const r = report();
+  r.checks.push('every item of the current specification listed once', 'no question left open', 'named stages are in the workflow (manual items on manual stages)', 'gaps and out-of-scope items give a reason');
+  needProblem(ctx, r);
+  if (!c || typeof c !== 'object' || !Array.isArray(c.entries)) { r.errors.push('coverage must have entries.'); return finish(r); }
+  const problemId = c.problemId ?? ctx.problemId;
+  if (ctx.problemId && problemId !== ctx.problemId) r.errors.push(`The coverage is for problem ${problemId}, not the active ${ctx.problemId}.`);
+  if (!problemId) return finish(r);
+  const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', problemId);
+  let spec: BusinessProblemSpec;
+  try { spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? ''); } catch { r.errors.push('There is no specification to cover.'); return finish(r); }
+  if (c.specVersion !== undefined && c.specVersion !== spec.version) r.errors.push(`The coverage is for specification version ${c.specVersion}; the current one is ${spec.version}. Re-read the coverage and propose again.`);
+  const planned = plannedWorkflow(ctx.workspaceRoot, problemId);
+  if (!planned) { r.errors.push('There is no workflow to cover the specification with: propose the workflow first.'); return finish(r); }
+  const check = checkCoverage(c, spec, planned.workflow);
+  r.errors.push(...check.errors);
+  r.warnings.push(...check.warnings, ...(check.teamGaps.length ? [`Work AutoDE can't do yet: ${check.teamGaps.join('; ')}.`] : []));
+  return finish(r);
+}
+
 export function validateProposal(kind: ProposalKind, payload: unknown, ctx: ProposalContext): ValidationReport {
   switch (kind) {
     case 'assertion': return validateAssertionProposal(payload as AssertionProposal);
@@ -298,6 +337,7 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'connection': return validateConnectionProposal(payload as ConnectionDraft, ctx);
     case 'vocabulary': return validateVocabularyProposal(payload as VocabularyProposalPayload);
     case 'workflow': return validateWorkflowProposal(payload as WorkflowInstance, ctx);
+    case 'coverage': return validateCoverageProposal(payload as CoverageProposal, ctx);
     case 'runbook': return validateRunbookProposal(payload as Runbook, ctx);
     case 'semantic_model': return validateSemanticModelProposal(payload as SemanticModelPayload, ctx);
     case 'article': return validateArticleProposal(payload as ArticlePayload, ctx);
@@ -362,16 +402,24 @@ export interface ApplyResult { decision: Decision; applied: boolean; message: st
  * coverage of the specification has an open question or an error. The CLI and the panel ask before resolving;
  * `applyDecision` asks again for a decision resolved by editing its file.
  */
-export function approvalBlockers(store: DecisionStore, id: string, ctx: Pick<ProposalContext, 'workspaceRoot' | 'problemRoot'>): string[] {
+export function approvalBlockers(store: DecisionStore, id: string, ctx: Pick<ProposalContext, 'workspaceRoot' | 'problemRoot'>, opts: { coverageFirst?: boolean } = {}): string[] {
   const d = store.get(id);
+  if (d.kind === 'coverage') {
+    const c = store.proposal<CoverageProposal>(id);
+    const v = validateCoverageProposal(c, { workspaceRoot: ctx.workspaceRoot, problemRoot: ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', c.problemId), problemId: c.problemId });
+    return v.ok ? [] : [`The coverage can't be approved as it stands: ${v.errors.join(' ')}`];
+  }
   if (d.kind !== 'workflow') return [];
   const p = store.proposal<WorkflowInstance>(id);
   const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', p.problemId);
   let spec: BusinessProblemSpec | undefined;
   try { spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? ''); } catch { return []; }
-  const c = effectiveCoverage(spec, p, readCoverage(root));
+  const c = effectiveCoverage(spec, p, pendingCoverage(ctx.workspaceRoot, p.problemId)?.coverage ?? readCoverage(root));
   const check = checkCoverage(c, spec, p);
-  return check.ok ? [] : [`The specification's coverage isn't complete (${check.counts.question} item(s) to place): ${check.errors.join(' ')} Place them in the plan step (or autode workflow coverage place), then approve.`];
+  if (!check.ok) return [`The specification's coverage isn't complete (${check.counts.question} item(s) to place): ${check.errors.join(' ')} Place them in the plan step (or autode workflow coverage place), then approve the coverage and the workflow.`];
+  // PLN1a: two approvals, in order (workflow-planning.md §3.5): what will be delivered, then how.
+  // A person approving on the plan step (panel, CLI) approves a complete coverage first, as its own decision (coverageFirst).
+  return c.approvedBy || opts.coverageFirst ? [] : ['Approve the coverage first: what will be delivered, then how (Approve coverage in the plan step, or autode workflow coverage approve).'];
 }
 
 export async function applyDecision(store: DecisionStore, id: string, ctx: ProposalContext, deps: ApplyDeps = {}): Promise<ApplyResult> {
@@ -461,11 +509,16 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         writeWorkflow(root, next);
         const resolved = [...d.events].reverse().find((e) => e.type === 'approved');
         appendEvent(root, { at: now.toISOString(), type: 'approved', actor: { kind: 'person', name: approver }, channel: resolved?.channel, decisionId: id, template: p.template.id, reason: keep.size ? 'the stages both workflows share keep their state' : current ? 'a new template restarts the workflow' : undefined });
-        // PLN0: the coverage the approver saw with the plan is approved with it.
-        try {
-          const spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? '');
-          approveCoverage(root, effectiveCoverage(spec, next, readCoverage(root)), approver, now.toISOString());
-        } catch { /* no specification to cover */ }
+        break;
+      }
+      case 'coverage': {
+        // PLN1a: approved through a channel that didn't ask first: the checks still have to pass now.
+        const c = store.proposal<CoverageProposal>(id);
+        const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', c.problemId);
+        const blockers = approvalBlockers(store, id, { workspaceRoot: ctx.workspaceRoot, problemRoot: root });
+        if (blockers.length) { const failed = store.markFailed(id, blockers.join(' ')); return { decision: failed, applied: false, message: blockers.join(' ') }; }
+        approveCoverage(root, c, approver, now.toISOString(), id);
+        appendEvent(root, { at: now.toISOString(), type: 'approved', actor: { kind: 'person', name: approver }, channel: [...d.events].reverse().find((e) => e.type === 'approved')?.channel, decisionId: id, reason: 'the coverage of the specification' });
         break;
       }
       case 'vocabulary': {

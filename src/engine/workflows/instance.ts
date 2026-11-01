@@ -50,7 +50,9 @@ export interface WorkflowStage {
   id: string;
   title: string;
   kind: StageKind;
-  origin: 'template' | 'added';
+  /** PLN1: `combined` is a stage taken from another template (`fromTemplate`), with its dependencies and gates. */
+  origin: 'template' | 'added' | 'combined';
+  fromTemplate?: string;
   inclusion: Inclusion;
   /** In this problem's workflow. A stage left out keeps its row, with the reason. */
   included: boolean;
@@ -66,6 +68,8 @@ export interface WorkflowStage {
   systems?: string[];
   tasks: StageTask[];
   agent?: AgentAssignment;
+  /** PLN1: who does a `manual` stage outside AutoDE (a person, a team). */
+  owner?: string;
   record: StageRecord;
 }
 
@@ -133,7 +137,7 @@ function stageFrom(t: TemplateStage, included: boolean, reason: string | undefin
     after: t.after, consumes: t.consumes, produces: t.produces, gates: t.gates, repeat: t.repeat, join: t.join,
     systems: t.repeat ? systems : undefined,
     tasks: t.repeat ? systems.map((s) => ({ id: `${t.id}:${s}`, title: `${t.title}: ${s}` })) : [],
-    agent: { role: kind.roles[0], tier: kind.ceiling },
+    agent: kind.roles.length ? { role: kind.roles[0], tier: kind.ceiling } : undefined,
     record: { status: 'pending' }
   };
 }
@@ -158,11 +162,69 @@ export function draftWorkflow(template: WorkflowTemplate, problemId: string, fac
 
 export interface PlanCheck { errors: string[]; warnings: string[] }
 
+/**
+ * PLN1: a workflow built from stage kinds alone, where no template fits (workflow-planning.md §3.2). It has
+ * no stage catalogue: every stage is added with a reason, and the composition rules hold as for any workflow.
+ */
+export const COMPOSED = 'composed';
+export const composedTemplate: WorkflowTemplate = { id: COMPOSED, version: 1, title: 'Composed workflow', description: 'Built from stage kinds where no template fits; every stage has a reason.', suggestWhen: [], stages: [], origin: 'engine' };
+
+/** The template a workflow is checked against: the named one, or the composed workflow's empty catalogue. */
+export function templateOf(templates: readonly WorkflowTemplate[], id: string | undefined): WorkflowTemplate | undefined {
+  return id === COMPOSED ? composedTemplate : templates.find((t) => t.id === id);
+}
+
+/** Whether `from` depends on `on`, directly or through other stages. */
+function dependsOn(byId: ReadonlyMap<string, WorkflowStage>, from: string, on: string, seen = new Set<string>()): boolean {
+  for (const d of byId.get(from)?.after ?? []) {
+    if (d.stage === on) return true;
+    if (!seen.has(d.stage)) { seen.add(d.stage); if (dependsOn(byId, d.stage, on, seen)) return true; }
+  }
+  return false;
+}
+
+/**
+ * The composition rules (PLN1; workflow-planning.md §3.2) for what a template didn't place: a stage taken from
+ * another template keeps its kind, gates and dependencies; a manual stage names its owner and has no agent;
+ * a model's approval follows the mapping's and deployment follows validation; a composed workflow that moves
+ * data between systems reconciles and validates it.
+ */
+function checkComposition(w: WorkflowInstance, templates: readonly WorkflowTemplate[], errors: string[]): void {
+  const included = w.stages.filter((s) => s.included);
+  const byId = new Map(included.map((s) => [s.id, s]));
+  for (const s of w.stages.filter((x) => x.origin === 'combined')) {
+    const from = templates.find((t) => t.id === s.fromTemplate);
+    const t = from?.stages.find((x) => x.id === s.id);
+    if (!from) { errors.push(`${s.id}: taken from template "${s.fromTemplate ?? ''}", which doesn't exist (known: ${templates.map((x) => x.id).join(', ')}).`); continue; }
+    if (!t) { errors.push(`${s.id}: template ${from.id} has no stage ${s.id} (its stages: ${from.stages.map((x) => x.id).join(', ')}).`); continue; }
+    if (s.kind !== t.kind) errors.push(`${s.id}: its kind is ${t.kind} in template ${from.id}.`);
+    if (!s.reason) errors.push(`${s.id}: a stage taken from template ${from.id} needs a reason.`);
+    if (!s.included) continue;
+    for (const g of t.gates) if (!s.gates.includes(g)) errors.push(`${s.id}: the ${g} gate it has in template ${from.id} can't be removed.`);
+    for (const d of t.after) if (byId.has(d.stage) && !s.after.some((x) => x.stage === d.stage && (x.approved || !d.approved))) errors.push(`${s.id}: keeps its dependency on ${d.stage}${d.approved ? ' (approved)' : ''} from template ${from.id}.`);
+  }
+  for (const s of w.stages.filter((x) => x.kind === 'manual')) {
+    if (s.agent) errors.push(`${s.id}: a manual stage has no agent; a person does it outside AutoDE.`);
+    if (!s.owner?.trim()) errors.push(`${s.id}: a manual stage names its owner (a person or a team).`);
+  }
+  const ofKind = (k: StageKind) => included.filter((s) => s.kind === k);
+  const order: Array<[StageKind, StageKind, string]> = [['modelling', 'mapping', 'a model is approved after the mapping'], ['deploy', 'validate', 'deployment follows validation']];
+  // A template's own order is its author's, reviewed with the template; these hold for what the planner placed.
+  const planned = (s: WorkflowStage) => s.origin !== 'template' || w.template.id === COMPOSED;
+  for (const [later, earlier, what] of order) {
+    for (const l of ofKind(later)) for (const e of ofKind(earlier)) if ((planned(l) || planned(e)) && !dependsOn(byId, l.id, e.id)) errors.push(`${l.id}: must come after ${e.id} (${what}).`);
+  }
+  if (w.template.id === COMPOSED) {
+    const movesData = included.some((s) => s.kind === 'build' || s.kind === 'code-conversion') && included.some((s) => s.kind === 'source-assessment' || s.consumes.includes('source-context'));
+    if (movesData) for (const k of ['reconcile', 'validate'] as StageKind[]) if (!ofKind(k).length) errors.push(`A composed workflow that moves data between systems needs a ${k} stage.`);
+  }
+}
+
 /** The longest brief a planner may write for a stage (v0.45.12). */
 export const MAX_BRIEF = 1500;
 
 /** The rules every workflow must follow (§9.2 PA3 §2), item by item. */
-export function checkWorkflow(w: WorkflowInstance, template: WorkflowTemplate, opts: { skills?: ReadonlyArray<{ id: string; stageKinds: readonly string[] }> } = {}): PlanCheck {
+export function checkWorkflow(w: WorkflowInstance, template: WorkflowTemplate, opts: { skills?: ReadonlyArray<{ id: string; stageKinds: readonly string[] }>; templates?: readonly WorkflowTemplate[] } = {}): PlanCheck {
   const errors: string[] = [];
   const warnings: string[] = [];
   // The planner's briefs and skill choices (v0.45.12): a brief carries context, never the method or the tools.
@@ -206,11 +268,13 @@ export function checkWorkflow(w: WorkflowInstance, template: WorkflowTemplate, o
     if (s.kind !== t.kind) errors.push(`${t.id}: its kind is ${t.kind} in the template.`);
     if (s.included) for (const g of t.gates) if (!s.gates.includes(g)) errors.push(`${t.id}: the ${g} gate can't be removed.`);
   }
-  for (const s of w.stages.filter((x) => x.origin === 'added')) {
-    if (template.stages.some((t) => t.id === s.id)) errors.push(`${s.id}: an added stage can't reuse a template stage id.`);
-    if (!s.reason) errors.push(`${s.id}: an added stage needs a reason.`);
-    warnings.push(`Added stage ${s.id} (${s.kind}): ${s.reason ?? 'no reason given'}.`);
+  for (const s of w.stages.filter((x) => x.origin === 'added' || x.origin === 'combined')) {
+    if (template.stages.some((t) => t.id === s.id)) errors.push(`${s.id}: an ${s.origin} stage can't reuse a template stage id.`);
+    if (s.origin === 'added' && !s.reason) errors.push(`${s.id}: an added stage needs a reason.`);
+    warnings.push(`${s.origin === 'added' ? 'Added' : `Taken from ${s.fromTemplate ?? '?'}:`} stage ${s.id} (${s.kind}): ${s.reason ?? 'no reason given'}.`);
   }
+  if (w.template.id === COMPOSED) warnings.push('A composed workflow: no template fits, so the planner chose every stage, each with a reason.');
+  checkComposition(w, opts.templates ?? [], errors);
   checkStructure(w.stages, errors, (s) => (s as WorkflowStage).included);
   return { errors, warnings };
 }
@@ -226,7 +290,7 @@ export interface WorkflowDiff {
 export function diffWorkflow(w: WorkflowInstance, template: WorkflowTemplate): WorkflowDiff {
   const byId = new Map(w.stages.map((s) => [s.id, s]));
   const diff: WorkflowDiff = { added: [], dropped: [], included: [], reassigned: [] };
-  for (const s of w.stages) if (s.origin === 'added') diff.added.push({ id: s.id, kind: s.kind, reason: s.reason });
+  for (const s of w.stages) if (s.origin === 'added' || s.origin === 'combined') diff.added.push({ id: s.id, kind: s.kind, reason: s.origin === 'combined' ? `from ${s.fromTemplate ?? '?'}: ${s.reason ?? ''}` : s.reason });
   for (const t of template.stages) {
     const s = byId.get(t.id);
     const defaultOn = t.inclusion === 'mandatory' || t.inclusion === 'default';

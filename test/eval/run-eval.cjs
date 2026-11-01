@@ -216,6 +216,7 @@ async function main() {
 
     // ── Scenario L: the large estate (Phase K2) — scale, responsiveness, scoping ──
     results.large = await measureLargeEstate(dist, scratch);
+    results.planning = measurePlanning(dist);
 
     // ── The engineer's conversation ──
     results.chat = [];
@@ -337,6 +338,40 @@ async function main() {
  * stay scoped, and recall on questions phrased in other words. Runs the extension's own
  * ContextFileManager — the same code path as "Import File…".
  */
+/**
+ * PLN1a (workflow-planning.md §5): each reference problem's coverage, item by item, against what a good plan
+ * gives it. Offline this is the engine's starting coverage on the template's draft: an item placed as expected
+ * is right, a question is left for the planner, anything else is wrong (a confident misplacement).
+ */
+function measurePlanning(dist) {
+  const { parseYaml } = dist('engine/context/Yaml.js');
+  const { loadTemplates } = dist('engine/workflows/templates.js');
+  const { draftWorkflow } = dist('engine/workflows/instance.js');
+  const { coverageItems, startingCoverage } = dist('engine/workflows/coverage.js');
+  const { cases } = parseYaml(fs.readFileSync(path.join(ROOT, 'test', 'reference', 'planning', 'coverage-cases.yaml'), 'utf8'));
+  const { templates } = loadTemplates(ROOT);
+  const out = { cases: [], items: 0, right: 0, left: 0, wrong: [] };
+  for (const c of cases) {
+    const t = templates.find((x) => x.id === c.template);
+    const facts = { 'estate.sources': 0, 'estate.systems': 0, 'pack.has_contract': false, 'estate.has_legacy_code': false, ...(c.facts || {}) };
+    const w = draftWorkflow(t, c.id, facts, []);
+    const got = new Map(startingCoverage(coverageItems(c.spec), w).map((e) => [e.id, e]));
+    const row = { id: c.id, template: c.template, items: 0, right: 0, left: 0, wrong: [] };
+    for (const [item, want] of Object.entries(c.expected)) {
+      row.items++;
+      const g = got.get(item);
+      const same = (a, b) => JSON.stringify([...(a || [])].sort()) === JSON.stringify([...(b || [])].sort());
+      if (!g) row.wrong.push(`${item}: not an item`);
+      else if (g.status === 'question') row.left++;
+      else if (g.status === want.status && same(g.stages, want.stages)) row.right++;
+      else row.wrong.push(`${item}: ${g.status}${g.stages ? ` ${g.stages.join(',')}` : ''}, expected ${want.status}${want.stages ? ` ${want.stages.join(',')}` : ''}`);
+    }
+    for (const id of got.keys()) if (!(id in c.expected)) row.wrong.push(`${id}: not expected`);
+    out.cases.push(row); out.items += row.items; out.right += row.right; out.left += row.left; out.wrong.push(...row.wrong.map((x) => `${c.id} ${x}`));
+  }
+  return out;
+}
+
 async function measureLargeEstate(dist, scratch) {
   const v8 = require('node:v8');
   const vm = require('node:vm');
@@ -512,6 +547,9 @@ function summaryRows(r) {
     ['BRD facts proposed with section provenance', 'reported', r.pack ? (r.pack.brd.status === 'extracted' ? `${r.pack.brd.withSectionProvenance}/${r.pack.brd.proposed}` : `not measured offline — ${r.pack.brd.reason}`) : 'n/a'],
     ['Vocabulary-mismatch seed recall', 'reported', r.vocabulary ? `${r.vocabulary.questions.filter((q) => q.found).length}/${r.vocabulary.questions.length} (paraphrases: ${r.vocabulary.questions.filter((q) => q.kind === 'paraphrase' && q.found).length}/${r.vocabulary.questions.filter((q) => q.kind === 'paraphrase').length})` : 'n/a — no catalog (before K2)'],
     ['Paraphrase recall with captured vocabulary', 'reported', r.vocabulary && r.vocabulary.capture ? `${r.vocabulary.capture.found.filter((q) => q.kind === 'paraphrase' && q.found).length}/${r.vocabulary.capture.found.filter((q) => q.kind === 'paraphrase').length} (all questions: ${r.vocabulary.capture.found.filter((q) => q.found).length}/${r.vocabulary.capture.found.length})` : 'n/a — no vocabulary capture (before C4a)'],
+    ['Coverage items the engine places as a good plan does (PLN1a)', 'reported', r.planning ? `${r.planning.right}/${r.planning.items} (left for the planner: ${r.planning.left})` : 'n/a'],
+    ['Coverage items the engine places wrongly', '0', r.planning ? String(r.planning.wrong.length) : 'n/a'],
+    ['Coverage items the planner places as expected', 'all', 'not measured offline — needs replay or record'],
     ['Large-estate seed recall', 'reported', r.large ? `${r.large.packs.filter((p) => p.found).length}/${r.large.packs.length}` : 'n/a'],
     ['Longest synchronous task, large estate', '≤ 100 ms', r.large ? `${Math.round(r.large.longestSyncMs)} ms` : 'n/a'],
     ['Plan-step context size', 'reported', `${r.contextNoiseLast.tokens} tokens median per step (max ${r.contextNoiseLast.tokensMax})`]
@@ -567,6 +605,12 @@ function renderReport(r) {
     L.push('', '| Interview question | Expected | Got | Why |', '|---|---|---|---|');
     for (const q of p.interview) L.push(`| ${q.question} | ${q.expect} | ${q.got} | ${q.reason || ''} |`);
     L.push('', `**Vocabulary capture:** ${p.vocabulary.proposals} proposal(s) — ${p.vocabulary.mined} mined from names and comments, ${p.vocabulary.fromDocuments} from the documents (LLM).`);
+  }
+  if (r.planning) {
+    L.push('', '## Workflow planning: coverage (PLN1a)', '');
+    L.push(`${r.planning.cases.length} reference problems (test/reference/planning/coverage-cases.yaml), each item against the coverage a good plan gives it. Offline, the engine's starting coverage on the template's draft: right, left as a question for the planner, or wrong.`, '');
+    L.push('| Case | Template | Items | Right | Left for the planner | Wrong |', '|---|---|---|---|---|---|');
+    for (const c of r.planning.cases) L.push(`| ${c.id} | ${c.template} | ${c.items} | ${c.right} | ${c.left} | ${c.wrong.length ? c.wrong.join('; ') : 0} |`);
   }
   if (r.large) {
     const g = r.large;

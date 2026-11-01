@@ -25,6 +25,8 @@ export type DecisionKind =
   | 'vocabulary'
   /** A problem's planned workflow (PA3a): the planning stage's output. */
   | 'workflow'
+  /** PLN1a: the specification's coverage by the workflow; approved before the workflow. */
+  | 'coverage'
   /** A workflow stage's approval gate (PA3a), for stages whose output has no approval of its own. */
   | 'gate'
   /** A runbook: platform changes checked by the engine and run by the runner once approved (v0.45.6). */

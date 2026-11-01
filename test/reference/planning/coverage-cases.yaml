@@ -1,0 +1,68 @@
+# PLN1a eval (docs/specs/workflow-planning.md §5 "Evaluated"): reference problems with the coverage a good
+# plan gives them, item by item. One per template, and an unusual one (a modernization with BI migration and an
+# ML feature handover). The eval compares the engine's starting coverage (offline) and, with a model, the
+# planner's (record or replay) against `expected`.
+#   status: covered | manual | out-of-scope | gap
+#   stages: for covered and manual items, the stage ids that deliver or track them (order doesn't matter)
+# Item ids are the source and the text, lower-cased and dashed, cut at 60 characters (coverage.ts coverageItems).
+cases:
+  - id: greenfield-retail
+    template: greenfield
+    facts: { estate.sources: 2, estate.systems: 3 }
+    spec:
+      objectives: [Daily revenue by store and channel]
+      scope: { in: [shop orders, customers], out: [] }
+      constraints: [Customer email and phone are masked outside the PII readers]
+      acceptanceCriteria: [Daily revenue matches the till totals]
+      governance: { personalData: present, regulations: [GDPR] }
+    expected:
+      scope:shop-orders: { status: covered, stages: [build] }
+      scope:customers: { status: covered, stages: [build] }
+      objective:daily-revenue-by-store-and-channel: { status: covered, stages: [build] }
+      constraint:customer-email-and-phone-are-masked-outside-the-pii-readers: { status: covered, stages: [build] }
+      acceptance:daily-revenue-matches-the-till-totals: { status: covered, stages: [validate] }
+      governance:personal-data: { status: covered, stages: [build] }
+
+  - id: modernization-oracle
+    template: modernization
+    facts: { estate.sources: 1, estate.systems: 2 }
+    spec:
+      objectives: [Retire the Oracle warehouse]
+      scope: { in: [the sales mart, convert the stored procedures that load it], out: [] }
+      constraints: [Go live before the Q3 close]
+      acceptanceCriteria: [Row counts reconcile within 0.1% for every table]
+    expected:
+      scope:the-sales-mart: { status: covered, stages: [build] }
+      scope:convert-the-stored-procedures-that-load-it: { status: covered, stages: [code-conversion] }
+      objective:retire-the-oracle-warehouse: { status: covered, stages: [build] }
+      constraint:go-live-before-the-q3-close: { status: out-of-scope, reason: a deadline, not a deliverable }
+      acceptance:row-counts-reconcile-within-0-1-for-every-table: { status: covered, stages: [reconcile] }
+
+  - id: estate-merge-crm
+    template: estate-merge
+    facts: { estate.sources: 2, estate.systems: 3 }
+    spec:
+      objectives: [One view of each customer after the acquisition]
+      scope: { in: [one customer golden record across both CRMs, merged order history], out: [] }
+      acceptanceCriteria: [Every customer of both CRMs is matched or listed as unmatched]
+    expected:
+      scope:one-customer-golden-record-across-both-crms: { status: covered, stages: [entity-resolution] }
+      scope:merged-order-history: { status: covered, stages: [build] }
+      objective:one-view-of-each-customer-after-the-acquisition: { status: covered, stages: [build] }
+      acceptance:every-customer-of-both-crms-is-matched-or-listed-as-unmatche: { status: covered, stages: [validate] }
+
+  - id: unusual-bi-and-ml-handover
+    template: modernization
+    facts: { estate.sources: 1, estate.systems: 2 }
+    spec:
+      objectives: [Move sales reporting off the legacy warehouse]
+      scope: { in: [the sales mart, the regional sales dashboards, churn features handed to the data science team], out: [] }
+      constraints: [Go live before the Q3 close]
+    # The planner adds the BI stage and a manual stage for the handover; the engine's draft has neither.
+    extraStages: [bi, { id: churn-handover, kind: manual, owner: data science team }]
+    expected:
+      scope:the-sales-mart: { status: covered, stages: [build] }
+      scope:the-regional-sales-dashboards: { status: covered, stages: [bi] }
+      scope:churn-features-handed-to-the-data-science-team: { status: manual, stages: [churn-handover] }
+      objective:move-sales-reporting-off-the-legacy-warehouse: { status: covered, stages: [build] }
+      constraint:go-live-before-the-q3-close: { status: out-of-scope, reason: a deadline, not a deliverable }

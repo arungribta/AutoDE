@@ -1394,6 +1394,21 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: say *customer history is SCD type 2*, then *customer history overwrites (type 1)*.
   Expect: both cards say *Contradicts …*; confirming one rejects the other.
 
+## Part 64 — v0.56.6 PLN1a: coverage, then the workflow; manual stages
+
+- [ ] **64.1 More items, placed honestly.**
+  Do: approve a specification with a constraint (*go live before the Q3 close*), an acceptance criterion and personal data; open the plan step.
+  Expect: the coverage lists them; the acceptance criterion is on the validate stage, personal data where the pipelines are built; the constraint is a question.
+- [ ] **64.2 Two approvals.**
+  Do: place the question (out of scope: *a deadline*), then **Approve the workflow** without approving the coverage.
+  Expect: the confirmation says it approves the coverage first; afterwards the history shows the coverage approval, then the workflow's. A workflow approved by editing its decision file while the coverage isn't approved is marked failed.
+- [ ] **64.3 The planner.**
+  Do: ask the planner (Claude Code with the plugin) to plan a problem whose scope includes *churn features handed to the data science team*.
+  Expect: it proposes the workflow with a manual stage (an owner, no agent) and then the coverage; the coverage proposal is shown in the plan step; *Work AutoDE can't do yet* lists the handover.
+- [ ] **64.4 A manual stage.**
+  Do: once it is ready, **Mark done…** on the manual stage.
+  Expect: a note is required, evidence files optional; the stage is done with your note in its history. Asking the agent to complete it is refused.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1747,5 +1762,9 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 63.1 |  |  |
 | 63.2 |  |  |
 | 63.3 |  |  |
+| 64.1 |  |  |
+| 64.2 |  |  |
+| 64.3 |  |  |
+| 64.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

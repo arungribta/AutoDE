@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import { parseBusinessProblemSpec, readProblemDocument } from '../documents/problemDocuments';
 import { Decision, DecisionStore, Proposer } from '../decisions/decisionStore';
-import { ProposalContext, applyDecision, propose } from '../decisions/proposals';
+import { ProposalContext, applyDecision, approvalBlockers, propose } from '../decisions/proposals';
+import { CoverageEntry, CoverageProposal, CoverageStatus, specCoverage } from './coverage';
 import { layoutPath } from '../workspaceLayout';
 import { WorkflowInstance, diffWorkflow, draftWorkflow, readWorkflow, sourceSystems, workflowFacts, writeWorkflow } from './instance';
 import { WorkflowTemplate, loadTemplates, suggestTemplate } from './templates';
@@ -115,15 +116,70 @@ export function proposeWorkflow(scope: WorkflowScope, w: WorkflowInstance, propo
   return d;
 }
 
+/**
+ * PLN1a: the coverage a person approves first when they approve the workflow on the same screen (panel or CLI):
+ * complete but not approved yet. Its summary goes in the confirmation; it is recorded as its own decision, first.
+ */
+export function coverageToApproveFirst(scope: WorkflowScope): { summary: string } | undefined {
+  const c = specCoverage(scope.workspaceRoot, scope.problemId);
+  if (!c || !c.check.ok || (c.coverage.approvedBy && !c.pendingDecision)) return undefined;
+  const n = (st: string) => c.coverage.entries.filter((e) => e.status === st).length;
+  return { summary: `This approves the coverage first (what will be delivered): ${n('covered')} item(s) delivered by stages, ${n('manual')} done outside AutoDE, ${n('out-of-scope')} out of scope, ${n('gap')} gap(s).` };
+}
+
 /** A person approves a workflow decision through a channel that allows it (panel, CLI, file); the engine applies it. */
 export async function approveWorkflow(scope: WorkflowScope, decisionId: string, by: string, channel: 'panel' | 'cli', note?: string): Promise<string> {
   const store = new DecisionStore(scope.workspaceRoot);
+  if (store.get(decisionId).kind === 'workflow' && coverageToApproveFirst(scope)) await approveCoverageNow(scope, by, channel);
   store.resolve(decisionId, { decision: 'approved', by, channel, note });
   const r = await applyDecision(store, decisionId, proposalContext(scope));
   return r.message;
 }
 
 export { diffWorkflow };
+
+export interface CoveragePlacement { item: string; status: Exclude<CoverageStatus, 'question'>; stages?: string[]; reason?: string }
+
+/**
+ * PLN1a: proposes the coverage (workflow-planning.md §3.5): the current coverage with these placements over it,
+ * as a `coverage` decision a person approves before the workflow. Refused, item by item, when a check fails;
+ * a newer proposal replaces an older pending one.
+ */
+export function proposeCoverage(scope: WorkflowScope, placements: readonly CoveragePlacement[], proposedBy: Proposer): Decision {
+  const c = specCoverage(scope.workspaceRoot, scope.problemId);
+  if (!c) throw new Error('No coverage yet: it needs the specification and a workflow (propose the workflow first).');
+  const by = proposedBy.host === 'mcp' ? `agent: ${proposedBy.client ?? 'MCP client'}` : `person: ${proposedBy.client ?? 'unknown'}`;
+  const unknown = placements.filter((p) => !c.coverage.entries.some((e) => e.id === p.item)).map((p) => p.item);
+  if (unknown.length) throw new Error(`No coverage item ${unknown.join(', ')} (items: ${c.coverage.entries.map((e) => e.id).join(', ')}).`);
+  const entries: CoverageEntry[] = c.coverage.entries.map((e) => {
+    const p = placements.find((x) => x.item === e.id);
+    return p ? { id: e.id, text: e.text, source: e.source, status: p.status, ...(p.stages?.length ? { stages: p.stages } : {}), ...(p.reason?.trim() ? { reason: p.reason.trim() } : {}), placedBy: by } : e;
+  });
+  const store = new DecisionStore(scope.workspaceRoot);
+  for (const d of store.list({ status: 'pending', kind: 'coverage' })) if (d.problemId === scope.problemId) store.withdraw(d.id, 'autode', 'replaced by a newer coverage proposal');
+  const payload: CoverageProposal = { problemId: scope.problemId, specId: c.coverage.specId, specVersion: c.coverage.specVersion, entries };
+  const d = propose(store, proposalContext(scope), 'coverage', payload, { proposedBy });
+  appendEvent(problemRootOf(scope), { at: new Date().toISOString(), type: 'proposed', actor: actorFrom(proposedBy.client, proposedBy.host), channel: proposedBy.host === 'mcp' ? 'tool' : proposedBy.host, decisionId: d.id, reason: 'the coverage of the specification' });
+  return d;
+}
+
+/**
+ * A person approves the coverage they see (panel or CLI): the pending proposal, or, when they placed the items
+ * themselves, the coverage as it stands, proposed and approved in one step. Refused while a check fails.
+ */
+export async function approveCoverageNow(scope: WorkflowScope, by: string, channel: 'panel' | 'cli'): Promise<string> {
+  const c = specCoverage(scope.workspaceRoot, scope.problemId);
+  if (!c) throw new Error('No coverage yet: it needs the specification and a workflow.');
+  if (c.coverage.approvedBy && !c.pendingDecision) return `The coverage is already approved (by ${c.coverage.approvedBy}).`;
+  if (!c.check.ok) throw new Error(`The coverage can't be approved yet: ${c.check.errors.join(' ')}`);
+  const store = new DecisionStore(scope.workspaceRoot);
+  const id = c.pendingDecision ?? propose(store, proposalContext(scope), 'coverage', { problemId: scope.problemId, specId: c.coverage.specId, specVersion: c.coverage.specVersion, entries: c.coverage.entries } satisfies CoverageProposal, { proposedBy: { host: channel === 'panel' ? 'vscode' : 'cli', client: by } }).id;
+  const blockers = approvalBlockers(store, id, { workspaceRoot: scope.workspaceRoot, problemRoot: problemRootOf(scope) });
+  if (blockers.length) throw new Error(blockers.join(' '));
+  store.resolve(id, { decision: 'approved', by, channel });
+  const r = await applyDecision(store, id, proposalContext(scope));
+  return r.applied ? `Coverage approved by ${by}. Next: approve the workflow.` : r.message;
+}
 
 /** The workflow's history, oldest first; with `stage`, that stage's events and the workflow-wide ones. */
 export function historyFor(scope: WorkflowScope, stage?: string): WorkflowEvent[] {

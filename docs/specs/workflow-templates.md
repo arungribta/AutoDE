@@ -41,6 +41,7 @@ The kind decides who can do the stage, the most an agent may do there (permissio
 | `document` | documenter | workspace-write | everything above | design and operations docs | check | the docs are generated and linked to their artifacts |
 | `platform-setup` | target-architect | propose | target context, spec | environment and security plan (accounts, networking, roles and grants, mapped from the source's security model); platform-change proposals | approve | the plan covers every environment in the estate; changes run only as approved decisions |
 | `bi-migration` | documenter, data-modeler | read | estate, model, mapping | inventory of reports and semantic objects, the mapping of their fields to the new model, a migration plan | approve | every report in scope is mapped or listed as a gap |
+| `manual` (v0.56.6) | none: a person or team outside AutoDE, named as the stage's `owner` | — | what the planner names | what the planner names (possibly nothing AutoDE holds) | none: its owner marks it done with a note | its owner says it is done ([workflow-planning.md](workflow-planning.md) §3.3) |
 
 *Five kinds beyond the twelve first discussed:*
 - `quality-rules` (a distinct step in published migration methods);

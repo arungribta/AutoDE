@@ -1464,7 +1464,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
     var ab = $('#pjAction');
     if (ab) ab.onclick = function () {
       // Approvals and coverage are made in the Workflow tab, where what is approved is in view.
-      if (a.id === 'approve-workflow' || a.id === 'place-coverage' || a.id === 'approve-stage') { post('openWorkflowView'); return; }
+      if (a.id === 'approve-workflow' || a.id === 'place-coverage' || a.id === 'approve-coverage' || a.id === 'approve-stage') { post('openWorkflowView'); return; }
       post('journeyAction', { id: a.id, args: a.args || {} });
     };
   }

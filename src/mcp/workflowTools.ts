@@ -2,10 +2,11 @@ import { problemMaintenance } from '../engine/maintenance/queue';
 import { EngineTool, ToolAnnotations } from './tools';
 import { EngineToolError } from './errors';
 import { EngineWorkspace } from './workspace';
-import { WorkflowScope, computeDraft, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { WorkflowScope, computeDraft, diffWorkflow, draftFrom, ensureWorkflow, historyFor, proposeCoverage, proposeWorkflow, redraft, statusFor, suggestFor, templatesFor } from '../engine/workflows/service';
+import { ProposalValidationError } from '../engine/decisions/proposals';
 import { WorkflowError, completeStage, nextAssignment, reopenStage, skipStage, startStage } from '../engine/workflows/runtime';
-import { MAX_BRIEF, WorkflowInstance, readWorkflow } from '../engine/workflows/instance';
-import { STAGE_KINDS } from '../engine/workflows/stageKinds';
+import { COMPOSED, MAX_BRIEF, WorkflowInstance, readWorkflow, templateOf } from '../engine/workflows/instance';
+import { STAGE_KINDS, StageKind } from '../engine/workflows/stageKinds';
 import { stageSkills } from '../engine/skills/port';
 import { layoutPath } from '../engine/workspaceLayout';
 import { Actor } from '../engine/workflows/events';
@@ -15,7 +16,7 @@ import { stageReadiness } from '../engine/workflows/readiness';
 import { stageContextGaps } from '../engine/agents/stageGaps';
 import { problemMode } from '../engine/documents/problemMode';
 import { journeyContextFrom, journeyFor } from '../engine/workflows/journey';
-import { CoverageStatus, placeCoverage, specCoverage } from '../engine/workflows/coverage';
+import { CoverageStatus, placeCoverageItem, specCoverage } from '../engine/workflows/coverage';
 import { parseEstate } from '../engine/context/estate';
 import * as fs from 'node:fs';
 
@@ -64,7 +65,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
     },
     {
       name: 'autode_workflow_draft',
-      description: 'The workflow to plan from, without proposing anything: the problem\'s current workflow (if any) and AutoDE\'s deterministic draft for a template (the suggested one by default), with what each stage kind allows: its roles, its permission-tier ceiling, and the skills that do it on this problem\'s platform. The planner refines the draft (stages in or out with reasons; per stage a role, a tier, skills and a brief) and proposes it with autode_propose_workflow. A brief carries context only (entities, constraints, open questions, what to produce): never tool or skill names.',
+      description: 'The workflow to plan from, without proposing anything: the problem\'s current workflow (if any) and AutoDE\'s deterministic draft for a template (the suggested one by default), with what every stage kind allows: its roles, its permission-tier ceiling, and the skills that do it on this problem\'s platform (a kind with none is a person\'s to do: a gap). The planner refines the draft (stages in or out with reasons; per stage a role, a tier, skills and a brief), may take stages from another template (origin "combined" with fromTemplate) or compose from stage kinds alone (template "composed"), adds a "manual" stage with an owner for work done outside AutoDE, and proposes it with autode_propose_workflow, then the coverage with autode_propose_coverage. A brief carries context only (entities, constraints, open questions, what to produce): never tool or skill names.',
       inputSchema: { type: 'object', additionalProperties: false, properties: { template: { type: 'string', minLength: 1 } } },
       annotations: read('Draft the workflow'),
       handler: async (args, ws) => wrap(() => {
@@ -73,9 +74,10 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
         const current = readWorkflow(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
         const platform = targetPlatform(layoutPath(scope.workspaceRoot, 'problems', scope.problemId));
         const pack = stageSkills(scope.resourcesRoot, scope.workspaceRoot);
-        const kinds = [...new Set(workflow.stages.map((s) => s.kind))].map((k) => ({
+        const kinds = (Object.keys(STAGE_KINDS) as StageKind[]).map((k) => ({
           kind: k, roles: STAGE_KINDS[k].roles, ceiling: STAGE_KINDS[k].ceiling, doneWhen: STAGE_KINDS[k].doneWhen,
-          skills: pack.filter((s) => skillFits(s, k, { platform })).map((s) => s.id)
+          skills: k === 'manual' ? [] : pack.filter((s) => skillFits(s, k, { platform })).map((s) => s.id),
+          inDraft: workflow.stages.some((s) => s.kind === k)
         }));
         return { draft: workflow, template: { id: template.id, version: template.version }, suggestion: suggestion ?? null, current: current ? { status: current.status, template: current.template } : null, stageKinds: kinds, maxBrief: MAX_BRIEF } as unknown as Record<string, unknown>;
       })
@@ -100,7 +102,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
     },
     {
       name: 'autode_coverage',
-      description: 'The active problem\'s coverage (PLN0): each in-scope item and objective of the specification with its status (covered by named stages, manual, out-of-scope with a reason, gap, or question still to place), against the approved workflow or the one waiting for approval, with the engine\'s checks. The workflow can\'t be approved while a question is open.',
+      description: 'The active problem\'s coverage: each in-scope item, objective, constraint and acceptance criterion of the specification (and personal-data handling) with its status (covered by named stages, manual on a manual stage, out-of-scope with a reason, gap, or question still to place), against the workflow waiting for approval or the current one, with the engine\'s checks and the team\'s gap list. A person approves the coverage, then the workflow; neither while a question is open.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       annotations: read('Coverage'),
       handler: async (_args, ws) => wrap(() => {
@@ -125,13 +127,31 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
       annotations: records('Place a coverage item'),
       handler: async (args, ws) => wrap(() => {
         const scope = scopeOf(ws);
-        const c = specCoverage(scope.workspaceRoot, scope.problemId);
-        if (!c) throw new EngineToolError('NOT_FOUND', 'No coverage yet: it needs the specification and a workflow.');
-        let next;
-        try { next = placeCoverage(c.problemRoot, c.coverage, String(args.item), { status: args.status as Exclude<CoverageStatus, 'question'>, stages: args.stages as string[] | undefined, reason: args.reason as string | undefined }, `agent: ${clientName() ?? 'MCP client'}`); }
+        let after;
+        try { after = placeCoverageItem(scope.workspaceRoot, scope.problemId, String(args.item), { status: args.status as Exclude<CoverageStatus, 'question'>, stages: args.stages as string[] | undefined, reason: args.reason as string | undefined }, `agent: ${clientName() ?? 'MCP client'}`); }
         catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
-        const after = specCoverage(scope.workspaceRoot, scope.problemId)!;
-        return { placed: next.entries.find((e) => e.id === args.item), check: after.check };
+        return { placed: after.coverage.entries.find((e) => e.id === args.item), check: after.check };
+      })
+    },
+    {
+      name: 'autode_propose_coverage',
+      description: 'Propose the whole coverage (PLN1a): place the items of autode_coverage, as a decision a person approves before the workflow (what will be delivered, then how). Items you leave out keep their current placement. Refused, item by item, while an item is still a question, a stage named isn\'t in the workflow (propose the workflow first), a manual item isn\'t on a manual stage, or a gap or out-of-scope item has no reason. Use only AutoDE\'s stage kinds and skills: what none can deliver is a gap, never a new skill.',
+      inputSchema: {
+        type: 'object', additionalProperties: false, required: ['placements'],
+        properties: {
+          placements: {
+            type: 'array', minItems: 1, maxItems: 200,
+            items: { type: 'object', additionalProperties: false, required: ['item', 'status'], properties: { item: { type: 'string', minLength: 1 }, status: { type: 'string', enum: ['covered', 'manual', 'out-of-scope', 'gap'] }, stages: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 20 }, reason: { type: 'string', minLength: 1, maxLength: 2000 } } }
+          }
+        }
+      },
+      annotations: records('Propose the coverage'),
+      handler: async (args, ws) => wrap(() => {
+        const scope = scopeOf(ws);
+        let d;
+        try { d = proposeCoverage(scope, args.placements as Array<{ item: string; status: Exclude<CoverageStatus, 'question'>; stages?: string[]; reason?: string }>, { host: 'mcp', client: clientName() }); }
+        catch (err) { throw new EngineToolError('VALIDATION_FAILED', err instanceof ProposalValidationError ? err.report.errors.join(' ') : err instanceof Error ? err.message : String(err)); }
+        return { decision: { id: d.id, kind: d.kind, stakes: d.stakes, status: d.status, title: d.title, summary: d.summary, validation: d.validation }, next: `A person approves it, then the workflow: the plan step in the AutoDE panel, \`autode workflow coverage approve\` in a terminal, or .autode/decisions/${d.id}.yaml. Tell the user.` };
       })
     },
     {
@@ -169,7 +189,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
     },
     {
       name: 'autode_propose_workflow',
-      description: 'Propose the active problem\'s workflow (the plan gate). Without "workflow", AutoDE drafts it deterministically from "template" (default: its suggestion) and the facts about the spec and estate; with "workflow", your refinement of that draft is checked against the template\'s rules (mandatory stages and gates kept, reasons for stages left out or added, roles and tiers allowed, dependencies sound). A person approves it.',
+      description: 'Propose the active problem\'s workflow (the plan gate). Without "workflow", AutoDE drafts it deterministically from "template" (default: its suggestion) and the facts about the spec and estate; with "workflow", your refinement of that draft is checked against the template\'s rules (mandatory stages and gates kept, reasons for stages left out or added, roles and tiers allowed, dependencies sound) and the composition rules (a stage taken from another template keeps its kind, gates and dependencies; a manual stage names its owner; a model follows the mapping and deployment follows validation; a "' + COMPOSED + '" workflow that moves data reconciles and validates it). A person approves the coverage, then it.',
       inputSchema: { type: 'object', additionalProperties: false, properties: { template: { type: 'string', minLength: 1 }, workflow: { type: 'object', description: 'A full workflow instance (as autode_workflow_status / the draft shows it), refined.' } } },
       annotations: records('Propose the workflow'),
       handler: async (args, ws) => wrap(() => {
@@ -186,7 +206,7 @@ export function workflowTools(clientName: () => string | undefined, allTools: ()
           if (args.workflow === undefined && w.provenance && args.template) w.provenance.chosenBy = agent();
         }
         const d = proposeWorkflow(scope, w, { host: 'mcp', client: clientName() });
-        const t = templatesFor(scope).templates.find((x) => x.id === w.template.id);
+        const t = templateOf(templatesFor(scope).templates, w.template.id);
         return { decision: { id: d.id, kind: d.kind, stakes: d.stakes, status: d.status, title: d.title, validation: d.validation }, diff: t ? diffWorkflow(w, t) as unknown as Record<string, unknown> : null, next: `A person approves it: the AutoDE panel, \`autode workflow approve\` in a terminal, or .autode/decisions/${d.id}.yaml. Tell the user.` };
       })
     },

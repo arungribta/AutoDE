@@ -149,7 +149,7 @@
         (s.approvedBy ? '<div>Approved</div><div>by ' + esc(s.approvedBy) + (s.approvedVia ? ' via ' + esc(s.approvedVia) : '') + (s.approvedAt ? ' on ' + esc(when(s.approvedAt)) : '') + '</div>' : '') +
         (d && d.record && d.record.outputs && d.record.outputs.length ? '<div>Outputs</div><div>' + d.record.outputs.map((f) => '<a data-file="' + esc(f) + '">' + esc(f) + '</a>').join('<br>') + '</div>' : '') +
         (s.tasks.length ? '<div>Tasks</div><div>' + s.tasks.map((t) => esc(t.title)).join('<br>') + '</div>' : '') + '</div>';
-      h += s.actions.map((x) => x === 'approve' && s.decisionId ? '<button class="primary" data-decide="approve" data-id="' + esc(s.decisionId) + '">Approve…</button><button data-decide="reject" data-id="' + esc(s.decisionId) + '">Reject…</button>' : '<button' + (x === 'approve-document' || x === 'run' ? ' class="primary"' : '') + ' data-act="' + esc(x) + '" data-stage="' + esc(s.id) + '">' + esc(x === 'produce' ? s.produceLabel : (ACTION_LABEL[x] || x)) + '</button>').join('');
+      h += s.actions.map((x) => x === 'approve' && s.decisionId ? '<button class="primary" data-decide="approve" data-id="' + esc(s.decisionId) + '">Approve…</button><button data-decide="reject" data-id="' + esc(s.decisionId) + '">Reject…</button>' : '<button' + (x === 'approve-document' || x === 'run' ? ' class="primary"' : '') + ' data-act="' + esc(x) + '" data-stage="' + esc(s.id) + '">' + esc(x === 'produce' ? s.produceLabel : x === 'hand-in' && s.kind === 'manual' ? 'Mark done…' : (ACTION_LABEL[x] || x)) + '</button>').join('');
       if (d && d.decision) {
         h += '<h2 style="margin-top:12px;">Decision ' + esc(d.decision.id) + ' — ' + esc(d.decision.status) + '</h2><ul class="hist">' + d.decision.events.map((e) => '<li>' + esc(when(e.at)) + ' ' + esc(e.type) + ' by ' + esc(e.actor) + (e.channel ? ' (' + esc(e.channel) + ')' : '') + (e.note ? ' — ' + esc(e.note) : '') + '</li>').join('') + '</ul><a data-open-decision="' + esc(d.decision.id) + '">Open decision file</a>';
       }
@@ -166,7 +166,10 @@
       '<tr><td>' + esc(COVER_MARK[e.status] || '') + '</td><td>' + esc(e.text) + '<div class="muted">' + esc(e.source) + '</div></td><td>' + esc(e.status) + (e.stages && e.stages.length ? ': ' + e.stages.map(esc).join(', ') : '') + (e.reason ? '<div class="muted">' + esc(e.reason) + '</div>' : '') + '<div class="muted">placed by ' + esc(e.placedBy) + '</div></td><td><button' + (e.status === 'question' ? ' class="primary"' : '') + ' data-place="' + esc(e.id) + '">' + (e.status === 'question' ? 'Place…' : 'Change…') + '</button></td></tr>').join('') + '</table>';
     if (c.check.errors.length) h += '<div class="guide">Before the plan can be approved: ' + c.check.errors.map(esc).join(' ') + '</div>';
     if (c.check.warnings.length) h += '<div class="muted">' + c.check.warnings.map(esc).join(' ') + '</div>';
-    if (c.approvedBy) h += '<div class="muted">Approved with the plan by ' + esc(c.approvedBy) + (c.approvedAt ? ' on ' + esc(when(c.approvedAt)) : '') + '.</div>';
+    // PLN1a: work AutoDE can't do yet, and the coverage's own approval, before the workflow's.
+    if (c.check.teamGaps && c.check.teamGaps.length) h += '<h2 style="margin-top:12px;">Work AutoDE can\'t do yet</h2><ul class="hist">' + c.check.teamGaps.map((g) => '<li>' + esc(g) + '</li>').join('') + '</ul><div class="muted">The team\'s list for new skills (through the skill lifecycle).</div>';
+    if (c.approvedBy && !c.pendingDecision) h += '<div class="muted">Approved by ' + esc(c.approvedBy) + (c.approvedAt ? ' on ' + esc(when(c.approvedAt)) : '') + '. The workflow is approved next.</div>';
+    else if (c.check.ok) h += '<div class="guide">' + (c.pendingDecision ? 'Proposed by the planner. ' : '') + 'Approve what will be delivered, then the workflow (how).</div>' + actionButton({ id: 'approve-coverage', label: 'Approve the coverage…', cli: 'autode workflow coverage approve' }, true);
     return h;
   }
   function previewHtml(j) {
