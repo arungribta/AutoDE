@@ -35,6 +35,7 @@ import type { CatalogMatrix, ConformanceResult, OperationPage, PlatformPage } fr
 import { lintSkillText, skillPage } from '../engine/platform/operations/catalogView';
 import { checksumOf, customise, loadCatalog } from '../engine/platform/operations/load';
 import { fragmentsFor, setPlatformResourcesRoot } from '../engine/platform/dialects';
+import { setOperationRunsRoot } from '../engine/platform/operations/runLog';
 import { problemOverlap } from '../engine/documents/problemOverlap';
 import type { ObservedEdge } from '../engine/lineage/observed';
 import type { AssetContext, AssetType, ExploreOverview, GraphSlice, Layer, SearchResult, SemanticOverview } from '../engine/explore/explore';
@@ -268,6 +269,8 @@ Platform operations (POP1: every interaction with a platform, as a reviewed file
   platform show <id>           One operation in full, with the statement per platform
   platform run <id> --connection <c> [--param k=v]… [--max-rows n]   Run a read operation (a change operation prints the runbook step to propose)
   platform propose <file>      Propose a team operation or platform definition (.autode/config/…) for a person's approval
+  platform propose-operation <file.yaml> --reason "<why>" [--fixes <item key>]   Propose a new or fixed operation (it needs a recorded example) for a person's approval
+  platform drift [--platform p]   Operations that fail on the platform's version or read a view or column that is gone, and object kinds a platform reports that its definition doesn't name
   platform request-access --connection <c> [--role r] [--capability a,b] [--database d] [--schema s]…   Draft a runbook granting AutoDE's role what its capabilities need (proposed when a problem is active)
 
 Lineage (LIN):
@@ -424,6 +427,7 @@ const OPTIONS = {
   tables: { type: 'string' },
   database: { type: 'string' },
   capability: { type: 'string' },
+  fixes: { type: 'string' },
   models: { type: 'string' },
   hops: { type: 'string' },
   type: { type: 'string' },
@@ -494,6 +498,8 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
   if (values.help || !command) { io.out(USAGE); return command || values.help ? EXIT.OK : EXIT.USAGE; }
   const ctx: Ctx = { io, values, workspaceRoot: path.resolve(io.cwd, values.workspace ?? '.'), resourcesRoot: resourcesRoot ?? io.cwd, version, json: values.json === true };
   setPlatformResourcesRoot(ctx.resourcesRoot);
+  // POP3: every operation run in this command (the estate's reads too) is recorded in this workspace, for drift.
+  setOperationRunsRoot(ctx.workspaceRoot);
   try {
     switch (command) {
       case 'validate': return await cmdValidate(ctx, rest);
@@ -536,7 +542,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
     }
   } catch (err) {
     return fail(ctx, err);
-  }
+  } finally { setOperationRunsRoot(undefined); }
 }
 
 function fail(ctx: Ctx, err: unknown): number {
@@ -2029,8 +2035,10 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       try { r = await tool('autode_platform_operations').handler({ id }, ws) as typeof r; } catch (err) { throw new CliError(EXIT.NOT_FOUND, err instanceof Error ? err.message : String(err)); }
       const o = r.operations[0] as unknown as PlatformOperation & { origin: string; status: string; file: string };
       const pg = r.page;
+      const pending = pg?.proposals.length ? ['', 'Proposals waiting for approval:', ...pg.proposals.map((p) => `  ${p.decision} ${p.file}${p.reason ? ` — ${p.reason}` : ''}${p.resembles.length ? ` (like ${p.resembles.join(', ')})` : ''}: autode decisions approve ${p.decision}`)] : [];
+      const drifted = pg?.drift.length ? ['', 'Drift:', ...pg.drift.map((x) => `  ✗ ${x.connection}${x.version ? ` (${x.platform} ${x.version})` : ''}: ${x.error}`)] : [];
       const relied = pg ? ['', `Relied on by: ${[...pg.reliedOnBy.capabilities.map((c) => `capability ${c}`), ...pg.reliedOnBy.engine, ...pg.reliedOnBy.skills.map((k) => `skill ${k.id} (${k.section})`)].join('; ') || 'nothing (unused)'}`, ...(pg.reliedOnBy.stages.length ? [`Stages: ${pg.reliedOnBy.stages.join(', ')}`] : []), ...(pg.lastRuns.length ? ['Last runs:', ...pg.lastRuns.map((x) => `  ${x.connection} ${x.at.slice(0, 16)} ${x.ok ? `ok, ${x.rows ?? 0} row(s)` : `failed: ${x.error ?? ''}`}`)] : [])] : [];
-      emit(ctx, { ok: true, ...r }, [`${o.id} — ${o.title} (${o.kind}, ${o.origin}, ${o.status}; ${o.file})`, o.description, '', 'Parameters:', ...o.params.map((p) => `  ${p.name} (${p.type})${p.default !== undefined ? ` = ${JSON.stringify(p.default)}` : ''}: ${p.label}`), 'Returns: ' + o.returns.map((x) => x.name).join(', '), ...Object.entries(o.platforms).flatMap(([pid, impl]) => ['', `${pid}${impl.since ? ` (since ${impl.since})` : ''}:`, `  ${(impl.sql ?? JSON.stringify(impl.cli ?? impl.http ?? impl.file)).trim().split('\n').join('\n  ')}`]), ...relied].join('\n'));
+      emit(ctx, { ok: true, ...r }, [`${o.id} — ${o.title} (${o.kind}, ${o.origin}, ${o.status}; ${o.file})`, o.description, '', 'Parameters:', ...o.params.map((p) => `  ${p.name} (${p.type})${p.default !== undefined ? ` = ${JSON.stringify(p.default)}` : ''}: ${p.label}`), 'Returns: ' + o.returns.map((x) => x.name).join(', '), ...Object.entries(o.platforms).flatMap(([pid, impl]) => ['', `${pid}${impl.since ? ` (since ${impl.since})` : ''}:`, `  ${(impl.sql ?? JSON.stringify(impl.cli ?? impl.http ?? impl.file)).trim().split('\n').join('\n  ')}`]), ...relied, ...drifted, ...pending].join('\n'));
       return EXIT.OK;
     }
     if (sub === 'run') {
@@ -2065,6 +2073,31 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
       emit(ctx, { ok: true, decision: d }, `Proposed ${file} as ${d.id}. A person approves it: autode decisions approve ${d.id} (or the panel). Until then it is a draft and never runs.`);
       return EXIT.OK;
+    }
+    if (sub === 'propose-operation') {
+      if (!id || !ctx.values.reason) throw new CliError(EXIT.USAGE, 'platform propose-operation <file.yaml> --reason "<why it is needed>" [--fixes <maintenance item key>].');
+      const full = path.resolve(ctx.io.cwd, id);
+      if (!fs.existsSync(full)) throw new CliError(EXIT.NOT_FOUND, `No file "${full}".`);
+      let r: Record<string, unknown>;
+      try { r = await tool('autode_propose_platform_operation').handler({ operation: fs.readFileSync(full, 'utf8'), reason: ctx.values.reason, ...(ctx.values.fixes ? { fixes: ctx.values.fixes } : {}) }, ws) as Record<string, unknown>; }
+      catch (err) {
+        const problems = (err as { details?: { problems?: string[] } }).details?.problems;
+        emit(ctx, { ok: false, problems: problems ?? [String((err as Error).message)] }, ['✗ Not proposed:', ...(problems ?? [String((err as Error).message)]).map((p) => `  ${p}`)].join('\n'));
+        return EXIT.REFUSED;
+      }
+      const d = r.decision as { id: string };
+      const like = (r.resembles as Array<{ id: string }>).map((x) => x.id);
+      emit(ctx, { ok: true, ...r }, `✓ Proposed ${String(r.file)} as ${d.id}${like.length ? ` (it resembles ${like.join(', ')})` : ''}. ${String(r.next)}`);
+      return EXIT.OK;
+    }
+    if (sub === 'drift') {
+      const r = await tool('autode_platform_drift').handler({ ...(ctx.values.platform ? { platform: ctx.values.platform } : {}) }, ws) as { operations: Array<{ operation: string; connection: string; platform: string; version?: string; kind: string; error: string; skills: Array<{ id: string; owner?: string }> }>; kinds: Array<{ platform: string; kind: string; count: number; connections: string[] }> };
+      const lines = [
+        ...r.operations.map((o) => `✗ ${o.operation} on ${o.connection} (${o.platform}${o.version ? ` ${o.version}` : ''}, ${o.kind}): ${o.error}${o.skills.length ? `\n    skills: ${o.skills.map((s) => `${s.id}${s.owner ? ` (${s.owner})` : ''}`).join(', ')}` : ''}`),
+        ...r.kinds.map((k) => `! ${k.platform} reports ${k.count} ${k.kind} object(s) its definition doesn't name (${k.connections.join(', ')})`)
+      ];
+      emit(ctx, { ok: !lines.length, ...r }, lines.length ? [...lines, '', 'Each is a maintenance item for the platform maintainer (autode maintenance list --role platform-maintainer); dismiss one with a reason: autode maintenance dismiss <key> --reason "<why>".'].join('\n') : 'No drift: every operation\'s last run worked or failed for another reason, and every object kind is known.');
+      return lines.length ? EXIT.FAILED : EXIT.OK;
     }
     if (sub === 'request-access') {
       if (!ctx.values.connection) throw new CliError(EXIT.USAGE, 'platform request-access --connection <id> [--role r] [--capability a,b] [--database d,e] [--schema s]….');

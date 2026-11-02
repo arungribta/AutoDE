@@ -16,6 +16,8 @@ import { VocabularyProposal, mergeVocabularyFile } from '../context/vocabulary';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { checksumOf, loadCatalog, writeApproval } from '../platform/operations/load';
+import { retireReplaced } from '../platform/operations/proposal';
+import type { PlatformOperation } from '../platform/operations/types';
 
 import { COMPOSED, WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, templateOf, writeWorkflow } from '../workflows/instance';
 import { skillFits, targetPlatform } from '../agents/assignment';
@@ -52,7 +54,8 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
 export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'coverage' | 'runbook' | 'semantic_model' | 'article' | 'platform_operation'>;
 
 /** POP1: a team file under .autode/config/platform-operations/ or platforms/, by its workspace-relative path and checksum. */
-export interface PlatformFilePayload { file: string; checksum: string }
+/** A team platform file at an exact checksum. POP3: an agent's proposal says why (`reason`) and the drift it fixes (`fixes`). */
+export interface PlatformFilePayload { file: string; checksum: string; operation?: string; reason?: string; fixes?: string; resembles?: string[] }
 
 export interface ProposalContext {
   workspaceRoot: string;
@@ -266,7 +269,7 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
     case 'semantic_model': { const s = payload as SemanticModelPayload; return { title: `${s.scope === 'shared' ? 'Shared semantic model' : 'Semantic composite'} ${s.name}`, summary: s.scope === 'shared' ? 'A workspace-level change: every problem that uses this model is affected.' : 'A composite of the active problem; it is resolved once applied.' }; }
     case 'article': { const a = payload as ArticlePayload; return { title: `Knowledge article: ${a.title}`.slice(0, 160), summary: `About ${a.about.join(', ')}; cites ${a.cites.length} fact(s). Approving it gives it to agents working on what it is about.` }; }
-    case 'platform_operation': { const p = payload as PlatformFilePayload; return { title: `${/\/platforms\//.test(p.file) ? 'Platform definition' : 'Platform operation'} ${p.file}`.slice(0, 160), summary: `${p.file} at ${p.checksum}. Approving it lets AutoDE run exactly this file; an edit makes it a draft again.` }; }
+    case 'platform_operation': { const p = payload as PlatformFilePayload; return { title: `${/\/platforms\//.test(p.file) ? 'Platform definition' : 'Platform operation'} ${p.file}`.slice(0, 160), summary: `${p.reason ? `${p.reason.slice(0, 300)} ` : ''}${p.file} at ${p.checksum}.${p.fixes ? ` It fixes ${p.fixes}.` : ''}${p.resembles?.length ? ` Like: ${p.resembles.join(', ')}.` : ''} Approving it lets AutoDE run exactly this file; an edit makes it a draft again.` }; }
   }
 }
 
@@ -361,6 +364,9 @@ export function validatePlatformFileProposal(p: PlatformFilePayload, ctx: Propos
   r.errors.push(...mine);
   const loaded = [...c.operations, ...c.platforms].find((x) => x.file === rel);
   if (!loaded && !mine.length) r.errors.push(`${rel} didn't load.`);
+  // POP3: an agent's proposal carries a recorded example, so what it returns is seen before it runs.
+  const ex = loaded && 'kind' in (loaded.item as object) ? (loaded.item as PlatformOperation).example : undefined;
+  if (loaded && /\/proposed\//.test(rel) && !(ex && ex.rows.length)) r.errors.push(`${rel} has no recorded example (example.params, example.rows): an agent's proposal needs one.`);
   if (loaded?.overrides) r.warnings.push(`It replaces AutoDE's shipped ${'kind' in (loaded.item as object) ? 'operation' : 'platform definition'} ${(loaded.item as { id: string }).id} for this workspace.`);
   return finish(r);
 }
@@ -554,8 +560,10 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         const loaded = [...c.operations, ...c.platforms].find((x) => x.file === p.file)!;
         const what = c.platforms.includes(loaded as never) ? 'platforms' : 'operations';
         writeApproval(ctx.workspaceRoot, what, (loaded.item as { id: string }).id, { checksum: p.checksum, by: approver, at: now.toISOString(), decisionId: id });
-        const done = store.markApplied(id, `Approved by ${approver} at ${p.checksum}.`);
-        return { decision: done, applied: true, message: `${p.file} approved by ${approver}: AutoDE runs it from now on; an edit makes it a draft again.` };
+        // POP3: the team's older file for the same operation is a draft now; it is moved aside, not left to confuse.
+        const replaced = what === 'operations' ? retireReplaced({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot }, (loaded.item as { id: string }).id, p.file, now) : [];
+        const done = store.markApplied(id, `Approved by ${approver} at ${p.checksum}.${replaced.length ? ` Replaced: ${replaced.join(', ')}.` : ''}`);
+        return { decision: done, applied: true, message: `${p.file} approved by ${approver}: AutoDE runs it from now on; an edit makes it a draft again.${replaced.length ? ` The team's earlier file (${replaced.join(', ')}) is in .autode/local/replaced-operations/.` : ''}` };
       }
       case 'article': {
         const a = store.proposal<ArticlePayload>(id);

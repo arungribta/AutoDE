@@ -6,6 +6,26 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.58.0
+
+POP3, agent-proposed operations and drift ([platform-operations.md](docs/specs/platform-operations.md) §6.4). The platform boundary is complete: POP1 to POP4, and POP3.
+
+- **Agents propose operations** (MCP `autode_propose_platform_operation`, `autode platform propose-operation <file> --reason "<why>"`): when an agent did something on a platform that no operation covers, or fixes an operation that drifted, it proposes the operation file with the reason (and `fixes`, the maintenance item it fixes).
+  - AutoDE checks it before a person sees it: the format, the read-only guard for reads, platforms it knows, and a **recorded example** (the parameters, the platform, the rows the platform returned) that binds and maps. A proposal without one is refused, with the reason; every problem comes back item by item.
+  - It is written to `.autode/config/platform-operations/proposed/<id>.<hash>.yaml`, named by its content, and filed as a `platform_operation` decision whose summary gives the reason and the operations it resembles (same area and platforms, shared parameters and names read).
+  - A team file with the same id that is already approved keeps running until a person approves the proposal; then AutoDE runs exactly the proposed file, through the executor, with no model. The team's earlier file for it moves to `.autode/local/replaced-operations/`.
+  - A newer proposal of the same operation supersedes the older one, whose draft file is removed.
+  - Approving a proposed file (`/proposed/`) also needs its recorded example.
+- **Drift is noticed and never silent.**
+  - Every operation run is recorded, now including estate extraction (through the adapters) and observed lineage, with the platform's version, the operation's content digest and the failure's kind: outside the implementation's version range, a missing object (the engine's generic words plus each platform definition's own codes, new field `errors.missingObject`: Snowflake, Databricks `TABLE_OR_VIEW_NOT_FOUND` …, Redshift, Oracle `ORA-00942` …), refused, or another failure.
+  - Two maintenance rules for the new **platform maintainer**:
+    - `operation-drift`: the last run of an operation on a connection failed for its version or a missing view or column. One item per operation and connection, naming the platform version and the skills that name it with their owners. It closes when the operation in effect changes (a fix approved) or a later run works. A privilege failure isn't drift.
+    - `object-kind-unread`: an estate read reported objects of a kind the platform's definition doesn't name (`BASE TABLE` → `table`; a Snowflake `hybrid_table` …), recorded per connection in `.autode/local/object-kinds.json`. It closes when the definition (a team copy) names the kind.
+  - Dismissing any maintenance item now needs a reason, in the engine as on every surface.
+  - `autode platform drift [--platform p]` and MCP `autode_platform_drift` list both.
+- **The platform maintainer** (`agents/platform-maintainer.md`), at the propose tier: it reads the catalog, tries reads, proposes operations and skill copies, and never decides. Its skill, `autode-core-platform-operations`, covers the operation format, recording an example, proposing, and fixing each kind of drift; its worked example passes the proposal checks in `npm test`.
+- **In the Platform catalog:** an operation's page shows its drift per connection and the proposals waiting for it, with the reason, what it resembles, the file, and **Approve** and **Reject…** (the panel's own decision path). The platform's Health tab adds drift, unknown object kinds and proposals. `autode platform operation <id>` shows the same.
+
 ## 0.57.1
 
 POP4b, the Platform catalog to edit ([platform-operations.md](docs/specs/platform-operations.md) §6.3). POP4 is complete.

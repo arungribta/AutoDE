@@ -97,3 +97,5 @@ capabilities:
     support: supported
     note: The redshift compile dialect (Pipeline Specs and Tier-1 primitives). A dry run can't check DDL or MERGE (Redshift's EXPLAIN doesn't compile them); those steps are reviewed from their statement.
 objectKinds: [table, view, late_binding_view, materialized_view, external_table, datashare_table]
+errors:
+  missingObject: ['relation ".*" does not exist', 'column ".*" does not exist']

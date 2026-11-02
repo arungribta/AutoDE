@@ -400,6 +400,8 @@ Acceptance:
 
 ### 6.4 POP3 — agent-proposed operations and drift detection (v0.58.0)
 
+**Status:** shipped in v0.58.0 (CHANGELOG.md 0.58.0; HOW: technical-design.md, POP3). Proposals under `.autode/config/platform-operations/proposed/`, named by content; drift from the recorded runs (every run, the estate's too) and the estate's object kinds; the platform maintainer role and `autode-core-platform-operations`. The scope below is kept as the record of what was asked.
+
 Scope:
 - **Proposals:**
   - an agent that did something with a platform's CLI or a query no operation covers can propose an operation file (`autode_propose_platform_operation`; decision kind `platform_operation`);

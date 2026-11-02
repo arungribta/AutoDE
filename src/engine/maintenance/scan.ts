@@ -49,6 +49,8 @@ export function scanWorkspace(workspaceRoot: string, options: { now?: Date } = {
 
 /** A person sets an item aside, with the reason (this engineer's; a changed cause makes a new item). */
 export function dismissItem(workspaceRoot: string, key: string, by: string, reason: string, now = new Date()): void {
+  // Never silent (POP3): an item leaves the queue only with the reason it needs nothing.
+  if (!reason?.trim()) throw new Error('Dismissing an item needs a reason (why it needs nothing).');
   const state = readMaintenanceState(workspaceRoot);
   writeMaintenanceState(workspaceRoot, { ...state, dismissed: { ...state.dismissed, [key]: { by, at: now.toISOString(), reason } } });
 }

@@ -504,6 +504,21 @@
       "type": "array",
       "items": {
         "type": "string"
+      },
+      "description": "The kinds of object it has (table, view, dynamic_table …): a kind its estate reads report that is not here raises a maintenance item."
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the platform words its errors, so AutoDE tells drift from other failures.",
+      "properties": {
+        "missingObject": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Regular expressions (case-insensitive) for an error that says a table, view or column is missing."
+        }
       }
     }
   }

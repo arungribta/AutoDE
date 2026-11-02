@@ -5886,12 +5886,12 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const readTools = ['autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
       const proposalTools = ['autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
-      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
+      assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_propose_platform_operation', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
-        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].includes(t.name)) ? [false, false] : [false, true];
+        const expected = readTools.includes(t.name) ? [true, false] : (proposalTools.includes(t.name) || ['autode_verify_assertion', 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_propose_platform_operation', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].includes(t.name)) ? [false, false] : [false, true];
         assert.deepStrictEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], expected, t.name);
       }
       const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
@@ -5984,6 +5984,8 @@ async function main() {
       autode_platform_catalog: [{ platform: 'snowflake' }, { platform: '' }],
       autode_platform_conformance: [{ connectionId: 'snowflake:prod' }, {}],
       autode_platform_request_access: [{ connectionId: 'snowflake:nope' }, { connectionId: 'snowflake:nope', schemas: [''] }],
+      autode_propose_platform_operation: [{ operation: { id: 'estate.x' }, reason: 'Listed the stages by hand.' }, { operation: { id: 'estate.x' }, reason: 'short' }],
+      autode_platform_drift: [{ platform: 'snowflake' }, { platform: '' }],
       autode_skill_check: [{ id: 'autode-de-mapping' }, { id: '' }],
       autode_skill_customise: [{ id: 'autode-de-mapping' }, { id: '' }],
       autode_plugin_status: [{}, { x: 1 }],
@@ -8523,7 +8525,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-orchestrator', 'autode-core-semantic-modeling', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment', 'autode-de-specification-authoring', 'autode-redshift-deployment', 'autode-redshift-governance', 'autode-redshift-ingestion', 'autode-redshift-performance', 'autode-redshift-pipelines', 'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-orchestrator', 'autode-core-platform-operations', 'autode-core-semantic-modeling', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment', 'autode-de-specification-authoring', 'autode-redshift-deployment', 'autode-redshift-governance', 'autode-redshift-ingestion', 'autode-redshift-performance', 'autode-redshift-pipelines', 'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -13688,6 +13690,197 @@ async function main() {
     const page = src('media/platforms.html');
     assert.ok(/role="grid" aria-label="Capability matrix"/.test(page) && /role="tablist" class="tabs"/.test(page) && /ArrowRight/.test(page), 'keyboard and screen reader');
     assert.ok(/Row values aren\\'t shown here/.test(page) && /never runs from here/.test(page), 'no data rows, no change runs from the view');
+  });
+
+  // ── v0.58.0 POP3: agent-proposed operations and drift (docs/specs/platform-operations.md §6.4) ──
+
+  await test('v0.58.0 POP3: a proposed operation is checked before a person sees it (no recorded example, a write in a read, an unknown platform: refused with the reason); a good one is a draft beside what it resembles and never runs until approved; approved, it runs through the executor with no model; a fix of an approved team file keeps the old one running until approved, then moves it aside; a newer proposal supersedes the older', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const PS = fresh('../dist/engine/platform/operations/proposeService.js');
+    const PR = fresh('../dist/engine/platform/operations/proposal.js');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const S = fresh('../dist/engine/platform/operations/service.js');
+    const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+    const { applyDecision } = fresh('../dist/engine/decisions/proposals.js');
+    const repo = nodePath.join(__dirname, '..');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop3-'));
+    try {
+      const scope = { resourcesRoot: repo, workspaceRoot: ws };
+      const stages = { formatVersion: 1, id: 'estate.list_stages', title: 'Stages in a schema', description: 'Each stage of one schema with its URL and type.', kind: 'read', content: 'metadata', area: 'estate',
+        params: [{ name: 'database', type: 'identifier', label: 'Database' }, { name: 'schema', type: 'literal', label: 'Schema' }],
+        returns: [{ name: 'stage_name', label: 'Stage' }, { name: 'stage_url', label: 'URL' }],
+        platforms: { snowflake: { sql: 'SELECT stage_name, stage_url FROM {database}.INFORMATION_SCHEMA.STAGES WHERE stage_schema = {schema:literal}' } } };
+      const example = { platform: 'snowflake', params: { database: 'RETAIL', schema: 'RAW' }, rows: [{ STAGE_NAME: 'ORDERS_LANDING', STAGE_URL: 's3://acme/orders/' }] };
+      const who = { host: 'mcp', client: 'platform-maintainer' };
+      const refused = (op, re) => { const p = PR.prepareOperationProposal(scope, { operation: op, reason: 'Listed the stages by hand while building the load.' }); assert.ok(p.problems.some((x) => re.test(x)), `${re}: ${p.problems.join(' | ')}`); assert.throws(() => PS.proposeOperation(scope, { operation: op, reason: 'Listed the stages by hand while building the load.' }, who), /can't be proposed/); };
+      refused(stages, /needs a recorded example/);
+      refused({ ...stages, example, platforms: { snowflake: { sql: 'DELETE FROM {database}.INFORMATION_SCHEMA.STAGES' } } }, /read operation must be one read-only statement/);
+      refused({ ...stages, example, platforms: { snowflek: stages.platforms.snowflake } }, /snowflek isn't a platform AutoDE knows/);
+      refused({ ...stages, example: { ...example, rows: [{ STAGE_NAME: 'X' }] } }, /example: no column for stage_url/);
+      assert.ok(PR.prepareOperationProposal(scope, { operation: { ...stages, example }, reason: '' }).problems.some((x) => /Say why/.test(x)));
+      assert.ok(!nodeFs.existsSync(nodePath.join(ws, '.autode', 'config', 'platform-operations', 'proposed')), 'nothing written for a refused proposal');
+      // A good one: a draft under proposed/, a pending decision, what it resembles.
+      const r = PS.proposeOperation(scope, { operation: { ...stages, example }, reason: 'Listed the stages by hand while building the load.' }, who);
+      assert.ok(r.decision.status === 'pending' && r.decision.kind === 'platform_operation' && /^\.autode\/config\/platform-operations\/proposed\/estate\.list_stages\.[0-9a-f]{8}\.yaml$/.test(r.prepared.file), JSON.stringify(r.decision).slice(0, 300));
+      assert.ok(r.prepared.resembles.length && r.prepared.resembles.every((x) => x.id.startsWith('estate.')), JSON.stringify(r.prepared.resembles));
+      assert.ok(/Listed the stages by hand/.test(r.decision.summary) && /resembles|Like:/.test(r.decision.summary));
+      const target = { connectionId: 'snowflake:acme', platform: 'snowflake', query: async (sql) => /CURRENT_VERSION/i.test(sql) ? [{ VERSION: '8.40.1' }] : [{ STAGE_NAME: 'ORDERS_LANDING', STAGE_URL: 's3://acme/orders/' }] };
+      await assert.rejects(S.runOnConnection(scope, target, 'estate.list_stages', { database: 'RETAIL', schema: 'RAW' }), /team draft/, 'a proposal never runs');
+      assert.strictEqual(PS.pendingOperationProposals(ws, 'estate.list_stages').length, 1);
+      // A person approves: it runs, deterministically, through the executor.
+      const store = new DecisionStore(ws);
+      store.resolve(r.decision.id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      const applied = await applyDecision(store, r.decision.id, { workspaceRoot: ws, resourcesRoot: repo });
+      assert.ok(applied.applied, applied.message);
+      const ran = await S.runOnConnection(scope, target, 'estate.list_stages', { database: 'RETAIL', schema: 'RAW' });
+      assert.ok(ran.ok && ran.rows[0].stage_name === 'ORDERS_LANDING' && /RETAIL\.INFORMATION_SCHEMA\.STAGES WHERE stage_schema = 'RAW'/.test(ran.statement), JSON.stringify(ran));
+      // A fix of the approved team file: the approved one keeps running until the fix is approved; a second fix supersedes the first.
+      const fix = (sql) => ({ ...stages, example, platforms: { snowflake: { sql } } });
+      const f1 = PS.proposeOperation(scope, { operation: fix('SELECT stage_name, stage_url FROM {database}.INFORMATION_SCHEMA.STAGES WHERE stage_schema = {schema:literal} ORDER BY stage_name'), reason: 'Order the stages by name.' }, who);
+      const f2 = PS.proposeOperation(scope, { operation: fix('SELECT stage_name, stage_url FROM {database}.INFORMATION_SCHEMA.STAGES WHERE stage_schema = {schema:literal} ORDER BY 1'), reason: 'Order the stages by their name, positionally.' }, who);
+      assert.deepStrictEqual(f2.superseded, [f1.decision.id]);
+      assert.strictEqual(new DecisionStore(ws).get(f1.decision.id).status, 'superseded');
+      assert.ok(!/ORDER BY/.test((await S.runOnConnection(scope, target, 'estate.list_stages', { database: 'RETAIL', schema: 'RAW' })).statement), 'the approved file runs while the fix waits');
+      // The approved file was the proposal itself; put a team file at the canonical place to see it moved aside.
+      const canonical = nodePath.join(ws, '.autode', 'config', 'platform-operations', 'estate.list_stages.yaml');
+      nodeFs.writeFileSync(canonical, nodeFs.readFileSync(nodePath.join(ws, f2.prepared.file), 'utf8').replace('ORDER BY 1', 'ORDER BY 2'));
+      store.resolve(f2.decision.id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      const a2 = await applyDecision(store, f2.decision.id, { workspaceRoot: ws, resourcesRoot: repo });
+      assert.ok(a2.applied && /replaced-operations/.test(a2.message) && !nodeFs.existsSync(canonical), a2.message);
+      assert.ok(/ORDER BY 1/.test((await S.runOnConnection(scope, target, 'estate.list_stages', { database: 'RETAIL', schema: 'RAW' })).statement));
+      // A proposed file without an example is refused at approval too (edited after it was proposed).
+      const { validatePlatformFileProposal } = fresh('../dist/engine/decisions/proposals.js');
+      const bare = nodePath.join(ws, '.autode', 'config', 'platform-operations', 'proposed', 'estate.list_bare.yaml');
+      const bareText = 'formatVersion: 1\nid: estate.list_bare\ntitle: Bare one\ndescription: A read without an example.\nkind: read\narea: estate\nparams: []\nreturns: [ { name: x } ]\nplatforms:\n  snowflake:\n    sql: SELECT 1 AS x\n';
+      nodeFs.writeFileSync(bare, bareText);
+      assert.ok(validatePlatformFileProposal({ file: '.autode/config/platform-operations/proposed/estate.list_bare.yaml', checksum: L.checksumOf(bareText) }, { workspaceRoot: ws, resourcesRoot: repo }).errors.some((e) => /no recorded example/.test(e)));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.58.0 POP3: drift is noticed and never silent — a view gone (the platform\'s own error words) raises one item for the platform maintainer per operation and connection, naming the version and the skills\' owners; an approved fix closes it, so does a run that works; a version outside the range raises one; a privilege failure doesn\'t; an object kind the definition doesn\'t name raises one until a team definition names it; a dismissed item needs a reason', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const X = fresh('../dist/engine/platform/operations/execute.js');
+    const S = fresh('../dist/engine/platform/operations/service.js');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const RL = fresh('../dist/engine/platform/operations/runLog.js');
+    const Q = fresh('../dist/engine/maintenance/queue.js');
+    const SC = fresh('../dist/engine/maintenance/scan.js');
+    const repo = nodePath.join(__dirname, '..');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop3-drift-'));
+    try {
+      const scope = { resourcesRoot: repo, workspaceRoot: ws };
+      X.forgetVersion();
+      const items = (rule) => Q.openMaintenanceItems({ workspaceRoot: ws, resourcesRoot: repo, sources: { graph: { nodes: [], edges: [] }, assertions: [] } }).filter((i) => i.rule === rule);
+      const gone = (id) => ({ connectionId: id, platform: 'snowflake', query: async (sql) => { if (/CURRENT_VERSION/i.test(sql)) return [{ VERSION: '9.2.0' }]; throw new Error("SQL compilation error: Object 'RETAIL.INFORMATION_SCHEMA.VIEWS' does not exist or not authorized."); } });
+      const params = { database: 'RETAIL', schema: 'SHOP' };
+      // Twice on one connection, once on another: one item per operation and connection.
+      for (const c of ['snowflake:acme', 'snowflake:acme']) { const r = await S.runOnConnection(scope, gone(c), 'estate.list_views', params); assert.ok(!r.ok && r.gapKind === 'missing-object' && /does not exist/.test(r.gap), JSON.stringify(r)); }
+      await S.runOnConnection(scope, gone('snowflake:dev'), 'estate.list_views', params);
+      let drift = items('operation-drift');
+      assert.deepStrictEqual(drift.map((i) => i.key).sort(), ['operation-drift:estate.list_views@snowflake:acme', 'operation-drift:estate.list_views@snowflake:dev']);
+      const it = drift[0];
+      assert.ok(it.agent === 'platform-maintainer' && /snowflake 9\.2\.0/.test(it.detail) && /Skills that name it: .*autode-redshift-ingestion \(AutoDE\)/.test(it.detail) && /autode_propose_platform_operation/.test(it.next), JSON.stringify(it));
+      // Databricks' own code is recognised from its definition, not from code.
+      const def = L.platformById(L.loadCatalog(scope), 'databricks');
+      assert.ok(X.isMissingObject('[TABLE_OR_VIEW_NOT_FOUND] The table or view `x`.`y` cannot be found.', def) && !X.isMissingObject('[TABLE_OR_VIEW_NOT_FOUND] …', L.platformById(L.loadCatalog(scope), 'redshift')));
+      // A privilege failure is a gap, not drift.
+      const denied = { connectionId: 'snowflake:locked', platform: 'snowflake', query: async (sql) => { if (/CURRENT_VERSION/i.test(sql)) return [{ VERSION: '9.2.0' }]; throw new Error('Insufficient privileges to operate on schema SHOP'); } };
+      const dr = await S.runOnConnection(scope, denied, 'estate.list_views', params);
+      assert.ok(dr.gapKind === 'failed' && !items('operation-drift').some((i) => /locked/.test(i.key)));
+      // A run that works on acme closes acme's item; dev's stays.
+      const fine = { connectionId: 'snowflake:acme', platform: 'snowflake', query: async (sql) => /CURRENT_VERSION/i.test(sql) ? [{ VERSION: '9.2.0' }] : [] };
+      assert.ok((await S.runOnConnection(scope, fine, 'estate.list_views', params)).ok);
+      assert.deepStrictEqual(items('operation-drift').map((i) => i.key), ['operation-drift:estate.list_views@snowflake:dev']);
+      // An approved fix (a team file, another content) closes dev's before anything runs again.
+      L.customise(scope, 'estate.list_views');
+      const team = nodePath.join(ws, '.autode', 'config', 'platform-operations', 'estate.list_views.yaml');
+      const text = nodeFs.readFileSync(team, 'utf8').replace('ORDER BY table_name', 'ORDER BY 3');
+      nodeFs.writeFileSync(team, text);
+      assert.strictEqual(items('operation-drift').length, 1, 'a draft fix changes nothing');
+      L.writeApproval(ws, 'operations', 'estate.list_views', { checksum: L.checksumOf(text), by: 'priya', at: new Date().toISOString() });
+      assert.strictEqual(items('operation-drift').length, 0, 'the approved fix closes it');
+      // A version outside an implementation's range.
+      const newer = text.replace(/  snowflake:\r?\n    sql:/, '  snowflake:\n    since: "10.0"\n    sql:');
+      assert.notStrictEqual(newer, text);
+      nodeFs.writeFileSync(team, newer);
+      L.writeApproval(ws, 'operations', 'estate.list_views', { checksum: L.checksumOf(newer), by: 'priya', at: new Date().toISOString() });
+      X.forgetVersion();
+      const v = await S.runOnConnection(scope, fine, 'estate.list_views', params);
+      assert.ok(v.gapKind === 'version' && /needs 10\.0 or later; the platform is 9\.2\.0/.test(v.gap), JSON.stringify(v));
+      drift = items('operation-drift');
+      assert.ok(drift.length === 1 && /doesn't fit the platform's version/.test(drift[0].title) && /since\/until/.test(drift[0].next), JSON.stringify(drift));
+      // Never silent: dismissing needs a reason, and only that engineer's view loses it.
+      assert.throws(() => SC.dismissItem(ws, drift[0].key, 'priya', ''), /reason/i);
+      SC.dismissItem(ws, drift[0].key, 'priya', 'Upgrade to 10.0 is next week.');
+      assert.strictEqual(items('operation-drift').length, 0);
+      assert.strictEqual(Q.maintenanceItems({ workspaceRoot: ws, resourcesRoot: repo, sources: { graph: { nodes: [], edges: [] }, assertions: [] } }).filter((i) => i.rule === 'operation-drift').length, 1, 'still in the queue, dismissed');
+      // An object kind the definition doesn't name: one item, until a team definition names it.
+      RL.recordObjectKinds(ws, { connection: 'snowflake:acme', platform: 'snowflake', kinds: { table: 12, view: 3, hybrid_table: 2 } });
+      RL.recordObjectKinds(ws, { connection: 'snowflake:dev', platform: 'snowflake', kinds: { hybrid_table: 1 } });
+      let kinds = items('object-kind-unread');
+      assert.ok(kinds.length === 1 && kinds[0].key === 'object-kind-unread:snowflake:hybrid_table' && /3 object\(s\) of kind hybrid_table/.test(kinds[0].title) && kinds[0].agent === 'platform-maintainer', JSON.stringify(kinds));
+      assert.strictEqual(RL.normalizeKind('BASE TABLE'), 'table');
+      assert.strictEqual(RL.normalizeKind('DYNAMIC TABLE'), 'dynamic_table');
+      L.customise(scope, 'snowflake');
+      const pf = nodePath.join(ws, '.autode', 'config', 'platforms', 'snowflake.yaml');
+      const pt = nodeFs.readFileSync(pf, 'utf8').replace('objectKinds: [table,', 'objectKinds: [table, hybrid_table,');
+      nodeFs.writeFileSync(pf, pt);
+      L.writeApproval(ws, 'platforms', 'snowflake', { checksum: L.checksumOf(pt), by: 'priya', at: new Date().toISOString() });
+      assert.strictEqual(items('object-kind-unread').length, 0);
+      // The catalog shows it on the operation's page and the platform's health.
+      const C = fresh('../dist/engine/platform/operations/catalogView.js');
+      nodeFs.unlinkSync(pf);
+      assert.ok(C.platformPage(scope, 'snowflake').health.unreadKinds.some((k) => k.kind === 'hybrid_table'));
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('v0.58.0 POP3: the platform maintainer — its role template and core skill load, at the propose tier, and its work order comes from a drift item; the skill\'s worked example passes the proposal checks; MCP autode_propose_platform_operation and autode_platform_drift, the CLI propose-operation and drift give the same answers; estate reads are recorded for drift; the catalog view is wired', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const D = fresh('../dist/engine/agents/definitions.js');
+    const B = fresh('../dist/engine/maintenance/brief.js');
+    const PR = fresh('../dist/engine/platform/operations/proposal.js');
+    const { parseYaml } = fresh('../dist/engine/context/Yaml.js');
+    const repo = nodePath.join(__dirname, '..');
+    const role = D.loadRoles(repo).roles.find((r) => r.name === 'platform-maintainer');
+    assert.ok(role && role.skills.includes('autode-core-platform-operations') && role.tools.includes('autode_propose_platform_operation'));
+    assert.ok(!role.tools.some((t) => /resolve|approve|apply|publish/.test(t)), 'it never decides');
+    assert.ok(D.loadSkillPack(repo).skills.some((k) => k.id === 'autode-core-platform-operations' && k.meta.maturity === 'tested'));
+    const skill = nodeFs.readFileSync(nodePath.join(repo, 'skills', 'autode-core-platform-operations', 'SKILL.md'), 'utf8');
+    const yaml = /```yaml\n([\s\S]*?)```/.exec(skill.replace(/\r\n/g, '\n'))[1];
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop3-surf-'));
+    let client;
+    try {
+      assert.deepStrictEqual(PR.prepareOperationProposal({ resourcesRoot: repo, workspaceRoot: ws }, { operation: yaml, reason: 'The worked example of the skill.' }).problems, [], 'the worked example passes');
+      const order = B.maintenanceAssignment(repo, ws, { key: 'operation-drift:estate.list_views@snowflake:acme', rule: 'operation-drift', agent: 'platform-maintainer', title: 't', detail: 'd', next: 'n', subjects: [], cli: 'c' }, [{ name: 'autode_propose_platform_operation', annotations: { readOnlyHint: false, destructiveHint: false } }, { name: 'autode_platform_drift', annotations: { readOnlyHint: true } }]);
+      assert.ok(order.assignment && order.assignment.engineTools.includes('autode_propose_platform_operation') && /autode-core-platform-operations/.test(order.assignment.text), JSON.stringify(order).slice(0, 400));
+      // CLI and MCP.
+      const file = nodePath.join(ws, 'stages.yaml');
+      nodeFs.writeFileSync(file, yaml);
+      const noReason = await cli(['platform', 'propose-operation', file, '--workspace', ws]);
+      assert.strictEqual(noReason.code, 2);
+      const viaCli = await cli(['platform', 'propose-operation', file, '--reason', 'Listed the stages by hand.', '--workspace', ws]);
+      assert.ok(viaCli.code === 0 && /Proposed \.autode\/config\/platform-operations\/proposed\/estate\.list_external_stages\.[0-9a-f]{8}\.yaml as/.test(viaCli.out), viaCli.out);
+      const bad = nodePath.join(ws, 'bad.yaml');
+      nodeFs.writeFileSync(bad, yaml.replace(/example:[\s\S]*$/, ''));
+      const refused = await cli(['platform', 'propose-operation', bad, '--reason', 'No example this time.', '--workspace', ws]);
+      assert.ok(refused.code === 4 && /needs a recorded example/.test(refused.out), refused.out);
+      const page = (await cli(['platform', 'operation', 'estate.list_external_stages', '--workspace', ws])).out;
+      assert.ok(/Proposals waiting for approval:/.test(page) && /autode decisions approve/.test(page), page);
+      client = await mcpSession(ws);
+      const call = async (name, args) => { const r = await client.callTool({ name, arguments: args }); return r.isError ? { error: r.content[0].text } : r.structuredContent; };
+      const m = await call('autode_propose_platform_operation', { operation: parseYaml(yaml), reason: 'Listed the stages by hand, again.' });
+      assert.ok(m.decision && m.superseded.length === 1 && /platform owner approves/.test(m.next), JSON.stringify(m));
+      const mbad = await call('autode_propose_platform_operation', { operation: { id: 'estate.x' }, reason: 'Missing almost everything.' });
+      assert.ok(mbad.error && /recorded example/.test(mbad.error), JSON.stringify(mbad));
+      const d = await call('autode_platform_drift', {});
+      assert.deepStrictEqual([d.operations, d.kinds], [[], []]);
+      assert.strictEqual((await cli(['platform', 'drift', '--workspace', ws])).code, 0);
+    } finally { if (client) await client.close(); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+    const src = (f) => nodeFs.readFileSync(nodePath.join(__dirname, '..', f), 'utf8');
+    assert.ok(/log: \{ connection: this\.getConnectionId\(\), via: 'estate' \}/.test(src('src/engine/platform/BaseAdapter.ts')) && /recordObjectKinds/.test(src('src/engine/platform/BaseAdapter.ts')) && /log: \{ connection: this\.getConnectionId\(\)/.test(src('src/engine/platform/adapters/DefinitionAdapter.ts')), 'the estate\'s reads are recorded');
+    assert.ok(/setOperationRunsRoot/.test(src('src/extension.ts')) && /setOperationRunsRoot/.test(src('src/mcp/server.ts')) && /setOperationRunsRoot/.test(src('src/cli/main.ts')));
+    const html = src('media/platforms.html');
+    assert.ok(/data-resolve="approved"/.test(html) && /<h2>Drift<\/h2>/.test(html) && /unreadKinds/.test(html), 'proposals and drift in the catalog');
   });
 
   // ── v0.57.1 POP4b: the catalog, to edit (docs/specs/platform-operations.md §6.3) ──

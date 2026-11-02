@@ -1467,6 +1467,21 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: Snowflake's page → Privileges; with a problem active, **Draft the runbook** for your connection (tick lineage).
   Expect: the grant on the SNOWFLAKE database for your role, proposed as a runbook decision; a capability without grant operations is listed in words. `autode platform request-access --connection <c>` gives the same steps.
 
+## Part 68 — v0.58.0 POP3: proposals and drift
+
+- [ ] **68.1 A proposal is checked.**
+  Do: in Claude Code (AutoDE plugin) ask the platform maintainer to propose an operation listing Snowflake stages, first without running anything.
+  Expect: refused: it needs a recorded example. After it runs the query read-only and proposes again: a pending decision, the file under `.autode/config/platform-operations/proposed/`.
+- [ ] **68.2 Review it in the catalog.**
+  Do: open the operation's page in the Platform catalog.
+  Expect: the proposal with its reason and the operations it resembles; **Approve** (confirmed) makes it run (Try it); **Reject…** asks why.
+- [ ] **68.3 Drift.**
+  Do: make a team copy of `estate.list_views` that reads a view that doesn't exist, approve it, and refresh the estate (or Try it).
+  Expect: one maintenance item *reads something the platform no longer has* for the platform maintainer (`autode platform drift`, the Health tab, the operation's page); the extraction reports the gap, never an empty success. Reset the copy (or approve a fixed one): the item closes.
+- [ ] **68.4 Dismiss with a reason.**
+  Do: `autode maintenance dismiss <key>` without `--reason`, then with one.
+  Expect: refused without; dismissed with.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1840,5 +1855,9 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 67.5 |  |  |
 | 67.6 |  |  |
 | 67.7 |  |  |
+| 68.1 |  |  |
+| 68.2 |  |  |
+| 68.3 |  |  |
+| 68.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

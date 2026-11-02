@@ -47,3 +47,5 @@ capabilities:
     support: partly
     note: Semantic views arrive with C5c.
 objectKinds: [table, view, materialized_view, dynamic_table, external_table, stream, task, stage]
+errors:
+  missingObject: ['does not exist or not authorized', 'SQL compilation error: .*invalid identifier']

@@ -10,6 +10,8 @@ import { openContext } from '../engine/context/estateIngest';
 import { refreshLineage } from '../engine/lineage/record';
 import { accessRunbook, capabilityMatrix, conformanceRun, operationPage, platformPage, skillOperations, skillPage, skillTexts } from '../engine/platform/operations/catalogView';
 import { DecisionStore } from '../engine/decisions/decisionStore';
+import { OperationProposalError, proposeOperation } from '../engine/platform/operations/proposeService';
+import { driftReport } from '../engine/platform/operations/drift';
 import { ProposalValidationError, propose } from '../engine/decisions/proposals';
 
 /**
@@ -34,6 +36,36 @@ export async function connectionTarget(session: PlatformSession, connectionId: s
 
 export function platformOperationTools(session: PlatformSession): EngineTool[] {
   return [
+    {
+      name: 'autode_propose_platform_operation',
+      description: "Propose a platform operation (POP3): when you did something on a platform that no operation covers (a query or CLI command you ran read-only), or to fix an operation that drifted (a maintenance item names it), propose the operation file so AutoDE can run it deterministically from then on. Give the operation as an object or its YAML (the format: autode_platform_operations shows any operation in full; the autode-core-platform-operations skill explains it) with a recorded example: the parameters it ran with, the platform, and rows the platform returned. AutoDE checks the format, the read-only guard for reads and that the example binds and maps before a person sees it; a problem comes back item by item. It is a draft until a platform owner approves it in the Platform catalog; an approved team file with the same id keeps running meanwhile.",
+      inputSchema: { type: 'object', required: ['operation', 'reason'], additionalProperties: false, properties: {
+        operation: { description: 'The operation file: an object, or its YAML text.', anyOf: [{ type: 'object' }, { type: 'string', minLength: 1 }] },
+        reason: { type: 'string', minLength: 10, description: 'Why it is needed: what you did that no operation covered, or what drifted.' },
+        fixes: { type: 'string', minLength: 1, description: 'The maintenance item it fixes (its key, operation-drift:…), if any.' }
+      } },
+      annotations: { title: 'Propose a platform operation', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws: EngineWorkspace) => {
+        try {
+          const r = proposeOperation({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, { operation: args.operation, reason: String(args.reason), ...(args.fixes ? { fixes: String(args.fixes) } : {}) }, { host: 'mcp', client: 'platform-maintainer' });
+          return { decision: { id: r.decision.id, title: r.decision.title }, file: r.prepared.file, resembles: r.prepared.resembles, superseded: r.superseded, warnings: r.decision.validation.warnings, next: `A platform owner approves it in the Platform catalog (the operation's page), or with autode decisions approve ${r.decision.id}. Tell the user it waits for them. Once approved, name it in the skill that needed it.` } as unknown as Record<string, unknown>;
+        } catch (err) {
+          if (err instanceof OperationProposalError) throw new EngineToolError('VALIDATION_FAILED', err.message, { problems: err.problems, resembles: err.prepared.resembles });
+          throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
+        }
+      }
+    },
+    {
+      name: 'autode_platform_drift',
+      description: "Drift in the platform operations (POP3): each operation whose last run on a connection failed because the platform's version is outside its range or a view or column it reads is gone (with the error, the platform version and the skills that name it), and each object kind a platform reported that its definition doesn't name. They are maintenance items for the platform maintainer until fixed (an approved fixed operation closes them) or dismissed with a reason.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: { platform: { type: 'string', minLength: 1 } } },
+      annotations: read('Platform drift'),
+      handler: async (args, ws: EngineWorkspace) => {
+        const d = driftReport({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot });
+        const p = args.platform ? String(args.platform) : undefined;
+        return { operations: d.operations.filter((o) => !p || o.platform === p), kinds: d.kinds.filter((k) => !p || k.platform === p) } as unknown as Record<string, unknown>;
+      }
+    },
     {
       name: 'autode_platform_request_access',
       description: "Request access (POP4b): a runbook that grants AutoDE's role what its capabilities need on a connection (default: those its last conformance run found short, else every capability with grant operations), built from the platform definition's grant operations, bound to the role, databases and schemas in scope. With an active problem it is proposed as a runbook decision for a person who administers the platform to approve and run; without one it comes back to show. Privileges no grant operation covers come back as warnings, in words.",

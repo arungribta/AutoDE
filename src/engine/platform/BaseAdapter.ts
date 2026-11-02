@@ -3,6 +3,7 @@ import { DataPlatformProvider } from '../types';
 import { BaseNode, TableNode, ColumnNode, GraphEdge } from '../context/types';
 import { PlatformDefinition, PlatformOperation } from './operations/types';
 import { runOperation } from './operations/execute';
+import { normalizeKind, recordObjectKinds } from './operations/runLog';
 import {
   IDataSourceAdapter,
   PlatformCapabilities,
@@ -96,7 +97,7 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     if (!this.estateSource || !op) return { ok: false as const, rows: [] as Array<Record<string, unknown>>, gap: `the operation ${id} isn't in the catalog` };
     const declared = Object.fromEntries(Object.entries(params).filter(([k, v]) => v !== undefined && op.params.some((p) => p.name === k)));
     const runner = { sql: async (sql: string, maxRows: number) => (await this.executeQuery(sql, { maxRows, timeoutMs: 120_000, signal: options?.signal })).rows };
-    return runOperation({ operation: op, platformId: this.estateSource.definition.id, platform: this.estateSource.definition, params: declared, runner, maxRows: 100_000 });
+    return runOperation({ operation: op, platformId: this.estateSource.definition.id, platform: this.estateSource.definition, params: declared, runner, maxRows: 100_000, log: { connection: this.getConnectionId(), via: 'estate' } });
   }
 
   /** The estate's reads through operations: each a gap if it fails; extra object lists (a new kind) join the tables. */
@@ -115,6 +116,12 @@ export abstract class BaseDataSourceAdapter implements IDataSourceAdapter {
     const tables = await read(ESTATE_READS.tables);
     // New object kinds: any other estate operation listing objects (a team file can add one) joins the tables, keeping its kind.
     for (const id of listed.filter((x) => !NOT_OBJECT_LISTS.has(x))) tables.rows.push(...(await read(id)).rows);
+    // POP3: the kinds the platform reported, so a kind its definition doesn't name raises a maintenance item.
+    if (tables.rows.length && this.estateSource) {
+      const kinds: Record<string, number> = {};
+      for (const r of tables.rows) { const k = normalizeKind(String(r['table_type'] ?? r['TABLE_TYPE'] ?? 'TABLE')); kinds[k] = (kinds[k] ?? 0) + 1; }
+      recordObjectKinds(undefined, { connection: this.getConnectionId(), platform: this.estateSource.definition.id, kinds });
+    }
     // Row counts and sizes, where the platform keeps them apart from the table list.
     const stats = await read('estate.table_stats');
     if (stats.rows.length) {

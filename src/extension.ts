@@ -59,6 +59,7 @@ import { summarize } from './engine/platform/operations/service';
 import { DecisionStore } from './engine/decisions/decisionStore';
 import { propose } from './engine/decisions/proposals';
 import { setPlatformResourcesRoot } from './engine/platform/dialects';
+import { setOperationRunsRoot } from './engine/platform/operations/runLog';
 
 /**
  * Resources that outlive a single command (e.g. `connectionManager` below,
@@ -72,6 +73,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
   // POP1: where the shipped platform definitions are, for every platform's dialect (probes, reconciliation, dry runs).
   setPlatformResourcesRoot(context.extensionUri.fsPath);
+  // POP3: operation runs (the estate's reads too) are recorded in the workspace, for drift.
+  setOperationRunsRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
   const hub = new DataAgentHubHub(configManager);
   // Tool-skill imports, reviews and lifecycle transitions (Phase S2); the durable record is each skill's sidecar.
   const skillLog = vscode.window.createOutputChannel('AutoDE: Tool Skills');
@@ -1013,7 +1016,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
       if (t && tid && !managers.some(([id]) => id === tid)) managers.push([tid, t]);
       return managers.flatMap(([id, m]) => { const platform = m.getActivePlatform(); return platform ? [{ id, platform, target: { connectionId: id, platform, query: async (sql: string, maxRows: number) => (await m.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>> } }] : []; });
     };
-    PlatformCatalogPanel.show(context, { workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, liveConnections: live, actor: skillActor }, open);
+    PlatformCatalogPanel.show(context, { workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, liveConnections: live, actor: skillActor, resolveDecision: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note) }, open);
   });
 
   const platformOperations = vscode.commands.registerCommand(`${EXTENSION_ID}.platformOperations`, async () => {

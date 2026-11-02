@@ -94,7 +94,7 @@ export class DefinitionAdapter extends BaseDataSourceAdapter {
   private async run(id: string, params: Record<string, unknown>, options?: ExtractOptions) {
     const op = this.o.operation(id);
     if (!op) return { ok: false as const, rows: [] as Array<Record<string, unknown>>, gap: `the operation ${id} isn't in the catalog` };
-    return runOperation({ operation: op, platformId: this.def.id, platform: this.def, params, runner: this.runner(options), version: this.version, maxRows: 100_000 });
+    return runOperation({ operation: op, platformId: this.def.id, platform: this.def, params, runner: this.runner(options), version: this.version, maxRows: 100_000, log: { connection: this.getConnectionId(), via: 'estate' } });
   }
 
   protected defaultScope(): { database: string; schema: string } {

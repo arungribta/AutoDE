@@ -46,3 +46,5 @@ capabilities:
     support: partly
     note: Metric views arrive with C5c.
 objectKinds: [table, view, materialized_view, streaming_table, metric_view, volume, function]
+errors:
+  missingObject: [TABLE_OR_VIEW_NOT_FOUND, UNRESOLVED_COLUMN, SCHEMA_NOT_FOUND]

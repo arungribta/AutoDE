@@ -185,6 +185,8 @@ export interface PlatformDefinition {
   capabilities: Record<string, PlatformCapability>;
   /** Object kinds it has, so an unread kind is noticed (POP3). */
   objectKinds?: string[];
+  /** POP3: the platform's own wording of errors, so drift is told from other failures. */
+  errors?: { missingObject?: string[] };
 }
 
 export type Origin = 'shipped' | 'team';

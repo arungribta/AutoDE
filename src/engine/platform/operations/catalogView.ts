@@ -17,6 +17,8 @@ import { parseSkillMarkdown } from '../../skills/toolSkills';
 import { AUTODE_SKILL_NAME, SKILL_PLATFORMS, checkSkillFormat, skillMeta } from '../../agents/definitions';
 import { STAGE_KINDS } from '../../workflows/stageKinds';
 import { TeamCopyState, teamCopy } from '../../skills/customise';
+import { OperationDrift, UnreadKind, driftReport } from './drift';
+import { pendingOperationProposals } from './proposeService';
 
 /**
  * POP4a, the operations and skills catalog (docs/specs/platform-operations.md §6.3): what AutoDE does on each
@@ -320,6 +322,9 @@ export interface OperationPage extends OperationSummary {
   reliedOnBy: { capabilities: string[]; engine: string[]; skills: Array<{ id: string; section: string }>; stages: string[] };
   /** Nothing relies on it: no capability, engine feature or skill names it. */
   unused: boolean;
+  /** POP3: pending proposals of it (an agent's or a team's), and its drift on each connection. */
+  proposals: ReturnType<typeof pendingOperationProposals>;
+  drift: OperationDrift[];
 }
 
 /** An operation's page: what it does on each platform, its example and last runs, and what relies on it. */
@@ -346,7 +351,9 @@ export function operationPage(scope: CatalogScope, id: string, catalog: Catalog 
     ...(op.example ? { example: op.example } : {}), ...(loaded.approvedBy ? { approvedBy: loaded.approvedBy } : {}),
     lastRuns: [...lastRuns(runs).values()],
     reliedOnBy: { capabilities: summary.usedBy, engine, skills, stages },
-    unused: !summary.usedBy.length && !engine.length && !skills.length
+    unused: !summary.usedBy.length && !engine.length && !skills.length,
+    proposals: scope.workspaceRoot ? pendingOperationProposals(scope.workspaceRoot, id) : [],
+    drift: driftReport(scope, catalog).operations.filter((d) => d.operation === id)
   };
 }
 
@@ -424,7 +431,7 @@ export interface PlatformPage {
   tools?: { cli?: { command: string; minVersion?: string; install?: string; versionArgs?: string[]; profiles: boolean }; api?: string };
   primitives?: { dialect: string; primitives: Array<{ kind: string; description: string; compiles: boolean; reason?: string }> };
   privileges: Array<{ capability: string; privileges: string; grants?: string[] }>;
-  health: { failing: OperationRun[]; recent: OperationRun[]; drafts: string[]; conformance: Array<{ connection: string; at: string; summary: string }> };
+  health: { failing: OperationRun[]; recent: OperationRun[]; drafts: string[]; conformance: Array<{ connection: string; at: string; summary: string }>; drift: OperationDrift[]; unreadKinds: UnreadKind[]; proposals: ReturnType<typeof pendingOperationProposals> };
 }
 
 const TAB_TITLES: Record<PlatformTab['id'], string> = { overview: 'Overview', capabilities: 'Capabilities', operations: 'Operations', skills: 'Skills', tools: 'Tools', primitives: 'Primitives and dialect', privileges: 'Privileges', health: 'Health' };
@@ -487,7 +494,9 @@ export function platformPage(scope: CatalogScope, id: string, catalog: Catalog =
       failing: [...last.values()].filter((r) => !r.ok),
       recent: runs.slice(-20).reverse(),
       drafts: catalog.operations.filter((o) => o.status === 'draft' && o.item.platforms[id]).map((o) => o.item.id).concat(catalog.platforms.filter((p) => p.item.id === id && p.status === 'draft').map((p) => `${p.item.id} (the platform definition)`)),
-      conformance: conns.map((c) => conformance[c.id]).filter((x): x is ConformanceResult => !!x).map((x) => ({ connection: x.connection, at: x.at, summary: x.summary }))
+      conformance: conns.map((c) => conformance[c.id]).filter((x): x is ConformanceResult => !!x).map((x) => ({ connection: x.connection, at: x.at, summary: x.summary })),
+      ...(() => { const d = driftReport(scope, catalog); return { drift: d.operations.filter((x) => x.platform === id), unreadKinds: d.kinds.filter((k) => k.platform === id) }; })(),
+      proposals: scope.workspaceRoot ? pendingOperationProposals(scope.workspaceRoot).filter((p) => mine.some((o) => o.file === p.file) || catalog.operations.some((o) => o.file === p.file && o.item.platforms[id])) : []
     }
   };
 }

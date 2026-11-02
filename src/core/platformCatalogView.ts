@@ -27,6 +27,8 @@ export interface PlatformCatalogHost {
   liveConnections(): Array<{ id: string; platform: string; target: ConnectionTarget }>;
   /** Who acts, for the skills' lifecycle and decisions. */
   actor(): string;
+  /** POP3: approve or reject a decision as the person at the keyboard (the panel's own path: checks, apply, log). */
+  resolveDecision?(id: string, decision: 'approved' | 'rejected', note?: string): Promise<void>;
 }
 
 type Message =
@@ -38,7 +40,8 @@ type Message =
   | { type: 'skillAction'; id: string; action: 'customise' | 'edit' | 'review' | 'publish' | 'keep' | 'reset' }
   | { type: 'checkMeta' | 'saveMeta'; id: string; edit: SkillFrontmatterEdit }
   | { type: 'operationForm' | 'proposeOperation'; id: string } | { type: 'checkOperation' | 'saveOperation'; id: string; edit: OperationEdit }
-  | { type: 'requestAccess'; connection: string; role?: string; schemas: string[]; capabilities: string[] };
+  | { type: 'requestAccess'; connection: string; role?: string; schemas: string[]; capabilities: string[] }
+  | { type: 'resolveDecision'; id: string; decision: 'approved' | 'rejected'; operation: string };
 
 export class PlatformCatalogPanel {
   private static current: PlatformCatalogPanel | undefined;
@@ -168,6 +171,15 @@ export class PlatformCatalogPanel {
         case 'customise': await vscode.commands.executeCommand('autoDataEngineeringHub.customisePlatformOperation', m.id); return;
         case 'openTab': await vscode.commands.executeCommand(m.tab === 'workflow' ? 'autoDataEngineeringHub.openWorkflow' : 'autoDataEngineeringHub.openKnowledgeExplorer'); return;
         case 'skillAction': await this.skillAction(m.id, m.action); return;
+        case 'resolveDecision': {
+          if (!this.host.resolveDecision) { this.post({ type: 'notice', text: `Approve it in Decisions (or autode decisions approve ${m.id}).` }); return; }
+          let note: string | undefined;
+          if (m.decision === 'rejected') { note = await vscode.window.showInputBox({ title: `Reject ${m.id}`, prompt: 'Why (the proposer sees it)?' }); if (note === undefined) return; }
+          else if ((await vscode.window.showWarningMessage(`Approve ${m.id}? AutoDE runs exactly this operation file from now on.`, { modal: true }, 'Approve')) !== 'Approve') return;
+          await this.host.resolveDecision(m.id, m.decision, note);
+          await this.onMessage({ type: 'operation', id: m.operation });
+          return;
+        }
         case 'checkMeta': case 'saveMeta': {
           const file = skillPage(this.scope(), m.id)?.meta?.file;
           if (!file) { this.post({ type: 'notice', text: `${m.id} has no editable copy: customise it first.`, error: true }); return; }

@@ -161,6 +161,11 @@ export const PLATFORM_SCHEMA = {
         properties: { support: { enum: ['supported', 'partly', 'not_applicable'] }, operations: { type: 'array', items: { type: 'string' } }, privileges: { type: 'string' }, grants: { type: 'array', items: { type: 'string' }, description: 'The change operations that grant these privileges (Request access drafts a runbook from them), in the order they apply.' }, note: { type: 'string' } }
       }
     },
-    objectKinds: { type: 'array', items: { type: 'string' } }
+    objectKinds: { type: 'array', items: { type: 'string' }, description: 'The kinds of object it has (table, view, dynamic_table …): a kind its estate reads report that is not here raises a maintenance item.' },
+    errors: {
+      type: 'object', additionalProperties: false,
+      description: 'How the platform words its errors, so AutoDE tells drift from other failures.',
+      properties: { missingObject: { type: 'array', items: { type: 'string' }, description: 'Regular expressions (case-insensitive) for an error that says a table, view or column is missing.' } }
+    }
   }
 } as const;

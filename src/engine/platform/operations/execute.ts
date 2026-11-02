@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { recordOperationRun } from './runLog';
 import { checkReadOnlySql } from '../sqlGuard';
 import { bindTemplate, valuesFor } from './bind';
 import { mapRows } from './map';
@@ -29,7 +31,12 @@ export interface RunInput {
   /** The connection's platform version, when known (read once per connection: `connectionVersion`). */
   version?: string;
   maxRows?: number;
+  /** POP3: record the run's outcome (never its rows) in the run log, for health and drift. */
+  log?: { connection: string; via?: string; workspaceRoot?: string };
 }
+
+/** Why a run read nothing (POP3): the drift kinds raise maintenance items; the others are reported where they happen. */
+export type GapKind = 'version' | 'missing-object' | 'refused' | 'failed';
 
 export interface RunResult {
   ok: boolean;
@@ -44,7 +51,23 @@ export interface RunResult {
   truncated: boolean;
   /** Why nothing (or not everything) was read. */
   gap?: string;
+  /** What kind of gap it is (POP3). */
+  gapKind?: GapKind;
   version?: string;
+}
+
+/** Words any platform uses when an object or column is gone; a platform definition adds its own codes (`errors.missingObject`). */
+const MISSING_OBJECT = /\b(does not exist|doesn't exist|not found|no such (table|view|column|object)|invalid identifier|unknown (column|table|view)|undefined (column|table))\b/i;
+
+/** Whether a platform's error says an object or column the operation reads is missing (POP3 drift). */
+export function isMissingObject(message: string, platform?: PlatformDefinition): boolean {
+  if (MISSING_OBJECT.test(message)) return true;
+  return (platform?.errors?.missingObject ?? []).some((p) => { try { return new RegExp(p, 'i').test(message); } catch { return false; } });
+}
+
+/** A stable digest of an operation's content: a run records it, so drift raised against one content closes when it changes. */
+export function operationDigest(op: PlatformOperation): string {
+  return createHash('sha256').update(JSON.stringify(op)).digest('hex').slice(0, 16);
 }
 
 export const DEFAULT_MAX_ROWS = 5000;
@@ -80,18 +103,31 @@ export function bindOperation(operation: PlatformOperation, platformId: string, 
 }
 
 export async function runOperation(input: RunInput): Promise<RunResult> {
+  const r = await runBound(input);
+  const classified: RunResult = r.gap && !r.gapKind ? { ...r, gapKind: isMissingObject(r.gap, input.platform) ? 'missing-object' : 'failed' } : r;
+  if (input.log) {
+    recordOperationRun(input.log.workspaceRoot, {
+      at: new Date().toISOString(), operation: input.operation.id, connection: input.log.connection, platform: input.platformId, ok: classified.ok && !classified.gap,
+      ...(classified.ok ? { rows: classified.rows.length } : {}), ...(classified.gap ? { error: classified.gap, kind: classified.gapKind } : {}),
+      ...(input.version ? { version: input.version } : {}), digest: operationDigest(input.operation), ...(input.log.via ? { via: input.log.via } : {})
+    });
+  }
+  return classified;
+}
+
+async function runBound(input: RunInput): Promise<RunResult> {
   const { operation: op, platformId } = input;
   const base: RunResult = { ok: false, operation: op.id, platform: platformId, rows: [], truncated: false, ...(input.version ? { version: input.version } : {}) };
-  if (op.kind !== 'read') return { ...base, gap: `${op.id} changes the platform: it runs only as a runbook step a person approves (propose it with autode_propose_runbook).` };
+  if (op.kind !== 'read') return { ...base, gapKind: 'refused', gap: `${op.id} changes the platform: it runs only as a runbook step a person approves (propose it with autode_propose_runbook).` };
   const bound = bindOperation(op, platformId, input.params, input.platform);
   const out = { ...base, ...(bound.statement ? { statement: bound.statement } : {}), ...(bound.argv ? { argv: bound.argv } : {}) };
   const range = inRange(bound.impl, input.version);
-  if (range) return { ...out, gap: `${op.id} on ${platformId} ${range}.` };
+  if (range) return { ...out, gapKind: 'version', gap: `${op.id} on ${platformId} ${range}.` };
   const maxRows = Math.max(1, Math.min(100_000, input.maxRows ?? DEFAULT_MAX_ROWS));
   try {
     if (bound.statement) {
       const c = checkReadOnlySql(bound.statement);
-      if (!c.ok) return { ...out, transport: 'sql', gap: `refused: ${c.reason}` };
+      if (!c.ok) return { ...out, transport: 'sql', gapKind: 'refused', gap: `refused: ${c.reason}` };
       if (!input.runner.sql) return { ...out, transport: 'sql', gap: 'no connection to run a statement on.' };
       const rows = await input.runner.sql(bound.statement, maxRows + 1);
       return { ...out, ok: true, transport: 'sql', rows: mapRows(op.returns, rows.slice(0, maxRows)), truncated: rows.length > maxRows };

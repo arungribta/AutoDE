@@ -71,9 +71,7 @@ export async function runOnConnection(scope: { resourcesRoot?: string; workspace
   // POP4a: each run's outcome (never its rows) for the catalog's last runs and health.
   const log = (ok: boolean, rows?: number, error?: string) => recordOperationRun(scope.workspaceRoot, { at: new Date().toISOString(), operation: operationId, connection: target.connectionId, platform: target.platform, ok, ...(rows !== undefined ? { rows } : {}), ...(error ? { error } : {}), ...(options.via ? { via: options.via } : {}) });
   try {
-    const r = await runOperation({ operation: op, platformId: target.platform, platform, params, runner, version, maxRows: options.maxRows });
-    log(r.ok && !r.gap, r.rows.length, r.gap);
-    return r;
+    return await runOperation({ operation: op, platformId: target.platform, platform, params, runner, version, maxRows: options.maxRows, log: { connection: target.connectionId, workspaceRoot: scope.workspaceRoot, ...(options.via ? { via: options.via } : {}) } });
   } catch (err) {
     log(false, undefined, err instanceof Error ? err.message : String(err));
     throw new OperationError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));

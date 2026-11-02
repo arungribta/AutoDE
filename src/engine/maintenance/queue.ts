@@ -20,6 +20,8 @@ import { problemTableIds } from '../context/capture';
 import { problemMode } from '../documents/problemMode';
 import { loadMaintenanceConfig, readMaintenanceState } from './policy';
 import { unreviewedTurns } from './turns';
+import { driftReport } from '../platform/operations/drift';
+import { platformResourcesRoot } from '../platform/definitions';
 
 /**
  * The maintenance queue (MM2; docs/specs/context-layer.md §5.6):
@@ -43,9 +45,11 @@ export type MaintenanceRule =
   | 'glossary-structure'      // terms that fit no glossary category
   | 'document-reading'        // a document not yet read for knowledge
   | 'unreviewed-turns'        // chat turns that read like facts, not yet reviewed
-  | 'stage-stale';            // a stage's deliverable rests on a fact that changed (§8.3)
+  | 'stage-stale'             // a stage's deliverable rests on a fact that changed (§8.3)
+  | 'operation-drift'         // POP3: an operation fails on the platform's version, or a view or column it reads is gone
+  | 'object-kind-unread';     // POP3: a platform reports objects of a kind its definition doesn't name
 
-export const MAINTENANCE_RULES: readonly MaintenanceRule[] = ['semantic-contradiction', 'semantic-broken', 'semantic-ambiguous', 'semantic-gap', 'article-stale', 'glossary-structure', 'document-reading', 'unreviewed-turns', 'stage-stale'];
+export const MAINTENANCE_RULES: readonly MaintenanceRule[] = ['semantic-contradiction', 'semantic-broken', 'semantic-ambiguous', 'semantic-gap', 'article-stale', 'glossary-structure', 'document-reading', 'unreviewed-turns', 'stage-stale', 'operation-drift', 'object-kind-unread'];
 
 export interface MaintenanceItem {
   /** The cause: `<rule>:<what>[:<hash of the difference>]`. Stable while the cause holds. */
@@ -245,6 +249,29 @@ function stageItems(input: MaintenanceInput): MaintenanceItem[] {
   } catch { return []; }
 }
 
+/** POP3: drift in the platform operations, for the platform maintainer (platform-operations.md §6.4). */
+function platformItems(input: MaintenanceInput): MaintenanceItem[] {
+  const d = driftReport({ resourcesRoot: input.resourcesRoot ?? platformResourcesRoot(), workspaceRoot: input.workspaceRoot });
+  return [
+    ...d.operations.map((o): MaintenanceItem => ({
+      key: `operation-drift:${o.key}`, rule: 'operation-drift', agent: 'platform-maintainer',
+      title: `${o.operation} ${o.kind === 'version' ? 'doesn\'t fit the platform\'s version' : 'reads something the platform no longer has'} on ${o.connection}`,
+      detail: `${o.platform}${o.version ? ` ${o.version}` : ''}, ${o.at.slice(0, 16).replace('T', ' ')}: ${o.error}${o.skills.length ? ` Skills that name it: ${o.skills.map((s) => `${s.id}${s.owner ? ` (${s.owner})` : ''}`).join(', ')}.` : ''}`,
+      next: o.kind === 'version'
+        ? `Add an implementation for ${o.platform} ${o.version ?? 'this version'} (since/until), with a recorded example from this version, and propose it with autode_propose_platform_operation. A platform owner approves it in the Platform catalog.`
+        : `Find what replaced the missing view or column (try reads with autode_platform_run; the platform's documentation), fix the statement, record an example from this platform, and propose the fixed operation with autode_propose_platform_operation. A platform owner approves it in the Platform catalog.`,
+      subjects: [`op:${o.operation}`, `connection:${o.connection}`, ...o.skills.map((s) => `skill:${s.id}`)], cli: `autode platform operation ${o.operation}`
+    })),
+    ...d.kinds.map((k): MaintenanceItem => ({
+      key: `object-kind-unread:${k.key}`, rule: 'object-kind-unread', agent: 'platform-maintainer',
+      title: `${k.platform} reports ${k.count} object(s) of kind ${k.kind}, which its definition doesn't name`,
+      detail: `Seen on ${k.connections.join(', ')}. AutoDE reads them as tables and nothing specific to the kind (its definition, its refresh, its lineage).`,
+      next: `Check what a ${k.kind} is on ${k.platform} and what AutoDE should read about it. Customise the platform definition to name the kind (autode platform customise ${k.platform}), and propose an operation for what it needs to read (autode_propose_platform_operation). A platform owner approves both.`,
+      subjects: [`platform:${k.platform}`, ...k.connections.map((c) => `connection:${c}`)], cli: `autode platform catalog ${k.platform}`
+    }))
+  ];
+}
+
 /** Every item the rules find now, dismissed or not (in rule order). Under `off`, none. */
 export function maintenanceItems(input: MaintenanceInput): MaintenanceItem[] {
   if (loadMaintenanceConfig(input.workspaceRoot).policy === 'off') return [];
@@ -252,7 +279,7 @@ export function maintenanceItems(input: MaintenanceInput): MaintenanceItem[] {
   const safe = (f: () => MaintenanceItem[]) => { try { return f(); } catch { return []; } };
   const items = [
     ...safe(() => semanticFindings(input, refs)), ...safe(() => semanticGaps(input, refs)), ...safe(() => articleItems(input)), ...safe(() => glossaryItem(input)),
-    ...safe(() => documentItems(input)), ...safe(() => turnItems(input)), ...safe(() => stageItems(input))
+    ...safe(() => documentItems(input)), ...safe(() => turnItems(input)), ...safe(() => stageItems(input)), ...safe(() => platformItems(input))
   ];
   const seen = new Set<string>();
   return items.filter((i) => !seen.has(i.key) && !!seen.add(i.key)).sort((a, b) => MAINTENANCE_RULES.indexOf(a.rule) - MAINTENANCE_RULES.indexOf(b.rule));

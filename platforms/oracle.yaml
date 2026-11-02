@@ -38,3 +38,5 @@ capabilities:
     support: not_applicable
     note: Oracle is supported as a source.
 objectKinds: [table, view, materialized_view]
+errors:
+  missingObject: ['ORA-00942', 'ORA-00904']
