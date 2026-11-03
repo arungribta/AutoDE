@@ -12,6 +12,9 @@ import { AssetMetadata, MetadataConfig, assetMetadata, metadataBySubject, patter
 import { Article, checkArticle } from '../knowledge/articles';
 import type { MappingContext } from '../types';
 import type { PipelineSpec } from '../pipelineSpec/types';
+import type { Ontology } from '../ontology/store';
+import { ancestorsOf, conceptNodeId, conceptOfNode, upperOf } from '../ontology/pack';
+import { MeaningLink, SCOPE_RANK, TermScope, boundTo, meaningLinks, termScope } from '../ontology/links';
 
 /**
  * Exploring what AutoDE knows (C5b; docs/specs/context-layer.md §6.10,
@@ -32,13 +35,13 @@ import type { PipelineSpec } from '../pipelineSpec/types';
  * facts as *knowledge facts* (DataHub's "assertion" is a quality check, so
  * the word isn't reused).
  */
-export type AssetType = 'database' | 'schema' | 'table' | 'view' | 'column' | 'domain' | 'data_product' | 'knowledge_article' | 'glossary_term' | 'rule' | 'verified_query' | 'semantic_model' | 'logical_table' | 'dimension' | 'time_dimension' | 'semantic_fact' | 'metric' | 'filter' | 'relationship' | 'custom_instruction' | 'knowledge_fact';
+export type AssetType = 'database' | 'schema' | 'table' | 'view' | 'column' | 'domain' | 'data_product' | 'knowledge_article' | 'glossary_term' | 'rule' | 'verified_query' | 'semantic_model' | 'logical_table' | 'dimension' | 'time_dimension' | 'semantic_fact' | 'metric' | 'filter' | 'relationship' | 'custom_instruction' | 'knowledge_fact' | 'concept';
 
 export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   database: 'Database', schema: 'Schema', domain: 'Domain', data_product: 'Data product', knowledge_article: 'Knowledge article', table: 'Table', view: 'View', column: 'Column', glossary_term: 'Glossary term', rule: 'Rule', verified_query: 'Verified query',
   semantic_model: 'Semantic model', logical_table: 'Logical table', dimension: 'Dimension', time_dimension: 'Time dimension', semantic_fact: 'Fact (semantic)', metric: 'Metric', filter: 'Filter',
   relationship: 'Relationship', custom_instruction: 'Custom instructions',
-  knowledge_fact: 'Knowledge fact'
+  knowledge_fact: 'Knowledge fact', concept: 'Concept'
 };
 
 /**
@@ -53,7 +56,7 @@ export type Layer = 'physical' | 'context' | 'semantic';
 
 export const LAYER_OF: Record<AssetType, Layer> = {
   database: 'physical', schema: 'physical', domain: 'context', data_product: 'context', knowledge_article: 'context', table: 'physical', view: 'physical', column: 'physical',
-  glossary_term: 'context', rule: 'context', knowledge_fact: 'context',
+  glossary_term: 'context', rule: 'context', knowledge_fact: 'context', concept: 'context',
   verified_query: 'semantic', semantic_model: 'semantic', logical_table: 'semantic', dimension: 'semantic', time_dimension: 'semantic', semantic_fact: 'semantic', metric: 'semantic', filter: 'semantic', relationship: 'semantic', custom_instruction: 'semantic'
 };
 
@@ -124,6 +127,8 @@ export interface ExploreSources {
   maintenance?: readonly MaintenanceItem[];
   /** LIN: each business problem's mapping document and Pipeline Spec, the designed lineage. */
   designs?: readonly ProblemDesign[];
+  /** ONT1 (§6.8): the ontology in effect — the upper layer and the team's approved packs. */
+  ontology?: Ontology;
 }
 
 /** A business problem's designs (LIN, §8.5): designed lineage is read from them, never copied. */
@@ -164,6 +169,9 @@ interface Index {
   config: MetadataConfig;
   assetMeta: Map<string, AssetMetadata>;
   summaries: Map<string, AssetSummary>;
+  /** ONT1: meaning links, live and proposed, and each term's bound assets. */
+  links: MeaningLink[];
+  termIdsOf: Map<string, string[]>;
 }
 
 const indexes = new WeakMap<ExploreSources, Index>();
@@ -174,8 +182,10 @@ function buildIndex(sources: ExploreSources): Index {
   const overlay = sources.semantic ? semanticGraph(sources.semantic, sources.graph) : { nodes: [], edges: [] };
   const containers = containerGraph(sources.graph);
   const config = sources.metadata ?? { tagGroups: [], properties: [], domains: [], errors: [] };
-  const governance = governanceNodes(config, sources.articles ?? [], new Set([...sources.graph.nodes, ...overlay.nodes].map((n) => n.id)));
-  const graph: GraphView = { nodes: [...sources.graph.nodes, ...containers.nodes, ...overlay.nodes, ...governance.nodes], edges: [...sources.graph.edges, ...containers.edges, ...overlay.edges, ...governance.edges] };
+  const links = meaningLinks(sources.assertions, { includeProposed: true });
+  const meaning = ontologyNodes(sources.ontology, links, new Set([...sources.graph.nodes, ...overlay.nodes].map((n) => n.id)));
+  const governance = governanceNodes(config, sources.articles ?? [], new Set([...sources.graph.nodes, ...overlay.nodes, ...meaning.nodes].map((n) => n.id)));
+  const graph: GraphView = { nodes: [...sources.graph.nodes, ...containers.nodes, ...overlay.nodes, ...meaning.nodes, ...governance.nodes], edges: [...sources.graph.edges, ...containers.edges, ...overlay.edges, ...meaning.edges, ...governance.edges] };
   const nodes = new Map(graph.nodes.map((n) => [n.id, n] as const));
   const out = new Map<string, GraphEdge[]>();
   const inc = new Map<string, GraphEdge[]>();
@@ -206,13 +216,16 @@ function buildIndex(sources: ExploreSources): Index {
     }
   }
   const termsOf = new Map<string, string[]>();
+  const termIdsOf = new Map<string, string[]>();
+  const byAssertion = new Map(sources.assertions.map((a) => [a.id, a] as const));
   for (const n of graph.nodes) {
     if (n.type !== 'business_term') continue;
     const targets = new Set([...((n as BusinessTermNode).mappedNodeIds ?? []), ...(out.get(n.id) ?? []).filter((e) => e.type === 'maps_to').map((e) => e.target)]);
     for (const t of targets) push(termsOf, t, n.label);
+    for (const t of boundTo(n, out.get(n.id) ?? [], byAssertion)) push(termIdsOf, t, n.id);
   }
   const refs = new Map(sources.graph.nodes.filter((n) => n.type === 'table').map((n) => [n.id, physicalRef(n as TableNode)] as const));
-  const idx: Index = { graph, nodes, out, in: inc, tableOf, columnsOf, bySubject, assertions: new Map(sources.assertions.map((a) => [a.id, a] as const)), classification, termsOf, refs, meta: metadataBySubject(sources.assertions), config, assetMeta: new Map(), summaries: new Map() };
+  const idx: Index = { graph, nodes, out, in: inc, tableOf, columnsOf, bySubject, assertions: new Map(sources.assertions.map((a) => [a.id, a] as const)), classification, termsOf, refs, meta: metadataBySubject(sources.assertions), config, assetMeta: new Map(), summaries: new Map(), links, termIdsOf };
   indexes.set(sources, idx);
   return idx;
 }
@@ -287,9 +300,37 @@ function governanceNodes(config: MetadataConfig, articles: readonly Article[], k
   return { nodes, edges };
 }
 
+/**
+ * Concepts as context-layer assets (ONT1, §6.8): every concept in effect, with `broader` edges to its parent and,
+ * from live meaning facts, `means` edges from terms and `represents` edges from tables. Proposed links aren't in
+ * the graph: the concept page lists them as waiting in the Context Inbox.
+ */
+function ontologyNodes(o: Ontology | undefined, links: readonly MeaningLink[], known: ReadonlySet<string>): { nodes: BaseNode[]; edges: GraphEdge[] } {
+  if (!o) return { nodes: [], edges: [] };
+  const nodes: BaseNode[] = []; const edges: GraphEdge[] = [];
+  for (const c of o.concepts.values()) {
+    const id = conceptNodeId(c.id);
+    nodes.push({ id, type: 'concept', label: c.label, ...(c.definition ? { description: c.definition } : {}), aliases: [c.id, ...(c.synonyms ?? [])], status: c.status === 'deprecated' ? 'deprecated' : 'active', metadata: { concept: c.id, pack: c.pack, ...(c.iri ? { iri: c.iri } : {}), ...(c.parent ? { parent: c.parent } : {}), ...(c.module ? { module: c.module } : {}), upper: upperOf(c.id, o.concepts) }, version: 1 });
+    if (c.parent && o.concepts.has(c.parent)) edges.push({ id: `broader:${id}->${conceptNodeId(c.parent)}`, source: id, target: conceptNodeId(c.parent), type: 'broader' });
+  }
+  for (const l of links) {
+    if (l.status === 'proposed' || !o.concepts.has(l.concept) || !known.has(l.subject)) continue;
+    edges.push({ id: `${l.predicate}:${l.fact}`, source: l.subject, target: conceptNodeId(l.concept), type: l.predicate, weight: 0.9, supportedBy: [l.fact] });
+  }
+  return { nodes, edges };
+}
+
+/** The concepts an asset means (ONT1): a term through its `means` links, a column through its terms, a table or logical table through *represents*. */
+function conceptsOf(n: BaseNode, idx: Index): string[] {
+  const live = idx.links.filter((l) => l.status !== 'proposed');
+  if (n.type === 'business_term') return [...new Set(live.filter((l) => l.predicate === 'means' && l.subject === n.id).map((l) => l.concept))];
+  if (n.type === 'column') { const terms = new Set(idx.termIdsOf.get(n.id) ?? []); return [...new Set(live.filter((l) => l.predicate === 'means' && terms.has(l.subject)).map((l) => l.concept))]; }
+  return [...new Set(live.filter((l) => l.predicate === 'represents' && l.subject === n.id).map((l) => l.concept))];
+}
+
 /** An asset's metadata (MM1), cached: its facts, then domains.yaml. */
 function metaOf(n: BaseNode, idx: Index): AssetMetadata | undefined {
-  if (n.type === 'domain' || n.type === 'data_product' || n.type === 'knowledge_article') return undefined;
+  if (n.type === 'domain' || n.type === 'data_product' || n.type === 'knowledge_article' || n.type === 'concept') return undefined;
   const hit = idx.assetMeta.get(n.id);
   if (hit) return hit;
   const fqn = fqnOf(n, idx);
@@ -436,7 +477,7 @@ export interface SearchResult {
   pendingFacets: FacetName[];
 }
 
-const BROWSABLE = new Set(['database', 'schema', 'domain', 'data_product', 'knowledge_article', 'table', 'semantic_view', 'column', 'business_term', 'business_rule', 'verified_query', 'metric', 'semantic_model', 'semantic_table', 'semantic_element', 'semantic_relationship', 'semantic_instruction']);
+const BROWSABLE = new Set(['concept', 'database', 'schema', 'domain', 'data_product', 'knowledge_article', 'table', 'semantic_view', 'column', 'business_term', 'business_rule', 'verified_query', 'metric', 'semantic_model', 'semantic_table', 'semantic_element', 'semantic_relationship', 'semantic_instruction']);
 
 function textScore(hay: { label: string; fqn?: string; aliases?: readonly string[]; description?: string }, tokens: readonly string[], whole: string): number {
   const label = hay.label.toLowerCase();
@@ -560,8 +601,10 @@ export interface AssetContext {
   quality?: Array<{ dimension: string; checks: FactRow[] }>;
   /** Knowledge articles about it, with whether each is stale. */
   articles?: Array<{ id: string; slug: string; title: string; state: string; stale: string[] }>;
-  /** A glossary term's definition and SKOS links (MM1). */
+  /** A glossary term's definition and SKOS links (MM1); with its scope (ONT1). */
   term?: Record<string, unknown>;
+  /** ONT1: a concept's page — every path to it (§6.8). */
+  concept?: ConceptPage;
   /** MM2: open maintenance items about it — what needs attention, and the agent suited to it. */
   maintenance?: Array<Pick<MaintenanceItem, 'key' | 'rule' | 'agent' | 'title' | 'detail' | 'next'>>;
   facts: FactRow[];
@@ -742,8 +785,9 @@ export function getAssetContext(sources: ExploreSources, ref: string): AssetCont
   const ambiguousBase = Array.isArray(n.metadata?.ambiguous) ? (n.metadata.ambiguous as string[]).map((id) => idx.nodes.get(id)).filter((x): x is BaseNode => !!x).map((x) => summarize(x, idx)) : undefined;
   return {
     asset, overview, ...(schema ? { schema } : {}), ...(contents ? { contents } : {}), ...(ambiguousBase?.length ? { ambiguousBase } : {}),
-    ...(metadata ? { metadata } : {}), ...(quality.length ? { quality } : {}), ...(articles.length ? { articles } : {}), ...(maintenance.length ? { maintenance } : {}), ...(termFact ? { term: { ...(termFact.value as Record<string, unknown>) } } : {}),
-    meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: [] },
+    ...(metadata ? { metadata } : {}), ...(quality.length ? { quality } : {}), ...(articles.length ? { articles } : {}), ...(maintenance.length ? { maintenance } : {}), ...(termFact ? { term: { ...(termFact.value as Record<string, unknown>), scope: termScope(n, idx.assertions) } } : {}),
+    meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: conceptsOf(n, idx).map((c) => idx.nodes.get(conceptNodeId(c))).filter((x): x is BaseNode => !!x).map((x) => summarize(x, idx)) },
+    ...(n.type === 'concept' ? { concept: conceptPage(n, idx, sources) } : {}),
     lineage: { related, note: 'Relationships and derivations next to it. Its full lineage (observed, designed, generated and logical) and the impact of a change: the lineage and impact views.' },
     governance: { classifications, rules },
     facts, memory,
@@ -756,6 +800,126 @@ export function getAssetContext(sources: ExploreSources, ref: string): AssetCont
       facts: facts.length
     }
   };
+}
+
+export interface ConceptPage {
+  concept: {
+    id: string; label: string; definition?: string; iri?: string; pack: string; module?: string; status: string;
+    standard?: { name: string; version: string; licence: string };
+    /** Its parents up to the upper layer, nearest first. */
+    ancestors: AssetSummary[];
+    upper?: string;
+    children: AssetSummary[];
+    synonyms: string[];
+    relations: Array<{ verb: string; target: AssetSummary; cardinality?: string }>;
+    /** Relations of other concepts that reach this one. */
+    referencedBy: Array<{ verb: string; from: AssetSummary }>;
+    attributes: { identifying: string[]; notable: string[] };
+    hints: { classifications: string[]; quality: Array<{ check: string; attribute?: string; note?: string }> };
+  };
+  /** Terms that mean it, most specific scope first (problem, system, line of business, enterprise). */
+  terms: Array<{ term: AssetSummary; scope: TermScope; match: string; fact: string; status: string; trust: TrustTier }>;
+  /** Tables and logical tables that represent it, and tables reached through their columns' terms, per system. */
+  tables: Array<{ asset: AssetSummary; via: 'represents' | 'columns'; fact?: string; system: string }>;
+  columns: Array<{ column: AssetSummary; table?: string; term: string; system: string }>;
+  /** Logical tables, metrics and other semantic elements that implement it. */
+  semantic: AssetSummary[];
+  facts: FactRow[];
+  rules: Array<{ id: string; text: string; enforcement: string; on: string }>;
+  articles: Array<{ id: string; slug: string; title: string; state: string; stale: string[] }>;
+  conflicts: Array<{ rule: string; sides: string[] }>;
+  gaps: string[];
+  /** Links waiting for a person in the Context Inbox. */
+  proposed: Array<{ fact: string; predicate: string; subject: string; statement: string }>;
+}
+
+/** Every path to a concept (§6.8): computed, nothing stored. */
+function conceptPage(n: BaseNode, idx: Index, sources: ExploreSources): ConceptPage {
+  const o = sources.ontology!;
+  const id = conceptOfNode(n.id)!;
+  const c = o.concepts.get(id)!;
+  const pack = o.packs.find((p) => p.id === c.pack);
+  const sum = (cid: string) => { const x = idx.nodes.get(conceptNodeId(cid)); return x ? summarize(x, idx) : undefined; };
+  const some = <T>(x: T | undefined): x is T => x !== undefined;
+  // This concept and its narrower ones: a term that means a narrower concept means this one too, more specifically.
+  const family = new Set<string>([id]);
+  for (let frontier = [id]; frontier.length;) { const next = frontier.flatMap((f) => o.children.get(f) ?? []).filter((x) => !family.has(x)); next.forEach((x) => family.add(x)); frontier = next; }
+  const live = idx.links.filter((l) => l.status !== 'proposed' && l.concept === id);
+  const terms = live.filter((l) => l.predicate === 'means').map((l) => ({ l, t: idx.nodes.get(l.subject) })).filter((x) => !!x.t)
+    .map(({ l, t }) => ({ term: summarize(t!, idx), scope: termScope(t!, idx.assertions), match: l.match ?? 'exact', fact: l.fact, status: l.status, trust: l.trust }))
+    .sort((a, b) => SCOPE_RANK[b.scope.level] - SCOPE_RANK[a.scope.level] || a.term.label.localeCompare(b.term.label));
+  const systemOf = (s: AssetSummary) => s.system ?? 'unassigned';
+  const tables: ConceptPage['tables'] = [];
+  for (const l of live.filter((x) => x.predicate === 'represents')) { const t = idx.nodes.get(l.subject); if (t) { const s = summarize(t, idx); tables.push({ asset: s, via: 'represents', fact: l.fact, system: systemOf(s) }); } }
+  const columns: ConceptPage['columns'] = [];
+  const termIds = new Set(terms.map((t) => t.term.id));
+  for (const [asset, ids] of idx.termIdsOf) {
+    const hit = ids.find((t) => termIds.has(t));
+    const col = hit ? idx.nodes.get(asset) : undefined;
+    if (!col || col.type !== 'column') continue;
+    const s = summarize(col, idx);
+    const table = idx.tableOf.get(col.id);
+    columns.push({ column: s, ...(table ? { table } : {}), term: idx.nodes.get(hit!)!.label, system: systemOf(s) });
+    if (table && !tables.some((x) => x.asset.id === table)) { const ts = summarize(idx.nodes.get(table)!, idx); tables.push({ asset: ts, via: 'columns', system: systemOf(ts) }); }
+  }
+  tables.sort((a, b) => a.system.localeCompare(b.system) || (a.via === b.via ? 0 : a.via === 'represents' ? -1 : 1) || a.asset.label.localeCompare(b.asset.label));
+  columns.sort((a, b) => a.system.localeCompare(b.system) || (a.column.fqn ?? a.column.label).localeCompare(b.column.fqn ?? b.column.label));
+  // The semantic layer: logical tables over a table that represents it (or that represent it), and elements derived from its columns.
+  const semantic = new Map<string, AssetSummary>();
+  const tableIds = new Set(tables.map((t) => t.asset.id));
+  const colIds = new Set(columns.map((x) => x.column.id));
+  for (const e of idx.graph.edges) {
+    if (!e.source.startsWith('sem:') || (e.type !== 'maps_to' && e.type !== 'derives_from')) continue;
+    if (tableIds.has(e.target) || colIds.has(e.target)) { const x = idx.nodes.get(e.source); if (x) semantic.set(x.id, summarize(x, idx)); }
+  }
+  // Facts about it: the meaning facts, and the facts about its terms.
+  const factIds = new Set<string>([...idx.links.filter((l) => l.concept === id).map((l) => l.fact)]);
+  const facts = [...factIds].map((f) => idx.assertions.get(f)).filter(some).map((a) => factRow(a));
+  for (const t of terms) for (const a of idx.bySubject.get(t.term.id) ?? []) if (!factIds.has(a.id) && a.kind !== 'meaning') { factIds.add(a.id); facts.push(factRow(a, t.term.label)); }
+  facts.sort(byRecent);
+  // Rules on its tables and columns.
+  const rules: ConceptPage['rules'] = [];
+  for (const t of tables) for (const r of getAssetContext(sources, t.asset.id)?.governance.rules ?? []) if (!rules.some((x) => x.id === r.id)) rules.push({ id: r.id, text: r.text, enforcement: r.enforcement, on: t.asset.fqn ?? t.asset.label });
+  const articles = (sources.articles ?? []).filter((a) => a.about.includes(n.id) || a.about.includes(id)).map((a) => ({ id: articleId(a.slug), slug: a.slug, title: a.title, state: a.state, stale: checkArticle(a, sources.assertions).staleBecause }));
+  // Conflicts: a represents link the table's key columns disagree with (their terms mean a concept under another
+  // upper concept), and a term that means two concepts exactly.
+  const conflicts: ConceptPage['conflicts'] = [];
+  const upper = upperOf(id, o.concepts);
+  for (const t of tables.filter((x) => x.via === 'represents')) {
+    const keys = (idx.columnsOf.get(t.asset.id) ?? []).filter((col) => (idx.nodes.get(col) as ColumnNode | undefined)?.isPrimaryKey || keyColumnsOf(t.asset.id, idx).has((idx.nodes.get(col)?.label ?? '').toLowerCase()));
+    for (const col of keys) for (const k of conceptsOf(idx.nodes.get(col)!, idx)) {
+      const ku = upperOf(k, o.concepts);
+      if (ku && upper && ku !== upper && !family.has(k) && !ancestorsOf(id, o.concepts).includes(k)) conflicts.push({ rule: 'represents', sides: [`${t.asset.fqn ?? t.asset.label} represents ${c.label} (${id}, a kind of ${upper.replace('upper:', '')})`, `its key column ${idx.nodes.get(col)!.label} means ${o.concepts.get(k)?.label ?? k} (${k}, a kind of ${ku.replace('upper:', '')})`] });
+    }
+  }
+  for (const t of terms.filter((x) => x.match === 'exact')) {
+    const others = idx.links.filter((l) => l.status !== 'proposed' && l.predicate === 'means' && l.subject === t.term.id && l.concept !== id && (l.match ?? 'exact') === 'exact');
+    for (const x of others) conflicts.push({ rule: 'means', sides: [`"${t.term.label}" means ${c.label} exactly`, `"${t.term.label}" means ${o.concepts.get(x.concept)?.label ?? x.concept} exactly`] });
+  }
+  const proposed = idx.links.filter((l) => l.status === 'proposed' && l.concept === id).map((l) => ({ fact: l.fact, predicate: l.predicate, subject: l.subject, statement: l.statement }));
+  const gaps: string[] = [];
+  if (c.status === 'deprecated') gaps.push('It is deprecated: terms and tables that mean it should move to its replacement.');
+  if (!terms.length) gaps.push(proposed.some((p) => p.predicate === 'means') ? 'No confirmed term means it yet: links are waiting in the Context Inbox.' : 'No term means it: align the vocabulary (autode ontology align).');
+  if (!tables.length) gaps.push('No table represents it, and no column reaches it through a term.');
+  const referencedBy = [...o.concepts.values()].flatMap((x) => (x.relations ?? []).filter((r) => r.target === id).map((r) => ({ verb: r.verb, from: sum(x.id) }))).filter((x): x is { verb: string; from: AssetSummary } => !!x.from);
+  return {
+    concept: {
+      id, label: c.label, ...(c.definition ? { definition: c.definition } : {}), ...(c.iri ? { iri: c.iri } : {}), pack: c.pack, ...(c.module ? { module: c.module } : {}), status: c.status ?? 'active',
+      ...(pack?.standard ? { standard: { name: pack.standard.name, version: pack.standard.version, licence: pack.standard.licence.name } } : {}),
+      ancestors: ancestorsOf(id, o.concepts).map(sum).filter(some), ...(upper ? { upper } : {}),
+      children: (o.children.get(id) ?? []).map(sum).filter(some), synonyms: c.synonyms ?? [],
+      relations: (c.relations ?? []).map((r) => ({ verb: r.verb, target: sum(r.target), ...(r.cardinality ? { cardinality: r.cardinality } : {}) })).filter((r): r is { verb: string; target: AssetSummary; cardinality?: string } => !!r.target),
+      referencedBy,
+      attributes: { identifying: c.attributes?.identifying ?? [], notable: c.attributes?.notable ?? [] },
+      hints: { classifications: c.hints?.classifications ?? [], quality: c.hints?.quality ?? [] }
+    },
+    terms, tables, columns, semantic: [...semantic.values()], facts, rules, articles, conflicts, gaps, proposed
+  };
+}
+
+/** A table's key columns as its live key facts state them (lower-case names). */
+function keyColumnsOf(tableId: string, idx: Index): Set<string> {
+  return new Set((idx.bySubject.get(tableId) ?? []).filter((a) => a.kind === 'key' && isLive(a.status) && Array.isArray(a.value)).flatMap((a) => (a.value as unknown[]).map((x) => String(x).toLowerCase())));
 }
 
 function factContext(a: Assertion, idx: Index, sources: ExploreSources): AssetContext {
@@ -1030,7 +1194,7 @@ export function semanticOverview(sources: ExploreSources): SemanticOverview {
 }
 
 export interface ExploreOverview {
-  counts: { domains: number; articles: number; databases: number; schemas: number; tables: number; columns: number; terms: number; rules: number; queries: number; facts: number; catalogTables: number; semanticModels: number; approvedSemanticModels: number; metrics: number; relationships: number };
+  counts: { concepts: number; domains: number; articles: number; databases: number; schemas: number; tables: number; columns: number; terms: number; rules: number; queries: number; facts: number; catalogTables: number; semanticModels: number; approvedSemanticModels: number; metrics: number; relationships: number };
   facts: { byStatus: Record<string, number>; byTrust: Record<string, number> };
   conflicts: number;
   needsReview: number;
@@ -1049,12 +1213,46 @@ export function exploreOverview(sources: ExploreSources): ExploreOverview {
   for (const t of of('table')) { const k = `${t.origin?.system ?? 'unassigned'}|${t.origin?.systemEnvironment ?? 'default'}`; systems.set(k, (systems.get(k) ?? 0) + 1); }
   const models = of('semantic_model').map((n) => summarize(n, idx));
   return {
-    counts: { domains: of('domain').length, articles: of('knowledge_article').length, databases: of('database').length, schemas: of('schema').length, tables: of('table').length, columns: of('column').length, terms: of('business_term').length, rules: of('business_rule').length, queries: of('verified_query').length, facts: facts.length, relationships: of('semantic_relationship').length, catalogTables: sources.catalog?.all?.().length ?? 0, semanticModels: models.length, approvedSemanticModels: models.filter((m) => m.status === 'approved').length, metrics: of('metric').length },
+    counts: { concepts: of('concept').length, domains: of('domain').length, articles: of('knowledge_article').length, databases: of('database').length, schemas: of('schema').length, tables: of('table').length, columns: of('column').length, terms: of('business_term').length, rules: of('business_rule').length, queries: of('verified_query').length, facts: facts.length, relationships: of('semantic_relationship').length, catalogTables: sources.catalog?.all?.().length ?? 0, semanticModels: models.length, approvedSemanticModels: models.filter((m) => m.status === 'approved').length, metrics: of('metric').length },
     facts: { byStatus, byTrust },
     conflicts: sources.conflicts.length,
     // What the Context Inbox holds (v0.56.1: proposed facts too, not only those flagged after a check).
     needsReview: facts.filter((a) => a.status === 'needs_review' || a.status === 'proposed').length,
     systems: [...systems.entries()].map(([k, tables]) => { const [system, environment] = k.split('|'); return { system, environment, tables }; }).sort((a, b) => a.system.localeCompare(b.system) || a.environment.localeCompare(b.environment)),
     semanticModels: models
+  };
+}
+
+// ── Ontology and glossary (ONT1, §6.8, §6.10) ──
+
+export interface OntologyOverview {
+  packs: Array<{ id: string; title: string; origin: 'shipped' | 'team'; state: string; file: string; concepts: number; distribution?: string; standard?: { name: string; version: string; licence: string; redistribution: string }; errors: string[] }>;
+  /** Concepts in effect as a tree under the upper layer, in order, with how much reaches each. */
+  tree: Array<{ id: string; label: string; depth: number; pack: string; status: string; terms: number; tables: number; proposed: number }>;
+  /** Glossary terms with their scope and the concepts they mean (none: not aligned yet). */
+  glossary: Array<{ term: AssetSummary; scope: TermScope; concepts: Array<{ id: string; label: string; match: string; status: string }> }>;
+  errors: string[];
+}
+
+export function ontologyOverview(sources: ExploreSources): OntologyOverview {
+  const idx = buildIndex(sources);
+  const o = sources.ontology;
+  if (!o) return { packs: [], tree: [], glossary: [], errors: ['No ontology loaded.'] };
+  const count = (cid: string, pred: 'means' | 'represents', proposed = false) => idx.links.filter((l) => l.concept === cid && l.predicate === pred && (l.status === 'proposed') === proposed).length;
+  const tree: OntologyOverview['tree'] = [];
+  const walk = (cid: string, depth: number) => {
+    const c = o.concepts.get(cid);
+    if (!c) return;
+    tree.push({ id: cid, label: c.label, depth, pack: c.pack, status: c.status ?? 'active', terms: count(cid, 'means'), tables: count(cid, 'represents'), proposed: count(cid, 'means', true) + count(cid, 'represents', true) });
+    for (const k of (o.children.get(cid) ?? []).slice().sort((a, b) => (o.concepts.get(a)?.label ?? a).localeCompare(o.concepts.get(b)?.label ?? b))) walk(k, depth + 1);
+  };
+  for (const c of [...o.concepts.values()].filter((x) => !x.parent).sort((a, b) => a.label.localeCompare(b.label))) walk(c.id, 0);
+  const glossary = idx.graph.nodes.filter((n) => n.type === 'business_term').map((n) => ({
+    term: summarize(n, idx), scope: termScope(n, idx.assertions),
+    concepts: idx.links.filter((l) => l.predicate === 'means' && l.subject === n.id).map((l) => ({ id: l.concept, label: o.concepts.get(l.concept)?.label ?? l.concept, match: l.match ?? 'exact', status: l.status }))
+  })).sort((a, b) => a.term.label.localeCompare(b.term.label));
+  return {
+    packs: o.loaded.filter((l) => l.pack).map((l) => ({ id: l.pack!.id, title: l.pack!.title, origin: l.origin, state: l.origin === 'shipped' ? (l.pack!.id === 'upper' ? 'in effect' : 'source') : l.state, file: l.file, concepts: l.pack!.concepts.length, distribution: l.pack!.distribution, ...(l.pack!.standard ? { standard: { name: l.pack!.standard.name, version: l.pack!.standard.version, licence: l.pack!.standard.licence.name, redistribution: l.pack!.standard.licence.redistribution } } : {}), errors: l.errors })),
+    tree, glossary, errors: o.errors
   };
 }

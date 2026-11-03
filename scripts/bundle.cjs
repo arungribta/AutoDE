@@ -74,7 +74,7 @@ require('./autode.js').main(['mcp', ...process.argv.slice(2)]).catch((err) => { 
 
 /**
  * The bundles strip comments, so the licences of the libraries they contain
- * ship as dist/THIRD-PARTY-NOTICES.md instead (MIT, ISC, BSD and Apache-2.0
+ * ship as dist/THIRD-PARTY-NOTICES.md instead (MIT, ISC, BSD, BlueOak-1.0.0 and Apache-2.0
  * all require their notice to travel with copies). Built from what esbuild
  * actually bundled, so it can't drift from the bundle.
  */

@@ -1482,6 +1482,32 @@ Use a workspace that already holds another subject's knowledge (for example the 
   Do: `autode maintenance dismiss <key>` without `--reason`, then with one.
   Expect: refused without; dismissed with.
 
+## Part 69 — v0.59.0 ONT1: the ontology, scoped terms and onboarding
+
+Use a workspace with the lending fixture: `autode estate ingest test/reference/lending/sources/loansys.ddl --system loansys`, its `vocabulary.yaml` copied to `.autode/knowledge/`, and a few glossary terms (Facility, Deal, Borrower).
+
+- [ ] **69.1 The Ontology view.**
+  Do: open the Knowledge Explorer, then the **Ontology** view.
+  Expect: the packs (the upper layer in effect, FIBO lending as a source), the eight upper concepts as the tree, the glossary with each term's scope and *not aligned*.
+- [ ] **69.2 Onboard FIBO lending.**
+  Do: *Onboard a standard…* → FIBO lending → *Analyse*.
+  Expect: 23 concepts, MIT; seeds with what matched them (a term, a table such as `brwr`, a column); one-hop concepts; every chosen concept placed. Untick one, *Update*, *Preview the pack*: the YAML without it. Give a reason and *Propose for approval*.
+- [ ] **69.3 Approve it.**
+  Do: approve the decision in the AutoDE panel (Decisions).
+  Expect: the Ontology view shows `fibo-lending` approved, its concepts in the tree; `.autode/knowledge/ontology/fibo-lending.yaml` exists.
+- [ ] **69.4 Align the vocabulary.**
+  Do: *Align the vocabulary…*, keep the checked links, *Propose the checked links*.
+  Expect: Facility and Deal → Credit Facility (exact); tables such as `deal_mstr` → Credit Facility. The concept page shows them under *Waiting in the Context Inbox*, not in its terms or the graph.
+- [ ] **69.5 Confirm in the Inbox.**
+  Do: confirm the links in the Context Inbox, then open *Credit Facility*.
+  Expect: the Concept tab lists Deal (system: loansys) before Facility (enterprise), `deal_mstr` representing it; the graph shows the terms and table linked to it; the term's and the table's Meaning tab list the concept.
+- [ ] **69.6 Your own standard.**
+  Do: *A file or folder…* → `test/reference/lending/standards/lending-sample.rdf` → *Analyse*; then the same with `lending-sample.ttl`.
+  Expect: the same concepts and relations either way, version 2026Q3, MIT. With `house-restricted.ttl`: licence *forbidden*, *the pack stays in this workspace*; once approved, `autode ontology export bank-house-ontology --out x.yaml` is refused.
+- [ ] **69.7 An agent onboards.**
+  Do: in Claude Code (AutoDE plugin), ask the knowledge engineer to onboard FIBO lending for this problem and align the terms.
+  Expect: it analyses, proposes the pack (a decision you approve) and proposes the links (facts you confirm); it never approves.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1859,5 +1885,12 @@ Use a workspace that already holds another subject's knowledge (for example the 
 | 68.2 |  |  |
 | 68.3 |  |  |
 | 68.4 |  |  |
+| 69.1 |  |  |
+| 69.2 |  |  |
+| 69.3 |  |  |
+| 69.4 |  |  |
+| 69.5 |  |  |
+| 69.6 |  |  |
+| 69.7 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

@@ -28,9 +28,15 @@ export function chatToolNames(tools: readonly ToolInfo[]): string[] {
   return toolsForTier(tools, 'read', CHAT_TOOLS);
 }
 
+/**
+ * The layers' agents: a request to one is work of its own (a work order), even though since ONT1 the knowledge
+ * engineer and the semantic modeler also do the `semantic-foundation` template's stages, through the workflow.
+ */
+const LAYER_ROLES = new Set(['knowledge-engineer', 'semantic-modeler', 'context-curator', 'platform-maintainer']);
+
 /** Roles that work outside the workflow's stages (the layers' agents); every other role's work is a stage. */
 export function isStageRole(role: string): boolean {
-  return Object.values(STAGE_KINDS).some((k) => k.roles.includes(role));
+  return !LAYER_ROLES.has(role) && Object.values(STAGE_KINDS).some((k) => k.roles.includes(role));
 }
 
 export interface Handoff {

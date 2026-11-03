@@ -70,7 +70,7 @@ function valueKey(a: Assertion): string {
 }
 
 /** Kinds where one subject holds many facts: two rules, assumptions, joins or lineage edges about it don't contradict each other. */
-const MANY_PER_SUBJECT = new Set<string>(['business_rule', 'assumption', 'relationship', 'lineage', 'verified_query', 'schema_fact']);
+const MANY_PER_SUBJECT = new Set<string>(['business_rule', 'assumption', 'relationship', 'lineage', 'verified_query', 'schema_fact', 'meaning']);  // ONT1: a term may mean several concepts (one exactly); the concept page shows a disagreement
 /** Predicates that name no particular choice: "a decision about X", "a constraint on X" (chat extraction's defaults). */
 const GENERIC_PREDICATES = new Set(['decision', 'decided', 'constraint', 'requires', 'assumes', 'assumption', 'rule']);
 

@@ -1,0 +1,13 @@
+# A house ontology whose licence forbids redistribution (ONT1: the pack stays in the team's workspace).
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix h: <https://ontology.bank.example/house/> .
+
+<https://ontology.bank.example/house/> a owl:Ontology ;
+  rdfs:label "Bank house ontology" ;
+  owl:versionInfo "7" ;
+  dct:rights "Copyright Example Bank. All rights reserved. Internal use only; not for redistribution." .
+
+h:Exposure a owl:Class ; rdfs:label "exposure"@en ; rdfs:comment "The amount the bank stands to lose on a facility."@en .
+h:Covenant a owl:Class ; rdfs:label "covenant"@en ; rdfs:comment "A condition a borrower agrees to in a facility."@en .

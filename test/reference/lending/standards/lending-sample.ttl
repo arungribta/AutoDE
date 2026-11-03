@@ -1,0 +1,42 @@
+# A small lending ontology in FIBO's style (OWL classes, labels, SKOS definitions, an object property, a
+# restriction), for the ONT1 onboarding tests. lending-sample.rdf holds the same triples in RDF/XML.
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex: <https://standards.example.org/lending/Core/> .
+
+<https://standards.example.org/lending/Core/> a owl:Ontology ;
+  rdfs:label "Example lending core" ;
+  owl:versionInfo "2026Q3" ;
+  dct:license <https://opensource.org/licenses/MIT> .
+
+ex:CreditAgreement a owl:Class ;
+  rdfs:label "credit agreement"@en ;
+  skos:definition "An agreement under which a lender extends credit to a borrower."@en .
+
+ex:Facility a owl:Class ;
+  rdfs:label "facility"@en ;
+  skos:altLabel "credit line"@en ;
+  skos:definition "A credit agreement that lets a borrower draw funds up to a limit."@en ;
+  rdfs:subClassOf ex:CreditAgreement ,
+    [ a owl:Restriction ; owl:onProperty ex:hasBorrower ; owl:someValuesFrom ex:Borrower ] ,
+    [ a owl:Restriction ; owl:onProperty ex:hasCommitmentAmount ; owl:someValuesFrom xsd:decimal ] .
+
+ex:Borrower a owl:Class ;
+  rdfs:label "borrower"@en ;
+  skos:altLabel "obligor"@en ;
+  skos:definition "A party that receives funds and must repay them."@en .
+
+ex:Collateral a owl:Class ;
+  rdfs:label "collateral"@en ;
+  skos:definition "An asset pledged to secure a credit agreement."@en .
+
+ex:securedBy a owl:ObjectProperty ;
+  rdfs:label "is secured by" ;
+  rdfs:domain ex:Facility ;
+  rdfs:range ex:Collateral .
+
+ex:hasBorrower a owl:ObjectProperty ; rdfs:label "has borrower" .
+ex:hasCommitmentAmount a owl:DatatypeProperty ; rdfs:label "has commitment amount" .

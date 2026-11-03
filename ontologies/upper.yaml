@@ -1,0 +1,34 @@
+# AutoDE ontology pack (ontology-pack/1; docs/specs/context-layer.md §6.8).
+# The upper layer: always in effect. Every industry pack places each of its concepts under one of these eight,
+# which gives estates that span industries a common meeting point (estate merge, C5d).
+autode: ontology-pack/1
+id: upper
+title: AutoDE upper layer
+prefix: upper
+description: Eight concepts every industry pack places its concepts under.
+distribution: shareable
+concepts:
+  - id: upper:Account
+    label: Account
+    definition: A record an organisation keeps of a relationship with a party, against which balances, entries or entitlements are held.
+  - id: upper:Agreement
+    label: Agreement
+    definition: A commitment between parties that sets out obligations and rights, such as a contract, loan, policy or subscription.
+  - id: upper:Document
+    label: Document
+    definition: A recorded statement, request or evidence, such as an application, statement, report or certificate.
+  - id: upper:Event
+    label: Event
+    definition: Something that happens at a point in time and changes the state of another thing, such as a default, a status change or a visit.
+  - id: upper:Location
+    label: Location
+    definition: A place, physical or administrative, such as an address, site, region or country.
+  - id: upper:Party
+    label: Party
+    definition: A person or organisation, or the role one plays, such as a customer, borrower, supplier or employee.
+  - id: upper:Product
+    label: Product
+    definition: Something offered, sold, held or pledged, such as goods, a service, a financial product or an asset.
+  - id: upper:Transaction
+    label: Transaction
+    definition: An exchange of value at a point in time, such as a payment, an order, a transfer or a sale.

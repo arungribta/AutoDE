@@ -54,6 +54,8 @@ export const LAYOUT = {
   domains: [AUTODE_DIR, 'config', 'domains.yaml'],
   /** MM1: knowledge articles (Markdown with front matter) that cite facts. */
   articles: [AUTODE_DIR, 'knowledge', 'articles'],
+  /** ONT1 (§6.8): the team's ontology packs (industry subsets and extensions), each approved by a person. */
+  ontology: [AUTODE_DIR, 'knowledge', 'ontology'],
   /** MM2 (§5.6): who acts on knowledge maintenance — suggest (default), draft or off. */
   maintenancePolicy: [AUTODE_DIR, 'config', 'maintenance.yaml'],
   /** Which decision kinds may be approved by MCP elicitation (PA3c). */

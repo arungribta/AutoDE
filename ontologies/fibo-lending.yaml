@@ -1,0 +1,231 @@
+# AutoDE ontology pack (ontology-pack/1; docs/specs/context-layer.md §6.8).
+# A curated, problem-relevant subset of FIBO for lending: a source to onboard from, never in effect by itself.
+# Onboarding (autode ontology onboard fibo-lending) takes the concepts a business problem touches, one hop out.
+# IRIs follow FIBO's published module paths; check them against your FIBO release, or onboard from your own copy
+# of FIBO (Turtle or RDF/XML) to take its IRIs and definitions exactly.
+autode: ontology-pack/1
+id: fibo-lending
+title: FIBO lending (core)
+prefix: fibo
+description: Lending core from the Financial Industry Business Ontology (EDM Council) - loans and credit agreements, their parties, collateral, payments and applications.
+standard:
+  name: FIBO
+  version: 2024Q4
+  iri: https://spec.edmcouncil.org/fibo/
+  licence:
+    name: MIT License
+    spdx: MIT
+    redistribution: allowed
+    note: FIBO is published by the EDM Council under the MIT licence; keep the copyright notice with the pack.
+distribution: shareable
+source:
+  kind: shipped
+  ref: ontologies/fibo-lending.yaml
+concepts:
+  - id: fibo:Account
+    label: Account
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/ProductsAndServices/ClientsAndAccounts/Account
+    parent: upper:Account
+    definition: A container for records of transactions, balances and agreements between a customer and a financial service provider.
+    attributes: { identifying: [account number], notable: [account status, open date, balance] }
+    hints: { classifications: [confidential], quality: [{ check: unique, attribute: account number }] }
+    module: FBC/ProductsAndServices/ClientsAndAccounts
+  - id: fibo:Borrower
+    label: Borrower
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Borrower
+    parent: upper:Party
+    definition: A party to a credit agreement that receives funds and is obliged to repay them.
+    synonyms: [debtor, obligor]
+    module: FBC/DebtAndEquities/Debt
+  - id: fibo:Collateral
+    label: Collateral
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Collateral
+    parent: upper:Product
+    definition: An asset pledged by a borrower to secure a loan, which the lender may take if the borrower defaults.
+    synonyms: [pledge, security]
+    attributes: { notable: [collateral type, collateral value, valuation date] }
+    module: FBC/DebtAndEquities/Debt
+  - id: fibo:CommercialLoan
+    label: Commercial Loan
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansSpecific/CommercialLoans/CommercialLoan
+    parent: fibo:Loan
+    definition: A loan to a business, for its operations or investments rather than for personal use.
+    synonyms: [business loan]
+    module: LOAN/LoansSpecific/CommercialLoans
+  - id: fibo:ConsumerLoan
+    label: Consumer Loan
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansSpecific/ConsumerLoans/ConsumerLoan
+    parent: fibo:Loan
+    definition: A loan to an individual for personal, family or household purposes.
+    synonyms: [personal loan, retail loan]
+    module: LOAN/LoansSpecific/ConsumerLoans
+  - id: fibo:Contract
+    label: Contract
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/Agreements/Contracts/Contract
+    parent: upper:Agreement
+    definition: A voluntary, deliberate and legally enforceable agreement between two or more competent parties.
+    attributes: { identifying: [contract identifier], notable: [effective date, termination date] }
+    module: FND/Agreements/Contracts
+  - id: fibo:Country
+    label: Country
+    iri: https://www.omg.org/spec/LCC/Countries/CountryRepresentation/Country
+    parent: upper:Location
+    definition: A sovereign state or another geopolitical entity recognised in the ISO 3166 standard (FIBO uses the OMG Languages, Countries and Codes specification).
+    attributes: { identifying: [country code] }
+    hints: { quality: [{ check: accepted_values, attribute: country code, note: ISO 3166-1 codes }] }
+    module: LCC/Countries/CountryRepresentation
+  - id: fibo:CreditAgreement
+    label: Credit Agreement
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/CreditAgreement
+    parent: fibo:Contract
+    definition: A contract under which a lender extends credit to a borrower, who agrees to repay it with interest under stated terms.
+    relations:
+      - { verb: hasBorrower, target: fibo:Borrower, cardinality: 1..* }
+      - { verb: hasLender, target: fibo:Lender, cardinality: 1..* }
+    module: FBC/DebtAndEquities/Debt
+  - id: fibo:CreditEvent
+    label: Credit Event
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/CreditEvents/CreditEvent
+    parent: upper:Event
+    definition: An event that changes the credit standing of a borrower or an obligation, such as a missed payment, a default or a restructuring.
+    synonyms: [default event]
+    relations:
+      - { verb: affects, target: fibo:Loan, cardinality: 1..* }
+    attributes: { notable: [event date, event type] }
+    module: FBC/DebtAndEquities/CreditEvents
+  - id: fibo:CreditFacility
+    label: Credit Facility
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/CreditFacility
+    parent: fibo:CreditAgreement
+    definition: A credit agreement that lets a borrower draw funds up to a limit over a period, as needed.
+    synonyms: [credit line, facility, line of credit]
+    attributes: { identifying: [facility identifier], notable: [commitment amount, facility limit, maturity date] }
+    module: FBC/DebtAndEquities/Debt
+  - id: fibo:Customer
+    label: Customer
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/ProductsAndServices/ClientsAndAccounts/Customer
+    parent: upper:Party
+    definition: A party that uses, or may use, a financial service provider's products and services.
+    synonyms: [client]
+    relations:
+      - { verb: holds, target: fibo:Account, cardinality: 0..* }
+    attributes: { identifying: [customer identifier] }
+    hints: { classifications: [pii], quality: [{ check: unique, attribute: customer identifier }] }
+    module: FBC/ProductsAndServices/ClientsAndAccounts
+  - id: fibo:FinancialProduct
+    label: Financial Product
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/ProductsAndServices/FinancialProductsAndServices/FinancialProduct
+    parent: upper:Product
+    definition: A product offered by a financial service provider, such as a loan product, a deposit product or a card.
+    attributes: { identifying: [product code], notable: [product name, product type] }
+    module: FBC/ProductsAndServices/FinancialProductsAndServices
+  - id: fibo:Guarantor
+    label: Guarantor
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Guaranty/Guarantor
+    parent: upper:Party
+    definition: A party that promises to meet another party's obligation if that party fails to.
+    synonyms: [surety]
+    module: FBC/DebtAndEquities/Guaranty
+  - id: fibo:Guaranty
+    label: Guaranty
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Guaranty/Guaranty
+    parent: fibo:Contract
+    definition: An agreement under which a guarantor promises to meet a borrower's obligation if the borrower fails to.
+    synonyms: [guarantee]
+    relations:
+      - { verb: guarantees, target: fibo:Loan, cardinality: 1..* }
+      - { verb: hasGuarantor, target: fibo:Guarantor, cardinality: 1..* }
+    module: FBC/DebtAndEquities/Guaranty
+  - id: fibo:Lender
+    label: Lender
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Lender
+    parent: upper:Party
+    definition: A party to a credit agreement that provides the funds.
+    synonyms: [creditor]
+    module: FBC/DebtAndEquities/Debt
+  - id: fibo:Loan
+    label: Loan
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansGeneral/Loans/Loan
+    parent: fibo:CreditAgreement
+    definition: A credit agreement under which a lender advances a principal sum that the borrower repays, with interest, on a schedule.
+    synonyms: [loan agreement, loan contract]
+    relations:
+      - { verb: hasPaymentSchedule, target: fibo:PaymentSchedule, cardinality: 0..1 }
+      - { verb: isSecuredBy, target: fibo:Collateral, cardinality: 0..* }
+    attributes: { identifying: [loan identifier], notable: [interest rate, loan status, maturity date, origination date, principal amount] }
+    hints:
+      classifications: [confidential]
+      quality:
+        - { check: not_null, attribute: loan identifier }
+        - { check: unique, attribute: loan identifier }
+        - { check: range, attribute: principal amount, note: greater than zero }
+    module: LOAN/LoansGeneral/Loans
+  - id: fibo:LoanApplication
+    label: Loan Application
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansGeneral/Loans/LoanApplication
+    parent: upper:Document
+    definition: A request by a prospective borrower for a loan, with the information the lender needs to decide on it.
+    synonyms: [credit application, loan request]
+    relations:
+      - { verb: hasApplicant, target: fibo:Borrower, cardinality: 1..* }
+      - { verb: requests, target: fibo:Loan, cardinality: 0..1 }
+    attributes: { identifying: [application identifier], notable: [application date, decision, requested amount] }
+    hints: { quality: [{ check: not_null, attribute: application date }] }
+    module: LOAN/LoansGeneral/Loans
+  - id: fibo:Mortgage
+    label: Mortgage
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/RealEstateLoans/MortgageLoans/Mortgage
+    parent: fibo:Loan
+    definition: A loan secured by real property, which the lender may take if the borrower fails to repay.
+    synonyms: [home loan, mortgage loan]
+    module: LOAN/RealEstateLoans/MortgageLoans
+  - id: fibo:Organization
+    label: Organization
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/Organizations/Organizations/Organization
+    parent: upper:Party
+    definition: A collection of one or more people, or of other organisations, that has a purpose and can act as one.
+    synonyms: [company, legal entity, organisation]
+    relations:
+      - { verb: hasAddress, target: fibo:PhysicalAddress, cardinality: 0..* }
+    attributes: { identifying: [legal entity identifier], notable: [legal name] }
+    module: FND/Organizations/Organizations
+  - id: fibo:Payment
+    label: Payment
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/ProductsAndServices/PaymentsAndSchedules/Payment
+    parent: upper:Transaction
+    definition: A transfer of money from one party to another, such as a loan repayment.
+    synonyms: [installment, repayment]
+    relations:
+      - { verb: appliesTo, target: fibo:Loan, cardinality: 0..1 }
+    attributes: { notable: [payment amount, payment date] }
+    hints: { quality: [{ check: not_null, attribute: payment date }, { check: range, attribute: payment amount, note: greater than zero }] }
+    module: FND/ProductsAndServices/PaymentsAndSchedules
+  - id: fibo:PaymentSchedule
+    label: Payment Schedule
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/ProductsAndServices/PaymentsAndSchedules/PaymentSchedule
+    parent: upper:Document
+    definition: The dates and amounts of the payments due under an agreement.
+    synonyms: [amortization schedule, repayment schedule]
+    module: FND/ProductsAndServices/PaymentsAndSchedules
+  - id: fibo:Person
+    label: Person
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/AgentsAndPeople/People/Person
+    parent: upper:Party
+    definition: A human being, as a party that can hold rights and obligations.
+    synonyms: [individual, natural person]
+    relations:
+      - { verb: hasAddress, target: fibo:PhysicalAddress, cardinality: 0..* }
+    attributes: { identifying: [national identifier], notable: [date of birth, name] }
+    hints: { classifications: [sensitive-pii], quality: [{ check: unique, attribute: national identifier }] }
+    module: FND/AgentsAndPeople/People
+  - id: fibo:PhysicalAddress
+    label: Physical Address
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/Places/Addresses/PhysicalAddress
+    parent: upper:Location
+    definition: The location of a building or site, as streets, a city, a postal code and a country.
+    synonyms: [address]
+    relations:
+      - { verb: isInCountry, target: fibo:Country, cardinality: 1 }
+    attributes: { notable: [city, postal code, street] }
+    hints: { classifications: [pii] }
+    module: FND/Places/Addresses

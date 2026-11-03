@@ -153,6 +153,24 @@ AutoDE's knowledge is the facts in its ledger: keys, grain, relationships, terms
 | `autode vocabulary mine` | Abbreviations mined from table and column names and comments (for example `PTRN = patron`) that aren't in the vocabulary yet. |
 | `autode vocabulary accept` | Shows the mined entries and lets you pick which are right for this customer. They go to `.autode/knowledge/vocabulary.yaml`. Needs a terminal. |
 
+## Ontology
+
+Meaning anchored in standards: the upper layer, the packs the team onboarded (FIBO first) and its extensions, and the glossary's links to them. Analysing is read-only; a pack is a decision a person approves; a link is a fact a person confirms in the Context Inbox.
+
+| Command | |
+|---|---|
+| `autode ontology` (or `ontology list`) | The packs (the upper layer, the team's with their state: approved, changed, draft) and the shipped standards to onboard from. |
+| `autode ontology concepts` | The concepts in effect as a tree under the upper layer, with how many terms and tables reach each, and what is waiting. |
+| `autode ontology glossary` | Each glossary term with its scope and the concepts it means. |
+| `autode ontology analyze <source>` | A standard's concepts, relations, modules, version and licence; the scope AutoDE proposes from this workspace (seeds, one hop, the ancestors they need); and the placement under the upper layer. `<source>` is a shipped pack (`fibo-lending`), a file or folder (OWL or SKOS in Turtle or RDF/XML, or an AutoDE pack), or `--git <url> [--ref r] [--subdir p]`. Adjust with `--add`, `--remove` or `--only` (concept ids, comma-separated) and `--place <id>=upper:<Concept>` (repeat). `--prefix` and `--pack` name a file source's ids and pack. |
+| `autode ontology preview <source> …` | The pack those choices give, as it would be proposed. |
+| `autode ontology onboard <source> … --reason "<why>"` | Proposes it as a workspace-level decision; approve it with `autode decisions approve <id>`. |
+| `autode ontology approve <pack>` | Approves a team pack as it is on disk, after a hand edit (a person, at a terminal). |
+| `autode ontology align [--only <terms or tables>] [--propose]` | Terms that mean a concept (exact, broader, related) and tables that represent one. `--propose` records them as facts for the Context Inbox. |
+| `autode ontology link <term or table> <concept> [--match exact\|broader\|narrower\|related] --reason "<why>"` | Proposes one link by hand. |
+| `autode ontology export <pack> --out <file>` | Writes a team pack for another workspace. Refused when the standard's licence keeps it in this one (exit 4). |
+| `autode explore concept <id or name>` | A concept's page: terms by scope, tables and columns per system, the semantic layer, facts, rules, articles, conflicts and gaps. |
+
 ## SQL and documents
 
 | Command | |

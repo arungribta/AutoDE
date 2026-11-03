@@ -41,6 +41,8 @@ The kind decides who can do the stage, the most an agent may do there (permissio
 | `document` | documenter | workspace-write | everything above | design and operations docs | check | the docs are generated and linked to their artifacts |
 | `platform-setup` | target-architect | propose | target context, spec | environment and security plan (accounts, networking, roles and grants, mapped from the source's security model); platform-change proposals | approve | the plan covers every environment in the estate; changes run only as approved decisions |
 | `bi-migration` | documenter, data-modeler | read | estate, model, mapping | inventory of reports and semantic objects, the mapping of their fields to the new model, a migration plan | approve | every report in scope is mapped or listed as a gap |
+| `ontology-alignment` | knowledge-engineer | propose | spec | an ontology pack onboarded from a standard, and the vocabulary's `means` and *represents* links (context-layer §6.8) | approve | the pack is approved and every glossary term the problem uses means a concept, or is recorded as a gap |
+| `semantic-modelling` | semantic-modeler | propose | ontology | shared semantic models over the aligned concepts | check, approve | the shared semantic models validate and are approved |
 | `manual` (v0.56.6) | none: a person or team outside AutoDE, named as the stage's `owner` | — | what the planner names | what the planner names (possibly nothing AutoDE holds) | none: its owner marks it done with a note | its owner says it is done ([workflow-planning.md](workflow-planning.md) §3.3) |
 
 *Five kinds beyond the twelve first discussed:*
@@ -120,6 +122,18 @@ All three put *assess, then design and map, then convert or build, then reconcil
 | BI and reports | bi-migration | optional | model (approved) | Reports from several sources onto the merged model. |
 | Deploy | deploy | optional | validate (approved) | |
 | Document | document | default | build | |
+
+## 4a. Semantic foundation (v0.59.0, ONT1)
+
+Meaning before measurement (context-layer.md §6.8): onboard an industry standard and align the business vocabulary to its concepts, then draft the shared semantic models over them. The ontology is shared by every business problem, so its pack is a workspace-level decision.
+
+| Stage | Kind | Inclusion | After | Notes |
+|---|---|---|---|---|
+| Business problem and specification | specify | mandatory | | |
+| Plan the workflow | plan | mandatory | specify (approved) | |
+| Source assessment | source-assessment | default, per source system | plan (approved) | The estate's tables and columns are what the standard's scope is proposed from. |
+| Onboard a standard and align the vocabulary | ontology-alignment | mandatory | plan (approved) | The knowledge engineer proposes the pack (a decision) and the links (the Context Inbox). |
+| Shared semantic models | semantic-modelling | mandatory | ontology (approved) | The semantic modeler drafts them. |
 
 ## 5. Review decisions (owner, 2026-10-21)
 

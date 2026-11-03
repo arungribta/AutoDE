@@ -1,0 +1,13 @@
+# The lending fixture's retrieval vocabulary: LOANSYS's abbreviations, and its word for a facility.
+synonyms:
+  - [facility, deal]
+abbreviations:
+  "APPL": "application"
+  "BRWR": "borrower"
+  "COLLAT": "collateral"
+  "GUAR": "guarantee"
+  "MAT": "maturity"
+  "NATL": "national"
+  "ORIG": "origination"
+  "INT": "interest"
+  "VAL": "value"

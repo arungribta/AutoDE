@@ -1,7 +1,7 @@
 # AutoDE — Engineering Onboarding Guide
 
 > **For:** an engineer joining the team that supports AutoDE's codebase, who needs to find their way around, run it, change it safely and ship a phase. Data engineers who *use* AutoDE: read the [user guide](user-guide.md).
-> **Describes:** v0.58.0 (2026-11-02). This guide orients; it does not duplicate. Details live in [technical-design.md](../design/technical-design.md) (HOW), [requirements.md](../requirements.md) (WHAT and WHY) and [roadmap.md](../roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
+> **Describes:** v0.59.0 (2026-11-03). This guide orients; it does not duplicate. Details live in [technical-design.md](../design/technical-design.md) (HOW), [requirements.md](../requirements.md) (WHAT and WHY) and [roadmap.md](../roadmap.md) (WHEN), and every section here links to them. The guide is updated when a phase ships, together with those documents. The previous long-form guide (v0.13.0) is in git history.
 
 ---
 
@@ -207,6 +207,10 @@ An **assertion** is one fact (`schema_fact`, `key`, `grain`, `relationship`, `bu
   - observed lineage is `lineage` facts written only by `recordObservedLineage`, which is platform-neutral;
   - adapters read no lineage: platform reads come as platform operations;
   - impact is graph traversal (direct by column lineage, possible by table lineage), never similarity.
+- **The ontology** (v0.59.0, `src/engine/ontology/`; technical-design §5.21):
+  - packs are YAML (`ontology-pack/1`): the shipped upper layer is always in effect, industry packs in `ontologies/` are sources, and the team's packs in `.autode/knowledge/ontology/` count while a person's approval matches their content;
+  - a term means a concept and a table represents one through `meaning` facts, confirmed in the Inbox; columns reach concepts only through their terms;
+  - onboarding and alignment are deterministic and go through `ontology/service.ts` on every surface; the RDF parser (N3.js, sax) reads only what a user supplies.
 - **The metadata model** (v0.51.0, `src/engine/metadata/`, `src/engine/knowledge/articles.ts`):
   - per-asset metadata is facts (kind `metadata`); the team's structure is `.autode/config/{tags,properties,domains}.yaml`;
   - classifications are their own kind;

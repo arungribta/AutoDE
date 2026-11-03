@@ -570,6 +570,34 @@ Nothing is approved without you, under any policy.
 
 ---
 
+### 8.10 Meaning: the ontology and the glossary
+
+Names differ across systems: LOANSYS calls a credit facility a *deal*, the credit risk team says *obligor* for the borrower. AutoDE anchors meaning in industry standards, so an agent can say what it matched and why.
+
+**Three layers of meaning:**
+- **The upper layer**: eight concepts, always there (Party, Agreement, Product, Account, Transaction, Location, Event, Document). Every other concept sits under one of them.
+- **Industry packs**: a small, problem-relevant part of a standard. FIBO (banking) ships first, as *FIBO lending*; a team can onboard its own copy of FIBO or any other standard.
+- **Extensions**: the team's own concepts (`ext:`), including a house ontology.
+
+Your **glossary terms** link to concepts: a term *means* a concept (an exact match, or the concept is broader, narrower or related). A table can *represent* a concept. Columns reach a concept through their terms. Each term has a **scope**: the enterprise, a line of business, a system, or one business problem.
+
+**Onboarding a standard** (the Knowledge Explorer's **Ontology** view, *Onboard a standard…*; or `autode ontology analyze`, then `preview`, then `onboard`):
+1. **Source.** Choose *FIBO lending*, or your own file or folder (OWL or SKOS, Turtle or RDF/XML), or a Git repository. Nothing is downloaded until you press *Analyse*.
+2. **Analysis.** How many concepts, relations and modules, the version and the licence. If the licence doesn't allow redistribution, the pack stays in this workspace and can't be exported.
+3. **Scope.** AutoDE proposes the concepts your glossary, tables and columns name, one step out, with what matched each. Tick or untick them; add others.
+4. **Placement.** Each concept without a place goes under one of the eight upper concepts. AutoDE suggests one; check it.
+5. **Approval.** Give the reason and *Propose for approval*. The ontology is shared by every business problem, so a person approves it in the AutoDE panel (Decisions).
+
+Onboarding the same standard later adds to the team's pack. Concepts are deprecated, never deleted.
+
+**Aligning the vocabulary** (*Align the vocabulary…*, or `autode ontology align`): AutoDE lists the terms that mean a concept and the tables that represent one, from names, synonyms and your vocabulary (`BRWR` = borrower). Check the ones that are right and propose them. Each becomes a fact you confirm in the **Context Inbox**; until then it counts for nothing. A term no concept fits stays a gap: the knowledge engineer can propose an extension concept. While a team pack is in effect, terms that mean no concept show up as a maintenance item for the knowledge engineer.
+
+**A concept's page** (click a concept, or `autode explore concept "Credit Facility"`): where it sits under the upper layer, its relations and attributes, the terms that mean it (the most specific scope first), the tables that represent it and the columns that reach it through terms, system by system, the semantic layer over them, facts, rules, articles, what is waiting in the Inbox, gaps and conflicts. A conflict is, for example, a table said to represent a *Loan* whose key column's term means a *Borrower*.
+
+Concepts are in the graph and on every asset's **Meaning** tab. A knowledge article can be about a concept.
+
+The **semantic-foundation** workflow template runs it as a workflow: onboard a standard and align the vocabulary (the knowledge engineer), then draft shared semantic models over the concepts (the semantic modeler), each approved by a person.
+
 ## 9. The workflow
 
 ### 9.1 Templates

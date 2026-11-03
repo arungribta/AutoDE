@@ -9,8 +9,10 @@ import { connectionStatus, readReadiness } from '../platform/connectionReadiness
 import { loadSemanticLayer, semanticPaths } from '../semantic/store';
 import { loadMetadataConfig } from '../metadata/model';
 import { listArticles } from '../knowledge/articles';
+import { findConcept, loadOntology } from '../ontology/store';
 import { layoutPath } from '../workspaceLayout';
-import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, ProblemDesign, browseAssets, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, searchAssets, semanticOverview } from './explore';
+import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, ProblemDesign, browseAssets, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, ontologyOverview, searchAssets, semanticOverview } from './explore';
+import { conceptNodeId } from '../ontology/pack';
 import { ChangeKind, LineageRequest, impactOf, lineageOf, lineageSummary } from './lineage';
 import { listProblems } from '../documents/problems';
 import { parseMappingContext, parsePipelineSpecDocument, readProblemDocument } from '../documents/problemDocuments';
@@ -65,7 +67,8 @@ export function exploreSources(workspaceRoot: string, context: ContextPackSource
     metadata: loadMetadataConfig(workspaceRoot),
     articles: context.articles ?? listArticles(workspaceRoot),
     maintenance: (() => { try { return openMaintenanceItems({ workspaceRoot, problemId, sources: context }); } catch { return []; } })(),
-    designs: problemDesigns(workspaceRoot)
+    designs: problemDesigns(workspaceRoot),
+    ontology: (() => { try { return loadOntology({ workspaceRoot }); } catch { return undefined; } })()
   };
 }
 
@@ -144,7 +147,9 @@ export type ExploreRequest =
   | { type: 'semantic' }
   | { type: 'browse'; parent?: string }
   | ({ type: 'lineage'; id: string } & LineageRequest)
-  | { type: 'impact'; change: ChangeKind; id: string; cap?: number };
+  | { type: 'impact'; change: ChangeKind; id: string; cap?: number }
+  | { type: 'concept'; id: string }
+  | { type: 'ontology' };
 
 export function handleExploreRequest(request: ExploreRequest, sources: ExploreSources, workspaceRoot: string): Record<string, unknown> {
   switch (request.type) {
@@ -175,5 +180,12 @@ export function handleExploreRequest(request: ExploreRequest, sources: ExploreSo
     case 'estate': return { type: 'estate', estate: estateView(workspaceRoot, sources) };
     case 'semantic': return { type: 'semantic', semantic: semanticOverview(sources) };
     case 'browse': return { type: 'browse', level: browseAssets(sources, request.parent) };
+    case 'ontology': return { type: 'ontology', ontology: ontologyOverview(sources) };
+    case 'concept': {
+      // A concept by id (fibo:Loan), label or synonym; its page is its asset context's concept section.
+      const c = sources.ontology ? findConcept(sources.ontology, request.id) : undefined;
+      const context = c ? getAssetContext(sources, conceptNodeId(c.id)) : undefined;
+      return context?.concept ? { type: 'concept', context } : { type: 'concept', error: `No concept "${request.id}" in effect (autode ontology concepts lists them; onboard a standard to add some).` };
+    }
   }
 }

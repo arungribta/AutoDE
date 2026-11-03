@@ -226,6 +226,7 @@
     <button role="tab" data-view="graph" aria-selected="false">Graph</button>
     <button role="tab" data-view="facts" aria-selected="false">Facts</button>
     <button role="tab" data-view="estate" aria-selected="false">Estate</button>
+    <button role="tab" data-view="ontology" aria-selected="false" title="Concepts, standards and the glossary (ONT1)">Ontology</button>
   </nav>
 </header>
 <main>
@@ -243,6 +244,7 @@
   </div></div>
   <div class="view" id="view-facts"><div class="page" id="factsPage"></div></div>
   <div class="view" id="view-estate"><div class="page" id="estatePage"></div></div>
+  <div class="view" id="view-ontology"><div class="page" id="ontologyPage"></div></div>
 </main>
 <div class="toast" id="toast" role="status"></div>
 <script src="{{cytoscapeUri}}"></script>
@@ -252,7 +254,7 @@
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // Asset types and facets as catalogs and Snowflake's semantic model name them (context-layer §6.11).
-  const KIND = { database: 'Database', schema: 'Schema', domain: 'Domain', data_product: 'Data product', knowledge_article: 'Knowledge article', table: 'Table', view: 'View', column: 'Column', glossary_term: 'Glossary term', rule: 'Rule', verified_query: 'Verified query', semantic_model: 'Semantic model', logical_table: 'Logical table', dimension: 'Dimension', time_dimension: 'Time dimension', semantic_fact: 'Fact (semantic)', metric: 'Metric', filter: 'Filter', relationship: 'Relationship', custom_instruction: 'Custom instructions', knowledge_fact: 'Knowledge fact' };
+  const KIND = { database: 'Database', schema: 'Schema', domain: 'Domain', data_product: 'Data product', knowledge_article: 'Knowledge article', table: 'Table', view: 'View', column: 'Column', glossary_term: 'Glossary term', rule: 'Rule', verified_query: 'Verified query', semantic_model: 'Semantic model', logical_table: 'Logical table', dimension: 'Dimension', time_dimension: 'Time dimension', semantic_fact: 'Fact (semantic)', metric: 'Metric', filter: 'Filter', relationship: 'Relationship', custom_instruction: 'Custom instructions', knowledge_fact: 'Knowledge fact', concept: 'Concept' };
   const LAYER = { physical: 'Physical', context: 'Context', semantic: 'Semantic' };
   const TRUST = ['verified', 'confirmed', 'documented', 'assumed', 'inferred'];
   const CERT = ['verified', 'documented', 'unverified', 'draft', 'deprecated'];
@@ -299,6 +301,7 @@
     if (v === 'facts') loadFacts();
     if (v === 'graph') loadLandscape();
     if (v === 'estate') loadEstate();
+    if (v === 'ontology') loadOntology();
   }
   document.querySelector('nav.views').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
 
@@ -419,7 +422,7 @@
     $('#asset').innerHTML = `
       <h2 style="margin:0 0 2px">What AutoDE knows</h2><div class="muted">Search above, open the <button class="link" data-view-link="graph">Graph</button> for the whole landscape, or pick a starting point. Everything here is read-only; changes go through the Context Inbox, decisions and the Semantic Model editor.</div>
       <div class="tiles">
-        ${[[c.tables, 'Tables in the working set'], [c.catalogTables, 'Tables in the estate catalog'], [c.columns, 'Columns'], [c.terms, 'Glossary terms'], [c.facts, 'Knowledge facts'], [c.semanticModels, `Semantic models (${c.approvedSemanticModels} approved)`], [c.metrics, 'Metrics'], [c.relationships, 'Relationships (semantic)'], [o.conflicts, 'Conflicts']].map(([v, l]) => `<div class="tile"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}
+        ${[[c.tables, 'Tables in the working set'], [c.catalogTables, 'Tables in the estate catalog'], [c.columns, 'Columns'], [c.terms, 'Glossary terms'], [c.facts, 'Knowledge facts'], [c.semanticModels, `Semantic models (${c.approvedSemanticModels} approved)`], [c.metrics, 'Metrics'], [c.concepts || 0, 'Concepts in effect'], [c.relationships, 'Relationships (semantic)'], [o.conflicts, 'Conflicts']].map(([v, l]) => `<div class="tile"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}
       </div>
       <h4>Three layers</h4>
       <div class="chips">${['physical', 'context', 'semantic'].map((l) => `<button class="btn" data-layer-link="${l}">${layerBadge(l)} ${esc({ physical: 'what exists', context: 'what it means and what is known', semantic: 'how it is measured' }[l])}</button>`).join('')}</div>
@@ -459,11 +462,12 @@
     document.querySelectorAll('#results li[data-i]').forEach((li) => li.setAttribute('aria-selected', String(state.results[Number(li.dataset.i)] && state.results[Number(li.dataset.i)].id === id)));
     renderAsset();
   }
-  const TABS = [['overview', 'Overview'], ['contents', 'Contents'], ['schema', 'Schema'], ['meaning', 'Meaning'], ['lineage', 'Lineage'], ['facts', 'Facts'], ['governance', 'Governance'], ['quality', 'Quality'], ['knowledge', 'Knowledge'], ['usedby', 'Used by'], ['graph', 'Graph']];
+  const TABS = [['concept', 'Concept'], ['overview', 'Overview'], ['contents', 'Contents'], ['schema', 'Schema'], ['meaning', 'Meaning'], ['lineage', 'Lineage'], ['facts', 'Facts'], ['governance', 'Governance'], ['quality', 'Quality'], ['knowledge', 'Knowledge'], ['usedby', 'Used by'], ['graph', 'Graph']];
   function tabCount(t, c) {
     if (t === 'contents') return c.contents ? c.contents.length : 0;
     if (t === 'schema') return c.schema ? c.schema.columns.length : 0;
-    if (t === 'meaning') return c.meaning.terms.length + c.meaning.semantic.length;
+    if (t === 'meaning') return c.meaning.terms.length + c.meaning.semantic.length + (c.meaning.concepts || []).length;
+    if (t === 'concept') return c.concept ? c.concept.terms.length + c.concept.tables.length : 0;
     if (t === 'lineage') return c.lineage.summary ? c.lineage.summary.upstream + c.lineage.summary.downstream : c.lineage.related.length;
     if (t === 'facts') return c.facts.length;
     if (t === 'governance') return c.governance.classifications.length + c.governance.rules.length;
@@ -475,8 +479,8 @@
   function renderAsset() {
     const c = current; const a = c.asset;
     const physicalOrSemantic = a.layer !== 'context' || a.assetType === 'glossary_term';
-    const tabs = TABS.filter(([t]) => (t !== 'quality' && t !== 'knowledge') || physicalOrSemantic).filter(([t]) => t !== 'contents' || c.contents).filter(([t]) => t !== 'schema' || c.schema).filter(([t]) => t !== 'graph' || a.assetType !== 'knowledge_fact');
-    if (!tabs.some(([t]) => t === state.tab)) state.tab = 'overview';
+    const tabs = TABS.filter(([t]) => (t !== 'quality' && t !== 'knowledge') || physicalOrSemantic).filter(([t]) => t !== 'contents' || c.contents).filter(([t]) => t !== 'schema' || c.schema).filter(([t]) => t !== 'graph' || a.assetType !== 'knowledge_fact').filter(([t]) => t !== 'concept' || c.concept);
+    if (!tabs.some(([t]) => t === state.tab)) state.tab = c.concept ? 'concept' : 'overview';
     const parent = c.overview.parent;
     const file = c.meaning.definition && c.meaning.definition.file;
     $('#asset').innerHTML = `
@@ -550,12 +554,14 @@
       return `<table class="grid"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Null</th><th>Classification</th><th>Certification</th></tr></thead><tbody>${s.columns.map((col) => `<tr class="click" data-asset="${esc(col.id)}" tabindex="0"><td><b>${esc(col.label)}</b>${col.description ? `<div class="small muted">${esc(col.description)}</div>` : ''}</td><td class="mono">${esc(col.dataType || '?')}</td><td>${col.primaryKey ? 'PK' : col.foreignKey ? 'FK' : ''}</td><td>${col.nullable ? 'yes' : 'no'}</td><td>${clsBadge(col.classification)}${col.strategy ? ` <span class="small muted">${esc(col.strategy)}</span>` : ''}</td><td>${certBadge(col.certification, col.trust)}</td></tr>`).join('')}</tbody></table>
         ${s.profile.length ? `<h4>Profile</h4>${s.profile.map(factItem).join('')}` : ''}`;
     }
+    if (t === 'concept') return c.concept ? conceptTab(c.concept) : empty('Not a concept.');
     if (t === 'meaning') {
       const m = c.meaning;
-      if (!m.terms.length && !m.semantic.length && !(m.definition && m.definition.expr)) return empty('No business meaning recorded yet: no glossary term is bound to it and no semantic model covers it. Ontology concepts arrive in ONT1.');
-      return `${m.terms.length ? `<h4>Glossary terms</h4>${m.terms.map((x) => `<div class="item">${assetLink(x)} ${certBadge(x.certification, x.trust)}${x.description ? `<div class="ev">${esc(x.description)}</div>` : ''}</div>`).join('')}` : ''}
+      const concepts = m.concepts || [];
+      if (!m.terms.length && !m.semantic.length && !concepts.length && !(m.definition && m.definition.expr)) return empty('No business meaning recorded yet: no glossary term is bound to it, it represents no concept and no semantic model covers it. Align the vocabulary in the Ontology view.');
+      return `${concepts.length ? `<h4>Concepts</h4>${concepts.map((x) => `<div class="item">${assetLink(x)} <span class="small muted">${esc(x.description || '')}</span></div>`).join('')}` : ''}${m.terms.length ? `<h4>Glossary terms</h4>${m.terms.map((x) => `<div class="item">${assetLink(x)} ${certBadge(x.certification, x.trust)}${x.description ? `<div class="ev">${esc(x.description)}</div>` : ''}</div>`).join('')}` : ''}
         ${m.semantic.length ? `<h4>In the semantic layer</h4><table class="grid"><thead><tr><th>Element</th><th>Type</th><th>Model</th><th>Expression</th><th></th></tr></thead><tbody>${m.semantic.map((x) => `<tr class="click" data-asset="${esc(x.id)}" tabindex="0"><td><b>${esc(x.label)}</b></td><td>${esc(KIND[x.assetType] || x.assetType)}</td><td>${esc(x.model || '')}</td><td class="mono">${esc(x.expr || '')}</td><td>${draftBadge(x)}</td></tr>`).join('')}</tbody></table>` : ''}
-        <div class="note small">Packs and the grounding check use only <b>approved</b> semantic definitions. Ontology concepts and scoped terminology arrive in ONT1.</div>`;
+        <div class="note small">Packs and the grounding check use only <b>approved</b> semantic definitions. A column reaches a concept through its glossary terms; a table, by representing one.</div>`;
     }
     if (t === 'lineage') {
       const L = state.lineage;
@@ -655,10 +661,127 @@
     const sys = e.target.closest('[data-system]'); if (sys) { state.filters = { system: [sys.dataset.system] }; persist(); offset = 0; search(); }
   }
 
+  // ── Ontology (ONT1, §6.8): packs, the concepts in effect, the glossary; onboarding a standard; aligning the vocabulary ──
+  const UPPER = ['Party', 'Agreement', 'Product', 'Account', 'Transaction', 'Location', 'Event', 'Document'];
+  const onto = { source: null, choices: { add: [], remove: [], place: {} }, analysis: null, preview: null, align: null };
+  const opAsk = (op, args) => new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); vscode.postMessage({ type: 'ontology', requestId: id, op, args: args || {} }); });
+  const scopeLabel = (s) => esc(s.level.replace(/_/g, ' ') + (s.name ? ': ' + s.name : ''));
+  async function loadOntology() {
+    const body = await ask({ type: 'ontology' }); const o = body.ontology; if (!o) { $('#ontologyPage').innerHTML = `<div class="empty">${esc(body.error || 'No ontology.')}</div>`; return; }
+    const shipped = (await opAsk('shipped')).shipped || [];
+    $('#ontologyPage').innerHTML = `<h2 style="margin:0 0 2px">Ontology and glossary</h2>
+      <div class="muted" style="margin-bottom:12px">What the business's words mean: the upper layer (eight concepts), the standards the team onboarded (FIBO first) and its own extensions; each glossary term with its scope and the concepts it means. A pack is a workspace-level decision; a term's link is a fact a person confirms in the Context Inbox.</div>
+      <div class="actions"><button class="btn primary" data-onto="onboard">Onboard a standard…</button><button class="btn" data-onto="align">Align the vocabulary…</button></div>
+      <div id="ontoWork"></div>
+      <h4>Packs</h4><table class="grid"><thead><tr><th>Pack</th><th>State</th><th>Concepts</th><th>Standard and licence</th></tr></thead><tbody>${o.packs.map((p) => `<tr><td><b>${esc(p.title)}</b><div class="small muted mono">${esc(p.id)} · ${esc(p.origin === 'shipped' ? 'shipped' : p.file)}</div></td><td>${p.state === 'approved' || p.state === 'in effect' ? `<span class="badge cert cert-verified">${esc(p.state)}</span>` : `<span class="badge ${p.state === 'changed' || p.state === 'invalid' ? 'pii' : ''}">${esc(p.state)}</span>`}</td><td>${p.concepts}</td><td class="small">${p.standard ? `${esc(p.standard.name)} ${esc(p.standard.version)} · ${esc(p.standard.licence)}${p.distribution === 'workspace' ? ' · <b>stays in this workspace</b>' : ''}` : '<span class="muted">the team\'s own</span>'}${p.errors.length ? `<div class="small" style="color:var(--danger)">${p.errors.map(esc).join('<br>')}</div>` : ''}</td></tr>`).join('')}</tbody></table>
+      ${shipped.length ? `<div class="muted small">Shipped standards to onboard from: ${shipped.map((s) => `<b>${esc(s.title)}</b> (${s.concepts} concepts${s.licence ? ', ' + esc(s.licence) : ''})`).join(', ')}.</div>` : ''}
+      <h4>Concepts in effect</h4>
+      <div class="tree-flat">${o.tree.map((t) => `<div class="item" style="padding-left:${t.depth * 18}px"><button class="link" data-asset="concept:${esc(t.id)}">${esc(t.label)}</button> <span class="small muted mono">${esc(t.id)}</span>${t.terms ? ` <span class="badge">${t.terms} term(s)</span>` : ''}${t.tables ? ` <span class="badge">${t.tables} table(s)</span>` : ''}${t.proposed ? ` <span class="badge draft">${t.proposed} waiting</span>` : ''}${t.status === 'deprecated' ? ' <span class="badge">deprecated</span>' : ''}</div>`).join('')}</div>
+      <h4>Glossary</h4>${o.glossary.length ? `<table class="grid"><thead><tr><th>Term</th><th>Scope</th><th>Means</th></tr></thead><tbody>${o.glossary.map((g) => `<tr class="click" data-asset="${esc(g.term.id)}" tabindex="0"><td><b>${esc(g.term.label)}</b></td><td>${scopeLabel(g.scope)}</td><td>${g.concepts.length ? g.concepts.map((c) => `<span class="badge${c.status === 'proposed' ? ' draft' : ''}" title="${esc(c.match)} match${c.status === 'proposed' ? ', waiting in the Context Inbox' : ''}">${esc(c.label)}</span>`).join(' ') : '<span class="muted small">not aligned</span>'}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">No glossary terms yet.</div>'}
+      ${o.errors.length ? `<div class="note warn">${o.errors.map(esc).join('<br>')}</div>` : ''}`;
+  }
+  function sourceArgs() { const s = onto.source; return s ? (s.kind === 'shipped' ? { source: { kind: 'shipped', id: s.id } } : s.kind === 'file' ? { source: { kind: 'file', path: s.path } } : { source: { kind: 'git', url: s.url, ref: s.ref || undefined, path: s.path || undefined } }) : {}; }
+  async function renderOnboard() {
+    const shipped = (await opAsk('shipped')).shipped || [];
+    const s = onto.source;
+    const a = onto.analysis;
+    const step = (n, title, body) => `<div class="card" style="margin-bottom:10px"><h3>${n}. ${esc(title)}</h3>${body}</div>`;
+    let html = step(1, 'Source', `<div class="muted small">A standard AutoDE ships, or your own copy: an OWL or SKOS file or folder (Turtle or RDF/XML), an AutoDE pack, or a Git repository. Nothing is downloaded automatically; a repository is cloned only when you press Analyse, with the limits of porting a skill.</div>
+      <div class="actions">${shipped.map((x) => `<button class="btn${s && s.kind === 'shipped' && s.id === x.id ? ' primary' : ''}" data-onto-src="${esc(x.id)}">${esc(x.title)}</button>`).join('')}<button class="btn" data-onto="pick">A file or folder…</button></div>
+      <div class="actions"><input id="ontoGit" placeholder="Git URL (https or ssh)" value="${esc(s && s.kind === 'git' ? s.url : '')}" style="flex:2"><input id="ontoRef" placeholder="branch or tag" value="${esc(s && s.kind === 'git' ? s.ref || '' : '')}" style="flex:1"><input id="ontoSub" placeholder="folder in it" value="${esc(s && s.kind === 'git' ? s.path || '' : '')}" style="flex:1"><button class="btn" data-onto="git">Use the repository</button></div>
+      ${s ? `<div class="small">Source: <b>${esc(s.kind === 'shipped' ? s.id : s.kind === 'file' ? s.path : s.url)}</b> <button class="btn primary" data-onto="analyze">Analyse</button></div>` : ''}`);
+    if (a) {
+      html += step(2, 'Analysis', `<div><b>${esc(a.source.title)}</b> · ${a.counts.concepts} concepts, ${a.counts.relations} relations, ${a.counts.modules} modules${a.standard ? ` · ${esc(a.standard.name)} ${esc(a.standard.version)}` : ''}</div>
+        <div class="small">Licence: ${esc(a.licence.name)} (redistribution ${esc(a.licence.redistribution)})${a.distribution === 'workspace' ? ' — <b>the pack stays in this workspace</b>' : ''}</div>
+        ${a.warnings.length ? `<div class="note warn small">${a.warnings.map(esc).join('<br>')}</div>` : ''}${a.existing ? `<div class="small muted">It grows the team's pack ${esc(a.existing.file)} (${a.existing.concepts} concepts).</div>` : ''}`);
+      const sel = new Set(a.scope.selected);
+      const row = (id, label, why, kind) => `<label class="item" style="display:block"><input type="checkbox" data-onto-pick="${esc(id)}" ${sel.has(id) ? 'checked' : ''}> <b>${esc(label)}</b> <span class="small muted mono">${esc(id)}</span> <span class="badge">${esc(kind)}</span> <span class="small muted">${esc(why)}</span></label>`;
+      const others = a.concepts.filter((c) => !sel.has(c.id) && !a.scope.required.includes(c.id));
+      html += step(3, 'Scope', `<div class="muted small">Seeds come from this workspace's glossary, tables and columns; one hop out adds their parents and what their relations reach. A pack starts small and grows with use.</div>
+        ${a.scope.seeds.map((x) => row(x.id, x.label, x.matchedBy.slice(0, 3).map((m) => m.kind + ' ' + m.text).join(', '), 'seed')).join('')}
+        ${a.scope.neighbours.map((x) => row(x.id, x.label, x.via, 'one hop')).join('')}
+        ${a.scope.required.length ? `<div class="small muted">Needed to reach the upper layer: ${a.scope.required.map(esc).join(', ')}</div>` : ''}
+        ${others.length ? `<div class="actions"><select id="ontoAdd"><option value="">Add another concept…</option>${others.map((c) => `<option value="${esc(c.id)}">${esc(c.label)} (${esc(c.id)})</option>`).join('')}</select><button class="btn" data-onto="add">Add</button></div>` : ''}
+        <div class="actions"><button class="btn" data-onto="analyze">Update</button></div>`);
+      html += step(4, 'Placement under the upper layer', a.placement.length ? `<table class="grid"><thead><tr><th>Concept</th><th>Under</th></tr></thead><tbody>${a.placement.map((p) => `<tr><td>${esc(p.label)} <span class="small muted mono">${esc(p.id)}</span></td><td><select data-onto-place="${esc(p.id)}"><option value="">— not placed —</option>${UPPER.map((u) => `<option value="upper:${u}" ${p.parent === 'upper:' + u ? 'selected' : ''}>${u}${p.suggested === 'upper:' + u ? ' (suggested)' : ''}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">Every chosen concept already sits under the upper layer.</div>');
+      html += step(5, 'Approval', `<div class="muted small">Every business problem shares the ontology, so a person approves the pack as a decision. Then align the vocabulary.</div>
+        <div class="actions"><button class="btn" data-onto="preview">Preview the pack</button></div>${onto.preview ? `<pre class="mono small" style="max-height:260px;overflow:auto;white-space:pre-wrap">${esc(onto.preview.text)}</pre>${onto.preview.problems.length ? `<div class="note warn small">${onto.preview.problems.map(esc).join('<br>')}</div>` : ''}` : ''}
+        <textarea id="ontoReason" rows="2" style="width:100%" placeholder="Why: the business problem or the gap it serves"></textarea>
+        <div class="actions"><button class="btn primary" data-onto="propose">Propose for approval</button></div>`);
+    }
+    $('#ontoWork').innerHTML = `<div class="model-card">${html}<div class="actions"><button class="btn" data-onto="close">Close</button></div></div>`;
+  }
+  async function renderAlign() {
+    const r = await opAsk('align'); onto.align = r;
+    if (r.error) { $('#ontoWork').innerHTML = `<div class="note warn">${esc(r.error)}</div>`; return; }
+    const means = r.means || []; const reps = r.represents || [];
+    $('#ontoWork').innerHTML = `<div class="model-card"><h3>Align the vocabulary</h3><div class="muted small">${r.concepts} concepts in effect, ${r.terms} terms and ${r.tables} tables in the working set. Each link is proposed as a fact; a person confirms it in the Context Inbox.</div>
+      ${means.length ? `<h4>Terms</h4>${means.map((m, i) => `<label class="item" style="display:block"><input type="checkbox" data-align-means="${i}" checked> "<b>${esc(m.label)}</b>" means <b>${esc(m.conceptLabel)}</b> <span class="small muted mono">${esc(m.concept)}</span> <span class="badge">${esc(m.match)}</span> <span class="small muted">${esc(m.reason)}</span></label>`).join('')}` : '<div class="muted small">No new term links.</div>'}
+      ${reps.length ? `<h4>Tables</h4>${reps.map((x, i) => `<label class="item" style="display:block"><input type="checkbox" data-align-rep="${i}" checked> <b>${esc(x.label)}</b> represents <b>${esc(x.conceptLabel)}</b> <span class="small muted mono">${esc(x.concept)}</span></label>`).join('')}` : '<div class="muted small">No new represents links.</div>'}
+      <div class="actions">${means.length || reps.length ? '<button class="btn primary" data-onto="proposeLinks">Propose the checked links</button>' : ''}<button class="btn" data-onto="close">Close</button></div></div>`;
+  }
+  $('#ontologyPage').addEventListener('change', (e) => {
+    const pick = e.target.closest('[data-onto-pick]');
+    if (pick) { const id = pick.dataset.ontoPick; const ch = onto.choices; if (pick.checked) { ch.remove = ch.remove.filter((x) => x !== id); if (!ch.add.includes(id)) ch.add.push(id); } else { ch.add = ch.add.filter((x) => x !== id); if (!ch.remove.includes(id)) ch.remove.push(id); } onto.preview = null; return; }
+    const pl = e.target.closest('[data-onto-place]'); if (pl) { if (pl.value) onto.choices.place[pl.dataset.ontoPlace] = pl.value; else delete onto.choices.place[pl.dataset.ontoPlace]; onto.preview = null; }
+  });
+  $('#ontologyPage').addEventListener('click', async (e) => {
+    const src = e.target.closest('[data-onto-src]');
+    if (src) { onto.source = { kind: 'shipped', id: src.dataset.ontoSrc }; onto.analysis = null; onto.preview = null; onto.choices = { add: [], remove: [], place: {} }; renderOnboard(); return; }
+    const b = e.target.closest('[data-onto]');
+    if (!b) { handleLinks(e); return; }
+    const act = b.dataset.onto;
+    const choices = () => ({ add: onto.choices.add, remove: onto.choices.remove, place: onto.choices.place });
+    if (act === 'onboard') { renderOnboard(); return; }
+    if (act === 'align') { renderAlign(); return; }
+    if (act === 'close') { $('#ontoWork').innerHTML = ''; return; }
+    if (act === 'pick') { const r = await opAsk('pick'); if (r.path) { onto.source = { kind: 'file', path: r.path }; onto.analysis = null; onto.preview = null; onto.choices = { add: [], remove: [], place: {} }; renderOnboard(); } return; }
+    if (act === 'git') { const url = $('#ontoGit').value.trim(); if (!url) { toast('Give the repository\'s URL.'); return; } onto.source = { kind: 'git', url, ref: $('#ontoRef').value.trim(), path: $('#ontoSub').value.trim() }; onto.analysis = null; onto.preview = null; renderOnboard(); return; }
+    if (act === 'add') { const id = $('#ontoAdd').value; if (id && !onto.choices.add.includes(id)) onto.choices.add.push(id); onto.choices.remove = onto.choices.remove.filter((x) => x !== id); }
+    if (act === 'analyze' || act === 'add') { b.disabled = true; const r = await opAsk('analyze', Object.assign(sourceArgs(), { choices: choices() })); if (r.error) { toast(r.error); b.disabled = false; return; } onto.analysis = r.analysis; onto.preview = null; renderOnboard(); return; }
+    if (act === 'preview') { const r = await opAsk('preview', Object.assign(sourceArgs(), { choices: choices() })); if (r.error) { toast(r.error); return; } onto.preview = r; renderOnboard(); return; }
+    if (act === 'propose') {
+      const reason = $('#ontoReason').value.trim(); if (reason.length < 10) { toast('Say why (at least a sentence): the reviewer reads it.'); return; }
+      b.disabled = true; const r = await opAsk('propose', Object.assign(sourceArgs(), { choices: choices(), reason }));
+      if (r.error) { toast(r.error); b.disabled = false; return; }
+      $('#ontoWork').innerHTML = `<div class="note">Proposed <b>${esc(r.decision.id)}</b>: ${esc(r.decision.title)}. A person approves it in the AutoDE panel (Decisions); then align the vocabulary. <button class="btn" data-onto="align">Align the vocabulary…</button></div>`;
+      onto.source = null; onto.analysis = null; onto.preview = null; return;
+    }
+    if (act === 'proposeLinks') {
+      const r = onto.align || {};
+      const means = [...document.querySelectorAll('[data-align-means]')].filter((x) => x.checked).map((x) => r.means[Number(x.dataset.alignMeans)]);
+      const represents = [...document.querySelectorAll('[data-align-rep]')].filter((x) => x.checked).map((x) => r.represents[Number(x.dataset.alignRep)]);
+      if (!means.length && !represents.length) { toast('Check the links to propose.'); return; }
+      const res = await opAsk('proposeLinks', { means, represents });
+      if (res.error) { toast(res.error); return; }
+      $('#ontoWork').innerHTML = `<div class="note">${res.recorded} link(s) proposed${res.duplicates ? `, ${res.duplicates} already known` : ''}. A person confirms them in the Context Inbox. <button class="link" data-open="inbox">Open the Context Inbox</button></div>`;
+      loadOntology(); return;
+    }
+  });
+  /** A concept's page (§6.8): every path to it. */
+  function conceptTab(p) {
+    const k = p.concept;
+    const sys = [...new Set(p.tables.map((t) => t.system))];
+    return `<div class="small muted">${k.ancestors.length ? [...k.ancestors].reverse().map((x) => `<button class="link" data-asset="${esc(x.id)}">${esc(x.label)}</button>`).join(' › ') + ' › ' : ''}<b>${esc(k.label)}</b> · pack ${esc(k.pack)}${k.standard ? ` · ${esc(k.standard.name)} ${esc(k.standard.version)} (${esc(k.standard.licence)})` : ''}${k.iri ? ` · <span class="mono">${esc(k.iri)}</span>` : ''}</div>
+      ${k.synonyms.length ? `<div class="small">Synonyms: ${k.synonyms.map(esc).join(', ')}</div>` : ''}
+      ${k.children.length ? `<div class="small">Narrower: ${k.children.map((x) => `<button class="link" data-asset="${esc(x.id)}">${esc(x.label)}</button>`).join(', ')}</div>` : ''}
+      ${k.relations.length || k.referencedBy.length ? `<h4>Relations</h4>${k.relations.map((r) => `<div class="item">${esc(r.verb)} → <button class="link" data-asset="${esc(r.target.id)}">${esc(r.target.label)}</button>${r.cardinality ? ` <span class="small muted">${esc(r.cardinality)}</span>` : ''}</div>`).join('')}${k.referencedBy.map((r) => `<div class="item"><button class="link" data-asset="${esc(r.from.id)}">${esc(r.from.label)}</button> ${esc(r.verb)} → this</div>`).join('')}` : ''}
+      ${k.attributes.identifying.length || k.attributes.notable.length ? `<h4>Attributes</h4><div class="small">${k.attributes.identifying.length ? 'Identifying: ' + k.attributes.identifying.map(esc).join(', ') + '<br>' : ''}${k.attributes.notable.length ? 'Notable: ' + k.attributes.notable.map(esc).join(', ') : ''}</div>` : ''}
+      <h4>Terms, most specific scope first</h4>${p.terms.length ? `<table class="grid"><thead><tr><th>Term</th><th>Scope</th><th>Match</th><th>Evidence</th></tr></thead><tbody>${p.terms.map((t) => `<tr class="click" data-asset="${esc(t.term.id)}" tabindex="0"><td><b>${esc(t.term.label)}</b></td><td>${scopeLabel(t.scope)}</td><td>${esc(t.match)}</td><td>${trustBadge(t.trust)}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">None yet.</div>'}
+      <h4>Tables and columns${sys.length > 1 ? `, across ${sys.length} systems` : ''}</h4>${p.tables.length ? sys.map((s) => `<div class="small muted">${esc(s)}</div>${p.tables.filter((t) => t.system === s).map((t) => `<div class="item">${assetLink(t.asset)} <span class="small muted">${t.via === 'represents' ? 'represents it' : 'through its columns’ terms'}</span>${p.columns.filter((x) => x.table === t.asset.id).map((x) => `<div class="ev">column ${assetLink(x.column)} via “${esc(x.term)}”</div>`).join('')}</div>`).join('')}`).join('') : '<div class="muted small">None yet.</div>'}
+      ${p.semantic.length ? `<h4>In the semantic layer</h4>${p.semantic.map((x) => `<div class="item">${assetLink(x)} <span class="badge">${esc(KIND[x.assetType] || x.assetType)}</span> ${draftBadge(x)}</div>`).join('')}` : ''}
+      ${p.rules.length ? `<h4>Rules</h4>${p.rules.map((r) => `<div class="item"><span class="badge">${esc(r.enforcement)}</span> ${esc(r.text)} <span class="small muted">on ${esc(r.on)}</span></div>`).join('')}` : ''}
+      ${p.articles.length ? `<h4>Articles</h4>${p.articles.map((x) => `<div class="item"><button class="link" data-asset="${esc(x.id)}">${esc(x.title)}</button> <span class="badge">${esc(x.state)}</span>${x.stale.length ? ' <span class="badge pii">stale</span>' : ''}</div>`).join('')}` : ''}
+      ${k.hints.classifications.length || k.hints.quality.length ? `<h4>Hints</h4><div class="small muted">Candidates only; never applied silently.</div><div class="small">${k.hints.classifications.map((x) => `<span class="badge">${esc(x)}</span>`).join(' ')} ${k.hints.quality.map((q) => esc(q.check + (q.attribute ? ' on ' + q.attribute : '') + (q.note ? ' (' + q.note + ')' : ''))).join(' · ')}</div>` : ''}
+      ${p.conflicts.length ? `<h4>Conflicts</h4>${p.conflicts.map((x) => `<div class="note warn small">${esc(x.rule)}: ${x.sides.map(esc).join(' ↔ ')}</div>`).join('')}` : ''}
+      ${p.proposed.length ? `<h4>Waiting in the Context Inbox</h4>${p.proposed.map((x) => `<div class="item small">${esc(x.statement)}</div>`).join('')}<button class="btn primary" data-open="inbox">Review in the Context Inbox</button>` : ''}
+      ${p.gaps.length ? `<h4>Gaps</h4>${p.gaps.map((g) => `<div class="item small">${esc(g)}</div>`).join('')}` : ''}`;
+  }
+
   // ── Graphs (Cytoscape.js, bundled): the asset's neighbourhood and the landscape share one renderer ──
   const graphs = { asset: undefined, landscape: undefined, lineage: undefined };
   const css = (name, fallback) => getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;
-  const SHAPE = { domain: 'star', data_product: 'pentagon', knowledge_article: 'round-rectangle', database: 'round-octagon', schema: 'cut-rectangle', relationship: 'tag', custom_instruction: 'round-diamond', table: 'round-rectangle', view: 'round-rectangle', column: 'ellipse', glossary_term: 'diamond', rule: 'triangle', verified_query: 'rhomboid', semantic_model: 'barrel', logical_table: 'round-tag', dimension: 'ellipse', time_dimension: 'ellipse', semantic_fact: 'ellipse', metric: 'hexagon', filter: 'vee' };
+  const SHAPE = { domain: 'star', data_product: 'pentagon', knowledge_article: 'round-rectangle', database: 'round-octagon', schema: 'cut-rectangle', relationship: 'tag', custom_instruction: 'round-diamond', table: 'round-rectangle', view: 'round-rectangle', column: 'ellipse', glossary_term: 'diamond', rule: 'triangle', verified_query: 'rhomboid', semantic_model: 'barrel', logical_table: 'round-tag', dimension: 'ellipse', time_dimension: 'ellipse', semantic_fact: 'ellipse', metric: 'hexagon', filter: 'vee', concept: 'octagon' };
   const LEGEND = '<span>Fill: layer (blue physical, purple context, green semantic)</span><span class="legend-line"><i></i> foreign key, relationship</span><span class="legend-line"><i class="dash"></i> proposed, or a draft model</span><span class="legend-line"><i class="dot"></i> semantic join</span><span>Border: certification (green verified, grey documented, orange unverified, dashed draft)</span>';
   const HINT = '<span>Click: details · double-click: expand in place · scroll: zoom · drag: move</span>';
 

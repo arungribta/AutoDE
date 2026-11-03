@@ -1,5 +1,5 @@
-export type NodeType = 'table' | 'column' | 'semantic_view' | 'business_term' | 'business_rule' | 'verified_query' | 'metric' | 'semantic_model' | 'semantic_table' | 'semantic_element' | 'semantic_relationship' | 'semantic_instruction' | 'database' | 'schema' | 'domain' | 'data_product' | 'knowledge_article';
-export type EdgeType = 'contains' | 'foreign_key' | 'maps_to' | 'uses_table' | 'constrained_by' | 'derives_from' | 'related_to';
+export type NodeType = 'table' | 'column' | 'semantic_view' | 'business_term' | 'business_rule' | 'verified_query' | 'metric' | 'semantic_model' | 'semantic_table' | 'semantic_element' | 'semantic_relationship' | 'semantic_instruction' | 'database' | 'schema' | 'domain' | 'data_product' | 'knowledge_article' | 'concept';
+export type EdgeType = 'contains' | 'foreign_key' | 'maps_to' | 'uses_table' | 'constrained_by' | 'derives_from' | 'related_to' | 'means' | 'represents' | 'broader';
 export type ContextLayer = 'industry' | 'enterprise' | 'domain' | 'system' | 'definition' | 'query' | 'artifact';
 export type NodeStatus = 'active' | 'draft' | 'deprecated';
 export type OriginSource = 'user' | 'derived' | 'system' | 'llm' | 'template';

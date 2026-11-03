@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The same triples as lending-sample.ttl, in RDF/XML with DOCTYPE entities as FIBO's files are written (ONT1 tests). -->
+<!DOCTYPE rdf:RDF [
+  <!ENTITY ex "https://standards.example.org/lending/Core/">
+  <!ENTITY xsd "http://www.w3.org/2001/XMLSchema#">
+]>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:skos="http://www.w3.org/2004/02/skos/core#"
+         xmlns:dct="http://purl.org/dc/terms/">
+  <owl:Ontology rdf:about="&ex;">
+    <rdfs:label>Example lending core</rdfs:label>
+    <owl:versionInfo>2026Q3</owl:versionInfo>
+    <dct:license rdf:resource="https://opensource.org/licenses/MIT"/>
+  </owl:Ontology>
+  <owl:Class rdf:about="&ex;CreditAgreement">
+    <rdfs:label xml:lang="en">credit agreement</rdfs:label>
+    <skos:definition xml:lang="en">An agreement under which a lender extends credit to a borrower.</skos:definition>
+  </owl:Class>
+  <owl:Class rdf:about="&ex;Facility">
+    <rdfs:label xml:lang="en">facility</rdfs:label>
+    <skos:altLabel xml:lang="en">credit line</skos:altLabel>
+    <skos:definition xml:lang="en">A credit agreement that lets a borrower draw funds up to a limit.</skos:definition>
+    <rdfs:subClassOf rdf:resource="&ex;CreditAgreement"/>
+    <rdfs:subClassOf>
+      <owl:Restriction>
+        <owl:onProperty rdf:resource="&ex;hasBorrower"/>
+        <owl:someValuesFrom rdf:resource="&ex;Borrower"/>
+      </owl:Restriction>
+    </rdfs:subClassOf>
+    <rdfs:subClassOf>
+      <owl:Restriction>
+        <owl:onProperty rdf:resource="&ex;hasCommitmentAmount"/>
+        <owl:someValuesFrom rdf:resource="&xsd;decimal"/>
+      </owl:Restriction>
+    </rdfs:subClassOf>
+  </owl:Class>
+  <owl:Class rdf:about="&ex;Borrower">
+    <rdfs:label xml:lang="en">borrower</rdfs:label>
+    <skos:altLabel xml:lang="en">obligor</skos:altLabel>
+    <skos:definition xml:lang="en">A party that receives funds and must repay them.</skos:definition>
+  </owl:Class>
+  <rdf:Description rdf:about="&ex;Collateral">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">collateral</rdfs:label>
+    <skos:definition xml:lang="en">An asset pledged to secure a credit agreement.</skos:definition>
+  </rdf:Description>
+  <owl:ObjectProperty rdf:about="&ex;securedBy">
+    <rdfs:label>is secured by</rdfs:label>
+    <rdfs:domain rdf:resource="&ex;Facility"/>
+    <rdfs:range rdf:resource="&ex;Collateral"/>
+  </owl:ObjectProperty>
+  <owl:ObjectProperty rdf:about="&ex;hasBorrower"><rdfs:label>has borrower</rdfs:label></owl:ObjectProperty>
+  <owl:DatatypeProperty rdf:about="&ex;hasCommitmentAmount"><rdfs:label>has commitment amount</rdfs:label></owl:DatatypeProperty>
+</rdf:RDF>

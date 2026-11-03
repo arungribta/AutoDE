@@ -33,6 +33,8 @@
 !platforms/*.yaml
 # Workflow templates (PA3a); agent role templates and skill folders (PA3b).
 !workflows/*.yaml
+# Ontology packs (ONT1): the upper layer and the shipped standards to onboard from.
+!ontologies/*.yaml
 !prerequisites.yaml
 !agents/*.md
 # Starter skills for Port a Skill (PA4): one knowledge skill, one procedure skill.

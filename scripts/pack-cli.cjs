@@ -27,6 +27,7 @@ const CONTENT = [
   'platform-operations',
   'platforms',
   'workflows',
+  'ontologies',
   'agents',
   'prerequisites.yaml',
   'media/autode-icon-64.png',
@@ -77,7 +78,7 @@ function stage(outDir = path.join(root, 'dist', 'package')) {
     bin: { autode: 'dist/autode.js' },
     main: 'dist/autode.js',
     engines: { node: '>=18' },
-    files: ['dist/', 'skills/', 'primitive-definitions/', 'platform-operations/', 'platforms/', 'workflows/', 'agents/', 'prerequisites.yaml', 'media/', 'README.md', 'LICENSE']
+    files: ['dist/', 'skills/', 'primitive-definitions/', 'platform-operations/', 'platforms/', 'workflows/', 'ontologies/', 'agents/', 'prerequisites.yaml', 'media/', 'README.md', 'LICENSE']
   };
   fs.writeFileSync(path.join(outDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
   return outDir;

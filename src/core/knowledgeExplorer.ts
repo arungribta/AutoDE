@@ -46,7 +46,7 @@ export class KnowledgeExplorerPanel {
   private static current: KnowledgeExplorerPanel | undefined;
   private readonly cache: ExploreSourceCache;
 
-  private constructor(private readonly panel: vscode.WebviewPanel, private readonly host: KnowledgeExplorerHost, extensionPath: string) {
+  private constructor(private readonly panel: vscode.WebviewPanel, private readonly host: KnowledgeExplorerHost, private readonly extensionPath: string) {
     this.cache = new ExploreSourceCache(extensionPath);
     panel.onDidDispose(() => { KnowledgeExplorerPanel.current = undefined; });
     panel.webview.onDidReceiveMessage((m: ExplorerMessage) => void this.onMessage(m));
@@ -76,7 +76,7 @@ export class KnowledgeExplorerPanel {
     // UI2: the AutoDE window's other tabs.
     const tab = (m as unknown as { type: string; tab?: string });
     if (tab.type === 'openTab') { await vscode.commands.executeCommand(tab.tab === 'workflow' ? 'autoDataEngineeringHub.openWorkflow' : 'autoDataEngineeringHub.platformCatalog'); return; }
-    const answer = await answerExplorerMessage(m, { workspaceRoot: () => this.host.workspaceRoot(), sources: async () => { const root = this.host.workspaceRoot(); return root ? this.cache.get(root) : undefined; } });
+    const answer = await answerExplorerMessage(m, { workspaceRoot: () => this.host.workspaceRoot(), sources: async () => { const root = this.host.workspaceRoot(); return root ? this.cache.get(root) : undefined; }, resourcesRoot: () => this.extensionPath, user: () => this.host.user?.() });
     if (answer.reply) void this.panel.webview.postMessage(answer.reply);
     if (answer.action) await this.act(answer.action);
   }
@@ -85,6 +85,12 @@ export class KnowledgeExplorerPanel {
     switch (a.kind) {
       case 'openFile': await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(a.file)); return;
       case 'openInbox': this.host.openInbox(); return;
+      case 'pickOntologySource': {
+        // ONT1: the person picks their own copy of a standard (a file or a folder); nothing is downloaded.
+        const pick = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: true, canSelectMany: false, title: 'A standard to onboard: OWL or SKOS (Turtle, RDF/XML), a folder of them, or an AutoDE pack', filters: { Ontology: ['ttl', 'nt', 'rdf', 'owl', 'xml', 'yaml', 'yml'] } });
+        void this.panel.webview.postMessage({ type: 'response', requestId: a.requestId, body: pick?.[0] ? { path: pick[0].fsPath } : {} });
+        return;
+      }
       case 'openWorkflow': await vscode.commands.executeCommand('autoDataEngineeringHub.openWorkflow'); return;
       case 'copy': await vscode.env.clipboard.writeText(a.text); return;
       case 'editMetadata': await editMetadata(this.host, this.panel, a.id, a.label); return;

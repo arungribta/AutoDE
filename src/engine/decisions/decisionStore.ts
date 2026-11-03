@@ -37,6 +37,8 @@ export type DecisionKind =
   | 'article'
   /** POP1: a team's platform operation or platform definition; approving it approves that exact file (its checksum). */
   | 'platform_operation'
+  /** ONT1: an ontology pack (an industry subset or an extension) imported, grown or with concepts deprecated; a workspace-level change. */
+  | 'ontology'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 

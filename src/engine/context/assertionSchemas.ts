@@ -48,7 +48,9 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
     properties: {
       term: { type: 'string', minLength: 1 }, definition: { type: 'string' }, formula: { type: 'string' }, boundTo: { type: 'array', items: { type: 'string' } },
       category: { type: 'string' }, broader: { type: 'array', items: { type: 'string' } }, narrower: { type: 'array', items: { type: 'string' } }, related: { type: 'array', items: { type: 'string' } },
-      steward: { type: 'string' }, status: { enum: ['draft', 'approved', 'deprecated'] }, abbreviation: { type: 'string' }, examples: { type: 'array', items: { type: 'string' } }
+      steward: { type: 'string' }, status: { enum: ['draft', 'approved', 'deprecated'] }, abbreviation: { type: 'string' }, examples: { type: 'array', items: { type: 'string' } },
+      // ONT1 (§6.8): where the term is used — the enterprise, a line of business, a named system or one business problem.
+      scope: { type: 'object', required: ['level'], properties: { level: { enum: ['enterprise', 'line_of_business', 'system', 'problem'] }, name: { type: 'string', minLength: 1 } } }
     }
   },
   metric: {
@@ -103,6 +105,13 @@ const VALUE_SCHEMAS: Record<AssertionKind, object> = {
       { required: ['status'], properties: { status: { enum: ['verified', 'draft', 'deprecated'] }, note: { type: 'string' } } },
       { required: ['name', 'value'], properties: { name: { type: 'string', minLength: 1 }, value: {} } }
     ]
+  },
+  // ONT1 (§6.8): subject [term] predicate means — the concept and how it matches, as SKOS names it (broader: the concept is broader than the term, skos:broadMatch);
+  // subject [table or logical table] predicate represents — the entity-level link (Collibra's represents).
+  meaning: {
+    type: 'object',
+    required: ['concept'],
+    properties: { concept: { type: 'string', pattern: '^[a-z][a-z0-9]*:[A-Za-z][A-Za-z0-9_]*$' }, match: { enum: ['exact', 'broader', 'narrower', 'related'] }, term: { type: 'string' } }
   },
   // LIN (§8.5): subject [downstream, upstream]. Ends are object ids (a column's id at column level); `entity` names the job, notebook or report that moved the data.
   lineage: {

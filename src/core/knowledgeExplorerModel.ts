@@ -3,6 +3,11 @@ import { ExploreSources, AssetContext } from '../engine/explore/explore';
 import { ExploreRequest, handleExploreRequest } from '../engine/explore/sources';
 import { renderAssetMarkdown, renderImpactCsv, renderImpactMarkdown } from '../engine/explore/render';
 import type { ChangeKind, ImpactResult } from '../engine/explore/lineage';
+import { OntologySource, shippedSources } from '../engine/ontology/onboard';
+import { Choices, OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import type { RepresentsCandidate, TermCandidate } from '../engine/ontology/onboard';
+import { PortError } from '../engine/skills/port';
+import { ProposalValidationError } from '../engine/decisions/proposals';
 
 /**
  * The Knowledge Explorer's messages (C5b; docs/specs/context-layer.md
@@ -16,6 +21,10 @@ export interface ExplorerHost {
   workspaceRoot(): string | undefined;
   /** The explore sources for the workspace (re-read when its files change). */
   sources(): Promise<ExploreSources | undefined>;
+  /** AutoDE's resources (shipped ontology packs). */
+  resourcesRoot?(): string | undefined;
+  /** Who the person is, for what they propose. */
+  user?(): string | undefined;
 }
 
 export type ExplorerMessage =
@@ -26,7 +35,9 @@ export type ExplorerMessage =
   | { type: 'exportGraph'; format: 'svg' | 'png'; data: string }
   | { type: 'editMetadata'; id: string }
   | { type: 'maintenance'; key: string; act: 'work' | 'dismiss' }
-  | { type: 'exportImpact'; id: string; change: ChangeKind; format: 'md' | 'csv' | 'copy' };
+  | { type: 'exportImpact'; id: string; change: ChangeKind; format: 'md' | 'csv' | 'copy' }
+  /** ONT1: onboarding a standard and aligning the vocabulary (§6.8); analysis is read-only, the rest are proposals. */
+  | { type: 'ontology'; requestId: number; op: 'shipped' | 'pick' | 'analyze' | 'preview' | 'propose' | 'align' | 'proposeLinks'; args?: Record<string, unknown> };
 
 export type OpenTarget =
   | { kind: 'file'; path: string }
@@ -42,7 +53,8 @@ export type ExplorerAction =
   | { kind: 'save'; format: 'svg' | 'png'; data: string }
   | { kind: 'editMetadata'; id: string; label: string }
   | { kind: 'maintenance'; key: string; act: 'work' | 'dismiss' }
-  | { kind: 'saveText'; name: string; format: 'md' | 'csv'; text: string };
+  | { kind: 'saveText'; name: string; format: 'md' | 'csv'; text: string }
+  | { kind: 'pickOntologySource'; requestId: number };
 
 export interface ExplorerAnswer {
   /** Posted back to the webview. */
@@ -99,6 +111,7 @@ export async function answerExplorerMessage(msg: ExplorerMessage, host: Explorer
     const name = `impact-${msg.change.replace(/_/g, '-')}-${(r.asset.fqn ?? r.asset.label).replace(/[^A-Za-z0-9_.-]+/g, '_')}.${msg.format}`;
     return { action: { kind: 'saveText', name, format: msg.format, text: msg.format === 'csv' ? renderImpactCsv(r) : renderImpactMarkdown(r) } };
   }
+  if (msg.type === 'ontology') return answerOntology(msg, host, root);
   if (msg.type === 'exportGraph') {
     if (!/^data:image\/(svg\+xml|png)[;,]/.test(msg.data) && !msg.data.startsWith('<svg')) return { reply: { type: 'toast', message: 'Nothing to export.' } };
     return { action: { kind: 'save', format: msg.format, data: msg.data } };
@@ -108,4 +121,35 @@ export async function answerExplorerMessage(msg: ExplorerMessage, host: Explorer
   if (t.kind === 'workflow') return { action: { kind: 'openWorkflow' } };
   const file = insideWorkspace(root, t.kind === 'file' ? t.path : t.file);
   return file ? { action: { kind: 'openFile', file } } : { reply: { type: 'toast', message: 'That file is outside the workspace.' } };
+}
+
+/** ONT1: the onboarding steps and the alignment, through the same service as `autode ontology` and MCP. */
+async function answerOntology(msg: Extract<ExplorerMessage, { type: 'ontology' }>, host: ExplorerHost, root: string): Promise<ExplorerAnswer> {
+  const reply = (body: Record<string, unknown>): ExplorerAnswer => ({ reply: { type: 'response', requestId: msg.requestId, body } });
+  const scope = { workspaceRoot: root, resourcesRoot: host.resourcesRoot?.() };
+  const args = msg.args ?? {};
+  try {
+    if (msg.op === 'shipped') return reply({ shipped: shippedSources(scope.resourcesRoot) });
+    if (msg.op === 'pick') return { action: { kind: 'pickOntologySource', requestId: msg.requestId } };
+    const sources = await host.sources();
+    if (!sources) return reply({ error: 'Nothing known yet.' });
+    const graph = sources.graph as WorkspaceGraph;
+    if (msg.op === 'align') return reply(alignmentCandidates(scope, graph, sources.assertions) as unknown as Record<string, unknown>);
+    const by = `user:${host.user?.() ?? 'user'}`;
+    if (msg.op === 'proposeLinks') {
+      const r = await proposeAlignment(scope, { means: (args.means ?? []) as TermCandidate[], represents: (args.represents ?? []) as RepresentsCandidate[] }, by);
+      return reply({ recorded: r.recorded.length, duplicates: r.duplicates.length });
+    }
+    const src = args.source as OntologySource | undefined;
+    if (!src || !['shipped', 'file', 'git'].includes(src.kind)) return reply({ error: 'Choose a source first.' });
+    const choices = (args.choices ?? {}) as Choices;
+    if (msg.op === 'analyze') return reply({ analysis: analyzeOntologySource(scope, src, graph, choices).analysis });
+    if (msg.op === 'preview') { const p = previewPack(scope, src, graph, choices); return reply({ text: p.text, added: p.added, kept: p.kept, problems: p.problems, revision: p.revision }); }
+    const { decision, built } = proposeOntologyPack(scope, src, graph, choices, { host: 'vscode', client: host.user?.() }, { reason: String(args.reason ?? '') });
+    return reply({ decision: { id: decision.id, title: decision.title, status: decision.status }, added: built.added });
+  } catch (err) {
+    if (err instanceof PortError || err instanceof OntologyProposalError) return reply({ error: err.message });
+    if (err instanceof ProposalValidationError) return reply({ error: `The pack doesn't pass its checks: ${err.report.errors.join(' ')}` });
+    return reply({ error: err instanceof Error ? err.message : String(err) });
+  }
 }

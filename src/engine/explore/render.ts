@@ -1,4 +1,4 @@
-import { ASSET_TYPE_LABELS, AssetContext, AssetSummary, ExploreOverview, GraphSlice, SearchResult, SemanticOverview } from './explore';
+import { ASSET_TYPE_LABELS, AssetContext, AssetSummary, ConceptPage, ExploreOverview, GraphSlice, OntologyOverview, SearchResult, SemanticOverview } from './explore';
 import type { ImpactCategory, ImpactResult, LineageNodeView, LineageResult } from './lineage';
 
 /**
@@ -161,4 +161,43 @@ export function renderImpactCsv(r: ImpactResult): string {
   const rows = [['category', 'asset', 'id', 'certainty', 'draft', 'domain', 'problem', 'sources', 'path']];
   for (const i of r.items) rows.push([i.category, i.label, i.id, i.certainty, i.draft ? 'yes' : 'no', i.domain ?? '', i.problemId ?? '', i.sources.join(' '), i.path.map((p) => p.label).join(' > ')]);
   return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+}
+
+/** A concept's page as Markdown (ONT1, §6.8): every path to it. */
+export function renderConceptMarkdown(p: ConceptPage): string {
+  const c = p.concept;
+  const scope = (s: { level: string; name?: string }) => `${s.level.replace(/_/g, ' ')}${s.name ? `: ${s.name}` : ''}`;
+  const L: string[] = [`# ${c.label}`, '', `Concept · \`${c.id}\` · pack ${c.pack}${c.standard ? ` (${c.standard.name} ${c.standard.version}, ${c.standard.licence})` : ''}${c.status === 'deprecated' ? ' · deprecated' : ''}`];
+  if (c.definition) L.push('', c.definition);
+  L.push('', `Under: ${[...c.ancestors].reverse().map((a) => a.label).join(' › ') || '(the upper layer)'}${c.iri ? ` · IRI: ${c.iri}` : ''}`);
+  if (c.synonyms.length) L.push(`Synonyms: ${c.synonyms.join(', ')}`);
+  if (c.children.length) L.push(`Narrower: ${c.children.map((x) => x.label).join(', ')}`);
+  if (c.relations.length) L.push('', '## Relations', ...c.relations.map((r) => `- ${r.verb} → ${r.target.label}${r.cardinality ? ` (${r.cardinality})` : ''}`));
+  if (c.referencedBy.length) L.push(...c.referencedBy.map((r) => `- ${r.from.label} ${r.verb} → this`));
+  if (c.attributes.identifying.length || c.attributes.notable.length) L.push('', '## Attributes', ...(c.attributes.identifying.length ? [`- identifying: ${c.attributes.identifying.join(', ')}`] : []), ...(c.attributes.notable.length ? [`- notable: ${c.attributes.notable.join(', ')}`] : []));
+  L.push('', '## Terms', ...(p.terms.length ? p.terms.map((t) => `- "${t.term.label}" (${scope(t.scope)}) — ${t.match} match, ${t.trust} [fact:${t.fact}]`) : ['- none yet']));
+  L.push('', '## Tables and columns', ...(p.tables.length ? p.tables.map((t) => `- ${t.asset.fqn ?? t.asset.label} (${t.system}) — ${t.via === 'represents' ? 'represents it' : 'through its columns’ terms'}`) : ['- none yet']), ...p.columns.map((x) => `  - column ${x.column.fqn ?? x.column.label} via "${x.term}"`));
+  if (p.semantic.length) L.push('', '## Semantic layer', ...p.semantic.map((s) => `- ${kindLabel(s.assetType)} ${s.label}`));
+  if (p.rules.length) L.push('', '## Rules', ...p.rules.map((r) => `- (${r.enforcement}) ${r.text} — on ${r.on}`));
+  if (p.articles.length) L.push('', '## Articles', ...p.articles.map((a) => `- ${a.title} (${a.state}${a.stale.length ? ', stale' : ''})`));
+  if (c.hints.classifications.length || c.hints.quality.length) L.push('', '## Hints (candidates, never applied silently)', ...(c.hints.classifications.length ? [`- classifications: ${c.hints.classifications.join(', ')}`] : []), ...c.hints.quality.map((q) => `- quality: ${q.check}${q.attribute ? ` on ${q.attribute}` : ''}${q.note ? ` (${q.note})` : ''}`));
+  if (p.conflicts.length) L.push('', '## Conflicts', ...p.conflicts.map((x) => `- ${x.rule}: ${x.sides.join(' ↔ ')}`));
+  if (p.proposed.length) L.push('', '## Waiting in the Context Inbox', ...p.proposed.map((x) => `- ${x.statement} [${x.fact}]`));
+  if (p.gaps.length) L.push('', '## Gaps', ...p.gaps.map((g) => `- ${g}`));
+  return L.join('\n');
+}
+
+export function renderOntology(o: OntologyOverview, part: 'packs' | 'concepts' | 'glossary' | 'all' = 'all'): string {
+  const L: string[] = [];
+  if (part === 'packs' || part === 'all') {
+    L.push('Packs:', ...o.packs.map((p) => `  ${p.id.padEnd(18)} ${p.state.padEnd(10)} ${String(p.concepts).padStart(3)} concept(s)  ${p.origin === 'shipped' ? 'shipped' : p.file}${p.standard ? `  ${p.standard.name} ${p.standard.version} (${p.standard.licence}${p.distribution === 'workspace' ? '; stays in this workspace' : ''})` : ''}${p.errors.length ? `; ${p.errors.join('; ')}` : ''}`));
+  }
+  if (part === 'concepts' || part === 'all') {
+    L.push(...(L.length ? [''] : []), 'Concepts in effect:', ...o.tree.map((t) => `  ${'  '.repeat(t.depth)}${t.label}  [${t.id}]${t.terms || t.tables ? `  ${t.terms} term(s), ${t.tables} table(s)` : ''}${t.proposed ? `, ${t.proposed} waiting` : ''}${t.status === 'deprecated' ? '  deprecated' : ''}`));
+  }
+  if (part === 'glossary' || part === 'all') {
+    L.push(...(L.length ? [''] : []), 'Glossary:', ...(o.glossary.length ? o.glossary.map((g) => `  ${g.term.label.padEnd(28)} ${g.scope.level.replace(/_/g, ' ')}${g.scope.name ? ` (${g.scope.name})` : ''}  → ${g.concepts.length ? g.concepts.map((c) => `${c.label} [${c.id}] ${c.match}${c.status === 'proposed' ? ', waiting' : ''}`).join('; ') : 'not aligned'}`) : ['  no terms']));
+  }
+  if (o.errors.length) L.push('', ...o.errors.map((e) => `! ${e}`));
+  return L.join('\n');
 }

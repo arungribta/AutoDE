@@ -1,0 +1,38 @@
+# AutoDE workflow template: semantic foundation (docs/specs/context-layer.md §6.8; docs/specs/workflow-templates.md).
+# Basis: meaning before measurement. Onboard a standard (FIBO first) and align the business vocabulary to its
+# concepts (the knowledge engineer), then draft the shared semantic models over the aligned concepts (the semantic
+# modeler); a person approves each. The ontology is shared by every business problem.
+id: semantic-foundation
+version: 1
+title: Semantic foundation
+description: An industry standard onboarded, the business vocabulary aligned to its concepts, and shared semantic models drafted over them.
+suggestWhen: [ontology, fibo, semantic layer, semantic model, business glossary, business vocabulary, common definitions, single definition, canonical model, align terms, standard definitions]
+stages:
+  - id: specify
+    title: Business problem and specification
+    kind: specify
+    inclusion: mandatory
+  - id: plan
+    title: Plan the workflow
+    kind: plan
+    inclusion: mandatory
+    after: [specify (approved)]
+  - id: sources
+    title: Source assessment
+    kind: source-assessment
+    inclusion: default
+    repeat: per-source-system
+    join: all
+    after: [plan (approved)]
+    note: The estate's tables and columns are what the scope of the standard is proposed from.
+  - id: ontology
+    title: Onboard a standard and align the vocabulary
+    kind: ontology-alignment
+    inclusion: mandatory
+    after: [plan (approved)]
+    note: The knowledge engineer proposes the pack (a workspace-level decision) and the terms' means links (the Context Inbox).
+  - id: semantic
+    title: Shared semantic models
+    kind: semantic-modelling
+    inclusion: mandatory
+    after: [ontology (approved)]

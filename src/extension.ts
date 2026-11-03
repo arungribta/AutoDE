@@ -59,6 +59,7 @@ import { summarize } from './engine/platform/operations/service';
 import { DecisionStore } from './engine/decisions/decisionStore';
 import { propose } from './engine/decisions/proposals';
 import { setPlatformResourcesRoot } from './engine/platform/dialects';
+import { setOntologyResourcesRoot } from './engine/ontology/store';
 import { setOperationRunsRoot } from './engine/platform/operations/runLog';
 
 /**
@@ -73,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigurationManager(context);
   // POP1: where the shipped platform definitions are, for every platform's dialect (probes, reconciliation, dry runs).
   setPlatformResourcesRoot(context.extensionUri.fsPath);
+  setOntologyResourcesRoot(context.extensionUri.fsPath);
   // POP3: operation runs (the estate's reads too) are recorded in the workspace, for drift.
   setOperationRunsRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
   const hub = new DataAgentHubHub(configManager);

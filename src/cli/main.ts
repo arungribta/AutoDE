@@ -25,7 +25,13 @@ import { draftSemanticModel } from '../engine/semantic/draft';
 import { resolveComposite } from '../engine/semantic/composite';
 import { newCompositeText } from '../engine/semantic/editorState';
 import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/explore/sources';
-import { renderAssetMarkdown, renderGraph, renderImpactCsv, renderImpactMarkdown, renderLineage, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
+import { renderAssetMarkdown, renderConceptMarkdown, renderGraph, renderImpactCsv, renderImpactMarkdown, renderLineage, renderOntology, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
+import type { OntologyOverview } from '../engine/explore/explore';
+import { OntologySource, shippedSources } from '../engine/ontology/onboard';
+import { OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, exportPack, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { approveTeamPack } from '../engine/ontology/decision';
+import { findConcept } from '../engine/ontology/store';
+import { MATCH_TYPES, MatchType } from '../engine/ontology/pack';
 import { CHANGE_KINDS, ChangeKind, ImpactResult, LineageResult } from '../engine/explore/lineage';
 import { RefreshReport, recordLineageBatch, refreshLines } from '../engine/lineage/record';
 import { platformOperationTools } from '../mcp/platformOperationTools';
@@ -35,6 +41,7 @@ import type { CatalogMatrix, ConformanceResult, OperationPage, PlatformPage } fr
 import { lintSkillText, skillPage } from '../engine/platform/operations/catalogView';
 import { checksumOf, customise, loadCatalog } from '../engine/platform/operations/load';
 import { fragmentsFor, setPlatformResourcesRoot } from '../engine/platform/dialects';
+import { setOntologyResourcesRoot } from '../engine/ontology/store';
 import { setOperationRunsRoot } from '../engine/platform/operations/runLog';
 import { problemOverlap } from '../engine/documents/problemOverlap';
 import type { ObservedEdge } from '../engine/lineage/observed';
@@ -259,7 +266,21 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
   explore asset <id|name>      Everything known about one asset: schema, meaning, relationships, governance, facts, decisions, used by
   explore graph [<id|name>] [--hops 1-3] [--system <s>] [--model <m>] [--columns]   The graph around an asset; with no asset, the landscape: tables and every relationship between them
   explore lineage <id|name> [--direction up|down|both] [--depth 1-10] [--columns]   Where it comes from and where it goes: every edge with its sources (observed, designed, generated, logical) and trust
+  explore concept <id|name>    A concept's page: its terms by scope, the tables that represent it and the columns bound through terms, per system; the semantic layer that implements it; facts, rules, articles, conflicts and gaps
   explore impact <id|name> --change rename_column|drop_column|retype_column|remove_table|supersede_fact [--format md|csv] [--out <file>]   What the change would affect, each with its path, by category and domain
+
+Ontology (ONT1: canonical concepts, standards onboarded as packs, business terms aligned to them):
+  ontology [list]              Packs (the upper layer, the team's with their state) and the shipped sources to onboard from
+  ontology concepts            The concepts in effect as a tree under the upper layer, with how many terms and tables reach each
+  ontology glossary            Each glossary term with its scope and the concepts it means
+  ontology analyze <source> [--git <url> --ref r --subdir p] [--add ids] [--remove ids] [--only ids] [--place id=upper:X]… [--prefix p] [--pack id]
+                               A standard (a shipped pack, an OWL/SKOS file or folder in Turtle or RDF/XML, an AutoDE pack): its concepts, licence, the scope proposed from this workspace and the placement
+  ontology preview <source> …  The pack those choices give, as it would be proposed
+  ontology onboard <source> … [--reason "<why>"]   Propose it: a workspace-level decision a person approves
+  ontology approve <pack>      Approve a team pack as it is on disk (terminal)
+  ontology align [--only <terms or tables>] [--propose]   Terms that mean a concept and tables that represent one; --propose records them for the Context Inbox
+  ontology link <term|table> <concept> [--match exact|broader|narrower|related] --reason "<why>"   Propose one link by hand
+  ontology export <pack> --out <file>   Write a team pack for another workspace (refused when its licence keeps it in this one)
 
 Platform operations (POP1: every interaction with a platform, as a reviewed file):
   platform catalog [<platform>]   The capability matrix (capabilities by platform: supported, partly, not applicable), or one platform's page
@@ -451,11 +472,21 @@ const OPTIONS = {
   item: { type: 'string', multiple: true },
   days: { type: 'string' },
   complete: { type: 'boolean' },
+  add: { type: 'string' },
+  remove: { type: 'string' },
+  only: { type: 'string' },
+  place: { type: 'string', multiple: true },
+  prefix: { type: 'string' },
+  pack: { type: 'string' },
+  git: { type: 'string' },
+  subdir: { type: 'string' },
+  match: { type: 'string' },
+  propose: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
 
-type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output' | 'param' | 'stage' | 'item'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[]; param?: string[]; stage?: string[]; item?: string[] };
+type Values = { [K in Exclude<keyof typeof OPTIONS, 'set' | 'schema' | 'output' | 'param' | 'stage' | 'item' | 'place'>]?: (typeof OPTIONS)[K]['type'] extends 'string' ? string : boolean } & { set?: string[]; schema?: string[]; output?: string[]; param?: string[]; stage?: string[]; item?: string[]; place?: string[] };
 
 class CliError extends Error {
   public constructor(public readonly exit: number, message: string) { super(message); }
@@ -498,6 +529,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
   if (values.help || !command) { io.out(USAGE); return command || values.help ? EXIT.OK : EXIT.USAGE; }
   const ctx: Ctx = { io, values, workspaceRoot: path.resolve(io.cwd, values.workspace ?? '.'), resourcesRoot: resourcesRoot ?? io.cwd, version, json: values.json === true };
   setPlatformResourcesRoot(ctx.resourcesRoot);
+  setOntologyResourcesRoot(ctx.resourcesRoot);
   // POP3: every operation run in this command (the estate's reads too) is recorded in this workspace, for drift.
   setOperationRunsRoot(ctx.workspaceRoot);
   try {
@@ -521,6 +553,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'semantic': return await cmdSemantic(ctx, rest);
       case 'explore': return await cmdExplore(ctx, rest);
       case 'lineage': return await cmdLineage(ctx, rest);
+      case 'ontology': return await cmdOntology(ctx, rest);
       case 'platform': return await cmdPlatform(ctx, rest);
       case 'metadata': return await cmdMetadata(ctx, rest);
       case 'articles': return await cmdArticles(ctx, rest);
@@ -1904,6 +1937,12 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
     emit(ctx, { ok: true, context: r.context }, renderAssetMarkdown(r.context as AssetContext));
     return EXIT.OK;
   }
+  if (sub === 'concept') {
+    const r = ask({ type: 'concept', id: ref });
+    if (!r.context) throw new CliError(EXIT.NOT_FOUND, String(r.error));
+    emit(ctx, { ok: true, context: r.context }, renderConceptMarkdown((r.context as AssetContext).concept!));
+    return EXIT.OK;
+  }
   if (sub === 'graph') {
     const r = ask({ type: 'graph', id: ref, ...(ctx.values.hops ? { hops: Number(ctx.values.hops) } : {}) });
     if (!r.slice) throw new CliError(EXIT.NOT_FOUND, String(r.error));
@@ -1935,7 +1974,126 @@ async function cmdExplore(ctx: Ctx, rest: string[]): Promise<number> {
     } else emit(ctx, { ok: true, impact: result }, text.trimEnd());
     return EXIT.OK;
   }
-  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, browse, semantic, asset, graph, lineage or impact.`);
+  throw new CliError(EXIT.USAGE, `Unknown explore command "${sub}": overview, search, browse, semantic, asset, concept, graph, lineage or impact.`);
+}
+
+/** ONT1 (§6.8): onboarding a standard, the ontology in effect, aligning the vocabulary. The same service as the Explorer and MCP. */
+async function cmdOntology(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'list', ...words] = rest;
+  const scope = { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot };
+  const list = (v: string | undefined) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : undefined);
+  const place = Object.fromEntries((ctx.values.place ?? []).map((p) => p.split('=').map((x) => x.trim())).filter((kv) => kv.length === 2 && kv[0] && kv[1]));
+  const choices = { ...(list(ctx.values.add) ? { add: list(ctx.values.add) } : {}), ...(list(ctx.values.remove) ? { remove: list(ctx.values.remove) } : {}), ...(list(ctx.values.only) ? { only: list(ctx.values.only) } : {}), place };
+  const opts = { ...(ctx.values.prefix ? { prefix: ctx.values.prefix } : {}), ...(ctx.values.pack ? { id: ctx.values.pack } : {}) };
+  const sourceOf = (): OntologySource => {
+    if (ctx.values.git) return { kind: 'git', url: ctx.values.git, ...(ctx.values.ref ? { ref: ctx.values.ref } : {}), ...(ctx.values.subdir ? { path: ctx.values.subdir } : {}) };
+    const ref = words.join(' ');
+    if (!ref) throw new CliError(EXIT.USAGE, `ontology ${sub} <shipped pack | file | folder> (or --git <url> [--ref r] [--subdir p]); shipped: ${shippedSources(ctx.resourcesRoot).map((s) => s.id).join(', ')}.`);
+    if (shippedSources(ctx.resourcesRoot).some((s) => s.id === ref)) return { kind: 'shipped', id: ref };
+    return { kind: 'file', path: path.resolve(ctx.io.cwd, ref) };
+  };
+  const graph = async () => (await workspace(ctx, ctx.values.problem).contextSources()).graph as WorkspaceGraph;
+  const fail = (err: unknown): never => { if (err instanceof port.PortError || err instanceof OntologyProposalError) throw new CliError(EXIT.FAILED, (err as Error).message); throw err; };
+  if (sub === 'list' || sub === 'concepts' || sub === 'glossary') {
+    const problemId = ctx.values.problem;
+    const sources = exploreSources(ctx.workspaceRoot, await workspace(ctx, problemId).contextSources(), problemId);
+    const o = handleExploreRequest({ type: 'ontology' }, sources, ctx.workspaceRoot).ontology as OntologyOverview;
+    const shipped = shippedSources(ctx.resourcesRoot);
+    emit(ctx, { ok: true, ontology: o, shipped }, sub === 'list' ? [renderOntology(o, 'packs'), '', 'Shipped sources to onboard from:', ...shipped.map((s) => `  ${s.id.padEnd(18)} ${s.concepts} concept(s)  ${s.title}${s.standard ? ` (${s.standard} ${s.version}, ${s.licence})` : ''}`)].join('\n') : renderOntology(o, sub));
+    return EXIT.OK;
+  }
+  if (sub === 'analyze' || sub === 'preview') {
+    try {
+      if (sub === 'preview') {
+        const p = previewPack(scope, sourceOf(), await graph(), choices, opts);
+        emit(ctx, { ok: !p.problems.length, pack: p.pack, revision: p.revision, added: p.added, kept: p.kept, problems: p.problems }, [p.text.trimEnd(), ...(p.problems.length ? ['', ...p.problems.map((x) => `! ${x}`)] : [])].join('\n'));
+        return p.problems.length ? EXIT.FAILED : EXIT.OK;
+      }
+      const { analysis: a } = analyzeOntologySource(scope, sourceOf(), await graph(), choices, opts);
+      const lines = [
+        `${a.source.title} (${a.source.kind}: ${a.source.ref}${a.source.commit ? ` @ ${a.source.commit.slice(0, 12)}` : ''})`,
+        `  ${a.counts.concepts} concept(s), ${a.counts.relations} relation(s), ${a.counts.modules} module(s)${a.standard ? `; ${a.standard.name} ${a.standard.version}` : ''}`,
+        `  Licence: ${a.licence.name} (redistribution ${a.licence.redistribution})${a.distribution === 'workspace' ? ': the pack stays in this workspace' : ''}`,
+        ...a.warnings.map((w) => `  ! ${w}`),
+        '', `Scope (${a.scope.selected.length} concept(s); adjust with --add / --remove, or --only):`,
+        ...a.scope.seeds.map((s) => `  seed      ${s.id.padEnd(28)} ${s.label}  (score ${s.score}: ${s.matchedBy.slice(0, 3).map((m) => `${m.kind} ${m.text}`).join(', ')})`),
+        ...a.scope.neighbours.map((n) => `  one hop   ${n.id.padEnd(28)} ${n.label}  (${n.via})`),
+        ...a.scope.required.map((r) => `  needed    ${r}  (an ancestor of a chosen concept)`),
+        ...(a.placement.length ? ['', 'Placement under the upper layer (change with --place <id>=upper:<Concept>):', ...a.placement.map((p) => `  ${p.id.padEnd(28)} ${p.parent ?? 'NOT PLACED'}${p.suggested && p.parent === p.suggested ? '  (suggested)' : ''}`)] : []),
+        ...(a.existing ? ['', `It grows the team pack ${a.existing.file} (${a.existing.state}, ${a.existing.concepts} concept(s)).`] : []),
+        '', 'Next: autode ontology preview … to see the pack, autode ontology onboard … to propose it.'
+      ];
+      emit(ctx, { ok: true, analysis: a }, lines.join('\n'));
+      return EXIT.OK;
+    } catch (err) { return fail(err); }
+  }
+  if (sub === 'onboard') {
+    try {
+      const { decision, built } = proposeOntologyPack(scope, sourceOf(), await graph(), choices, { host: 'cli', client: actorOf(ctx) }, { ...opts, ...(ctx.values.reason ? { reason: ctx.values.reason } : {}) });
+      emit(ctx, { ok: true, decision: { id: decision.id, status: decision.status, title: decision.title }, added: built.added }, `Proposed ${decision.id}: ${decision.title}. A person approves it (autode decisions approve ${decision.id}, or the AutoDE panel); then align the vocabulary: autode ontology align.`);
+      return EXIT.OK;
+    } catch (err) {
+      if (err instanceof ProposalValidationError) throw new CliError(EXIT.FAILED, `The pack doesn't pass its checks: ${err.report.errors.join(' ')}`);
+      return fail(err);
+    }
+  }
+  if (sub === 'approve') {
+    const id = words[0];
+    if (!id) throw new CliError(EXIT.USAGE, 'ontology approve <pack id> (a team pack as it is on disk, e.g. after a hand edit).');
+    requirePerson(ctx, 'Approving an ontology pack', 'Approve its decision in the AutoDE panel, or here in a terminal.');
+    if ((await ctx.io.prompt(`Approve the pack ${id} as it is on disk (every business problem shares it)? Type approve: `)).trim().toLowerCase() !== 'approve') { ctx.io.out('Nothing changed.'); return EXIT.REFUSED; }
+    const r = approveTeamPack(scope, id, actorOf(ctx));
+    emit(ctx, { ok: r.ok, message: r.message }, r.message);
+    return r.ok ? EXIT.OK : EXIT.FAILED;
+  }
+  if (sub === 'align') {
+    const src = await workspace(ctx, ctx.values.problem).contextSources();
+    const al = alignmentCandidates(scope, src.graph as WorkspaceGraph, src.assertions);
+    const only = list(ctx.values.only);
+    const pickMeans = al.means.filter((m) => !only || only.includes(m.term) || only.includes(m.label));
+    const pickRep = al.represents.filter((r) => !only || only.includes(r.table) || only.includes(r.label));
+    const shown = [
+      `${al.concepts} concept(s) in effect; ${al.terms} term(s), ${al.tables} table(s) in the working set.`,
+      ...(pickMeans.length ? ['Terms (means):', ...pickMeans.map((m) => `  "${m.label}" → ${m.conceptLabel} [${m.concept}] ${m.match}  (${m.reason})`)] : ['No new term links.']),
+      ...(pickRep.length ? ['Tables (represents):', ...pickRep.map((r) => `  ${r.label} → ${r.conceptLabel} [${r.concept}]`)] : ['No new represents links.'])
+    ];
+    if (!ctx.values.propose) {
+      emit(ctx, { ok: true, alignment: { ...al, means: pickMeans, represents: pickRep } }, [...shown, '', 'Nothing recorded. --propose records them as proposed facts for the Context Inbox (a person confirms each).'].join('\n'));
+      return EXIT.OK;
+    }
+    const r = await proposeAlignment(scope, { means: pickMeans, represents: pickRep }, actorOf(ctx), ctx.values.problem);
+    emit(ctx, { ok: true, recorded: r.recorded.map((a) => ({ id: a.id, statement: a.statement, status: a.status })), duplicates: r.duplicates }, [...shown, '', `${r.recorded.length} link(s) proposed${r.duplicates.length ? `, ${r.duplicates.length} already known` : ''}: a person confirms them in the Context Inbox (autode facts).`].join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'link') {
+    // One link by hand: a term means a concept, or a table represents one.
+    const [subject, concept] = words;
+    if (!subject || !concept) throw new CliError(EXIT.USAGE, 'ontology link <term or table> <concept> [--match exact|broader|narrower|related] --reason "<why>"');
+    const problemId = ctx.values.problem;
+    const sources = exploreSources(ctx.workspaceRoot, await workspace(ctx, problemId).contextSources(), problemId);
+    const c = sources.ontology ? findConcept(sources.ontology, concept) : undefined;
+    if (!c) throw new CliError(EXIT.NOT_FOUND, `No concept "${concept}" in effect (autode ontology concepts).`);
+    const asset = handleExploreRequest({ type: 'asset', id: subject }, sources, ctx.workspaceRoot).context as AssetContext | undefined;
+    if (!asset) throw new CliError(EXIT.NOT_FOUND, `No term or table "${subject}" (autode explore search).`);
+    const match = (ctx.values.match ?? 'exact') as MatchType;
+    if (!MATCH_TYPES.includes(match)) throw new CliError(EXIT.USAGE, `--match is ${MATCH_TYPES.join(', ')}.`);
+    const isTerm = asset.asset.assetType === 'glossary_term';
+    if (!isTerm && !['table', 'view', 'logical_table'].includes(asset.asset.assetType)) throw new CliError(EXIT.USAGE, `${asset.asset.label} is a ${asset.asset.assetType}: a term means a concept; a table or logical table represents one (columns reach concepts through their terms).`);
+    if (!ctx.values.reason) throw new CliError(EXIT.USAGE, '--reason "<why>" is the link\'s evidence.');
+    const r = await proposeAlignment(scope, isTerm ? { means: [{ term: asset.asset.id, label: asset.asset.label, concept: c.id, conceptLabel: c.label, match, reason: ctx.values.reason }] } : { represents: [{ table: asset.asset.id, label: asset.asset.fqn ?? asset.asset.label, concept: c.id, conceptLabel: c.label, reason: ctx.values.reason }] }, actorOf(ctx), problemId);
+    emit(ctx, { ok: true, recorded: r.recorded.map((a) => ({ id: a.id, statement: a.statement })) }, r.recorded.length ? `Proposed ${r.recorded[0].id}: ${r.recorded[0].statement} A person confirms it in the Context Inbox (autode facts confirm ${r.recorded[0].id}).` : 'AutoDE already holds this link.');
+    return EXIT.OK;
+  }
+  if (sub === 'export') {
+    const id = words[0];
+    if (!id || !ctx.values.out) throw new CliError(EXIT.USAGE, 'ontology export <pack id> --out <file.yaml>');
+    try {
+      const r = exportPack(scope, id, path.resolve(ctx.io.cwd, ctx.values.out));
+      emit(ctx, { ok: true, file: rel(ctx, r.file) }, `Wrote ${rel(ctx, r.file)}: another workspace onboards it with autode ontology onboard ${rel(ctx, r.file)}.`);
+      return EXIT.OK;
+    } catch (err) { if (err instanceof OntologyProposalError) throw new CliError(EXIT.REFUSED, err.message); throw err; }
+  }
+  throw new CliError(EXIT.USAGE, `Unknown ontology command "${sub}": list, concepts, glossary, analyze, preview, onboard, approve, align, link or export.`);
 }
 
 /** LIN: observed lineage, read through the platform's lineage operations or recorded from a file. */

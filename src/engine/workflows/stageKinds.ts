@@ -10,6 +10,10 @@ export type StageKind =
   | 'specify' | 'plan' | 'target-context' | 'source-assessment' | 'conformance' | 'quality-rules'
   | 'mapping' | 'entity-resolution' | 'modelling' | 'code-conversion' | 'build' | 'reconcile'
   | 'validate' | 'deploy' | 'document' | 'platform-setup' | 'bi-migration'
+  /** ONT1: onboarding a standard and aligning the vocabulary to its concepts (the knowledge engineer). */
+  | 'ontology-alignment'
+  /** ONT1: drafting shared semantic models from the aligned concepts (the semantic modeler). */
+  | 'semantic-modelling'
   /** PLN1: work a person does outside AutoDE (an ML feature pipeline, a streaming service, a sign-off in another tool). No agent, nothing run. */
   | 'manual';
 
@@ -21,7 +25,8 @@ export type Tier = (typeof TIERS)[number];
 export const ARTIFACTS = [
   'spec', 'workflow', 'target-context', 'source-context', 'estate', 'conformance-report', 'quality-rules',
   'mapping', 'entity-resolution', 'model', 'converted-code', 'pipeline-spec', 'artifacts', 'reconciliation-report',
-  'validation-report', 'deployment', 'documentation', 'platform-setup-plan', 'bi-migration-plan', 'legacy-code', 'contract'
+  'validation-report', 'deployment', 'documentation', 'platform-setup-plan', 'bi-migration-plan', 'legacy-code', 'contract',
+  'ontology', 'semantic-model'
 ] as const;
 export type Artifact = (typeof ARTIFACTS)[number];
 
@@ -57,6 +62,8 @@ export const STAGE_KINDS: Readonly<Record<StageKind, StageKindSpec>> = {
   'deploy': k('deploy', ['pipeline-engineer'], 'propose', ['artifacts'], ['deployment'], ['approve'], 'the platform changes are approved and applied'),
   'document': k('document', ['documenter'], 'workspace-write', ['artifacts'], ['documentation'], ['check'], 'the documents are generated and linked to their artifacts'),
   'platform-setup': k('platform-setup', ['target-architect'], 'propose', ['target-context'], ['platform-setup-plan'], ['approve'], 'the plan covers every environment of the estate'),
+  'ontology-alignment': k('ontology-alignment', ['knowledge-engineer'], 'propose', ['spec'], ['ontology'], ['approve'], 'the pack is approved and every glossary term the problem uses means a concept, or is recorded as a gap'),
+  'semantic-modelling': k('semantic-modelling', ['semantic-modeler'], 'propose', ['ontology'], ['semantic-model'], ['check', 'approve'], 'the shared semantic models validate and are approved'),
   'bi-migration': k('bi-migration', ['documenter', 'data-modeler'], 'read', ['estate'], ['bi-migration-plan'], ['approve'], 'every report in scope is mapped or listed as a gap'),
   // No role: AutoDE assigns no agent. No gate: its owner marks it done, with a note (workflow-planning.md §3.3).
   'manual': k('manual', [], 'read', [], [], [], 'its owner marks it done outside AutoDE, with a note')

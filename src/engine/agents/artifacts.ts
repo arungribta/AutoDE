@@ -27,7 +27,8 @@ const PHASE_OF: Record<StageKind, string> = {
   'mapping': '02-model', 'entity-resolution': '02-model', 'modelling': '02-model', 'bi-migration': '02-model',
   'build': '03-build', 'code-conversion': '03-build', 'deploy': '03-build',
   'reconcile': '04-validate', 'validate': '04-validate', 'document': '04-validate',
-  'manual': '03-build'
+  'manual': '03-build',
+  'ontology-alignment': '01-discover', 'semantic-modelling': '02-model'
 };
 
 export interface RecordArtifactInput {

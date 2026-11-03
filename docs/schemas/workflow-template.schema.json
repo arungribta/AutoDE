@@ -21,7 +21,7 @@
         "properties": {
           "id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
           "title": { "type": "string" },
-          "kind": { "enum": ["specify", "plan", "target-context", "source-assessment", "conformance", "quality-rules", "mapping", "entity-resolution", "modelling", "code-conversion", "build", "reconcile", "validate", "deploy", "document", "platform-setup", "bi-migration"] },
+          "kind": { "enum": ["specify", "plan", "target-context", "source-assessment", "conformance", "quality-rules", "mapping", "entity-resolution", "modelling", "code-conversion", "build", "reconcile", "validate", "deploy", "document", "platform-setup", "bi-migration", "ontology-alignment", "semantic-modelling", "manual"] },
           "inclusion": { "enum": ["mandatory", "default", "conditional", "optional"], "default": "default" },
           "when": { "type": "string", "description": "For conditional stages: a fact (estate.sources, estate.systems, pack.has_contract, estate.has_legacy_code), 'not <fact>', or '<fact> <op> <number>'." },
           "after": { "type": "array", "items": { "type": "string", "pattern": "^\\s*[A-Za-z0-9_.-]+\\s*(\\(\\s*approved\\s*\\))?\\s*$" }, "description": "Stages this waits for; '(approved)' waits for their approval gate." },
@@ -36,6 +36,6 @@
     }
   },
   "definitions": {
-    "artifact": { "enum": ["spec", "workflow", "target-context", "source-context", "estate", "conformance-report", "quality-rules", "mapping", "entity-resolution", "model", "converted-code", "pipeline-spec", "artifacts", "reconciliation-report", "validation-report", "deployment", "documentation", "platform-setup-plan", "bi-migration-plan", "legacy-code", "contract"] }
+    "artifact": { "enum": ["spec", "workflow", "target-context", "source-context", "estate", "conformance-report", "quality-rules", "mapping", "entity-resolution", "model", "converted-code", "pipeline-spec", "artifacts", "reconciliation-report", "validation-report", "deployment", "documentation", "platform-setup-plan", "bi-migration-plan", "legacy-code", "contract", "ontology", "semantic-model"] }
   }
 }

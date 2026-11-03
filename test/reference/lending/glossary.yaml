@@ -1,0 +1,35 @@
+# The lending fixture's business vocabulary (ONT1): the enterprise's terms and LOANSYS's own words, each with its
+# scope, and the columns some are bound to. Loaded as business_term facts by the ONT1 test.
+terms:
+  - term: Facility
+    definition: A committed line of credit the bank extends to a borrower, drawn as needed up to a limit.
+    scope: { level: enterprise }
+  - term: Deal
+    definition: LOANSYS's word for a facility.
+    scope: { level: system, name: loansys }
+  - term: Borrower
+    definition: The party that receives the funds and must repay them.
+    scope: { level: enterprise }
+    boundTo: [loansys.brwr.brwr_id]
+  - term: Obligor
+    definition: The credit risk team's word for the borrower.
+    scope: { level: line_of_business, name: credit risk }
+  - term: Loan Application
+    definition: A prospective borrower's request for credit, with what the lender needs to decide.
+    scope: { level: enterprise }
+  - term: Collateral Value
+    definition: The appraised value of the collateral pledged against a facility.
+    scope: { level: enterprise }
+    boundTo: [loansys.collat.collat_val]
+  - term: Commercial Mortgage
+    definition: A mortgage on commercial real estate.
+    scope: { level: line_of_business, name: commercial banking }
+  - term: Guarantee
+    definition: A third party's promise to repay if the borrower can't.
+    scope: { level: enterprise }
+  - term: Repayment
+    definition: A payment of principal or interest by the borrower.
+    scope: { level: enterprise }
+  - term: Maturity Date
+    definition: The date the facility's last payment is due.
+    scope: { level: enterprise }

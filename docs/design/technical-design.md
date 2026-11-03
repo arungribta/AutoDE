@@ -952,7 +952,7 @@ Under `draft`, the panel calls `draftAtStageBoundary` after a successful stage r
 - Claude Code (v0.52.3): `ClaudeLlmAdapter` writes a temp MCP config with `panelServerEntry` (this extension's bundle; `AUTODE_AGENT_NAME`, `AUTODE_TOOLS`) and runs the CLI with `--output-format stream-json --verbose --mcp-config … --strict-mcp-config --allowedTools mcp__autode__…`. `ClaudeStreamParser` (`src/core/claudeStream.ts`) turns `tool_use` and `tool_result` events into progress lines and audit entries, so traces are the same on every model. The server lists only `AUTODE_TOOLS` when set. The CLI's environment carries `AUTODE_PANEL_RUN=1`, which `autode hook turn` skips.
 - The panel posts the trace with `chatResponse`, persists it on the transcript's `ai` message (`ChatMessage.trace`; history sent to the model uses `content` only) and redraws it on restore.
 
-**Agents.** `agents/semantic-modeler.md` and `agents/knowledge-engineer.md` belong to no stage kind: they work items, and later a `semantic-foundation` workflow (ONT1). Their skills have `stageKinds: []`.
+**Agents.** `agents/semantic-modeler.md` and `agents/knowledge-engineer.md` work items. Since v0.59.0 (ONT1) they also do the `semantic-foundation` template's stages (`semantic-modelling`, `ontology-alignment`; §5.21); their other skills keep `stageKinds: []`, and a request to either in the chat is still a work order of its own.
 
 ### 5.20 Lineage and impact (v0.53.0; CTX-15, LIN)
 
@@ -1008,6 +1008,104 @@ Edges run upstream → downstream (`from`, `to`), keyed `level|from|to`, and car
   - `loadLineage` draws a Cytoscape `preset` layout, one column per hop (`layered`), edges coloured by their first source; or it shows the edge table.
   - `loadImpact` groups items by category.
   - *Export* posts `exportImpact`, which the host answers with `saveText` or `copy` (`knowledgeExplorerModel.ts`).
+
+### 5.21 The ontology, scoped terms and onboarding standards (v0.59.0; CTX-14, ONT1)
+
+Context-layer §6.8. All of it is in `src/engine/ontology/`. It is platform-neutral and has no model.
+
+**Packs** (`pack.ts`).
+- `OntologyPack` (`autode: ontology-pack/1`): `id`, `title`, `prefix`, `standard` { `name`, `version`, `iri`, `licence` { `redistribution`: `allowed` | `forbidden` | `unknown` } }, `distribution` (`shareable` | `workspace`), `source` { `kind`, `ref`, `commit`, `checksum` }, `concepts`, `approved` { `by`, `at`, `revision`, `decision` }.
+- A `Concept` has an `id` (`<prefix>:<LocalName>`, or `ext:` for an extension), `label`, `definition`, `iri`, one `parent`, `broader` (an extension's nearest standard concept), `synonyms`, `relations` [{ `verb`, `target`, `cardinality` }], `attributes` { `identifying`, `notable` }, `hints` { `classifications`, `quality` }, `module` and `status` (`deprecated`).
+- `normalizePack` fixes the order: concepts by id, lists sorted where order carries no meaning. So `stringifyPack` writes the same content as the same text.
+- `packRevision` is the sha256 of the canonical JSON without `approved`.
+- `checkPacks` checks packs together: parents, `broader` and relation targets exist, every concept chains to an `upper:` concept, and no parents loop.
+
+**Store** (`store.ts`).
+- Shipped packs: `<resources>/ontologies/*.yaml`, found from `setOntologyResourcesRoot` (set at start-up by the extension, the CLI and the MCP server) or from `__dirname`.
+  - `upper.yaml` is always in effect.
+  - `fibo-lending.yaml` is a source only.
+- Team packs: `.autode/knowledge/ontology/<id>.yaml` (layout key `ontology`). A team pack's state is `approved` while `approved.revision` matches, `changed` after an edit, `draft` without an approval, and `invalid` when it doesn't parse.
+- `loadOntology(scope)` returns the upper layer plus the approved team packs. A pack whose `checkPacks` errors are not empty is left out, and its errors are listed. It returns a `concepts` map (with each concept's pack), `children`, every `loaded` pack with its state, and `errors`. It is cached per workspace on every file's revision.
+- `findConcept` finds a concept by id, label or synonym.
+
+**Reading RDF** (`rdf.ts`; the P6 decision record is in the roadmap, 2026-11-03).
+- `parseTurtle` uses N3.js's `N3Parser` (its CommonJS build, `n3/lib/N3Parser`, without the stream modules). Blank nodes are renumbered in document order (`_:b0`…), so the output is deterministic.
+- `parseRdfXml` maps the RDF/XML grammar over sax's namespace-aware events:
+  - node elements (a typed node emits `rdf:type`), with `rdf:about`, `rdf:ID` and `rdf:nodeID`, resolved against `xml:base`;
+  - property attributes, `rdf:resource`, `rdf:datatype`, `xml:lang`;
+  - `rdf:parseType` `Resource`, `Collection` (an `rdf:first`/`rdf:rest` list) and `Literal`, and `rdf:li`;
+  - DOCTYPE entities (FIBO writes its files with them), read from the internal subset into sax's `ENTITIES`.
+- `rdfFormat` picks the format from the name and the first characters.
+
+**From triples to concepts** (`convert.ts`, `analyzeTriples`).
+- Classes are `owl:Class`, `rdfs:Class` and `skos:Concept` subjects with an IRI.
+- Labels come from `skos:prefLabel` or `rdfs:label` (English or untagged first). Definitions come from `skos:definition`, `rdfs:comment` or `dct:description`. Synonyms are `skos:altLabel` and FIBO's `synonym` annotation.
+- The parent is the first named `rdfs:subClassOf` or `skos:broader` in the file (several are reported in `warnings`).
+- Relations come from object properties with a domain and range in the file, and from restrictions (`owl:onProperty` with `someValuesFrom`, `allValuesFrom` or `onClass`). Cardinality comes from the qualified and plain cardinalities, and `someValuesFrom` gives `1..*`. A restriction on a datatype property, or to an `xsd:` type, becomes a notable attribute.
+- Ids are local names, with a numbered suffix on a collision. The prefix is `fibo` for FIBO IRIs, else the title's initials.
+- The module is the namespace minus the common base.
+- The licence comes from the ontology's `dct:license`, `dc:rights`, `cc:license` or the repository's LICENSE (`classifyLicence`): an explicit prohibition gives `forbidden`; MIT, Apache-2.0, CC0, CC BY and BSD give `allowed`; anything else gives `unknown`.
+- `suggestPlacement` places a concept the source leaves without a parent, by keywords in its own label, its children's labels and its definition (one regular expression per upper concept, most specific first). It is a suggestion only.
+
+**Onboarding** (`onboard.ts`, `service.ts`).
+- `readSource` reads a source:
+  - `shipped` (a pack);
+  - `file` (a file or folder: RDF files are merged, with blank nodes prefixed per file, and a lone YAML pack is read as it is);
+  - `git` (`stageSource` from porting a skill, with `SOURCE_CAPS`, then a folder in it, with the licence from `detectLicence`).
+- `seedConcepts(concepts, workspaceSignals(graph), vocabulary)`:
+  - The signals are glossary terms (weight 3), tables (2) and columns (1).
+  - Each signal's words go through the customer's vocabulary (`concepts()` from `vocabulary.ts`: abbreviations, synonyms, singular). Storage words (`mstr`, `stg`, `dtl` …) are dropped for tables and columns.
+  - A signal counts for the concepts whose most specific name (label or synonym) it contains.
+- `proposeScope` takes the seeds, adds one hop (each seed's parent and its relation targets), applies the person's `add` and `remove` (or `only`), and lists the ancestors needed to reach the upper layer (`required`).
+- `placementOf` lists the chosen concepts the source leaves unplaced, with the override, else the source's own upper parent, else the suggestion.
+- `buildPack`:
+  - takes the chosen concepts and their ancestors, each placed;
+  - keeps an existing team pack's concepts (it grows);
+  - drops relations and `broader` that point outside the pack and the ontology in effect;
+  - sets `distribution: workspace` unless the licence allows redistribution;
+  - reports every unplaced concept as a problem.
+- `proposeOntologyPack` refuses a pack with problems or with nothing to add, supersedes a pending proposal of the same pack, and files the decision.
+- `exportPack` refuses a `workspace` pack and a pack that isn't approved.
+
+**The decision** (`decision.ts`; kind `ontology` in `decisionStore.ts`, wired in `proposals.ts`). The payload is { `id`, `content` (the whole pack), `reason`, `added` }. The subject is `ontology:<id>` at the team pack's current revision, so a pack edited since is superseded rather than applied.
+- `validateOntologyPayload` checks that the pack parses, that `checkPacks` passes with the other packs in effect, that no concept id clashes with another pack, and that no current concept is dropped. A deprecation is a warning.
+- `applyOntologyPayload` writes the pack with `approved` set to the approver and the revision.
+- `approveTeamPack` approves a hand-edited pack, for `autode ontology approve`, a person at a terminal.
+
+**Links** (`links.ts`).
+- A fact of kind `meaning` (`assertions.ts`, schema in `assertionSchemas.ts`) has the value { `concept`, `match`, `term` }. Its predicate is `means` (subject: a term node) or `represents` (subject: a table or logical table).
+- It is high stakes (not in `LOW_STAKES_ASSERTION_KINDS`), so a person confirms it in the Context Inbox.
+- It is many per subject in `conflicts.ts`: a term may have several links, and the concept page flags two `exact` ones.
+- `business_term`'s value gains `scope` { `level`: `enterprise` | `line_of_business` | `system` | `problem`, `name` }. `termScope` reads it, else the fact's `specId` (`problem`), else `enterprise`.
+- `boundTo` gives the columns a term is bound to (`mappedNodeIds`, `maps_to` edges, the definitions' `boundTo`).
+- `alignTerms` gives candidates. `exact` is the same word set as a name. Otherwise the longest name the term contains: `related` when the remaining words are all attribute words (`amount`, `date`, `value` …), else `broader`.
+- `representsCandidates` matches table names without storage words. Links already live or proposed are skipped.
+- `meaningProposals` and `proposeAlignment` record the candidates through `recordChatProposals`, which skips duplicates.
+
+**In the Explorer** (`explore.ts`). `ExploreSources.ontology` is loaded by `exploreSources`.
+- `buildIndex` adds `ontologyNodes`: a `concept` node per concept in effect, with id `concept:<concept id>`, aliases (its id and synonyms) and metadata (pack, IRI, parent, module, upper). It adds `broader` edges, and `means` and `represents` edges from live links only (`supportedBy` the fact).
+- The asset type `concept` is in the context layer.
+- `meaning.concepts` on every asset page comes from `conceptsOf`: a term through `means`, a column through its terms (`termIdsOf`), a table through `represents`.
+- `conceptPage` builds the `concept` section of a concept's asset context:
+  - the concept and its ancestors, children, relations and referrers;
+  - terms sorted by `SCOPE_RANK`;
+  - tables that represent it, and tables reached through bound columns, per system;
+  - semantic nodes over those tables and columns;
+  - the facts (meaning facts and facts about its terms), and the rules from each table's governance;
+  - articles about `concept:<id>` or `<id>`;
+  - conflicts: *represents* versus the key columns' concepts under another upper concept, and two exact means;
+  - gaps, and proposed links.
+- `ontologyOverview` gives the packs, the tree and the glossary. `ExploreRequest` gains `concept` (through `findConcept`) and `ontology`.
+
+**Surfaces.**
+- CLI `autode ontology` (`list`, `concepts`, `glossary`, `analyze`, `preview`, `onboard`, `approve`, `align`, `link`, `export`) and `autode explore concept`. The renderers are `renderConceptMarkdown` and `renderOntology`.
+- MCP `ontologyTools.ts`: `autode_ontology`, `autode_get_concept_context`, `autode_ontology_analyze` (read) and `autode_propose_ontology_pack`, `autode_ontology_align` (read), `autode_propose_concept_links` (propose). A file source must be inside the workspace, and there is no Git source.
+- VS Code:
+  - the Explorer's Ontology view and the concept tab (`media/explorer.html`);
+  - an `ontology` message with ops `shipped`, `pick`, `analyze`, `preview`, `propose`, `align` and `proposeLinks`, answered by `answerOntology` in `knowledgeExplorerModel.ts`;
+  - `pickOntologySource`, a host action that opens VS Code's file dialog.
+- The maintenance rule `term-unaligned` (`queue.ts`) is raised only while a team pack is in effect.
+- The stage kinds `ontology-alignment` and `semantic-modelling` (`stageKinds.ts`), used by `workflows/semantic-foundation.yaml`. In `chatFrontDoor.ts`, `LAYER_ROLES` keeps the layers' agents as work orders of their own.
 
 ## 6. Data Platforms
 
@@ -2288,6 +2386,8 @@ src/engine/maintenance/
   brief.ts, policy.ts, queue.ts, scan.ts, turns.ts
 src/engine/metadata/
   model.ts, record.ts
+src/engine/ontology/
+  convert.ts, decision.ts, links.ts, onboard.ts, pack.ts, rdf.ts, service.ts, store.ts
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters
@@ -2315,7 +2415,7 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   coverage.ts, documentApproval.ts, events.ts, instance.ts, journey.ts, planning.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, maintenanceTools.ts, platform.ts, platformOperationTools.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, maintenanceTools.ts, ontologyTools.ts, platform.ts, platformOperationTools.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 ```
 <!-- /generated:source-tree -->
 

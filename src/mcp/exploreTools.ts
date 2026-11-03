@@ -8,6 +8,8 @@ import type { ChangeKind } from '../engine/explore/lineage';
 import { computeRevision } from '../engine/context/contextStore';
 import { articleSummary, checkArticle, readArticle } from '../engine/knowledge/articles';
 import { loadMetadataConfig } from '../engine/metadata/model';
+import * as path from 'node:path';
+import { readTeamPack, shippedDir } from '../engine/ontology/store';
 
 /**
  * The Knowledge Explorer over MCP (C5b; docs/specs/context-layer.md
@@ -114,6 +116,7 @@ export function exploreTools(): EngineTool[] {
 
 /** `autode://explore/overview`, `autode://explore/estate` and `autode://asset/{id}`. */
 export const ASSET_RESOURCE_TEMPLATE = { uriTemplate: 'autode://asset/{id}', name: 'Asset context', description: 'Everything AutoDE knows about one asset (as autode_get_asset_context).', mimeType: 'application/json' };
+export const ONTOLOGY_RESOURCE_TEMPLATE = { uriTemplate: 'autode://ontology/{pack}', name: 'Ontology pack', description: 'An ontology pack as YAML (ontology-pack/1): the upper layer, a shipped standard, or a pack of the team with its approval.', mimeType: 'application/yaml' };
 export const ARTICLE_RESOURCE_TEMPLATE = { uriTemplate: 'autode://article/{slug}', name: 'Knowledge article', description: 'A knowledge article, Markdown with its front matter (about, cites, status, approval).', mimeType: 'text/markdown' };
 
 export function exploreResources(): Array<{ uri: string; name: string; description: string; mimeType: string }> {
@@ -136,6 +139,17 @@ export async function readExploreResource(ws: EngineWorkspace, key: string): Pro
     if (!a) throw new EngineToolError('NOT_FOUND', `No article "${key.slice('article/'.length)}" (autode_search_articles).`);
     const text = fs.readFileSync(a.file, 'utf8');
     return { text, revision: computeRevision(text), mimeType: 'text/markdown' };
+  }
+  else if (key.startsWith('ontology/')) {
+    // ONT1: a pack as it is on disk; the team's pack wins over a shipped one with the same id.
+    const id = decodeURIComponent(key.slice('ontology/'.length));
+    const scope = { workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot };
+    const team = readTeamPack(scope.workspaceRoot, id);
+    const dir = shippedDir(scope.resourcesRoot);
+    const file = team ? path.join(scope.workspaceRoot, team.file) : dir && /^[a-z0-9][a-z0-9-]*$/.test(id) && fs.existsSync(path.join(dir, `${id}.yaml`)) ? path.join(dir, `${id}.yaml`) : undefined;
+    if (!file) throw new EngineToolError('NOT_FOUND', `No ontology pack "${id}" (autode_ontology lists them).`);
+    const text = fs.readFileSync(file, 'utf8');
+    return { text, revision: computeRevision(text), mimeType: 'application/yaml' };
   }
   else if (key.startsWith('asset/')) {
     const r = await explore(ws, { type: 'asset', id: decodeURIComponent(key.slice('asset/'.length)) });

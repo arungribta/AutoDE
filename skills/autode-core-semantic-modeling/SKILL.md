@@ -1,10 +1,10 @@
 ---
 name: autode-core-semantic-modeling
 description: Draft, refine and repair AutoDE's shared semantic models (Snowflake semantic model YAML) from confirmed facts - tables and keys, relationships, dimensions, facts, metrics, synonyms, verified queries, kpi tags - resolve ambiguous base tables, bind models to their system, and propose each change for a person to approve. Use it when a semantic model is to be created, when a maintenance item names the semantic modeler, or when a metric, join or term has no counterpart in the layer.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_search_assets, mcp__autode__autode_get_asset_context, mcp__autode__autode_explore_graph, mcp__autode__autode_semantic_list, mcp__autode__autode_semantic_check, mcp__autode__autode_semantic_draft, mcp__autode__autode_semantic_resolve, mcp__autode__autode_propose_semantic_model, mcp__autode__autode_propose_assertion]
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_search_assets, mcp__autode__autode_get_asset_context, mcp__autode__autode_explore_graph, mcp__autode__autode_semantic_list, mcp__autode__autode_semantic_check, mcp__autode__autode_semantic_draft, mcp__autode__autode_semantic_resolve, mcp__autode__autode_propose_semantic_model, mcp__autode__autode_propose_assertion, mcp__autode__autode_get_concept_context, mcp__autode__autode_ontology]
 metadata:
   scope: core
-  stageKinds: []
+  stageKinds: [semantic-modelling]
   platforms: [any]
   version: 1
   owner: AutoDE

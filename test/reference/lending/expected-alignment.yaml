@@ -1,0 +1,21 @@
+# What aligning the lending fixture's vocabulary to the FIBO lending pack is expected to propose (ONT1 acceptance:
+# "the lending fixture's terms align with the expected concepts"). A term listed under unaligned gets no link:
+# its concept isn't in the pack (an interest rate or a date is an attribute, not a concept).
+means:
+  Facility: { concept: fibo:CreditFacility, match: exact }
+  Deal: { concept: fibo:CreditFacility, match: exact }
+  Borrower: { concept: fibo:Borrower, match: exact }
+  Obligor: { concept: fibo:Borrower, match: exact }
+  Loan Application: { concept: fibo:LoanApplication, match: exact }
+  Collateral Value: { concept: fibo:Collateral, match: related }
+  Commercial Mortgage: { concept: fibo:Mortgage, match: broader }
+  Guarantee: { concept: fibo:Guaranty, match: exact }
+  Repayment: { concept: fibo:Payment, match: exact }
+unaligned: [Maturity Date]
+represents:
+  loansys.deal_mstr: fibo:CreditFacility
+  loansys.brwr: fibo:Borrower
+  loansys.loan_appl: fibo:LoanApplication
+  loansys.collat: fibo:Collateral
+  loansys.pmt: fibo:Payment
+  loansys.guar: fibo:Guaranty

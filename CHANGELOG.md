@@ -6,6 +6,63 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.59.0
+
+ONT1, the canonical ontology, scoped terminology and onboarding standards ([context-layer.md](docs/specs/context-layer.md) §6.8). Meaning now has three layers: an upper layer, industry packs (FIBO first) and the team's extensions, with the business's terms linked to them.
+
+- **The ontology.**
+  - The **upper layer** (`ontologies/upper.yaml`, always in effect) has eight concepts: Party, Agreement, Product, Account, Transaction, Location, Event and Document.
+  - **Packs** are plain YAML (`autode: ontology-pack/1`):
+    - concepts, each with one parent, its source IRI, a definition, synonyms, relations with cardinality hints, identifying and notable attributes, and hints (typical classifications and quality rules, offered later as candidates and never applied silently);
+    - the standard, its pinned version and its licence.
+    - They have no axioms and use no reasoner.
+  - The shipped **FIBO lending** pack (`ontologies/fibo-lending.yaml`, 23 concepts, MIT) is a source to onboard from, never in effect by itself.
+  - The team's packs are in `.autode/knowledge/ontology/`. A pack is in effect while a person's approval matches its content; edited afterwards, it is `changed` and out of effect until approved again (`autode ontology approve <pack>`, at a terminal). Every concept must chain to the upper layer, and a pack whose concepts don't connect is left out, with its errors.
+- **Onboarding a standard**, the same steps everywhere: the Knowledge Explorer's new **Ontology** view (*Onboard a standard…*), `autode ontology analyze | preview | onboard`, and MCP `autode_ontology_analyze` (read-only) and `autode_propose_ontology_pack`.
+  1. *Source*: a shipped pack, or the team's own copy of a standard: an OWL or SKOS file or folder in Turtle or RDF/XML, or an AutoDE pack.
+     - In a terminal or VS Code, it can also be a Git repository, staged with the limits and checks of porting a skill. Nothing is downloaded automatically.
+     - Over MCP an agent onboards only from a shipped pack or a file in the workspace.
+  2. *Analysis*: concepts, relations (object properties with a domain and range, and OWL restrictions, with cardinality), modules, version, and the licence (from the ontology's `dct:license` or rights, or the repository's LICENSE).
+  3. *Scope*: seed concepts come from the workspace's glossary terms, tables and columns, through the customer's vocabulary (abbreviations, synonyms), one hop out (parents and relation targets), with the ancestors they need; the person adds or removes concepts.
+  4. *Placement*: each concept the source leaves without a parent is placed under an upper concept. AutoDE suggests one; the person decides. An unplaced concept is a problem, never a guess.
+  5. *Approval*: a workspace-level decision, kind `ontology`, which a person approves.
+     - Approved, the pack is written with that person's approval of its exact revision.
+     - Onboarding the same standard again grows the team's pack.
+     - A proposal that drops a concept is refused: concepts are deprecated, never deleted.
+  - The same source and the same choices give the same pack, byte for byte. The Turtle and RDF/XML forms of one ontology give the same concepts.
+  - **A licence that forbids redistribution, or one AutoDE doesn't recognise,** keeps the pack in this workspace (`distribution: workspace`): `autode ontology export` refuses it.
+- **Terms and concepts.**
+  - New fact kind **`meaning`**, both high stakes, confirmed by a person in the Context Inbox:
+    - `means` (a glossary term means a concept, with a match type as SKOS names it: exact, broader, narrower, related);
+    - `represents` (a table or logical table represents a concept, the entity-level link estate merge will use).
+  - A glossary term gains a **scope**: the enterprise, a line of business, a named system or one business problem. It defaults to the problem the term was recorded for, else the enterprise.
+  - Columns reach concepts only through the terms bound to them.
+  - **Aligning the vocabulary** (`autode ontology align [--propose]`, the Ontology view's *Align the vocabulary…*, MCP `autode_ontology_align` and `autode_propose_concept_links`; `autode ontology link` for one link by hand):
+    - deterministic candidates: *exact* when a term is a name or synonym of a concept; *broader* when it says more ("Commercial Mortgage" → Mortgage); *related* when only attribute words follow the name ("Collateral Value" → Collateral);
+    - *represents* for tables whose name, without storage words, is a concept's name.
+    - A person checks and proposes them.
+  - New maintenance rule **`term-unaligned`**, for the knowledge engineer: once a team pack is in effect, terms that mean no concept.
+- **The concept page**: in the Explorer (a concept's *Concept* tab), `autode explore concept <id|name>` and MCP `autode_get_concept_context`. It is computed from every path to the concept:
+  - its place under the upper layer, its relations and attributes;
+  - the terms that mean it, most specific scope first;
+  - the tables that represent it and the columns bound through terms, per system;
+  - the semantic layer over them, the facts, rules and articles;
+  - links waiting in the Inbox, and gaps;
+  - conflicts: a *represents* link the table's key columns disagree with (their terms mean a concept under another upper concept), or a term that means two concepts exactly.
+- **Concepts in the graph and on asset pages.** Concepts are context-layer assets (search, facets, graph nodes), with `broader`, `means` and `represents` edges from confirmed facts. A proposed link is not in the graph. An asset's Meaning tab lists its concepts. A knowledge article can be *about* a concept.
+- **The Ontology view** in the Knowledge Explorer: the packs with their state and licence, the concept tree with how many terms and tables reach each, the glossary with scope and concepts, onboarding and alignment.
+- **The knowledge engineer's ontology skills**, `autode-core-ontology-onboarding` and `autode-core-term-alignment`, and its six new tools. A new workflow template, **`semantic-foundation`** (specify → plan → sources → onboard and align → shared semantic models), with two new stage kinds: `ontology-alignment` (the knowledge engineer) and `semantic-modelling` (the semantic modeler). A request to either agent in the chat is still a work order of its own.
+- **A lending fixture** (`test/reference/lending/`) beside the retail reference problem: LOANSYS's seven cryptic tables, a glossary with scoped terms, its vocabulary, the expected alignment, and one ontology in Turtle and RDF/XML plus a house ontology whose licence forbids redistribution.
+- **The RDF parser** (P6 decision record, in the roadmap's decision log, 2026-11-03): N3.js 2.13.12's Turtle parser (MIT) and sax 1.6.1 (BlueOak-1.0.0, no dependencies), for which AutoDE maps the RDF/XML grammar itself. Both are bundled (about 71 KB minified) and listed in `THIRD-PARTY-NOTICES.md`.
+- Also: the workflow template JSON Schema now lists the `manual` stage kind (added in PLN1), along with the two new kinds.
+
+Deviations from the specification:
+- The shipped FIBO pack is curated by hand, with FIBO's module paths and IRIs, rather than converted from FIBO's files when AutoDE is built: the build has no FIBO copy to read and downloads nothing. Its IRIs should be checked against a FIBO release; a team that onboards from its own copy of FIBO gets FIBO's own IRIs and definitions.
+- The spec names the *semantic architect* proposing seed concepts. Seeds come from the engine's deterministic matching instead, and the knowledge engineer's skill judges and adjusts them.
+- A licence AutoDE doesn't recognise keeps the pack in the workspace too, not only one that forbids redistribution.
+- Over MCP, a Git source is not offered: a person stages a repository (CLI or VS Code).
+- Two stage kinds were added for the `semantic-foundation` template; the spec only named the template.
+
 ## 0.58.0
 
 POP3, agent-proposed operations and drift ([platform-operations.md](docs/specs/platform-operations.md) §6.4). The platform boundary is complete: POP1 to POP4, and POP3.

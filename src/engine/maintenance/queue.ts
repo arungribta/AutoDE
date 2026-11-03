@@ -1,4 +1,6 @@
 import * as fs from 'node:fs';
+import { loadOntology } from '../ontology/store';
+import { meaningLinks } from '../ontology/links';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Assertion, isLive } from '../context/assertions';
@@ -47,9 +49,10 @@ export type MaintenanceRule =
   | 'unreviewed-turns'        // chat turns that read like facts, not yet reviewed
   | 'stage-stale'             // a stage's deliverable rests on a fact that changed (§8.3)
   | 'operation-drift'         // POP3: an operation fails on the platform's version, or a view or column it reads is gone
-  | 'object-kind-unread';     // POP3: a platform reports objects of a kind its definition doesn't name
+  | 'object-kind-unread'      // POP3: a platform reports objects of a kind its definition doesn't name
+  | 'term-unaligned';         // ONT1: glossary terms that mean no concept while the team has a pack in effect
 
-export const MAINTENANCE_RULES: readonly MaintenanceRule[] = ['semantic-contradiction', 'semantic-broken', 'semantic-ambiguous', 'semantic-gap', 'article-stale', 'glossary-structure', 'document-reading', 'unreviewed-turns', 'stage-stale', 'operation-drift', 'object-kind-unread'];
+export const MAINTENANCE_RULES: readonly MaintenanceRule[] = ['semantic-contradiction', 'semantic-broken', 'semantic-ambiguous', 'semantic-gap', 'article-stale', 'glossary-structure', 'document-reading', 'unreviewed-turns', 'stage-stale', 'operation-drift', 'object-kind-unread', 'term-unaligned'];
 
 export interface MaintenanceItem {
   /** The cause: `<rule>:<what>[:<hash of the difference>]`. Stable while the cause holds. */
@@ -188,6 +191,17 @@ function glossaryItem(input: MaintenanceInput): MaintenanceItem[] {
   return [{ key: `glossary-structure:${h8(terms.map((a) => a.id).sort().join('|'))}`, rule: 'glossary-structure', agent: 'knowledge-engineer', title: `${names.length} glossary term(s) fit no category`, detail: names.slice(0, 20).join(', ') + (names.length > 20 ? ` and ${names.length - 20} more` : ''), next: 'Place each term: its category, broader, narrower and related terms, and its steward if known. Propose each as a correction of the term fact (autode_propose_assertion, same kind, subject and predicate).', subjects: terms.map((a) => a.id), cli: 'autode facts list --kind business_term' }];
 }
 
+/** ONT1 (§6.8): once a standard is onboarded, glossary terms that mean no concept (no link confirmed or waiting). */
+function alignmentItem(input: MaintenanceInput): MaintenanceItem[] {
+  const ontology = loadOntology({ workspaceRoot: input.workspaceRoot });
+  if (ontology.packs.length < 2) return [];
+  const linked = new Set(meaningLinks(input.sources.assertions, { includeProposed: true }).filter((l) => l.predicate === 'means').map((l) => l.subject));
+  const terms = input.sources.graph.nodes.filter((n) => n.type === 'business_term' && !linked.has(n.id));
+  if (!terms.length) return [];
+  const names = terms.map((t) => t.label).sort();
+  return [{ key: `term-unaligned:${h8(terms.map((t) => t.id).sort().join('|'))}`, rule: 'term-unaligned', agent: 'knowledge-engineer', title: `${names.length} glossary term(s) mean no concept`, detail: names.slice(0, 20).join(', ') + (names.length > 20 ? ` and ${names.length - 20} more` : ''), next: 'Align them: autode_ontology_align lists the matches AutoDE finds; judge each (exact, broader, related) and propose them with autode_propose_concept_links. A term no concept fits may need an extension concept (ext:), proposed as a pack.', subjects: terms.map((t) => t.id), cli: 'autode ontology align' }];
+}
+
 /** Documents AutoDE touched (pack documents, the last workspace scan) whose current content hasn't been read for knowledge. */
 function documentItems(input: MaintenanceInput): MaintenanceItem[] {
   const problems = input.all ? listProblems(input.workspaceRoot).map((p) => p.id) : input.problemId ? [input.problemId] : [];
@@ -278,7 +292,7 @@ export function maintenanceItems(input: MaintenanceInput): MaintenanceItem[] {
   const refs = tableRefs(input.sources.graph);
   const safe = (f: () => MaintenanceItem[]) => { try { return f(); } catch { return []; } };
   const items = [
-    ...safe(() => semanticFindings(input, refs)), ...safe(() => semanticGaps(input, refs)), ...safe(() => articleItems(input)), ...safe(() => glossaryItem(input)),
+    ...safe(() => semanticFindings(input, refs)), ...safe(() => semanticGaps(input, refs)), ...safe(() => articleItems(input)), ...safe(() => glossaryItem(input)), ...safe(() => alignmentItem(input)),
     ...safe(() => documentItems(input)), ...safe(() => turnItems(input)), ...safe(() => stageItems(input)), ...safe(() => platformItems(input))
   ];
   const seen = new Set<string>();

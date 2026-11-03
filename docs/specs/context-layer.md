@@ -738,8 +738,8 @@ Impact uses graph traversal, never similarity. It is available on all three surf
 | `autode_search_assets` `{ query, facets? }` (C5b) | The Knowledge Explorer's search. |
 | `autode_get_asset_context` `{ asset }` (C5b) | Asset context (§7.5). |
 | `autode_lineage` `{ asset, direction, depth, level }`, `autode_impact` `{ change }` (LIN) | Traversals (§8.5). |
-| `autode_ontology_list`, `autode_ontology_concept`, `autode_ontology_analyze` (ONT1) | Read the canonical ontology; analyse a standard for onboarding (read-only). |
-| `autode_propose_ontology_import` (ONT1) | Proposes an onboarding, a workspace-level decision for a person. `means` links go through `autode_propose_assertion`. |
+| `autode_ontology`, `autode_get_concept_context`, `autode_ontology_analyze`, `autode_ontology_align` (ONT1) | Read the canonical ontology and the glossary; a concept's page; analyse a standard for onboarding; alignment candidates (all read-only). |
+| `autode_propose_ontology_pack`, `autode_propose_concept_links` (ONT1) | Propose a pack (a workspace-level decision for a person) and `means` / `represents` links (facts for the Context Inbox; `autode_propose_assertion` with kind `meaning` also works). |
 | Resources `autode://asset/{id}`, `autode://ontology/{pack}` | Read-only views with revisions. |
 
 There is deliberately no `confirm` or `reject` tool over MCP: confirmation is a human action in the extension UI (principle P3).
@@ -905,6 +905,8 @@ Acceptance:
 Shipped in v0.53.0 (CHANGELOG.md 0.53.0; technical-design.md §5.20). Still open: the platform reads, written as platform operations (Snowflake `ACCESS_HISTORY` and `OBJECT_DEPENDENCIES`, Databricks `system.access` lineage), and the manual check against a live Snowflake account.
 
 ### Phase ONT1: Canonical ontology, terminology and onboarding standards
+Shipped in v0.59.0 (CHANGELOG.md 0.59.0, with the deviations: a hand-curated FIBO pack rather than one converted at build time; seeds from deterministic matching, judged by the knowledge engineer; an unrecognised licence keeps a pack in the workspace too; two stage kinds for the template; technical-design.md §5.21). Still open: checking the FIBO pack's IRIs against a FIBO release, and the manual check (manual-verification.md Part 69).
+
 Scope:
 - §6.8: the upper layer; the pack format; a FIBO pack (about 20–40 core concepts, starting with lending); onboarding a standard in the Explorer, on the CLI (`autode ontology`) and over MCP; term scope and `means` links.
 - The knowledge engineer's ontology skills (onboarding a standard, aligning terms, *represents* links), and the `semantic-foundation` workflow template.
