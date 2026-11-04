@@ -1,0 +1,19 @@
+# AutoDE standard (standard/1; docs/specs/context-layer.md §6.8): the Banking Industry Architecture Network.
+autode: standard/1
+id: bian
+title: BIAN
+publisher: BIAN
+industry: Banking
+description: BIAN's business objects - parties, products, agreements, accounts and their parts - as its Semantic APIs define them (OpenAPI), across every service domain.
+home: https://bian.org/deliverables/service-landscape/
+licence: { name: Apache License 2.0, spdx: Apache-2.0, redistribution: allowed }
+format: openapi
+# BIAN's releases are folders of one repository: pinned to the commit. Release 13: release 14's folder is named 'oas3 ' (a trailing space), which Windows can't check out.
+release: { version: '13.0.0', ref: b58bf4c2c300dd018afc084e9bb24b7adaaa3500, date: 2025-06-30 }
+source: { git: https://github.com/bian-official/public.git, path: release13.0.0/semantic-apis/oas3/yamls }
+reader:
+  prefix: bian
+  # BIAN marks a business object's property format class, a datatype's datatype; enumerations end in values.
+  conceptFormat: class
+  datatypeFormat: datatype
+  enumName: 'values$'

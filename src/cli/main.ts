@@ -28,7 +28,9 @@ import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/
 import { renderAssetMarkdown, renderConceptMarkdown, renderGraph, renderImpactCsv, renderImpactMarkdown, renderLineage, renderOntology, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
 import type { OntologyOverview } from '../engine/explore/explore';
 import { OntologySource, shippedSources } from '../engine/ontology/onboard';
-import { OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, exportPack, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, browseSource, exportPack, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { parseStandard, standardsCatalog } from '../engine/ontology/standards';
+import { standardIsLocal } from '../engine/ontology/onboard';
 import { approveTeamPack } from '../engine/ontology/decision';
 import { findConcept } from '../engine/ontology/store';
 import { MATCH_TYPES, MatchType } from '../engine/ontology/pack';
@@ -271,6 +273,9 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
 
 Ontology (ONT1: canonical concepts, standards onboarded as packs, business terms aligned to them):
   ontology [list]              Packs (the upper layer, the team's with their state) and the shipped sources to onboard from
+  ontology standards           The standards to onboard from (FIBO, CIM, BIAN, the team's and proposed ones): publisher, industry, licence, pinned release, how each is had
+  ontology browse <standard|source> [--whole] [--search <words>] [--parent <id>] [--concept <id>] [--decision <d>]   A standard's concepts as a tree, a search, or one concept in full (a standard's repository is fetched on request, then read from this machine)
+  ontology propose-standard <file.yaml> --reason "<why; where from>"   Propose a team standard (standard/1) for a person's approval
   ontology concepts            The concepts in effect as a tree under the upper layer, with how many terms and tables reach each
   ontology glossary            Each glossary term with its scope and the concepts it means
   ontology analyze <source> [--git <url> --ref r --subdir p] [--add ids] [--remove ids] [--only ids] [--place id=upper:X]… [--prefix p] [--pack id]
@@ -482,6 +487,11 @@ const OPTIONS = {
   subdir: { type: 'string' },
   match: { type: 'string' },
   propose: { type: 'boolean' },
+  whole: { type: 'boolean' },
+  search: { type: 'string' },
+  parent: { type: 'string' },
+  concept: { type: 'string' },
+  decision: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' }
 } as const;
@@ -1988,12 +1998,57 @@ async function cmdOntology(ctx: Ctx, rest: string[]): Promise<number> {
   const sourceOf = (): OntologySource => {
     if (ctx.values.git) return { kind: 'git', url: ctx.values.git, ...(ctx.values.ref ? { ref: ctx.values.ref } : {}), ...(ctx.values.subdir ? { path: ctx.values.subdir } : {}) };
     const ref = words.join(' ');
-    if (!ref) throw new CliError(EXIT.USAGE, `ontology ${sub} <shipped pack | file | folder> (or --git <url> [--ref r] [--subdir p]); shipped: ${shippedSources(ctx.resourcesRoot).map((s) => s.id).join(', ')}.`);
+    if (!ref) throw new CliError(EXIT.USAGE, `ontology ${sub} <standard | shipped pack | file | folder> (or --git <url> [--ref r] [--subdir p]); standards: ${standardsCatalog(scope).map((s) => s.id).join(', ')} (autode ontology standards).`);
+    // A standard of the catalog (fibo, cim-cgmes, bian, the team's), else a shipped pack, else a file.
+    if (standardsCatalog(scope).some((s) => s.id === ref)) return { kind: 'standard', id: ref, ...(ctx.values.whole ? { whole: true } : {}), ...(ctx.values.decision ? { decision: ctx.values.decision } : {}) };
     if (shippedSources(ctx.resourcesRoot).some((s) => s.id === ref)) return { kind: 'shipped', id: ref };
     return { kind: 'file', path: path.resolve(ctx.io.cwd, ref) };
   };
   const graph = async () => (await workspace(ctx, ctx.values.problem).contextSources()).graph as WorkspaceGraph;
   const fail = (err: unknown): never => { if (err instanceof port.PortError || err instanceof OntologyProposalError) throw new CliError(EXIT.FAILED, (err as Error).message); throw err; };
+  if (sub === 'standards') {
+    const list = standardsCatalog(scope).map((s) => ({ ...s, local: standardIsLocal(scope, s.id, false, s.decision) }));
+    const lines = list.map((s) => `  ${s.id.padEnd(14)} ${s.title}  (${s.industry}; ${s.publisher})\n    ${s.format}, ${s.licence.spdx ?? s.licence.name}${s.licence.redistribution !== 'allowed' ? ' (stays in the workspace)' : ''}, release ${s.release.version}${s.origin === 'proposed' ? `  PROPOSED ${s.decision}: try it with autode ontology browse ${s.id} --decision ${s.decision}, approve with autode decisions approve ${s.decision}` : s.origin === 'team' ? '  the team\'s' : ''}\n    ${s.availability === 'shipped-pack' ? 'a pack ships with AutoDE' : s.local ? 'read on this machine' : `fetched on request: ${s.source}`}${s.onboarded.length ? `; onboarded: ${s.onboarded.map((o) => `${o.pack} (${o.state}, ${o.concepts})`).join(', ')}` : ''}`);
+    emit(ctx, { ok: true, standards: list }, ['Standards to onboard from:', ...lines, '', 'Browse one: autode ontology browse <id> [--whole] [--search <words>]; onboard: autode ontology onboard <id>. A team adds a standard: autode ontology propose-standard <file.yaml> --reason "<why and where from>".'].join('\n'));
+    return EXIT.OK;
+  }
+  if (sub === 'propose-standard') {
+    const file = words[0];
+    if (!file || !ctx.values.reason) throw new CliError(EXIT.USAGE, 'ontology propose-standard <file.yaml> --reason "<why the team needs it; the publisher\'s page, the release and the licence it was checked against>"');
+    const full = path.resolve(ctx.io.cwd, file);
+    if (!fs.existsSync(full)) throw new CliError(EXIT.NOT_FOUND, `No file "${file}".`);
+    const content = fs.readFileSync(full, 'utf8');
+    const parsed = parseStandard(content);
+    if (!parsed.def) throw new CliError(EXIT.FAILED, `${file}: ${parsed.errors.join('; ')}`);
+    try {
+      const d = propose(new DecisionStore(ctx.workspaceRoot), { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot }, 'standard', { id: parsed.def.id, content, reason: ctx.values.reason }, { proposedBy: { host: 'cli', client: actorOf(ctx) } });
+      emit(ctx, { ok: true, decision: { id: d.id, title: d.title } }, `Proposed ${d.id}: ${d.title}. Try it first (autode ontology browse ${parsed.def.id} --decision ${d.id}), then a person approves it (autode decisions approve ${d.id}).`);
+      return EXIT.OK;
+    } catch (err) {
+      if (err instanceof ProposalValidationError) throw new CliError(EXIT.FAILED, `The standard doesn't pass its checks: ${err.report.errors.join(' ')}`);
+      throw err;
+    }
+  }
+  if (sub === 'browse') {
+    try {
+      const src = sourceOf();
+      const r = browseSource(scope, src, { ...(ctx.values.search ? { query: ctx.values.search } : {}), ...(ctx.values.parent ? { parent: ctx.values.parent } : {}), ...(ctx.values.concept ? { concept: ctx.values.concept } : {}), ...(ctx.values.all ? { limit: 500 } : {}) }, opts);
+      const head = `${r.source.title}${r.version ? ` ${r.version}` : ''} (${r.licence.spdx ?? r.licence.name}${r.distribution === 'workspace' ? ', stays in the workspace' : ''}): ${r.counts.concepts} concept(s), ${r.counts.relations} relation(s), ${r.counts.modules} module(s)${r.source.commit ? ` @ ${r.source.commit.slice(0, 12)}` : ''}`;
+      const lines = [head];
+      if (r.concept) {
+        const c = r.concept;
+        lines.push('', `${c.label}  [${c.id}]${c.iri ? `  ${c.iri}` : ''}`, ...(c.ancestors.length ? [`  under: ${[...c.ancestors].reverse().map((a) => a.label).join(' › ')}`] : []), ...(c.definition ? [`  ${c.definition}`] : []),
+          ...(c.synonyms?.length ? [`  synonyms: ${c.synonyms.join(', ')}`] : []), ...(c.children.length ? [`  narrower: ${c.children.map((x) => x.label).join(', ')}`] : []),
+          ...(c.relations ?? []).map((x) => `  ${x.verb} → ${c.targets[x.target] ?? x.target}${x.cardinality ? ` (${x.cardinality})` : ''}`),
+          ...(c.attributes?.notable?.length ? [`  attributes: ${c.attributes.notable.join(', ')}`] : []), ...c.referencedBy.slice(0, 10).map((x) => `  ${x.label} ${x.verb} → this`));
+      } else {
+        if (r.path.length) lines.push(`In: ${[...r.path].reverse().map((p) => p.label).join(' › ')}`);
+        lines.push(...r.entries.map((e) => `  ${e.label}  [${e.id}]${e.children ? `  ${e.children} narrower` : ''}`), ...(r.total > r.offset + r.entries.length ? [`  … ${r.total - r.offset - r.entries.length} more (--all, or narrow with --search)`] : []));
+      }
+      emit(ctx, { ok: true, browse: r }, lines.join('\n'));
+      return EXIT.OK;
+    } catch (err) { return fail(err); }
+  }
   if (sub === 'list' || sub === 'concepts' || sub === 'glossary') {
     const problemId = ctx.values.problem;
     const sources = exploreSources(ctx.workspaceRoot, await workspace(ctx, problemId).contextSources(), problemId);
@@ -2093,7 +2148,7 @@ async function cmdOntology(ctx: Ctx, rest: string[]): Promise<number> {
       return EXIT.OK;
     } catch (err) { if (err instanceof OntologyProposalError) throw new CliError(EXIT.REFUSED, err.message); throw err; }
   }
-  throw new CliError(EXIT.USAGE, `Unknown ontology command "${sub}": list, concepts, glossary, analyze, preview, onboard, approve, align, link or export.`);
+  throw new CliError(EXIT.USAGE, `Unknown ontology command "${sub}": list, standards, browse, concepts, glossary, analyze, preview, onboard, approve, align, link, export or propose-standard.`);
 }
 
 /** LIN: observed lineage, read through the platform's lineage operations or recorded from a file. */

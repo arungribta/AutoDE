@@ -1,0 +1,22 @@
+# AutoDE standard (standard/1; docs/specs/context-layer.md §6.8): IEC CIM for utilities, as ENTSO-E's CGMES profiles.
+autode: standard/1
+id: cim-cgmes
+title: CIM (CGMES 3.0)
+publisher: ENTSO-E, from IEC 61970 and 61968
+industry: Utilities (electricity grids)
+description: The Common Information Model for power systems, as the Common Grid Model Exchange Standard's vocabularies - equipment, topology, state variables, operations, geography.
+home: https://www.entsoe.eu/digital/cim/cim-for-grid-models-exchange/
+licence: { name: Apache License 2.0, spdx: Apache-2.0, redistribution: allowed, note: Keep the licence and the NOTICE with the pack. The IEC standards themselves are sold by the IEC. }
+format: rdf
+# The repository has no release tags: pinned to a commit.
+release: { version: CGMES 3.0 (2026-10-15), ref: e96dd4e323b1e2236e141dd03bf9adea81672e00, date: 2026-10-15 }
+source: { git: https://github.com/entsoe/CGMES-AP.git, path: CGMES/RDFS }
+reader:
+  prefix: cim
+  # CIM's datatypes, primitives and enumerations are classes in RDFS; they are attribute types, not concepts.
+  skipClasses:
+    - { property: 'http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#stereotype', value: '(CIMDatatype|Primitive|enumeration|Compound)$' }
+  # An association end CGMES doesn't exchange.
+  skipProperties:
+    - { property: 'http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#AssociationUsed', value: '^No$' }
+  cardinalityProperty: 'http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#multiplicity'

@@ -6,9 +6,13 @@ import { BaseNode, GraphEdge, TableNode } from '../context/types';
 import { PortError, SOURCE_CAPS, detectLicence, gitRunner, GitRunner, stageSource } from '../skills/port';
 import { SourceAnalysis, SourceConcept, analyzeTriples, classifyLicence } from './convert';
 import { Triple, parseRdf, rdfFormat } from './rdf';
-import { Concept, MatchType, OntologyPack, PACK_FORMAT, UPPER_CONCEPTS, isUpper, normalizePack, parsePack, stringifyPack } from './pack';
+import { Concept, MatchType, OntologyPack, PACK_FORMAT, PackLicence, UPPER_CONCEPTS, isUpper, normalizePack, parsePack, stringifyPack } from './pack';
 import { Ontology, OntologyScope, loadOntology, readTeamPack, shippedPacks } from './store';
 import { MeaningLink } from './links';
+import { analyzeApiSchemas, isApiSchema } from './openapi';
+import { ReaderSettings, StandardDefinition, StandardFormat, findStandard, pendingStandards } from './standards';
+import { createHash } from 'node:crypto';
+import { layoutPath } from '../workspaceLayout';
 
 /**
  * Onboarding a standard (ONT1; docs/specs/context-layer.md §6.8): the same five steps on every surface — the
@@ -26,7 +30,9 @@ import { MeaningLink } from './links';
 export type OntologySource =
   | { kind: 'shipped'; id: string }
   | { kind: 'file'; path: string }
-  | { kind: 'git'; url: string; ref?: string; path?: string };
+  | { kind: 'git'; url: string; ref?: string; path?: string }
+  /** A standard of the catalog (ontologies/standards/, .autode/config/standards/): its shipped pack, or its repository at the pinned release, fetched on request. */
+  | { kind: 'standard'; id: string; whole?: boolean; /** A proposed standard, tried by a person before approving it. */ decision?: string };
 
 export interface ReadSource {
   analysis: SourceAnalysis;
@@ -38,6 +44,7 @@ export interface ReadSource {
 }
 
 const RDF_FILE = /\.(ttl|nt|n3|rdf|owl|xml)$/i;
+const API_FILE = /\.(ya?ml|json)$/i;
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'standard';
 
 /** The shipped packs a person can onboard from (the upper layer is always in effect). */
@@ -60,8 +67,8 @@ function fromPack(pack: OntologyPack, source: ReadSource['source']): ReadSource 
   };
 }
 
-/** Files a folder holds that may be RDF (or packs), within the porting caps. */
-function rdfFiles(dir: string): string[] {
+/** Files a folder holds that a reader may take (RDF, OpenAPI or JSON Schema, packs), within the porting caps. */
+function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   let bytes = 0;
   const walk = (d: string) => {
@@ -70,7 +77,7 @@ function rdfFiles(dir: string): string[] {
       const p = path.join(d, e.name);
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) { walk(p); continue; }
-      if (!RDF_FILE.test(e.name) && !/\.ya?ml$/i.test(e.name)) continue;
+      if (!RDF_FILE.test(e.name) && !API_FILE.test(e.name)) continue;
       const size = fs.statSync(p).size;
       if (size > SOURCE_CAPS.maxFileBytes) throw new PortError(`${path.relative(dir, p)} is ${size} bytes; the most a file may be is ${SOURCE_CAPS.maxFileBytes}.`);
       bytes += size;
@@ -82,34 +89,48 @@ function rdfFiles(dir: string): string[] {
   return out;
 }
 
-/** Reads files (or one file) into one analysis: a pack as it is, RDF as triples. */
-function readFiles(files: string[], root: string, opts: { prefix?: string; licenceText?: string; name: string }): { analysis: SourceAnalysis; pack?: OntologyPack } {
+interface ReadOptions { prefix?: string; licenceText?: string; name: string; settings?: ReaderSettings; format?: StandardFormat; title?: string }
+
+/**
+ * Reads files (or one file) into one analysis, by the reader that fits them: an AutoDE pack as it is, RDF (OWL, RDFS,
+ * SKOS) as triples, OpenAPI or JSON Schema as schemas. A standard's catalog entry names its format; otherwise the
+ * files decide.
+ */
+function readFiles(files: string[], root: string, opts: ReadOptions): { analysis: SourceAnalysis; pack?: OntologyPack } {
   const texts = files.map((f) => ({ name: path.relative(root, f).split(path.sep).join('/') || path.basename(f), text: fs.readFileSync(f, 'utf8') }));
   const packs = texts.filter((t) => /\.ya?ml$/i.test(t.name) && new RegExp(`autode:\\s*${PACK_FORMAT.replace('/', '\\/')}`).test(t.text));
-  if (packs.length === 1 && texts.filter((t) => RDF_FILE.test(t.name)).length === 0) {
+  const rdf = texts.filter((t) => RDF_FILE.test(t.name));
+  const api = texts.filter((t) => isApiSchema(t.name, t.text));
+  if ((opts.format === 'pack' || !opts.format) && packs.length === 1 && !rdf.length && !api.length) {
     const parsed = parsePack(packs[0].text);
     if (!parsed.pack) throw new PortError(`${packs[0].name}: ${parsed.errors.join('; ')}`);
     return { analysis: fromPack(parsed.pack, { kind: 'file', ref: packs[0].name }).analysis, pack: parsed.pack };
   }
+  if (opts.format === 'openapi' || (!opts.format && api.length && !rdf.length)) {
+    if (!api.length) throw new PortError('No OpenAPI or JSON Schema documents found.');
+    return { analysis: analyzeApiSchemas(api, { ...(opts.title ? { title: opts.title } : {}), ...(opts.prefix ? { prefix: opts.prefix } : {}), ...(opts.licenceText ? { licenceText: opts.licenceText } : {}), ...(opts.settings ? { settings: opts.settings } : {}) }) };
+  }
   const triples: Triple[] = [];
   const warnings: string[] = [];
   let read = 0;
-  for (const t of texts.filter((x) => RDF_FILE.test(x.name))) {
+  for (const t of rdf) {
     const format = rdfFormat(t.name, t.text);
     if (!format) { warnings.push(`${t.name}: not Turtle or RDF/XML; skipped.`); continue; }
     try { triples.push(...parseRdf(t.text, format, `urn:autode:source:${t.name}`).map((x) => ({ ...x, s: prefixBlank(x.s, read), o: x.literal ? x.o : prefixBlank(x.o, read) }))); read++; }
     catch (err) { throw new PortError(`${t.name}: ${err instanceof Error ? err.message : String(err)}`); }
   }
-  if (!read) throw new PortError('No ontology found: give a Turtle (.ttl), RDF/XML (.rdf, .owl) or SKOS file, a folder of them, or an AutoDE pack.');
-  const analysis = analyzeTriples(triples, { name: opts.name, text: texts.map((t) => `${t.name}\n${t.text}`).join('\n'), ...(opts.prefix ? { prefix: opts.prefix } : {}), ...(opts.licenceText ? { licenceText: opts.licenceText } : {}) });
+  if (!read) throw new PortError('No ontology found: give a Turtle (.ttl), RDF/XML (.rdf, .owl), SKOS, OpenAPI or JSON Schema file, a folder of them, or an AutoDE pack.');
+  const analysis = analyzeTriples(triples, { name: opts.name, text: rdf.map((t) => `${t.name}\n${t.text}`).join('\n'), ...(opts.prefix ? { prefix: opts.prefix } : {}), ...(opts.licenceText ? { licenceText: opts.licenceText } : {}), ...(opts.settings ? { settings: opts.settings } : {}) });
+  if (opts.title) analysis.title = opts.title;
   analysis.warnings.unshift(...warnings);
   return { analysis };
 }
 
 const prefixBlank = (term: string, file: number) => (term.startsWith('_:') ? `_:f${file}${term.slice(2)}` : term);
 
-/** Step 1 and 2: reads a source and analyses it. Read-only. */
+/** Step 1 and 2: reads a source and analyses it. Read-only (a repository is cloned to a temporary folder and removed). */
 export function readSource(scope: OntologyScope, src: OntologySource, opts: { prefix?: string; id?: string; git?: GitRunner } = {}): ReadSource {
+  if (src.kind === 'standard') return readStandard(scope, src.id, { ...opts, ...(src.whole ? { whole: true } : {}), ...(src.decision ? { decision: src.decision } : {}) });
   if (src.kind === 'shipped') {
     const l = shippedPacks(scope.resourcesRoot).find((x) => x.pack?.id === src.id);
     if (!l?.pack) throw new PortError(`No shipped pack "${src.id}" (${shippedSources(scope.resourcesRoot).map((s) => s.id).join(', ') || 'none'}).`);
@@ -120,7 +141,7 @@ export function readSource(scope: OntologyScope, src: OntologySource, opts: { pr
     const full = path.resolve(src.path);
     if (!fs.existsSync(full)) throw new PortError(`No file or folder "${src.path}".`);
     const isDir = fs.statSync(full).isDirectory();
-    const files = isDir ? rdfFiles(full) : [full];
+    const files = isDir ? sourceFiles(full) : [full];
     if (!isDir && fs.statSync(full).size > SOURCE_CAPS.maxBytes) throw new PortError(`${src.path} is larger than ${SOURCE_CAPS.maxBytes} bytes.`);
     const licenceText = isDir ? licenceFile(full) : undefined;
     const { analysis, pack } = readFiles(files, isDir ? full : path.dirname(full), { name: path.basename(full), ...(opts.prefix ? { prefix: opts.prefix } : {}), ...(licenceText ? { licenceText } : {}) });
@@ -128,17 +149,61 @@ export function readSource(scope: OntologyScope, src: OntologySource, opts: { pr
     if (pack) return { ...fromPack(pack, source), ...(opts.id ? { id: opts.id } : {}) };
     return { analysis, id: opts.id ?? slug(analysis.title), title: analysis.title, standard: standardOf(analysis), source };
   }
-  const staged = stageSource({ kind: 'git', location: src.url, ...(src.ref ? { ref: src.ref } : {}) }, SOURCE_CAPS, opts.git ?? gitRunner);
+  return readGit(src, opts, {});
+}
+
+function readGit(src: { url: string; ref?: string; path?: string | string[] }, opts: { prefix?: string; id?: string; git?: GitRunner }, read: { settings?: ReaderSettings; format?: StandardFormat; title?: string; licence?: PackLicence; version?: string }): ReadSource {
+  // Only the folders are downloaded and counted against the caps (a standard's repository can be large).
+  const paths = Array.isArray(src.path) ? src.path : src.path ? [src.path] : [];
+  const staged = stageSource({ kind: 'git', location: src.url, ...(src.ref ? { ref: src.ref } : {}), ...(paths.length ? { path: paths } : {}) }, SOURCE_CAPS, opts.git ?? gitRunner);
   try {
-    const dir = src.path ? path.join(staged.dir, src.path) : staged.dir;
-    if (!path.resolve(dir).startsWith(path.resolve(staged.dir)) || !fs.existsSync(dir)) throw new PortError(`No folder "${src.path}" in the repository.`);
-    const files = fs.statSync(dir).isDirectory() ? rdfFiles(dir) : [dir];
+    const dir = paths.length === 1 ? path.join(staged.dir, paths[0]) : staged.dir;
+    if (!path.resolve(dir).startsWith(path.resolve(staged.dir)) || !fs.existsSync(dir)) throw new PortError(`No folder "${paths.join(', ')}" in the repository.`);
+    const files = fs.statSync(dir).isDirectory() ? sourceFiles(dir) : [dir];
     const lic = detectLicence(staged.dir, staged.dir, undefined);
-    const { analysis, pack } = readFiles(files, staged.dir, { name: src.url.split('/').pop() ?? 'repository', ...(opts.prefix ? { prefix: opts.prefix } : {}), ...(lic ? { licenceText: lic.spdx ?? lic.name } : {}) });
-    const source = { kind: 'git' as const, ref: `${src.url}${src.path ? `#${src.path}` : ''}`, ...(staged.provenance.resolvedCommit ? { commit: staged.provenance.resolvedCommit } : {}), checksum: analysis.checksum };
+    const { analysis, pack } = readFiles(files, dir, { name: src.url.split('/').pop() ?? 'repository', ...(opts.prefix ? { prefix: opts.prefix } : {}), ...(lic ? { licenceText: lic.spdx ?? lic.name } : {}), ...read });
+    // A catalog entry's licence is the reviewed one; it wins over what the files state.
+    if (read.licence) analysis.licence = read.licence;
+    if (read.version) analysis.version = read.version;
+    const source = { kind: 'git' as const, ref: `${src.url}${paths.length ? `#${paths.join(',')}` : ''}${src.ref ? `@${src.ref}` : ''}`, ...(staged.provenance.resolvedCommit ? { commit: staged.provenance.resolvedCommit } : {}), checksum: analysis.checksum };
     if (pack) return { ...fromPack(pack, source), ...(opts.id ? { id: opts.id } : {}) };
     return { analysis, id: opts.id ?? slug(analysis.title), title: analysis.title, standard: standardOf(analysis), source };
   } finally { staged.cleanup(); }
+}
+
+/** Where a standard read at its pinned release is kept on this machine (`.autode/local/`, never committed). */
+function standardCache(scope: OntologyScope, def: StandardDefinition): string {
+  const key = createHash('sha256').update(JSON.stringify([def.release, def.source, def.reader, def.format, def.licence, def.title, READER_VERSION])).digest('hex').slice(0, 12);
+  return layoutPath(scope.workspaceRoot, 'local', 'standards', `${def.id}-${key}.json`);
+}
+/** Raised when what the readers produce changes, so a cached standard is read again. */
+const READER_VERSION = 1;
+
+/** Whether a standard can be read without fetching anything: a shipped pack, or a read already cached on this machine. */
+export function standardIsLocal(scope: OntologyScope, id: string, whole = false, decision?: string): boolean {
+  const def = decision ? pendingStandards(scope.workspaceRoot).find((p) => p.decision === decision && p.def?.id === id)?.def : findStandard(scope, id);
+  return !!def && ((!!def.pack && !whole) || fs.existsSync(standardCache(scope, def)));
+}
+
+/**
+ * A standard of the catalog: its shipped pack when it has one (unless the whole standard is asked for), else its
+ * repository at the pinned release, read once and cached on this machine, so browsing it again is immediate and the
+ * same release always gives the same concepts.
+ */
+function readStandard(scope: OntologyScope, id: string, opts: { prefix?: string; id?: string; git?: GitRunner; whole?: boolean; decision?: string }): ReadSource {
+  const def = opts.decision ? pendingStandards(scope.workspaceRoot).find((p) => p.decision === opts.decision && p.def?.id === id)?.def : findStandard(scope, id);
+  if (!def) throw new PortError(`No standard "${id}" (autode ontology standards lists them).`);
+  if (def.pack && !opts.whole) return readSource(scope, { kind: 'shipped', id: def.pack }, opts);
+  if (!def.source?.git) throw new PortError(`${def.title} has no repository to read; its shipped pack is ${def.pack ?? 'missing'}.`);
+  const cache = standardCache(scope, def);
+  let r: ReadSource | undefined;
+  try { r = JSON.parse(fs.readFileSync(cache, 'utf8')) as ReadSource; } catch { r = undefined; }
+  if (!r) {
+    r = readGit({ url: def.source.git, ref: def.release.ref, ...(def.source.path ? { path: def.source.path } : {}) }, { ...opts, id: def.id }, { ...(def.reader ? { settings: def.reader } : {}), format: def.format, title: def.title, licence: def.licence, version: def.release.version });
+    r = { ...r, title: def.title, standard: { name: def.title, version: def.release.version, ...(def.home ? { iri: def.home } : {}), licence: def.licence } };
+    try { fs.mkdirSync(path.dirname(cache), { recursive: true }); fs.writeFileSync(cache, JSON.stringify(r)); } catch { /* read again next time */ }
+  }
+  return opts.id ? { ...r, id: opts.id } : r;
 }
 
 function licenceFile(dir: string): string | undefined {

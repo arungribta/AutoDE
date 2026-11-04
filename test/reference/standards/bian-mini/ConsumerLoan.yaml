@@ -1,0 +1,41 @@
+# Part of a BIAN Semantic API, in its shape (OpenAPI 3; business objects marked format class, datatypes format
+# datatype, enumerations ...values), for the ONT1 standards tests.
+openapi: 3.0.0
+info:
+  title: Consumer Loan
+  version: 13.0.0
+  license: { name: Apache 2.0, url: 'https://www.apache.org/licenses/LICENSE-2.0' }
+paths: {}
+components:
+  schemas:
+    ConsumerLoanFacility:
+      type: object
+      description: The consumer loan facility ||
+      properties:
+        LoanProductReference: { $ref: '#/components/schemas/loanproduct' }
+        CustomerReference: { $ref: '#/components/schemas/party' }
+        Repayments: { type: array, items: { $ref: '#/components/schemas/payment' } }
+        LoanStatus: { $ref: '#/components/schemas/loanstatusvalues' }
+    loanproduct:
+      type: object
+      description: The loan product the facility is an instance of
+      properties:
+        LoanProduct: { type: string, format: class, description: A banking product that offers loans. }
+        LoanAmount: { $ref: '#/components/schemas/amount' }
+    party:
+      type: object
+      description: A person or organisation
+      properties:
+        Party: { type: string, format: class }
+        PartyName: { $ref: '#/components/schemas/text' }
+    amount:
+      type: object
+      properties:
+        Amount: { type: string, format: datatype }
+    text:
+      type: object
+      properties:
+        Text: { type: string, format: datatype }
+    loanstatusvalues:
+      type: string
+      enum: [Active, Closed]

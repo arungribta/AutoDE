@@ -4,7 +4,9 @@ import { ExploreRequest, handleExploreRequest } from '../engine/explore/sources'
 import { renderAssetMarkdown, renderImpactCsv, renderImpactMarkdown } from '../engine/explore/render';
 import type { ChangeKind, ImpactResult } from '../engine/explore/lineage';
 import { OntologySource, shippedSources } from '../engine/ontology/onboard';
-import { Choices, OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { Choices, OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, browseSource, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { standardsCatalog } from '../engine/ontology/standards';
+import { standardIsLocal } from '../engine/ontology/onboard';
 import type { RepresentsCandidate, TermCandidate } from '../engine/ontology/onboard';
 import { PortError } from '../engine/skills/port';
 import { ProposalValidationError } from '../engine/decisions/proposals';
@@ -37,7 +39,7 @@ export type ExplorerMessage =
   | { type: 'maintenance'; key: string; act: 'work' | 'dismiss' }
   | { type: 'exportImpact'; id: string; change: ChangeKind; format: 'md' | 'csv' | 'copy' }
   /** ONT1: onboarding a standard and aligning the vocabulary (§6.8); analysis is read-only, the rest are proposals. */
-  | { type: 'ontology'; requestId: number; op: 'shipped' | 'pick' | 'analyze' | 'preview' | 'propose' | 'align' | 'proposeLinks'; args?: Record<string, unknown> };
+  | { type: 'ontology'; requestId: number; op: 'shipped' | 'pick' | 'analyze' | 'preview' | 'propose' | 'align' | 'proposeLinks' | 'standards' | 'browse'; args?: Record<string, unknown> };
 
 export type OpenTarget =
   | { kind: 'file'; path: string }
@@ -54,7 +56,9 @@ export type ExplorerAction =
   | { kind: 'editMetadata'; id: string; label: string }
   | { kind: 'maintenance'; key: string; act: 'work' | 'dismiss' }
   | { kind: 'saveText'; name: string; format: 'md' | 'csv'; text: string }
-  | { kind: 'pickOntologySource'; requestId: number };
+  | { kind: 'pickOntologySource'; requestId: number }
+  /** A standard not on this machine yet: the host fetches it in a child process (never in the extension host), then answers the request. */
+  | { kind: 'fetchStandard'; requestId: number; id: string; whole?: boolean; decision?: string };
 
 export interface ExplorerAnswer {
   /** Posted back to the webview. */
@@ -130,6 +134,7 @@ async function answerOntology(msg: Extract<ExplorerMessage, { type: 'ontology' }
   const args = msg.args ?? {};
   try {
     if (msg.op === 'shipped') return reply({ shipped: shippedSources(scope.resourcesRoot) });
+    if (msg.op === 'standards') return reply({ standards: standardsCatalog(scope).map((s) => ({ ...s, local: standardIsLocal(scope, s.id, false, s.decision) })) });
     if (msg.op === 'pick') return { action: { kind: 'pickOntologySource', requestId: msg.requestId } };
     const sources = await host.sources();
     if (!sources) return reply({ error: 'Nothing known yet.' });
@@ -141,7 +146,10 @@ async function answerOntology(msg: Extract<ExplorerMessage, { type: 'ontology' }
       return reply({ recorded: r.recorded.length, duplicates: r.duplicates.length });
     }
     const src = args.source as OntologySource | undefined;
-    if (!src || !['shipped', 'file', 'git'].includes(src.kind)) return reply({ error: 'Choose a source first.' });
+    if (!src || !['shipped', 'file', 'git', 'standard'].includes(src.kind)) return reply({ error: 'Choose a source first.' });
+    // A standard read the first time is fetched by the host, off the extension host's thread; then it is read from this machine.
+    if (src.kind === 'standard' && !standardIsLocal(scope, src.id, !!src.whole, src.decision)) return { action: { kind: 'fetchStandard', requestId: msg.requestId, id: src.id, ...(src.whole ? { whole: true } : {}), ...(src.decision ? { decision: src.decision } : {}) } };
+    if (msg.op === 'browse') return reply({ browse: browseSource(scope, src, { ...(typeof args.query === 'string' && args.query ? { query: args.query } : {}), ...(typeof args.parent === 'string' && args.parent ? { parent: args.parent } : {}), ...(typeof args.concept === 'string' && args.concept ? { concept: args.concept } : {}), ...(typeof args.offset === 'number' ? { offset: args.offset } : {}) }) });
     const choices = (args.choices ?? {}) as Choices;
     if (msg.op === 'analyze') return reply({ analysis: analyzeOntologySource(scope, src, graph, choices).analysis });
     if (msg.op === 'preview') { const p = previewPack(scope, src, graph, choices); return reply({ text: p.text, added: p.added, kept: p.kept, problems: p.problems, revision: p.revision }); }

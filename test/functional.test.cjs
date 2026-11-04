@@ -5886,8 +5886,8 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
-      const proposalTools = ['autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
+      const readTools = ['autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_ontology_standards', 'autode_ontology_browse', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const proposalTools = ['autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_standard', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_propose_platform_operation', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
@@ -5992,6 +5992,9 @@ async function main() {
       autode_ontology_align: [{}, { x: 1 }],
       autode_propose_ontology_pack: [{ source: { shipped: 'fibo-lending' }, reason: 'Lending terms need shared meaning.' }, { source: { shipped: 'fibo-lending' }, reason: 'short' }],
       autode_propose_concept_links: [{ links: [{ subject: 'nope', concept: 'upper:Party', reason: 'It is a party.' }] }, { links: [] }],
+      autode_ontology_standards: [{}, { x: 1 }],
+      autode_ontology_browse: [{ source: { standard: 'fibo' } }, { source: { standard: 'fibo' }, limit: 0 }],
+      autode_propose_standard: [{ content: 'autode: standard/1\nid: x', reason: 'Researched on the publisher site.' }, { content: 'short', reason: 'Researched on the publisher site.' }],
       autode_skill_check: [{ id: 'autode-de-mapping' }, { id: '' }],
       autode_skill_customise: [{ id: 'autode-de-mapping' }, { id: '' }],
       autode_plugin_status: [{}, { x: 1 }],
@@ -8537,7 +8540,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-ontology-onboarding', 'autode-core-orchestrator', 'autode-core-platform-operations', 'autode-core-semantic-modeling', 'autode-core-term-alignment', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment', 'autode-de-specification-authoring', 'autode-redshift-deployment', 'autode-redshift-governance', 'autode-redshift-ingestion', 'autode-redshift-performance', 'autode-redshift-pipelines', 'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-ontology-onboarding', 'autode-core-orchestrator', 'autode-core-platform-operations', 'autode-core-semantic-modeling', 'autode-core-standard-research', 'autode-core-term-alignment', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment', 'autode-de-specification-authoring', 'autode-redshift-deployment', 'autode-redshift-governance', 'autode-redshift-ingestion', 'autode-redshift-performance', 'autode-redshift-pipelines', 'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -11922,7 +11925,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes()).skills;
     const role = (n) => roles.find((r) => r.name === n);
     assert.deepStrictEqual(role('semantic-modeler').skills, ['autode-core-semantic-modeling', 'autode-core-knowledge-maintenance']);
-    assert.deepStrictEqual(role('knowledge-engineer').skills, ['autode-core-glossary-structure', 'autode-core-ontology-onboarding', 'autode-core-term-alignment', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance']);
+    assert.deepStrictEqual(role('knowledge-engineer').skills, ['autode-core-glossary-structure', 'autode-core-ontology-onboarding', 'autode-core-standard-research', 'autode-core-term-alignment', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance']);
     assert.ok(role('semantic-modeler').tools.includes('autode_propose_semantic_model') && role('knowledge-engineer').tools.includes('autode_propose_article') && role('context-curator').tools.includes('autode_dismiss_turns'));
     for (const id of ['autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance']) assert.deepStrictEqual(pack.find((k) => k.id === id).meta.stageKinds, [], id);
     // ONT1: the semantic-foundation template gives the two layers' agents a stage kind each.
@@ -14068,14 +14071,127 @@ async function main() {
     const text = nodeFs.readFileSync(nodePath.join(dir, 'fibo-lending.yaml'), 'utf8');
     const pack = parsePack(text).pack;
     const cur = parseYaml(nodeFs.readFileSync(nodePath.join(dir, 'sources', 'fibo-lending.curation.yaml'), 'utf8'));
+    const std = parseYaml(nodeFs.readFileSync(nodePath.join(dir, 'standards', `${cur.standard}.yaml`), 'utf8'));
     assert.match(text, /GENERATED by scripts\/build-ontology-pack\.cjs/);
-    assert.deepStrictEqual([pack.standard.version, /^[0-9a-f]{40}$/.test(pack.source.commit), pack.source.ref], [cur.standard.version, true, `${cur.standard.repository}/tree/${cur.standard.version}`]);
+    assert.deepStrictEqual([pack.standard.version, /^[0-9a-f]{40}$/.test(pack.source.commit), pack.source.ref], [std.release.version, true, `${std.source.git.replace(/\.git$/, '')}/tree/${std.release.ref}`]);
     const key = (c) => [c.id, c.iri, c.parent];
     assert.deepStrictEqual(pack.concepts.map(key), cur.concepts.map(key).sort((a, b) => a[0].localeCompare(b[0])));
     assert.ok(pack.concepts.every((c) => c.definition && c.definition.length > 10), 'FIBO defines every concept');
     assert.strictEqual(checkPacks([parsePack(nodeFs.readFileSync(nodePath.join(dir, 'upper.yaml'), 'utf8')).pack, pack]).size, 0);
     const r = require('node:child_process').spawnSync(process.execPath, [nodePath.join(__dirname, '..', 'scripts', 'build-ontology-pack.cjs')], { encoding: 'utf8' });
     assert.deepStrictEqual([r.status, /Usage/.test(r.stderr)], [2, true]);
+  });
+
+  // v0.59.1: standards beyond FIBO (CIM, BIAN, the team's), researched by an agent, browsed and onboarded.
+
+  /** A repository holding a standard's files in a folder, pinned to its commit, served over file:// as a host would be. */
+  function standardRepo(nodeFs, nodePath, os) {
+    const { execFileSync } = require('node:child_process');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-stdrepo-'));
+    const git = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'test');
+    git('config', 'uploadpack.allowFilter', 'true'); git('config', 'uploadpack.allowAnySHA1InWant', 'true');
+    const copy = (from, to) => { nodeFs.mkdirSync(nodePath.join(dir, to), { recursive: true }); for (const f of nodeFs.readdirSync(from)) nodeFs.copyFileSync(nodePath.join(from, f), nodePath.join(dir, to, f)); };
+    copy(nodePath.join(__dirname, 'reference', 'standards', 'cim-mini'), 'CGMES/RDFS');
+    copy(nodePath.join(__dirname, 'reference', 'standards', 'bian-mini'), 'release13/oas3/yamls');
+    nodeFs.mkdirSync(nodePath.join(dir, 'other'), { recursive: true });
+    nodeFs.writeFileSync(nodePath.join(dir, 'other', 'big.txt'), 'x'.repeat(1000));
+    nodeFs.writeFileSync(nodePath.join(dir, 'LICENSE'), 'Apache License\nVersion 2.0, January 2004\n');
+    git('add', '-A'); git('commit', '-q', '-m', 'release');
+    return { dir, url: `file://${dir.replace(/\\/g, '/')}`, sha: git('rev-parse', 'HEAD'), done: () => nodeFs.rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  await test('v0.59.1 ONT1: standards are data — FIBO, CIM (CGMES) and BIAN ship in the catalog; RDFS properties with multiplicities and a standard\'s settings (CIM\'s datatypes and unused association ends) and OpenAPI schemas (BIAN\'s business objects, repeated across documents) read as concepts, relations and attributes; a team standard is proposed, tried by a person (only its folder fetched, at the pinned commit), approved, browsed and onboarded; an agent browses only what is on this machine', async () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const repo = standardRepo(nodeFs, nodePath, os);
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-std-'));
+    const W = ['--workspace', ws];
+    try {
+      // The shipped catalog.
+      let r = await cli(['ontology', 'standards', ...W, '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      const shipped = Object.fromEntries(r.json().standards.map((s) => [s.id, s]));
+      assert.deepStrictEqual(['bian', 'cim-cgmes', 'fibo'].map((id) => [shipped[id].format, shipped[id].licence.spdx, shipped[id].availability, /^[0-9a-f]{40}$|^master_/.test(shipped[id].release.ref)]), [['openapi', 'Apache-2.0', 'on-request', true], ['rdf', 'Apache-2.0', 'on-request', true], ['rdf', 'MIT', 'shipped-pack', true]]);
+      // A team's standard, as the knowledge engineer would propose it after researching it.
+      const def = (id, title, format, pth, reader) => `autode: standard/1\nid: ${id}\ntitle: ${title}\npublisher: Example body\nindustry: ${format === 'rdf' ? 'Utilities' : 'Banking'}\nlicence: { name: Apache License 2.0, spdx: Apache-2.0, redistribution: allowed }\nformat: ${format}\nrelease: { version: '1.0', ref: ${repo.sha} }\nsource: { git: '${repo.url}', path: '${pth}' }\nreader: ${JSON.stringify(reader)}\n`;
+      const cimDef = def('cim-mini', 'CIM (test)', 'rdf', 'CGMES/RDFS', { prefix: 'cim', skipClasses: [{ property: 'http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#stereotype', value: '(CIMDatatype|Primitive|enumeration)$' }], skipProperties: [{ property: 'http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#AssociationUsed', value: '^No$' }], cardinalityProperty: 'http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#multiplicity' });
+      nodeFs.writeFileSync(nodePath.join(ws, 'cim-mini.yaml'), cimDef);
+      assert.strictEqual((await cli(['ontology', 'propose-standard', nodePath.join(ws, 'cim-mini.yaml'), ...W, '--reason', 'short'])).code, 1, 'a reason that says where it came from');
+      r = await cli(['ontology', 'propose-standard', nodePath.join(ws, 'cim-mini.yaml'), ...W, '--reason', 'The grid problem needs CIM; ENTSO-E publishes its RDFS under Apache-2.0 at this commit.', '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      const decision = r.json().decision.id;
+      r = await cli(['ontology', 'standards', ...W, '--json']);
+      const proposedEntry = r.json().standards.find((s) => s.id === 'cim-mini');
+      assert.deepStrictEqual([proposedEntry.origin, proposedEntry.decision, proposedEntry.local], ['proposed', decision, false]);
+      // A person tries it before approving: only its folder is fetched, at the pinned commit.
+      r = await cli(['ontology', 'browse', 'cim-mini', '--decision', decision, ...W, '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      let b = r.json().browse;
+      assert.deepStrictEqual([b.counts.concepts, b.source.commit, b.licence.spdx], [4, repo.sha, 'Apache-2.0']);
+      assert.ok(b.warnings.some((w) => /2 class\(es\) left out as datatypes/.test(w)), 'CIM\'s datatype and enumeration are not concepts');
+      assert.deepStrictEqual(b.entries.map((e) => [e.label, e.children]), [['IdentifiedObject', 2]], 'the tree: one root');
+      const cacheDir = nodePath.join(ws, '.autode', 'local', 'standards');
+      assert.ok(nodeFs.readdirSync(cacheDir).some((f) => f.startsWith('cim-mini-')), 'read once, kept on this machine');
+      assert.strictEqual((await cli(['decisions', 'approve', decision, ...W], { interactive: true, answers: ['approve'] })).code, 0);
+      assert.ok(nodeFs.existsSync(nodePath.join(ws, '.autode', 'config', 'standards', 'cim-mini.yaml')));
+      // Browsing: a level, a concept in full (relations with multiplicity; the unused end left out; attributes).
+      r = await cli(['ontology', 'browse', 'cim-mini', '--parent', 'cim:IdentifiedObject', ...W, '--json']);
+      assert.deepStrictEqual(r.json().browse.entries.map((e) => e.label), ['ConductingEquipment', 'Terminal']);
+      r = await cli(['ontology', 'browse', 'cim-mini', '--concept', 'cim:Terminal', ...W, '--json']);
+      const term = r.json().browse.concept;
+      assert.deepStrictEqual([term.relations, term.attributes.notable, term.ancestors.map((a) => a.label)], [[{ verb: 'conductingEquipment', target: 'cim:ConductingEquipment', cardinality: '1' }], ['phases'], ['IdentifiedObject']]);
+      r = await cli(['ontology', 'browse', 'cim-mini', '--concept', 'cim:ConductingEquipment', ...W, '--json']);
+      assert.deepStrictEqual([r.json().browse.concept.relations, r.json().browse.concept.referencedBy.map((x) => x.label)], [undefined, ['Terminal']], 'the association end CGMES doesn\'t use is left out');
+      assert.deepStrictEqual((await cli(['ontology', 'browse', 'cim-mini', '--search', 'alternating current', ...W, '--json'])).json().browse.entries.map((e) => e.id), ['cim:ACLineSegment'], 'search reaches definitions');
+      // BIAN's shape: a team standard over API schemas.
+      const bianFile = nodePath.join(ws, 'bian-mini.yaml');
+      nodeFs.writeFileSync(bianFile, def('bian-mini', 'BIAN (test)', 'openapi', 'release13/oas3/yamls', { prefix: 'bian', conceptFormat: 'class', datatypeFormat: 'datatype', enumName: 'values$' }));
+      r = await cli(['ontology', 'propose-standard', bianFile, ...W, '--reason', 'BIAN business objects for the banking problem, Apache-2.0 at this commit.', '--json']);
+      await cli(['decisions', 'approve', r.json().decision.id, ...W], { interactive: true, answers: ['approve'] });
+      // An agent may browse only what is on this machine: BIAN isn't yet; CIM is.
+      const { ontologyTools } = require('../dist/mcp/ontologyTools.js');
+      const { EngineWorkspace } = require('../dist/mcp/workspace.js');
+      const engine = new EngineWorkspace({ workspaceRoot: ws, resourcesRoot: nodePath.join(__dirname, '..') });
+      const tool = (n) => ontologyTools(() => 'test').find((t) => t.name === n);
+      await assert.rejects(tool('autode_ontology_browse').handler({ source: { standard: 'bian-mini' } }, engine), /isn't on this machine yet: a person fetches it/);
+      assert.strictEqual((await tool('autode_ontology_browse').handler({ source: { standard: 'cim-mini' }, concept: 'cim:ACLineSegment' }, engine)).concept.attributes.notable[0], 'r');
+      assert.ok((await tool('autode_ontology_standards').handler({}, engine)).standards.some((s) => s.id === 'cim-mini' && s.local && s.origin === 'team'));
+      // The Explorer: a standard not on this machine asks the host to fetch it (off the extension host); then it reads.
+      const { answerExplorerMessage } = require('../dist/core/knowledgeExplorerModel.js');
+      const { exploreSources } = require('../dist/engine/explore/sources.js');
+      const host = { workspaceRoot: () => ws, sources: async () => exploreSources(ws, await engine.contextSources(), undefined), resourcesRoot: () => nodePath.join(__dirname, '..') };
+      assert.deepStrictEqual((await answerExplorerMessage({ type: 'ontology', requestId: 3, op: 'browse', args: { source: { kind: 'standard', id: 'bian-mini' } } }, host)).action, { kind: 'fetchStandard', requestId: 3, id: 'bian-mini' });
+      r = await cli(['ontology', 'browse', 'bian-mini', ...W, '--json']);
+      b = r.json().browse;
+      assert.deepStrictEqual(b.entries.map((e) => e.label), ['Consumer Loan Facility', 'Loan Product', 'Party', 'Payment'], 'business objects, labels from their CamelCase spelling; datatypes and enumerations left out');
+      const facility = (await answerExplorerMessage({ type: 'ontology', requestId: 4, op: 'browse', args: { source: { kind: 'standard', id: 'bian-mini' }, concept: 'bian:ConsumerLoanFacility' } }, host)).reply.body.browse.concept;
+      assert.deepStrictEqual([facility.relations.map((x) => `${x.verb}>${x.target}${x.cardinality ? ' ' + x.cardinality : ''}`), facility.attributes.notable, facility.definition], [['customerReference>bian:Party', 'loanProductReference>bian:LoanProduct', 'repayments>bian:Payment 0..*'], ['loan status'], 'The consumer loan facility']);
+      const party = (await tool('autode_ontology_browse').handler({ source: { standard: 'bian-mini' }, concept: 'bian:Party' }, engine)).concept;
+      assert.deepStrictEqual(party.attributes.notable, ['party', 'party identification', 'party name'], 'one concept from both documents');
+      // Onboarding from a team standard, with the concepts chosen while browsing.
+      r = await cli(['ontology', 'onboard', 'cim-mini', ...W, '--only', 'cim:ACLineSegment,cim:Terminal', '--place', 'cim:IdentifiedObject=upper:Product', '--reason', 'Grid equipment for the outage problem.', '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      await cli(['decisions', 'approve', r.json().decision.id, ...W], { interactive: true, answers: ['approve'] });
+      const { parsePack } = require('../dist/engine/ontology/pack.js');
+      const pack = parsePack(nodeFs.readFileSync(nodePath.join(ws, '.autode', 'knowledge', 'ontology', 'cim-mini.yaml'), 'utf8')).pack;
+      assert.deepStrictEqual([pack.concepts.map((c) => c.id), pack.standard.name, pack.standard.version, pack.source.commit], [['cim:ACLineSegment', 'cim:ConductingEquipment', 'cim:IdentifiedObject', 'cim:Terminal'], 'CIM (test)', '1.0', repo.sha]);
+      r = await cli(['ontology', 'standards', ...W, '--json']);
+      assert.deepStrictEqual(r.json().standards.find((s) => s.id === 'cim-mini').onboarded, [{ pack: 'cim-mini', state: 'approved', concepts: 4 }]);
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); repo.done(); }
+  });
+
+  await test('v0.59.1 ONT1: the research skill and the Standards view — the knowledge engineer has the research skill and the standards tools at the propose tier; the Ontology view lists the standards, browses them, tries a proposed one and onboards the selected concepts; the panel fetches in a child process', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const D = fresh('../dist/engine/agents/definitions.js');
+    const ke = D.loadRoles(wfRes()).roles.find((r) => r.name === 'knowledge-engineer');
+    assert.ok(ke.skills.includes('autode-core-standard-research') && ['autode_ontology_standards', 'autode_ontology_browse', 'autode_propose_standard'].every((t) => ke.tools.includes(t)));
+    const skill = D.loadSkillPack(wfRes()).skills.find((k) => k.id === 'autode-core-standard-research');
+    assert.ok(skill && /never make AutoDE fetch/.test(skill.instructions));
+    const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
+    for (const s of ['id="ontoStandards"', 'data-std-browse', 'data-decision', "opAsk('browse'", 'data-br-check', "data-br=\"onboard\""]) assert.ok(html.includes(s), s);
+    const host = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'knowledgeExplorer.ts'), 'utf8');
+    assert.match(host, /case 'fetchStandard'[\s\S]*execFile\(process\.execPath[\s\S]*ELECTRON_RUN_AS_NODE/);
   });
 
   await test('v0.58.0 POP3: the platform maintainer — its role template and core skill load, at the propose tier, and its work order comes from a drift item; the skill\'s worked example passes the proposal checks; MCP autode_propose_platform_operation and autode_platform_drift, the CLI propose-operation and drift give the same answers; estate reads are recorded for drift; the catalog view is wired', async () => {

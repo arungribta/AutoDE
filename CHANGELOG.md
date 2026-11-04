@@ -6,6 +6,55 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.59.1
+
+Standards beyond FIBO ([context-layer.md](docs/specs/context-layer.md) §6.8; owner, 2026-11-03: "FIBO is just one standard; CIM for utilities, BIAN … the framework should allow bringing other standards, with a UI to onboard and browse them, and the knowledge engineer should be able to research them").
+
+- **Standards are data** (`autode: standard/1`, `src/engine/ontology/standards.ts`).
+  - Each entry records the standard's publisher, industry, licence, a pinned release (a tag, or a full commit id for a repository without tags), its repository and the folders that hold its files, the reader to use, and reader settings for its quirks.
+  - A new standard is a new file, never new code.
+  - Shipped in `ontologies/standards/`:
+    - **FIBO**: a pack ships (`fibo-lending`), and the whole standard is its LOAN, FBC and FND modules at `master_2026Q3`;
+    - **CIM**, as ENTSO-E's CGMES 3.0 vocabularies (`entsoe/CGMES-AP`, `CGMES/RDFS`, Apache-2.0);
+    - **BIAN**, release 13's Semantic APIs (`bian-official/public`, Apache-2.0).
+  - A team's entries go in `.autode/config/standards/` and override a shipped one by id.
+- **Pluggable readers.**
+  - RDF (OWL, RDFS, SKOS) now reads plain RDFS properties: a range that is a class becomes a relation, anything else an attribute, with the multiplicity from the standard's `cardinalityProperty`. CIM uses this.
+  - A new **OpenAPI and JSON Schema reader** (`openapi.ts`), for BIAN, ISO 20022 and API-defined standards:
+    - object schemas become concepts; references to them become relations (`0..*` for arrays); other properties become attributes; `allOf` with one reference is the parent;
+    - the same schema in several documents becomes one concept;
+    - a lower-case schema name takes its words from its CamelCase spelling elsewhere.
+  - Settings carry each standard's conventions:
+    - CIM: `skipClasses` (its CIMDatatype, Primitive and enumeration classes), `skipProperties` (association ends it doesn't exchange) and `cardinalityProperty`;
+    - BIAN: `conceptFormat` and `datatypeFormat` (`class` and `datatype`) and `enumName`;
+    - FIBO: `labelCase: title`.
+- **Fetched only on request, and only the folders.** A standard without a shipped pack is fetched when a person browses or onboards it:
+  - the commit is fetched without file contents, the folder is listed and checked against the porting limits, its files are fetched by id in batches and written out;
+  - git's index is never built, so a path elsewhere in the repository that Windows can't hold (BIAN's release 14 folder name ends in a space) doesn't block reading this one;
+  - the reading is cached in `.autode/local/standards/` (never committed), keyed by the release and the entry, so browsing again is immediate.
+  - Measured live: CIM in about 4 s (438 concepts, 223 relations), FIBO's three module folders in 18 s (1,146 concepts), BIAN in 38 s (1,346 business objects, 6,469 relations).
+- **The Standards view** in the Ontology view:
+  - a card per standard (industry, publisher, format, licence, release, how it is had, what the team onboarded from it);
+  - **Browse** (and *Browse the whole standard* for FIBO): the concept tree level by level, search over names, synonyms and definitions, and a concept in full (definition, IRI, ancestors, narrower concepts, relations, attributes, what refers to it);
+  - select concepts and **Onboard the selected…**, which opens the onboarding steps with them;
+  - standards are offered as sources in step 1.
+  - The panel fetches in a child process (AutoDE's CLI), never in the extension host.
+  - CLI: `autode ontology standards`, `autode ontology browse <standard|source> [--whole] [--search] [--parent] [--concept]`, and a standard as the source of `analyze`, `preview` and `onboard`.
+- **The knowledge engineer researches standards.**
+  - A new skill, `autode-core-standard-research`, covers:
+    - finding the publisher's machine-readable release;
+    - checking the licence;
+    - pinning a release;
+    - choosing the folders and the reader settings, with what FIBO, CIM and BIAN taught.
+  - The agent uses its host's web tools; AutoDE itself never searches the web, and an agent never makes AutoDE fetch.
+  - It proposes the entry with MCP `autode_propose_standard` (or a person with `autode ontology propose-standard <file> --reason`), as a decision of the new kind `standard`.
+  - A person **tries** the proposal (Standards: *Try it*, or `browse <id> --decision <d>`, which fetches it), then approves it.
+  - MCP `autode_ontology_standards` lists the catalog. `autode_ontology_browse` and the onboarding tools take `source.standard`, but only for a standard that is on this machine already (a shipped pack, or one a person fetched).
+- **The pack generator is generic**: `scripts/build-ontology-pack.cjs` reads module locations from the standard's `modules` rules, and the curation names its standard by id. A maintainer can generate a shipped pack for CIM or BIAN the same way as for FIBO.
+- `stageSource` (porting a skill, onboarding) can stage a list of folders and pin a commit; a cleanup that fails no longer hides the error that ended the staging.
+
+Not done: shipped packs for CIM and BIAN (each is onboarded from its repository); BIAN release 14, whose folder name Windows can't hold; checking a standard's readings against a domain expert's expectations.
+
 ## 0.59.0
 
 ONT1, the canonical ontology, scoped terminology and onboarding standards ([context-layer.md](docs/specs/context-layer.md) §6.8). Meaning now has three layers: an upper layer, industry packs (FIBO first) and the team's extensions, with the business's terms linked to them.

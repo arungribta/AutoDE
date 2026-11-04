@@ -1,7 +1,7 @@
 ---
 name: autode-core-ontology-onboarding
 description: Onboard an industry standard (FIBO first, or the team's own OWL or SKOS copy) as an AutoDE ontology pack - the concepts a business problem touches, one hop out, each placed under the upper layer - and propose it as a workspace-level decision a person approves. Use it when a problem needs shared meaning (an ontology, FIBO, canonical definitions) or a maintenance item says a concept is missing.
-allowed-tools: [Read, mcp__autode__autode_ontology, mcp__autode__autode_ontology_analyze, mcp__autode__autode_propose_ontology_pack, mcp__autode__autode_get_concept_context, mcp__autode__autode_search_assets, mcp__autode__autode_get_asset_context, mcp__autode__autode_list_assertions]
+allowed-tools: [Read, mcp__autode__autode_ontology_standards, mcp__autode__autode_ontology_browse, mcp__autode__autode_ontology, mcp__autode__autode_ontology_analyze, mcp__autode__autode_propose_ontology_pack, mcp__autode__autode_get_concept_context, mcp__autode__autode_search_assets, mcp__autode__autode_get_asset_context, mcp__autode__autode_list_assertions]
 metadata:
   scope: core
   stageKinds: [ontology-alignment]
@@ -16,7 +16,7 @@ AutoDE's meaning has three layers: the **upper layer** (Party, Agreement, Produc
 
 ## 1. Source
 
-`autode_ontology` lists the packs in effect and the standards AutoDE ships (`fibo-lending`). A team with its own copy of a standard puts the file or folder in the workspace (Turtle or RDF/XML; FIBO's modules are both). Nothing is downloaded: a Git repository is a person's choice, in the Knowledge Explorer or `autode ontology analyze --git`.
+`autode_ontology_standards` lists the standards catalog: FIBO (a pack ships), CIM as CGMES and BIAN (read from their repositories), and the team's. Use `source: { standard: "<id>" }`. A standard without a shipped pack is fetched only when a person browses it (Ontology view, Standards; or `autode ontology browse <id>`); until then AutoDE refuses it to you: ask the user. Browse it first (`autode_ontology_browse`: the tree, a search, a concept in full) to choose concepts. A standard the catalog lacks: autode-core-standard-research. A team's own copy can also be a file or folder in the workspace (`source: { file }`).
 
 ## 2. Analyse
 

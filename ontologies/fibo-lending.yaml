@@ -16,8 +16,7 @@ standard:
     name: MIT License
     spdx: MIT
     redistribution: allowed
-    note: FIBO is published by the EDM Council under the MIT licence; keep the
-      copyright notice with the pack.
+    note: Keep the copyright notice with the pack.
 distribution: shareable
 source:
   kind: shipped

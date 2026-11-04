@@ -664,7 +664,8 @@
   // ── Ontology (ONT1, §6.8): packs, the concepts in effect, the glossary; onboarding a standard; aligning the vocabulary ──
   const UPPER = ['Party', 'Agreement', 'Product', 'Account', 'Transaction', 'Location', 'Event', 'Document'];
   const onto = { source: null, choices: { add: [], remove: [], place: {} }, analysis: null, preview: null, align: null };
-  const opAsk = (op, args) => new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); vscode.postMessage({ type: 'ontology', requestId: id, op, args: args || {} }); });
+  const opAsk = (op, args) => new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); vscode.postMessage({ type: 'ontology', requestId: id, op, args: args || {} }); })
+    .then((r) => (r && r.fetched && op !== 'browse' ? opAsk(op, args) : r));
   const scopeLabel = (s) => esc(s.level.replace(/_/g, ' ') + (s.name ? ': ' + s.name : ''));
   async function loadOntology() {
     const body = await ask({ type: 'ontology' }); const o = body.ontology; if (!o) { $('#ontologyPage').innerHTML = `<div class="empty">${esc(body.error || 'No ontology.')}</div>`; return; }
@@ -673,23 +674,26 @@
       <div class="muted" style="margin-bottom:12px">What the business's words mean: the upper layer (eight concepts), the standards the team onboarded (FIBO first) and its own extensions; each glossary term with its scope and the concepts it means. A pack is a workspace-level decision; a term's link is a fact a person confirms in the Context Inbox.</div>
       <div class="actions"><button class="btn primary" data-onto="onboard">Onboard a standard…</button><button class="btn" data-onto="align">Align the vocabulary…</button></div>
       <div id="ontoWork"></div>
+      <h4>Standards</h4><div class="muted small">Industry standards to onboard from. Browse one to see its concepts before choosing; a standard without a shipped pack is fetched from its repository at its pinned release only when you browse it. A team adds a standard by proposing its definition (the knowledge engineer can research one), approved like any decision.</div><div id="ontoStandards"></div>
       <h4>Packs</h4><table class="grid"><thead><tr><th>Pack</th><th>State</th><th>Concepts</th><th>Standard and licence</th></tr></thead><tbody>${o.packs.map((p) => `<tr><td><b>${esc(p.title)}</b><div class="small muted mono">${esc(p.id)} · ${esc(p.origin === 'shipped' ? 'shipped' : p.file)}</div></td><td>${p.state === 'approved' || p.state === 'in effect' ? `<span class="badge cert cert-verified">${esc(p.state)}</span>` : `<span class="badge ${p.state === 'changed' || p.state === 'invalid' ? 'pii' : ''}">${esc(p.state)}</span>`}</td><td>${p.concepts}</td><td class="small">${p.standard ? `${esc(p.standard.name)} ${esc(p.standard.version)} · ${esc(p.standard.licence)}${p.distribution === 'workspace' ? ' · <b>stays in this workspace</b>' : ''}` : '<span class="muted">the team\'s own</span>'}${p.errors.length ? `<div class="small" style="color:var(--danger)">${p.errors.map(esc).join('<br>')}</div>` : ''}</td></tr>`).join('')}</tbody></table>
       ${shipped.length ? `<div class="muted small">Shipped standards to onboard from: ${shipped.map((s) => `<b>${esc(s.title)}</b> (${s.concepts} concepts${s.licence ? ', ' + esc(s.licence) : ''})`).join(', ')}.</div>` : ''}
       <h4>Concepts in effect</h4>
       <div class="tree-flat">${o.tree.map((t) => `<div class="item" style="padding-left:${t.depth * 18}px"><button class="link" data-asset="concept:${esc(t.id)}">${esc(t.label)}</button> <span class="small muted mono">${esc(t.id)}</span>${t.terms ? ` <span class="badge">${t.terms} term(s)</span>` : ''}${t.tables ? ` <span class="badge">${t.tables} table(s)</span>` : ''}${t.proposed ? ` <span class="badge draft">${t.proposed} waiting</span>` : ''}${t.status === 'deprecated' ? ' <span class="badge">deprecated</span>' : ''}</div>`).join('')}</div>
       <h4>Glossary</h4>${o.glossary.length ? `<table class="grid"><thead><tr><th>Term</th><th>Scope</th><th>Means</th></tr></thead><tbody>${o.glossary.map((g) => `<tr class="click" data-asset="${esc(g.term.id)}" tabindex="0"><td><b>${esc(g.term.label)}</b></td><td>${scopeLabel(g.scope)}</td><td>${g.concepts.length ? g.concepts.map((c) => `<span class="badge${c.status === 'proposed' ? ' draft' : ''}" title="${esc(c.match)} match${c.status === 'proposed' ? ', waiting in the Context Inbox' : ''}">${esc(c.label)}</span>`).join(' ') : '<span class="muted small">not aligned</span>'}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">No glossary terms yet.</div>'}
       ${o.errors.length ? `<div class="note warn">${o.errors.map(esc).join('<br>')}</div>` : ''}`;
+    renderStandards();
   }
-  function sourceArgs() { const s = onto.source; return s ? (s.kind === 'shipped' ? { source: { kind: 'shipped', id: s.id } } : s.kind === 'file' ? { source: { kind: 'file', path: s.path } } : { source: { kind: 'git', url: s.url, ref: s.ref || undefined, path: s.path || undefined } }) : {}; }
+  function sourceArgs() { const s = onto.source; return s ? (s.kind === 'standard' ? { source: s } : s.kind === 'shipped' ? { source: { kind: 'shipped', id: s.id } } : s.kind === 'file' ? { source: { kind: 'file', path: s.path } } : { source: { kind: 'git', url: s.url, ref: s.ref || undefined, path: s.path || undefined } }) : {}; }
   async function renderOnboard() {
+    const standards = (await opAsk('standards')).standards || [];
     const shipped = (await opAsk('shipped')).shipped || [];
     const s = onto.source;
     const a = onto.analysis;
     const step = (n, title, body) => `<div class="card" style="margin-bottom:10px"><h3>${n}. ${esc(title)}</h3>${body}</div>`;
     let html = step(1, 'Source', `<div class="muted small">A standard AutoDE ships, or your own copy: an OWL or SKOS file or folder (Turtle or RDF/XML), an AutoDE pack, or a Git repository. Nothing is downloaded automatically; a repository is cloned only when you press Analyse, with the limits of porting a skill.</div>
-      <div class="actions">${shipped.map((x) => `<button class="btn${s && s.kind === 'shipped' && s.id === x.id ? ' primary' : ''}" data-onto-src="${esc(x.id)}">${esc(x.title)}</button>`).join('')}<button class="btn" data-onto="pick">A file or folder…</button></div>
+      <div class="actions">${standards.filter((x) => x.origin !== 'proposed').map((x) => `<button class="btn${s && s.kind === 'standard' && s.id === x.id ? ' primary' : ''}" data-std-onboard="${esc(x.id)}" title="${esc(x.industry)}">${esc(x.title)}</button>`).join('')}${shipped.map((x) => `<button class="btn${s && s.kind === 'shipped' && s.id === x.id ? ' primary' : ''}" data-onto-src="${esc(x.id)}">${esc(x.title)}</button>`).join('')}<button class="btn" data-onto="pick">A file or folder…</button></div>
       <div class="actions"><input id="ontoGit" placeholder="Git URL (https or ssh)" value="${esc(s && s.kind === 'git' ? s.url : '')}" style="flex:2"><input id="ontoRef" placeholder="branch or tag" value="${esc(s && s.kind === 'git' ? s.ref || '' : '')}" style="flex:1"><input id="ontoSub" placeholder="folder in it" value="${esc(s && s.kind === 'git' ? s.path || '' : '')}" style="flex:1"><button class="btn" data-onto="git">Use the repository</button></div>
-      ${s ? `<div class="small">Source: <b>${esc(s.kind === 'shipped' ? s.id : s.kind === 'file' ? s.path : s.url)}</b> <button class="btn primary" data-onto="analyze">Analyse</button></div>` : ''}`);
+      ${s ? `<div class="small">Source: <b>${esc(s.kind === 'shipped' || s.kind === 'standard' ? s.id : s.kind === 'file' ? s.path : s.url)}</b> <button class="btn primary" data-onto="analyze">Analyse</button></div>` : ''}`);
     if (a) {
       html += step(2, 'Analysis', `<div><b>${esc(a.source.title)}</b> · ${a.counts.concepts} concepts, ${a.counts.relations} relations, ${a.counts.modules} modules${a.standard ? ` · ${esc(a.standard.name)} ${esc(a.standard.version)}` : ''}</div>
         <div class="small">Licence: ${esc(a.licence.name)} (redistribution ${esc(a.licence.redistribution)})${a.distribution === 'workspace' ? ' — <b>the pack stays in this workspace</b>' : ''}</div>
@@ -758,6 +762,73 @@
       loadOntology(); return;
     }
   });
+  // Standards (ONT1): the catalog, browsing a standard before onboarding it, and trying a proposed one.
+  const br = { source: null, title: '', parent: '', query: '', concept: null, checked: new Set(), offset: 0, data: null };
+  const stdSource = (s, whole, decision) => Object.assign({ kind: 'standard', id: s }, whole ? { whole: true } : {}, decision ? { decision } : {});
+  async function renderStandards() {
+    const r = await opAsk('standards');
+    const list = r.standards || [];
+    const how = (s) => s.availability === 'shipped-pack' ? 'A pack ships with AutoDE' : s.local ? 'Read on this machine' : 'Fetched from its repository when you browse it';
+    $('#ontoStandards').innerHTML = list.length ? `<div class="cards">${list.map((s) => `<div class="card"><h3>${esc(s.title)} ${s.origin === 'proposed' ? '<span class="badge draft">proposed</span>' : s.origin === 'team' ? '<span class="badge">the team\'s</span>' : ''}</h3>
+      <div class="small">${esc(s.industry)} · ${esc(s.publisher)}</div>
+      <div class="small muted">${esc(s.format === 'openapi' ? 'OpenAPI / JSON Schema' : s.format === 'rdf' ? 'OWL / RDFS / SKOS' : 'AutoDE pack')} · ${esc(s.licence.spdx || s.licence.name)}${s.licence.redistribution !== 'allowed' ? ' · <b>stays in this workspace</b>' : ''} · release ${esc(s.release.version)}</div>
+      ${s.description ? `<div class="small">${esc(s.description)}</div>` : ''}
+      <div class="small muted">${esc(how(s))}${s.onboarded.length ? ` · onboarded: ${s.onboarded.map((o) => esc(o.pack) + ' (' + o.concepts + ')').join(', ')}` : ''}</div>
+      ${s.origin === 'proposed' ? `<div class="note small">${esc(s.reason || '')}<br>Try it, then approve it in the AutoDE panel (Decisions: ${esc(s.decision)}).</div>` : ''}
+      <div class="actions">${s.origin === 'proposed' ? `<button class="btn primary" data-std-browse="${esc(s.id)}" data-decision="${esc(s.decision)}">Try it</button>` : `<button class="btn" data-std-browse="${esc(s.id)}">Browse${s.availability === 'shipped-pack' ? ' the pack' : ''}</button>${s.availability === 'shipped-pack' && s.source ? `<button class="btn" data-std-browse="${esc(s.id)}" data-whole="1" title="Read the whole standard from its repository at the pinned release">Browse the whole standard</button>` : ''}<button class="btn primary" data-std-onboard="${esc(s.id)}">Onboard…</button>`}</div></div>`).join('')}</div>` : '<div class="muted small">No standards in the catalog.</div>';
+  }
+  async function browse(reset) {
+    if (reset) { br.offset = 0; br.concept = null; }
+    $('#ontoWork').innerHTML = `<div class="model-card"><div class="empty">${br.data ? 'Loading…' : 'Reading the standard (the first time, AutoDE fetches its folders at the pinned release; this can take a minute)…'}</div></div>`;
+    const r = await opAsk('browse', { source: br.source, query: br.query, parent: br.parent, offset: br.offset });
+    if (r.error) { $('#ontoWork').innerHTML = `<div class="note warn">${esc(r.error)}</div>`; return; }
+    br.data = r.browse;
+    if (r.fetched) renderStandards();
+    renderBrowser();
+  }
+  function renderBrowser() {
+    const d = br.data; if (!d) return;
+    const c = br.concept;
+    $('#ontoWork').innerHTML = `<div class="model-card"><h3>${esc(d.source.title)}${d.version ? ' ' + esc(d.version) : ''}</h3>
+      <div class="small muted">${d.counts.concepts} concepts · ${d.counts.relations} relations · ${d.counts.modules} modules · ${esc(d.licence.spdx || d.licence.name)}${d.distribution === 'workspace' ? ' · stays in this workspace' : ''}${d.source.commit ? ' · ' + esc(d.source.commit.slice(0, 12)) : ''}</div>
+      <div class="actions"><input id="brQuery" placeholder="Search names, synonyms, definitions" value="${esc(br.query)}" style="flex:2"><button class="btn" data-br="search">Search</button>${br.query || br.parent ? '<button class="btn" data-br="top">Top level</button>' : ''}</div>
+      ${d.path.length ? `<div class="small">${[...d.path].reverse().map((p) => `<button class="link" data-br-open="${esc(p.id)}">${esc(p.label)}</button>`).join(' › ')}</div>` : ''}
+      <div style="display:flex;gap:12px;align-items:flex-start"><div style="flex:1;min-width:0">
+        ${d.entries.map((e) => `<div class="item"><label><input type="checkbox" data-br-check="${esc(e.id)}" ${br.checked.has(e.id) ? 'checked' : ''}></label> <button class="link" data-br-concept="${esc(e.id)}">${esc(e.label)}</button>${e.children ? ` <button class="badge" data-br-open="${esc(e.id)}" title="Show the narrower concepts">${e.children} narrower ›</button>` : ''}${e.status === 'deprecated' ? ' <span class="badge">deprecated</span>' : ''}${e.definition ? `<div class="ev">${esc(e.definition)}</div>` : ''}</div>`).join('') || '<div class="muted small">Nothing here.</div>'}
+        ${d.total > d.offset + d.entries.length ? `<button class="btn" data-br="more">${d.total - d.offset - d.entries.length} more…</button>` : ''}
+      </div>${c ? `<div style="flex:1;min-width:0" class="card"><h3>${esc(c.label)}</h3><div class="small muted mono">${esc(c.id)}${c.iri ? ' · ' + esc(c.iri) : ''}</div>
+        ${c.ancestors.length ? `<div class="small">Under: ${[...c.ancestors].reverse().map((a) => esc(a.label)).join(' › ')}</div>` : '<div class="small muted">No parent in the standard: you place it under the upper layer when onboarding.</div>'}
+        ${c.definition ? `<div class="small">${esc(c.definition)}</div>` : ''}
+        ${(c.synonyms || []).length ? `<div class="small">Synonyms: ${c.synonyms.map(esc).join(', ')}</div>` : ''}
+        ${c.children.length ? `<div class="small">Narrower: ${c.children.slice(0, 30).map((x) => `<button class="link" data-br-concept="${esc(x.id)}">${esc(x.label)}</button>`).join(', ')}</div>` : ''}
+        ${(c.relations || []).length ? `<h4>Relations</h4>${c.relations.map((x) => `<div class="small">${esc(x.verb)} → <button class="link" data-br-concept="${esc(x.target)}">${esc(c.targets[x.target] || x.target)}</button>${x.cardinality ? ' (' + esc(x.cardinality) + ')' : ''}</div>`).join('')}` : ''}
+        ${c.referencedBy.length ? `<div class="small muted">Referred to by ${c.referencedBy.slice(0, 12).map((x) => esc(x.label) + ' (' + esc(x.verb) + ')').join(', ')}</div>` : ''}
+        ${c.attributes && (c.attributes.notable || []).length ? `<div class="small">Attributes: ${c.attributes.notable.map(esc).join(', ')}</div>` : ''}
+        <div class="actions"><button class="btn" data-br-check-one="${esc(c.id)}">${br.checked.has(c.id) ? 'Unselect' : 'Select for onboarding'}</button></div></div>` : ''}</div>
+      <div class="actions"><button class="btn primary" data-br="onboard">${br.checked.size ? `Onboard the ${br.checked.size} selected…` : 'Onboard from it…'}</button><button class="btn" data-onto="close">Close</button></div></div>`;
+  }
+  $('#ontologyPage').addEventListener('click', async (e) => {
+    const sb = e.target.closest('[data-std-browse]');
+    if (sb) { br.source = stdSource(sb.dataset.stdBrowse, sb.dataset.whole === '1', sb.dataset.decision); br.parent = ''; br.query = ''; br.checked = new Set(); br.data = null; browse(true); return; }
+    const so = e.target.closest('[data-std-onboard]');
+    if (so) { onto.source = stdSource(so.dataset.stdOnboard); onto.analysis = null; onto.preview = null; onto.choices = { add: [], remove: [], place: {} }; renderOnboard(); return; }
+    const op = e.target.closest('[data-br-open]'); if (op) { br.parent = op.dataset.brOpen; br.query = ''; browse(true); return; }
+    const bc = e.target.closest('[data-br-concept]');
+    if (bc) { const r = await opAsk('browse', { source: br.source, concept: bc.dataset.brConcept, query: br.query, parent: br.parent, offset: br.offset }); if (r.browse) { br.data = r.browse; br.concept = r.browse.concept; renderBrowser(); } return; }
+    const one = e.target.closest('[data-br-check-one]'); if (one) { const id = one.dataset.brCheckOne; if (br.checked.has(id)) br.checked.delete(id); else br.checked.add(id); renderBrowser(); return; }
+    const b = e.target.closest('[data-br]'); if (!b) return;
+    if (b.dataset.br === 'search') { br.query = $('#brQuery').value.trim(); br.parent = ''; browse(true); }
+    else if (b.dataset.br === 'top') { br.query = ''; br.parent = ''; browse(true); }
+    else if (b.dataset.br === 'more') { br.offset += br.data.entries.length; browse(false); }
+    else if (b.dataset.br === 'onboard') {
+      onto.source = br.source; onto.preview = null; onto.choices = { add: [...br.checked], remove: [], place: {} };
+      const r = await opAsk('analyze', { source: onto.source, choices: onto.choices });
+      if (r.error) { toast(r.error); return; }
+      onto.analysis = r.analysis; renderOnboard();
+    }
+  });
+  $('#ontologyPage').addEventListener('change', (e) => { const ch = e.target.closest('[data-br-check]'); if (ch) { if (ch.checked) br.checked.add(ch.dataset.brCheck); else br.checked.delete(ch.dataset.brCheck); } });
+  $('#ontologyPage').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'brQuery') { br.query = e.target.value.trim(); br.parent = ''; browse(true); } });
   /** A concept's page (§6.8): every path to it. */
   function conceptTab(p) {
     const k = p.concept;

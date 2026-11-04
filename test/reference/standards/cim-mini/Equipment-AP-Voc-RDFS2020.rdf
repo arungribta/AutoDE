@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A few classes of CGMES's Equipment vocabulary, in its shape (RDFS 2020, cims: extensions), for the ONT1 standards tests. -->
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:cims="http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#" xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:dct="http://purl.org/dc/terms/" xml:base="http://iec.ch/TC57/CIM100">
+  <rdf:Description rdf:about="http://iec.ch/TC57/ns/CIM/CoreEquipment-EU#Ontology">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Ontology"/>
+    <dct:title xml:lang="en">Core Equipment Vocabulary</dct:title>
+    <owl:versionInfo>3.0.0</owl:versionInfo>
+    <dct:rights>Copyright</dct:rights>
+  </rdf:Description>
+  <rdf:Description rdf:about="#IdentifiedObject">
+    <rdfs:label xml:lang="en">IdentifiedObject</rdfs:label>
+    <rdfs:comment>This is a root class to provide common identification for all classes needing identification and naming attributes.</rdfs:comment>
+    <cims:stereotype rdf:resource="http://iec.ch/TC57/NonStandard/UML#concrete"/>
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#ConductingEquipment">
+    <rdfs:label xml:lang="en">ConductingEquipment</rdfs:label>
+    <rdfs:comment>The parts of the AC power system that are designed to carry current or that are conductively connected through terminals.</rdfs:comment>
+    <rdfs:subClassOf rdf:resource="#IdentifiedObject"/>
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#ACLineSegment">
+    <rdfs:label xml:lang="en">ACLineSegment</rdfs:label>
+    <rdfs:comment>A wire or combination of wires used to carry alternating current between points in the power system.</rdfs:comment>
+    <rdfs:subClassOf rdf:resource="#ConductingEquipment"/>
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#Terminal">
+    <rdfs:label xml:lang="en">Terminal</rdfs:label>
+    <rdfs:comment>An AC electrical connection point to a piece of conducting equipment.</rdfs:comment>
+    <rdfs:subClassOf rdf:resource="#IdentifiedObject"/>
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#Resistance">
+    <rdfs:label xml:lang="en">Resistance</rdfs:label>
+    <cims:stereotype>CIMDatatype</cims:stereotype>
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#PhaseCode">
+    <rdfs:label xml:lang="en">PhaseCode</rdfs:label>
+    <cims:stereotype rdf:resource="http://iec.ch/TC57/NonStandard/UML#enumeration"/>
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#ACLineSegment.r">
+    <rdfs:label xml:lang="en">r</rdfs:label>
+    <rdfs:domain rdf:resource="#ACLineSegment"/>
+    <cims:dataType rdf:resource="#Resistance"/>
+    <cims:multiplicity rdf:resource="http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#M:1..1"/>
+    <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#Terminal.ConductingEquipment">
+    <rdfs:label xml:lang="en">ConductingEquipment</rdfs:label>
+    <rdfs:domain rdf:resource="#Terminal"/>
+    <rdfs:range rdf:resource="#ConductingEquipment"/>
+    <cims:multiplicity rdf:resource="http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#M:1"/>
+    <cims:AssociationUsed>Yes</cims:AssociationUsed>
+    <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#ConductingEquipment.Terminals">
+    <rdfs:label xml:lang="en">Terminals</rdfs:label>
+    <rdfs:domain rdf:resource="#ConductingEquipment"/>
+    <rdfs:range rdf:resource="#Terminal"/>
+    <cims:multiplicity rdf:resource="http://iec.ch/TC57/1999/rdf-schema-extensions-19990926#M:0..n"/>
+    <cims:AssociationUsed>No</cims:AssociationUsed>
+    <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="#Terminal.phases">
+    <rdfs:label xml:lang="en">phases</rdfs:label>
+    <rdfs:domain rdf:resource="#Terminal"/>
+    <rdfs:range rdf:resource="#PhaseCode"/>
+    <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"/>
+  </rdf:Description>
+</rdf:RDF>

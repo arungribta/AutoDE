@@ -39,6 +39,8 @@ export type DecisionKind =
   | 'platform_operation'
   /** ONT1: an ontology pack (an industry subset or an extension) imported, grown or with concepts deprecated; a workspace-level change. */
   | 'ontology'
+  /** ONT1: a team's standard to onboard from (`autode: standard/1`), researched by an agent or a person. */
+  | 'standard'
   /** The panel's existing approvals, recorded for the audit trail. */
   | 'spec_approval' | 'pipeline_spec_approval';
 

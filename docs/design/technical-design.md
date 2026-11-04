@@ -1097,13 +1097,23 @@ Context-layer §6.8. All of it is in `src/engine/ontology/`. It is platform-neut
   - gaps, and proposed links.
 - `ontologyOverview` gives the packs, the tree and the glossary. `ExploreRequest` gains `concept` (through `findConcept`) and `ontology`.
 
+**Standards** (v0.59.1; `standards.ts`, `openapi.ts`).
+- `StandardDefinition` (`standard/1`): `id`, `title`, `publisher`, `industry`, `licence`, `format` (`rdf` | `openapi` | `pack`), `release` { `version`, `ref` (tag or 40-character commit) }, `source` { `git`, `path` (a folder or a list) }, `pack` (a shipped pack generated from it), `reader` (`ReaderSettings`: `prefix`, `skipClasses` and `skipProperties` as { `property`, `value` regex } rules, `cardinalityProperty`, `conceptFormat`, `datatypeFormat`, `enumName`, `labelCase`), `modules` (for the generator). `loadStandards` reads shipped then team entries (team wins by id); `standardsCatalog` adds availability, what the team onboarded from each, and pending `standard` decisions (`origin: proposed`).
+- `OntologySource` gains `{ kind: 'standard', id, whole?, decision? }`. `readStandard` uses the shipped pack unless `whole`, else `readGit` at the release with the entry's reader settings and licence (the entry's licence wins over the files'). The reading is cached as JSON in `.autode/local/standards/<id>-<hash>.json` (hash of release, source, reader, format, licence, title and `READER_VERSION`). `standardIsLocal` says whether reading needs no fetch.
+- `stageSource` with `path` (one or several folders) calls `stageFolder`: `git init`, `fetch --depth 1 --filter=blob:none origin <ref>`, `ls-tree -r -z FETCH_HEAD -- <folders>` checked without sizes (`checkListing`), the blobs fetched by id in batches of 150, each `cat-file blob` written out within the size caps. The index is never built.
+- RDF: `analyzeTriples` applies `skipClasses`, reads `rdf:Property` (range in the file → relation with `multiplicity`, else attribute), honours `skipProperties` and `labelCase`; `verbOf` keeps camel-case role names (`dcConductingEquipment`).
+- OpenAPI (`analyzeApiSchemas`): schemas from `components.schemas`, `$defs` or `definitions`, merged by name across documents; a schema is a datatype when it is an enum, matches `enumName`, has a `datatypeFormat` property, isn't an object, or wraps one scalar; a concept when it has a `conceptFormat` property, two or more properties, a reference, or `allOf`.
+- `browseSource` (`service.ts`): a level (roots, or a parent's children), search (names and synonyms, then definitions), or one concept with ancestors, children, relation targets' labels and referrers; paged; sources memoised per process.
+- Decision kind `standard`: payload { `id`, `content`, `reason` }, validated by `validateStandardPayload` (parses, a reason of a sentence, no shipped pack, a full commit id), applied by `applyStandardPayload` to `.autode/config/standards/<id>.yaml`; subject `standard:<id>` at the file's hash.
+
 **Surfaces.**
-- CLI `autode ontology` (`list`, `concepts`, `glossary`, `analyze`, `preview`, `onboard`, `approve`, `align`, `link`, `export`) and `autode explore concept`. The renderers are `renderConceptMarkdown` and `renderOntology`.
-- MCP `ontologyTools.ts`: `autode_ontology`, `autode_get_concept_context`, `autode_ontology_analyze` (read) and `autode_propose_ontology_pack`, `autode_ontology_align` (read), `autode_propose_concept_links` (propose). A file source must be inside the workspace, and there is no Git source.
+- CLI `autode ontology` (`list`, `standards`, `browse`, `concepts`, `glossary`, `analyze`, `preview`, `onboard`, `approve`, `align`, `link`, `export`, `propose-standard`) and `autode explore concept`. The renderers are `renderConceptMarkdown` and `renderOntology`.
+- MCP `ontologyTools.ts`: `autode_ontology`, `autode_get_concept_context`, `autode_ontology_analyze`, `autode_ontology_align`, `autode_ontology_standards`, `autode_ontology_browse` (read) and `autode_propose_ontology_pack`, `autode_propose_concept_links`, `autode_propose_standard` (propose). A file source must be inside the workspace, there is no Git source, and a standard must be on the machine already (`PERMISSION_DENIED` otherwise).
 - VS Code:
   - the Explorer's Ontology view and the concept tab (`media/explorer.html`);
   - an `ontology` message with ops `shipped`, `pick`, `analyze`, `preview`, `propose`, `align` and `proposeLinks`, answered by `answerOntology` in `knowledgeExplorerModel.ts`;
-  - `pickOntologySource`, a host action that opens VS Code's file dialog.
+  - `pickOntologySource`, a host action that opens VS Code's file dialog;
+  - ops `standards` and `browse`; for a standard not on the machine the model answers with the host action `fetchStandard`, and `knowledgeExplorer.ts` runs `dist/autode.js ontology browse <id> --json` with `ELECTRON_RUN_AS_NODE` in a child process, then answers the request (the webview's `opAsk` asks its original question again when the answer says `fetched`).
 - The maintenance rule `term-unaligned` (`queue.ts`) is raised only while a team pack is in effect.
 - The stage kinds `ontology-alignment` and `semantic-modelling` (`stageKinds.ts`), used by `workflows/semantic-foundation.yaml`. In `chatFrontDoor.ts`, `LAYER_ROLES` keeps the layers' agents as work orders of their own.
 
@@ -2387,7 +2397,7 @@ src/engine/maintenance/
 src/engine/metadata/
   model.ts, record.ts
 src/engine/ontology/
-  convert.ts, decision.ts, links.ts, onboard.ts, pack.ts, rdf.ts, service.ts, store.ts
+  convert.ts, decision.ts, links.ts, onboard.ts, openapi.ts, pack.ts, rdf.ts, service.ts, standards.ts, store.ts
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters

@@ -1,0 +1,19 @@
+# AutoDE standard (standard/1; docs/specs/context-layer.md §6.8): the Financial Industry Business Ontology.
+autode: standard/1
+id: fibo
+title: FIBO
+publisher: EDM Council
+industry: Financial services
+description: The Financial Industry Business Ontology - parties, agreements, loans, securities, accounts and payments, in OWL.
+home: https://spec.edmcouncil.org/fibo/
+licence: { name: MIT License, spdx: MIT, redistribution: allowed, note: Keep the copyright notice with the pack. }
+format: rdf
+release: { version: master_2026Q3, ref: master_2026Q3, date: 2026-10-20 }
+# The lending core ships as a pack generated from this release. Browsing the whole standard reads its LOAN, FBC and
+# FND modules from the repository at the release, on request.
+pack: fibo-lending
+source: { git: https://github.com/edmcouncil/fibo.git, path: [LOAN, FBC, FND] }
+reader: { prefix: fibo, labelCase: title }
+modules:
+  - { iri: '^https://spec\.edmcouncil\.org/fibo/ontology/(.+)/[^/]+$', file: '$1.rdf' }
+  - { iri: '^(https://www\.omg\.org/spec/.+/)[^/]+$', url: '$1', accept: application/rdf+xml }

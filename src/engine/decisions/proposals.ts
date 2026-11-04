@@ -19,6 +19,7 @@ import { checksumOf, loadCatalog, writeApproval } from '../platform/operations/l
 import { retireReplaced } from '../platform/operations/proposal';
 import type { PlatformOperation } from '../platform/operations/types';
 import { OntologyPayload, applyOntologyPayload, ontologyRevision, validateOntologyPayload } from '../ontology/decision';
+import { StandardPayload, applyStandardPayload, standardRevision, validateStandardPayload } from '../ontology/standards';
 
 import { COMPOSED, WorkflowInstance, checkWorkflow, diffWorkflow, readWorkflow, templateOf, writeWorkflow } from '../workflows/instance';
 import { skillFits, targetPlatform } from '../agents/assignment';
@@ -52,7 +53,7 @@ import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, Validat
  */
 
 /** What can be proposed. `mapping` and `platform_change` decisions were retired in v0.45.8 (SIMP-2): mappings are drafted into the mapping document, platform changes are runbooks; their old decision files still read. */
-export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'coverage' | 'runbook' | 'semantic_model' | 'article' | 'platform_operation' | 'ontology'>;
+export type ProposalKind = Extract<DecisionKind, 'assertion' | 'spec_revision' | 'pipeline_spec' | 'connection' | 'vocabulary' | 'workflow' | 'coverage' | 'runbook' | 'semantic_model' | 'article' | 'platform_operation' | 'ontology' | 'standard'>;
 
 /** POP1: a team file under .autode/config/platform-operations/ or platforms/, by its workspace-relative path and checksum. */
 /** A team platform file at an exact checksum. POP3: an agent's proposal says why (`reason`) and the drift it fixes (`fixes`). */
@@ -252,6 +253,7 @@ function subjectFor(kind: ProposalKind, ctx: ProposalContext, payload: unknown):
   if (kind === 'article') { const a = payload as ArticlePayload; return { document: `article:${a.slug}`, revision: readArticle(ctx.workspaceRoot, a.slug)?.revision ?? 'none' }; }
   if (kind === 'platform_operation') { const p = payload as PlatformFilePayload; return { document: `platform:${p.file}`, revision: p.checksum }; }
   if (kind === 'ontology') { const o = payload as OntologyPayload; return { document: `ontology:${o.id}`, revision: ontologyRevision(ctx.workspaceRoot, o.id) }; }
+  if (kind === 'standard') { const o = payload as StandardPayload; return { document: `standard:${o.id}`, revision: standardRevision(ctx.workspaceRoot, o.id) }; }
   return undefined;
 }
 
@@ -270,6 +272,7 @@ function describe(kind: ProposalKind, payload: unknown): { title: string; summar
     case 'runbook': { const r = payload as Runbook; return { title: `Runbook ${r.id}: ${r.title} (${r.steps?.length ?? 0} steps on ${r.connectionId})`.slice(0, 160), summary: r.reason ?? '' }; }
     case 'connection': { const c = payload as ConnectionDraft; const e = draftEntry({ ...c, fields: c.fields ?? {} }); return { title: `Connection ${e.id} (${c.platform}, ${c.role})`, summary: `${Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(', ') || 'no settings'}; credentials ${c.credentials.resolver}${c.credentials.ref ? `:${c.credentials.ref}` : ''}.` }; }
     case 'semantic_model': { const s = payload as SemanticModelPayload; return { title: `${s.scope === 'shared' ? 'Shared semantic model' : 'Semantic composite'} ${s.name}`, summary: s.scope === 'shared' ? 'A workspace-level change: every problem that uses this model is affected.' : 'A composite of the active problem; it is resolved once applied.' }; }
+    case 'standard': { const o = payload as StandardPayload; return { title: `Standard ${o.id} for the ontology catalog`, summary: `${String(o.reason ?? '').slice(0, 400)} Approving it adds the standard to this workspace's catalog; a person then browses it (its repository is fetched only then) and onboards from it.` }; }
     case 'ontology': { const o = payload as OntologyPayload; return { title: `Ontology pack ${o.id}${o.added?.length ? `: ${o.added.length} concept(s) added` : ''}`.slice(0, 160), summary: `${o.reason ? `${o.reason.slice(0, 300)} ` : ''}${o.added?.length ? `Adds ${o.added.slice(0, 12).join(', ')}${o.added.length > 12 ? ', …' : ''}. ` : ''}A workspace-level change: every business problem shares the ontology. Approving it approves this revision of the pack.` }; }
     case 'article': { const a = payload as ArticlePayload; return { title: `Knowledge article: ${a.title}`.slice(0, 160), summary: `About ${a.about.join(', ')}; cites ${a.cites.length} fact(s). Approving it gives it to agents working on what it is about.` }; }
     case 'platform_operation': { const p = payload as PlatformFilePayload; return { title: `${/\/platforms\//.test(p.file) ? 'Platform definition' : 'Platform operation'} ${p.file}`.slice(0, 160), summary: `${p.reason ? `${p.reason.slice(0, 300)} ` : ''}${p.file} at ${p.checksum}.${p.fixes ? ` It fixes ${p.fixes}.` : ''}${p.resembles?.length ? ` Like: ${p.resembles.join(', ')}.` : ''} Approving it lets AutoDE run exactly this file; an edit makes it a draft again.` }; }
@@ -351,6 +354,7 @@ export function validateProposal(kind: ProposalKind, payload: unknown, ctx: Prop
     case 'semantic_model': return validateSemanticModelProposal(payload as SemanticModelPayload, ctx);
     case 'article': return validateArticleProposal(payload as ArticlePayload, ctx);
     case 'platform_operation': return validatePlatformFileProposal(payload as PlatformFilePayload, ctx);
+    case 'standard': { const r = report(); r.checks.push('the definition parses (standard/1): publisher, licence, a pinned release, a source', 'a reason that says where it was researched'); const v = validateStandardPayload(payload as StandardPayload, { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot }); r.errors.push(...v.errors); r.warnings.push(...v.warnings); return finish(r); }
     case 'ontology': { const r = report(); r.checks.push('the pack parses (ontology-pack/1)', 'every concept chains to the upper layer; parents and relation targets exist', 'no concept of the current pack is dropped (deprecate instead)'); const v = validateOntologyPayload(payload as OntologyPayload, { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot }); r.errors.push(...v.errors); r.warnings.push(...v.warnings); return finish(r); }
   }
 }
@@ -568,6 +572,17 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         const replaced = what === 'operations' ? retireReplaced({ workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot }, (loaded.item as { id: string }).id, p.file, now) : [];
         const done = store.markApplied(id, `Approved by ${approver} at ${p.checksum}.${replaced.length ? ` Replaced: ${replaced.join(', ')}.` : ''}`);
         return { decision: done, applied: true, message: `${p.file} approved by ${approver}: AutoDE runs it from now on; an edit makes it a draft again.${replaced.length ? ` The team's earlier file (${replaced.join(', ')}) is in .autode/local/replaced-operations/.` : ''}` };
+      }
+      case 'standard': {
+        const o = store.proposal<StandardPayload>(id);
+        if (d.subject?.revision && d.subject.revision !== standardRevision(ctx.workspaceRoot, o.id)) {
+          const sup = store.markSuperseded(id, `The standard ${o.id} changed after the proposal was made; propose again against the current version.`);
+          return { decision: sup, applied: false, message: sup.events[sup.events.length - 1].note ?? '' };
+        }
+        const w = applyStandardPayload(o, { workspaceRoot: ctx.workspaceRoot, resourcesRoot: ctx.resourcesRoot });
+        if (w.errors.length) { const failed = store.markFailed(id, w.errors.join(' ')); return { decision: failed, applied: false, message: `${id}: ${w.errors.join(' ')}` }; }
+        const done = store.markApplied(id, `Approved by ${approver}; wrote ${path.relative(ctx.workspaceRoot, w.file).split(path.sep).join('/')}.`);
+        return { decision: done, applied: true, message: `Standard ${o.id} added to the catalog (approved by ${approver}). Browse it in the Ontology view (Standards) or autode ontology browse ${o.id}, then onboard from it.` };
       }
       case 'ontology': {
         const o = store.proposal<OntologyPayload>(id);

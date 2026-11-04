@@ -590,6 +590,11 @@ Your **glossary terms** link to concepts: a term *means* a concept (an exact mat
 
 Onboarding the same standard later adds to the team's pack. Concepts are deprecated, never deleted.
 
+**Standards beyond FIBO.** The Ontology view's **Standards** section lists every standard AutoDE can onboard from: FIBO (a lending pack ships, and the whole standard can be browsed), CIM for utilities (as ENTSO-E's CGMES), BIAN for banking, and your team's own. Each card says who publishes it, its licence and release, and how AutoDE gets it.
+- **Browse** shows a standard's concepts as a tree, a search over names and definitions, and any concept in full. The first time, AutoDE fetches only the standard's folders at its pinned release (a few seconds to a minute); after that it is on your machine.
+- Tick the concepts you need and choose **Onboard the selected…**: the onboarding steps open with them.
+- **A standard that isn't listed**: ask the knowledge engineer to research it. It finds the publisher's files, licence and release with its own web tools and proposes the standard's entry. You **Try it** from its card, then approve it in the AutoDE panel (Decisions). In a terminal: `autode ontology propose-standard <file.yaml> --reason "…"`.
+
 **Aligning the vocabulary** (*Align the vocabulary…*, or `autode ontology align`): AutoDE lists the terms that mean a concept and the tables that represent one, from names, synonyms and your vocabulary (`BRWR` = borrower). Check the ones that are right and propose them. Each becomes a fact you confirm in the **Context Inbox**; until then it counts for nothing. A term no concept fits stays a gap: the knowledge engineer can propose an extension concept. While a team pack is in effect, terms that mean no concept show up as a maintenance item for the knowledge engineer.
 
 **A concept's page** (click a concept, or `autode explore concept "Credit Facility"`): where it sits under the upper layer, its relations and attributes, the terms that mean it (the most specific scope first), the tables that represent it and the columns that reach it through terms, system by system, the semantic layer over them, facts, rules, articles, what is waiting in the Inbox, gaps and conflicts. A conflict is, for example, a table said to represent a *Loan* whose key column's term means a *Borrower*.

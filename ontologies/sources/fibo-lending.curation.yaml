@@ -10,17 +10,9 @@ pack:
   description: Lending core from the Financial Industry Business Ontology (EDM
     Council) - loans and credit agreements, their parties, collateral, payments
     and applications.
-standard:
-  name: FIBO
-  version: master_2026Q3
-  iri: https://spec.edmcouncil.org/fibo/
-  repository: https://github.com/edmcouncil/fibo
-  licence:
-    name: MIT License
-    spdx: MIT
-    redistribution: allowed
-    note: FIBO is published by the EDM Council under the MIT licence; keep the
-      copyright notice with the pack.
+# The standard's catalog entry (ontologies/standards/fibo.yaml) gives the release, the repository, the licence and
+# where each module is.
+standard: fibo
 concepts:
   - id: fibo:Account
     iri: https://spec.edmcouncil.org/fibo/ontology/FBC/ProductsAndServices/ClientsAndAccounts/Account

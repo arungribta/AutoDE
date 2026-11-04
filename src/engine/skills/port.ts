@@ -32,7 +32,8 @@ import { skillsInEffect } from './customise';
  */
 
 export type PortSourceKind = 'local' | 'git' | 'dbt';
-export interface PortSource { kind: PortSourceKind; location: string; ref?: string }
+/** `path` (Git only): a folder of the repository; only it is checked out and counted against the caps (ONT1: a standard's folder). */
+export interface PortSource { kind: PortSourceKind; location: string; ref?: string; path?: string | string[] }
 export interface PortCaps { maxFiles: number; maxBytes: number; maxFileBytes: number }
 /** A source (a whole repository or folder) and one skill in it. */
 export const SOURCE_CAPS: PortCaps = { maxFiles: 2000, maxBytes: 30_000_000, maxFileBytes: 5_000_000 };
@@ -96,30 +97,90 @@ export function stageSource(src: PortSource, caps: PortCaps = SOURCE_CAPS, git: 
   }
   if (!/^(https:\/\/|git@|ssh:\/\/|file:\/\/)/.test(src.location) && !fs.existsSync(src.location)) throw new PortError(`${src.location} is not a Git URL (https://, git@, ssh:// or file://) or a local repository.`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-port-'));
-  const cleanup = () => fs.rmSync(tmp, { recursive: true, force: true });
+  // A file Windows still holds (git's last write) must not hide the error that ended the staging.
+  const cleanup = () => { try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* left in the temporary folder */ } };
   try {
-    const clone = git(['clone', '--depth', '1', '--no-checkout', ...(src.ref ? ['--branch', src.ref] : []), '--', src.location, tmp]);
+    // A commit (a repository without tags) is fetched by its id; a branch or tag is cloned at it.
+    const byCommit = !!src.ref && /^[0-9a-f]{40}$/.test(src.ref);
+    const subs = (Array.isArray(src.path) ? src.path : src.path ? [src.path] : []).map((p) => p.split(/[\\/]+/).filter(Boolean).join('/')).filter(Boolean);
+    for (const sub of subs) if (!safeRelative(sub)) throw new PortError(`${sub} is not a folder inside the repository.`);
+    if (subs.length) return stageFolder(src, subs, caps, git, tmp, cleanup);
+    const clone = git(['clone', '--depth', '1', '--no-checkout', ...(src.ref && !byCommit ? ['--branch', src.ref] : []), '--', src.location, tmp]);
     if (clone.status !== 0) throw new PortError(`git clone failed: ${clone.stderr.trim().split('\n').pop() ?? 'unknown error'}`);
-    const tree = git(['ls-tree', '-r', '-l', '-z', 'HEAD'], tmp);
-    if (tree.status !== 0) throw new PortError(`Could not list the repository: ${tree.stderr.trim()}`);
-    let files = 0, bytes = 0;
-    for (const entry of tree.stdout.split('\0').filter(Boolean)) {
-      const tab = entry.indexOf('\t');
-      const [mode, , , size] = entry.slice(0, tab).split(/\s+/);
-      const p = entry.slice(tab + 1);
-      if (!safeRelative(p)) throw new PortError(`The repository has a path that escapes it: ${p}. Nothing was copied.`);
-      if (mode === '120000') throw new PortError(`${p} is a symbolic link: skills are imported as plain files. Nothing was copied.`);
-      if (mode === '160000') throw new PortError(`${p} is a Git submodule: import the submodule's repository directly. Nothing was copied.`);
-      const n = Number(size) || 0;
-      if (n > caps.maxFileBytes) throw new PortError(`${p} is ${n} bytes; the most a file may be is ${caps.maxFileBytes}. Nothing was copied.`);
-      files++; bytes += n;
-      if (files > caps.maxFiles) throw new PortError(`The repository has more than ${caps.maxFiles} files. Nothing was copied.`);
-      if (bytes > caps.maxBytes) throw new PortError(`The repository is larger than ${caps.maxBytes} bytes. Nothing was copied.`);
+    let head = 'HEAD';
+    if (byCommit) {
+      const f = git(['fetch', '--depth', '1', 'origin', src.ref!], tmp);
+      if (f.status !== 0) throw new PortError(`git fetch of ${src.ref} failed: ${f.stderr.trim().split('\n').pop() ?? 'unknown error'}`);
+      head = 'FETCH_HEAD';
     }
-    const co = git(['checkout', '--quiet', 'HEAD', '--', '.'], tmp);
+    const tree = git(['ls-tree', '-r', '-l', '-z', head], tmp);
+    if (tree.status !== 0) throw new PortError(`Could not list the repository: ${tree.stderr.trim()}`);
+    const { files, bytes } = checkListing(tree.stdout, caps, true);
+    const co = git(['checkout', '--quiet', head, '--', '.'], tmp);
     if (co.status !== 0) throw new PortError(`git checkout failed: ${co.stderr.trim()}`);
-    const commit = git(['rev-parse', 'HEAD'], tmp).stdout.trim();
+    const commit = git(['rev-parse', head], tmp).stdout.trim();
     return { dir: tmp, provenance: { source: 'git', repoUrl: src.location, ref: src.ref, resolvedCommit: commit || undefined }, files, bytes, cleanup };
+  } catch (err) { cleanup(); throw err; }
+}
+
+/** A tree listing's checks (`ls-tree -r -z`, with `-l` for sizes): paths, links, submodules, counts and sizes. */
+function checkListing(listing: string, caps: PortCaps, withSizes: boolean): { files: number; bytes: number; entries: Array<{ sha: string; path: string }> } {
+  let files = 0, bytes = 0;
+  const entries: Array<{ sha: string; path: string }> = [];
+  for (const entry of listing.split('\0').filter(Boolean)) {
+    const tab = entry.indexOf('\t');
+    const [mode, , sha, size] = entry.slice(0, tab).split(/\s+/);
+    const p = entry.slice(tab + 1);
+    if (!safeRelative(p)) throw new PortError(`The repository has a path that escapes it: ${p}. Nothing was copied.`);
+    if (mode === '120000') throw new PortError(`${p} is a symbolic link: skills are imported as plain files. Nothing was copied.`);
+    if (mode === '160000') throw new PortError(`${p} is a Git submodule: import the submodule's repository directly. Nothing was copied.`);
+    const n = withSizes ? Number(size) || 0 : 0;
+    if (n > caps.maxFileBytes) throw new PortError(`${p} is ${n} bytes; the most a file may be is ${caps.maxFileBytes}. Nothing was copied.`);
+    files++; bytes += n;
+    if (files > caps.maxFiles) throw new PortError(`The repository has more than ${caps.maxFiles} files. Nothing was copied.`);
+    if (bytes > caps.maxBytes) throw new PortError(`The repository is larger than ${caps.maxBytes} bytes. Nothing was copied.`);
+    entries.push({ sha, path: p });
+  }
+  return { files, bytes, entries };
+}
+
+/**
+ * One folder of a repository (ONT1: a standard's folder): the commit is fetched without file contents, the folder is
+ * listed and checked, its files are fetched by id in batches, and each is written out within the caps. Git's index
+ * is never built, so a path elsewhere in the repository that the operating system can't hold (BIAN's release 14
+ * folder ends in a space, which Windows refuses) doesn't stop reading this one. Only the folder is downloaded.
+ */
+function stageFolder(src: PortSource, subs: string[], caps: PortCaps, git: GitRunner, tmp: string, cleanup: () => void): StagedSource {
+  try {
+    const run = (args: string[], what: string) => {
+      const r = git(args, tmp);
+      if (r.status !== 0) throw new PortError(`${what} failed: ${r.stderr.trim().split('\n').pop() ?? 'unknown error'}`);
+      return r;
+    };
+    run(['init', '-q'], 'git init');
+    run(['remote', 'add', 'origin', src.location], 'git remote add');
+    run(['fetch', '-q', '--depth', '1', '--filter=blob:none', 'origin', src.ref ?? 'HEAD'], `git fetch of ${src.ref ?? 'the default branch'}`);
+    const sub = subs.join(', ');
+    const listed = checkListing(run(['ls-tree', '-r', '-z', 'FETCH_HEAD', '--', ...subs], `Listing ${sub}`).stdout, caps, false);
+    if (!listed.files) throw new PortError(`No files in ${sub} at ${src.ref ?? 'the default branch'}.`);
+    // The files' contents, in batches (a server that ignored the filter already sent them; a fetch that fails here is
+    // reported by the read below).
+    const shas = [...new Set(listed.entries.map((e) => e.sha))];
+    for (let i = 0; i < shas.length; i += 150) git(['fetch', '-q', '--no-write-fetch-head', 'origin', ...shas.slice(i, i + 150)], tmp);
+    let bytes = 0;
+    for (const e of listed.entries) {
+      const blob = git(['cat-file', 'blob', e.sha], tmp);
+      if (blob.status !== 0) throw new PortError(`Could not read ${e.path}: ${blob.stderr.trim().split('\n').pop() ?? 'unknown error'}`);
+      const n = Buffer.byteLength(blob.stdout, 'utf8');
+      if (n > caps.maxFileBytes) throw new PortError(`${e.path} is ${n} bytes; the most a file may be is ${caps.maxFileBytes}. Nothing was kept.`);
+      bytes += n;
+      if (bytes > caps.maxBytes) throw new PortError(`${sub} is larger than ${caps.maxBytes} bytes. Nothing was kept.`);
+      const out = path.join(tmp, ...e.path.split('/'));
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      fs.writeFileSync(out, blob.stdout);
+    }
+    const commit = git(['rev-parse', 'FETCH_HEAD'], tmp).stdout.trim();
+    return { dir: tmp, provenance: { source: 'git', repoUrl: src.location, ref: src.ref, resolvedCommit: commit || undefined }, files: listed.files, bytes, cleanup };
   } catch (err) { cleanup(); throw err; }
 }
 

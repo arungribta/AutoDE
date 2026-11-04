@@ -56,6 +56,8 @@ export const LAYOUT = {
   articles: [AUTODE_DIR, 'knowledge', 'articles'],
   /** ONT1 (§6.8): the team's ontology packs (industry subsets and extensions), each approved by a person. */
   ontology: [AUTODE_DIR, 'knowledge', 'ontology'],
+  /** ONT1: the team's own standards to onboard from (`autode: standard/1`), overriding shipped ones by id. */
+  standards: [AUTODE_DIR, 'config', 'standards'],
   /** MM2 (§5.6): who acts on knowledge maintenance — suggest (default), draft or off. */
   maintenancePolicy: [AUTODE_DIR, 'config', 'maintenance.yaml'],
   /** Which decision kinds may be approved by MCP elicitation (PA3c). */

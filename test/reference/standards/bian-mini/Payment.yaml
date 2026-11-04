@@ -1,0 +1,28 @@
+# Another BIAN-style Semantic API: it repeats party (merged into one concept) and adds payment.
+openapi: 3.0.0
+info:
+  title: Payment Execution
+  version: 13.0.0
+paths: {}
+components:
+  schemas:
+    payment:
+      type: object
+      description: A transfer of money
+      properties:
+        Payment: { type: string, format: class }
+        PaymentAmount: { $ref: '#/components/schemas/amount' }
+        PayerReference: { $ref: '#/components/schemas/party' }
+    party:
+      type: object
+      properties:
+        Party: { type: string, format: class }
+        PartyIdentification: { $ref: '#/components/schemas/text' }
+    amount:
+      type: object
+      properties:
+        Amount: { type: string, format: datatype }
+    text:
+      type: object
+      properties:
+        Text: { type: string, format: datatype }

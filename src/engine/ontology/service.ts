@@ -10,6 +10,7 @@ import { propose } from '../decisions/proposals';
 import { layoutPath } from '../workspaceLayout';
 import { OntologyPayload } from './decision';
 import { meaningLinks } from './links';
+import { SourceConcept } from './convert';
 import { BuiltPack, OntologySource, PlacementRow, ReadSource, ScopeResult, TermCandidate, RepresentsCandidate, alignTerms, buildPack, meaningProposals, placementOf, proposeScope, readSource, representsCandidates, seedConcepts, workspaceSignals } from './onboard';
 import { packRevision, stringifyPack } from './pack';
 import { OntologyScope, loadOntology, readTeamPack } from './store';
@@ -138,4 +139,84 @@ export function exportPack(scope: OntologyScope, id: string, out: string): { fil
   fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
   fs.writeFileSync(out, stringifyPack({ ...rest, source: { kind: 'file', ref: `${id}.yaml`, checksum: packRevision(l.pack) } }));
   return { file: out };
+}
+
+// ── Browsing a standard before onboarding it (ONT1: the Standards view, `autode ontology browse`, MCP) ──
+
+export interface BrowseRequest { query?: string; parent?: string; concept?: string; offset?: number; limit?: number }
+export interface BrowseEntry { id: string; label: string; children: number; parent?: string; module?: string; definition?: string; status?: string }
+export interface BrowseResult {
+  source: { id: string; title: string; kind: string; ref: string; commit?: string };
+  version?: string;
+  licence: { name: string; spdx?: string; redistribution: string };
+  distribution: 'shareable' | 'workspace';
+  counts: { concepts: number; relations: number; modules: number };
+  /** A level of the tree (its roots, or a concept's children), or the search hits; paged. */
+  entries: BrowseEntry[];
+  total: number;
+  offset: number;
+  /** The level's concept and its ancestors, nearest first (for a breadcrumb). */
+  path: Array<{ id: string; label: string }>;
+  /** One concept in full. */
+  concept?: SourceConcept & { ancestors: Array<{ id: string; label: string }>; children: Array<{ id: string; label: string }>; targets: Record<string, string>; referencedBy: Array<{ verb: string; from: string; label: string }> };
+  warnings: string[];
+}
+
+const memo = new Map<string, ReadSource>();
+
+/** Reads a source for browsing: a standard from its cache, anything else once per process (the last few). */
+function readForBrowse(scope: OntologyScope, src: OntologySource, opts: { prefix?: string; id?: string }): ReadSource {
+  const key = JSON.stringify([scope.workspaceRoot, src, opts]);
+  const hit = memo.get(key);
+  if (hit && src.kind !== 'file') return hit;
+  const r = readSource(scope, src, opts);
+  memo.set(key, r);
+  while (memo.size > 4) memo.delete(memo.keys().next().value as string);
+  return r;
+}
+
+export function browseSource(scope: OntologyScope, src: OntologySource, req: BrowseRequest = {}, opts: { prefix?: string; id?: string } = {}): BrowseResult {
+  const read = readForBrowse(scope, src, opts);
+  const a = read.analysis;
+  const byId = new Map(a.concepts.map((c) => [c.id, c] as const));
+  const children = new Map<string, string[]>();
+  for (const c of a.concepts) if (c.parent && byId.has(c.parent)) children.set(c.parent, [...(children.get(c.parent) ?? []), c.id]);
+  const entry = (c: SourceConcept): BrowseEntry => ({ id: c.id, label: c.label, children: children.get(c.id)?.length ?? 0, ...(c.parent ? { parent: c.parent } : {}), ...(c.module ? { module: c.module } : {}), ...(c.definition ? { definition: c.definition.slice(0, 200) } : {}), ...(c.status ? { status: c.status } : {}) });
+  const byLabel = (x: SourceConcept, y: SourceConcept) => x.label.localeCompare(y.label) || x.id.localeCompare(y.id);
+  const ancestors = (id: string) => { const out: Array<{ id: string; label: string }> = []; for (let cur = byId.get(id)?.parent; cur && byId.has(cur) && out.length < 50; cur = byId.get(cur)?.parent) out.push({ id: cur, label: byId.get(cur)!.label }); return out; };
+  let list: SourceConcept[];
+  const q = req.query?.trim().toLowerCase();
+  if (q) {
+    // Every word in the label, a synonym or the id first; then in the definition too.
+    const words = q.split(/\s+/);
+    const hay = (c: SourceConcept) => `${c.label} ${(c.synonyms ?? []).join(' ')} ${c.id}`.toLowerCase();
+    const inName = a.concepts.filter((c) => words.every((w) => hay(c).includes(w)));
+    const named = new Set(inName);
+    const inDef = a.concepts.filter((c) => !named.has(c) && words.every((w) => `${hay(c)} ${c.definition ?? ''}`.toLowerCase().includes(w)));
+    list = [...inName.sort(byLabel), ...inDef.sort(byLabel)];
+  } else if (req.parent) {
+    if (!byId.has(req.parent)) throw new OntologyProposalError([`No concept "${req.parent}" in ${a.title}.`]);
+    list = (children.get(req.parent) ?? []).map((id) => byId.get(id)!).sort(byLabel);
+  } else list = a.concepts.filter((c) => !c.parent || !byId.has(c.parent)).sort(byLabel);
+  const offset = Math.max(0, req.offset ?? 0);
+  const limit = Math.min(Math.max(1, req.limit ?? 100), 500);
+  let concept: BrowseResult['concept'];
+  if (req.concept) {
+    const c = byId.get(req.concept);
+    if (!c) throw new OntologyProposalError([`No concept "${req.concept}" in ${a.title}.`]);
+    const targets = Object.fromEntries((c.relations ?? []).map((r) => [r.target, byId.get(r.target)?.label ?? r.target]));
+    const referencedBy = a.concepts.flatMap((x) => (x.relations ?? []).filter((r) => r.target === c.id).map((r) => ({ verb: r.verb, from: x.id, label: x.label }))).slice(0, 200);
+    concept = { ...c, ancestors: ancestors(c.id), children: (children.get(c.id) ?? []).map((id) => ({ id, label: byId.get(id)!.label })).sort((x, y) => x.label.localeCompare(y.label)), targets, referencedBy };
+  }
+  return {
+    source: { id: read.id, title: read.title, kind: read.source.kind, ref: read.source.ref, ...(read.source.commit ? { commit: read.source.commit } : {}) },
+    ...(a.version ? { version: a.version } : {}),
+    licence: { name: a.licence.name, ...(a.licence.spdx ? { spdx: a.licence.spdx } : {}), redistribution: a.licence.redistribution },
+    distribution: a.licence.redistribution === 'allowed' ? 'shareable' : 'workspace',
+    counts: { concepts: a.concepts.length, relations: a.relations, modules: a.modules.length },
+    entries: list.slice(offset, offset + limit).map(entry), total: list.length, offset,
+    path: req.parent && !q ? [{ id: req.parent, label: byId.get(req.parent)!.label }, ...ancestors(req.parent)] : [],
+    ...(concept ? { concept } : {}),
+    warnings: a.warnings
+  };
 }

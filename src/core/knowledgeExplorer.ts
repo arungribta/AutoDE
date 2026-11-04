@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { execFile } from 'node:child_process';
 import * as vscode from 'vscode';
 import { EngineWorkspace } from '../mcp/workspace';
 import { ExploreSources } from '../engine/explore/explore';
@@ -85,6 +86,20 @@ export class KnowledgeExplorerPanel {
     switch (a.kind) {
       case 'openFile': await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(a.file)); return;
       case 'openInbox': this.host.openInbox(); return;
+      case 'fetchStandard': {
+        // ONT1: a person asked to browse a standard: AutoDE's CLI fetches the folder at the pinned release in a child
+        // process (git, minutes at worst) and caches the reading; the panel then asks again and reads it at once.
+        const root = this.host.workspaceRoot();
+        if (!root) return;
+        void this.panel.webview.postMessage({ type: 'toast', message: `Fetching ${a.id} at its pinned release (only its folders)…` });
+        const args = [path.join(this.extensionPath, 'dist', 'autode.js'), 'ontology', 'browse', a.id, '--workspace', root, '--resources', this.extensionPath, '--json', ...(a.whole ? ['--whole'] : []), ...(a.decision ? ['--decision', a.decision] : [])];
+        execFile(process.execPath, args, { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, maxBuffer: 256 * 1024 * 1024, timeout: 15 * 60_000, windowsHide: true }, (err, stdout, stderr) => {
+          let body: Record<string, unknown>;
+          try { body = JSON.parse(stdout) as Record<string, unknown>; } catch { body = { error: (stderr || (err ? err.message : '') || 'The fetch failed.').replace(/^autode: /, '').trim() }; }
+          void this.panel.webview.postMessage({ type: 'response', requestId: a.requestId, body: body.browse ? { browse: body.browse, fetched: true } : body });
+        });
+        return;
+      }
       case 'pickOntologySource': {
         // ONT1: the person picks their own copy of a standard (a file or a folder); nothing is downloaded.
         const pick = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: true, canSelectMany: false, title: 'A standard to onboard: OWL or SKOS (Turtle, RDF/XML), a folder of them, or an AutoDE pack', filters: { Ontology: ['ttl', 'nt', 'rdf', 'owl', 'xml', 'yaml', 'yml'] } });

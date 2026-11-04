@@ -1508,6 +1508,24 @@ Use a workspace with the lending fixture: `autode estate ingest test/reference/l
   Do: in Claude Code (AutoDE plugin), ask the knowledge engineer to onboard FIBO lending for this problem and align the terms.
   Expect: it analyses, proposes the pack (a decision you approve) and proposes the links (facts you confirm); it never approves.
 
+## Part 70 — v0.59.1 ONT1: standards beyond FIBO
+
+- [ ] **70.1 The Standards section.**
+  Do: open the Ontology view.
+  Expect: cards for BIAN, CIM (CGMES 3.0) and FIBO with publisher, industry, licence and release; FIBO says a pack ships, the others that they are fetched on request.
+- [ ] **70.2 Browse CIM.**
+  Do: **Browse** on CIM.
+  Expect: a short wait (a few seconds; VS Code stays responsive), then about 438 concepts. Search *power transformer*; open *Terminal*: it is under IdentifiedObject, with a relation to ConductingEquipment. Browse again: immediate.
+- [ ] **70.3 Browse the whole of FIBO and BIAN.**
+  Do: *Browse the whole standard* on FIBO; **Browse** on BIAN.
+  Expect: FIBO about 1,146 concepts (Loan under Credit Agreement Repaid Periodically); BIAN about 1,346 business objects (Party, Loan Product) after up to a minute.
+- [ ] **70.4 Onboard what you selected.**
+  Do: in CIM, select ACLineSegment and Terminal, **Onboard the selected…**, place IdentifiedObject under Product, propose and approve.
+  Expect: a team pack `cim-cgmes` with those concepts and their ancestors; the CIM card says it was onboarded.
+- [ ] **70.5 The knowledge engineer researches a standard.**
+  Do: in Claude Code (AutoDE plugin), ask the knowledge engineer to research and propose a standard the catalog lacks (for example HL7 FHIR or ACORD).
+  Expect: it searches the web, then proposes an entry with a pinned release and the licence it read; the card shows *proposed* with its reason; **Try it** fetches and browses it; you approve it in Decisions. It never approves.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1892,5 +1910,10 @@ Use a workspace with the lending fixture: `autode estate ingest test/reference/l
 | 69.5 |  |  |
 | 69.6 |  |  |
 | 69.7 |  |  |
+| 70.1 |  |  |
+| 70.2 |  |  |
+| 70.3 |  |  |
+| 70.4 |  |  |
+| 70.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

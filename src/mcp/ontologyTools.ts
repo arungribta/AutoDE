@@ -5,7 +5,11 @@ import { explore } from './exploreTools';
 import { PortError } from '../engine/skills/port';
 import { ProposalValidationError } from '../engine/decisions/proposals';
 import { OntologySource, shippedSources } from '../engine/ontology/onboard';
-import { Choices, OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { Choices, OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, browseSource, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { parseStandard, standardsCatalog } from '../engine/ontology/standards';
+import { standardIsLocal } from '../engine/ontology/onboard';
+import { DecisionStore } from '../engine/decisions/decisionStore';
+import { propose as proposeDecision } from '../engine/decisions/proposals';
 import { MATCH_TYPES, MatchType } from '../engine/ontology/pack';
 import { findConcept, loadOntology } from '../engine/ontology/store';
 
@@ -19,7 +23,7 @@ import { findConcept, loadOntology } from '../engine/ontology/store';
 const read = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const propose = (title: string): ToolAnnotations => ({ title, readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const strings = { type: 'array', items: { type: 'string', minLength: 1 } };
-const SOURCE = { type: 'object', additionalProperties: false, properties: { shipped: { type: 'string', description: 'A shipped pack (autode_ontology lists them), e.g. fibo-lending.' }, file: { type: 'string', description: 'A file or folder in the workspace: OWL or SKOS in Turtle or RDF/XML, or an AutoDE pack.' } } };
+const SOURCE = { type: 'object', additionalProperties: false, properties: { standard: { type: 'string', description: 'A standard of the catalog (autode_ontology_standards): its shipped pack, or its full release once a person has fetched it on this machine.' }, whole: { type: 'boolean', description: 'With standard: the whole standard rather than its shipped pack.' }, shipped: { type: 'string', description: 'A shipped pack (autode_ontology lists them), e.g. fibo-lending.' }, file: { type: 'string', description: 'A file or folder in the workspace: OWL or SKOS in Turtle or RDF/XML, or an AutoDE pack.' } } };
 const CHOICES = {
   add: { ...strings, description: 'Concept ids to add to the proposed scope.' },
   remove: { ...strings, description: 'Concept ids to leave out.' },
@@ -30,7 +34,14 @@ const CHOICES = {
 };
 
 function sourceOf(args: Record<string, unknown>, workspaceRoot: string, resourcesRoot?: string): OntologySource {
-  const s = (args.source ?? {}) as { shipped?: string; file?: string };
+  const s = (args.source ?? {}) as { standard?: string; whole?: boolean; shipped?: string; file?: string };
+  if (s.standard) {
+    // Only what is on this machine: an agent never makes AutoDE fetch a standard (a person does, in the Standards view or the CLI).
+    const scope = { workspaceRoot, resourcesRoot };
+    if (!standardsCatalog(scope).some((x) => x.id === s.standard && x.origin !== 'proposed')) throw new EngineToolError('NOT_FOUND', `No standard "${s.standard}" (autode_ontology_standards).`);
+    if (!standardIsLocal(scope, s.standard, !!s.whole)) throw new EngineToolError('PERMISSION_DENIED', `${s.standard} isn't on this machine yet: a person fetches it (Ontology view, Standards: Browse; or autode ontology browse ${s.standard}${s.whole ? ' --whole' : ''}). Then it can be read here.`);
+    return { kind: 'standard', id: s.standard, ...(s.whole ? { whole: true } : {}) };
+  }
   if (s.shipped) {
     if (!shippedSources(resourcesRoot).some((x) => x.id === s.shipped)) throw new EngineToolError('NOT_FOUND', `No shipped pack "${s.shipped}" (${shippedSources(resourcesRoot).map((x) => x.id).join(', ')}).`);
     return { kind: 'shipped', id: s.shipped };
@@ -40,7 +51,7 @@ function sourceOf(args: Record<string, unknown>, workspaceRoot: string, resource
     if (!full.startsWith(path.resolve(workspaceRoot) + path.sep)) throw new EngineToolError('PERMISSION_DENIED', 'A file source is in the workspace; a person onboards anything else (autode ontology analyze, or the Knowledge Explorer).');
     return { kind: 'file', path: full };
   }
-  throw new EngineToolError('VALIDATION_FAILED', 'Give source.shipped (a pack AutoDE ships) or source.file (a file or folder in the workspace).');
+  throw new EngineToolError('VALIDATION_FAILED', 'Give source.standard (autode_ontology_standards), source.shipped (a pack AutoDE ships) or source.file (a file or folder in the workspace).');
 }
 
 const choicesOf = (args: Record<string, unknown>): Choices => ({ ...(args.add ? { add: args.add as string[] } : {}), ...(args.remove ? { remove: args.remove as string[] } : {}), ...(args.only ? { only: args.only as string[] } : {}), ...(args.place ? { place: args.place as Record<string, string> } : {}) });
@@ -137,6 +148,43 @@ export function ontologyTools(clientName: () => string | undefined): EngineTool[
         const r = await proposeAlignment(scope, { means, represents }, `mcp:${clientName() ?? 'client'}`, ws.activeProblemId());
         return { proposed: r.recorded.map((a) => ({ id: a.id, statement: a.statement, status: a.status })), duplicates: r.duplicates, next: 'A person confirms them in the AutoDE Context Inbox. Tell the user.' };
       }
+    },
+    {
+      name: 'autode_ontology_standards',
+      description: 'The standards AutoDE can onboard from: FIBO (financial services), CIM as ENTSO-E\'s CGMES (utilities), BIAN (banking) and the team\'s own, with each one\'s publisher, industry, format (rdf, openapi), licence, pinned release, and how it is had: a pack AutoDE ships, read on this machine already, or fetched from its repository when a person asks (Ontology view → Standards, or autode ontology browse). Proposed standards waiting for approval are listed too. To add a standard, research it and propose its definition with autode_propose_standard.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      annotations: read('The standards catalog'),
+      handler: async (_args, ws) => {
+        const scope = { workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot };
+        return { standards: standardsCatalog(scope).map((s) => ({ ...s, local: standardIsLocal(scope, s.id, false, s.decision) })) };
+      }
+    },
+    {
+      name: 'autode_ontology_browse',
+      description: 'Browse a standard or a source before onboarding it, read-only: its concepts as a tree (the roots, or a concept\'s narrower ones with parent), a search (query: every word in a name, synonym or definition), or one concept in full (concept: its definition, IRI, ancestors, narrower concepts, relations, attributes, what refers to it). A standard is browsed from its shipped pack, or from this machine once a person has fetched it (whole: true reads the whole standard rather than the shipped pack); a standard not fetched yet is refused with how a person fetches it.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['source'], properties: { source: { type: 'object', additionalProperties: false, properties: { standard: { type: 'string' }, shipped: { type: 'string' }, file: { type: 'string' }, whole: { type: 'boolean' } } }, query: { type: 'string' }, parent: { type: 'string' }, concept: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 500 } } },
+      annotations: read('Browse a standard'),
+      handler: async (args, ws) => {
+        try {
+          const scope = { workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot };
+          return browseSource(scope, sourceOf(args, scope.workspaceRoot, scope.resourcesRoot), { ...(args.query ? { query: String(args.query) } : {}), ...(args.parent ? { parent: String(args.parent) } : {}), ...(args.concept ? { concept: String(args.concept) } : {}), ...(args.offset !== undefined ? { offset: Number(args.offset) } : {}), ...(args.limit ? { limit: Number(args.limit) } : {}) }) as unknown as Record<string, unknown>;
+        } catch (err) { return asToolError(err); }
+      }
+    },
+    {
+      name: 'autode_propose_standard',
+      description: 'Propose a standard for the team\'s catalog (autode: standard/1), after researching it with your own web tools: the publisher\'s machine-readable release (OWL, RDFS or SKOS in Turtle or RDF/XML; OpenAPI or JSON Schema), its licence (read the LICENSE: redistribution allowed, forbidden or unknown), a pinned release (a tag, or a full commit id), the repository and the folder(s) that hold the files, and reader settings for its quirks (classes that are datatypes, a multiplicity property, how business objects are marked). Follow the skill autode-core-standard-research. A person tries it (AutoDE fetches it then) and approves it; you never fetch through AutoDE.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['content', 'reason'], properties: { content: { type: 'string', minLength: 20, description: 'The definition as YAML (autode: standard/1).' }, reason: { type: 'string', minLength: 20, description: 'Why the team needs it, and where each part of the definition was checked (pages, files, licence).' } } },
+      annotations: propose('Propose a standard'),
+      handler: async (args, ws) => {
+        const parsed = parseStandard(String(args.content));
+        if (!parsed.def) throw new EngineToolError('VALIDATION_FAILED', `The definition doesn't parse: ${parsed.errors.join('; ')}`, { errors: parsed.errors });
+        try {
+          const d = proposeDecision(new DecisionStore(ws.options.workspaceRoot), { workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot }, 'standard', { id: parsed.def.id, content: String(args.content), reason: String(args.reason) }, { proposedBy: { host: 'mcp', client: clientName() } });
+          return { decision: { id: d.id, status: d.status, title: d.title }, next: `A person tries it in the Ontology view (Standards: Try it) or autode ontology browse ${parsed.def.id} --decision ${d.id}, and approves it (autode decisions approve ${d.id}). Tell the user.` };
+        } catch (err) { return asToolError(err); }
+      }
     }
   ];
 }
+

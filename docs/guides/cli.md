@@ -160,6 +160,9 @@ Meaning anchored in standards: the upper layer, the packs the team onboarded (FI
 | Command | |
 |---|---|
 | `autode ontology` (or `ontology list`) | The packs (the upper layer, the team's with their state: approved, changed, draft) and the shipped standards to onboard from. |
+| `autode ontology standards` | The standards to onboard from (FIBO, CIM, BIAN, the team's and proposed ones): publisher, industry, format, licence, pinned release, and whether it ships as a pack, is on this machine, or is fetched on request. |
+| `autode ontology browse <standard or source> [--whole] [--search <words>] [--parent <id>] [--concept <id>] [--decision <d>]` | A standard's concepts as a tree, a search, or one concept in full. The first browse of a standard fetches its folders at the pinned release; then it is read from this machine. `--whole` reads the whole standard rather than its shipped pack; `--decision` tries a proposed standard. |
+| `autode ontology propose-standard <file.yaml> --reason "<why; where from>"` | Proposes a team standard (`autode: standard/1`) for a person's approval. |
 | `autode ontology concepts` | The concepts in effect as a tree under the upper layer, with how many terms and tables reach each, and what is waiting. |
 | `autode ontology glossary` | Each glossary term with its scope and the concepts it means. |
 | `autode ontology analyze <source>` | A standard's concepts, relations, modules, version and licence; the scope AutoDE proposes from this workspace (seeds, one hop, the ancestors they need); and the placement under the upper layer. `<source>` is a shipped pack (`fibo-lending`), a file or folder (OWL or SKOS in Turtle or RDF/XML, or an AutoDE pack), or `--git <url> [--ref r] [--subdir p]`. Adjust with `--add`, `--remove` or `--only` (concept ids, comma-separated) and `--place <id>=upper:<Concept>` (repeat). `--prefix` and `--pack` name a file source's ids and pack. |
