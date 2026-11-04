@@ -1,0 +1,342 @@
+# The FIBO lending pack's curation (ONT1): which FIBO concepts it takes and what AutoDE adds to them.
+# scripts/build-ontology-pack.cjs reads FIBO's own files at the pinned release and checks that every IRI is a class there. The
+# labels are AutoDE's (FIBO writes them in lower case), definitions and synonyms are FIBO's; it writes ontologies/fibo-lending.yaml.
+# Kept here: the placement under AutoDE's upper layer (FIBO's own class tree is deeper), relations, attributes, hints.
+autode: ontology-curation/1
+pack:
+  id: fibo-lending
+  title: FIBO lending (core)
+  prefix: fibo
+  description: Lending core from the Financial Industry Business Ontology (EDM
+    Council) - loans and credit agreements, their parties, collateral, payments
+    and applications.
+standard:
+  name: FIBO
+  version: master_2026Q3
+  iri: https://spec.edmcouncil.org/fibo/
+  repository: https://github.com/edmcouncil/fibo
+  licence:
+    name: MIT License
+    spdx: MIT
+    redistribution: allowed
+    note: FIBO is published by the EDM Council under the MIT licence; keep the
+      copyright notice with the pack.
+concepts:
+  - id: fibo:Account
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/ProductsAndServices/ClientsAndAccounts/Account
+    label: Account
+    parent: upper:Account
+    attributes:
+      identifying:
+        - account number
+      notable:
+        - account status
+        - balance
+        - open date
+    hints:
+      classifications:
+        - confidential
+      quality:
+        - check: unique
+          attribute: account number
+  - id: fibo:Borrower
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Borrower
+    label: Borrower
+    parent: upper:Party
+    synonyms:
+      - debtor
+      - obligor
+  - id: fibo:Collateral
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Collateral
+    label: Collateral
+    parent: upper:Product
+    synonyms:
+      - pledge
+      - security
+    attributes:
+      notable:
+        - collateral type
+        - collateral value
+        - valuation date
+  - id: fibo:CommercialLoan
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansSpecific/CommercialLoans/CommercialLoan
+    label: Commercial Loan
+    parent: fibo:Loan
+    synonyms:
+      - business loan
+  - id: fibo:ConsumerLoan
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansSpecific/ConsumerLoans/ConsumerLoan
+    label: Consumer Loan
+    parent: fibo:Loan
+    synonyms:
+      - personal loan
+      - retail loan
+  - id: fibo:Contract
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/Agreements/Contracts/Contract
+    label: Contract
+    parent: upper:Agreement
+    attributes:
+      identifying:
+        - contract identifier
+      notable:
+        - effective date
+        - termination date
+  - id: fibo:Country
+    iri: https://www.omg.org/spec/LCC/Countries/CountryRepresentation/Country
+    label: Country
+    parent: upper:Location
+    attributes:
+      identifying:
+        - country code
+    hints:
+      quality:
+        - check: accepted_values
+          attribute: country code
+          note: ISO 3166-1 codes
+  - id: fibo:CreditAgreement
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/CreditAgreement
+    label: Credit Agreement
+    parent: fibo:Contract
+    relations:
+      - verb: hasBorrower
+        target: fibo:Borrower
+        cardinality: 1..*
+      - verb: hasLender
+        target: fibo:Lender
+        cardinality: 1..*
+  - id: fibo:CreditEvent
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/CreditEvents/CreditEvent
+    label: Credit Event
+    parent: upper:Event
+    synonyms:
+      - default event
+    relations:
+      - verb: affects
+        target: fibo:Loan
+        cardinality: 1..*
+    attributes:
+      notable:
+        - event date
+        - event type
+  - id: fibo:CreditFacility
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/CreditFacility
+    label: Credit Facility
+    parent: fibo:CreditAgreement
+    synonyms:
+      - credit line
+      - facility
+      - line of credit
+    attributes:
+      identifying:
+        - facility identifier
+      notable:
+        - commitment amount
+        - facility limit
+        - maturity date
+  - id: fibo:Customer
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/ProductsAndServices/ProductsAndServices/Customer
+    label: Customer
+    parent: upper:Party
+    synonyms:
+      - client
+    relations:
+      - verb: holds
+        target: fibo:Account
+        cardinality: 0..*
+    attributes:
+      identifying:
+        - customer identifier
+    hints:
+      classifications:
+        - pii
+      quality:
+        - check: unique
+          attribute: customer identifier
+  - id: fibo:FinancialProduct
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/ProductsAndServices/FinancialProductsAndServices/FinancialProduct
+    label: Financial Product
+    parent: upper:Product
+    attributes:
+      identifying:
+        - product code
+      notable:
+        - product name
+        - product type
+  - id: fibo:Guarantor
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Guaranty/Guarantor
+    label: Guarantor
+    parent: upper:Party
+    synonyms:
+      - surety
+  - id: fibo:Guaranty
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Guaranty/Guaranty
+    label: Guaranty
+    parent: fibo:Contract
+    synonyms:
+      - guarantee
+    relations:
+      - verb: guarantees
+        target: fibo:Loan
+        cardinality: 1..*
+      - verb: hasGuarantor
+        target: fibo:Guarantor
+        cardinality: 1..*
+  - id: fibo:Lender
+    iri: https://spec.edmcouncil.org/fibo/ontology/FBC/DebtAndEquities/Debt/Lender
+    label: Lender
+    parent: upper:Party
+    synonyms:
+      - creditor
+  - id: fibo:Loan
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansGeneral/Loans/Loan
+    label: Loan
+    parent: fibo:CreditAgreement
+    synonyms:
+      - loan agreement
+      - loan contract
+    relations:
+      - verb: hasPaymentSchedule
+        target: fibo:PaymentSchedule
+        cardinality: 0..1
+      - verb: isSecuredBy
+        target: fibo:Collateral
+        cardinality: 0..*
+    attributes:
+      identifying:
+        - loan identifier
+      notable:
+        - interest rate
+        - loan status
+        - maturity date
+        - origination date
+        - principal amount
+    hints:
+      classifications:
+        - confidential
+      quality:
+        - check: not_null
+          attribute: loan identifier
+        - check: range
+          attribute: principal amount
+          note: greater than zero
+        - check: unique
+          attribute: loan identifier
+  - id: fibo:LoanApplication
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/LoansGeneral/LoanApplications/LoanApplication
+    label: Loan Application
+    parent: upper:Document
+    synonyms:
+      - credit application
+      - loan request
+    relations:
+      - verb: hasApplicant
+        target: fibo:Borrower
+        cardinality: 1..*
+      - verb: requests
+        target: fibo:Loan
+        cardinality: 0..1
+    attributes:
+      identifying:
+        - application identifier
+      notable:
+        - application date
+        - decision
+        - requested amount
+    hints:
+      quality:
+        - check: not_null
+          attribute: application date
+  - id: fibo:Mortgage
+    iri: https://spec.edmcouncil.org/fibo/ontology/LOAN/RealEstateLoans/Mortgages/Mortgage
+    label: Mortgage
+    parent: fibo:Loan
+    synonyms:
+      - home loan
+      - mortgage loan
+  - id: fibo:Organization
+    iri: https://www.omg.org/spec/Commons/Organizations/Organization
+    label: Organization
+    parent: upper:Party
+    synonyms:
+      - company
+      - legal entity
+      - organisation
+    relations:
+      - verb: hasAddress
+        target: fibo:PhysicalAddress
+        cardinality: 0..*
+    attributes:
+      identifying:
+        - legal entity identifier
+      notable:
+        - legal name
+  - id: fibo:Payment
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/ProductsAndServices/PaymentsAndSchedules/Payment
+    label: Payment
+    parent: upper:Transaction
+    synonyms:
+      - installment
+      - repayment
+    relations:
+      - verb: appliesTo
+        target: fibo:Loan
+        cardinality: 0..1
+    attributes:
+      notable:
+        - payment amount
+        - payment date
+    hints:
+      quality:
+        - check: not_null
+          attribute: payment date
+        - check: range
+          attribute: payment amount
+          note: greater than zero
+  - id: fibo:PaymentSchedule
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/ProductsAndServices/PaymentsAndSchedules/PaymentSchedule
+    label: Payment Schedule
+    parent: upper:Document
+    synonyms:
+      - amortization schedule
+      - repayment schedule
+  - id: fibo:Person
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/AgentsAndPeople/People/Person
+    label: Person
+    parent: upper:Party
+    synonyms:
+      - individual
+      - natural person
+    relations:
+      - verb: hasAddress
+        target: fibo:PhysicalAddress
+        cardinality: 0..*
+    attributes:
+      identifying:
+        - national identifier
+      notable:
+        - date of birth
+        - name
+    hints:
+      classifications:
+        - sensitive-pii
+      quality:
+        - check: unique
+          attribute: national identifier
+  - id: fibo:PhysicalAddress
+    iri: https://spec.edmcouncil.org/fibo/ontology/FND/Places/Addresses/PhysicalAddress
+    label: Physical Address
+    parent: upper:Location
+    synonyms:
+      - address
+    relations:
+      - verb: isInCountry
+        target: fibo:Country
+        cardinality: 1
+    attributes:
+      notable:
+        - city
+        - postal code
+        - street
+    hints:
+      classifications:
+        - pii

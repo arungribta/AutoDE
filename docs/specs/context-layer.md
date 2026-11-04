@@ -905,7 +905,7 @@ Acceptance:
 Shipped in v0.53.0 (CHANGELOG.md 0.53.0; technical-design.md §5.20). Still open: the platform reads, written as platform operations (Snowflake `ACCESS_HISTORY` and `OBJECT_DEPENDENCIES`, Databricks `system.access` lineage), and the manual check against a live Snowflake account.
 
 ### Phase ONT1: Canonical ontology, terminology and onboarding standards
-Shipped in v0.59.0 (CHANGELOG.md 0.59.0, with the deviations: a hand-curated FIBO pack rather than one converted at build time; seeds from deterministic matching, judged by the knowledge engineer; an unrecognised licence keeps a pack in the workspace too; two stage kinds for the template; technical-design.md §5.21). Still open: checking the FIBO pack's IRIs against a FIBO release, and the manual check (manual-verification.md Part 69).
+Shipped in v0.59.0 (CHANGELOG.md 0.59.0, with the deviations: the FIBO pack is generated from a pinned FIBO release by a maintainer's script, not converted at build time; seeds from deterministic matching, judged by the knowledge engineer; an unrecognised licence keeps a pack in the workspace too; two stage kinds for the template; technical-design.md §5.21). Still open: the manual check (manual-verification.md Part 69).
 
 Scope:
 - §6.8: the upper layer; the pack format; a FIBO pack (about 20–40 core concepts, starting with lending); onboarding a standard in the Explorer, on the CLI (`autode ontology`) and over MCP; term scope and `means` links.
