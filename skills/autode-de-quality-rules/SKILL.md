@@ -1,7 +1,7 @@
 ---
 name: autode-de-quality-rules
 description: Define the data quality rules for an AutoDE business problem - not-null, uniqueness, accepted values, ranges, referential integrity, freshness and reconciliation tolerances - each traced to the specification, a contract or the data. Use it for the quality-rules stage of an AutoDE workflow.
-allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_check_conformance, mcp__autode__autode_pack_list, mcp__autode__autode_propose_assertion, mcp__autode__autode_workflow_status, mcp__autode__autode_record_artifact]
+allowed-tools: [Read, Grep, Glob, mcp__autode__autode_get_context_pack, mcp__autode__autode_resolve, mcp__autode__autode_list_assertions, mcp__autode__autode_check_conformance, mcp__autode__autode_pack_list, mcp__autode__autode_quality_candidates, mcp__autode__autode_propose_quality_rules, mcp__autode__autode_policies, mcp__autode__autode_propose_assertion, mcp__autode__autode_workflow_status, mcp__autode__autode_record_artifact]
 metadata:
   scope: de
   stageKinds: [quality-rules]
@@ -20,7 +20,18 @@ metadata:
 
 A critical attribute is one the outcome depends on: keys and the columns joined on, the measures in the success criteria, the dates that drive incremental loads and reporting periods, and the columns a contract names.
 
-## 2. Write the rules
+## 2. Start from what is known
+
+`autode_quality_candidates` lists the rules AutoDE derives without a model, each with its reason and the fact it rests on:
+- a confirmed key or a declared primary key: not null, and unique;
+- a grain: unique;
+- a confirmed relationship or a declared foreign key: referential;
+- an e-mail column classified personal data: its pattern;
+- a concept's hints, for the attribute columns of a table that represents it (a payment's date is never null, its amount above zero).
+
+Keep the ones that hold and propose them with `autode_propose_quality_rules` (a person confirms each in the Context Inbox). Candidates already recorded say so. `autode_policies` lists what the team's policies require of each classified column (masking, retention, access): add those duties to your rules' reasons, and to **Critical attributes** if a column has no rule.
+
+## 3. Write the rules
 
 For each critical attribute, one or more rules:
 
@@ -36,13 +47,13 @@ For each critical attribute, one or more rules:
 
 Each rule has: an id (`qr-<table>-<column>-<type>`), the table and column (resolved), the type and its parameters, the **severity** (`error` stops the load, `warn` reports), and the **reason** (the success criterion, contract clause or fact id it comes from).
 
-## 3. Propose and record
+## 4. Propose and record
 
 - Propose each rule with `autode_propose_assertion`: kind `quality_expectation`, subject `[<table>, <column>]`, predicate the rule type, value its parameters and severity, the statement in one sentence, and the evidence (the spec criterion, contract or fact it traces to).
 - Record two files with `autode_record_artifact` (stage: the quality-rules stage):
   - `quality-rules.yaml`: the rules as a list (`id`, `table`, `column`, `type`, `params`, `severity`, `reason`);
   - `quality-rules.md`: the same as a table for the reviewer, followed by **Critical attributes without a rule**, each with its reason, and **Not in the estate**: names you couldn't resolve.
 
-## 4. Finish
+## 5. Finish
 
 Reply with a short summary for the approver: how many rules, of which `error` severity, which critical attributes have no rule and why, and what needs a person's confirmation in the Context Inbox.

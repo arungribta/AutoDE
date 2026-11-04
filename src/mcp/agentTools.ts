@@ -1,4 +1,7 @@
 import { openMaintenanceItems } from '../engine/maintenance/queue';
+import { WorkspaceGraph, workspaceMeaning } from '../engine/ontology/service';
+import type { Assertion } from '../engine/context/assertions';
+import { loadPolicies, policyGaps } from '../engine/governance/policies';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EngineTool, ToolAnnotations } from './tools';
@@ -272,13 +275,16 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
         const errors = [...validatePipelineSpec(spec).errors];
         for (const e of entities) for (const [i, t] of e.transforms.entries()) { const v = validateTransformSpec({ kind: t.kind, params: t.params, primitiveVersion: t.primitiveVersion }); if (!v.valid) errors.push(...v.errors.map((x) => `${e.name} step ${i + 1} (${t.kind}): ${x}`)); }
         // GOV: confirmed sensitive-pii facts about the columns it reads must be declared (and so masked).
-        const gov = governanceGaps(spec, governanceFacts((await ws.contextSources()).assertions));
-        errors.push(...gov.errors);
+        const facts = governanceFacts((await ws.contextSources()).assertions);
+        const gov = governanceGaps(spec, facts);
+        // ONT2: the team's policies (.autode/config/policies.yaml): a masking duty unmet is an error.
+        const pol = policyGaps(spec, facts, loadPolicies(ws.options.workspaceRoot).policies);
+        errors.push(...gov.errors, ...pol.errors);
         if (errors.length) throw new EngineToolError('VALIDATION_FAILED', `The Pipeline Spec isn't valid: ${errors.join(' ')}`, { errors });
         writePipelineSpec(problemRoot, spec);
         const file = problemDocumentPath(problemRoot, 'pipelineSpec');
         note(ws, problemRoot, stageFor(problemRoot, 'build', args.stage), file);
-        return { id: spec.id, version: spec.version, status: spec.status, entities: entities.length, file: path.relative(ws.options.workspaceRoot, file).split(path.sep).join('/'), ...(gov.warnings.length ? { warnings: gov.warnings } : {}), next: 'Compile it with autode_compile_pipeline_spec and record the files with autode_record_artifact; then tell the user the Pipeline Spec is ready for their approval.' };
+        return { id: spec.id, version: spec.version, status: spec.status, entities: entities.length, file: path.relative(ws.options.workspaceRoot, file).split(path.sep).join('/'), ...(gov.warnings.length || pol.warnings.length ? { warnings: [...gov.warnings, ...pol.warnings] } : {}), next: 'Compile it with autode_compile_pipeline_spec and record the files with autode_record_artifact; then tell the user the Pipeline Spec is ready for their approval.' };
       }
     },
     {
@@ -308,12 +314,13 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
     },
     {
       name: 'autode_match_columns',
-      description: 'Candidate column matches from a source table to a target table, deterministic, each with a score and its reasons: the same name, the same name without the table prefix, the same meaning through the vocabulary (CUST_NO ~ customer_number), words in common, and earlier approved mappings; types that can\'t convert lower the score. The target is a table in the estate, or a planned table given as targetColumns. Use it before drafting a mapping; you decide.',
+      description: 'Candidate column matches from a source table to a target table, deterministic, each with a score and its reasons: the same name, the same name without the table prefix, the same meaning through the vocabulary (CUST_NO ~ customer_number), words in common, and earlier approved mappings; and through meaning (ONT2: the ontology\'s names and synonyms folded, so deal ~ facility; a glossary term bound to the source column, or a term of the source table that names it; both columns\' terms meaning the same concept), with a shared classification as a little more evidence and a note when a sensitive source must be masked. Types that can\'t convert lower the score; namesOnly leaves meaning out. The target is a table in the estate, or a planned table given as targetColumns. Use it before drafting a mapping; you decide.',
       inputSchema: { type: 'object', required: ['source'], additionalProperties: false, properties: {
         source: { type: 'string', minLength: 1, description: 'Source table, fully qualified where ambiguous.' },
         target: { type: 'string', minLength: 1, description: 'Target table in the estate.' },
         targetColumns: { type: 'array', items: { type: 'object', required: ['name'], additionalProperties: false, properties: { name: { type: 'string', minLength: 1 }, type: { type: 'string' } } }, description: 'The columns of a planned target table not yet in the estate.' },
-        threshold: { type: 'number', minimum: 0, maximum: 1 }
+        threshold: { type: 'number', minimum: 0, maximum: 1 },
+        namesOnly: { type: 'boolean', description: 'Match by names and the vocabulary alone, without meaning (ONT2).' }
       } },
       annotations: read('Match columns'),
       handler: async (args, ws) => {
@@ -336,7 +343,7 @@ export function agentTools(clientName: () => string | undefined): EngineTool[] {
         const vf = layoutPath(ws.options.workspaceRoot, 'vocabulary');
         const vocab = buildVocabulary(fs.existsSync(vf) ? parseVocabularyFile(fs.readFileSync(vf, 'utf8')) : undefined);
         const r = matchColumns({ table: s.fqn, columns: [...s.columns.entries()].map(([name, type]) => ({ name, type })) }, { table: targetName, columns: targetCols },
-          { vocab, precedents: mappingPrecedents(ws.options.workspaceRoot), threshold: args.threshold as number | undefined });
+          { vocab, precedents: mappingPrecedents(ws.options.workspaceRoot), threshold: args.threshold as number | undefined, ...(args.namesOnly ? {} : { meaning: workspaceMeaning({ workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot }, src as unknown as { graph: WorkspaceGraph; assertions: Assertion[] }) }) });
         return { source: s.fqn, target: targetName ?? null, ...r } as unknown as Record<string, unknown>;
       }
     },

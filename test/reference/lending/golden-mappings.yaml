@@ -1,0 +1,17 @@
+# The lending fixture's golden column mappings (ONT2 acceptance: "the mapping finds pairs that names alone miss,
+# measured against golden mappings, with recall reported before and after"). LOANSYS → a planned warehouse whose
+# names follow FIBO's words (obligor, credit line, installment, pledge) rather than LOANSYS's own. Some pairs nothing
+# deterministic finds (dob → date_of_birth, commit_amt → commitment_amount): they stay, so recall is honest.
+mappings:
+  - source: loansys.brwr
+    target: dim_borrower
+    columns: { brwr_id: borrower_id, brwr_nm: obligor_name, natl_id: national_identifier, dob: date_of_birth }
+  - source: loansys.deal_mstr
+    target: fct_credit_line
+    columns: { deal_id: credit_line_id, commit_amt: commitment_amount, mat_dt: maturity_date, int_rate: interest_rate }
+  - source: loansys.pmt
+    target: fct_installment
+    columns: { pmt_id: installment_id, pmt_amt: installment_amount, pmt_dt: installment_date }
+  - source: loansys.collat
+    target: dim_pledge
+    columns: { collat_id: pledge_id, collat_val: pledge_value, collat_typ: pledge_type }

@@ -52,6 +52,8 @@ export const LAYOUT = {
   tagGroups: [AUTODE_DIR, 'config', 'tags.yaml'],
   customProperties: [AUTODE_DIR, 'config', 'properties.yaml'],
   domains: [AUTODE_DIR, 'config', 'domains.yaml'],
+  /** ONT2: policies as data, regulation → classifications → required controls (masking, retention, access). */
+  policies: [AUTODE_DIR, 'config', 'policies.yaml'],
   /** MM1: knowledge articles (Markdown with front matter) that cite facts. */
   articles: [AUTODE_DIR, 'knowledge', 'articles'],
   /** ONT1 (§6.8): the team's ontology packs (industry subsets and extensions), each approved by a person. */

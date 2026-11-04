@@ -470,7 +470,7 @@
     if (t === 'concept') return c.concept ? c.concept.terms.length + c.concept.tables.length : 0;
     if (t === 'lineage') return c.lineage.summary ? c.lineage.summary.upstream + c.lineage.summary.downstream : c.lineage.related.length;
     if (t === 'facts') return c.facts.length;
-    if (t === 'governance') return c.governance.classifications.length + c.governance.rules.length;
+    if (t === 'governance') return c.governance.classifications.length + c.governance.rules.length + (c.governance.policies || []).filter((x) => x.policies.length).length;
     if (t === 'quality') return (c.quality || []).reduce((n, q) => n + q.checks.length, 0);
     if (t === 'knowledge') return (c.articles || []).length;
     if (t === 'usedby') return c.usedBy.artifacts.length + c.usedBy.semanticModels.length + c.usedBy.queries.length;
@@ -559,7 +559,8 @@
       const m = c.meaning;
       const concepts = m.concepts || [];
       if (!m.terms.length && !m.semantic.length && !concepts.length && !(m.definition && m.definition.expr)) return empty('No business meaning recorded yet: no glossary term is bound to it, it represents no concept and no semantic model covers it. Align the vocabulary in the Ontology view.');
-      return `${concepts.length ? `<h4>Concepts</h4>${concepts.map((x) => `<div class="item">${assetLink(x)} <span class="small muted">${esc(x.description || '')}</span></div>`).join('')}` : ''}${m.terms.length ? `<h4>Glossary terms</h4>${m.terms.map((x) => `<div class="item">${assetLink(x)} ${certBadge(x.certification, x.trust)}${x.description ? `<div class="ev">${esc(x.description)}</div>` : ''}</div>`).join('')}` : ''}
+      const chainHtml = (m.chains || []).length ? `<h4>How it reaches its meaning</h4>${m.chains.map((ch) => `<div class="item small">${ch.map((st, i) => `${i ? ` <span class="muted">${esc(st.via || '→')}</span> ` : ''}${st.kind === 'concept' || st.kind === 'upper' ? `<button class="link" data-asset="concept:${esc(st.id)}">${esc(st.label)}</button>` : `<b>${esc(st.label)}</b>`}${st.fact ? ` <button class="badge" data-asset="${esc(st.fact)}" title="The fact behind this step">${esc(st.trust || 'fact')}</button>` : ''}${st.scope ? ` <span class="muted">(${esc(st.scope.level.replace(/_/g, ' '))}${st.scope.name ? ': ' + esc(st.scope.name) : ''})</span>` : ''}`).join('')}</div>`).join('')}` : '';
+      return `${chainHtml}${concepts.length ? `<h4>Concepts</h4>${concepts.map((x) => `<div class="item">${assetLink(x)} <span class="small muted">${esc(x.description || '')}</span></div>`).join('')}` : ''}${m.terms.length ? `<h4>Glossary terms</h4>${m.terms.map((x) => `<div class="item">${assetLink(x)} ${certBadge(x.certification, x.trust)}${x.description ? `<div class="ev">${esc(x.description)}</div>` : ''}</div>`).join('')}` : ''}
         ${m.semantic.length ? `<h4>In the semantic layer</h4><table class="grid"><thead><tr><th>Element</th><th>Type</th><th>Model</th><th>Expression</th><th></th></tr></thead><tbody>${m.semantic.map((x) => `<tr class="click" data-asset="${esc(x.id)}" tabindex="0"><td><b>${esc(x.label)}</b></td><td>${esc(KIND[x.assetType] || x.assetType)}</td><td>${esc(x.model || '')}</td><td class="mono">${esc(x.expr || '')}</td><td>${draftBadge(x)}</td></tr>`).join('')}</tbody></table>` : ''}
         <div class="note small">Packs and the grounding check use only <b>approved</b> semantic definitions. A column reaches a concept through its glossary terms; a table, by representing one.</div>`;
     }
@@ -582,12 +583,14 @@
       if (!g.classifications.length && !g.rules.length) return empty('No classifications or rules apply to it.');
       return `${g.classifications.length ? `<h4>Classifications</h4><table class="grid"><thead><tr><th>Column</th><th>Classification</th><th>Masking</th><th>Evidence</th></tr></thead><tbody>${g.classifications.map((x) => `<tr${x.factId ? ` class="click" data-asset="${esc(x.factId)}" tabindex="0"` : ''}><td>${esc(x.column)}</td><td>${clsBadge(x.classification)}</td><td>${esc(x.strategy || '')}</td><td>${trustBadge(x.trust)}</td></tr>`).join('')}</tbody></table>` : ''}
         ${g.rules.length ? `<h4>Rules</h4>${g.rules.map((r) => `<div class="item"><span class="badge ${r.modality === 'mandatory' || r.enforcement === 'STRICT' ? 'pii' : ''}" title="Modality">${esc(r.modality || (r.enforcement === 'STRICT' ? 'mandatory' : 'advisory'))}</span> ${r.ruleType ? `<span class="badge" title="Rule type (SBVR)">${esc(r.ruleType)}</span> ` : ''}${esc(r.text)}</div>`).join('')}` : ''}
-        <div class="note small">Policies as data (GDPR, PCI, SOX → required controls) arrive in ONT2.</div>`;
+        ${(g.policies || []).length ? `<h4>Policies</h4><table class="grid"><thead><tr><th>Column</th><th>Classification</th><th>Policies and what they require</th></tr></thead><tbody>${g.policies.map((x) => `<tr><td class="mono">${esc(x.column)}</td><td>${clsBadge(x.classification)}</td><td>${x.policies.length ? x.policies.map((pol) => `<b>${esc(pol.title)}</b>${pol.regulation ? ` <span class="badge">${esc(pol.regulation)}</span>` : ''}<div class="small muted">${pol.controls.map((k) => esc(k.control === 'masking' ? `masking${k.strategy ? ' (' + k.strategy + ')' : ''}` : k.control === 'retention' ? `retention ${k.days} days` : `access: ${(k.roles || []).join(', ')}`)).join(' · ')}</div>`).join('') : '<span class="muted small">no policy applies</span>'}</td></tr>`).join('')}</tbody></table>` : ''}
+        <div class="note small">Policies are data: .autode/config/policies.yaml maps a regulation to the classifications it covers and the controls it requires. The Pipeline Spec's check runs on them.</div>`;
     }
     if (t === 'quality') {
       const q = c.quality || [];
-      if (!q.length) return empty('No quality expectations yet. Propose them as facts (not null, unique, accepted values, freshness…); each is filed under its dimension.');
-      return q.map((d) => `<h4>${esc(d.dimension)}</h4>${d.checks.map(factItem).join('')}`).join('');
+      const cand = `<div id="qualityCandidates"><button class="btn" data-quality="${esc(c.asset.assetType === 'column' && c.overview.parent ? c.overview.parent.id : c.asset.id)}">Suggest quality rules…</button> <span class="muted small">From its keys, grain, relationships, classifications and the concepts it represents.</span></div>`;
+      if (!q.length) return empty('No quality expectations yet; each is filed under its dimension.') + cand;
+      return q.map((d) => `<h4>${esc(d.dimension)}</h4>${d.checks.map(factItem).join('')}`).join('') + cand;
     }
     if (t === 'knowledge') {
       const list = c.articles || [];
@@ -829,6 +832,26 @@
   });
   $('#ontologyPage').addEventListener('change', (e) => { const ch = e.target.closest('[data-br-check]'); if (ch) { if (ch.checked) br.checked.add(ch.dataset.brCheck); else br.checked.delete(ch.dataset.brCheck); } });
   $('#ontologyPage').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'brQuery') { br.query = e.target.value.trim(); br.parent = ''; browse(true); } });
+  // Quality candidates (ONT2): suggested from what is known; proposing records them for the Context Inbox.
+  let qualityShown = [];
+  $('#asset').addEventListener('click', async (e) => {
+    const qb = e.target.closest('[data-quality]');
+    if (qb) {
+      const r = await opAsk('quality', { tables: [qb.dataset.quality] });
+      if (r.error) { toast(r.error); return; }
+      qualityShown = r.candidates || [];
+      const fresh = qualityShown.filter((x) => !x.existing);
+      $('#qualityCandidates').innerHTML = qualityShown.length ? `<h4>Suggested quality rules</h4>${qualityShown.map((x, i) => `<label class="item" style="display:block"><input type="checkbox" data-qc="${i}" ${x.existing ? 'disabled' : 'checked'}> <b>${esc(x.columns.join(', '))}</b> <span class="badge">${esc(x.check.replace('_', ' '))}</span> <span class="badge">${esc(x.source)}</span>${x.existing ? ' <span class="badge">recorded</span>' : ''}<div class="ev">${esc(x.reason)}</div></label>`).join('')}${fresh.length ? '<div class="actions"><button class="btn primary" data-quality-propose>Propose the checked rules</button></div>' : ''}` : '<div class="muted small">Nothing to suggest: AutoDE knows no key, grain, relationship, classification or concept for it yet.</div>';
+      return;
+    }
+    if (e.target.closest('[data-quality-propose]')) {
+      const rules = [...document.querySelectorAll('[data-qc]')].filter((x) => x.checked && !x.disabled).map((x) => qualityShown[Number(x.dataset.qc)]).map((x) => ({ subject: x.subject, check: x.check }));
+      if (!rules.length) { toast('Check the rules to propose.'); return; }
+      const r = await opAsk('proposeQuality', { rules });
+      if (r.error) { toast(r.error); return; }
+      $('#qualityCandidates').innerHTML = `<div class="note">${r.proposed} rule(s) proposed. A person confirms them in the Context Inbox. <button class="link" data-open="inbox">Open the Context Inbox</button></div>`;
+    }
+  });
   /** A concept's page (§6.8): every path to it. */
   function conceptTab(p) {
     const k = p.concept;

@@ -160,6 +160,10 @@ Meaning anchored in standards: the upper layer, the packs the team onboarded (FI
 | Command | |
 |---|---|
 | `autode ontology` (or `ontology list`) | The packs (the upper layer, the team's with their state: approved, changed, draft) and the shipped standards to onboard from. |
+| `autode ontology resolve <text>` | What the text means: the concepts it names (a concept's name or synonym, or a glossary term), the terms that mean them, and every table and column that means them, each with its chain and facts. |
+| `autode ontology match <source> --target <t> [--target-columns a,b] [--names-only]` | Column matches with their reasons, through meaning or by names alone (to compare). |
+| `autode quality candidates [--table <t>] [--propose]` | Quality rules from confirmed keys, grain and relationships, declared keys and foreign keys, classifications and a concept's hints, each with its reason; `--propose` records the new ones for the Context Inbox. |
+| `autode governance policies` | The team's policies (`.autode/config/policies.yaml`) and, for every classified column, the ones that apply. Exit 1 when the file has errors. |
 | `autode ontology standards` | The standards to onboard from (FIBO, CIM, BIAN, the team's and proposed ones): publisher, industry, format, licence, pinned release, and whether it ships as a pack, is on this machine, or is fetched on request. |
 | `autode ontology browse <standard or source> [--whole] [--search <words>] [--parent <id>] [--concept <id>] [--decision <d>]` | A standard's concepts as a tree, a search, or one concept in full. The first browse of a standard fetches its folders at the pinned release; then it is read from this machine. `--whole` reads the whole standard rather than its shipped pack; `--decision` tries a proposed standard. |
 | `autode ontology propose-standard <file.yaml> --reason "<why; where from>"` | Proposes a team standard (`autode: standard/1`) for a person's approval. |

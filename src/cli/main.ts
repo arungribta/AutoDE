@@ -28,7 +28,13 @@ import { ExploreRequest, exploreSources, handleExploreRequest } from '../engine/
 import { renderAssetMarkdown, renderConceptMarkdown, renderGraph, renderImpactCsv, renderImpactMarkdown, renderLineage, renderOntology, renderOverview, renderSearch, renderSemantic } from '../engine/explore/render';
 import type { OntologyOverview } from '../engine/explore/explore';
 import { OntologySource, shippedSources } from '../engine/ontology/onboard';
-import { OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, browseSource, exportPack, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
+import { OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, browseSource, exportPack, previewPack, proposeAlignment, proposeOntologyPack, workspaceMeaning } from '../engine/ontology/service';
+import { ChainStep, resolveMeaning } from '../engine/ontology/meaning';
+import type { Assertion } from '../engine/context/assertions';
+import { meaningTools } from '../mcp/meaningTools';
+import { agentTools } from '../mcp/agentTools';
+import type { QualityCandidate } from '../engine/quality/candidates';
+import { columnPolicies, loadPolicies } from '../engine/governance/policies';
 import { parseStandard, standardsCatalog } from '../engine/ontology/standards';
 import { standardIsLocal } from '../engine/ontology/onboard';
 import { approveTeamPack } from '../engine/ontology/decision';
@@ -273,6 +279,8 @@ Knowledge Explorer (what AutoDE knows; the same answers as the VS Code Explorer 
 
 Ontology (ONT1: canonical concepts, standards onboarded as packs, business terms aligned to them):
   ontology [list]              Packs (the upper layer, the team's with their state) and the shipped sources to onboard from
+  ontology resolve <text>      What the text means: the concepts it names (a concept's name or synonym, or a glossary term), and every table and column that means them, with the chain (column → term → concept) and its facts
+  ontology match <source> --target <t> | --target-columns a,b [--names-only]   Column matches with their reasons, through meaning (concepts folded, terms, classifications) or by names alone
   ontology standards           The standards to onboard from (FIBO, CIM, BIAN, the team's and proposed ones): publisher, industry, licence, pinned release, how each is had
   ontology browse <standard|source> [--whole] [--search <words>] [--parent <id>] [--concept <id>] [--decision <d>]   A standard's concepts as a tree, a search, or one concept in full (a standard's repository is fetched on request, then read from this machine)
   ontology propose-standard <file.yaml> --reason "<why; where from>"   Propose a team standard (standard/1) for a person's approval
@@ -286,6 +294,9 @@ Ontology (ONT1: canonical concepts, standards onboarded as packs, business terms
   ontology align [--only <terms or tables>] [--propose]   Terms that mean a concept and tables that represent one; --propose records them for the Context Inbox
   ontology link <term|table> <concept> [--match exact|broader|narrower|related] --reason "<why>"   Propose one link by hand
   ontology export <pack> --out <file>   Write a team pack for another workspace (refused when its licence keeps it in this one)
+
+Quality (ONT2):
+  quality candidates [--table <t>] [--propose]   Quality rules from confirmed keys, grain and relationships, declared keys and foreign keys, classifications and a concept's hints; --propose records the new ones for the Context Inbox
 
 Platform operations (POP1: every interaction with a platform, as a reviewed file):
   platform catalog [<platform>]   The capability matrix (capabilities by platform: supported, partly, not applicable), or one platform's page
@@ -327,6 +338,7 @@ Capture coverage:
 
 Governance (personal data):
   governance show [--table <t>]   Columns that look like personal data, and how each is classified
+  governance policies          The team's policies (.autode/config/policies.yaml) and, for every classified column, the policies that apply to it
   governance classify <table.column> --as pii|sensitive-pii|confidential|none [--strategy hash|redact]   (terminal) Record it, confirmed
   pack list                    The active problem's documents (contracts, BRDs, samples …)
   pack add <file> --role <r> --authority signed|draft --doc-version <v> [--table <obj id>]   (terminal)
@@ -488,6 +500,9 @@ const OPTIONS = {
   match: { type: 'string' },
   propose: { type: 'boolean' },
   whole: { type: 'boolean' },
+  'target-columns': { type: 'string' },
+  target: { type: 'string' },
+  'names-only': { type: 'boolean' },
   search: { type: 'string' },
   parent: { type: 'string' },
   concept: { type: 'string' },
@@ -564,6 +579,7 @@ export async function run(argv: readonly string[], io: CliIo = nodeIo()): Promis
       case 'explore': return await cmdExplore(ctx, rest);
       case 'lineage': return await cmdLineage(ctx, rest);
       case 'ontology': return await cmdOntology(ctx, rest);
+      case 'quality': return await cmdQuality(ctx, rest);
       case 'platform': return await cmdPlatform(ctx, rest);
       case 'metadata': return await cmdMetadata(ctx, rest);
       case 'articles': return await cmdArticles(ctx, rest);
@@ -2006,6 +2022,25 @@ async function cmdOntology(ctx: Ctx, rest: string[]): Promise<number> {
   };
   const graph = async () => (await workspace(ctx, ctx.values.problem).contextSources()).graph as WorkspaceGraph;
   const fail = (err: unknown): never => { if (err instanceof port.PortError || err instanceof OntologyProposalError) throw new CliError(EXIT.FAILED, (err as Error).message); throw err; };
+  if (sub === 'resolve') {
+    const text = words.join(' ');
+    if (!text) throw new CliError(EXIT.USAGE, 'ontology resolve <text>: the concepts it names, and every table and column that means them, with their chains.');
+    const src = await workspace(ctx, ctx.values.problem).contextSources();
+    const found = resolveMeaning(text, workspaceMeaning(scope, src as unknown as { graph: WorkspaceGraph; assertions: Assertion[] }));
+    const chain = (c: ChainStep[]) => c.map((s) => `${s.via ? `${s.via} ` : ''}${s.label}${s.fact ? ` [${s.fact}]` : ''}`).join(' → ');
+    const lines = found.length ? found.flatMap((m) => [`${m.label} [${m.concept}] — named by "${m.matched}" (${m.via})`, ...m.terms.map((t) => `  term "${t.label}" (${t.scope.level.replace(/_/g, ' ')}${t.scope.name ? `: ${t.scope.name}` : ''})${t.match ? `, ${t.match}` : ''}`), ...m.assets.map((a) => `  ${a.kind} ${a.label}: ${chain(a.chain)}`)]) : [`Nothing in "${text}" names a concept in effect.`];
+    emit(ctx, { ok: true, meaning: found }, lines.join('\n'));
+    return found.length ? EXIT.OK : EXIT.NOT_FOUND;
+  }
+  if (sub === 'match') {
+    const source = words[0];
+    if (!source || (!ctx.values.target && !ctx.values.columns)) throw new CliError(EXIT.USAGE, 'ontology match <source table> --target <table> (or --target-columns a,b,c for a planned one) [--names-only]');
+    const tool = agentTools(() => actorOf(ctx)).find((t) => t.name === 'autode_match_columns')!;
+    const planned = typeof ctx.values['target-columns'] === 'string' ? (ctx.values['target-columns'] as string).split(',').map((x) => ({ name: x.trim() })).filter((x) => x.name) : undefined;
+    const r = await tool.handler({ source, ...(ctx.values.target ? { target: ctx.values.target } : {}), ...(planned?.length ? { targetColumns: planned } : {}), ...(ctx.values['names-only'] ? { namesOnly: true } : {}) }, workspace(ctx, ctx.values.problem)) as { source: string; target: string | null; matches: Array<{ sourceColumn: string; targetColumn: string; score: number; reasons: string[] }>; unmatchedSource: string[]; unmatchedTarget: string[] };
+    emit(ctx, { ok: true, ...r }, [`${r.source} → ${r.target ?? '(planned)'}${ctx.values['names-only'] ? ' (names only)' : ''}:`, ...r.matches.map((m) => `  ${m.sourceColumn.padEnd(24)} → ${m.targetColumn.padEnd(24)} ${m.score.toFixed(2)}  ${m.reasons.join('; ')}`), ...(r.unmatchedTarget.length ? [`  not matched (target): ${r.unmatchedTarget.join(', ')}`] : [])].join('\n'));
+    return EXIT.OK;
+  }
   if (sub === 'standards') {
     const list = standardsCatalog(scope).map((s) => ({ ...s, local: standardIsLocal(scope, s.id, false, s.decision) }));
     const lines = list.map((s) => `  ${s.id.padEnd(14)} ${s.title}  (${s.industry}; ${s.publisher})\n    ${s.format}, ${s.licence.spdx ?? s.licence.name}${s.licence.redistribution !== 'allowed' ? ' (stays in the workspace)' : ''}, release ${s.release.version}${s.origin === 'proposed' ? `  PROPOSED ${s.decision}: try it with autode ontology browse ${s.id} --decision ${s.decision}, approve with autode decisions approve ${s.decision}` : s.origin === 'team' ? '  the team\'s' : ''}\n    ${s.availability === 'shipped-pack' ? 'a pack ships with AutoDE' : s.local ? 'read on this machine' : `fetched on request: ${s.source}`}${s.onboarded.length ? `; onboarded: ${s.onboarded.map((o) => `${o.pack} (${o.state}, ${o.concepts})`).join(', ')}` : ''}`);
@@ -2149,6 +2184,25 @@ async function cmdOntology(ctx: Ctx, rest: string[]): Promise<number> {
     } catch (err) { if (err instanceof OntologyProposalError) throw new CliError(EXIT.REFUSED, err.message); throw err; }
   }
   throw new CliError(EXIT.USAGE, `Unknown ontology command "${sub}": list, standards, browse, concepts, glossary, analyze, preview, onboard, approve, align, link, export or propose-standard.`);
+}
+
+/** ONT2: quality-rule candidates from keys, grain, relationships, classifications and a concept's hints; proposing them for the Context Inbox. */
+async function cmdQuality(ctx: Ctx, rest: string[]): Promise<number> {
+  const [sub = 'candidates'] = rest;
+  if (sub !== 'candidates') throw new CliError(EXIT.USAGE, 'quality candidates [--table <t>] [--propose]');
+  const tools = meaningTools(() => actorOf(ctx));
+  const ws = workspace(ctx, ctx.values.problem);
+  const r = await tools.find((t) => t.name === 'autode_quality_candidates')!.handler({ ...(ctx.values.table ? { tables: [ctx.values.table] } : {}) }, ws) as { candidates: QualityCandidate[] };
+  const fresh = r.candidates.filter((c) => !c.existing);
+  const lines = r.candidates.map((c) => `  ${`${c.table}${c.columns.length === 1 ? `.${c.columns[0]}` : ` (${c.columns.join(', ')})`}`.padEnd(46)} ${c.check.padEnd(14)} ${c.source.padEnd(14)} ${c.existing ? `recorded (${c.existing})` : c.reason}`);
+  if (!ctx.values.propose) {
+    emit(ctx, { ok: true, candidates: r.candidates }, [`${r.candidates.length} candidate(s), ${fresh.length} not recorded yet:`, ...lines, '', fresh.length ? 'Propose them for the Context Inbox: autode quality candidates --propose (a person confirms each).' : 'Nothing new to propose.'].join('\n'));
+    return EXIT.OK;
+  }
+  if (!fresh.length) { emit(ctx, { ok: true, proposed: [] }, 'Nothing new to propose.'); return EXIT.OK; }
+  const p = await tools.find((t) => t.name === 'autode_propose_quality_rules')!.handler({ rules: fresh.map((c) => ({ subject: c.subject, check: c.check })) }, ws) as { proposed: Array<{ id: string; statement: string }> };
+  emit(ctx, { ok: true, proposed: p.proposed }, `${p.proposed.length} quality rule(s) proposed: a person confirms them in the Context Inbox (autode facts).`);
+  return EXIT.OK;
 }
 
 /** LIN: observed lineage, read through the platform's lineage operations or recorded from a file. */
@@ -2454,7 +2508,21 @@ async function cmdGovernance(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: true, candidates, tables: tables.length }, `${text}\n\nClassify a column: autode governance classify <table.column> --as pii|sensitive-pii|confidential|none [--strategy hash|redact]`);
       return EXIT.OK;
     }
-    if (sub !== 'classify') throw new CliError(EXIT.USAGE, 'governance show [--table <t>] | classify <table.column> --as <classification> [--strategy hash|redact] [--note <text>]');
+    if (sub === 'policies') {
+      // ONT2: the team's policies, and every classified column with the ones that apply to it.
+      const p = loadPolicies(ctx.workspaceRoot);
+      const cols = columnPolicies(facts, p.policies);
+      const lines = [
+        p.policies.length ? `Policies (${rel(ctx, p.file)}):` : `No policies: write ${rel(ctx, p.file)} (autode: policies/1; regulation → classifications → controls).`,
+        ...p.policies.map((x) => `  ${x.id}${x.regulation ? ` (${x.regulation})` : ''}: ${x.applies.classifications.join(', ')} → ${x.controls.map((c) => c.control === 'masking' ? `masking${c.strategy ? ` (${c.strategy})` : ''}` : c.control === 'retention' ? `retention ${c.days} days` : `access ${(c.roles ?? []).join(', ')}`).join('; ')}`),
+        ...p.errors.map((e) => `  ! ${e}`),
+        '', cols.length ? 'Classified columns:' : 'No classified columns yet (autode governance classify).',
+        ...cols.map((c) => `  ${`${c.table}.${c.column}`.padEnd(44)} ${c.classification.padEnd(14)} ${c.policies.length ? c.policies.map((x) => x.id).join(', ') : 'no policy applies'}`)
+      ];
+      emit(ctx, { ok: p.errors.length === 0, policies: p.policies, errors: p.errors, columns: cols }, lines.join('\n'));
+      return p.errors.length ? EXIT.FAILED : EXIT.OK;
+    }
+    if (sub !== 'classify') throw new CliError(EXIT.USAGE, 'governance show [--table <t>] | policies | classify <table.column> --as <classification> [--strategy hash|redact] [--note <text>]');
     const dot = target?.lastIndexOf('.') ?? -1;
     if (!target || dot <= 0) throw new CliError(EXIT.USAGE, 'governance classify takes <table.column>.');
     const classification = ctx.values.as as gov.Classification | undefined;

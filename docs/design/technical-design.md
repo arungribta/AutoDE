@@ -1117,6 +1117,45 @@ Context-layer §6.8. All of it is in `src/engine/ontology/`. It is platform-neut
 - The maintenance rule `term-unaligned` (`queue.ts`) is raised only while a team pack is in effect.
 - The stage kinds `ontology-alignment` and `semantic-modelling` (`stageKinds.ts`), used by `workflows/semantic-foundation.yaml`. In `chatFrontDoor.ts`, `LAYER_ROLES` keeps the layers' agents as work orders of their own.
 
+### 5.22 Reasoning through meaning (v0.60.0; CTX-14, ONT2)
+
+Context-layer §6.8, §11. Deterministic; no model.
+
+**The meaning index** (`src/engine/ontology/meaning.ts`). `meaningIndex({ graph, assertions, ontology, vocab })` is cached per sources object; `workspaceMeaning(scope, src)` in `service.ts` builds one for a workspace, and `meaningFor` in `explore.ts` builds one per set of Explorer sources.
+- `phrases`: every non-upper, non-deprecated concept's label and synonyms as vocabulary word lists (`concepts()` of `vocabulary.ts`), longest first.
+- `links` (live `meaning` facts), `termsOf` (an asset → the terms bound to it, through `boundTo`), `tableOf`, and `classification` (confirmed classifications by `table.column`).
+- `foldConcepts(text)` replaces each phrase found in a name's words by `<conceptId>` and lists what it found.
+- `meaningChains(assetId)` returns `ChainStep[]` lists: { `kind` (column, table, term, concept, upper), `id`, `label`, `via` (bound to, means, represents, under), `fact`, `trust`, `match`, `scope` }. A table goes through *represents* and its terms; a column through its terms; a term directly; each chain ends with the concept's ancestors.
+- `resolveMeaning(text)`: concepts named by folding, plus glossary terms whose words the text contains (with their live `means` links). Each comes with its terms by `SCOPE_RANK`, and every table that represents it and every column bound to its terms, each with its chain.
+
+**Matching** (`agents/columnMatch.ts`). `scorePair` takes an optional `meaning` index. When names score under 0.85, `meaningScore` offers:
+- 0.85: a term bound to the source column whose words are the target's;
+- 0.75: a term of the source table that contains the column's words and is the target's name;
+- 0.8: folded token sets equal, with a concept involved (a partial overlap that includes a concept token gives 0.6 × Jaccard);
+- 0.85: both columns' terms mean the same concept (target columns in the estate).
+
+The best of these replaces the name score and its reason. Afterwards, the same classification on both sides adds 0.05, and a personal-data source adds a note. `autode_match_columns` passes the index unless `namesOnly`. The eval's scenario M (`test/eval/lib/mappingRecall.cjs`) builds both fixtures and runs golden mappings to planned targets twice.
+
+**Quality candidates** (`src/engine/quality/candidates.ts`). `qualityCandidates(idx, { tables })` per table:
+- live key facts and the declared primary key: not null per column, and unique (composite on the table, with `columns`);
+- grain facts not already a key: unique;
+- live relationship facts whose first subject is the table, and `foreign_key` edges: referential (`references: table.column`);
+- e-mail columns classified pii or sensitive-pii: pattern;
+- for each concept the table represents, and its ancestors: `hints.quality` rules whose attribute matches a column by words or by a bound term's words.
+
+`existing` names a live or proposed quality fact with the same subject and check. `qualityProposals` makes `quality_expectation` facts (predicate `expects`, flag `candidate`, trust documented, or inferred for hints), recorded through `recordChatProposals`.
+
+**Policies** (`src/engine/governance/policies.ts`; layout key `policies`).
+- `parsePolicies` reads `policies/1` (id, title, regulation, `applies.classifications`, `controls` of masking, retention or access).
+- `columnPolicies(facts, policies)` lists every classified column with the policies that apply.
+- `policyGaps(spec, facts, policies)` follows each entity's staging renames: a masking control on an unmasked confirmed column is an error, and retention and access are warnings, one per duty.
+- `documentApproval.ts` (Pipeline Spec approval) and `autode_record_pipeline_spec` add its errors to `governanceGaps`'s. The Explorer's sources carry `policies`, and an asset page's `governance.policies` lists them per classified column.
+
+**Surfaces.**
+- MCP `meaningTools.ts`: `autode_quality_candidates`, `autode_propose_quality_rules`, `autode_policies`. `autode_resolve` returns `meaning`.
+- CLI: `autode ontology resolve | match`, `autode quality candidates`, `autode governance policies`.
+- Explorer: the Meaning tab's chains, the Governance tab's policies, and the Quality tab's *Suggest quality rules…* (ontology ops `quality` and `proposeQuality`).
+
 ## 6. Data Platforms
 
 ### 6.1 Design Rationale
@@ -2383,7 +2422,7 @@ src/engine/documents/
 src/engine/explore/
   explore.ts, lineage.ts, render.ts, sources.ts
 src/engine/governance/
-  governance.ts
+  governance.ts, policies.ts
 src/engine/grounding/    # SQL grounding checks, manifests, reports
   manifest.ts, semanticGrounding.ts, sqlGrounding.ts
 src/engine/interview/
@@ -2397,7 +2436,7 @@ src/engine/maintenance/
 src/engine/metadata/
   model.ts, record.ts
 src/engine/ontology/
-  convert.ts, decision.ts, links.ts, onboard.ts, openapi.ts, pack.ts, rdf.ts, service.ts, standards.ts, store.ts
+  convert.ts, decision.ts, links.ts, meaning.ts, onboard.ts, openapi.ts, pack.ts, rdf.ts, service.ts, standards.ts, store.ts
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters
@@ -2410,6 +2449,8 @@ src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
 src/engine/platform/operations/
   bind.ts, catalogView.ts, drift.ts, execute.ts, form.ts, load.ts, map.ts, proposal.ts, proposeService.ts, runLog.ts, schema.ts, service.ts, types.ts
+src/engine/quality/
+  candidates.ts
 src/engine/runner/    # runbooks: checks, policy, the runner and its log
   hostGuard.ts, policy.ts, run.ts, runbook.ts, runLog.ts
 src/engine/semantic/
@@ -2425,7 +2466,7 @@ src/engine/transforms/primitives/    # Tier 1 primitives
 src/engine/workflows/    # workflow templates, instances, runtime, events, document approval
   coverage.ts, documentApproval.ts, events.ts, instance.ts, journey.ts, planning.ts, readiness.ts, runtime.ts, service.ts, stageKinds.ts, templates.ts
 src/mcp/    # MCP server (no vscode; §10.6)
-  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, maintenanceTools.ts, ontologyTools.ts, platform.ts, platformOperationTools.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
+  agentTools.ts, catalogs.ts, decisions.ts, errors.ts, exploreTools.ts, maintenanceTools.ts, meaningTools.ts, ontologyTools.ts, platform.ts, platformOperationTools.ts, runnerHost.ts, semanticTools.ts, server.ts, tools.ts, workflowTools.ts, workspace.ts, workspaceTools.ts
 ```
 <!-- /generated:source-tree -->
 

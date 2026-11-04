@@ -6,6 +6,48 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.60.0
+
+ONT2, reasoning through meaning ([context-layer.md](docs/specs/context-layer.md) §6.8, §11). The ontology and the glossary's links to it now work in AutoDE's deterministic tools. Each result names the concept and the facts it went through. No model is involved.
+
+- **The meaning index** (`src/engine/ontology/meaning.ts`): the ontology in effect, the confirmed `means` and *represents* links, the terms bound to tables and columns, and classifications, as one index.
+  - **Folding**: each concept's names (its label and synonyms, through the customer's vocabulary) become one token, so "deal", "facility" and "credit line" compare as the same thing wherever a concept says they are.
+  - **The chain**: column → term (its binding) → concept (the term's `means` link) → the upper layer, or table → concept (*represents*). Each step carries the fact behind it, its trust, the match type and the term's scope.
+- **Resolution through concepts.**
+  - `autode_resolve` gains `meaning`, and there is a new `autode ontology resolve <text>`. They return the concepts a text names (by a concept's name or synonym, or by a glossary term that means one), the terms that mean each concept (most specific scope first), and every table and column that means it, each with its chain.
+  - An asset page's Meaning tab shows **How it reaches its meaning**: its chains, with links to the facts.
+- **Mapping through meaning.** `autode_match_columns` adds four signals, each named in its reasons:
+  - the same concept once names are folded (*the same meaning through the concept Collateral (fibo:Collateral: collateral ~ pledge)*);
+  - a target named by a glossary term bound to the source column;
+  - a term of the source table that names the column;
+  - both columns' terms meaning the same concept.
+
+  A shared classification adds a little; a source classified personal data notes that the target must mask it. `namesOnly: true` (CLI `autode ontology match … --names-only`) leaves meaning out, to compare.
+  - **Measured against golden mappings** (`test/reference/lending/golden-mappings.yaml`, `test/reference/retail-orders/golden/mappings.yaml`; eval scenario M, in `npm run eval`):
+    - lending: **6 of 14 pairs by names, 12 of 14 through meaning**, none wrong either way;
+    - retail: **6 of 8 either way**: it has no ontology, and its one glossary-driven pair is already found by names.
+- **Quality-rule candidates** (`src/engine/quality/candidates.ts`; MCP `autode_quality_candidates` and `autode_propose_quality_rules`; CLI `autode quality candidates [--table] [--propose]`; on the Explorer's Quality tab, *Suggest quality rules…*). Every candidate gives its reason and the fact it rests on:
+  - a confirmed key or a declared primary key: not null and unique;
+  - a grain: unique;
+  - a confirmed relationship or a declared foreign key: referential;
+  - an e-mail column classified personal data: its pattern;
+  - a concept's hints, for the attribute columns of a table that represents it (on the lending fixture: FIBO Payment's date never null and amount above zero; Loan Application's date never null).
+
+  Proposed, they wait in the Context Inbox: at documented trust when they rest on a fact or a declared key, inferred when they come from a hint. Recorded ones aren't proposed again.
+- **Policies as data** (`.autode/config/policies.yaml`, `autode: policies/1`; `src/engine/governance/policies.ts`):
+  - each policy gives a regulation (or the team's own rule), the classifications it covers, and the controls it requires: masking (with a strategy), retention (days), access (roles);
+  - every classified column lists the policies that apply to it (`autode governance policies`, MCP `autode_policies`, the asset page's Governance tab), and says so when none does;
+  - **the governance check runs on them** when a Pipeline Spec is recorded or approved. A policy's masking duty unmet is an error (before, an unmasked `pii` column was only a warning). Retention and access are reported as owed, since the Pipeline Spec can't state them;
+  - a malformed file is reported item by item.
+- The quality engineer has the candidate and policy tools, and its skill starts from the candidates. The mapping skill explains reasons that go through meaning.
+
+Deviations and limits:
+- Retail's recall doesn't change: improving it needs an ontology for retail (a team extension pack).
+- Policies apply by classification across the workspace, not only to problems that name the regulation.
+- Accepted-values candidates carry the hint's note, not a value list.
+- Context packs don't use concepts yet; resolution through meaning is in `autode_resolve` and the CLI.
+- Policies are edited as a file; the Explorer shows them but doesn't edit them.
+
 ## 0.59.1
 
 Standards beyond FIBO ([context-layer.md](docs/specs/context-layer.md) §6.8; owner, 2026-11-03: "FIBO is just one standard; CIM for utilities, BIAN … the framework should allow bringing other standards, with a UI to onboard and browse them, and the knowledge engineer should be able to research them").

@@ -10,6 +10,8 @@ import { loadSemanticLayer, semanticPaths } from '../semantic/store';
 import { loadMetadataConfig } from '../metadata/model';
 import { listArticles } from '../knowledge/articles';
 import { findConcept, loadOntology } from '../ontology/store';
+import { buildVocabulary, parseVocabularyFile } from '../context/vocabulary';
+import { loadPolicies } from '../governance/policies';
 import { layoutPath } from '../workspaceLayout';
 import { ArtifactUse, AssetType, Certification, ExploreSources, Layer, ProblemDesign, browseAssets, exploreGraph, exploreLandscape, exploreOverview, getAssetContext, listFacts, ontologyOverview, searchAssets, semanticOverview } from './explore';
 import { conceptNodeId } from '../ontology/pack';
@@ -68,7 +70,9 @@ export function exploreSources(workspaceRoot: string, context: ContextPackSource
     articles: context.articles ?? listArticles(workspaceRoot),
     maintenance: (() => { try { return openMaintenanceItems({ workspaceRoot, problemId, sources: context }); } catch { return []; } })(),
     designs: problemDesigns(workspaceRoot),
-    ontology: (() => { try { return loadOntology({ workspaceRoot }); } catch { return undefined; } })()
+    ontology: (() => { try { return loadOntology({ workspaceRoot }); } catch { return undefined; } })(),
+    vocabulary: (() => { try { return buildVocabulary(parseVocabularyFile(fs.readFileSync(layoutPath(workspaceRoot, 'vocabulary'), 'utf8'))); } catch { return buildVocabulary(); } })(),
+    policies: loadPolicies(workspaceRoot).policies
   };
 }
 

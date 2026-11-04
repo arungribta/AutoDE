@@ -1526,6 +1526,23 @@ Use a workspace with the lending fixture: `autode estate ingest test/reference/l
   Do: in Claude Code (AutoDE plugin), ask the knowledge engineer to research and propose a standard the catalog lacks (for example HL7 FHIR or ACORD).
   Expect: it searches the web, then proposes an entry with a pinned release and the licence it read; the card shows *proposed* with its reason; **Try it** fetches and browses it; you approve it in Decisions. It never approves.
 
+## Part 71 — v0.60.0 ONT2: reasoning through meaning
+
+Use the lending workspace of Part 69 (FIBO onboarded, the vocabulary aligned and confirmed).
+
+- [ ] **71.1 What a text means.**
+  Do: `autode ontology resolve "credit line limits"`; open `loansys.collat.collat_val` in the Explorer, Meaning tab.
+  Expect: Credit Facility, its terms (Deal before Facility) and deal_mstr with its chain to Agreement; the column's chain collat_val → Collateral Value → Collateral → Product, each step linking its fact.
+- [ ] **71.2 Mapping through meaning.**
+  Do: `autode ontology match loansys.collat --target dim_pledge --target-columns pledge_id,pledge_value,pledge_type`, then with `--names-only`.
+  Expect: pledge_value and pledge_type matched through the concept Collateral; names only leaves them unmatched. `npm run eval` reports lending 6/14 → 12/14.
+- [ ] **71.3 Quality rules.**
+  Do: open `loansys.pmt`, Quality tab, *Suggest quality rules…*, then *Propose the checked rules*.
+  Expect: not null and unique on pmt_id (declared key), pmt_dt never null and pmt_amt in range from FIBO Payment, each with its reason; proposed, they wait in the Context Inbox; suggesting again marks them recorded.
+- [ ] **71.4 Policies.**
+  Do: write the example `.autode/config/policies.yaml` (user guide §8.10), classify `loansys.brwr.brwr_nm` as pii, open loansys.brwr's Governance tab; run `autode governance policies`.
+  Expect: brwr_nm lists the GDPR policy with masking and retention; a Pipeline Spec that doesn't mask brwr_nm can't be approved (the reason names the policy).
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1915,5 +1932,9 @@ Use a workspace with the lending fixture: `autode estate ingest test/reference/l
 | 70.3 |  |  |
 | 70.4 |  |  |
 | 70.5 |  |  |
+| 71.1 |  |  |
+| 71.2 |  |  |
+| 71.3 |  |  |
+| 71.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

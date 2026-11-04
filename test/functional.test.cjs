@@ -5886,8 +5886,8 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_ontology_standards', 'autode_ontology_browse', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
-      const proposalTools = ['autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_standard', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
+      const readTools = ['autode_quality_candidates', 'autode_policies', 'autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_ontology_standards', 'autode_ontology_browse', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const proposalTools = ['autode_propose_quality_rules', 'autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_standard', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_propose_platform_operation', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
@@ -5993,6 +5993,9 @@ async function main() {
       autode_propose_ontology_pack: [{ source: { shipped: 'fibo-lending' }, reason: 'Lending terms need shared meaning.' }, { source: { shipped: 'fibo-lending' }, reason: 'short' }],
       autode_propose_concept_links: [{ links: [{ subject: 'nope', concept: 'upper:Party', reason: 'It is a party.' }] }, { links: [] }],
       autode_ontology_standards: [{}, { x: 1 }],
+      autode_quality_candidates: [{}, { tables: [''] }],
+      autode_propose_quality_rules: [{ rules: [{ subject: 'nope', check: 'unique' }] }, { rules: [] }],
+      autode_policies: [{}, { x: 1 }],
       autode_ontology_browse: [{ source: { standard: 'fibo' } }, { source: { standard: 'fibo' }, limit: 0 }],
       autode_propose_standard: [{ content: 'autode: standard/1\nid: x', reason: 'Researched on the publisher site.' }, { content: 'short', reason: 'Researched on the publisher site.' }],
       autode_skill_check: [{ id: 'autode-de-mapping' }, { id: '' }],
@@ -14192,6 +14195,151 @@ async function main() {
     for (const s of ['id="ontoStandards"', 'data-std-browse', 'data-decision', "opAsk('browse'", 'data-br-check', "data-br=\"onboard\""]) assert.ok(html.includes(s), s);
     const host = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', 'knowledgeExplorer.ts'), 'utf8');
     assert.match(host, /case 'fetchStandard'[\s\S]*execFile\(process\.execPath[\s\S]*ELECTRON_RUN_AS_NODE/);
+  });
+
+  // v0.60.0: ONT2, reasoning through meaning (context-layer §6.8, §11).
+
+  /** The lending workspace with FIBO onboarded and the vocabulary aligned and confirmed (as a person would). */
+  async function alignedLending() {
+    const L = await lendingWorkspace();
+    const W = L.W;
+    let r = await cli(['ontology', 'onboard', 'fibo-lending', ...W, '--reason', 'The lending problem needs shared meaning.', '--json']);
+    await cli(['decisions', 'approve', r.json().decision.id, ...W], { interactive: true, answers: ['approve'] });
+    r = await cli(['ontology', 'align', ...W, '--propose', '--json']);
+    await cli(['facts', 'confirm', ...r.json().recorded.map((x) => x.id), ...W], { interactive: true, answers: ['confirm'] });
+    return L;
+  }
+
+  await test('v0.60.0 ONT2: mapping through meaning — on the lending and retail fixtures, matching against golden mappings finds pairs names alone miss (lending 6/14 → 12/14, none wrong; retail, with no ontology, unchanged at 6/8), each gained pair naming the concept it went through; names only is still there to compare (MCP namesOnly, CLI --names-only)', async () => {
+    const os = require('node:os'); const nodePath = require('node:path');
+    const { measureMappingRecall, fixtureWorkspace } = require('./eval/lib/mappingRecall.cjs');
+    const dist = (m) => require(nodePath.join(__dirname, '..', 'dist', m));
+    const r = await measureMappingRecall({ root: nodePath.join(__dirname, '..'), dist, tmp: os.tmpdir() });
+    assert.deepStrictEqual([r.lending.total, r.lending.namesOnly.found, r.lending.meaning.found, r.lending.namesOnly.wrong, r.lending.meaning.wrong, r.lending.lost], [14, 6, 12, 0, 0, []]);
+    assert.deepStrictEqual([r.retail.total, r.retail.namesOnly.found, r.retail.meaning.found, r.retail.meaning.wrong, r.retail.lost], [8, 6, 6, 0, []], 'no ontology, nothing gained or lost');
+    const gained = Object.fromEntries(r.lending.gained.map((g) => [g.source, g.reasons.join('; ')]));
+    assert.match(gained['loansys.brwr.brwr_nm'], /through the concept Borrower \(fibo:Borrower: borrower ~ obligor\)/);
+    assert.match(gained['loansys.collat.collat_val'], /through the concept Collateral \(fibo:Collateral: collateral ~ pledge\)/);
+    assert.match(gained['loansys.deal_mstr.deal_id'], /Credit Facility .*credit line/);
+    // The CLI gives the tool's answer, with or without meaning.
+    const ws = await fixtureWorkspace('lending', { root: nodePath.join(__dirname, '..'), dist, tmp: os.tmpdir() });
+    const W = ['--workspace', ws];
+    const by = (j) => Object.fromEntries(j.matches.map((m) => [m.sourceColumn, m.targetColumn]));
+    const withMeaning = (await cli(['ontology', 'match', 'loansys.collat', '--target', 'dim_pledge', '--target-columns', 'pledge_id,pledge_value,pledge_type', ...W, '--json'])).json();
+    const names = (await cli(['ontology', 'match', 'loansys.collat', '--target', 'dim_pledge', '--target-columns', 'pledge_id,pledge_value,pledge_type', '--names-only', ...W, '--json'])).json();
+    assert.deepStrictEqual([by(withMeaning).collat_val, by(names).collat_val], ['pledge_value', undefined]);
+  });
+
+  await test('v0.60.0 ONT2: resolution through concepts with the evidence chain — a concept\'s name or synonym, or a glossary term, resolves to the concept and every table and column that means it, each with its chain (column → term → concept → the upper layer) and the facts behind it; autode_resolve, the CLI and the asset page agree', async () => {
+    const L = await alignedLending();
+    try {
+      const { W } = L;
+      let r = await cli(['ontology', 'resolve', 'credit line limits', ...W, '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      const cf = r.json().meaning.find((m) => m.concept === 'fibo:CreditFacility');
+      assert.deepStrictEqual([cf.matched, cf.via, cf.terms.map((t) => [t.label, t.scope.level])], ['credit line', 'concept name', [['Deal', 'system'], ['Facility', 'enterprise']]]);
+      const deal = cf.assets.find((a) => /deal_mstr/.test(a.label));
+      assert.deepStrictEqual(deal.chain.map((s) => [s.kind, s.label, s.via ?? null]), [['table', 'deal_mstr', null], ['concept', 'Credit Facility', 'represents'], ['concept', 'Credit Agreement', 'under'], ['concept', 'Contract', 'under'], ['upper', 'Agreement', 'under']]);
+      assert.ok(deal.chain[1].fact, 'the represents fact is the evidence');
+      // A glossary term names a concept; a column reaches it through its term.
+      r = await cli(['ontology', 'resolve', 'what is the collateral value', ...W, '--json']);
+      const coll = r.json().meaning.find((m) => m.concept === 'fibo:Collateral');
+      const col = coll.assets.find((a) => a.kind === 'column');
+      assert.deepStrictEqual(col.chain.map((s) => [s.kind, s.label, s.via ?? null]).slice(0, 3), [['column', 'collat.collat_val', null], ['term', 'Collateral Value', 'bound to'], ['concept', 'Collateral', 'means']]);
+      assert.ok(col.chain[1].fact && col.chain[2].fact && col.chain[2].match === 'related');
+      // autode_resolve gives the same meaning; the asset page has the chain.
+      const { EngineWorkspace } = require('../dist/mcp/workspace.js');
+      const { TOOLS } = require('../dist/mcp/tools.js');
+      const engine = new EngineWorkspace({ workspaceRoot: L.ws, resourcesRoot: require('node:path').join(__dirname, '..') });
+      const res = await TOOLS.find((t) => t.name === 'autode_resolve').handler({ text: 'what is the collateral value' }, engine);
+      assert.deepStrictEqual(JSON.parse(JSON.stringify(res.meaning)), r.json().meaning);
+      const page = (await cli(['explore', 'asset', 'loansys.collat.collat_val', ...W, '--json'])).json().context;
+      assert.ok(page.meaning.chains.some((c) => c.map((s) => s.label).join(' > ') === 'collat.collat_val > Collateral Value > Collateral > Product'), JSON.stringify(page.meaning.chains));
+      assert.strictEqual((await cli(['ontology', 'resolve', 'weather forecast', ...W])).code, 5);
+    } finally { L.done(); }
+  });
+
+  await test('v0.60.0 ONT2: quality-rule candidates exist for every confirmed key and relationship (and declared keys), and from a concept\'s hints for the attributes of a table that represents it; proposed, they wait in the Inbox at documented trust (inferred from a hint) and are not proposed twice', async () => {
+    const L = await alignedLending();
+    try {
+      const { W } = L;
+      const { EngineWorkspace } = require('../dist/mcp/workspace.js');
+      const nodePath = require('node:path');
+      const engine = () => new EngineWorkspace({ workspaceRoot: L.ws, resourcesRoot: nodePath.join(__dirname, '..') });
+      const src = await engine().contextSources();
+      const table = (name) => src.graph.nodes.find((n) => n.type === 'table' && n.label === name);
+      const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+      const ledger = new AssertionLedger(nodePath.join(L.ws, '.autode', 'knowledge', 'ledger'));
+      await ledger.load();
+      const base = { evidence: [{ type: 'user_edit', ref: 'test' }], trust: 'confirmed', status: 'active', createdBy: 'user:test' };
+      await ledger.assert({ ...base, kind: 'key', subject: [table('guar').id], predicate: 'primary', value: ['guar_id'], statement: 'The key of guar is guar_id.' });
+      await ledger.assert({ ...base, kind: 'relationship', subject: [table('collat').id, table('deal_mstr').id], predicate: 'joins_to', value: { from: { entity: table('collat').id, columns: ['deal_id'] }, to: { entity: table('deal_mstr').id, columns: ['deal_id'] }, cardinality: 'N:1' }, statement: 'collat.deal_id references deal_mstr.deal_id.' });
+      await ledger.assert({ ...base, kind: 'classification', subject: [`${src.graph.nodes.find((n) => n.type === 'column' && n.label === 'brwr_nm').id}`], predicate: 'classification', value: { classification: 'pii', strategy: 'hash' }, statement: 'brwr_nm is pii.' });
+      let r = await cli(['quality', 'candidates', ...W, '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      const c = r.json().candidates;
+      const has = (t, col, check, source) => c.some((x) => x.table.endsWith(t) && x.columns.join() === col && x.check === check && x.source === source);
+      assert.ok(has('guar', 'guar_id', 'not_null', 'key') && has('guar', 'guar_id', 'unique', 'key'), 'the confirmed key');
+      assert.ok(has('collat', 'deal_id', 'referential', 'relationship') && c.find((x) => x.check === 'referential').value.references.endsWith('deal_mstr.deal_id'), 'the confirmed relationship');
+      for (const t of ['brwr', 'loan_appl', 'collat', 'pmt', 'cust_acct', 'deal_mstr']) assert.ok(c.some((x) => x.table.endsWith(t) && x.check === 'unique' && x.source === 'declared key'), `declared key of ${t}`);
+      assert.ok(has('pmt', 'pmt_dt', 'not_null', 'hint') && has('pmt', 'pmt_amt', 'range', 'hint'), 'FIBO Payment\'s hints on the table that represents it');
+      assert.ok(has('loan_appl', 'appl_dt', 'not_null', 'hint'), 'Loan Application\'s hint (application date)');
+      assert.ok(c.every((x) => x.reason && x.subject), 'each with its reason');
+      r = await cli(['quality', 'candidates', '--propose', ...W, '--json']);
+      const proposed = r.json().proposed;
+      assert.strictEqual(proposed.length, c.length);
+      const facts = new AssertionLedger(nodePath.join(L.ws, '.autode', 'knowledge', 'ledger'));
+      await facts.load();
+      const q = facts.assertions().filter((a) => a.kind === 'quality_expectation');
+      assert.ok(q.every((a) => a.status === 'proposed') && q.some((a) => a.trust === 'documented') && q.some((a) => a.trust === 'inferred'));
+      r = await cli(['quality', 'candidates', ...W, '--json']);
+      assert.ok(r.json().candidates.every((x) => x.existing), 'recorded: not proposed again');
+      // The Explorer: suggestions for a table, proposed from the page.
+      const { answerExplorerMessage } = require('../dist/core/knowledgeExplorerModel.js');
+      const { exploreSources } = require('../dist/engine/explore/sources.js');
+      const host = { workspaceRoot: () => L.ws, sources: async () => exploreSources(L.ws, await engine().contextSources(), undefined), resourcesRoot: () => nodePath.join(__dirname, '..') };
+      const viaPanel = (await answerExplorerMessage({ type: 'ontology', requestId: 1, op: 'quality', args: { tables: [table('pmt').id] } }, host)).reply.body.candidates;
+      assert.ok(viaPanel.length && viaPanel.every((x) => x.table.endsWith('pmt') && x.existing));
+    } finally { L.done(); }
+  });
+
+  await test('v0.60.0 ONT2: policies as data — .autode/config/policies.yaml maps a regulation to classifications and controls; every classified column lists the policies that apply (CLI, MCP, the asset page); the governance check makes a policy\'s masking duty an error and reports retention and access as owed; a malformed file is reported item by item', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const L = await alignedLending();
+    try {
+      const { W } = L;
+      nodeFs.writeFileSync(nodePath.join(L.ws, '.autode', 'config', 'policies.yaml'), 'autode: policies/1\npolicies:\n  - id: gdpr-personal-data\n    title: Personal data under GDPR\n    regulation: GDPR\n    applies: { classifications: [pii, sensitive-pii] }\n    controls:\n      - { control: masking, strategy: hash }\n      - { control: retention, days: 2555 }\n  - id: bank-secrecy\n    title: Customer secrecy\n    applies: { classifications: [sensitive-pii] }\n    controls:\n      - { control: access, roles: [data_steward, credit_risk] }\n');
+      assert.strictEqual((await cli(['governance', 'classify', 'loansys.brwr.natl_id', '--as', 'sensitive-pii', ...W], { interactive: true, answers: ['classify'] })).code, 0);
+      assert.strictEqual((await cli(['governance', 'classify', 'loansys.brwr.brwr_nm', '--as', 'pii', ...W], { interactive: true, answers: ['classify'] })).code, 0);
+      assert.strictEqual((await cli(['governance', 'classify', 'loansys.loan_appl.decision_cd', '--as', 'confidential', ...W], { interactive: true, answers: ['classify'] })).code, 0);
+      let r = await cli(['governance', 'policies', ...W, '--json']);
+      assert.strictEqual(r.code, 0, r.err);
+      const cols = Object.fromEntries(r.json().columns.map((c) => [c.column, c.policies.map((p) => p.id)]));
+      assert.deepStrictEqual(cols, { natl_id: ['gdpr-personal-data', 'bank-secrecy'], brwr_nm: ['gdpr-personal-data'], decision_cd: [] }, 'every classified column, with what applies (nothing, said so)');
+      const { meaningTools } = require('../dist/mcp/meaningTools.js');
+      const { EngineWorkspace } = require('../dist/mcp/workspace.js');
+      const engine = new EngineWorkspace({ workspaceRoot: L.ws, resourcesRoot: nodePath.join(__dirname, '..') });
+      const viaMcp = await meaningTools(() => 'test').find((t) => t.name === 'autode_policies').handler({}, engine);
+      assert.deepStrictEqual(JSON.parse(JSON.stringify(viaMcp.columns)), r.json().columns);
+      const page = (await cli(['explore', 'asset', 'loansys.brwr', ...W, '--json'])).json().context;
+      assert.deepStrictEqual(page.governance.policies.map((p) => [p.column, p.policies.length]).sort(), [['brwr_nm', 1], ['natl_id', 2]]);
+      // The governance check: masking is a duty; retention and access are owed.
+      const { policyGaps, loadPolicies } = require('../dist/engine/governance/policies.js');
+      const { governanceFacts } = require('../dist/engine/governance/governance.js');
+      const facts = governanceFacts((await engine.contextSources()).assertions);
+      const spec = { entities: [{ name: 'dim_borrower', source: { object: 'loansys.brwr' }, transforms: [{ kind: 'mask', params: { columns: [{ name: 'natl_id' }] } }] }] };
+      const gaps = policyGaps(spec, facts, loadPolicies(L.ws).policies);
+      assert.deepStrictEqual(gaps.errors.length, 1);
+      assert.match(gaps.errors[0], /policy gdpr-personal-data \(GDPR\) requires loansys\.brwr\.brwr_nm \(pii, fact .+\) to be masked by hash/);
+      assert.ok(gaps.warnings.some((w) => /retention of 2555 days \(policy gdpr-personal-data\)/.test(w)) && gaps.warnings.some((w) => /access only for data_steward, credit_risk \(policy bank-secrecy\)/.test(w)));
+      // A malformed file: each problem named.
+      nodeFs.writeFileSync(nodePath.join(L.ws, '.autode', 'config', 'policies.yaml'), 'autode: policies/1\npolicies:\n  - id: bad\n    applies: { classifications: [secret] }\n    controls: [{ control: retention }]\n');
+      r = await cli(['governance', 'policies', ...W, '--json']);
+      assert.strictEqual(r.code, 1);
+      assert.ok(r.json().errors.some((e) => /not secret/.test(e)) && r.json().errors.some((e) => /retention needs days/.test(e)));
+      const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'explorer.html'), 'utf8');
+      for (const s of ['<h4>Policies</h4>', 'How it reaches its meaning', 'data-quality=', 'data-quality-propose']) assert.ok(html.includes(s), s);
+    } finally { L.done(); }
   });
 
   await test('v0.58.0 POP3: the platform maintainer — its role template and core skill load, at the propose tier, and its work order comes from a drift item; the skill\'s worked example passes the proposal checks; MCP autode_propose_platform_operation and autode_platform_drift, the CLI propose-operation and drift give the same answers; estate reads are recorded for drift; the catalog view is wired', async () => {

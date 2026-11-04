@@ -1,0 +1,11 @@
+# The retail reference problem's golden column mappings (ONT2: mapping recall, names alone and through meaning).
+# Retail has no industry ontology: the only meaning here is its glossary (the term "Loyalty Tier" of
+# crm.loyalty_members names its tier column). Pairs nothing deterministic finds (full_name → customer_name,
+# enrolled_at → enrolment_timestamp) stay, so recall is honest.
+mappings:
+  - source: crm.customers
+    target: dim_customer
+    columns: { cust_no: customer_number, full_name: customer_name, email: email, segment_code: segment_code }
+  - source: crm.loyalty_members
+    target: dim_loyalty_member
+    columns: { member_id: member_id, tier: loyalty_tier, points_balance: points_balance, enrolled_at: enrolment_timestamp }

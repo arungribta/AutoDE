@@ -1,4 +1,7 @@
 import { getPrimitiveVersion, isSelectable, listPrimitives, validateTransformSpec, compileTransformSpec } from '../engine/transforms/registry';
+import { WorkspaceGraph, workspaceMeaning } from '../engine/ontology/service';
+import { resolveMeaning } from '../engine/ontology/meaning';
+import type { Assertion } from '../engine/context/assertions';
 import { SqlDialect, TransformPrimitive } from '../engine/transforms/types';
 import { validatePipelineSpec } from '../engine/pipelineSpec/validator';
 import { compilePipelineSpec } from '../engine/pipelineSpec/compiler';
@@ -213,7 +216,7 @@ export const TOOLS: readonly EngineTool[] = [
   // ── context-layer §9 (read-only part) ──
   {
     name: 'autode_resolve',
-    description: 'Resolve free text (a table name, a business term, a question) to the estate objects it refers to, deterministically: the working set first, then the estate catalog (abbreviations, synonyms, the customer\'s vocabulary, comments, glossary).',
+    description: 'Resolve free text (a table name, a business term, a question) to the estate objects it refers to, deterministically: the working set first, then the estate catalog (abbreviations, synonyms, the customer\'s vocabulary, comments, glossary). Through meaning (ONT2): the concepts the text names, by a concept\'s name or synonym or a glossary term that means one, and every table and column that means them, each with its chain (column → term → concept → the upper layer) and the facts behind it.',
     inputSchema: { type: 'object', required: ['text'], additionalProperties: false, properties: { text: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100 } } },
     annotations: readOnly('Resolve text to estate objects'),
     handler: async (args, ws) => {
@@ -228,7 +231,9 @@ export const TOOLS: readonly EngineTool[] = [
       const hits = src.catalog ? src.catalog.search(String(args.text)).slice(0, limit) : [];
       for (const h of hits) if (!seen.has(h.id)) matches.push({ id: h.id, type: 'table', score: h.score, via: 'catalog', matched: h.matched, tier: h.tier, visible: h.visible, source: 'catalog' });
       matches.sort((a, b) => Number(b.score) - Number(a.score));
-      return { text: args.text, matches: matches.slice(0, limit) };
+      // ONT2: what the text means: the concepts it names (or a glossary term means), and every asset that means them, each with its chain.
+      const meaning = resolveMeaning(String(args.text), workspaceMeaning({ workspaceRoot: ws.options.workspaceRoot, resourcesRoot: ws.options.resourcesRoot }, src as unknown as { graph: WorkspaceGraph; assertions: Assertion[] }));
+      return { text: args.text, matches: matches.slice(0, limit), ...(meaning.length ? { meaning } : {}) };
     }
   },
   {

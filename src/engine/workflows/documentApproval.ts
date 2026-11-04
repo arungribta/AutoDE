@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { loadPolicies, policyGaps } from '../governance/policies';
 import * as path from 'node:path';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
 import { parseBusinessProblemSpec, parseMappingContext, parsePipelineSpecDocument, readProblemDocument, serializeMappingContext, writeBusinessProblemSpec, writePipelineSpec } from '../documents/problemDocuments';
@@ -102,7 +103,9 @@ function documentProblems(problemRoot: string, kind: StageKind): Array<{ text: s
       // GOV: confirmed sensitive-pii facts about the columns it reads must be in its governance blocks.
       const ledger = new AssertionLedger(layoutPath(path.resolve(problemRoot, '..', '..', '..'), 'ledger'));
       ledger.loadSync();
-      const gaps = governanceGaps(p, governanceFacts(ledger.assertions())).errors;
+      const facts = governanceFacts(ledger.assertions());
+      // ONT2: a policy's masking duty is an error too.
+      const gaps = [...governanceGaps(p, facts).errors, ...policyGaps(p, facts, loadPolicies(path.resolve(problemRoot, '..', '..', '..')).policies).errors];
       const masking = new Set(v.valid ? [] : unmaskedSensitive(p));
       const label = (e: string) => `Pipeline Spec: ${e}`;
       return [...(v.valid ? [] : v.errors).map((e) => ({ text: label(e), soft: masking.has(e) })), ...soft(gaps.map(label))];

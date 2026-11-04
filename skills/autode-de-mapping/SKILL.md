@@ -30,6 +30,8 @@ Read every candidate's reasons:
 - **use the alternatives** for the unmatched columns;
 - **cryptic names**: `autode_mine_vocabulary` may explain them.
 
+Matches through meaning say so: *the same meaning through the concept Collateral (collateral ~ pledge)*, *through the term "Loyalty Tier" bound to tier*, *both mean Borrower*. They come from the ontology in effect and the glossary: weigh them as you would a name, and note the concept in the mapping's reason. `namesOnly: true` shows what names alone would match. A source classified personal data says so: the target must mask it.
+
 ## 3. Transformations
 
 For each column, write `transformExpression` when the value isn't copied as is:

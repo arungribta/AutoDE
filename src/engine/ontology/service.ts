@@ -11,6 +11,7 @@ import { layoutPath } from '../workspaceLayout';
 import { OntologyPayload } from './decision';
 import { meaningLinks } from './links';
 import { SourceConcept } from './convert';
+import { MeaningIndex, meaningIndex } from './meaning';
 import { BuiltPack, OntologySource, PlacementRow, ReadSource, ScopeResult, TermCandidate, RepresentsCandidate, alignTerms, buildPack, meaningProposals, placementOf, proposeScope, readSource, representsCandidates, seedConcepts, workspaceSignals } from './onboard';
 import { packRevision, stringifyPack } from './pack';
 import { OntologyScope, loadOntology, readTeamPack } from './store';
@@ -219,4 +220,9 @@ export function browseSource(scope: OntologyScope, src: OntologySource, req: Bro
     ...(concept ? { concept } : {}),
     warnings: a.warnings
   };
+}
+
+/** The meaning index for a workspace (ONT2): its graph and facts, the ontology in effect, the customer's vocabulary. */
+export function workspaceMeaning(scope: OntologyScope, src: { graph: WorkspaceGraph; assertions: readonly Assertion[] }): MeaningIndex {
+  return meaningIndex({ graph: src.graph, assertions: src.assertions, ontology: loadOntology(scope), vocab: vocabularyOf(scope.workspaceRoot) });
 }

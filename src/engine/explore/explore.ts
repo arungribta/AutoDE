@@ -15,6 +15,9 @@ import type { PipelineSpec } from '../pipelineSpec/types';
 import type { Ontology } from '../ontology/store';
 import { ancestorsOf, conceptNodeId, conceptOfNode, upperOf } from '../ontology/pack';
 import { MeaningLink, SCOPE_RANK, TermScope, boundTo, meaningLinks, termScope } from '../ontology/links';
+import { ChainStep, MeaningIndex, meaningChains, meaningIndex } from '../ontology/meaning';
+import { Vocabulary, buildVocabulary } from '../context/vocabulary';
+import { Policy, policiesFor } from '../governance/policies';
 
 /**
  * Exploring what AutoDE knows (C5b; docs/specs/context-layer.md §6.10,
@@ -129,6 +132,9 @@ export interface ExploreSources {
   designs?: readonly ProblemDesign[];
   /** ONT1 (§6.8): the ontology in effect — the upper layer and the team's approved packs. */
   ontology?: Ontology;
+  /** ONT2: the customer's vocabulary (for the meaning chains) and the team's policies. */
+  vocabulary?: Vocabulary;
+  policies?: readonly Policy[];
 }
 
 /** A business problem's designs (LIN, §8.5): designed lineage is read from them, never copied. */
@@ -318,6 +324,16 @@ function ontologyNodes(o: Ontology | undefined, links: readonly MeaningLink[], k
     edges.push({ id: `${l.predicate}:${l.fact}`, source: l.subject, target: conceptNodeId(l.concept), type: l.predicate, weight: 0.9, supportedBy: [l.fact] });
   }
   return { nodes, edges };
+}
+
+const meanings = new WeakMap<ExploreSources, MeaningIndex>();
+/** The meaning index over the Explorer's graph (ONT2), one per set of sources. */
+function meaningFor(sources: ExploreSources, idx: Index): MeaningIndex {
+  const hit = meanings.get(sources);
+  if (hit) return hit;
+  const m = meaningIndex({ graph: idx.graph, assertions: sources.assertions, ...(sources.ontology ? { ontology: sources.ontology } : {}), vocab: sources.vocabulary ?? buildVocabulary() });
+  meanings.set(sources, m);
+  return m;
 }
 
 /** The concepts an asset means (ONT1): a term through its `means` links, a column through its terms, a table or logical table through *represents*. */
@@ -591,10 +607,10 @@ export interface AssetContext {
   /** Tables: their columns. */
   schema?: { columns: Array<AssetSummary & { dataType: string; nullable: boolean; primaryKey: boolean; foreignKey: boolean; strategy?: string }>; keys: FactRow[]; grain: FactRow[]; profile: FactRow[] };
   /** Business meaning: glossary terms, semantic elements over it, and (for semantic elements) their definition. */
-  meaning: { terms: AssetSummary[]; semantic: Array<AssetSummary & { expr?: string; model?: string }>; definition?: Record<string, unknown>; concepts: AssetSummary[] };
+  meaning: { terms: AssetSummary[]; semantic: Array<AssetSummary & { expr?: string; model?: string }>; definition?: Record<string, unknown>; concepts: AssetSummary[]; /** ONT2: how it reaches each concept (column → term → concept → the upper layer), each step with its fact. */ chains?: ChainStep[][] };
   /** Relationships and derivations next to it; with the lineage summary (LIN) when asked through the request handler. */
   lineage: { related: RelatedAsset[]; note: string; summary?: { upstream: number; downstream: number; sources: string[] } };
-  governance: { classifications: Array<{ column: string; classification: string; strategy?: string; factId?: string; trust?: TrustTier }>; rules: Array<{ id: string; text: string; enforcement: string; ruleType?: string; modality?: string; scope?: string }> };
+  governance: { classifications: Array<{ column: string; classification: string; strategy?: string; factId?: string; trust?: TrustTier }>; rules: Array<{ id: string; text: string; enforcement: string; ruleType?: string; modality?: string; scope?: string }>; /** ONT2: the team's policies for each classified column. */ policies?: Array<{ column: string; classification: string; policies: Array<{ id: string; title: string; regulation?: string; controls: Policy['controls'] }> }> };
   /** MM1 (§6.11): owners (with role, and whether inherited from the domain), domain, data products, tags, custom properties, certification. */
   metadata?: AssetMetadata;
   /** Quality expectations by DAMA dimension. */
@@ -783,13 +799,15 @@ export function getAssetContext(sources: ExploreSources, ref: string): AssetCont
   const maintenance = itemsTouching(sources.maintenance ?? [], [n.id]).map((i) => ({ key: i.key, rule: i.rule, agent: i.agent, title: i.title, detail: i.detail, next: i.next }));
   const termFact = n.type === 'business_term' ? (n.supportedBy ?? []).map((id) => idx.assertions.get(id)).find((a) => a?.kind === 'business_term') : undefined;
   const ambiguousBase = Array.isArray(n.metadata?.ambiguous) ? (n.metadata.ambiguous as string[]).map((id) => idx.nodes.get(id)).filter((x): x is BaseNode => !!x).map((x) => summarize(x, idx)) : undefined;
+  // ONT2: how it reaches each concept (column → term → concept → the upper layer), each step with its fact.
+  const meaningChainsOf = () => { const chains = n.type === 'concept' ? [] : scope.flatMap((s) => meaningChains(s, meaningFor(sources, idx))).filter((c) => c.length > 1); return chains.length ? { chains } : {}; };
   return {
     asset, overview, ...(schema ? { schema } : {}), ...(contents ? { contents } : {}), ...(ambiguousBase?.length ? { ambiguousBase } : {}),
     ...(metadata ? { metadata } : {}), ...(quality.length ? { quality } : {}), ...(articles.length ? { articles } : {}), ...(maintenance.length ? { maintenance } : {}), ...(termFact ? { term: { ...(termFact.value as Record<string, unknown>), scope: termScope(n, idx.assertions) } } : {}),
-    meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: conceptsOf(n, idx).map((c) => idx.nodes.get(conceptNodeId(c))).filter((x): x is BaseNode => !!x).map((x) => summarize(x, idx)) },
+    meaning: { terms: [...terms.values()], semantic: [...semantic.values()], ...(definition ? { definition } : {}), concepts: conceptsOf(n, idx).map((c) => idx.nodes.get(conceptNodeId(c))).filter((x): x is BaseNode => !!x).map((x) => summarize(x, idx)), ...meaningChainsOf() },
     ...(n.type === 'concept' ? { concept: conceptPage(n, idx, sources) } : {}),
     lineage: { related, note: 'Relationships and derivations next to it. Its full lineage (observed, designed, generated and logical) and the impact of a change: the lineage and impact views.' },
-    governance: { classifications, rules },
+    governance: { classifications, rules, ...(sources.policies?.length && classifications.length ? { policies: classifications.map((c) => ({ column: c.column, classification: c.classification, policies: policiesFor(c.classification, sources.policies!).map((p) => ({ id: p.id, title: p.title, ...(p.regulation ? { regulation: p.regulation } : {}), controls: p.controls })) })) } : {}) },
     facts, memory,
     usedBy: { artifacts, semanticModels, queries },
     conflicts,

@@ -741,6 +741,7 @@ Impact uses graph traversal, never similarity. It is available on all three surf
 | `autode_get_asset_context` `{ asset }` (C5b) | Asset context (§7.5). |
 | `autode_lineage` `{ asset, direction, depth, level }`, `autode_impact` `{ change }` (LIN) | Traversals (§8.5). |
 | `autode_ontology`, `autode_get_concept_context`, `autode_ontology_analyze`, `autode_ontology_align` (ONT1) | Read the canonical ontology and the glossary; a concept's page; analyse a standard for onboarding; alignment candidates (all read-only). |
+| `autode_quality_candidates`, `autode_propose_quality_rules`, `autode_policies` (ONT2); `autode_resolve` returns `meaning`, `autode_match_columns` matches through meaning (`namesOnly` to compare) | Quality-rule candidates from what is known, proposed for the Inbox; policies with the columns they apply to. |
 | `autode_propose_ontology_pack`, `autode_propose_concept_links` (ONT1) | Propose a pack (a workspace-level decision for a person) and `means` / `represents` links (facts for the Context Inbox; `autode_propose_assertion` with kind `meaning` also works). |
 | Resources `autode://asset/{id}`, `autode://ontology/{pack}` | Read-only views with revisions. |
 
@@ -925,6 +926,8 @@ Acceptance:
 - The lending fixture's terms align with the expected concepts.
 
 ### Phase ONT2: Reasoning through meaning
+Shipped in v0.60.0 (CHANGELOG.md 0.60.0, with its limits: retail's recall unchanged without an ontology; policies by classification workspace-wide; retention and access reported as owed; context packs not yet through concepts; technical-design.md §5.22). Measured: lending golden mappings 6/14 by names, 12/14 through meaning, none wrong.
+
 Scope:
 - Resolution through concepts, with the evidence chain (§6.8).
 - Column matching for mappings considers concepts and classifications.

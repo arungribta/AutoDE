@@ -6,6 +6,11 @@ import type { ChangeKind, ImpactResult } from '../engine/explore/lineage';
 import { OntologySource, shippedSources } from '../engine/ontology/onboard';
 import { Choices, OntologyProposalError, WorkspaceGraph, alignmentCandidates, analyzeOntologySource, browseSource, previewPack, proposeAlignment, proposeOntologyPack } from '../engine/ontology/service';
 import { standardsCatalog } from '../engine/ontology/standards';
+import { qualityCandidates, qualityProposals } from '../engine/quality/candidates';
+import { workspaceMeaning } from '../engine/ontology/service';
+import { AssertionLedger } from '../engine/context/ledger';
+import { recordChatProposals } from '../engine/context/chatExtraction';
+import { layoutPath } from '../engine/workspaceLayout';
 import { standardIsLocal } from '../engine/ontology/onboard';
 import type { RepresentsCandidate, TermCandidate } from '../engine/ontology/onboard';
 import { PortError } from '../engine/skills/port';
@@ -39,7 +44,7 @@ export type ExplorerMessage =
   | { type: 'maintenance'; key: string; act: 'work' | 'dismiss' }
   | { type: 'exportImpact'; id: string; change: ChangeKind; format: 'md' | 'csv' | 'copy' }
   /** ONT1: onboarding a standard and aligning the vocabulary (§6.8); analysis is read-only, the rest are proposals. */
-  | { type: 'ontology'; requestId: number; op: 'shipped' | 'pick' | 'analyze' | 'preview' | 'propose' | 'align' | 'proposeLinks' | 'standards' | 'browse'; args?: Record<string, unknown> };
+  | { type: 'ontology'; requestId: number; op: 'shipped' | 'pick' | 'analyze' | 'preview' | 'propose' | 'align' | 'proposeLinks' | 'standards' | 'browse' | 'quality' | 'proposeQuality'; args?: Record<string, unknown> };
 
 export type OpenTarget =
   | { kind: 'file'; path: string }
@@ -140,6 +145,17 @@ async function answerOntology(msg: Extract<ExplorerMessage, { type: 'ontology' }
     if (!sources) return reply({ error: 'Nothing known yet.' });
     const graph = sources.graph as WorkspaceGraph;
     if (msg.op === 'align') return reply(alignmentCandidates(scope, graph, sources.assertions) as unknown as Record<string, unknown>);
+    // ONT2: quality-rule candidates for a table, and proposing the chosen ones for the Context Inbox.
+    if (msg.op === 'quality' || msg.op === 'proposeQuality') {
+      const all = qualityCandidates(workspaceMeaning(scope, { graph, assertions: sources.assertions }), msg.op === 'quality' && Array.isArray(args.tables) ? { tables: args.tables as string[] } : {});
+      if (msg.op === 'quality') return reply({ candidates: all });
+      const wanted = (args.rules ?? []) as Array<{ subject: string; check: string }>;
+      const chosen = all.filter((c) => wanted.some((w) => w.subject === c.subject && w.check === c.check));
+      const ledger = new AssertionLedger(layoutPath(root, 'ledger'));
+      await ledger.load();
+      const { recorded } = await recordChatProposals(ledger, { proposed: qualityProposals(chosen, `user:${host.user?.() ?? 'user'}`), dropped: [], duplicates: [] });
+      return reply({ proposed: recorded.length });
+    }
     const by = `user:${host.user?.() ?? 'user'}`;
     if (msg.op === 'proposeLinks') {
       const r = await proposeAlignment(scope, { means: (args.means ?? []) as TermCandidate[], represents: (args.represents ?? []) as RepresentsCandidate[] }, by);

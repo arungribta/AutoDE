@@ -601,6 +601,24 @@ Onboarding the same standard later adds to the team's pack. Concepts are depreca
 
 Concepts are in the graph and on every asset's **Meaning** tab. A knowledge article can be about a concept.
 
+**Meaning at work.** Once terms mean concepts, AutoDE uses them:
+- **What does this mean?** `autode ontology resolve "credit line limits"` (or `autode_resolve` in an agent host) names the concept, the terms that mean it and every table and column that means it, each with its chain: column → term → concept, with the facts behind each step. An asset's Meaning tab shows the same chain.
+- **Mapping**: column matches go through meaning too, and say so (*the same meaning through the concept Collateral: collateral ~ pledge*). On the lending fixture this doubles what names alone find.
+- **Quality rules**: on a table's Quality tab, *Suggest quality rules…* lists rules from its keys, relationships, classifications and the concepts it represents, each with its reason; tick them and propose them to the Context Inbox. In a terminal: `autode quality candidates --propose`.
+- **Policies**: write `.autode/config/policies.yaml` (a regulation, the classifications it covers, what it requires: masking, retention, access). Every classified column's Governance tab lists the policies that apply, and a Pipeline Spec that leaves a column unmasked where a policy requires masking can't be approved. `autode governance policies` lists them all.
+
+```yaml
+autode: policies/1
+policies:
+  - id: gdpr-personal-data
+    title: Personal data under GDPR
+    regulation: GDPR
+    applies: { classifications: [pii, sensitive-pii] }
+    controls:
+      - { control: masking, strategy: hash }
+      - { control: retention, days: 2555 }
+```
+
 The **semantic-foundation** workflow template runs it as a workflow: onboard a standard and align the vocabulary (the knowledge engineer), then draft shared semantic models over the concepts (the semantic modeler), each approved by a person.
 
 ## 9. The workflow

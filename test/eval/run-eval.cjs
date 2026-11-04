@@ -20,6 +20,7 @@ const path = require('node:path');
 const { createVscodeHost, installVscodeHost } = require('./lib/vscodeHost.cjs');
 const { LlmRouter } = require('./lib/llmRouter.cjs');
 const { generateLargeEstate } = require('./lib/largeEstate.cjs');
+const { measureMappingRecall } = require('./lib/mappingRecall.cjs');
 
 const ROOT = path.join(__dirname, '..', '..');
 const REF = path.join(ROOT, 'test', 'reference', 'retail-orders');
@@ -217,6 +218,8 @@ async function main() {
     // ── Scenario L: the large estate (Phase K2) — scale, responsiveness, scoping ──
     results.large = await measureLargeEstate(dist, scratch);
     results.planning = measurePlanning(dist);
+    // ── Scenario M: mapping through meaning (ONT2) — golden mappings, names only and through meaning ──
+    results.mapping = await measureMappingRecall({ root: ROOT, dist, tmp: scratch });
 
     // ── The engineer's conversation ──
     results.chat = [];
@@ -550,6 +553,8 @@ function summaryRows(r) {
     ['Coverage items the engine places as a good plan does (PLN1a)', 'reported', r.planning ? `${r.planning.right}/${r.planning.items} (left for the planner: ${r.planning.left})` : 'n/a'],
     ['Coverage items the engine places wrongly', '0', r.planning ? String(r.planning.wrong.length) : 'n/a'],
     ['Coverage items the planner places as expected', 'all', 'not measured offline — needs replay or record'],
+    ['Mapping recall, lending: names only → through meaning (ONT2)', 'reported', r.mapping ? `${r.mapping.lending.namesOnly.found}/${r.mapping.lending.total} → ${r.mapping.lending.meaning.found}/${r.mapping.lending.total} (wrong: ${r.mapping.lending.namesOnly.wrong} → ${r.mapping.lending.meaning.wrong})` : 'n/a'],
+    ['Mapping recall, retail: names only → through meaning (ONT2)', 'reported', r.mapping ? `${r.mapping.retail.namesOnly.found}/${r.mapping.retail.total} → ${r.mapping.retail.meaning.found}/${r.mapping.retail.total} (wrong: ${r.mapping.retail.namesOnly.wrong} → ${r.mapping.retail.meaning.wrong})` : 'n/a'],
     ['Large-estate seed recall', 'reported', r.large ? `${r.large.packs.filter((p) => p.found).length}/${r.large.packs.length}` : 'n/a'],
     ['Longest synchronous task, large estate', '≤ 100 ms', r.large ? `${Math.round(r.large.longestSyncMs)} ms` : 'n/a'],
     ['Plan-step context size', 'reported', `${r.contextNoiseLast.tokens} tokens median per step (max ${r.contextNoiseLast.tokensMax})`]
@@ -611,6 +616,13 @@ function renderReport(r) {
     L.push(`${r.planning.cases.length} reference problems (test/reference/planning/coverage-cases.yaml), each item against the coverage a good plan gives it. Offline, the engine's starting coverage on the template's draft: right, left as a question for the planner, or wrong.`, '');
     L.push('| Case | Template | Items | Right | Left for the planner | Wrong |', '|---|---|---|---|---|---|');
     for (const c of r.planning.cases) L.push(`| ${c.id} | ${c.template} | ${c.items} | ${c.right} | ${c.left} | ${c.wrong.length ? c.wrong.join('; ') : 0} |`);
+  }
+  if (r.mapping) {
+    L.push('', '## Mapping through meaning (ONT2)', '');
+    L.push('Golden column mappings (test/reference/lending/golden-mappings.yaml, test/reference/retail-orders/golden/mappings.yaml), each to a planned target, matched by autode_match_columns by names and the vocabulary alone, then through meaning (the ontology in effect folded, glossary terms, classifications). Retail has no ontology.', '');
+    L.push('| Fixture | Pairs | Names only | Through meaning | Wrong (before → after) |', '|---|---|---|---|---|');
+    for (const k of ['lending', 'retail']) { const m = r.mapping[k]; L.push(`| ${k} | ${m.total} | ${m.namesOnly.found} | ${m.meaning.found} | ${m.namesOnly.wrong} → ${m.meaning.wrong} |`); }
+    for (const k of ['lending', 'retail']) for (const g of r.mapping[k].gained) L.push(`- ${k}: ${g.source} → ${g.target}: ${g.reasons.join('; ')}`);
   }
   if (r.large) {
     const g = r.large;
