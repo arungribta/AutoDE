@@ -4,7 +4,7 @@ import { EngineWorkspace } from './workspace';
 import { PlatformSession } from './platform';
 import { gateQueryResult } from '../engine/platform/sampleData';
 import { governanceFacts } from '../engine/governance/governance';
-import { loadCatalog, operationById } from '../engine/platform/operations/load';
+import { loadCatalog, operationById, platformById } from '../engine/platform/operations/load';
 import { ConnectionTarget, OperationError, runOnConnection, summarize } from '../engine/platform/operations/service';
 import { openContext } from '../engine/context/estateIngest';
 import { refreshLineage } from '../engine/lineage/record';
@@ -13,6 +13,14 @@ import { DecisionStore } from '../engine/decisions/decisionStore';
 import { OperationProposalError, proposeOperation } from '../engine/platform/operations/proposeService';
 import { driftReport } from '../engine/platform/operations/drift';
 import { ProposalValidationError, propose } from '../engine/decisions/proposals';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { parseYaml } from '../engine/context/Yaml';
+import { layoutPath } from '../engine/workspaceLayout';
+import { OnboardingAnswers, OnboardingError, likeAnswers, loadTemplates, onboardingStatus, planOnboarding, proposeConformanceReview, proposeOnboarding, skillName, templateAnswers } from '../engine/platform/onboarding';
+import { getCliDescriptor } from '../engine/platform/credentials/cliRegistry';
+import { DefinitionCli } from '../engine/platform/credentials/DefinitionCli';
+import { DataPlatformProvider } from '../engine/types';
 
 /**
  * Platform operations over MCP (POP1; docs/specs/platform-operations.md §4):
@@ -34,6 +42,32 @@ export async function connectionTarget(session: PlatformSession, connectionId: s
   };
 }
 
+/** The text under the first heading of a skill that is about installing, signing in or setting up. */
+function setupSteps(text: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^#{1,6}\s/.test(l) && /install|set ?up|sign in/i.test(l));
+  if (start < 0) return undefined;
+  const level = /^#+/.exec(lines[start])![0].length;
+  const end = lines.findIndex((l, i) => i > start && /^#{1,6}\s/.test(l) && /^#+/.exec(l)![0].length <= level);
+  return lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim() || undefined;
+}
+
+/** When the platform's definition reaches it by a CLI: is the CLI found, and if not, how to install it and what the setup skill says. */
+async function cliSetup(scope: { resourcesRoot?: string; workspaceRoot: string }, platformId: string): Promise<Record<string, unknown> | undefined> {
+  const def = loadCatalog(scope).platforms.find((p) => p.item.id === platformId)?.item;
+  const cli = def?.access?.cli;
+  if (!def || !cli) return undefined;
+  const descriptor = getCliDescriptor(platformId as DataPlatformProvider) ?? (def.connection ? new DefinitionCli(def) : undefined);
+  if (!descriptor) return undefined;
+  if ((await descriptor.detect()).found) return { cli: cli.command, found: true };
+  const file = path.join(layoutPath(scope.workspaceRoot, 'toolSkills', skillName(platformId, 'setup')), 'SKILL.md');
+  const skillSteps = fs.existsSync(file) ? setupSteps(fs.readFileSync(file, 'utf8')) : undefined;
+  return { cli: cli.command, found: false, ...(cli.install ? { install: cli.install } : {}), ...(skillSteps ? { skillSteps } : {}) };
+}
+
+const maintainer = { host: 'mcp', client: 'platform-maintainer' } as const;
+const failure = (err: unknown) => new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
+
 export function platformOperationTools(session: PlatformSession): EngineTool[] {
   return [
     {
@@ -53,6 +87,93 @@ export function platformOperationTools(session: PlatformSession): EngineTool[] {
           if (err instanceof OperationProposalError) throw new EngineToolError('VALIDATION_FAILED', err.message, { problems: err.problems, resembles: err.prepared.resembles });
           throw new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
         }
+      }
+    },
+    {
+      name: 'autode_platform_template',
+      description: "The onboarding template (POP5b): the questions to answer to add a new system to AutoDE. With no arguments, the categories, each with its label, what it is and the transports it can use. With category: the answers to fill in for that category (id, title, transports, access, connection fields, version detection, an implementation and recorded example for each starter operation, and the skills to write) and the capabilities and starter operations the category expects. With like: the answers of a platform AutoDE already has, as a starting point for a similar system (its id and title are replaced, so it is not mistaken for the original). Fill the answers in, then check them with autode_platform_onboard.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        category: { type: 'string', minLength: 1, description: 'A category from the list this tool gives with no arguments.' },
+        like: { type: 'string', minLength: 1, description: 'A platform already in the catalog to start from.' },
+        id: { type: 'string', minLength: 1, description: "The new system's id (lower case, digits, _ or -)." }
+      } },
+      annotations: read('Platform onboarding template'),
+      handler: async (args, ws: EngineWorkspace) => {
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        try {
+          if (args.like) {
+            const catalog = loadCatalog(scope);
+            const original = platformById(catalog, String(args.like))?.title ?? String(args.like);
+            const answers = likeAnswers(catalog, String(args.like), args.id ? String(args.id) : 'my_system', `My system (like ${original})`);
+            return { like: String(args.like), answers, next: 'Change what differs (connection fields, statements, recorded examples from a real read-only run), then check it with autode_platform_onboard.' } as unknown as Record<string, unknown>;
+          }
+          const templates = loadTemplates(scope.resourcesRoot);
+          if (!args.category) return { categories: Object.entries(templates).map(([id, t]) => ({ id, label: t.label, description: t.description, transports: t.transports })) } as unknown as Record<string, unknown>;
+          const category = String(args.category);
+          const t = templates[category];
+          if (!t) throw new EngineToolError('NOT_FOUND', `No category ${category} (${Object.keys(templates).join(', ')}).`);
+          return { category, answers: templateAnswers(scope, category, args.id ? String(args.id) : undefined), capabilities: t.capabilities, starter: t.starter ?? [], next: 'Fill the answers in, grounding each implementation in a recorded example from a real read-only run, then check them with autode_platform_onboard.' } as unknown as Record<string, unknown>;
+        } catch (err) {
+          if (err instanceof EngineToolError) throw err;
+          throw new EngineToolError('NOT_FOUND', err instanceof Error ? err.message : String(err));
+        }
+      }
+    },
+    {
+      name: 'autode_platform_onboard',
+      description: "Onboard a new system (POP5b). Give the answers (an object, or YAML) from autode_platform_template. With action check: each step with its state and what is missing, what only AutoDE's code can add (said plainly: a new transport, sign-in method or compile dialect stops the work), and the files it would write. Nothing is written. With action propose: when the plan is ready, the files, the skills (as drafts) and one decision that approves them all are written; a person approves it (never you). Once approved the system is on trial: it connects, and only conformance runs read from it, until a person reviews a conformance run on a real connection. When it is not ready nothing is written and the steps come back as the failure. Never put a credential in the answers.",
+      inputSchema: { type: 'object', required: ['answers', 'action'], additionalProperties: false, properties: {
+        answers: { description: 'The onboarding answers: an object, or its YAML text.', anyOf: [{ type: 'object' }, { type: 'string', minLength: 1 }] },
+        action: { type: 'string', enum: ['check', 'propose'], description: 'check writes nothing; propose writes the files and the decision when the plan is ready.' }
+      } },
+      annotations: { title: 'Onboard a system', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws: EngineWorkspace) => {
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        let answers: OnboardingAnswers;
+        try {
+          const parsed = typeof args.answers === 'string' ? parseYaml(args.answers) : args.answers;
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('The answers are not an object.');
+          answers = parsed as OnboardingAnswers;
+        } catch (err) { throw failure(err); }
+        try {
+          if (args.action === 'check') {
+            const plan = planOnboarding(scope, answers);
+            const files = plan.status === 'ready' && plan.definition ? [`platform definition: ${plan.definition.id}`, ...plan.operations.map((o) => `operation: ${o.id}`), ...plan.implementations.map((f) => `implementation: ${f.implements} for ${f.platform}`), ...plan.skills.map((k) => `skill: ${k.name}`)] : [];
+            return { status: plan.status, steps: plan.steps, neededCode: plan.neededCode, files, next: plan.status === 'ready' ? 'Propose it with action propose.' : plan.status === 'needs-code' ? 'This needs code AutoDE does not have: say so plainly to the user and stop. Nothing was written.' : 'Fill in what is missing and check again.' } as unknown as Record<string, unknown>;
+          }
+          if (args.action !== 'propose') throw new EngineToolError('VALIDATION_FAILED', 'action is check or propose.');
+          const r = proposeOnboarding(scope, answers, maintainer);
+          return { decision: { id: r.decision.id, title: r.decision.title }, files: r.files, skills: r.skills, next: `A person approves ${r.decision.id} (autode decisions approve ${r.decision.id}, or the panel); you cannot. Tell the user it waits for them. Once approved the system is on trial: connect to a real one, run autode_platform_conformance, then file the review with autode_propose_conformance_review.` } as unknown as Record<string, unknown>;
+        } catch (err) {
+          if (err instanceof OnboardingError) throw new EngineToolError('VALIDATION_FAILED', err.message, { status: err.plan.status, steps: err.plan.steps, neededCode: err.plan.neededCode });
+          if (err instanceof EngineToolError) throw err;
+          throw failure(err);
+        }
+      }
+    },
+    {
+      name: 'autode_platform_onboarding_status',
+      description: "Where a new system is in onboarding (POP5b): none (it did not come through onboarding), draft (waiting for a person to approve it), trial (approved; only conformance runs read from it), or counted (a person reviewed a conformance run). With the last conformance run, the one thing to do next and, when the system is reached by a CLI, whether that CLI is found; if it is not, the install command and the install and sign-in steps of its setup skill.",
+      inputSchema: { type: 'object', required: ['platform'], additionalProperties: false, properties: { platform: { type: 'string', minLength: 1 } } },
+      annotations: read('Onboarding status'),
+      handler: async (args, ws: EngineWorkspace) => {
+        const scope = { resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot };
+        const id = String(args.platform);
+        const status = onboardingStatus(scope, id);
+        const setup = await cliSetup(scope, id);
+        return { ...status, ...(setup ? { setup } : {}) } as unknown as Record<string, unknown>;
+      }
+    },
+    {
+      name: 'autode_propose_conformance_review',
+      description: "File the review of a new system's latest conformance run (POP5b), bound to the definition's exact content. A person approves it (never you); that is what makes the system count. It needs the system approved and a conformance run on a real connection (autode_platform_conformance).",
+      inputSchema: { type: 'object', required: ['platform'], additionalProperties: false, properties: { platform: { type: 'string', minLength: 1 } } },
+      annotations: { title: 'Propose a conformance review', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws: EngineWorkspace) => {
+        try {
+          const d = proposeConformanceReview({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, String(args.platform), maintainer);
+          return { decision: { id: d.id, title: d.title }, next: `A person reviews the conformance run and approves ${d.id} (autode decisions approve ${d.id}, or the panel); you cannot. Tell the user it waits for them.` } as unknown as Record<string, unknown>;
+        } catch (err) { throw failure(err); }
       }
     },
     {

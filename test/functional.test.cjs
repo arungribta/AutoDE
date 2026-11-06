@@ -5886,8 +5886,8 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_quality_candidates', 'autode_policies', 'autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_ontology_standards', 'autode_ontology_browse', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
-      const proposalTools = ['autode_propose_quality_rules', 'autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_standard', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
+      const readTools = ['autode_quality_candidates', 'autode_policies', 'autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_ontology_standards', 'autode_ontology_browse', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_platform_template', 'autode_platform_onboarding_status', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const proposalTools = ['autode_propose_quality_rules', 'autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_standard', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_platform_onboard', 'autode_propose_conformance_review', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_propose_platform_operation', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
@@ -5986,6 +5986,10 @@ async function main() {
       autode_platform_request_access: [{ connectionId: 'snowflake:nope' }, { connectionId: 'snowflake:nope', schemas: [''] }],
       autode_propose_platform_operation: [{ operation: { id: 'estate.x' }, reason: 'Listed the stages by hand.' }, { operation: { id: 'estate.x' }, reason: 'short' }],
       autode_platform_drift: [{ platform: 'snowflake' }, { platform: '' }],
+      autode_platform_template: [{ category: 'database' }, { category: '' }],
+      autode_platform_onboarding_status: [{ platform: 'acme' }, {}],
+      autode_platform_onboard: [{ answers: {}, action: 'check' }, { answers: {}, action: 'maybe' }],
+      autode_propose_conformance_review: [{ platform: 'acme' }, {}],
       autode_ontology: [{}, { x: 1 }],
       autode_get_concept_context: [{ concept: 'upper:Party' }, { concept: '' }],
       autode_ontology_analyze: [{ source: { shipped: 'fibo-lending' } }, { source: { shipped: 'fibo-lending' }, prefix: 'Bad Prefix' }],
@@ -8543,7 +8547,7 @@ async function main() {
     const pack = D.loadSkillPack(wfRes());
     assert.deepStrictEqual([roles.errors, pack.errors], [[], []]);
     assert.ok(roles.roles.some((r) => r.name === 'documenter' && r.skills.includes('autode-de-documentation') && r.tools.includes('autode_record_artifact')));
-    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-ontology-onboarding', 'autode-core-orchestrator', 'autode-core-platform-operations', 'autode-core-semantic-modeling', 'autode-core-standard-research', 'autode-core-term-alignment', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment', 'autode-de-specification-authoring', 'autode-redshift-deployment', 'autode-redshift-governance', 'autode-redshift-ingestion', 'autode-redshift-performance', 'autode-redshift-pipelines', 'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
+    assert.deepStrictEqual(pack.skills.map((k) => k.id).sort(), ['autode-core-document-reading', 'autode-core-fact-extraction', 'autode-core-glossary-structure', 'autode-core-knowledge-articles', 'autode-core-knowledge-maintenance', 'autode-core-ontology-onboarding', 'autode-core-orchestrator', 'autode-core-platform-onboarding', 'autode-core-platform-operations', 'autode-core-semantic-modeling', 'autode-core-standard-research', 'autode-core-term-alignment', 'autode-core-vocabulary', 'autode-core-workflow-planning', 'autode-databricks-deployment', 'autode-databricks-governance', 'autode-databricks-ingestion', 'autode-databricks-performance', 'autode-databricks-pipelines', 'autode-dbt-project', 'autode-de-conformance', 'autode-de-documentation', 'autode-de-interview-constraints', 'autode-de-interview-data-flow', 'autode-de-interview-governance', 'autode-de-interview-quality', 'autode-de-interview-requirements', 'autode-de-interview-sources', 'autode-de-interview-transformations', 'autode-de-mapping', 'autode-de-modelling', 'autode-de-pipeline-build', 'autode-de-quality-rules', 'autode-de-reconciliation', 'autode-de-source-assessment', 'autode-de-specification-authoring', 'autode-redshift-deployment', 'autode-redshift-governance', 'autode-redshift-ingestion', 'autode-redshift-performance', 'autode-redshift-pipelines', 'autode-snowflake-deployment', 'autode-snowflake-governance', 'autode-snowflake-ingestion', 'autode-snowflake-performance', 'autode-snowflake-pipelines'].sort());
     assert.deepStrictEqual(D.checkDefinitions(roles.roles, pack.skills), []);
     const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-roles-'));
     try {
@@ -12621,6 +12625,7 @@ async function main() {
     } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
     // The published schemas are the code's.
     assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'docs', 'schemas', 'platform-operation.schema.json'), 'utf8')), JSON.parse(JSON.stringify(S.OPERATION_SCHEMA)));
+    assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'docs', 'schemas', 'platform-implementation.schema.json'), 'utf8')), JSON.parse(JSON.stringify(S.IMPLEMENTATION_SCHEMA)));
     assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'docs', 'schemas', 'platform.schema.json'), 'utf8')), JSON.parse(JSON.stringify(S.PLATFORM_SCHEMA)));
     // No lineage SQL in the engine's TypeScript: it lives in the operation files.
     for (const f of ['src/engine/lineage/record.ts', 'src/engine/lineage/observed.ts', 'src/engine/platform/adapters/SnowflakeAdapter.ts', 'src/engine/platform/adapters/DatabricksAdapter.ts']) assert.ok(!/ACCESS_HISTORY|OBJECT_DEPENDENCIES|column_lineage|table_lineage/.test(nodeFs.readFileSync(nodePath.join(root, f), 'utf8').replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, '')), f);
@@ -15177,6 +15182,400 @@ async function main() {
       assert.ok(/names its folder/.test(holes({ transports: ['file'] })));
       assert.ok(/method/.test(holes({ access: { api: { name: 'X', baseUrlField: 'url', auth: [{ method: 'kerberos' }] } } })), 'a sign-in method outside the fixed set is refused');
     } finally { D.usePlatformWorkspace(undefined); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  // ── POP5b (v0.61.1): onboarding a new system from a template ──
+  const pop5b = (() => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+    const root = nodePath.join(__dirname, '..');
+    const ON = require('../dist/engine/platform/onboarding.js');
+    const L = require('../dist/engine/platform/operations/load.js');
+    const S = require('../dist/engine/platform/operations/service.js');
+    const V = require('../dist/engine/platform/operations/catalogView.js');
+    const H = require('../dist/engine/platform/httpTransport.js');
+    const DS = require('../dist/engine/decisions/decisionStore.js');
+    const PR = require('../dist/engine/decisions/proposals.js');
+    const DA = require('../dist/engine/platform/adapters/DefinitionAdapter.js');
+    const tmpWs = () => nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-pop5b-'));
+    const scopeOf = (w) => ({ resourcesRoot: root, workspaceRoot: w });
+    /** Every file under a folder, as relative paths (none when the folder is missing). */
+    const filesUnder = (dir, prefix = '') => { try { return nodeFs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? filesUnder(nodePath.join(dir, e.name), `${prefix}${e.name}/`) : [`${prefix}${e.name}`]); } catch { return []; } };
+    const proposer = { host: 'test', client: 'onboarding-test' };
+    /** A catalog system that reads by HTTP: a version, and a starter read of its business terms, with examples and the setup skill. */
+    const answers = () => ({
+      id: 'acme_catalog', title: 'Acme Catalog', category: 'catalog', transports: ['http'],
+      access: { api: { name: 'Acme REST API', baseUrlField: 'baseUrl', auth: [{ method: 'bearer', tokenField: 'token' }] } },
+      connection: { fields: [{ name: 'instance', label: 'Instance', required: true }, { name: 'baseUrl', label: 'Base URL', required: true }, { name: 'token', label: 'API token', secret: true }], idFields: ['instance'], roles: ['source'] },
+      versionOperation: 'platform.version',
+      implementations: {
+        'platform.version': { implementation: { http: { method: 'GET', path: '/version' } }, example: { params: {}, rows: [{ version: '2026.3.1' }] } },
+        'knowledge.list_terms': { implementation: { http: { method: 'GET', path: '/terms', results: 'items' } }, example: { params: {}, rows: [{ name: 'Customer', definition: 'A buyer.', domain: 'Sales', owner: 'Ops' }] } }
+      },
+      skills: [{ name: 'acme-catalog-setup', description: 'Set up Acme Catalog: installing what it needs, signing in, and what to do when it fails.', body: '# Set up\n\n## Sign in\n\n## Troubleshooting\n' }]
+    });
+    /** The system's server: the bearer token must match, /version gives the version, /terms gives one term. */
+    const acmeServer = (req, res, url) => {
+      if (req.headers.authorization !== 'Bearer tok') return pop5.json(res, {}, 401);
+      pop5.json(res, url.pathname === '/version' ? { version: '2026.3.1' } : { items: [{ name: 'Customer', definition: 'A buyer.', domain: 'Sales', owner: 'Ops' }] });
+    };
+    /** A person approves a decision in the CLI, then it is applied. */
+    const approve = async (w, id) => {
+      const store = new DS.DecisionStore(w);
+      store.resolve(id, { decision: 'approved', by: 'priya', channel: 'cli' });
+      return PR.applyDecision(store, id, { workspaceRoot: w, resourcesRoot: root });
+    };
+    /** The connection's target, with the token given in memory: no connection file, no secret on disk. */
+    const target = (base, token = 'tok', connectionId = 'acme_catalog:main') => ({
+      connectionId, platform: 'acme_catalog', query: async () => { throw new Error('no SQL'); },
+      http: H.httpConnection(pop5.api, 'Acme', { baseUrl: base, token }, { sleep: async () => {} })
+    });
+    /** A run recorded a little later than now, so it is the latest one. */
+    const laterNow = () => new Date(Date.now() + 60_000);
+    return { nodeFs, nodePath, os, root, ON, L, S, V, H, DS, PR, DA, tmpWs, scopeOf, filesUnder, proposer, answers, acmeServer, approve, target, laterNow };
+  })();
+
+  await test('POP5b: onboarding reproduces Redshift from its parts: a catalog without it, answered from what it had, plans the definition, the implementations and the whole operations exactly as shipped; only examples and the setup skill are missing', async () => {
+    const { root, ON, L } = pop5b;
+    const catalog = L.loadCatalog({ resourcesRoot: root });
+    const redshift = catalog.platforms.find((p) => p.item.id === 'redshift').item;
+    const answers = ON.answersFrom(catalog, 'redshift');
+    const before = JSON.parse(JSON.stringify(answers));
+    const stripped = {
+      errors: [...catalog.errors],
+      implementations: catalog.implementations,
+      platforms: catalog.platforms.filter((p) => p.item.id !== 'redshift'),
+      operations: catalog.operations.flatMap((o) => {
+        if (!o.item.platforms.redshift) return [o];
+        const { redshift: _r, ...others } = o.item.platforms;
+        if (!Object.keys(others).length) return [];
+        const { example, ...rest } = o.item;
+        const kept = example && example.platform !== 'redshift' ? { ...rest, example } : rest;
+        return [{ ...o, item: { ...kept, platforms: others } }];
+      })
+    };
+    const plan = ON.planOnboarding({ resourcesRoot: root }, answers, stripped);
+    assert.deepStrictEqual(answers, before, 'the answers were not mutated');
+    assert.notStrictEqual(plan.status, 'needs-code', JSON.stringify(plan.neededCode));
+    assert.deepStrictEqual(plan.neededCode, []);
+    assert.deepStrictEqual(plan.definition, redshift, 'the definition is the shipped one');
+    for (const f of plan.implementations) {
+      assert.strictEqual(f.platform, 'redshift');
+      const shipped = catalog.operations.find((o) => o.item.id === f.implements).item.platforms.redshift;
+      assert.deepStrictEqual(f.implementation, shipped, `${f.implements}: the shipped redshift block`);
+    }
+    const onlyRedshift = catalog.operations.filter((o) => Object.keys(o.item.platforms).join() === 'redshift').map((o) => o.item);
+    assert.ok(onlyRedshift.length > 0, 'some operations only Redshift has');
+    assert.deepStrictEqual([...plan.operations].sort((a, b) => a.id.localeCompare(b.id)), [...onlyRedshift].sort((a, b) => a.id.localeCompare(b.id)), 'the whole operations only Redshift has, as shipped');
+    const withRedshift = catalog.operations.filter((o) => o.item.platforms.redshift).map((o) => o.item.id).sort();
+    const covered = [...plan.implementations.map((f) => f.implements), ...plan.operations.map((o) => o.id)].sort();
+    assert.deepStrictEqual(covered, withRedshift, 'every shipped operation with a redshift block is covered, once');
+    const missing = plan.steps.flatMap((s) => s.missing);
+    assert.ok(missing.length > 0 && missing.every((m) => /has no recorded example|^the setup skill/.test(m)), `only examples and the setup skill may be missing: ${missing.join(' | ')}`);
+  });
+
+  await test('POP5b: a template gives its starter; empty answers are incomplete, say what is missing, and write nothing; a complete catalog system is ready, with a whole starter operation and an implementation file, and still writes nothing when planned', async () => {
+    const { ON, root, tmpWs, scopeOf, filesUnder, proposer, answers } = pop5b;
+    const w = tmpWs();
+    try {
+      const t = ON.templateAnswers({ resourcesRoot: root }, 'catalog');
+      assert.deepStrictEqual(Object.keys(t.implementations), ['platform.version', 'knowledge.list_terms'], 'the template asks for the version and the required starter read');
+      assert.strictEqual(t.category, 'catalog');
+      const empty = ON.planOnboarding(scopeOf(w), {});
+      assert.strictEqual(empty.status, 'incomplete');
+      for (const s of empty.steps) if (s.state !== 'done') assert.ok(s.missing.length > 0, `${s.id} says what is missing`);
+      assert.ok(empty.steps.find((s) => s.id === 'category').missing.some((m) => /category/.test(m)));
+      await assert.rejects(async () => ON.proposeOnboarding(scopeOf(w), {}, proposer), (e) => e.name === 'OnboardingError');
+      assert.deepStrictEqual(filesUnder(w), [], 'nothing written for empty answers');
+      const ready = ON.planOnboarding(scopeOf(w), answers());
+      assert.strictEqual(ready.status, 'ready', JSON.stringify(ready.steps.filter((s) => s.state !== 'done')));
+      assert.ok(ready.steps.every((s) => s.state === 'done'));
+      assert.deepStrictEqual(ready.operations.map((o) => o.id), ['knowledge.list_terms'], 'the starter is a whole new operation');
+      assert.ok(ready.operations[0].platforms.acme_catalog && ready.operations[0].kind === 'read');
+      assert.deepStrictEqual(ready.implementations.map((f) => [f.implements, f.platform]), [['platform.version', 'acme_catalog']], 'the version is an implementation file');
+      assert.deepStrictEqual(ready.skills.map((s) => s.name), ['acme-catalog-setup']);
+      assert.deepStrictEqual(filesUnder(w), [], 'planning writes nothing');
+    } finally { pop5b.nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: what only code can add is said plainly and stops the onboarding: a new transport, a new sign-in method, a compile dialect with none; nothing is written', async () => {
+    const { ON, nodePath, tmpWs, scopeOf, filesUnder, proposer, answers, nodeFs } = pop5b;
+    const cases = [
+      ['grpc transport', (a) => ({ ...a, transports: ['grpc'] }), /grpc/],
+      ['kerberos sign-in', (a) => ({ ...a, access: { api: { ...a.access.api, auth: [{ method: 'kerberos' }] } } }), /kerberos/],
+      ['compile target with no dialect', (a) => ({ ...a, capabilities: { 'compile.target': { support: 'supported' } } }), /compile dialect/]
+    ];
+    for (const [label, change, re] of cases) {
+      const w = tmpWs();
+      try {
+        const plan = ON.planOnboarding(scopeOf(w), change(answers()));
+        assert.strictEqual(plan.status, 'needs-code', label);
+        assert.ok(plan.neededCode.length > 0 && plan.neededCode.some((c) => re.test(c)), `${label}: ${plan.neededCode.join(' | ')}`);
+        await assert.rejects(async () => ON.proposeOnboarding(scopeOf(w), change(answers()), proposer), (e) => e.name === 'OnboardingError' && /needs code/.test(e.message), label);
+        assert.ok(!nodeFs.existsSync(nodePath.join(w, '.autode', 'config')), `${label}: nothing under .autode/config`);
+        assert.deepStrictEqual(filesUnder(w), [], `${label}: nothing written`);
+      } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+    }
+  });
+
+  await test('POP5b: an implementation file leaves the shipped operation alone: a draft until approved; approved, the operation has acme and every shipped statement unchanged; an edit makes it a draft again; an unknown operation and a write in a read are catalog errors', async () => {
+    const { nodeFs, nodePath, root, L, tmpWs } = pop5b;
+    const w = tmpWs();
+    try {
+      const scope = { resourcesRoot: root, workspaceRoot: w };
+      const shipped = L.loadCatalog({ resourcesRoot: root }).operations.find((o) => o.item.id === 'estate.list_tables').item;
+      const dir = nodePath.join(w, '.autode', 'config', 'platform-implementations');
+      nodeFs.mkdirSync(dir, { recursive: true });
+      const file = nodePath.join(dir, 'estate.list_tables.acme.yaml');
+      const text = ['formatVersion: 1', 'implements: estate.list_tables', 'platform: acme', 'implementation:', '  sql: SELECT table_catalog, table_schema, table_name FROM {database}.tables WHERE table_schema = {schema:literal}', ''].join('\n');
+      nodeFs.writeFileSync(file, text);
+      const draft = L.loadCatalog(scope);
+      const d1 = draft.implementations.find((i) => i.item.id === 'estate.list_tables@acme');
+      assert.ok(d1 && d1.status === 'draft', 'a draft until approved');
+      assert.strictEqual(draft.operations.find((o) => o.item.id === 'estate.list_tables').item.platforms.acme, undefined, 'a draft never runs');
+      L.writeApproval(w, 'implementations', 'estate.list_tables@acme', { checksum: L.checksumOf(text), by: 'priya', at: new Date().toISOString() });
+      const approved = L.loadCatalog(scope);
+      const op = approved.operations.find((o) => o.item.id === 'estate.list_tables');
+      assert.strictEqual(approved.implementations.find((i) => i.item.id === 'estate.list_tables@acme').status, 'approved');
+      assert.deepStrictEqual(op.item.platforms.acme, { sql: 'SELECT table_catalog, table_schema, table_name FROM {database}.tables WHERE table_schema = {schema:literal}' });
+      for (const [p, impl] of Object.entries(shipped.platforms)) assert.deepStrictEqual(op.item.platforms[p], impl, `${p}: the shipped statement is unchanged`);
+      assert.deepStrictEqual(op.teamImplementations, ['acme']);
+      nodeFs.writeFileSync(file, text + '# edited after approval\n');
+      const edited = L.loadCatalog(scope);
+      assert.strictEqual(edited.implementations.find((i) => i.item.id === 'estate.list_tables@acme').status, 'draft', 'an edit makes it a draft again');
+      assert.strictEqual(edited.operations.find((o) => o.item.id === 'estate.list_tables').item.platforms.acme, undefined);
+      nodeFs.writeFileSync(file, text);
+      // Bad cases: each is a catalog error, and the operation still loads.
+      nodeFs.writeFileSync(nodePath.join(dir, 'estate.nope.acme.yaml'), text.replace('implements: estate.list_tables', 'implements: estate.nope'));
+      nodeFs.writeFileSync(nodePath.join(dir, 'estate.list_tables.bad.yaml'), text.replace('platform: acme', 'platform: bad').replace(/sql: .*/, 'sql: DELETE FROM {database}.tables'));
+      const bad = L.loadCatalog(scope);
+      assert.ok(bad.errors.some((e) => /no operation estate\.nope to add to/.test(e)), bad.errors.join(' | '));
+      assert.ok(bad.errors.some((e) => /estate\.list_tables\.bad\.yaml: bad: a read operation must be one read-only statement/.test(e)), bad.errors.join(' | '));
+      assert.ok(bad.operations.some((o) => o.item.id === 'estate.list_tables' && o.status === 'approved'), 'the shipped operation still loads');
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: bundle and trial, end to end on a real server with no secret in a file: a file edited after the proposal fails its approval; on trial only conformance and Try it read; a person\'s review counts the system', async () => {
+    const { nodeFs, nodePath, ON, L, S, V, DS, PR, tmpWs, scopeOf, proposer, answers, acmeServer, approve, target } = pop5b;
+    const w = tmpWs();
+    try {
+      await pop5.serve(acmeServer, async (base) => {
+        const scope = scopeOf(w);
+        const first = ON.proposeOnboarding(scope, answers(), proposer);
+        assert.strictEqual(first.decision.kind, 'platform_bundle');
+        assert.strictEqual(first.decision.status, 'pending');
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'draft', 'before approval: a draft');
+        assert.strictEqual(L.platformById(L.loadCatalog(scope), 'acme_catalog'), undefined, 'a draft platform is not in effect');
+        // A file edited between the proposal and its approval: the approval fails and approves nothing.
+        const def = first.files.find((f) => f.what === 'platforms');
+        nodeFs.appendFileSync(nodePath.join(w, def.file), '# edited after the proposal\n');
+        const failed = await approve(w, first.decision.id);
+        assert.strictEqual(failed.applied, false, failed.message);
+        assert.strictEqual(new DS.DecisionStore(w).get(first.decision.id).status, 'failed');
+        assert.match(failed.message, /changed/);
+        assert.strictEqual(L.readApprovals(w).platforms.acme_catalog, undefined, 'nothing approved');
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'draft');
+        // Proposed again, unedited, and approved by a person: on trial.
+        const second = ON.proposeOnboarding(scope, answers(), proposer);
+        const ok = await approve(w, second.decision.id);
+        assert.ok(ok.applied, ok.message);
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'trial');
+        const t = target(base);
+        const refused = await S.runOnConnection(scope, t, 'knowledge.list_terms', {}, { via: 'autode_platform_run' });
+        assert.strictEqual(refused.ok, false);
+        assert.strictEqual(refused.gapKind, 'refused', JSON.stringify(refused));
+        assert.match(refused.gap, /on trial/);
+        const conf = await S.runOnConnection(scope, t, 'knowledge.list_terms', {}, { via: 'conformance' });
+        assert.ok(conf.ok && conf.rows[0].name === 'Customer', JSON.stringify(conf));
+        const tryIt = await S.runOnConnection(scope, t, 'knowledge.list_terms', {}, { via: 'catalog: try it' });
+        assert.ok(tryIt.ok && tryIt.rows[0].name === 'Customer', JSON.stringify(tryIt));
+        const run = await V.conformanceRun(scope, t, { baseUrl: base, instance: 'main' });
+        assert.strictEqual(run.capabilities['knowledge.import'].status, 'ok', run.summary);
+        assert.ok(V.readConformance(w)[t.connectionId], 'the conformance run is recorded');
+        const review = ON.proposeConformanceReview(scope, 'acme_catalog', proposer);
+        assert.strictEqual(review.kind, 'platform_conformance');
+        assert.strictEqual(review.status, 'pending');
+        const counted = await approve(w, review.id);
+        assert.ok(counted.applied, counted.message);
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'counted');
+        const ordinary = await S.runOnConnection(scope, t, 'knowledge.list_terms', {}, { via: 'autode_platform_run' });
+        assert.ok(ordinary.ok && ordinary.rows[0].name === 'Customer', JSON.stringify(ordinary));
+      });
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: a review is bound to the definition\'s exact content: an old run can\'t be approved after the definition changes and is approved again; a run in which no capability worked is refused; proposing with no run says what to do', async () => {
+    const { nodeFs, ON, S, V, tmpWs, scopeOf, proposer, answers, acmeServer, approve, target, laterNow } = pop5b;
+    const w = tmpWs();
+    try {
+      await pop5.serve(acmeServer, async (base) => {
+        const scope = scopeOf(w);
+        await approve(w, ON.proposeOnboarding(scope, answers(), proposer).decision.id);
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'trial');
+        assert.throws(() => ON.proposeConformanceReview(scope, 'acme_catalog', proposer), /autode platform conformance/, 'no run: says what to do');
+        await V.conformanceRun(scope, target(base), {});
+        const oldReview = ON.proposeConformanceReview(scope, 'acme_catalog', proposer);
+        // The definition changes (a new title) and is approved again: the run was made with the old one.
+        const changed = await approve(w, ON.proposeOnboarding(scope, { ...answers(), title: 'Acme Catalogue' }, proposer).decision.id);
+        assert.ok(changed.applied, changed.message);
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'trial', 'a changed and re-approved definition is on trial again');
+        const stale = await approve(w, oldReview.id);
+        assert.strictEqual(stale.applied, false, 'an old review is not approved');
+        assert.match(stale.message, /changed since this run/);
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'trial');
+        // A run with the current definition counts.
+        await V.conformanceRun(scope, target(base), {});
+        const current = ON.proposeConformanceReview(scope, 'acme_catalog', proposer);
+        assert.ok((await approve(w, current.id)).applied);
+        assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'counted');
+        // A run in which nothing worked (a wrong token) is refused before a person sees it.
+        await V.conformanceRun(scope, target(base, 'wrong', 'acme_catalog:bad'), {}, laterNow);
+        assert.throws(() => ON.proposeConformanceReview(scope, 'acme_catalog', proposer), /No capability worked/);
+      });
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: a bundle and a conformance review are high stakes: the agent channel (tool) can\'t resolve either', async () => {
+    const { nodeFs, ON, V, DS, tmpWs, scopeOf, proposer, answers, acmeServer, approve, target } = pop5b;
+    const w = tmpWs();
+    try {
+      await pop5.serve(acmeServer, async (base) => {
+        const scope = scopeOf(w);
+        const store = new DS.DecisionStore(w);
+        const bundle = ON.proposeOnboarding(scope, answers(), proposer).decision;
+        assert.strictEqual(bundle.stakes, 'high');
+        assert.ok(!bundle.allowedChannels.includes('tool'), JSON.stringify(bundle.allowedChannels));
+        assert.throws(() => store.resolve(bundle.id, { decision: 'approved', by: 'agent', channel: 'tool' }), (e) => e.code === 'CHANNEL_NOT_ALLOWED' && /only by a person/.test(e.message));
+        assert.strictEqual(store.get(bundle.id).status, 'pending');
+        await approve(w, bundle.id);
+        await V.conformanceRun(scope, target(base), {});
+        const review = ON.proposeConformanceReview(scope, 'acme_catalog', proposer);
+        assert.strictEqual(review.stakes, 'high');
+        assert.ok(!review.allowedChannels.includes('tool'), JSON.stringify(review.allowedChannels));
+        assert.throws(() => store.resolve(review.id, { decision: 'approved', by: 'agent', channel: 'tool' }), (e) => e.code === 'CHANNEL_NOT_ALLOWED');
+        assert.strictEqual(store.get(review.id).status, 'pending');
+      });
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: a system on trial has its estate refused: its adapter throws /on trial/ from getMetadataQueries, and not otherwise', async () => {
+    const { nodeFs, ON, L, S, DA, tmpWs, scopeOf, proposer, answers, approve } = pop5b;
+    const w = tmpWs();
+    try {
+      await approve(w, ON.proposeOnboarding(scopeOf(w), answers(), proposer).decision.id);
+      const scope = scopeOf(w);
+      assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'trial');
+      const cat = L.loadCatalog(scope);
+      const def = L.platformById(cat, 'acme_catalog');
+      const adapter = (onTrial) => new DA.DefinitionAdapter('acme_catalog', {}, () => {}, { definition: def, operation: (id) => L.operationById(cat, id)?.item, cliConsent: false, onTrial });
+      assert.throws(() => adapter(true).getMetadataQueries(), /on trial/);
+      assert.throws(() => adapter(false).getMetadataQueries(), (e) => !/on trial/.test(e.message) && /has no tables to read/.test(e.message), 'off trial, the catalog system\'s own refusal is what says it has no estate');
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: CLI as a real process: platform template lists the categories; a catalog template is YAML that check refuses until its implementation is filled in; a transport that is code is said so and writes nothing under .autode/config/platforms', async () => {
+    const { nodeFs, nodePath, root, tmpWs, filesUnder } = pop5b;
+    const { spawnSync } = require('node:child_process');
+    const { parseYaml } = require('../dist/engine/context/Yaml.js');
+    const w = tmpWs();
+    const run = (args) => spawnSync(process.execPath, [nodePath.join(root, 'dist', 'autode.js'), ...args], { cwd: w, encoding: 'utf8', timeout: 120000 });
+    try {
+      const list = run(['platform', 'template']);
+      assert.strictEqual(list.status, 0, list.stderr);
+      for (const c of ['warehouse', 'lakehouse', 'semantic', 'catalog', 'orchestration', 'bi']) assert.match(list.stdout, new RegExp(`^\\s+${c}\\s`, 'm'), c);
+      const tpl = run(['platform', 'template', 'catalog', '--id', 'acme_cat']);
+      assert.strictEqual(tpl.status, 0, tpl.stderr);
+      assert.strictEqual(parseYaml(tpl.stdout).id, 'acme_cat', 'the template is YAML');
+      nodeFs.writeFileSync(nodePath.join(w, 'acme_cat.yaml'), tpl.stdout);
+      const check = run(['platform', 'onboard', 'check', 'acme_cat.yaml']);
+      assert.notStrictEqual(check.status, 0, check.stdout);
+      assert.match(check.stdout, /fill in its implementation/);
+      assert.ok(!/oneOf|must have required property/.test(check.stdout + check.stderr), check.stdout + check.stderr);
+      const grpcText = tpl.stdout.replace('transports:\n  - http\n', 'transports: [grpc]\n');
+      assert.notStrictEqual(grpcText, tpl.stdout, 'the transport line was found and changed');
+      nodeFs.writeFileSync(nodePath.join(w, 'grpc.yaml'), grpcText);
+      const grpc = run(['platform', 'onboard', 'check', 'grpc.yaml']);
+      assert.notStrictEqual(grpc.status, 0, grpc.stdout);
+      assert.match(grpc.stdout, /needs AutoDE code/, grpc.stdout);
+      assert.match(grpc.stdout, /grpc/, grpc.stdout);
+      assert.deepStrictEqual(filesUnder(nodePath.join(w, '.autode', 'config', 'platforms')), [], 'nothing written under .autode/config/platforms');
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: CLI --like: a template from redshift is YAML with no example key anywhere and no redshift key inside implementations; check reports the recorded examples missing', async () => {
+    const { nodeFs, nodePath, root, tmpWs } = pop5b;
+    const { spawnSync } = require('node:child_process');
+    const { parseYaml } = require('../dist/engine/context/Yaml.js');
+    const allKeys = (x) => (x && typeof x === 'object') ? Object.entries(x).flatMap(([k, v]) => [k, ...allKeys(v)]) : [];
+    const w = tmpWs();
+    const run = (args) => spawnSync(process.execPath, [nodePath.join(root, 'dist', 'autode.js'), ...args], { cwd: w, encoding: 'utf8', timeout: 120000 });
+    try {
+      const like = run(['platform', 'template', '--like', 'redshift', '--id', 'acme_wh']);
+      assert.strictEqual(like.status, 0, like.stderr);
+      const doc = parseYaml(like.stdout);
+      assert.strictEqual(doc.id, 'acme_wh');
+      assert.ok(!allKeys(doc).includes('example'), 'no example key anywhere');
+      assert.ok(!allKeys(doc.implementations).includes('redshift'), 'no redshift key inside implementations');
+      nodeFs.writeFileSync(nodePath.join(w, 'acme_wh.yaml'), like.stdout);
+      const check = run(['platform', 'onboard', 'check', 'acme_wh.yaml']);
+      assert.notStrictEqual(check.status, 0, check.stdout);
+      assert.match(check.stdout, /has no recorded example/, check.stdout);
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: MCP surfaces: onboard check writes nothing; propose on incomplete answers fails with VALIDATION_FAILED carrying the steps and writes nothing; the status of a team CLI that is not found gives its install text and the setup skill text', async () => {
+    const { nodeFs, nodePath, root, L, filesUnder, tmpWs, answers } = pop5b;
+    const w = tmpWs();
+    let client;
+    try {
+      const dDir = nodePath.join(w, '.autode', 'config', 'platforms');
+      nodeFs.mkdirSync(dDir, { recursive: true });
+      const def = ['formatVersion: 1', 'id: acme_cli', 'title: Acme CLI', 'category: catalog', 'transports: [cli]',
+        'access:', '  cli: { command: autode-acme-nope-cli-7f3a, install: "Install the Acme CLI from the Acme portal, then sign in with acme login." }',
+        'connection:', '  fields:', '    - { name: instance, label: Instance, required: true }', '  idFields: [instance]', '  roles: [source]',
+        'capabilities: {}', ''].join('\n');
+      nodeFs.writeFileSync(nodePath.join(dDir, 'acme_cli.yaml'), def);
+      L.writeApproval(w, 'platforms', 'acme_cli', { checksum: L.checksumOf(def), by: 'test', at: 'now' });
+      const skillDir = nodePath.join(w, '.autode', 'config', 'skills', 'tool-skills', 'acme-cli-setup');
+      nodeFs.mkdirSync(skillDir, { recursive: true });
+      nodeFs.writeFileSync(nodePath.join(skillDir, 'SKILL.md'), '# Acme CLI setup\n\n## Install\n\nInstall the Acme CLI from the Acme portal, then run acme login.\n\n## Sign in\n\nUse acme login.\n');
+      client = await mcpSession(w);
+      const before = filesUnder(w);
+      const call = async (name, args) => { const r = await client.callTool({ name, arguments: args }); return r.isError ? { error: r.structuredContent, text: r.content[0].text } : r.structuredContent; };
+      const checked = await call('autode_platform_onboard', { answers: answers(), action: 'check' });
+      assert.strictEqual(checked.status, 'ready', JSON.stringify(checked).slice(0, 400));
+      const refused = await call('autode_platform_onboard', { answers: { id: 'acme_part', category: 'catalog' }, action: 'propose' });
+      assert.ok(refused.error && refused.error.code === 'VALIDATION_FAILED' && Array.isArray(refused.error.details.steps) && refused.error.details.steps.length > 0, JSON.stringify(refused).slice(0, 400));
+      assert.deepStrictEqual(filesUnder(w), before, 'check and a refused propose write nothing');
+      const st = await call('autode_platform_onboarding_status', { platform: 'acme_cli' });
+      assert.strictEqual(st.setup.found, false, JSON.stringify(st).slice(0, 400));
+      assert.strictEqual(st.setup.install, 'Install the Acme CLI from the Acme portal, then sign in with acme login.');
+      assert.match(st.setup.skillSteps, /Install the Acme CLI from the Acme portal, then run acme login\./);
+    } finally { if (client) await client.close(); nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: the catalog view shows a system on trial as onboarding trial, and no other platform carries an onboarding key', async () => {
+    const { nodeFs, nodePath, root, ON, V, tmpWs, scopeOf, proposer, answers, approve } = pop5b;
+    const w = tmpWs();
+    try {
+      const scope = scopeOf(w);
+      const first = ON.proposeOnboarding(scope, answers(), proposer);
+      const ok = await approve(w, first.decision.id);
+      assert.ok(ok.applied, ok.message);
+      assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'trial');
+      const m = V.capabilityMatrix(scope);
+      assert.ok(!m.errors.length, m.errors.join(' | '));
+      assert.strictEqual(m.platforms.find((p) => p.id === 'acme_catalog').onboarding, 'trial');
+      const others = m.platforms.filter((p) => p.id !== 'acme_catalog');
+      assert.ok(others.length > 0, 'the shipped platforms are listed');
+      assert.deepStrictEqual(others.filter((p) => 'onboarding' in p).map((p) => p.id), [], 'no onboarding key on shipped platforms');
+    } finally { nodeFs.rmSync(w, { recursive: true, force: true }); }
+  });
+
+  await test('POP5b: the catalog page has the Add a system button and a fieldset with a legend for the category choice', async () => {
+    const { nodeFs, nodePath, root } = pop5b;
+    const page = nodeFs.readFileSync(nodePath.join(root, 'media', 'platforms.html'), 'utf8');
+    assert.ok(/<button class="btn primary" data-add-system>Add a system…<\/button>/.test(page), 'the Add a system button');
+    assert.ok(/<fieldset><legend>1\. What kind of system is it\?<\/legend>/.test(page), 'the category fieldset and legend');
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

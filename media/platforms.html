@@ -44,6 +44,11 @@
   fieldset { border: 1px solid var(--border); border-radius: 4px; margin: 8px 0; padding: 6px 10px; } legend { padding: 0 4px; }
   .field-help { display: block; color: var(--muted); font-size: 0.9em; }
   .check-inline { display: inline-flex; align-items: center; gap: 4px; margin: 2px 12px 2px 0; }
+  .badge { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 8px; color: var(--warn); font-size: 0.85em; font-weight: normal; }
+  .badge.counted { border-color: var(--ok); color: var(--ok); }
+  .steps li.done { color: var(--ok); } .steps li.missing { color: var(--warn); } .steps li.needs-code { color: var(--bad); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .block { display: block; }
   .findings li.error { color: var(--bad); } .findings li.warning { color: var(--warn); }
 </style>
 </head>
@@ -64,14 +69,16 @@
   const send = (m) => vscode.postMessage(m);
   const SUPPORT = { supported: '✓ supported', partly: '◐ partly', not_applicable: '– not applicable', not_declared: '·' };
   const STATUS = { ok: '✓ works', partly: '◐ partly works', failing: '✗ fails', 'not-checked': '· not checked' };
-  const state = { view: 'matrix', tab: 'overview', page: null, matrix: null, live: [] };
+  const state = { view: 'matrix', tab: 'overview', page: null, matrix: null, live: [], add: null, addCat: '', addId: '' };
+  const BADGE = { draft: ['Draft', 'Not approved yet. It never runs until a person approves it.'], trial: ['On trial', 'Approved, but not yet proven on a real connection. Only conformance checks and Try it read from it.'], counted: ['Onboarded', 'Proven on a real connection and reviewed by a person.'] };
+  const badge = (s) => s && BADGE[s] ? '<span class="badge ' + esc(s) + '" title="' + esc(BADGE[s][1]) + '">' + esc(BADGE[s][0]) + '</span>' : '';
 
   function crumbs(extra) { return '<div class="crumbs"><button class="link" data-go="matrix">Capability matrix</button>' + (extra ? ' › ' + extra : '') + '</div>'; }
 
   function matrixHtml(m) {
     if (!m.platforms.length) return '<h1>Platform catalog</h1><p class="empty">No platform definitions are loaded. AutoDE ships Snowflake, Databricks, Redshift and Oracle; a team adds its own in .autode/config/platforms/.</p>';
-    let h = '<h1>Platform catalog</h1><p class="muted">What AutoDE can do on each platform, and what it needs. A cell shows the platform definition\'s answer, and the last conformance run on each of this workspace\'s connections. Choose a platform for its page.</p>';
-    h += '<table role="grid" aria-label="Capability matrix"><thead><tr><th scope="col">Capability</th>' + m.platforms.map((p) => '<th scope="col"><button class="link" data-platform="' + esc(p.id) + '">' + esc(p.title) + '</button><div class="muted">' + esc(p.category) + (p.connected ? ' · ' + p.connections.length + ' connection(s)' : ' · not connected') + '</div></th>').join('') + '</tr></thead><tbody>';
+    let h = '<h1>Platform catalog</h1><p class="muted">What AutoDE can do on each platform, and what it needs. A cell shows the platform definition\'s answer, and the last conformance run on each of this workspace\'s connections. Choose a platform for its page.</p><p><button class="btn primary" data-add-system>Add a system…</button></p>';
+    h += '<table role="grid" aria-label="Capability matrix"><thead><tr><th scope="col">Capability</th>' + m.platforms.map((p) => '<th scope="col"><button class="link" data-platform="' + esc(p.id) + '">' + esc(p.title) + '</button>' + badge(p.onboarding) + '<div class="muted">' + esc(p.category) + (p.connected ? ' · ' + p.connections.length + ' connection(s)' : ' · not connected') + '</div></th>').join('') + '</tr></thead><tbody>';
     for (const c of m.capabilities) {
       h += '<tr><th scope="row">' + esc(c) + '</th>' + m.platforms.map((p) => {
         const cell = m.cells[c][p.id];
@@ -85,9 +92,36 @@
     return h;
   }
 
+  function onboardingHtml(o) {
+    if (!o) return '';
+    const why = BADGE[o.state] ? '<p class="muted">' + esc(BADGE[o.state][1]) + '</p>' : '';
+    return why + '<div class="notice"><strong>Next:</strong> ' + esc(o.next) + (o.review ? ' <button class="btn primary" data-file-review="1">File the review</button>' : '') + '</div>';
+  }
+
+  function addHtml(a) {
+    if (!a) return crumbs('Add a system') + '<p class="muted">Loading…</p>';
+    let h = crumbs('Add a system') + '<h1>Add a system</h1><p class="muted">Add a system AutoDE does not ship, such as one your team runs. You fill in a short file of answers; AutoDE checks it and proposes it. A person approves it before anything runs.</p>';
+    if (!a.hasWorkspace) return h + '<p class="empty">Open a workspace folder first: the answers are kept in it.</p>';
+    if (!a.categories.length) return h + '<p class="empty">No system categories are available. Reinstall AutoDE, or check that its platform-templates folder is present.</p>';
+    h += '<div id="addsys"><fieldset><legend>1. What kind of system is it?</legend>' + a.categories.map((c) => '<label class="check-inline block"><input type="radio" name="category" value="' + esc(c.id) + '"' + (state.addCat === c.id ? ' checked' : '') + '> ' + esc(c.label) + '<span class="field-help">' + esc(c.description) + '</span></label>').join('') + '</fieldset>' +
+      '<label for="sysid">2. Its id <input type="text" id="sysid" name="id" aria-describedby="sysid-h" value="' + esc(state.addId || '') + '"><span class="field-help" id="sysid-h">Lower case letters, digits, _ or -, starting with a letter. For example: sales_crm.</span></label>' +
+      '<p><button class="btn primary" type="button" data-onb="start">Start</button><button class="btn" type="button" data-onb="check">Check</button><button class="btn" type="button" id="onb-propose" data-onb="propose" disabled>Propose</button></p>' +
+      '<p class="muted">Start makes the answers file and opens it. Fill it in and save it. Check shows what is still missing. Propose is available once the check passes.</p></div><div id="onboardOut" aria-live="polite"></div>';
+    return h;
+  }
+
+  function planHtml(pl) {
+    let h = '';
+    if (pl.status === 'needs-code') h += '<div class="notice error"><strong>This cannot be added from answers alone.</strong> It needs something that only AutoDE\'s own code can do, so nothing can be proposed:<ul>' + pl.neededCode.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
+    const LABEL = { done: '✓ done', missing: '◐ missing', 'needs-code': '✗ needs code' };
+    h += '<h3>Steps</h3><ul class="steps">' + pl.steps.map((st) => '<li class="' + esc(st.state) + '">' + esc(st.title) + ': ' + esc(LABEL[st.state] || st.state) + (st.missing.length ? '<ul>' + st.missing.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</li>').join('') + '</ul>';
+    h += pl.status === 'ready' ? '<p class="s-ok">Ready. Choose Propose to ask a person to approve it.</p>' : pl.status === 'incomplete' ? '<p class="s-partly">Not ready. Fill in what is missing in the answers file, save, and choose Check again.</p>' : '';
+    return h;
+  }
+
   function platformHtml(p) {
     if (!p) return crumbs() + '<p class="empty">No such platform.</p>';
-    let h = crumbs(esc(p.title)) + '<h1>' + esc(p.title) + '</h1><div class="muted">' + esc(p.category) + ' · ' + esc(p.overview.origin) + ' definition, ' + esc(p.overview.status) + '</div>';
+    let h = crumbs(esc(p.title)) + '<h1>' + esc(p.title) + badge(p.onboarding && p.onboarding.state) + '</h1>' + onboardingHtml(p.onboarding) + '<div class="muted">' + esc(p.category) + ' · ' + esc(p.overview.origin) + ' definition, ' + esc(p.overview.status) + '</div>';
     if (!p.tabs.some((t) => t.id === state.tab)) state.tab = 'overview';
     h += '<div role="tablist" class="tabs" aria-label="Platform sections">' + p.tabs.map((t) => '<button role="tab" id="tab-' + t.id + '" aria-selected="' + (state.tab === t.id) + '" data-tab="' + t.id + '">' + esc(t.title) + '</button>').join('') + '</div><section role="tabpanel" aria-labelledby="tab-' + state.tab + '">';
     const t = state.tab;
@@ -219,7 +253,7 @@
   }
 
   function render() {
-    root.innerHTML = state.view === 'matrix' ? (state.matrix ? matrixHtml(state.matrix) : '<p class="muted">Loading…</p>') : state.view === 'platform' ? platformHtml(state.page) : state.view === 'operation' ? operationHtml(state.page) : state.view === 'opform' ? opFormHtml(state.page) : skillHtml(state.page);
+    root.innerHTML = state.view === 'matrix' ? (state.matrix ? matrixHtml(state.matrix) : '<p class="muted">Loading…</p>') : state.view === 'platform' ? platformHtml(state.page) : state.view === 'operation' ? operationHtml(state.page) : state.view === 'opform' ? opFormHtml(state.page) : state.view === 'add' ? addHtml(state.add) : skillHtml(state.page);
     const h1 = root.querySelector('h1'); if (h1) h1.setAttribute('tabindex', '-1');
   }
 
@@ -232,7 +266,15 @@
   root.addEventListener('click', (e) => {
     const t = e.target.closest('button'); if (!t) return;
     const d = t.dataset;
-    if (d.go === 'matrix') { state.view = 'matrix'; send({ type: 'matrix' }); render(); }
+    if (t.hasAttribute('data-add-system')) { state.view = 'add'; state.add = null; send({ type: 'addSystem' }); render(); }
+    else if (d.onb) {
+      const f = document.getElementById('addsys'); const cat = f.querySelector('[name=category]:checked'); const id = f.querySelector('[name=id]').value.trim();
+      state.addCat = cat ? cat.value : ''; state.addId = id;
+      document.getElementById('onboardOut').innerHTML = '<p class="muted">Working…</p>';
+      send({ type: d.onb === 'start' ? 'onboardingStart' : d.onb === 'check' ? 'onboardingCheck' : 'onboardingPropose', category: state.addCat, id });
+    }
+    else if (t.hasAttribute('data-file-review')) send({ type: 'fileReview', id: state.page.id });
+    else if (d.go === 'matrix') { state.view = 'matrix'; send({ type: 'matrix' }); render(); }
     else if (d.platform) { state.tab = 'overview'; send({ type: 'platform', id: d.platform }); }
     else if (d.op) send({ type: 'operation', id: d.op });
     else if (d.skill) send({ type: 'skill', id: d.skill });
@@ -274,6 +316,12 @@
     if (m.type === 'matrix') { state.matrix = m.matrix; state.live = m.live || []; if (state.view === 'matrix') render(); }
     else if (m.type === 'platform') { state.view = 'platform'; state.page = m.page; state.live = m.live || []; render(); }
     else if (m.type === 'operation') { state.view = 'operation'; state.page = m.page; state.live = m.live || []; const out = document.getElementById('tryOut'); const keep = out ? out.innerHTML : ''; render(); if (keep) document.getElementById('tryOut').innerHTML = keep; }
+    else if (m.type === 'addSystem') { state.view = 'add'; state.add = m; render(); const h = root.querySelector('h1'); if (h) h.focus(); }
+    else if (m.type === 'onboardingOut') {
+      const out = document.getElementById('onboardOut'); if (!out) return;
+      out.innerHTML = (m.error ? '<div class="notice error">' + esc(m.error) + '</div>' : '') + (m.text ? '<div class="notice">' + esc(m.text) + '</div>' : '') + (m.plan ? planHtml(m.plan) : '') + (m.proposed ? '<p>Decision <strong>' + esc(m.proposed) + '</strong>. A person approves it in Decisions.</p>' : '');
+      const b = document.getElementById('onb-propose'); if (b) b.disabled = !(m.plan && m.plan.status === 'ready');
+    }
     else if (m.type === 'skill') { state.view = 'skill'; state.page = m.page; render(); }
     else if (m.type === 'operationForm') { state.view = 'opform'; state.page = m.form; render(); }
     else if (m.type === 'metaChecks') { const out = document.getElementById('metaChecks'); if (out) out.innerHTML = findingsHtml(m.findings, 'Nothing flagged.'); }

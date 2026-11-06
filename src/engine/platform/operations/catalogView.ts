@@ -18,6 +18,8 @@ import { AUTODE_SKILL_NAME, SKILL_PLATFORMS, checkSkillFormat, skillMeta } from 
 import { STAGE_KINDS } from '../../workflows/stageKinds';
 import { TeamCopyState, teamCopy } from '../../skills/customise';
 import { OperationDrift, UnreadKind, driftReport } from './drift';
+// onboarding.ts imports readConformance from here: each uses the other only inside functions, never at load.
+import { onboardingState, onboardingStatus } from '../onboarding';
 import { pendingOperationProposals } from './proposeService';
 
 /**
@@ -61,7 +63,7 @@ export interface MatrixCell {
 
 export interface CatalogMatrix {
   capabilities: string[];
-  platforms: Array<{ id: string; title: string; category: string; connected: boolean; connections: string[]; origin: string; status: string }>;
+  platforms: Array<{ id: string; title: string; category: string; connected: boolean; connections: string[]; origin: string; status: string; onboarding?: 'draft' | 'trial' | 'counted' }>;
   /** capability → platform → cell. */
   cells: Record<string, Record<string, MatrixCell>>;
   errors: string[];
@@ -173,7 +175,8 @@ export function capabilityMatrix(scope: CatalogScope, catalog: Catalog = loadCat
   const defs = catalog.platforms.filter((p) => p.status === 'approved');
   const platforms = defs.map((p) => {
     const mine = conns.filter((c) => c.platform === p.item.id).map((c) => c.id);
-    return { id: p.item.id, title: p.item.title, category: p.item.category, connected: mine.length > 0, connections: mine, origin: p.origin, status: p.status };
+    const ob = onboardingState(scope, p.item.id, catalog);
+    return { id: p.item.id, title: p.item.title, category: p.item.category, connected: mine.length > 0, connections: mine, origin: p.origin, status: p.status, ...(ob !== 'none' ? { onboarding: ob } : {}) };
   }).sort((a, b) => Number(b.connected) - Number(a.connected) || CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category) || a.title.localeCompare(b.title));
   const capabilities = orderCapabilities(defs.flatMap((p) => Object.keys(p.item.capabilities)));
   const cells: CatalogMatrix['cells'] = {};
@@ -422,6 +425,8 @@ export interface PlatformPage {
   id: string;
   title: string;
   category: string;
+  /** Set when the system came through onboarding. `next` is the one thing to do now; `review` is true once a conformance run can be filed for review. */
+  onboarding?: { state: 'draft' | 'trial' | 'counted'; next: string; review: boolean; conformance?: { connection: string; at: string; summary: string } };
   /** Only the tabs that apply to its category and definition. */
   tabs: PlatformTab[];
   overview: { origin: string; status: string; file: string; approvedBy?: string; transports: string[]; versionOperation?: string; roles: string[]; connections: Array<{ id: string; role: string; readiness: string; detail?: string }> };
@@ -470,8 +475,11 @@ export function platformPage(scope: CatalogScope, id: string, catalog: Catalog =
   const compiles = (def.category === 'warehouse' || def.category === 'lakehouse') && def.dialect?.compile;
   const tabs: PlatformTab['id'][] = ['overview', 'capabilities', 'operations', 'skills', ...(def.access ? ['tools' as const] : []), ...(compiles ? ['primitives' as const] : []), 'privileges', 'health'];
   const conformance = readConformance(scope.workspaceRoot);
+  const ob = scope.workspaceRoot ? onboardingState(scope, id, catalog) : 'none';
+  const obStatus = ob !== 'none' && scope.workspaceRoot ? onboardingStatus({ resourcesRoot: scope.resourcesRoot, workspaceRoot: scope.workspaceRoot }, id) : undefined;
   return {
     id, title: def.title, category: def.category,
+    ...(ob !== 'none' && obStatus ? { onboarding: { state: ob, next: obStatus.next, review: ob === 'trial' && !!obStatus.conformance, ...(obStatus.conformance ? { conformance: obStatus.conformance } : {}) } } : {}),
     tabs: tabs.map((t) => ({ id: t, title: TAB_TITLES[t] })),
     overview: {
       origin: loaded.origin, status: loaded.status, file: loaded.file, ...(loaded.approvedBy ? { approvedBy: loaded.approvedBy } : {}), transports: def.transports, ...(def.versionOperation ? { versionOperation: def.versionOperation } : {}), roles: def.connection?.roles ?? [],

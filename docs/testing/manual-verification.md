@@ -1560,6 +1560,26 @@ You need a REST API you may read (any test instance with a token) and a folder o
   Do: make it the active source and run discovery; with a Redshift or Snowflake profile that signs in through a browser, test the connection.
   Expect: discovery says the system has no tables; the browser profile fails at once, saying why.
 
+## Part 73 — v0.61.1 POP5b: onboarding a new system
+
+You need a REST API you may read, as in Part 72, this time added through the template.
+
+- [ ] **73.1 The panel's way through.**
+  Do: Platform catalog → *Add a system…*; pick Data catalog and an id; *Start*; *Check* with the file untouched.
+  Expect: the answers file opens; each step says what is missing, in plain words; *Propose* stays disabled. Works by keyboard, and in a light and a dark theme.
+- [ ] **73.2 Code is said plainly.**
+  Do: in the answers set `transports: [grpc]`; *Check*.
+  Expect: an error says a new transport is code; nothing can be proposed; nothing appears under `.autode/config/`.
+- [ ] **73.3 One review.**
+  Do: fill the answers in with real statements and recorded examples; *Propose*; approve the one decision in Decisions.
+  Expect: the system appears with an On trial badge and its page says what to do next. `autode platform run` on it is refused; Try it reads.
+- [ ] **73.4 Conformance makes it count.**
+  Do: connect it; run a conformance; *File the review*; approve it. Then edit its definition and re-approve it.
+  Expect: the badge goes and reads work everywhere; after the edit it is on trial again.
+- [ ] **73.5 Starting from a similar system.**
+  Do: `autode platform template --like redshift --id acme_wh > a.yaml`; `autode platform onboard check a.yaml`.
+  Expect: every operation is listed as needing a recorded example of its own: Redshift's are not carried over.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1957,5 +1977,10 @@ You need a REST API you may read (any test instance with a token) and a folder o
 | 72.2 |  |  |
 | 72.3 |  |  |
 | 72.4 |  |  |
+| 73.1 |  |  |
+| 73.2 |  |  |
+| 73.3 |  |  |
+| 73.4 |  |  |
+| 73.5 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

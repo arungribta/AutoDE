@@ -85,6 +85,24 @@ export const OPERATION_SCHEMA = {
   }
 } as const;
 
+/** POP5b: one platform's implementation of an operation another file holds. */
+export const IMPLEMENTATION_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  $id: 'https://autode.dev/schemas/platform-implementation.schema.json',
+  title: 'AutoDE platform implementation',
+  description: 'One platform\'s implementation of an operation another file holds: the operation stays as it is, for every other platform.',
+  type: 'object',
+  additionalProperties: false,
+  required: ['formatVersion', 'implements', 'platform', 'implementation'],
+  properties: {
+    formatVersion: { const: 1 },
+    implements: OPERATION_SCHEMA.properties.id,
+    platform: { type: 'string', pattern: '^[a-z][a-z0-9_-]*$' },
+    implementation: OPERATION_SCHEMA.properties.platforms.additionalProperties,
+    example: { type: 'object', additionalProperties: false, required: ['params', 'rows'], description: 'What the platform returned when it ran.', properties: { params: { type: 'object' }, rows: { type: 'array', items: { type: 'object' } } } }
+  }
+} as const;
+
 export const PLATFORM_SCHEMA = {
   $schema: 'http://json-schema.org/draft-07/schema#',
   $id: 'https://autode.dev/schemas/platform.schema.json',

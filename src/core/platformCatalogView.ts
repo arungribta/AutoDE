@@ -14,6 +14,8 @@ import { layoutPath } from '../engine/workspaceLayout';
 import { bindOperation } from '../engine/platform/operations/execute';
 import { ConnectionTarget, OperationError, runOnConnection } from '../engine/platform/operations/service';
 import { loadConnectionsConfig } from '../engine/platform/connectionsConfig';
+import { OnboardingAnswers, OnboardingError, loadTemplates, planOnboarding, proposeConformanceReview, proposeOnboarding, templateAnswers } from '../engine/platform/onboarding';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
 
 /**
  * The Platform catalog tab (POP4a; docs/specs/platform-operations.md §6.3): the capability matrix, each platform's
@@ -41,7 +43,8 @@ type Message =
   | { type: 'checkMeta' | 'saveMeta'; id: string; edit: SkillFrontmatterEdit }
   | { type: 'operationForm' | 'proposeOperation'; id: string } | { type: 'checkOperation' | 'saveOperation'; id: string; edit: OperationEdit }
   | { type: 'requestAccess'; connection: string; role?: string; schemas: string[]; capabilities: string[] }
-  | { type: 'resolveDecision'; id: string; decision: 'approved' | 'rejected'; operation: string };
+  | { type: 'resolveDecision'; id: string; decision: 'approved' | 'rejected'; operation: string }
+  | { type: 'addSystem' } | { type: 'onboardingStart' | 'onboardingCheck' | 'onboardingPropose'; category?: string; id: string } | { type: 'fileReview'; id: string };
 
 export class PlatformCatalogPanel {
   private static current: PlatformCatalogPanel | undefined;
@@ -115,6 +118,9 @@ export class PlatformCatalogPanel {
       vscode.window.showInformationMessage(r.errors.length ? `Installed with problems: ${r.errors.join(' ')}` : `Claude Code now has the skills in effect (${r.written.length} files).`);
     }
   }
+
+  /** Where a person's onboarding answers are kept while they fill them in. */
+  private onboardingFile(workspaceRoot: string, id: string): string { return path.join(workspaceRoot, '.autode', 'local', 'onboarding', `${id.replace(/[^a-z0-9_-]/gi, '')}.yaml`); }
 
   private post(m: Record<string, unknown>): void { void this.panel.webview.postMessage(m); }
 
@@ -205,6 +211,58 @@ export class PlatformCatalogPanel {
           const file = path.relative(ws.workspaceRoot, full).split(path.sep).join('/');
           const d = propose(new DecisionStore(ws.workspaceRoot), { workspaceRoot: ws.workspaceRoot, resourcesRoot: this.resourcesRoot }, 'platform_operation', { file, checksum: checksumOf(fs.readFileSync(full, 'utf8')) }, { proposedBy: { host: 'vscode', client: this.host.actor() } });
           this.post({ type: 'notice', text: `Proposed ${file} as ${d.id}. A person approves it in Decisions; until then it is a draft and never runs.` });
+          return;
+        }
+        case 'addSystem': {
+          const root = this.host.workspaceRoot();
+          const templates = loadTemplates(this.resourcesRoot);
+          this.post({ type: 'addSystem', hasWorkspace: !!root, categories: Object.entries(templates).map(([id, c]) => ({ id, label: c.label, description: c.description })) });
+          return;
+        }
+        case 'onboardingStart': {
+          const ws = this.workspace();
+          const id = (m.id ?? '').trim();
+          if (!/^[a-z][a-z0-9_-]*$/.test(id)) { this.post({ type: 'onboardingOut', error: 'Give the system an id: lower case letters, digits, _ or -, starting with a letter.' }); return; }
+          if (!m.category || !loadTemplates(this.resourcesRoot)[m.category]) { this.post({ type: 'onboardingOut', error: 'Choose a category first.' }); return; }
+          const file = this.onboardingFile(ws.workspaceRoot, id);
+          const existed = fs.existsSync(file);
+          if (!existed) {
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, stringifyYaml(templateAnswers({ resourcesRoot: this.resourcesRoot }, m.category, id)));
+          }
+          await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
+          this.post({ type: 'onboardingOut', started: true, id, file: path.relative(ws.workspaceRoot, file).split(path.sep).join('/'), text: existed ? `Opened your answers for ${id}. They were kept as they were.` : `Made the starter answers for ${id} and opened them. Fill in what is marked, save, then choose Check.` });
+          return;
+        }
+        case 'onboardingCheck': case 'onboardingPropose': {
+          const ws = this.workspace();
+          const file = this.onboardingFile(ws.workspaceRoot, m.id);
+          if (!fs.existsSync(file)) { this.post({ type: 'onboardingOut', error: `There are no answers for ${m.id} yet: choose Start first.` }); return; }
+          let answers: OnboardingAnswers;
+          try {
+            const parsed = parseYaml(fs.readFileSync(file, 'utf8'));
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('the file is empty or is not a list of answers');
+            answers = parsed as OnboardingAnswers;
+          } catch (err) { this.post({ type: 'onboardingOut', error: `The answers file can't be read as YAML: ${err instanceof Error ? err.message : String(err)}` }); return; }
+          if (m.type === 'onboardingCheck') {
+            const plan = planOnboarding(ws, answers);
+            this.post({ type: 'onboardingOut', id: m.id, plan: { status: plan.status, steps: plan.steps, neededCode: plan.neededCode } });
+            return;
+          }
+          try {
+            const r = proposeOnboarding(ws, answers, { host: 'vscode', client: this.host.actor() });
+            this.post({ type: 'onboardingOut', id: m.id, proposed: r.decision.id, text: `Proposed as ${r.decision.id}. A person approves it in Decisions; until then the system is a draft and never runs.` });
+          } catch (err) {
+            if (err instanceof OnboardingError) { this.post({ type: 'onboardingOut', id: m.id, plan: { status: err.plan.status, steps: err.plan.steps, neededCode: err.plan.neededCode }, error: err.message }); return; }
+            throw err;
+          }
+          return;
+        }
+        case 'fileReview': {
+          const ws = this.workspace();
+          const d = proposeConformanceReview(ws, m.id, { host: 'vscode', client: this.host.actor() });
+          this.post({ type: 'notice', text: `Filed the review as ${d.id}. A person approves it in Decisions; then ${m.id} counts.` });
+          await this.onMessage({ type: 'platform', id: m.id });
           return;
         }
         case 'requestAccess': {

@@ -1,0 +1,82 @@
+# AutoDE platform templates (docs/specs/platform-operations.md §6.5, POP5b): what onboarding a new system asks for, by
+# category. `capabilities` lists what AutoDE can do with a system of this category, and the operations each one needs; a
+# `required` capability must be implemented before the system can be proposed. An operation that exists in the catalog
+# gets one platform's implementation (an implementation file). `starter` operations don't exist yet: they are the
+# shape (parameters and results) a new system of this category fills in, so AtScale and Collibra land on one model.
+formatVersion: 1
+categories:
+  warehouse:
+    label: Warehouse
+    description: Tables and SQL. AutoDE reads its estate, profiles its data, and may compile to it.
+    transports: [sql, cli, http]
+    capabilities:
+      estate:
+        required: true
+        operations: [estate.list_tables, estate.list_columns, estate.list_views]
+        optional: [estate.table_stats, estate.list_primary_keys, estate.list_foreign_keys, estate.list_databases, estate.list_schemas]
+      profiling:
+        note: Needs the dialect fragments sample, regexMatch and distinctTuples.
+      lineage:
+        optional: [lineage.columns, lineage.objects]
+    skills: [setup]
+  lakehouse:
+    like: warehouse
+    label: Lakehouse
+    description: Tables and SQL over files. AutoDE reads its estate, profiles its data, and may compile to it.
+  semantic:
+    label: Semantic layer
+    description: Business models over a warehouse. AutoDE imports and exports them; it has no tables of its own.
+    transports: [http, file, cli]
+    capabilities:
+      semantic.import:
+        required: true
+        operations: [semantic.list_models]
+    starter:
+      - id: semantic.list_models
+        title: List the semantic models
+        description: Lists the semantic models the system holds, with where each one comes from.
+        kind: read
+        content: metadata
+        area: semantic
+        params: []
+        returns: [{ name: name, label: Model }, { name: description, label: Description }, { name: source, label: Where it comes from }]
+    skills: [setup]
+  catalog:
+    label: Data catalog
+    description: Glossary, domains and owners. AutoDE imports what the catalog knows; it has no tables of its own.
+    transports: [http, cli]
+    capabilities:
+      knowledge.import:
+        required: true
+        operations: [knowledge.list_terms]
+        optional: [knowledge.list_domains]
+    starter:
+      - id: knowledge.list_terms
+        title: List the business terms
+        description: Lists the catalog's business terms with their definitions, domains and owners.
+        kind: read
+        content: metadata
+        area: knowledge
+        params: []
+        returns: [{ name: name, label: Term }, { name: definition, label: Definition }, { name: domain, label: Domain }, { name: owner, label: Owner }]
+      - id: knowledge.list_domains
+        title: List the domains
+        description: Lists the catalog's domains and who owns each one.
+        kind: read
+        content: metadata
+        area: knowledge
+        params: []
+        returns: [{ name: name, label: Domain }, { name: owner, label: Owner }]
+    skills: [setup]
+  orchestration:
+    label: Orchestration
+    description: Pipelines and schedules. AutoDE reads what runs and when.
+    transports: [http, cli]
+    capabilities: {}
+    skills: [setup]
+  bi:
+    label: BI
+    description: Reports and dashboards. AutoDE reads what depends on the data.
+    transports: [http, cli]
+    capabilities: {}
+    skills: [setup]

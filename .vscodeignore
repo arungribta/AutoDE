@@ -31,6 +31,7 @@
 !primitive-definitions/**
 !platform-operations/**
 !platforms/*.yaml
+!platform-templates/**
 # Workflow templates (PA3a); agent role templates and skill folders (PA3b).
 !workflows/*.yaml
 # Ontology packs (ONT1): the upper layer and the shipped standards to onboard from.

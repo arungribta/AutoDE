@@ -37,6 +37,10 @@ export type DecisionKind =
   | 'article'
   /** POP1: a team's platform operation or platform definition; approving it approves that exact file (its checksum). */
   | 'platform_operation'
+  /** POP5b: a set of platform files approved together, each at its checksum: a system being onboarded, or a pack being imported. */
+  | 'platform_bundle'
+  /** POP5b: a person's review of a conformance run on a real connection; the onboarded system then counts. */
+  | 'platform_conformance'
   /** ONT1: an ontology pack (an industry subset or an extension) imported, grown or with concepts deprecated; a workspace-level change. */
   | 'ontology'
   /** ONT1: a team's standard to onboard from (`autode: standard/1`), researched by an agent or a person. */

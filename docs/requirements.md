@@ -160,6 +160,7 @@ Product-wide; every capability and phase preserves them. The forward specs refer
   - People can see every operation, what relies on it (skills, engine features, stages), and edit the skills, technical and non-technical users alike.
   - Agents can propose operations a person approves.
   - Drift (a renamed view, an unread object kind) is noticed and raised.
+  - A new system is added by files from a template, reviewed once, and counts only after a person has reviewed it working on a real connection; what would need code is said plainly (v0.61.1).
   - Systems reached over a REST API or through files connect the same way, from files, with their credentials kept to the connection's own address (v0.61.0).
   - Every kind of system AutoDE works with (warehouses, lakehouses, semantic platforms, catalogs) is described by a platform definition and its capability map. The catalog shows, per system and connection, what AutoDE can do, what is missing (a privilege, an edition) and what relies on it. New systems are onboarded from a template.
 

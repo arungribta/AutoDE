@@ -18,6 +18,7 @@ import { checkReadOnlySql } from './sqlGuard';
 import { fragmentsFor } from './dialects';
 import { DefinitionAdapter } from './adapters/DefinitionAdapter';
 import type { OperationRunner } from './operations/execute';
+import { onTrial } from './onboarding';
 import { connectsByDefinition, platformDefinition, platformOperation } from './definitions';
 
 export type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
@@ -86,7 +87,7 @@ export class ConnectionManager implements Disposable {
     const scope = { workspaceRoot: this.workspaceRoot() };
     const definition = platformDefinition(platform, scope);
     if (!definition || !connectsByDefinition(definition)) return undefined;
-    return (creds, l) => new DefinitionAdapter(platform, creds, l, { definition, operation: (id) => platformOperation(id, scope), cliConsent: this.cliConsent(), baseDir: scope.workspaceRoot });
+    return (creds, l) => new DefinitionAdapter(platform, creds, l, { definition, operation: (id) => platformOperation(id, scope), cliConsent: this.cliConsent(), baseDir: scope.workspaceRoot, onTrial: onTrial(scope, platform) });
   }
 
   /** Registers (or replaces) the adapter for a platform — further platforms, and fakes in tests. */

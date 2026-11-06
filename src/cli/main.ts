@@ -98,7 +98,7 @@ import { driversRoot as defaultDriversRoot } from '../engine/platform/driverStor
 import { DataPlatformProvider, SkillDefinition, SourceContext, SourceContextEntry } from '../engine/types';
 import { TARGET_OPTIONS, readTargetContext, sourceEntryForSystem, sourceSystemChoices, targetConnectionChoices, targetContextFile, writeTargetContextDraft } from '../engine/context/problemContexts';
 import { sourceContextFile, writeSourceContextDraft } from '../engine/agents/sourceContextDraft';
-import { parseYaml } from '../engine/context/Yaml';
+import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
 import { findSourceFiles } from '../engine/context/sourceFiles';
 import { Catalog } from '../engine/context/catalog';
 import { layoutPath } from '../engine/workspaceLayout';
@@ -308,6 +308,11 @@ Platform operations (POP1: every interaction with a platform, as a reviewed file
   platform propose <file>      Propose a team operation or platform definition (.autode/config/…) for a person's approval
   platform propose-operation <file.yaml> --reason "<why>" [--fixes <item key>]   Propose a new or fixed operation (it needs a recorded example) for a person's approval
   platform drift [--platform p]   Operations that fail on the platform's version or read a view or column that is gone, and object kinds a platform reports that its definition doesn't name
+  platform template [<category>] [--like <platform>] [--id <id>]   The answers to fill in to onboard a new system (no category: the categories; --like: start from a platform AutoDE has)
+  platform onboard check <answers.yaml>   Each onboarding step with its state, what is missing and what needs code; writes nothing
+  platform onboard propose <answers.yaml>   Propose the new system (files, skills and one decision) for a person's approval
+  platform onboard status <id>   Where the system is (draft, trial, counted), its last conformance run, whether its CLI is found, and the next step
+  platform onboard review <id>   File the review of its latest conformance run for a person's approval
   platform request-access --connection <c> [--role r] [--capability a,b] [--database d] [--schema s]…   Draft a runbook granting AutoDE's role what its capabilities need (proposed when a problem is active)
 
 Lineage (LIN):
@@ -466,6 +471,8 @@ const OPTIONS = {
   database: { type: 'string' },
   capability: { type: 'string' },
   fixes: { type: 'string' },
+  like: { type: 'string' },
+  id: { type: 'string' },
   models: { type: 'string' },
   hops: { type: 'string' },
   type: { type: 'string' },
@@ -2247,6 +2254,8 @@ async function cmdLineage(ctx: Ctx, rest: string[]): Promise<number> {
   throw new CliError(EXIT.USAGE, 'lineage refresh --connection <id>, or lineage record <file.json> --connection <id> --method <name> [--complete].');
 }
 
+const onboardSteps = (steps: Array<{ title: string; state: string; missing: string[] }>): string[] => steps.flatMap((s) => [`  ${s.state === 'done' ? '✓' : s.state === 'needs-code' ? '✗ (needs code)' : '·'} ${s.title}`, ...s.missing.map((m) => `      ${m}`)]);
+
 /** POP1: the platform operations catalog; running a read; proposing a team file. The MCP tools' own handlers. */
 async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
   const [sub = 'operations', id] = rest;
@@ -2357,6 +2366,54 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: true, ...r }, `✓ Proposed ${String(r.file)} as ${d.id}${like.length ? ` (it resembles ${like.join(', ')})` : ''}. ${String(r.next)}`);
       return EXIT.OK;
     }
+    if (sub === 'template') {
+      const category = rest[1];
+      let r: Record<string, unknown>;
+      try { r = await tool('autode_platform_template').handler({ ...(category ? { category } : {}), ...(ctx.values.like ? { like: ctx.values.like } : {}), ...(ctx.values.id ? { id: ctx.values.id } : {}) }, ws) as Record<string, unknown>; }
+      catch (err) { throw new CliError(EXIT.NOT_FOUND, err instanceof Error ? err.message : String(err)); }
+      if (r.categories) {
+        emit(ctx, { ok: true, ...r }, [...(r.categories as Array<{ id: string; label: string; description: string; transports: string[] }>).map((c) => `  ${c.id.padEnd(16)} ${c.label} (${c.transports.join(', ')}): ${c.description}`), '', 'autode platform template <category> gives the answers to fill in; --like <platform> starts from a platform AutoDE has.'].join('\n'));
+      } else {
+        emit(ctx, { ok: true, ...r }, `# ${String(r.next)}\n${stringifyYaml(r.answers)}`);
+      }
+      return EXIT.OK;
+    }
+    if (sub === 'onboard') {
+      const [, what, target] = rest;
+      if (!what || !target) throw new CliError(EXIT.USAGE, 'platform onboard check <answers.yaml> | propose <answers.yaml> | status <id> | review <id>.');
+      if (what === 'check' || what === 'propose') {
+        const full = path.resolve(ctx.io.cwd, target);
+        if (!fs.existsSync(full)) throw new CliError(EXIT.NOT_FOUND, `No file "${full}".`);
+        let r: Record<string, unknown>;
+        try { r = await tool('autode_platform_onboard').handler({ answers: fs.readFileSync(full, 'utf8'), action: what }, ws) as Record<string, unknown>; }
+        catch (err) {
+          const d = (err as { details?: { status?: string; steps?: Array<{ title: string; state: string; missing: string[] }>; neededCode?: string[] } }).details;
+          if (!d?.steps) throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err));
+          emit(ctx, { ok: false, ...d }, [what === 'propose' ? '✗ Not proposed, nothing was written:' : '✗ Not ready:', ...onboardSteps(d.steps), ...(d.neededCode?.length ? ['', 'This needs AutoDE code, which no template can add:', ...d.neededCode.map((c) => `  ${c}`), 'Say so to the platform team; do not work around it.'] : [])].join('\n'));
+          return EXIT.REFUSED;
+        }
+        if (what === 'check') {
+          const ready = r.status === 'ready';
+          emit(ctx, { ok: ready, ...r }, [ready ? '✓ Ready to propose:' : '✗ Not ready:', ...onboardSteps(r.steps as Array<{ title: string; state: string; missing: string[] }>), ...((r.neededCode as string[]).length ? ['', 'This needs AutoDE code, which no template can add:', ...(r.neededCode as string[]).map((c) => `  ${c}`)] : []), ...((r.files as string[]).length ? ['', 'It would write:', ...(r.files as string[]).map((f) => `  ${f}`)] : []), '', String(r.next)].join('\n'));
+          return ready ? EXIT.OK : EXIT.REFUSED;
+        }
+        emit(ctx, { ok: true, ...r }, [`✓ Proposed as ${(r.decision as { id: string }).id}: ${(r.files as unknown[]).length} file(s), ${(r.skills as unknown[]).length} skill(s).`, String(r.next)].join('\n'));
+        return EXIT.OK;
+      }
+      if (what === 'status') {
+        let r: { state: string; conformance?: { connection: string; at: string; summary: string }; next: string; setup?: { cli: string; found: boolean; install?: string; skillSteps?: string } };
+        try { r = await tool('autode_platform_onboarding_status').handler({ platform: target }, ws) as unknown as typeof r; } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+        emit(ctx, { ok: true, ...r }, [`${target}: ${r.state}`, ...(r.conformance ? [`Last conformance: ${r.conformance.connection} ${r.conformance.at.slice(0, 16)}: ${r.conformance.summary}`] : ['Last conformance: none']), ...(r.setup ? [r.setup.found ? `CLI ${r.setup.cli}: found` : `CLI ${r.setup.cli}: not found${r.setup.install ? `. Install: ${r.setup.install}` : ''}`, ...(r.setup.skillSteps ? ['Setup steps from its skill:', ...r.setup.skillSteps.split('\n').map((l) => `  ${l}`)] : [])] : []), '', `Next: ${r.next}`].join('\n'));
+        return EXIT.OK;
+      }
+      if (what === 'review') {
+        let r: Record<string, unknown>;
+        try { r = await tool('autode_propose_conformance_review').handler({ platform: target }, ws) as Record<string, unknown>; } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+        emit(ctx, { ok: true, ...r }, `✓ Filed the review as ${(r.decision as { id: string }).id}. ${String(r.next)}`);
+        return EXIT.OK;
+      }
+      throw new CliError(EXIT.USAGE, 'platform onboard takes check, propose, status or review.');
+    }
     if (sub === 'drift') {
       const r = await tool('autode_platform_drift').handler({ ...(ctx.values.platform ? { platform: ctx.values.platform } : {}) }, ws) as { operations: Array<{ operation: string; connection: string; platform: string; version?: string; kind: string; error: string; skills: Array<{ id: string; owner?: string }> }>; kinds: Array<{ platform: string; kind: string; count: number; connections: string[] }> };
       const lines = [
@@ -2376,7 +2433,7 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: true, ...r }, [rb.title, ...rb.steps.map((s) => `  ${s.title}\n    ${s.sql ?? ''}`), ...((r.warnings as string[]) ?? []).map((w) => `! ${w}`), r.proposed ? `Proposed as ${(r.decision as { id: string }).id}. ${String(r.next)}` : String(r.next)].join('\n'));
       return EXIT.OK;
     }
-    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, propose <file>, or request-access --connection <c>.');
+    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, propose <file>, template [<category>], onboard check|propose|status|review, or request-access --connection <c>.');
   } finally { session.dispose(); }
 }
 

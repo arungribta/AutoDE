@@ -1,0 +1,207 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://autode.dev/schemas/platform-implementation.schema.json",
+  "title": "AutoDE platform implementation",
+  "description": "One platform's implementation of an operation another file holds: the operation stays as it is, for every other platform.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "formatVersion",
+    "implements",
+    "platform",
+    "implementation"
+  ],
+  "properties": {
+    "formatVersion": {
+      "const": 1
+    },
+    "implements": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "description": "area.name, for example lineage.columns."
+    },
+    "platform": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sql": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A statement; {param} binds a parameter, {param:literal} binds it as a quoted value, and [[ … ]] is kept only when the parameters inside it have values."
+        },
+        "cli": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "description": "An argument list, never a shell line."
+        },
+        "http": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "path"
+          ],
+          "properties": {
+            "method": {
+              "enum": [
+                "GET",
+                "POST"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "description": "After the connection's base URL; {param} is encoded as one path segment."
+            },
+            "query": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "body": {
+              "description": "A JSON template: \"{param}\" alone keeps the value's type; an optional parameter with no value drops the key."
+            },
+            "readOnly": {
+              "type": "boolean",
+              "description": "A POST that changes nothing (a search)."
+            },
+            "results": {
+              "type": "string",
+              "description": "A JSON path to the result rows; absent: the response is the rows."
+            },
+            "paging": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "style"
+              ],
+              "description": "How the pages are followed.",
+              "properties": {
+                "style": {
+                  "enum": [
+                    "offset",
+                    "page",
+                    "cursor",
+                    "link"
+                  ]
+                },
+                "param": {
+                  "type": "string",
+                  "description": "offset, page, cursor: the query parameter that says where to read from."
+                },
+                "sizeParam": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "start": {
+                  "type": "number"
+                },
+                "next": {
+                  "type": "string",
+                  "description": "cursor, link: the path to the next cursor or link in the response."
+                },
+                "total": {
+                  "type": "string",
+                  "description": "offset, page: the path to the total count."
+                }
+              }
+            }
+          }
+        },
+        "file": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "glob",
+            "parse"
+          ],
+          "properties": {
+            "glob": {
+              "type": "string",
+              "description": "Relative to the connection's folder: *, **, ?, {a,b}; {param} is bound."
+            },
+            "parse": {
+              "enum": [
+                "yaml",
+                "json",
+                "csv"
+              ]
+            },
+            "results": {
+              "type": "string",
+              "description": "yaml, json: the path to the rows in each file; absent: one row per file."
+            }
+          }
+        },
+        "parse": {
+          "enum": [
+            "json",
+            "table"
+          ]
+        },
+        "since": {
+          "type": "string",
+          "pattern": "^\\d+(\\.\\d+){0,3}$",
+          "description": "A version such as 8.0 or 3.5.1."
+        },
+        "until": {
+          "type": "string",
+          "pattern": "^\\d+(\\.\\d+){0,3}$",
+          "description": "A version such as 8.0 or 3.5.1."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "sql"
+          ]
+        },
+        {
+          "required": [
+            "cli"
+          ]
+        },
+        {
+          "required": [
+            "http"
+          ]
+        },
+        {
+          "required": [
+            "file"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "params",
+        "rows"
+      ],
+      "description": "What the platform returned when it ran.",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

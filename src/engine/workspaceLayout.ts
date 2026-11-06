@@ -67,6 +67,8 @@ export const LAYOUT = {
   /** POP1: the team's platform operations and platform definitions (override shipped ones by id once approved), and their approvals. */
   platformOperations: [AUTODE_DIR, 'config', 'platform-operations'],
   platformDefinitions: [AUTODE_DIR, 'config', 'platforms'],
+  platformImplementations: [AUTODE_DIR, 'config', 'platform-implementations'],
+  platformOnboarding: [AUTODE_DIR, 'config', 'platform-onboarding'],
   platformApprovals: [AUTODE_DIR, 'config', 'platform-approvals.json'],
   decisions: [AUTODE_DIR, 'decisions'],
   local: [AUTODE_DIR, 'local'],

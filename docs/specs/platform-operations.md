@@ -425,7 +425,7 @@ Acceptance:
 
 ### 6.5 POP5 — onboarding new systems, and sharing them (v0.61.0–v0.61.2)
 
-**Status:** in three releases. POP5a shipped in v0.61.0: the `http` and `file` transports and team-defined platforms that connect (CHANGELOG.md 0.61.0, with its deviations; HOW: technical-design.md, POP5a). POP5b (the template) and POP5c (packs) follow.
+**Status:** in three releases. POP5a shipped in v0.61.0: the `http` and `file` transports and team-defined platforms that connect (CHANGELOG.md 0.61.0, with its deviations; HOW: technical-design.md, POP5a). POP5b shipped in v0.61.1: the template, implementation files, on trial and the conformance review (CHANGELOG.md 0.61.1). POP5c (packs) follows.
 
 Scope:
 - **A new system from a template:** the steps are category, transports, access paths (CLI, API), connection fields, version detection, starter operations for the category's capabilities, then skills. It counts only once its recorded examples pass and a conformance run on a real connection is reviewed.

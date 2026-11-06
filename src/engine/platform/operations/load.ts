@@ -9,8 +9,8 @@ import { BindError, bindPlain, bindTemplate, sampleValues, valuesFor } from './b
 import { checkGlob } from '../fileTransport';
 import { bindHttp, httpReadProblem } from './httpRead';
 import { mapRows } from './map';
-import { OPERATION_SCHEMA, PLATFORM_SCHEMA } from './schema';
-import { Loaded, PlatformDefinition, PlatformOperation } from './types';
+import { IMPLEMENTATION_SCHEMA, OPERATION_SCHEMA, PLATFORM_SCHEMA } from './schema';
+import { ImplementationFile, Loaded, PlatformDefinition, PlatformOperation } from './types';
 
 /**
  * Loading the catalog (POP1): AutoDE's operations (`platform-operations/`)
@@ -28,17 +28,26 @@ export interface CatalogScope { resourcesRoot?: string; workspaceRoot?: string }
 export interface Catalog {
   operations: Array<Loaded<PlatformOperation>>;
   platforms: Array<Loaded<PlatformDefinition>>;
+  /** POP5b: the team's implementation files; the approved ones are merged into their operations. */
+  implementations: Array<Loaded<ImplementationFile & { id: string }>>;
   errors: string[];
 }
 
 interface Approval { checksum: string; by: string; at: string; decisionId?: string }
-export interface Approvals { operations: Record<string, Approval>; platforms: Record<string, Approval> }
+export interface Approvals {
+  operations: Record<string, Approval>;
+  platforms: Record<string, Approval>;
+  /** POP5b: by `operation@platform`. */
+  implementations: Record<string, Approval>;
+  /** POP5b: a person's review of a conformance run, for a definition's exact content; the system then counts. */
+  conformance: Record<string, Approval>;
+}
 
-let compiled: { op: ValidateFunction; platform: ValidateFunction } | undefined;
+let compiled: { op: ValidateFunction; platform: ValidateFunction; impl: ValidateFunction } | undefined;
 function validators() {
   if (!compiled) {
     const ajv = new Ajv({ allErrors: true, strict: false, logger: false });
-    compiled = { op: ajv.compile(OPERATION_SCHEMA), platform: ajv.compile(PLATFORM_SCHEMA) };
+    compiled = { op: ajv.compile(OPERATION_SCHEMA), platform: ajv.compile(PLATFORM_SCHEMA), impl: ajv.compile(IMPLEMENTATION_SCHEMA) };
   }
   return compiled;
 }
@@ -130,11 +139,11 @@ function yamlFiles(dir: string): string[] {
 }
 
 export function readApprovals(workspaceRoot: string | undefined): Approvals {
-  if (!workspaceRoot) return { operations: {}, platforms: {} };
+  const none: Approvals = { operations: {}, platforms: {}, implementations: {}, conformance: {} };
+  if (!workspaceRoot) return none;
   try {
-    const raw = JSON.parse(fs.readFileSync(layoutPath(workspaceRoot, 'platformApprovals'), 'utf8')) as Partial<Approvals>;
-    return { operations: raw.operations ?? {}, platforms: raw.platforms ?? {} };
-  } catch { return { operations: {}, platforms: {} }; }
+    return { ...none, ...(JSON.parse(fs.readFileSync(layoutPath(workspaceRoot, 'platformApprovals'), 'utf8')) as Partial<Approvals>) };
+  } catch { return none; }
 }
 
 /** POP5: changes whenever an approval is written. */
@@ -142,7 +151,7 @@ export function readApprovalsStamp(workspaceRoot: string): string {
   try { return String(fs.statSync(layoutPath(workspaceRoot, 'platformApprovals')).mtimeMs); } catch { return '0'; }
 }
 
-export function writeApproval(workspaceRoot: string, what: 'operations' | 'platforms', id: string, approval: Approval): void {
+export function writeApproval(workspaceRoot: string, what: keyof Approvals, id: string, approval: Approval): void {
   const all = readApprovals(workspaceRoot);
   all[what][id] = approval;
   const file = layoutPath(workspaceRoot, 'platformApprovals');
@@ -184,7 +193,32 @@ export function loadCatalog(scope: CatalogScope): Catalog {
   const platforms = loadKind<PlatformDefinition>(dirs('platforms', 'platformDefinitions'), approvals.platforms, checkPlatform, 'platform', root, errors);
   const effective = new Map(platforms.filter((p) => p.status === 'approved').map((p) => [p.item.id, p.item] as const));
   const operations = loadKind<PlatformOperation>(dirs('platform-operations', 'platformOperations'), approvals.operations, (op) => checkOperation(op, effective), 'operation', root, errors);
-  return { operations, platforms, errors };
+  const implementations = scope.workspaceRoot ? loadImplementations(scope.workspaceRoot, operations, approvals.implementations, effective, root, errors) : [];
+  return { operations, platforms, implementations, errors };
+}
+
+/** POP5b: the team's implementation files. An approved one joins its operation, for that platform only. */
+function loadImplementations(workspaceRoot: string, operations: Array<Loaded<PlatformOperation>>, approvals: Record<string, Approval>, platforms: ReadonlyMap<string, PlatformDefinition>, root: string | undefined, errors: string[]): Array<Loaded<ImplementationFile & { id: string }>> {
+  const out: Array<Loaded<ImplementationFile & { id: string }>> = [];
+  const v = validators().impl;
+  for (const file of yamlFiles(layoutPath(workspaceRoot, 'platformImplementations'))) {
+    const rel = root ? path.relative(root, file).split(path.sep).join('/') : file;
+    let text: string; let raw: ImplementationFile;
+    try { text = fs.readFileSync(file, 'utf8'); raw = parseYaml(text) as ImplementationFile; } catch (err) { errors.push(`${rel}: ${err instanceof Error ? err.message : String(err)}`); continue; }
+    if (!v(raw)) { errors.push(`${rel}: ${schemaErrors(v).join('; ')}`); continue; }
+    const at = operations.findIndex((o) => o.item.id === raw.implements && o.status === 'approved');
+    if (at < 0) { errors.push(`${rel}: no operation ${raw.implements} to add to`); continue; }
+    const base = operations[at];
+    const added: PlatformOperation = { ...base.item, platforms: { ...base.item.platforms, [raw.platform]: raw.implementation } };
+    const problems = checkOperation({ ...added, platforms: { [raw.platform]: raw.implementation }, example: raw.example ? { ...raw.example, platform: raw.platform } : undefined } as PlatformOperation, platforms);
+    if (problems.length) { errors.push(`${rel}: ${problems.join('; ')}`); continue; }
+    const id = `${raw.implements}@${raw.platform}`;
+    const checksum = checksumOf(text);
+    const approved = approvals[id]?.checksum === checksum;
+    out.push({ item: { ...raw, id }, origin: 'team', file: rel, checksum, status: approved ? 'approved' : 'draft', ...(approved ? { approvedBy: approvals[id].by } : {}), overrides: !!base.item.platforms[raw.platform] });
+    if (approved) operations[at] = { ...base, item: added, teamImplementations: [...(base.teamImplementations ?? []), raw.platform] };
+  }
+  return out;
 }
 
 /** The operation in effect with this id (shipped, or the approved team file); drafts never run. */

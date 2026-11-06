@@ -95,6 +95,19 @@ export interface OperationExample {
   platform?: string;
 }
 
+/**
+ * POP5b: one platform's implementation of an operation another file holds, so adding a system leaves the shipped
+ * operation (and every other platform's statement in it) as AutoDE ships it.
+ */
+export interface ImplementationFile {
+  formatVersion: number;
+  /** The operation it adds to. */
+  implements: string;
+  platform: string;
+  implementation: PlatformImpl;
+  example?: Pick<OperationExample, 'params' | 'rows'>;
+}
+
 export interface PlatformOperation {
   formatVersion: number;
   id: string;
@@ -273,4 +286,6 @@ export interface Loaded<T> {
   approvedBy?: string;
   /** A team file that replaces a shipped one with the same id. */
   overrides?: boolean;
+  /** POP5b: platforms whose implementation comes from a team's implementation file. */
+  teamImplementations?: string[];
 }

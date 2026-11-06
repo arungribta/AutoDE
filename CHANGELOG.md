@@ -6,6 +6,26 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.61.1
+
+POP5b, onboarding a new system from a template ([platform-operations.md](docs/specs/platform-operations.md) §6.5). A system is added by files, guided step by step, reviewed once, and counted only after a person has seen it work on a real connection.
+
+- **The template** (`platform-templates/categories.yaml`, `src/engine/platform/onboarding.ts`): for each category, what AutoDE can do with such a system, which operations each capability needs, and the shape of the starter operations a catalog or semantic system fills in. The steps are what it is, how it is reached, access paths, connection fields, version detection, starter operations and skills.
+- **`--like <platform>`** starts from a similar system: its definition, and each of its statements as an implementation to adapt. Its recorded examples are left out on purpose, as they are what another platform returned.
+- **Implementation files** (`.autode/config/platform-implementations/`, `docs/schemas/platform-implementation.schema.json`): one platform's block on an existing operation. Adding a system no longer means copying a shipped operation, which would freeze every other platform's statement in that workspace.
+- **One review.** A system's definition, operations and implementations are one decision (`platform_bundle`), each file at its exact checksum. An edit after proposing fails the approval.
+- **On trial, then counted.** Once approved a system connects, and only conformance runs and Try it read from it; the estate, agents and stages don't. A person reviews a conformance run on a real connection (`platform_conformance`), and it then counts. The review is bound to the definition's exact content: a changed definition is on trial again. A run where nothing worked can't be reviewed.
+- **Honest.** A new transport, sign-in method or compile dialect is named as code to write, and nothing is written. Answers that aren't complete say what is missing, step by step.
+- **Guided.** With a platform's CLI missing, the status says so and shows its install line and the steps from its setup skill.
+- **Surfaces:** `autode platform template`, `autode platform onboard check|propose|status|review`; MCP `autode_platform_template`, `autode_platform_onboard`, `autode_platform_onboarding_status`, `autode_propose_conformance_review` (agents propose, a person approves); *Add a system…* in the Platform catalog, with On trial badges and *File the review*; the skill `autode-core-platform-onboarding`, given to the platform maintainer.
+- **The template reproduces Redshift:** from Redshift's answers, against a catalog with Redshift removed, it gives POP2's definition exactly, its 8 implementations on shared operations and its 9 operations only it has. The test proves the template can express a real platform, not that it wrote one: the answers are read back from Redshift's own files.
+
+Deliberate deviations:
+- **Skills stay out of the bundle.** They are drafts in the skills' own lifecycle, published as usual.
+- **A recorded example is needed before proposing,** so a statement is run by hand once, as for POP3's proposals. Conformance can't record it: that would change a file a person approved.
+- **The panel's steps are an answers file and a check,** not a form per field: a statement or a connection list is edited more easily as YAML, and the same file works on every surface. A draft system doesn't appear in the matrix, which lists approved platforms; its decision does in Decisions.
+- **`autode platform run` is refused on trial.** Only conformance and the panel's Try it read.
+
 ## 0.61.0
 
 POP5a, the `http` and `file` transports live ([platform-operations.md](docs/specs/platform-operations.md) §2.1, §6.5), the first of POP5's three releases. A system reached over a REST API or through files in a folder now connects and reads with no adapter and no card written for it, from a platform definition and operations alone. No system of that kind ships yet: AtScale and Collibra arrive through IMP1 and IMP3.

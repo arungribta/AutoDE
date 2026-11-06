@@ -33,6 +33,8 @@ export interface DefinitionAdapterOptions {
   call?: CliCall;
   /** Tests: the wait between polls. */
   sleep?: (ms: number) => Promise<void>;
+  /** POP5b: approved but its conformance not reviewed: it connects, and its estate isn't read yet. */
+  onTrial?: boolean;
   /** POP5: where a relative folder is resolved (the workspace). */
   baseDir?: string;
   /** Tests: the http transport's options. */
@@ -191,6 +193,7 @@ export class DefinitionAdapter extends BaseDataSourceAdapter {
 
   /** Only profiling is a query here; the estate's reads are its operations (readEstate). */
   getMetadataQueries(): PlatformMetadataQueries {
+    if (this.o.onTrial) throw new Error(`${this.def.title} is on trial: AutoDE reads its estate once a person reviews a conformance run (autode platform onboard status ${this.def.id}).`);
     if (!this.def.capabilities['estate'] || this.def.capabilities['estate'].support === 'not_applicable') {
       throw new Error(`${this.def.title} is a ${this.def.category} system: it has no tables to read as an estate. What AutoDE reads from it is listed on its catalog page (autode platform catalog --platform ${this.def.id}).`);
     }
