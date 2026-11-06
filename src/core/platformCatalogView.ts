@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { readVersion } from '../mcp/server';
 import { accessRunbook, capabilityMatrix, conformanceRun, lintSkillText, operationPage, platformPage, skillPage } from '../engine/platform/operations/catalogView';
 import { checksumOf, loadCatalog, operationById, platformById } from '../engine/platform/operations/load';
 import { OperationEdit, checkOperationEdit, operationForm, saveOperationEdit } from '../engine/platform/operations/form';
@@ -16,6 +17,7 @@ import { ConnectionTarget, OperationError, runOnConnection } from '../engine/pla
 import { loadConnectionsConfig } from '../engine/platform/connectionsConfig';
 import { OnboardingAnswers, OnboardingError, loadTemplates, planOnboarding, proposeConformanceReview, proposeOnboarding, templateAnswers } from '../engine/platform/onboarding';
 import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
+import { PackError, exportPack, importPack, inspectPack } from '../engine/platform/packs';
 
 /**
  * The Platform catalog tab (POP4a; docs/specs/platform-operations.md §6.3): the capability matrix, each platform's
@@ -44,7 +46,9 @@ type Message =
   | { type: 'operationForm' | 'proposeOperation'; id: string } | { type: 'checkOperation' | 'saveOperation'; id: string; edit: OperationEdit }
   | { type: 'requestAccess'; connection: string; role?: string; schemas: string[]; capabilities: string[] }
   | { type: 'resolveDecision'; id: string; decision: 'approved' | 'rejected'; operation: string }
-  | { type: 'addSystem' } | { type: 'onboardingStart' | 'onboardingCheck' | 'onboardingPropose'; category?: string; id: string } | { type: 'fileReview'; id: string };
+  | { type: 'addSystem' } | { type: 'onboardingStart' | 'onboardingCheck' | 'onboardingPropose'; category?: string; id: string } | { type: 'fileReview'; id: string }
+  | { type: 'packExport' } | { type: 'packExportRun'; name: string; platforms: string[] }
+  | { type: 'packImport' } | { type: 'packImportCheck' | 'packImportRun'; dir: string; replace: boolean };
 
 export class PlatformCatalogPanel {
   private static current: PlatformCatalogPanel | undefined;
@@ -254,6 +258,50 @@ export class PlatformCatalogPanel {
             this.post({ type: 'onboardingOut', id: m.id, proposed: r.decision.id, text: `Proposed as ${r.decision.id}. A person approves it in Decisions; until then the system is a draft and never runs.` });
           } catch (err) {
             if (err instanceof OnboardingError) { this.post({ type: 'onboardingOut', id: m.id, plan: { status: err.plan.status, steps: err.plan.steps, neededCode: err.plan.neededCode }, error: err.message }); return; }
+            throw err;
+          }
+          return;
+        }
+        case 'packExport': {
+          const root = this.host.workspaceRoot();
+          const platforms = root ? loadCatalog({ resourcesRoot: this.resourcesRoot, workspaceRoot: root }).platforms.filter((p) => p.origin === 'team').map((p) => ({ id: p.item.id, title: p.item.title, approved: p.status === 'approved' })) : [];
+          this.post({ type: 'packExport', hasWorkspace: !!root, platforms });
+          return;
+        }
+        case 'packExportRun': {
+          const ws = this.workspace();
+          const name = (m.name ?? '').trim();
+          if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) { this.post({ type: 'packOut', error: 'Give the pack a name: lower case letters, digits, _ or -.' }); return; }
+          const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Export here', title: 'Choose an empty folder for the pack' });
+          if (!picked?.length) { this.post({ type: 'packOut', text: 'No folder chosen; nothing was written.' }); return; }
+          try {
+            const r = exportPack(ws, { out: picked[0].fsPath, name, ...(m.platforms?.length ? { platforms: m.platforms } : {}), by: this.host.actor(), autode: readVersion(this.resourcesRoot) });
+            this.post({ type: 'packOut', text: `Wrote pack ${r.manifest.name} to ${r.out}: ${r.manifest.items.length} file(s), ${r.manifest.skills.length} skill(s). Whoever imports it checks it first, and a person approves the import.` });
+          } catch (err) {
+            if (err instanceof PackError) { this.post({ type: 'packOut', error: 'Not exported:', problems: err.problems }); return; }
+            throw err;
+          }
+          return;
+        }
+        case 'packImport': {
+          this.workspace();
+          const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Check this pack', title: 'Choose the pack folder' });
+          if (!picked?.length) return;
+          await this.onMessage({ type: 'packImportCheck', dir: picked[0].fsPath, replace: false });
+          return;
+        }
+        case 'packImportCheck': {
+          const ws = this.workspace();
+          this.post({ type: 'packImport', dir: m.dir, replace: !!m.replace, report: inspectPack(ws, m.dir, { replace: !!m.replace }) });
+          return;
+        }
+        case 'packImportRun': {
+          const ws = this.workspace();
+          try {
+            const r = importPack(ws, m.dir, { host: 'vscode', client: this.host.actor() }, { replace: !!m.replace });
+            this.post({ type: 'packOut', text: (r.decision ? `Proposed ${r.files.length} file(s) as ${r.decision.id}. A person approves it in Decisions; until then they are drafts and never run.` : 'The pack has no platform files, so there is nothing to approve.') + (r.skills.length ? ` ${r.skills.length} skill(s) arrived as unreviewed drafts: a person reviews and publishes them.` : ''), imported: true });
+          } catch (err) {
+            if (err instanceof PackError) { this.post({ type: 'packOut', error: 'Not imported; nothing was written:', problems: err.problems }); return; }
             throw err;
           }
           return;

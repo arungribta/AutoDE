@@ -1,7 +1,7 @@
 # AutoDE — Technical Design Document
 
 **Last Updated:** 2026-11-06
-**Version:** 0.61.1
+**Version:** 0.61.2
 **Scope:** HOW AutoDE is built — architecture, modules, data formats, algorithms and design trade-offs. What AutoDE must do and why: [requirements.md](../requirements.md) and the forward specifications. Order and status: [roadmap.md](../roadmap.md). Release history (moved out of this document on 2026-10-15): [CHANGELOG.md](../../CHANGELOG.md). Document map: [README.md](../README.md).
 
 > Restructured on 2026-10-15: sections 1, 2, 5, 7, 10.1–10.2, 11 and 12 were rewritten against the code at v0.30.0; the others were carried over with paths updated for the v0.26.0 move to `src/engine/`, and some still describe their version's design in narrative form. The historical phase list (old §10) was removed — release history is in CHANGELOG.md. Where this document and the code disagree, the code and the latest CHANGELOG entry win; corrections are tracked in the roadmap.
@@ -1704,6 +1704,11 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - **Proposals** (`proposal.ts`, `proposeService.ts`): `prepareOperationProposal()` parses (object or YAML), requires `reason`, an id, `example.rows`, known platforms, and `checkOperation` with the approved platforms; `resemblingOperations()` scores approved operations (area, shared platforms, shared parameter names, shared names read — `{…}` placeholders and `SQL_WORDS` left out). `proposalFile(id, text)` = `proposed/<id>.<checksum 8>.yaml`. `proposeOperation()` supersedes pending proposals of the same operation (`PlatformFilePayload.operation`) and removes their draft files (never the approved one), writes the file with a header comment, and `propose(…, 'platform_operation', { file, checksum, operation, reason, fixes, resembles })`. `validatePlatformFileProposal` requires `example.rows` for a `/proposed/` file. Applying calls `retireReplaced()`: the team's other files of that id, now drafts, move to `.autode/local/replaced-operations/`. `pendingOperationProposals()` feeds `operationPage().proposals` and `platformPage().health.proposals`; `drift` and `health.drift`/`unreadKinds` come from `driftReport`.
   - **Surfaces:** MCP `autode_propose_platform_operation` (propose tier), `autode_platform_drift` (read); CLI `platform propose-operation <file> --reason [--fixes]` and `platform drift` (both call those handlers); `platform operation` adds drift and proposals. VS Code: `PlatformCatalogHost.resolveDecision` → `SidebarProvider.resolveFromView` (message `resolveDecision`, Reject asks for the note).
   - **Role and skill:** `agents/platform-maintainer.md`; `skills/autode-core-platform-operations` (core, no stage kinds; maintenance work orders give it to the role).
+- **POP5c, packs** (v0.61.2; `src/engine/platform/packs.ts`).
+  - **Format:** a folder with `autode-pack.yaml` (`autode-platform-pack/1`): items (`what`, `id`, `file`, `checksum`), skills (`name`, `dir`, `checksum`), and `reviewed`, the exporter's statement.
+  - **`exportPack`:** collects every reason to refuse before writing: drafts, on trial, rows in a non-metadata operation's example, `secretIn` (known credential shapes), a non-empty folder.
+  - **`inspectPack`:** writes nothing. `readManifest` (paths relative, in their own folder), `checkFolder` (only the manifest's files, no links, caps), then each file's checksum, `secretIn`, `checkPlatform` and `checkOperation` against this workspace's catalog with the pack's platforms added. Sorts items into adds, replaces, same and overridesShipped.
+  - **`importPack`:** inspects again, copies the files in, imports skills through `importSkill` (unreviewed), and files a `platform_bundle`.
 - **POP5b, onboarding** (v0.61.1; `src/engine/platform/onboarding.ts`, `platform-templates/categories.yaml`).
   - **Plan:** `planOnboarding(scope, answers, catalog?)` writes nothing. It returns `steps`, `neededCode` (a transport, sign-in method or compile dialect outside the fixed sets), the definition, `implementations` (an operation the catalog has) and `operations` (whole: starters, or ones only this system has). `status` is `ready`, `incomplete` or `needs-code`. `answersFrom` reads answers back from a platform; `likeAnswers` makes them another system's, without examples.
   - **Implementation files:** `load.ts` `loadImplementations`, after operations: an approved file joins its operation for that platform only (`Loaded.teamImplementations`). Approvals are keyed `operation@platform`.
@@ -2455,7 +2460,7 @@ src/engine/ontology/
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters
-  BaseAdapter.ts, cliStatement.ts, ConnectionManager.ts, connectionReadiness.ts, connectionsConfig.ts, connectionSetup.ts, definitions.ts, dialectMarkers.ts, dialects.ts, driverStore.ts, fileTransport.ts, httpTransport.ts, onboarding.ts, prerequisites.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
+  BaseAdapter.ts, cliStatement.ts, ConnectionManager.ts, connectionReadiness.ts, connectionsConfig.ts, connectionSetup.ts, definitions.ts, dialectMarkers.ts, dialects.ts, driverStore.ts, fileTransport.ts, httpTransport.ts, onboarding.ts, packs.ts, prerequisites.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
 src/engine/platform/adapters/    # Snowflake and Databricks adapters
   DatabricksAdapter.ts, DefinitionAdapter.ts, OracleAdapter.ts, SnowflakeAdapter.ts, snowflakeJwt.ts
 src/engine/platform/credentials/    # credential resolvers and CLI detection

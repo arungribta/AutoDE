@@ -69,7 +69,7 @@
   const send = (m) => vscode.postMessage(m);
   const SUPPORT = { supported: '✓ supported', partly: '◐ partly', not_applicable: '– not applicable', not_declared: '·' };
   const STATUS = { ok: '✓ works', partly: '◐ partly works', failing: '✗ fails', 'not-checked': '· not checked' };
-  const state = { view: 'matrix', tab: 'overview', page: null, matrix: null, live: [], add: null, addCat: '', addId: '' };
+  const state = { view: 'matrix', tab: 'overview', page: null, matrix: null, live: [], add: null, addCat: '', addId: '', pack: null, packName: '' };
   const BADGE = { draft: ['Draft', 'Not approved yet. It never runs until a person approves it.'], trial: ['On trial', 'Approved, but not yet proven on a real connection. Only conformance checks and Try it read from it.'], counted: ['Onboarded', 'Proven on a real connection and reviewed by a person.'] };
   const badge = (s) => s && BADGE[s] ? '<span class="badge ' + esc(s) + '" title="' + esc(BADGE[s][1]) + '">' + esc(BADGE[s][0]) + '</span>' : '';
 
@@ -77,7 +77,7 @@
 
   function matrixHtml(m) {
     if (!m.platforms.length) return '<h1>Platform catalog</h1><p class="empty">No platform definitions are loaded. AutoDE ships Snowflake, Databricks, Redshift and Oracle; a team adds its own in .autode/config/platforms/.</p>';
-    let h = '<h1>Platform catalog</h1><p class="muted">What AutoDE can do on each platform, and what it needs. A cell shows the platform definition\'s answer, and the last conformance run on each of this workspace\'s connections. Choose a platform for its page.</p><p><button class="btn primary" data-add-system>Add a system…</button></p>';
+    let h = '<h1>Platform catalog</h1><p class="muted">What AutoDE can do on each platform, and what it needs. A cell shows the platform definition\'s answer, and the last conformance run on each of this workspace\'s connections. Choose a platform for its page.</p><p><button class="btn primary" data-add-system>Add a system…</button> <button class="btn" type="button" data-pack-export>Export a pack…</button> <button class="btn" type="button" data-pack-import>Import a pack…</button></p>';
     h += '<table role="grid" aria-label="Capability matrix"><thead><tr><th scope="col">Capability</th>' + m.platforms.map((p) => '<th scope="col"><button class="link" data-platform="' + esc(p.id) + '">' + esc(p.title) + '</button>' + badge(p.onboarding) + '<div class="muted">' + esc(p.category) + (p.connected ? ' · ' + p.connections.length + ' connection(s)' : ' · not connected') + '</div></th>').join('') + '</tr></thead><tbody>';
     for (const c of m.capabilities) {
       h += '<tr><th scope="row">' + esc(c) + '</th>' + m.platforms.map((p) => {
@@ -108,6 +108,31 @@
       '<p><button class="btn primary" type="button" data-onb="start">Start</button><button class="btn" type="button" data-onb="check">Check</button><button class="btn" type="button" id="onb-propose" data-onb="propose" disabled>Propose</button></p>' +
       '<p class="muted">Start makes the answers file and opens it. Fill it in and save it. Check shows what is still missing. Propose is available once the check passes.</p></div><div id="onboardOut" aria-live="polite"></div>';
     return h;
+  }
+
+  function packHtml(p) {
+    if (!p) return crumbs('Pack') + '<p class="muted">Loading…</p>';
+    const title = p.mode === 'import' ? 'Import a pack' : 'Export a pack';
+    let h = crumbs(esc(title)) + '<h1>' + esc(title) + '</h1>';
+    if (p.hasWorkspace === false) return h + '<p class="empty">Open a workspace folder first.</p>';
+    if (p.mode === 'export') {
+      h += '<p class="muted">A pack is a folder of your team’s approved platform files and published skills, for another workspace to import. Only what a person approved goes in; drafts, systems still on trial and anything that looks like a credential stop the export.</p>';
+      h += '<div id="packform"><label for="packname">Pack name <input type="text" id="packname" name="name" aria-describedby="packname-h" value="' + esc(state.packName || '') + '"><span class="field-help" id="packname-h">Lower case letters, digits, _ or -. For example: sales_crm.</span></label>';
+      h += '<fieldset><legend>Team platforms to include</legend>' + (p.platforms.length ? p.platforms.map((x, i) => '<label class="check-inline block" for="pk' + i + '"><input type="checkbox" id="pk' + i + '" name="platform" value="' + esc(x.id) + '"> ' + esc(x.title) + ' (' + esc(x.id) + ')' + (x.approved ? '' : ' <span class="field-help">draft: not approved yet, so the export will stop</span>') + '</label>').join('') + '<span class="field-help">None ticked means every approved team file.</span>' : '<p class="empty">There are no team platforms yet. A system you add with Add a system appears here once a person has approved it.</p>') + '</fieldset>';
+      h += '<p><button class="btn primary" type="button" data-pack-run="export">Choose a folder and export…</button></p></div>';
+    } else {
+      const r = p.report;
+      const list = (label, a) => '<tr><th scope="row">' + esc(label) + '</th><td>' + (a.length ? a.map(esc).join(', ') : '<span class="muted">none</span>') + '</td></tr>';
+      h += '<p class="muted">From the folder <code>' + esc(p.dir) + '</code>. Nothing has been written yet. Filing it for approval writes the files as drafts and asks a person to approve them; its skills arrive as unreviewed drafts.</p>';
+      h += '<h2>' + esc(r.name || 'This pack') + (r.from ? ' <span class="muted">from ' + esc(r.from) + '</span>' : '') + '</h2>';
+      h += '<table><tbody>' + list('Adds', r.adds) + list('Replaces', r.replaces) + list('Already here', r.same) + list('Overrides what AutoDE ships', r.overridesShipped) + list('Skills', r.skills) + '</tbody></table>';
+      if (r.reviewed.length) h += '<h3>The exporter says</h3><ul>' + r.reviewed.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul><p class="muted">This is the exporter’s word, not checked here. A person here still approves the import.</p>';
+      if (r.warnings.length) h += '<ul class="findings">' + r.warnings.map((w) => '<li class="warning">' + esc(w) + '</li>').join('') + '</ul>';
+      if (r.problems.length) h += '<div class="notice error"><strong>It cannot be imported as it is:</strong><ul>' + r.problems.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
+      if (r.problems.some((x) => /replace it/i.test(x)) || p.replace) h += '<label class="check-inline" for="packreplace"><input type="checkbox" id="packreplace" data-pack-replace' + (p.replace ? ' checked' : '') + '> Replace approved files <span class="field-help">Replaces files and skills already here. A person must approve the pack before they run again, and a replaced skill is reviewed again.</span></label>';
+      h += '<p>' + (r.ok ? '<button class="btn primary" type="button" data-pack-run="import">File for approval</button> ' : '') + '<button class="btn" type="button" data-pack-import>Choose another folder…</button></p>';
+    }
+    return h + '<div id="packOut" aria-live="polite"></div>';
   }
 
   function planHtml(pl) {
@@ -253,7 +278,7 @@
   }
 
   function render() {
-    root.innerHTML = state.view === 'matrix' ? (state.matrix ? matrixHtml(state.matrix) : '<p class="muted">Loading…</p>') : state.view === 'platform' ? platformHtml(state.page) : state.view === 'operation' ? operationHtml(state.page) : state.view === 'opform' ? opFormHtml(state.page) : state.view === 'add' ? addHtml(state.add) : skillHtml(state.page);
+    root.innerHTML = state.view === 'matrix' ? (state.matrix ? matrixHtml(state.matrix) : '<p class="muted">Loading…</p>') : state.view === 'platform' ? platformHtml(state.page) : state.view === 'operation' ? operationHtml(state.page) : state.view === 'opform' ? opFormHtml(state.page) : state.view === 'add' ? addHtml(state.add) : state.view === 'pack' ? packHtml(state.pack) : skillHtml(state.page);
     const h1 = root.querySelector('h1'); if (h1) h1.setAttribute('tabindex', '-1');
   }
 
@@ -267,6 +292,18 @@
     const t = e.target.closest('button'); if (!t) return;
     const d = t.dataset;
     if (t.hasAttribute('data-add-system')) { state.view = 'add'; state.add = null; send({ type: 'addSystem' }); render(); }
+    else if (t.hasAttribute('data-pack-export')) { state.view = 'pack'; state.pack = null; send({ type: 'packExport' }); render(); }
+    else if (t.hasAttribute('data-pack-import')) send({ type: 'packImport' });
+    else if (d.packRun === 'export') {
+      const f = document.getElementById('packform'); state.packName = f.querySelector('[name=name]').value.trim();
+      document.getElementById('packOut').innerHTML = '<p class="muted">Working…</p>';
+      send({ type: 'packExportRun', name: state.packName, platforms: [...f.querySelectorAll('[name=platform]:checked')].map((x) => x.value) });
+    }
+    else if (d.packRun === 'import') {
+      const box = document.getElementById('packreplace');
+      document.getElementById('packOut').innerHTML = '<p class="muted">Working…</p>';
+      send({ type: 'packImportRun', dir: state.pack.dir, replace: !!(box && box.checked) });
+    }
     else if (d.onb) {
       const f = document.getElementById('addsys'); const cat = f.querySelector('[name=category]:checked'); const id = f.querySelector('[name=id]').value.trim();
       state.addCat = cat ? cat.value : ''; state.addId = id;
@@ -296,6 +333,9 @@
     else if (t.hasAttribute('data-preview')) { const v = formValues(); send({ type: 'preview', operation: state.page.id, platform: v.platform, params: v.params }); }
     else if (t.hasAttribute('data-try')) { const v = formValues(); document.getElementById('tryOut').innerHTML = '<p class="muted">Running…</p>'; send({ type: 'try', operation: state.page.id, connection: v.connection, params: v.params }); }
   });
+  root.addEventListener('change', (e) => {
+    if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-pack-replace') && state.pack) send({ type: 'packImportCheck', dir: state.pack.dir, replace: e.target.checked });
+  });
   root.addEventListener('keydown', (e) => {
     const tab = e.target.closest && e.target.closest('[role=tablist].tabs [role=tab]');
     if (!tab || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return;
@@ -317,6 +357,12 @@
     else if (m.type === 'platform') { state.view = 'platform'; state.page = m.page; state.live = m.live || []; render(); }
     else if (m.type === 'operation') { state.view = 'operation'; state.page = m.page; state.live = m.live || []; const out = document.getElementById('tryOut'); const keep = out ? out.innerHTML : ''; render(); if (keep) document.getElementById('tryOut').innerHTML = keep; }
     else if (m.type === 'addSystem') { state.view = 'add'; state.add = m; render(); const h = root.querySelector('h1'); if (h) h.focus(); }
+    else if (m.type === 'packExport') { state.view = 'pack'; state.pack = { mode: 'export', hasWorkspace: m.hasWorkspace, platforms: m.platforms }; render(); const h = root.querySelector('h1'); if (h) h.focus(); }
+    else if (m.type === 'packImport') { const first = state.view !== 'pack' || !state.pack || state.pack.dir !== m.dir; state.view = 'pack'; state.pack = { mode: 'import', dir: m.dir, replace: m.replace, report: m.report }; render(); if (first) { const h = root.querySelector('h1'); if (h) h.focus(); } else { const b = document.getElementById('packreplace'); if (b) b.focus(); } }
+    else if (m.type === 'packOut') {
+      const out = document.getElementById('packOut'); if (!out) return;
+      out.innerHTML = (m.error ? '<div class="notice error">' + esc(m.error) + (m.problems ? '<ul>' + m.problems.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>' : '') + (m.text ? '<div class="notice">' + esc(m.text) + '</div>' : '');
+    }
     else if (m.type === 'onboardingOut') {
       const out = document.getElementById('onboardOut'); if (!out) return;
       out.innerHTML = (m.error ? '<div class="notice error">' + esc(m.error) + '</div>' : '') + (m.text ? '<div class="notice">' + esc(m.text) + '</div>' : '') + (m.plan ? planHtml(m.plan) : '') + (m.proposed ? '<p>Decision <strong>' + esc(m.proposed) + '</strong>. A person approves it in Decisions.</p>' : '');

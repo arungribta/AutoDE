@@ -66,6 +66,7 @@ import { EngineTool, SQL_DIALECTS, TOOLS } from '../mcp/tools';
 import { EngineToolError, redact, toEnvelope } from '../mcp/errors';
 import { PlatformSession } from '../mcp/platform';
 import { findResourcesRoot, main as mcpMain, readVersion } from '../mcp/server';
+import { PackError, PackReport, exportPack as exportPlatformPack, importPack as importPlatformPack, inspectPack as inspectPlatformPack } from '../engine/platform/packs';
 import { Decision, DecisionError, DecisionStatus, DecisionStore, stakesFor } from '../engine/decisions/decisionStore';
 import { ProposalValidationError, applyDecision, approvalBlockers, propose } from '../engine/decisions/proposals';
 import { journeyContext, journeyFor, journeyLines } from '../engine/workflows/journey';
@@ -313,6 +314,9 @@ Platform operations (POP1: every interaction with a platform, as a reviewed file
   platform onboard propose <answers.yaml>   Propose the new system (files, skills and one decision) for a person's approval
   platform onboard status <id>   Where the system is (draft, trial, counted), its last conformance run, whether its CLI is found, and the next step
   platform onboard review <id>   File the review of its latest conformance run for a person's approval
+  platform pack export <out> --name <name> [--platform <id>[,<id>…]]   Write the team's approved platform files and published skills to a new folder (since 0.61.2)
+  platform pack inspect <dir> [--replace]   What importing a pack would add, replace and override, and any problem; writes nothing
+  platform pack import <dir> [--replace]   Write a pack's files as drafts and propose them in one decision for a person's approval; its skills arrive unreviewed
   platform request-access --connection <c> [--role r] [--capability a,b] [--database d] [--schema s]…   Draft a runbook granting AutoDE's role what its capabilities need (proposed when a problem is active)
 
 Lineage (LIN):
@@ -433,6 +437,7 @@ const OPTIONS = {
   note: { type: 'string' },
   by: { type: 'string' },
   platform: { type: 'string' },
+  name: { type: 'string' },
   role: { type: 'string' },
   resolver: { type: 'string' },
   ref: { type: 'string' },
@@ -2414,6 +2419,45 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       }
       throw new CliError(EXIT.USAGE, 'platform onboard takes check, propose, status or review.');
     }
+    if (sub === 'pack') {
+      const [, what, dir] = rest;
+      if ((what !== 'export' && what !== 'inspect' && what !== 'import') || !dir || rest.length > 3) throw new CliError(EXIT.USAGE, 'platform pack export <out> --name <name> [--platform <id>[,<id>…]] | inspect <dir> [--replace] | import <dir> [--replace].');
+      const scope = { resourcesRoot: ctx.resourcesRoot, workspaceRoot: ctx.workspaceRoot };
+      const full = path.resolve(ctx.io.cwd, dir);
+      const refuse = (problems: string[], head: string) => { emit(ctx, { ok: false, problems }, [head, ...problems.map((p) => `  ${p}`)].join('\n')); return EXIT.REFUSED; };
+      const show = (r: PackReport) => [
+        `Pack ${r.name ?? '(unreadable)'}${r.from ? ` from ${r.from}` : ''}`,
+        `  adds: ${r.adds.join(', ') || 'none'}`, `  replaces: ${r.replaces.join(', ') || 'none'}`, `  same: ${r.same.join(', ') || 'none'}`,
+        `  overrides what AutoDE ships: ${r.overridesShipped.join(', ') || 'none'}`, `  skills: ${r.skills.join(', ') || 'none'}`,
+        ...(r.reviewed.length ? ['  The exporter says (not checked here):', ...r.reviewed.map((x) => `    ${x}`)] : []),
+        ...r.warnings.map((w) => `  ! ${w}`), ...r.problems.map((p) => `  ✗ ${p}`)
+      ];
+      if (what === 'export') {
+        if (!ctx.values.name) throw new CliError(EXIT.USAGE, 'platform pack export <out> --name <name> [--platform <id>[,<id>…]].');
+        const platforms = (ctx.values.platform ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+        try {
+          const r = exportPlatformPack(scope, { out: full, name: ctx.values.name, ...(platforms.length ? { platforms } : {}), by: actorOf(ctx), autode: ctx.version });
+          emit(ctx, { ok: true, out: r.out, manifest: r.manifest }, `✓ Wrote pack ${r.manifest.name} to ${r.out}: ${r.manifest.items.length} file(s), ${r.manifest.skills.length} skill(s). Whoever imports it checks it first and a person approves the import.`);
+          return EXIT.OK;
+        } catch (err) { if (err instanceof PackError) return refuse(err.problems, '✗ Not exported:'); throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+      }
+      if (!fs.existsSync(full)) throw new CliError(EXIT.NOT_FOUND, `No folder "${full}".`);
+      if (what === 'inspect') {
+        let r: PackReport;
+        try { r = inspectPlatformPack(scope, full, { replace: ctx.values.replace === true }); } catch (err) { throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+        emit(ctx, { ...r }, [...show(r), '', r.ok ? 'It can be imported: autode platform pack import <dir>.' : 'It cannot be imported as it is.'].join('\n'));
+        return r.ok ? EXIT.OK : EXIT.REFUSED;
+      }
+      try {
+        const r = importPlatformPack({ ...scope, resourcesRoot: ctx.resourcesRoot }, full, { host: 'cli', client: actorOf(ctx) }, { replace: ctx.values.replace === true });
+        emit(ctx, { ok: true, decision: r.decision ?? null, files: r.files, skills: r.skills, report: r.report }, [
+          ...show(r.report), '',
+          r.decision ? `✓ Proposed ${r.files.length} file(s) as ${r.decision.id}. A person approves it: autode decisions approve ${r.decision.id} (or the panel). Until then they are drafts and never run.` : '✓ The pack has no platform files, so there is nothing to approve.',
+          ...(r.skills.length ? [`${r.skills.length} skill(s) arrived as unreviewed drafts: ${r.skills.join(', ')}. A person reviews and publishes them.`] : [])
+        ].join('\n'));
+        return EXIT.OK;
+      } catch (err) { if (err instanceof PackError) return refuse(err.problems, '✗ Not imported, nothing was written:'); throw new CliError(EXIT.FAILED, err instanceof Error ? err.message : String(err)); }
+    }
     if (sub === 'drift') {
       const r = await tool('autode_platform_drift').handler({ ...(ctx.values.platform ? { platform: ctx.values.platform } : {}) }, ws) as { operations: Array<{ operation: string; connection: string; platform: string; version?: string; kind: string; error: string; skills: Array<{ id: string; owner?: string }> }>; kinds: Array<{ platform: string; kind: string; count: number; connections: string[] }> };
       const lines = [
@@ -2433,7 +2477,7 @@ async function cmdPlatform(ctx: Ctx, rest: string[]): Promise<number> {
       emit(ctx, { ok: true, ...r }, [rb.title, ...rb.steps.map((s) => `  ${s.title}\n    ${s.sql ?? ''}`), ...((r.warnings as string[]) ?? []).map((w) => `! ${w}`), r.proposed ? `Proposed as ${(r.decision as { id: string }).id}. ${String(r.next)}` : String(r.next)].join('\n'));
       return EXIT.OK;
     }
-    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, propose <file>, template [<category>], onboard check|propose|status|review, or request-access --connection <c>.');
+    throw new CliError(EXIT.USAGE, 'platform takes operations, show <id>, run <id> --connection <c>, customise <id>, propose <file>, template [<category>], onboard check|propose|status|review, pack export|inspect|import, or request-access --connection <c>.');
   } finally { session.dispose(); }
 }
 

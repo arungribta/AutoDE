@@ -1580,6 +1580,20 @@ You need a REST API you may read, as in Part 72, this time added through the tem
   Do: `autode platform template --like redshift --id acme_wh > a.yaml`; `autode platform onboard check a.yaml`.
   Expect: every operation is listed as needing a recorded example of its own: Redshift's are not carried over.
 
+## Part 74 — v0.61.2 POP5c: packs
+
+Use the system onboarded in Part 73, and a second, empty workspace.
+
+- [ ] **74.1 Export, and what it refuses.**
+  Do: Platform catalog → *Export a pack…*. Then give an operation that reads rows a recorded example with rows, approve it, and export again.
+  Expect: a folder with `autode-pack.yaml`, and no connection in it; the second export is refused and names the file, and nothing is written.
+- [ ] **74.2 Import with one review.**
+  Do: in the second workspace, *Import a pack…*; read the report; file it; approve the one decision in Decisions.
+  Expect: nothing runs before approval; afterwards the Platform catalog shows the same system, and its skills are drafts to review.
+- [ ] **74.3 A tampered pack and an approved file.**
+  Do: edit one file in the pack and import it. Restore it, change that file in the second workspace, approve it there, and import again.
+  Expect: the first says the file changed after export; the second is refused until *Replace approved files* is chosen, and the replaced file is a draft until approved.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1982,5 +1996,8 @@ You need a REST API you may read, as in Part 72, this time added through the tem
 | 73.3 |  |  |
 | 73.4 |  |  |
 | 73.5 |  |  |
+| 74.1 |  |  |
+| 74.2 |  |  |
+| 74.3 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

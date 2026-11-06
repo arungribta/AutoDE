@@ -21,6 +21,8 @@ import { OnboardingAnswers, OnboardingError, likeAnswers, loadTemplates, onboard
 import { getCliDescriptor } from '../engine/platform/credentials/cliRegistry';
 import { DefinitionCli } from '../engine/platform/credentials/DefinitionCli';
 import { DataPlatformProvider } from '../engine/types';
+import { PackError, exportPack, importPack, inspectPack } from '../engine/platform/packs';
+import { readVersion } from './server';
 
 /**
  * Platform operations over MCP (POP1; docs/specs/platform-operations.md §4):
@@ -67,6 +69,20 @@ async function cliSetup(scope: { resourcesRoot?: string; workspaceRoot: string }
 
 const maintainer = { host: 'mcp', client: 'platform-maintainer' } as const;
 const failure = (err: unknown) => new EngineToolError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err));
+
+/** An agent reads and writes packs only inside the workspace: a folder outside it is refused. */
+function insideWorkspace(ws: EngineWorkspace, dir: string, what: string): string {
+  const root = fs.realpathSync(path.resolve(ws.options.workspaceRoot));
+  const full = path.resolve(root, dir);
+  // A link is followed before the check: the nearest folder that exists decides where the path really is.
+  let existing = full;
+  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
+  const rel = path.relative(root, path.join(fs.realpathSync(existing), path.relative(existing, full)));
+  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) throw new EngineToolError('VALIDATION_FAILED', `${what} must be a folder inside the workspace (${root}); ${dir} is outside it.`);
+  return full;
+}
+
+const packFailure = (err: unknown) => err instanceof PackError ? new EngineToolError('VALIDATION_FAILED', err.message, { problems: err.problems }) : err instanceof EngineToolError ? err : failure(err);
 
 export function platformOperationTools(session: PlatformSession): EngineTool[] {
   return [
@@ -149,6 +165,56 @@ export function platformOperationTools(session: PlatformSession): EngineTool[] {
           if (err instanceof EngineToolError) throw err;
           throw failure(err);
         }
+      }
+    },
+    {
+      name: 'autode_platform_pack_inspect',
+      description: "Check a platform pack folder (a team's approved platform files and published skills, exported by another workspace) without writing anything. The report: what it adds, replaces, leaves the same, what it would override of what AutoDE ships, its skills, the exporter's statement about conformance reviews (the exporter's word, not a fact here), warnings and problems. ok is true only when nothing blocks the import. The folder must be inside the workspace.",
+      inputSchema: { type: 'object', required: ['dir'], additionalProperties: false, properties: {
+        dir: { type: 'string', minLength: 1, description: 'The pack folder, inside the workspace.' },
+        replace: { type: 'boolean', description: 'Allow replacing approved files and skills already here (a person is asked to approve either way).' }
+      } },
+      annotations: read('Inspect a platform pack'),
+      handler: async (args, ws: EngineWorkspace) => {
+        const dir = insideWorkspace(ws, String(args.dir), 'dir');
+        try { return inspectPack({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, dir, { replace: args.replace === true }) as unknown as Record<string, unknown>; }
+        catch (err) { throw packFailure(err); }
+      }
+    },
+    {
+      name: 'autode_platform_pack_export',
+      description: "Export the team's approved platform files (platform definitions, operations, implementations) and published skills into a new, empty pack folder so another workspace can import them. Only what a person approved goes in: drafts, systems still on trial, recorded examples that hold rows of data and anything that looks like a credential refuse the export, with every reason listed. With platforms, only those team platforms and their skills. The folder (out) must be inside the workspace.",
+      inputSchema: { type: 'object', required: ['name', 'out'], additionalProperties: false, properties: {
+        name: { type: 'string', minLength: 1, description: 'The pack name: lower-case letters, digits, _ or -.' },
+        out: { type: 'string', minLength: 1, description: 'A new or empty folder inside the workspace.' },
+        platforms: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Team platform ids to export; default all.' }
+      } },
+      annotations: { title: 'Export a platform pack', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws: EngineWorkspace) => {
+        const out = insideWorkspace(ws, String(args.out), 'out');
+        try {
+          const r = exportPack({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, { out, name: String(args.name), ...(Array.isArray(args.platforms) && args.platforms.length ? { platforms: args.platforms.map(String) } : {}), by: maintainer.client, autode: readVersion(ws.options.resourcesRoot) });
+          return { out: path.relative(ws.options.workspaceRoot, r.out).split(path.sep).join('/'), manifest: r.manifest, next: 'The pack is written. Share the folder; whoever imports it checks it first and a person approves the import.' } as unknown as Record<string, unknown>;
+        } catch (err) { throw packFailure(err); }
+      }
+    },
+    {
+      name: 'autode_platform_pack_import',
+      description: "Import a platform pack folder: its files are written as drafts and one decision is filed to approve them all; its skills arrive as unreviewed drafts. A person approves the decision (never you); until then nothing runs. Refused, with every problem listed, when the pack was changed after export, holds a credential, or would replace an approved file or skill without replace. The folder must be inside the workspace. Check it first with autode_platform_pack_inspect.",
+      inputSchema: { type: 'object', required: ['dir'], additionalProperties: false, properties: {
+        dir: { type: 'string', minLength: 1, description: 'The pack folder, inside the workspace.' },
+        replace: { type: 'boolean', description: 'Replace approved files and skills already here; only when the user asked for it.' }
+      } },
+      annotations: { title: 'Import a platform pack', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      handler: async (args, ws: EngineWorkspace) => {
+        const dir = insideWorkspace(ws, String(args.dir), 'dir');
+        try {
+          const r = importPack({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, dir, maintainer, { replace: args.replace === true });
+          const next = r.decision
+            ? `A person approves ${r.decision.id} (autode decisions approve ${r.decision.id}, or the panel); you cannot. Tell the user it waits for them. The ${r.skills.length} skill(s) arrive as unreviewed drafts: a person reviews and publishes them separately.`
+            : `Nothing to approve: the pack has no platform files. Its ${r.skills.length} skill(s) arrived as unreviewed drafts; a person reviews and publishes them.`;
+          return { decision: r.decision ? { id: r.decision.id, title: r.decision.title } : null, files: r.files, skills: r.skills, report: r.report, next } as unknown as Record<string, unknown>;
+        } catch (err) { throw packFailure(err); }
       }
     },
     {

@@ -40,3 +40,12 @@ A system is added with files, not code: a definition, its operations and impleme
 3. `autode_propose_conformance_review` files the run for review. **A person reviews and approves it**; then the system counts and stages can use it.
 
 If a run shows an operation failing, fix that implementation and propose it again; do not edit around the check.
+
+## 5. Sharing a system as a pack
+
+A pack is a folder of a team's approved platform files and published skills, so another workspace can have the same system without redoing the onboarding.
+
+- **Export only what is approved.** `autode_platform_pack_export` refuses drafts, systems still on trial, recorded examples that hold rows of data and anything that looks like a credential; fix what it lists, have a person approve again, then export. Do not work around a refusal.
+- **Stay inside the workspace.** As an agent you read and write packs only in folders inside the workspace; a folder outside it is refused. If the user's pack is elsewhere, ask them to copy it into the workspace.
+- **Check before importing.** `autode_platform_pack_inspect` shows what the pack adds, replaces and overrides of what AutoDE ships, and every problem. `reviewed` is the exporter's word about a conformance review, not a fact here: say so.
+- **A person approves the import.** `autode_platform_pack_import` writes the files as drafts and files one decision; you cannot approve it. Its skills arrive as unreviewed drafts that a person reviews and publishes. Use `replace` only when the user asked to replace approved files or skills here.

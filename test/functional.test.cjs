@@ -5886,8 +5886,8 @@ async function main() {
       assert.deepStrictEqual([info.name, info.title, info.version], ['autode', 'AutoDE', pkg.version]);
       assert.ok(/^data:image\/png;base64,/.test(info.icons[0].src) && info.icons[0].sizes[0] === '64x64', 'the icon is embedded, not fetched');
       const tools = (await client.listTools()).tools;
-      const readTools = ['autode_quality_candidates', 'autode_policies', 'autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_ontology_standards', 'autode_ontology_browse', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_platform_template', 'autode_platform_onboarding_status', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
-      const proposalTools = ['autode_propose_quality_rules', 'autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_standard', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_platform_onboard', 'autode_propose_conformance_review', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
+      const readTools = ['autode_quality_candidates', 'autode_policies', 'autode_ontology', 'autode_get_concept_context', 'autode_ontology_analyze', 'autode_ontology_align', 'autode_ontology_standards', 'autode_ontology_browse', 'autode_work_order', 'autode_maintenance_list', 'autode_maintenance_next', 'autode_search_articles', 'autode_browse_assets', 'autode_search_assets', 'autode_get_asset_context', 'autode_explore_graph', 'autode_lineage', 'autode_impact', 'autode_platform_operations', 'autode_platform_run', 'autode_platform_catalog', 'autode_platform_conformance', 'autode_platform_drift', 'autode_platform_template', 'autode_platform_onboarding_status', 'autode_platform_pack_inspect', 'autode_find_source_files', 'autode_search_primitives', 'autode_describe_primitive', 'autode_validate_transform', 'autode_compile_transform', 'autode_validate_pipeline_spec', 'autode_compile_pipeline_spec', 'autode_generate_design_doc', 'autode_resolve', 'autode_get_context_pack', 'autode_list_assertions', 'autode_check_grounding', 'autode_list_connections', 'autode_test_connection', 'autode_list_databases', 'autode_list_schemas', 'autode_extract_metadata', 'autode_explain_sql', 'autode_execute_query', 'autode_list_decisions', 'autode_get_decision', 'autode_list_problems', 'autode_pack_list', 'autode_check_conformance', 'autode_mine_vocabulary', 'autode_workflow_templates', 'autode_workflow_draft', 'autode_interview_state', 'autode_pack_reading', 'autode_workflow_status', 'autode_coverage', 'autode_planning_questions', 'autode_workflow_next', 'autode_workflow_history', 'autode_match_columns', 'autode_reconcile_plan', 'autode_draft_model', 'autode_check_model', 'autode_primitive_candidates', 'autode_skills_list', 'autode_skill_check', 'autode_plugin_status', 'autode_skills_analyze', 'autode_governance_candidates', 'autode_runbook_status', 'autode_approvals_list', 'autode_review_session', 'autode_capture_coverage', 'autode_semantic_list', 'autode_semantic_check', 'autode_semantic_draft'];
+      const proposalTools = ['autode_propose_quality_rules', 'autode_propose_ontology_pack', 'autode_propose_concept_links', 'autode_propose_standard', 'autode_propose_article', 'autode_propose_assertion', 'autode_propose_spec_change', 'autode_propose_pipeline_spec', 'autode_propose_connection', 'autode_platform_onboard', 'autode_platform_pack_export', 'autode_platform_pack_import', 'autode_propose_conformance_review', 'autode_propose_vocabulary', 'autode_propose_runbook', 'autode_propose_semantic_model'];
       assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...readTools, ...proposalTools, 'autode_start_problem', 'autode_select_problem', 'autode_interview_record_answer', 'autode_refresh_working_set', 'autode_ingest_file', 'autode_ingest_metadata', 'autode_pack_add', 'autode_pack_apply', 'autode_pack_record_reading', 'autode_propose_workflow', 'autode_place_coverage', 'autode_propose_coverage', 'autode_skill_customise', 'autode_platform_request_access', 'autode_propose_platform_operation', 'autode_ask_planning_questions', 'autode_record_planning_answer', 'autode_report_coverage_change', 'autode_record_artifact', 'autode_record_mapping', 'autode_record_source_context', 'autode_record_target_context', 'autode_record_pipeline_spec', 'autode_workflow_start_stage', 'autode_workflow_complete_stage', 'autode_workflow_skip_stage', 'autode_workflow_reopen_stage', 'autode_verify_assertion', 'autode_resolve_decision', 'autode_review_assertion', 'autode_record_assumption', 'autode_find_candidates', 'autode_semantic_resolve', 'autode_maintenance_scan', 'autode_dismiss_turns', 'autode_record_observed_lineage', 'autode_refresh_lineage'].sort());
       // PA1/C4b: reads are read-only; proposals and verification only record (a pending decision, a proposed fact, a probe result); resolving, reviewing and applying are destructive (the host asks first).
       for (const t of tools) {
@@ -5988,6 +5988,9 @@ async function main() {
       autode_platform_drift: [{ platform: 'snowflake' }, { platform: '' }],
       autode_platform_template: [{ category: 'database' }, { category: '' }],
       autode_platform_onboarding_status: [{ platform: 'acme' }, {}],
+      autode_platform_pack_inspect: [{ dir: 'packs/acme' }, { dir: '' }],
+      autode_platform_pack_export: [{ name: 'acme-catalog', out: 'packs/acme', platforms: ['acme_catalog'] }, { out: 'packs/acme' }],
+      autode_platform_pack_import: [{ dir: 'packs/acme' }, { dir: '' }],
       autode_platform_onboard: [{ answers: {}, action: 'check' }, { answers: {}, action: 'maybe' }],
       autode_propose_conformance_review: [{ platform: 'acme' }, {}],
       autode_ontology: [{}, { x: 1 }],
@@ -15576,6 +15579,478 @@ async function main() {
     const page = nodeFs.readFileSync(nodePath.join(root, 'media', 'platforms.html'), 'utf8');
     assert.ok(/<button class="btn primary" data-add-system>Add a system…<\/button>/.test(page), 'the Add a system button');
     assert.ok(/<fieldset><legend>1\. What kind of system is it\?<\/legend>/.test(page), 'the category fieldset and legend');
+  });
+
+  // ── POP5c (v0.61.2): packs ──
+  const pop5c = (() => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+    const root = nodePath.join(__dirname, '..');
+    const K = require('../dist/engine/platform/packs.js');
+    const Y = require('../dist/engine/context/Yaml.js');
+    const LY = require('../dist/engine/workspaceLayout.js');
+    const SK = require('../dist/engine/skills/lifecycle.js');
+    const PT = require('../dist/engine/skills/port.js');
+    const L = pop5b.L; const S = pop5b.S; const V = pop5b.V; const ON = pop5b.ON; const DS = pop5b.DS;
+    const proposer = pop5b.proposer; const approve = pop5b.approve; const target = pop5b.target; const filesUnder = pop5b.filesUnder;
+    const scopeOf = (w) => ({ resourcesRoot: root, workspaceRoot: w });
+    const read = (f) => nodeFs.readFileSync(f, 'utf8');
+    const write = (f, t) => { nodeFs.mkdirSync(nodePath.dirname(f), { recursive: true }); nodeFs.writeFileSync(f, t); };
+    /** Temp folders made by one test; removed by done() in its finally. */
+    const dirsOf = () => {
+      const dirs = [];
+      return {
+        mk: (label) => { const d = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), `autode-pop5c-${label}-`)); dirs.push(d); return d; },
+        done: () => { for (const d of dirs) nodeFs.rmSync(d, { recursive: true, force: true }); }
+      };
+    };
+    const layoutOf = { platforms: 'platformDefinitions', operations: 'platformOperations', implementations: 'platformImplementations' };
+    /** Where a pack item lands in a workspace. */
+    const fileFor = (w, item) => LY.layoutPath(w, layoutOf[item.what], nodePath.posix.basename(item.file));
+    const skillState = (w, name) => SK.loadToolSkillStates(PT.toolSkillsDir(w), 'autode', { migrate: false }).find((s) => s.skill.name === name);
+    /** The team's read is a metadata operation (a business glossary), written whole, with made-up example rows: the only rows a pack may carry. */
+    const shareable = () => {
+      const a = pop5b.answers();
+      const impl = a.implementations['knowledge.list_terms'];
+      a.operations = [{
+        formatVersion: 1, id: 'knowledge.list_terms', title: 'List business terms', description: 'Lists the business terms of Acme Catalog.', kind: 'read', content: 'metadata', area: 'knowledge',
+        params: [], returns: [{ name: 'name' }, { name: 'definition' }, { name: 'domain' }, { name: 'owner' }],
+        platforms: { acme_catalog: impl.implementation }, example: { platform: 'acme_catalog', params: {}, rows: impl.example.rows }
+      }];
+      return a;
+    };
+    /** A team system made as a team author would: its files come from the onboarding plan (the plan writes nothing), each approved at its content, and its setup skill published. It has no onboarding record, so it is not on trial. */
+    const buildTeam = (w) => {
+      const scope = scopeOf(w);
+      const plan = ON.planOnboarding(scope, shareable());
+      assert.strictEqual(plan.status, 'ready', JSON.stringify(plan.steps.filter((s) => s.state !== 'done')));
+      const id = plan.definition.id;
+      const at = new Date().toISOString();
+      const put = (what, key, dirKey, file, value) => { const text = Y.stringifyYaml(value); write(LY.layoutPath(w, dirKey, file), text); L.writeApproval(w, what, key, { checksum: L.checksumOf(text), by: 'priya', at }); };
+      put('platforms', id, 'platformDefinitions', `${id}.yaml`, plan.definition);
+      for (const o of plan.operations) put('operations', o.id, 'platformOperations', `${o.id}.yaml`, o);
+      for (const f of plan.implementations) put('implementations', `${f.implements}@${id}`, 'platformImplementations', `${f.implements}.${id}.yaml`, f);
+      for (const s of plan.skills) {
+        const dir = nodePath.join(PT.toolSkillsDir(w), s.name);
+        write(nodePath.join(dir, 'SKILL.md'), `---\n${Y.stringifyYaml({ name: s.name, description: s.description }).trimEnd()}\n---\n${s.body.trimEnd()}\n`);
+        SK.recordImport(dir, { source: 'local', location: 'a team author' }, 'priya', { managementEnabled: true });
+        SK.publishToolSkill(dir, 'priya');
+      }
+      return scope;
+    };
+    /** The same system through onboarding: a person approves the bundle, so it has an onboarding record (on trial until its conformance is reviewed). */
+    const buildOnboarded = async (w) => {
+      const scope = scopeOf(w);
+      const { decision } = ON.proposeOnboarding(scope, shareable(), proposer);
+      const r = await approve(w, decision.id);
+      assert.ok(r.applied, r.message);
+      SK.publishToolSkill(nodePath.join(PT.toolSkillsDir(w), 'acme-catalog-setup'), 'priya');
+      return scope;
+    };
+    /** A person's edit to an approved file: the new content is approved at its checksum, as a person would approve it. */
+    const editApproved = (w, what, id, file, change) => {
+      const text = change(read(file));
+      write(file, text);
+      L.writeApproval(w, what, id, { checksum: L.checksumOf(text), by: 'priya', at: new Date().toISOString() });
+    };
+    const editManifest = (dir, change) => {
+      const m = Y.parseYaml(read(nodePath.join(dir, K.PACK_MANIFEST)));
+      change(m);
+      write(nodePath.join(dir, K.PACK_MANIFEST), Y.stringifyYaml(m));
+    };
+    const cloneDir = (from, to) => nodeFs.cpSync(from, to, { recursive: true });
+    /** Every file of a folder with its text, for a before-and-after comparison. */
+    const snapshot = (dir) => Object.fromEntries(filesUnder(dir).map((f) => [f, read(nodePath.join(dir, f))]));
+    return { nodeFs, nodePath, os, root, K, Y, LY, SK, PT, L, S, V, ON, DS, proposer, approve, target, filesUnder, scopeOf, read, write, dirsOf, fileFor, skillState, shareable, buildTeam, buildOnboarded, editApproved, editManifest, cloneDir, snapshot };
+  })();
+
+  await test('POP5c: shareable: a pack from one workspace imports into an empty one; nothing runs before a person approves; after approval the catalogs, matrices and summaries agree, files keep their checksums, the skill is an unreviewed draft, and exporting from the copy gives the same items', async () => {
+    const { nodeFs, nodePath, L, S, V, K, approve, proposer, buildTeam, scopeOf, read, fileFor, skillState, dirsOf } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const a = mk('a'); const b = mk('b'); const out = nodePath.join(mk('pack'), 'acme');
+      const scopeA = await buildTeam(a);
+      const exported = K.exportPack(scopeA, { out, name: 'acme-catalog', platforms: ['acme_catalog'], by: 'arun', now: new Date('2026-11-01T10:00:00Z') });
+      assert.ok(nodeFs.existsSync(nodePath.join(out, K.PACK_MANIFEST)), 'the manifest is written');
+      const scopeB = scopeOf(b);
+      const imported = K.importPack(scopeB, out, proposer);
+      assert.ok(imported.report.ok && imported.decision, JSON.stringify(imported.report));
+      // Before approval: the team files are drafts and nothing runs.
+      const drafts = L.loadCatalog(scopeB);
+      assert.strictEqual(drafts.platforms.find((p) => p.item.id === 'acme_catalog').status, 'draft', 'the platform is a draft');
+      assert.strictEqual(drafts.operations.find((o) => o.item.id === 'knowledge.list_terms').status, 'draft', 'the operation is a draft');
+      assert.strictEqual(drafts.implementations.find((i) => i.item.id === 'platform.version@acme_catalog').status, 'draft', 'the implementation is a draft');
+      assert.strictEqual(L.platformById(drafts, 'acme_catalog'), undefined, 'a draft platform does not run');
+      assert.strictEqual(drafts.operations.find((o) => o.item.id === 'platform.version').item.platforms.acme_catalog, undefined, 'the shipped operation has no team statement yet');
+      assert.strictEqual(skillState(b, 'acme-catalog-setup').sidecar.status, 'draft', 'the skill is a draft before approval');
+      const approved = await approve(b, imported.decision.id);
+      assert.ok(approved.applied, approved.message);
+      // Files keep their checksums: the manifest, the copy in B, and the original in A.
+      for (const item of exported.manifest.items) {
+        assert.strictEqual(L.checksumOf(read(fileFor(b, item))), item.checksum, `${item.what} ${item.id} keeps its checksum in B`);
+        assert.strictEqual(L.checksumOf(read(fileFor(a, item))), item.checksum, `${item.what} ${item.id} is the same file in A`);
+      }
+      const sk = skillState(b, 'acme-catalog-setup');
+      assert.strictEqual(sk.sidecar.status, 'draft', 'the skill arrives as a draft');
+      assert.strictEqual(sk.effectiveTier, 'unreviewed', 'and unreviewed');
+      assert.strictEqual(sk.checksum, exported.manifest.skills[0].checksum, 'the skill files keep their checksum');
+      // Same matrix: platforms and cells, exactly.
+      const ma = V.capabilityMatrix(scopeA); const mb = V.capabilityMatrix(scopeB);
+      assert.deepStrictEqual(mb.capabilities, ma.capabilities);
+      assert.ok(ma.platforms.some((p) => p.id === 'acme_catalog'), 'A has the system in its matrix');
+      assert.deepStrictEqual(mb.platforms, ma.platforms, 'platforms match');
+      assert.deepStrictEqual(mb.cells, ma.cells, 'cells match');
+      const sa = S.summarize(L.loadCatalog(scopeA)).map(({ file, ...r }) => r);
+      const sb = S.summarize(L.loadCatalog(scopeB)).map(({ file, ...r }) => r);
+      assert.deepStrictEqual(sb, sa, 'summaries match apart from the file');
+      // Exporting from the copy gives the same item checksums.
+      const again = K.exportPack(scopeB, { out: nodePath.join(mk('pack2'), 'acme'), name: 'acme-catalog', platforms: ['acme_catalog'], by: 'arun', now: new Date('2026-11-01T10:00:00Z') });
+      const sums = (m) => m.items.map((i) => [i.what, i.id, i.checksum]);
+      assert.deepStrictEqual(sums(again.manifest), sums(exported.manifest), 'the same item checksums come back out');
+    } finally { done(); }
+  });
+
+  await test('POP5c: export refuses with every reason at once and writes nothing: a draft, a platform on trial, rows of data in an operation and in an implementation, a credential in three files, a non-empty out folder, a shipped platform asked for', async () => {
+    const { nodeFs, nodePath, ON, L, K, LY, Y, scopeOf, read, write, approve, proposer, editApproved, dirsOf } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const w = mk('refuse'); const out = mk('refuse-out'); const scope = scopeOf(w);
+      await approve(w, ON.proposeOnboarding(scope, pop5b.answers(), proposer).decision.id);
+      assert.strictEqual(ON.onboardingState(scope, 'acme_catalog'), 'trial', 'the setup is on trial');
+      // Content data with example rows, and an AWS key in the same file.
+      editApproved(w, 'operations', 'knowledge.list_terms', LY.layoutPath(w, 'platformOperations', 'knowledge.list_terms.yaml'),
+        (t) => Y.stringifyYaml({ ...Y.parseYaml(t), content: 'data' }) + '# AKIAIOSFODNN7EXAMPLE\n');
+      // A password in the platform file.
+      editApproved(w, 'platforms', 'acme_catalog', LY.layoutPath(w, 'platformDefinitions', 'acme_catalog.yaml'), (t) => t + '# password: hunter2hunter2\n');
+      // A private key header in the shipped operation's team implementation.
+      editApproved(w, 'implementations', 'platform.version@acme_catalog', LY.layoutPath(w, 'platformImplementations', 'platform.version.acme_catalog.yaml'), (t) => t + '# -----BEGIN RSA PRIVATE KEY-----\n');
+      // An approved implementation of the content-data operation, with rows.
+      const implFile = LY.layoutPath(w, 'platformImplementations', 'knowledge.list_terms.acme_catalog.yaml');
+      const implText = Y.stringifyYaml({ formatVersion: 1, implements: 'knowledge.list_terms', platform: 'acme_catalog', implementation: { http: { method: 'GET', path: '/terms', results: 'items' } }, example: { params: {}, rows: [{ name: 'Customer', definition: 'A buyer.', domain: 'Sales', owner: 'Ops' }] } });
+      write(implFile, implText);
+      L.writeApproval(w, 'implementations', 'knowledge.list_terms@acme_catalog', { checksum: L.checksumOf(implText), by: 'priya', at: new Date().toISOString() });
+      // A draft: a shipped operation copied for the team and not yet approved.
+      L.customise(scope, 'estate.list_tables');
+      // The out folder is not empty.
+      write(nodePath.join(out, 'keep.txt'), 'mine');
+      let thrown;
+      try { K.exportPack(scope, { out, name: 'mixed', platforms: ['acme_catalog', 'snowflake'], by: 'arun' }); } catch (e) { thrown = e; }
+      assert.ok(thrown instanceof K.PackError, String(thrown));
+      const p = thrown.problems;
+      const expected = [
+        [/platform-operations\/estate\.list_tables\.yaml is a draft/, 'the draft'],
+        [/acme_catalog is on trial/, 'the platform on trial'],
+        [/platform-operations\/knowledge\.list_terms\.yaml: its recorded example holds rows of data/, 'rows in the operation'],
+        [/platform-implementations\/knowledge\.list_terms\.acme_catalog\.yaml: its recorded example holds rows of data/, 'rows in the implementation'],
+        [/platforms\/acme_catalog\.yaml seems to hold a credential value/, 'the password'],
+        [/platform-operations\/knowledge\.list_terms\.yaml seems to hold an AWS access key/, 'the AKIA key'],
+        [/platform-implementations\/platform\.version\.acme_catalog\.yaml seems to hold a private key/, 'the private key'],
+        [/isn't empty/, 'the non-empty out folder'],
+        [/snowflake isn't a team platform/, 'the shipped platform']
+      ];
+      for (const [re, what] of expected) assert.ok(p.some((x) => re.test(x)), `${what} is listed: ${p.join(' | ')}`);
+      // Nothing written: the out folder still holds only its own file.
+      assert.deepStrictEqual(nodeFs.readdirSync(out), ['keep.txt']);
+      assert.strictEqual(read(nodePath.join(out, 'keep.txt')), 'mine');
+    } finally { done(); }
+  });
+
+  await test('POP5c: with only shipped things there is nothing to export: a shipped platform asked for is said so, and nothing is written', async () => {
+    const { nodeFs, nodePath, K, scopeOf, dirsOf } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const w = mk('shipped'); const out = nodePath.join(mk('out'), 'pack');
+      let thrown;
+      try { K.exportPack(scopeOf(w), { out, name: 'x', platforms: ['snowflake'], by: 'arun' }); } catch (e) { thrown = e; }
+      assert.ok(thrown instanceof K.PackError, String(thrown));
+      assert.ok(thrown.problems.some((x) => /snowflake isn't a team platform/.test(x)), thrown.problems.join(' | '));
+      assert.ok(thrown.problems.some((x) => /Nothing to export/.test(x)), thrown.problems.join(' | '));
+      assert.ok(!nodeFs.existsSync(out), 'no folder is made');
+      let none;
+      try { K.exportPack(scopeOf(w), { out, name: 'x', by: 'arun' }); } catch (e) { none = e; }
+      assert.ok(none instanceof K.PackError && none.problems.some((x) => /Nothing to export/.test(x)), 'an empty workspace has nothing to export either');
+      assert.ok(!nodeFs.existsSync(out));
+    } finally { done(); }
+  });
+
+  await test('POP5c: no connection or secret travels: A holds a connections file, the pack has none, and the pack holds only what its manifest lists, with no AutoDE sidecar', async () => {
+    const { nodePath, K, LY, buildTeam, filesUnder, read, write, dirsOf, scopeOf } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const a = mk('a'); const out = nodePath.join(mk('pack'), 'acme');
+      const scopeA = await buildTeam(a);
+      const conn = LY.layoutPath(a, 'connections');
+      write(conn, 'connections:\n  - id: acme_catalog:main\n    platform: acme_catalog\n    token: tok-do-not-travel-98765\n');
+      const exported = K.exportPack(scopeA, { out, name: 'acme-catalog', platforms: ['acme_catalog'], by: 'arun' });
+      const m = exported.manifest;
+      const files = filesUnder(out).sort();
+      const expected = [K.PACK_MANIFEST, ...m.items.map((i) => i.file), ...m.skills.flatMap((s) => filesUnder(nodePath.join(out, s.dir)).map((f) => `${s.dir}/${f}`))].sort();
+      assert.deepStrictEqual(files, expected, 'the pack holds only its manifest\'s files');
+      assert.ok(!files.some((f) => /connection/i.test(f)), 'no connections file');
+      assert.ok(!files.some((f) => nodePath.posix.basename(f).startsWith('.autode')), 'no AutoDE sidecar or analysis file');
+      for (const f of files) assert.ok(!read(nodePath.join(out, f)).includes('do-not-travel'), `${f} holds no token`);
+      assert.ok(read(conn).includes('do-not-travel'), 'A keeps its own connection');
+    } finally { done(); }
+  });
+
+  await test('POP5c: hostile packs: inspect refuses and import throws PackError, writing nothing under .autode/config, for a tampered file, an extra file, traversal in an item or a skill, a symlink, a wrong format, a missing manifest, a non-read-only read with a recomputed checksum, a secret with a recomputed checksum, and an implementation of an operation the workspace lacks', async () => {
+    const { nodePath, K, Y, L, scopeOf, read, write, editManifest, cloneDir, filesUnder, buildTeam, dirsOf, proposer, nodeFs } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const a = mk('a'); const P = nodePath.join(mk('pack'), 'acme');
+      const scopeA = await buildTeam(a);
+      K.exportPack(scopeA, { out: P, name: 'acme-catalog', platforms: ['acme_catalog'], by: 'arun' });
+      const platformFile = 'platforms/acme_catalog.yaml';
+      const implFile = 'platform-implementations/platform.version.acme_catalog.yaml';
+      const j = (d, f) => nodePath.join(d, f);
+      const setChecksum = (d, f, text) => editManifest(d, (m) => { m.items.find((i) => i.file === f).checksum = L.checksumOf(text); });
+      const cases = [
+        ['a tampered file', /changed after the pack was exported/, (d) => write(j(d, platformFile), read(j(d, platformFile)) + '# edited after export\n')],
+        ['an extra file', /isn't in the pack's manifest/, (d) => write(j(d, 'platforms/extra.yaml'), 'formatVersion: 1\n')],
+        ['an item path that leaves the folder', /isn't a pack file/, (d) => editManifest(d, (m) => { m.items[0].file = 'platforms/../../evil.yaml'; })],
+        ['an item ../outside.yaml', /isn't a pack file/, (d) => editManifest(d, (m) => { m.items[0].file = '../outside.yaml'; })],
+        ['a skill dir ../x', /isn't a pack skill/, (d) => editManifest(d, (m) => { m.skills[0].dir = '../x'; })],
+        ['a wrong format', /format is autode-platform-pack\/9/, (d) => editManifest(d, (m) => { m.format = 'autode-platform-pack/9'; })],
+        ['a missing manifest', /isn't a pack/, (d) => nodeFs.rmSync(j(d, K.PACK_MANIFEST))],
+        ['a read operation that is not read-only, checksum recomputed', /read operation must be one read-only statement/, (d) => {
+          const text = Y.stringifyYaml({ ...Y.parseYaml(read(j(d, implFile))), implementation: { sql: 'DELETE FROM terms' } });
+          write(j(d, implFile), text); setChecksum(d, implFile, text);
+        }],
+        ['a platform file holding a secret, checksum recomputed', /seems to hold a credential value/, (d) => {
+          const text = read(j(d, platformFile)) + '# password: hunter2hunter2\n';
+          write(j(d, platformFile), text); setChecksum(d, platformFile, text);
+        }],
+        ['an implementation of an operation the workspace lacks', /no operation estate\.nope to add to/, (d) => {
+          const text = Y.stringifyYaml({ ...Y.parseYaml(read(j(d, implFile))), implements: 'estate.nope' });
+          write(j(d, implFile), text); setChecksum(d, implFile, text);
+        }]
+      ];
+      // A control: the untouched pack passes in an empty workspace.
+      assert.ok(K.inspectPack(scopeOf(mk('control')), P, {}).ok, 'the untouched pack passes');
+      for (const [label, re, mutate] of cases) {
+        const d = nodePath.join(mk('hostile'), 'pack');
+        cloneDir(P, d);
+        mutate(d);
+        const ws = mk('hostile-ws');
+        const r = K.inspectPack(scopeOf(ws), d, {});
+        assert.strictEqual(r.ok, false, `${label}: refused`);
+        assert.ok(r.problems.some((p) => re.test(p)), `${label}: ${r.problems.join(' | ')}`);
+        assert.throws(() => K.importPack(scopeOf(ws), d, proposer), (e) => e instanceof K.PackError && e.problems.some((p) => re.test(p)), `${label}: import throws PackError`);
+        assert.deepStrictEqual(filesUnder(nodePath.join(ws, '.autode', 'config')), [], `${label}: nothing written under .autode/config`);
+      }
+      // A symlink inside the pack: skipped where symlinks can't be made on this machine.
+      const sym = nodePath.join(mk('hostile'), 'pack'); cloneDir(P, sym);
+      // A file link where the machine allows it; otherwise a directory junction (needs no rights on Windows).
+      let made = true;
+      try { nodeFs.symlinkSync(nodePath.join(sym, platformFile), nodePath.join(sym, 'platforms', 'link.yaml'), 'file'); }
+      catch {
+        try { nodeFs.symlinkSync(nodePath.join(sym, 'skills'), nodePath.join(sym, 'platforms', 'link'), 'junction'); } catch { made = false; }
+      }
+      if (made) {
+        const ws = mk('hostile-ws');
+        const r = K.inspectPack(scopeOf(ws), sym, {});
+        assert.ok(!r.ok && r.problems.some((p) => /is a symbolic link/.test(p)), `a symlink: ${r.problems.join(' | ')}`);
+        assert.throws(() => K.importPack(scopeOf(ws), sym, proposer), (e) => e instanceof K.PackError);
+        assert.deepStrictEqual(filesUnder(nodePath.join(ws, '.autode', 'config')), [], 'a symlink: nothing written');
+      } else {
+        console.log('    (POP5c symlink case skipped: symlinks cannot be created on this machine)');
+      }
+    } finally { done(); }
+  });
+
+  await test('POP5c: conflicts: an approved file with other content is a problem without replace and nothing changes; with replace it imports as a draft until approved; the same content is reported as same; a pack overriding a shipped operation is warned about in the report and the decision', async () => {
+    const { nodePath, K, L, LY, DS, approve, proposer, buildTeam, scopeOf, read, write, snapshot, dirsOf, skillState } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const a = mk('a'); const b = mk('b'); const P = nodePath.join(mk('pack'), 'acme');
+      const scopeA = await buildTeam(a);
+      K.exportPack(scopeA, { out: P, name: 'acme-catalog', platforms: ['acme_catalog'], by: 'arun' });
+      const scopeB = scopeOf(b);
+      const first = K.importPack(scopeB, P, proposer);
+      assert.ok((await approve(b, first.decision.id)).applied);
+      // Same content: reported as same, nothing to replace.
+      const same = K.inspectPack(scopeB, P, {});
+      assert.deepStrictEqual(same.replaces, [], 'nothing to replace');
+      for (const id of ['acme_catalog', 'knowledge.list_terms', 'platform.version@acme_catalog']) assert.ok(same.same.includes(id), `${id} is reported as same: ${same.same.join(',')}`);
+      // An approved file here, with other content.
+      const opFile = LY.layoutPath(b, 'platformOperations', 'knowledge.list_terms.yaml');
+      const edited = read(opFile) + '# edited here\n';
+      write(opFile, edited);
+      L.writeApproval(b, 'operations', 'knowledge.list_terms', { checksum: L.checksumOf(edited), by: 'priya', at: new Date().toISOString() });
+      const report = K.inspectPack(scopeB, P, {});
+      assert.ok(report.replaces.includes('knowledge.list_terms'), 'it would replace the file');
+      assert.ok(report.problems.some((p) => /knowledge\.list_terms is approved here with other content/.test(p)), report.problems.join(' | '));
+      assert.strictEqual(report.ok, false);
+      const before = snapshot(nodePath.join(b, '.autode'));
+      const pending = new DS.DecisionStore(b).list({ status: 'pending' }).length;
+      assert.throws(() => K.importPack(scopeB, P, proposer), (e) => e instanceof K.PackError && e.problems.some((p) => /approved here with other content/.test(p)));
+      assert.deepStrictEqual(snapshot(nodePath.join(b, '.autode')), before, 'nothing changed');
+      assert.strictEqual(new DS.DecisionStore(b).list({ status: 'pending' }).length, pending, 'no decision was filed');
+      // With replace: the pack's content comes in and is a draft until a person approves it.
+      const replaced = K.importPack(scopeB, P, proposer, { replace: true });
+      assert.strictEqual(read(opFile), read(nodePath.join(P, 'platform-operations', 'knowledge.list_terms.yaml')), 'the pack\'s content is in place');
+      assert.strictEqual(L.loadCatalog(scopeB).operations.find((o) => o.item.id === 'knowledge.list_terms' && o.origin === 'team').status, 'draft', 'a draft until approved');
+      assert.strictEqual(skillState(b, 'acme-catalog-setup').sidecar.status, 'draft', 'the replaced skill starts its review over');
+      assert.ok((await approve(b, replaced.decision.id)).applied);
+      assert.strictEqual(L.loadCatalog(scopeB).operations.find((o) => o.item.id === 'knowledge.list_terms' && o.origin === 'team').status, 'approved');
+      // A pack that overrides a shipped operation: warned in the report and in the decision's text.
+      const o = mk('override');
+      const cust = L.customise(scopeOf(o), 'estate.list_tables');
+      L.writeApproval(o, 'operations', 'estate.list_tables', { checksum: L.checksumOf(read(nodePath.join(o, cust.file))), by: 'priya', at: new Date().toISOString() });
+      const P5 = nodePath.join(mk('pack5'), 'shipped-copy');
+      K.exportPack(scopeOf(o), { out: P5, name: 'shipped-copy', by: 'arun' });
+      const ws5 = mk('ws5');
+      const r5 = K.inspectPack(scopeOf(ws5), P5, {});
+      assert.ok(r5.ok, r5.problems.join(' | '));
+      assert.deepStrictEqual(r5.overridesShipped, ['estate.list_tables']);
+      assert.ok(r5.warnings.some((w) => /It replaces what AutoDE ships for this workspace: estate\.list_tables/.test(w)), r5.warnings.join(' | '));
+      const imp5 = K.importPack(scopeOf(ws5), P5, proposer);
+      assert.ok(/It replaces what AutoDE ships: estate\.list_tables/.test(imp5.decision.summary), imp5.decision.summary);
+    } finally { done(); }
+  });
+
+  await test('POP5c: trust: the exporter\'s word on a conformance review is shown as theirs; the import is high stakes and the agent channel (tool) can\'t resolve it; once approved the imported system is not gated (state none) and runs', async () => {
+    const { nodePath, ON, V, S, DS, K, scopeOf, buildOnboarded, approve, proposer, target, dirsOf } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const a = mk('a'); const b = mk('b'); const P = nodePath.join(mk('pack'), 'acme');
+      await pop5.serve(pop5b.acmeServer, async (base) => {
+        const scopeA = await buildOnboarded(a);
+        await V.conformanceRun(scopeA, target(base), {});
+        const review = ON.proposeConformanceReview(scopeA, 'acme_catalog', proposer);
+        assert.ok((await approve(a, review.id)).applied);
+        assert.strictEqual(ON.onboardingState(scopeA, 'acme_catalog'), 'counted');
+        const exported = K.exportPack(scopeA, { out: P, name: 'acme-catalog', platforms: ['acme_catalog'], by: 'arun' });
+        assert.deepStrictEqual(Object.keys(exported.manifest.reviewed ?? {}), ['acme_catalog'], 'the pack says it was reviewed');
+        const scopeB = scopeOf(b);
+        const imp = K.importPack(scopeB, P, proposer);
+        assert.ok(imp.report.reviewed.some((r) => /^acme_catalog: arun says priya reviewed a conformance run on /.test(r)), JSON.stringify(imp.report.reviewed));
+        assert.ok(imp.decision.summary.includes('arun says priya reviewed'), imp.decision.summary);
+        assert.strictEqual(imp.decision.stakes, 'high');
+        assert.ok(!imp.decision.allowedChannels.includes('tool'), JSON.stringify(imp.decision.allowedChannels));
+        const store = new DS.DecisionStore(b);
+        assert.throws(() => store.resolve(imp.decision.id, { decision: 'approved', by: 'agent', channel: 'tool' }), (e) => e.code === 'CHANNEL_NOT_ALLOWED');
+        assert.strictEqual(store.get(imp.decision.id).status, 'pending');
+        assert.ok((await approve(b, imp.decision.id)).applied);
+        assert.strictEqual(ON.onboardingState(scopeB, 'acme_catalog'), 'none', 'the import is not gated: no onboarding record');
+        const r = await S.runOnConnection(scopeB, target(base), 'knowledge.list_terms', {}, { via: 'autode_platform_run' });
+        assert.ok(r.ok && r.rows[0].name === 'Customer', JSON.stringify(r));
+      });
+    } finally { done(); }
+  });
+
+  await test('POP5c: importing the same pack again: after import and approval, inspect reports every file and the skill as same, ok, with no problems', async () => {
+    const { nodePath, K, approve, proposer, buildTeam, scopeOf, dirsOf } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const a = mk('a'); const b = mk('b'); const P = nodePath.join(mk('pack'), 'acme');
+      K.exportPack(buildTeam(a), { out: P, name: 'acme-catalog', platforms: ['acme_catalog'], by: 'arun' });
+      const first = K.importPack(scopeOf(b), P, proposer);
+      assert.ok((await approve(b, first.decision.id)).applied);
+      const r = K.inspectPack(scopeOf(b), P, {});
+      assert.deepStrictEqual(r.problems, [], r.problems.join(' | '));
+      assert.strictEqual(r.ok, true);
+      assert.deepStrictEqual(r.adds, []);
+      assert.deepStrictEqual(r.replaces, []);
+      assert.deepStrictEqual(r.warnings, []);
+      for (const id of ['acme_catalog', 'knowledge.list_terms', 'platform.version@acme_catalog', 'acme-catalog-setup']) assert.ok(r.same.includes(id), `${id} is same: ${r.same.join(', ')}`);
+    } finally { done(); }
+  });
+
+  await test('POP5c: a decision\'s summary keeps "replaces what AutoDE ships" with a 200-character pack name and exporter', async () => {
+    const { nodePath, L, K, proposer, scopeOf, read, DS, dirsOf } = pop5c;
+    const { mk, done } = dirsOf();
+    try {
+      const o = mk('override');
+      const cust = L.customise(scopeOf(o), 'estate.list_tables');
+      L.writeApproval(o, 'operations', 'estate.list_tables', { checksum: L.checksumOf(read(nodePath.join(o, cust.file))), by: 'priya', at: new Date().toISOString() });
+      const name = 'p' + 'a'.repeat(199);
+      const by = 'e'.repeat(200);
+      assert.strictEqual(name.length, 200);
+      const P = nodePath.join(mk('pack'), 'long');
+      K.exportPack(scopeOf(o), { out: P, name, by });
+      const ws = mk('ws');
+      const imp = K.importPack(scopeOf(ws), P, proposer);
+      const shipped = 'It replaces what AutoDE ships: estate.list_tables';
+      assert.ok(imp.decision.summary.includes(shipped), imp.decision.summary.slice(0, 400));
+      const stored = new DS.DecisionStore(ws).get(imp.decision.id);
+      assert.ok(stored.summary.includes(shipped), stored.summary.slice(0, 400));
+    } finally { done(); }
+  });
+
+  await test('POP5c: CLI as a real process: platform pack export writes a pack; inspect in a second workspace says what it adds; import files one decision; a hostile pack exits non-zero and lists its problem; --platform takes a comma-separated list', async () => {
+    const { nodeFs, nodePath, root, K, L, DS, buildTeam, scopeOf, read, write, cloneDir, filesUnder, dirsOf } = pop5c;
+    const { spawnSync } = require('node:child_process');
+    const { mk, done } = dirsOf();
+    const run = (cwd, args) => spawnSync(process.execPath, [nodePath.join(root, 'dist', 'autode.js'), ...args], { cwd, encoding: 'utf8', timeout: 120000 });
+    try {
+      const a = mk('a'); const b = mk('b'); const P = nodePath.join(mk('pack'), 'p1');
+      buildTeam(a);
+      const two = run(a, ['platform', 'pack', 'export', P, '--name', 'p1', '--platform', 'acme_catalog,snowflake']);
+      assert.notStrictEqual(two.status, 0, two.stdout);
+      assert.match(two.stdout + two.stderr, /snowflake isn't a team platform/);
+      assert.ok(!nodeFs.existsSync(P), 'a refused export writes nothing');
+      const ex = run(a, ['platform', 'pack', 'export', P, '--name', 'p1', '--platform', 'acme_catalog']);
+      assert.strictEqual(ex.status, 0, ex.stdout + ex.stderr);
+      assert.match(ex.stdout, /Wrote pack p1/);
+      assert.ok(nodeFs.existsSync(nodePath.join(P, K.PACK_MANIFEST)), 'the manifest is written');
+      const insp = run(b, ['platform', 'pack', 'inspect', P]);
+      assert.strictEqual(insp.status, 0, insp.stdout + insp.stderr);
+      assert.match(insp.stdout, /adds: .*acme_catalog/);
+      assert.match(insp.stdout, /knowledge\.list_terms/);
+      assert.match(insp.stdout, /skills: acme-catalog-setup/);
+      const imp = run(b, ['platform', 'pack', 'import', P]);
+      assert.strictEqual(imp.status, 0, imp.stdout + imp.stderr);
+      assert.match(imp.stdout, /Proposed \d+ file\(s\) as /);
+      const pending = new DS.DecisionStore(b).list({ status: 'pending', kind: 'platform_bundle' });
+      assert.strictEqual(pending.length, 1, 'one decision is filed');
+      assert.strictEqual(L.loadCatalog(scopeOf(b)).platforms.find((p) => p.item.id === 'acme_catalog').status, 'draft', 'nothing runs before approval');
+      // A hostile pack: changed after export; refused with the problem listed, nothing written.
+      const H = nodePath.join(mk('pack'), 'hostile');
+      cloneDir(P, H);
+      write(nodePath.join(H, 'platforms', 'acme_catalog.yaml'), read(nodePath.join(H, 'platforms', 'acme_catalog.yaml')) + '# edited after export\n');
+      const c = mk('c');
+      const bad = run(c, ['platform', 'pack', 'import', H]);
+      assert.notStrictEqual(bad.status, 0, bad.stdout);
+      assert.match(bad.stdout + bad.stderr, /changed after the pack was exported/);
+      assert.match(bad.stdout + bad.stderr, /Not imported, nothing was written/);
+      assert.deepStrictEqual(filesUnder(nodePath.join(c, '.autode', 'config')), [], 'nothing written');
+    } finally { done(); }
+  });
+
+  await test('POP5c: MCP handlers: export, import and inspect refuse a folder outside the workspace (a relative escape, an absolute path, a junction inside that points out) with VALIDATION_FAILED; a folder that does not exist yet inside the workspace exports', async () => {
+    const { nodeFs, nodePath, K, buildTeam, dirsOf } = pop5c;
+    const { mk, done } = dirsOf();
+    let client;
+    try {
+      const w = mk('mcp'); const outside = mk('outside');
+      buildTeam(w);
+      let junction = true;
+      try { nodeFs.symlinkSync(outside, nodePath.join(w, 'escape'), 'junction'); } catch { junction = false; }
+      client = await mcpSession(w);
+      const call = async (name, args) => { const r = await client.callTool({ name, arguments: args }); return r.isError ? { error: r.structuredContent } : { ok: r.structuredContent }; };
+      const refused = async (name, args) => {
+        const r = await call(name, args);
+        assert.ok(r.error && r.error.code === 'VALIDATION_FAILED', `${name} ${JSON.stringify(args)}: ${JSON.stringify(r).slice(0, 300)}`);
+      };
+      await refused('autode_platform_pack_export', { name: 'p1', out: nodePath.join(outside, 'p1') });
+      await refused('autode_platform_pack_export', { name: 'p1', out: '..\\..\\x' });
+      await refused('autode_platform_pack_import', { dir: nodePath.join(outside, 'p1') });
+      await refused('autode_platform_pack_import', { dir: '..\\..\\x' });
+      await refused('autode_platform_pack_inspect', { dir: outside });
+      if (junction) await refused('autode_platform_pack_export', { name: 'p1', out: 'escape/p1' });
+      else console.log('    (POP5c junction case skipped: a junction cannot be made on this machine)');
+      const ok = await call('autode_platform_pack_export', { name: 'acme-catalog', out: 'packs/acme', platforms: ['acme_catalog'] });
+      assert.ok(ok.ok && ok.ok.out === 'packs/acme', JSON.stringify(ok).slice(0, 300));
+      assert.ok(nodeFs.existsSync(nodePath.join(w, 'packs', 'acme', K.PACK_MANIFEST)), 'the pack is written inside the workspace');
+      assert.ok(!nodeFs.existsSync(nodePath.join(outside, 'p1')), 'nothing was written outside');
+    } finally { if (client) await client.close(); done(); }
+  });
+
+  await test('POP5c: the catalog page has the Export a pack and Import a pack buttons', () => {
+    const { nodePath, root } = pop5c;
+    const html = require('node:fs').readFileSync(nodePath.join(root, 'media', 'platforms.html'), 'utf8');
+    assert.match(html, /<button class="btn" type="button" data-pack-export>Export a pack…<\/button>/);
+    assert.match(html, /<button class="btn" type="button" data-pack-import>Import a pack…<\/button>/);
   });
 
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {

@@ -6,6 +6,22 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.61.2
+
+POP5c, packs ([platform-operations.md](docs/specs/platform-operations.md) §6.5), which completes POP5. A team's platform definitions, operations, implementations and skills go to another workspace as a folder, and arrive with one review.
+
+- **Export** (`src/engine/platform/packs.ts`): a folder with a manifest (`autode-pack.yaml`) naming each file and its checksum. Only the team's own approved files and published skills go in, for chosen platforms or all of them. Never a connection, and never AutoDE's own files.
+- **Refused at export, every reason at once and nothing written:** a draft, a system on trial, anything that looks like a credential, and a recorded example of an operation that reads row values, since that would carry a client's data to another workspace. Metadata examples travel.
+- **Import** checks everything again before anything is written: the format, every path is inside the pack and in its manifest, no links, each checksum, each file's schema and read-only guard, and no credentials. It shows what the pack adds, replaces and changes of what AutoDE ships. One decision (`platform_bundle`) approves it; until a person does, nothing runs.
+- **An approved file is never silently replaced.** Importing over one would stop it running until the review, so it is refused unless asked for.
+- **Skills arrive as ported skills do:** unreviewed drafts, reviewed and published in this workspace.
+- **Surfaces:** `autode platform pack export|inspect|import`; MCP `autode_platform_pack_inspect`, `autode_platform_pack_export`, `autode_platform_pack_import`, which keep to the workspace's own folder, since an agent must not reach arbitrary folders; *Export a pack…* and *Import a pack…* in the Platform catalog.
+
+Deliberate deviations:
+- **A pack is a folder,** which can be a Git checkout. AutoDE doesn't fetch it or make an archive.
+- **An imported system isn't put on trial.** The review of the import is this workspace's act of trust, so the catalog matches the exporter's after review, as the acceptance asks. The exporter's note that a conformance run was reviewed is shown as their word and proves nothing here.
+- **The credential check looks for known shapes,** so it catches mistakes, not a determined person. The rule that keeps secrets out is that connections never go in.
+
 ## 0.61.1
 
 POP5b, onboarding a new system from a template ([platform-operations.md](docs/specs/platform-operations.md) §6.5). A system is added by files, guided step by step, reviewed once, and counted only after a person has seen it work on a real connection.
