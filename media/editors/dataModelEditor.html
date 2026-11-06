@@ -24,10 +24,11 @@ pre { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); bor
 <pre id="content"></pre>
 <script>
 (function() {
-  var content = `{{CONTENT}}`;
+  function esc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var content = {{CONTENT}};
   var el = document.getElementById('content');
   // Basic SQL syntax highlighting
-  var highlighted = content
+  var highlighted = esc(content)
     .replace(/--.*$/gm, '<span class="sql-comment">$&</span>')
     .replace(/\b(CREATE|TABLE|OR|REPLACE|VIEW|SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|ON|AS|AND|PRIMARY|KEY|REFERENCES|FOREIGN|NOT|NULL|DEFAULT|CURRENT_TIMESTAMP|INTEGER|STRING|DECIMAL|BOOLEAN|DATE|TIMESTAMP_NTZ|VARIANT|INSERT|INTO|VALUES|UPDATE|SET|DELETE|DROP|ALTER|ADD|CONSTRAINT|INDEX|UNIQUE|CHECK|CASCADE)\b/gi, '<span class="sql-keyword">$&</span>')
     .replace(/'[^']*'/g, '<span class="sql-string">$&</span>');

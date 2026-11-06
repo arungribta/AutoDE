@@ -6,6 +6,34 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.61.4
+
+CR1b, a security review against OWASP ASVS 4.0.3 (about Level 2) and a measured review of complexity ([code-review-2026-11.md](docs/design/code-review-2026-11.md) §7, §8). The first review had been against AutoDE's own rules, not a named standard; the owner asked for one.
+
+**Injection and data**
+- A SQL literal handles backslashes: on Snowflake and Spark `\\'` would have ended the string, and what followed would have run, with the guard passing it. Each platform's `dialect.backslashEscapes` says how it reads them; a dialect that doesn't say gets the safe reading. Probes use the same rule.
+- The five custom editors take a file's text as a JSON value, so it can't break out of the script. File names and text are escaped where they are shown.
+- A semantic model element's name is escaped before it goes into a pattern.
+- The drivers folder can't hold what a shell would expand.
+
+**Paths**
+- One check, `src/engine/pathGuard.ts`, follows links for every path a model or agent names: `autode_read_file`, `autode_write_file`, `autode_list_dir`, `autode_search_files`, ingestion and packs. Before, a link in a cloned repository could reach outside the workspace.
+
+**Configuration a cloned repository could set**
+- Executable paths, the drivers folder, key and wallet paths, `llmEndpoint`, the consent settings and `readOnlyMode` are `machine` scope: VS Code ignores them in a workspace's `.vscode/settings.json`. **A team that kept these in workspace settings must move them to user settings.**
+- An API key goes only to an https endpoint, or http on this machine.
+
+**Smaller**
+- Every webview nonce comes from a secure source; temporary files are private to the user.
+- `autode_search_files` refuses patterns with nested quantifiers and caps the line it tests, so a pattern can't freeze the host.
+- `verifyRunLog` fails on a line it can't read, instead of reporting an intact log.
+
+**Dependencies**
+- `@modelcontextprotocol/sdk` 1.32.2, and transitive fixes: production dependencies have no known vulnerabilities. CI now fails on a high one. Seven moderate advisories remain in development tools only, in `@vscode/vsce` and `typescript-eslint`, whose fixes are major upgrades.
+
+**A complexity gate**
+- `test/architecture.test.cjs` measures each function. Nothing new may exceed 20, and the 180 functions above that today, recorded in `test/architecture/complexity.json`, may only come down.
+
 ## 0.61.3
 
 CR1, the fixes from the critical code review ([code-review-2026-11.md](docs/design/code-review-2026-11.md)). Every item is a safety defect, or a gate that could falsely pass. Structural findings are left for the owner to decide.

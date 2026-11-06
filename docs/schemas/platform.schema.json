@@ -523,6 +523,10 @@
             "type": "string"
           }
         },
+        "backslashEscapes": {
+          "type": "boolean",
+          "description": "Whether a backslash inside a string is an escape. Unsaid: treated as true, the safe reading."
+        },
         "fragments": {
           "type": "object",
           "additionalProperties": {

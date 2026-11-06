@@ -1608,6 +1608,18 @@ These are what the automated tests can't reach.
   Do: on a key-pair connection, read a table large enough for several result partitions, and compare the row count.
   Expect: the count matches `SELECT COUNT(*)`.
 
+## Part 76 — v0.61.4 CR1b: the security fixes, on the real thing
+
+- [ ] **76.1 The custom editors.**
+  Do: open a Markdown file containing `</script><b>x</b>` and a backtick with *Open With…* in each AutoDE editor.
+  Expect: the text is shown as text, and each editor still works as before, multi-line content included.
+- [ ] **76.2 Settings from a repository.**
+  Do: in a test folder put `autoDataEngineeringHub.claudeCodePath` and `dataPlatformCliConsent: true` in `.vscode/settings.json`, and open it.
+  Expect: VS Code marks them as not applicable in workspace settings, and AutoDE behaves as if they were unset.
+- [ ] **76.3 A backslash in a value on Snowflake.**
+  Do: run `estate.list_columns` with a schema value containing `\` and a quote.
+  Expect: it reads nothing, and no second query runs.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -2016,5 +2028,8 @@ These are what the automated tests can't reach.
 | 75.1 |  |  |
 | 75.2 |  |  |
 | 75.3 |  |  |
+| 76.1 |  |  |
+| 76.2 |  |  |
+| 76.3 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

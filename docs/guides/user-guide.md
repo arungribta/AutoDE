@@ -1,6 +1,6 @@
 # AutoDE user guide
 
-> **Describes:** v0.61.3. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
+> **Describes:** v0.61.4. For data engineers who use AutoDE on client work: how to set it up, how a piece of work flows through it, and every feature in detail. If you maintain AutoDE's code, read the [engineering onboarding guide](engineering-onboarding-guide.md) instead.
 
 **Contents**
 

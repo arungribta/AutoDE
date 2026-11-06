@@ -2,7 +2,7 @@
   "name": "auto-data-engineering-hub",
   "displayName": "AutoDE — Data Engineering Workspace",
   "description": "AI-powered data engineering workspace with agentic orchestration, multi-phase workflows, and rich artifact generation for Snowflake, Databricks, and BigQuery.",
-  "version": "0.61.3",
+  "version": "0.61.4",
   "publisher": "arun-gribta",
   "author": {
     "name": "Arun Gribta"
@@ -734,6 +734,7 @@
           "description": "Snowflake authentication mode."
         },
         "autoDataEngineeringHub.snowflakePrivateKeyPath": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Path to Snowflake private key."
@@ -824,16 +825,19 @@
           "description": "Target Snowflake authentication mode."
         },
         "autoDataEngineeringHub.targetSnowflakePrivateKeyPath": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Path to the target connection's Snowflake private key."
         },
         "autoDataEngineeringHub.targetSnowflakeCliPath": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Explicit path to the Snowflake CLI for the target connection (only if not found automatically). Leave blank if `snow` is on PATH."
         },
         "autoDataEngineeringHub.targetDatabricksCliPath": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Explicit path to the Databricks CLI for the target connection (only if not found automatically)."
@@ -849,6 +853,7 @@
           "description": "Default query timeout in seconds."
         },
         "autoDataEngineeringHub.readOnlyMode": {
+          "scope": "machine",
           "type": "boolean",
           "default": true,
           "description": "Restrict to read-only mode."
@@ -905,11 +910,13 @@
           "description": "The model each LLM provider uses, e.g. { \"copilot\": \"claude-sonnet-5-5\", \"claude\": \"opus\" }. An empty string uses the provider's own default (Claude Code's configured model; Copilot's first model). Set from the LLM tab."
         },
         "autoDataEngineeringHub.claudeCodePath": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Path to the Claude Code CLI ('claude' / 'claude.exe'). Leave empty to auto-detect: PATH, then the binary bundled with the 'Claude Code for VS Code' extension. Only used when activeLlmProvider is 'claude'."
         },
         "autoDataEngineeringHub.llmEndpoint": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Custom LLM endpoint."
@@ -960,11 +967,13 @@
           "description": "Extension description."
         },
         "autoDataEngineeringHub.languageModelProgrammaticConsent": {
+          "scope": "machine",
           "type": "boolean",
           "default": false,
           "description": "Allow AutoDE to programmatically use a locally-installed language model for its LLM calls (opt-in): GitHub Copilot via the VS Code Language Model API, or the Claude Code CLI."
         },
         "autoDataEngineeringHub.copilotProgrammaticConsent": {
+          "scope": "machine",
           "type": "boolean",
           "default": false,
           "markdownDescription": "_Deprecated — use `#autoDataEngineeringHub.languageModelProgrammaticConsent#`._ Still honored as a fallback for existing setups."
@@ -980,16 +989,19 @@
           "description": "Manage imported tool skills' lifecycle: imports start as drafts, and Publish/Deprecate/Retire Tool Skill keep numbered versions that plan steps can pin (opt-in). Reviewing and trusting a skill works either way."
         },
         "autoDataEngineeringHub.dataPlatformCliConsent": {
+          "scope": "machine",
           "type": "boolean",
           "default": false,
           "description": "Allow AutoDE to shell out to a data-platform CLI (currently: 'snow connection list') to enumerate configured connections for 'AutoDE: Connect to Data Platform' (opt-in). CLI detection (a version check) does not require this."
         },
         "autoDataEngineeringHub.snowflakeCliPath": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Path to the Snowflake CLI ('snow' / 'snow.exe'). Leave empty to auto-detect via PATH."
         },
         "autoDataEngineeringHub.databricksCliPath": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Path to the Databricks CLI ('databricks' / 'databricks.exe'). Leave empty to auto-detect via PATH. Not required for connection enumeration, which reads '.databrickscfg' directly."
@@ -1005,16 +1017,19 @@
           "description": "Oracle source: the database user. The password is stored with 'AutoDE: Set Oracle Password' (secret storage)."
         },
         "autoDataEngineeringHub.oracleConfigDir": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Folder containing tnsnames.ora. Empty: TNS_ADMIN, then $ORACLE_HOME/network/admin, as Oracle's own tools do."
         },
         "autoDataEngineeringHub.oracleWalletLocation": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Folder of an Oracle TLS wallet (e.g. for Autonomous Database). Leave empty for connections without a wallet."
         },
         "autoDataEngineeringHub.driversDirectory": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Where drivers you install with AutoDE's guidance live. Empty: the AUTODE_DRIVERS_DIR environment variable, else ~/.autode/drivers (shared with the MCP server)."
@@ -1063,7 +1078,7 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "ajv": "^8.20.0",
     "n3": "2.13.12",
     "sax": "1.6.1",

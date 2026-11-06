@@ -12210,7 +12210,7 @@ async function main() {
     const src = (f) => fs.readFileSync(nodePath.join(__dirname, '..', ...f.split('/')), 'utf8');
     const adapter = src('src/core/claudeCodeAdapter.ts');
     assert.ok(adapter.includes("args.push('--append-system-prompt-file', promptFile);") && !adapter.includes("args.push('--append-system-prompt', "), 'instructions in a file');
-    assert.match(adapter, /finally \{\n\s+if \(promptFile\) \{ try \{ fs\.rmSync\(promptFile/);
+    assert.match(adapter, /finally \{\n\s+if \(promptDir\) \{ try \{ fs\.rmSync\(promptDir/);
     const html = src('media/sidebar.html');
     for (const t of ['<select id="copilotModel"', '<select id="claudeModel"', 'llmModels: currentModels()', "post('updateSettings', { settings: { llmModels: savedModels } })", 'copilotModels = info.models']) assert.ok(html.includes(t), t);
     assert.ok(!html.includes("activeLlmModel: (getSelectedLlm() === 'claude'"), 'the shared model is no longer written from the LLM tab');
@@ -16459,6 +16459,271 @@ async function main() {
     } finally { nodeFs.rmSync(probe, { force: true }); }
   });
 
+  // ── CR1b (v0.61.4): the security review's fixes ──
+  {
+    const BS = String.fromCharCode(92);
+    const BT = String.fromCharCode(96);
+    // Reads one quoted SQL literal as a platform would: backslash escapes when it says so, '' for a quote.
+    // Returns the decoded value and where the literal ends, or undefined when it never closes.
+    const readQuoted = (sql, backslashEscapes) => {
+      if (sql[0] !== "'") return undefined;
+      let out = '';
+      let i = 1;
+      while (i < sql.length) {
+        const ch = sql[i];
+        if (backslashEscapes && ch === BS) { out += sql[i + 1] ?? ''; i += 2; continue; }
+        if (ch === "'") {
+          if (sql[i + 1] === "'") { out += "'"; i += 2; continue; }
+          return { value: out, end: i + 1 };
+        }
+        out += ch;
+        i++;
+      }
+      return undefined;
+    };
+    const hostile = BS + "' UNION SELECT pw FROM u --";
+    const pOne = [{ name: 's', type: 'literal', label: 'a value' }];
+    const pList = [{ name: 's', type: 'literal_list', label: 'values' }];
+    const expectDoubled = "'" + BS + BS + "''" + ' UNION SELECT pw FROM u --' + "'";
+    const expectRaw = "'" + BS + "''" + ' UNION SELECT pw FROM u --' + "'";
+
+    await test('CR1b: SQL literals: a backslash-quote value binds as one string where the platform reads backslash escapes (doubled, and the reader ends at the final quote), and not doubled where it does not (standard rules agree); the shipped dialects say so; the list, :lower and :upper forms follow the same rule; the probe literal too', () => {
+      const bind = require('../dist/engine/platform/operations/bind.js');
+      const { fragmentsFor } = require('../dist/engine/platform/dialects.js');
+      assert.deepStrictEqual(['snowflake', 'databricks', 'oracle', 'redshift'].map((p) => fragmentsFor(p).backslashEscapes), [true, true, false, false], 'the shipped definitions');
+      const prefix = 'SELECT 1 WHERE c = ';
+      const on = bind.bindTemplate(prefix + '{s:literal}', pOne, { s: hostile }, { backslashEscapes: true });
+      assert.strictEqual(on, prefix + expectDoubled);
+      assert.deepStrictEqual(readQuoted(on.slice(prefix.length), true), { value: hostile, end: expectDoubled.length });
+      assert.strictEqual(bind.bindTemplate(prefix + '{s:literal}', pOne, { s: hostile }, {}), on, 'the default doubles');
+      const naive = "'" + hostile.replace(/'/g, "''") + "'";
+      assert.notStrictEqual(readQuoted(naive, true).end, naive.length, 'undoubled, a backslash-escape reader would end the string early');
+      const off = bind.bindTemplate(prefix + '{s:literal}', pOne, { s: hostile }, { backslashEscapes: false });
+      assert.strictEqual(off, prefix + expectRaw);
+      assert.deepStrictEqual(readQuoted(off.slice(prefix.length), false), { value: hostile, end: expectRaw.length });
+      const listed = bind.bindTemplate('x IN ({s})', pList, { s: [hostile, 'b'] }, { backslashEscapes: true });
+      assert.strictEqual(listed, 'x IN (' + expectDoubled + ", 'b')");
+      assert.strictEqual(bind.bindTemplate('x IN ({s:literal})', pList, { s: [hostile] }, { backslashEscapes: false }), 'x IN (' + expectRaw + ')');
+      const cases = [
+        [bind.bindTemplate('c = {s:lower}', pOne, { s: hostile }, { backslashEscapes: true }), 'c = ', true, '', hostile.toLowerCase()],
+        [bind.bindTemplate('c = {s:upper}', pOne, { s: hostile }, { backslashEscapes: true }), 'c = ', true, '', hostile.toUpperCase()],
+        [bind.bindTemplate('c IN ({s:lower})', pList, { s: [hostile] }, { backslashEscapes: true }), 'c IN (', true, ')', hostile.toLowerCase()],
+        [bind.bindTemplate('c IN ({s:upper})', pList, { s: [hostile] }, { backslashEscapes: false }), 'c IN (', false, ')', hostile.toUpperCase()]
+      ];
+      for (const [sql, head, escapes, tail, value] of cases) {
+        const got = readQuoted(sql.slice(head.length), escapes);
+        assert.deepStrictEqual(got && got.value, value, sql);
+        assert.strictEqual(sql.slice(head.length + got.end), tail, sql);
+      }
+      const pr = require('../dist/engine/context/probes.js');
+      const spec = { check: 'accepted_values', table: { fqn: 'T' }, columns: ['c'], values: [hostile] };
+      assert.ok(pr.renderProbeSql(spec, fragmentsFor('snowflake')).includes('NOT IN (' + expectDoubled + ')'), 'probe on a backslash-escape platform');
+      assert.ok(pr.renderProbeSql(spec, fragmentsFor('oracle')).includes('NOT IN (' + expectRaw + ')'), 'probe on a platform without backslash escapes');
+    });
+
+    await test('CR1b: editors: a script value has no raw "<" and parses back to its exact text (backtick, backslash before a backtick, script-closing text, $&, U+2028, U+2029); each editor template fills with only its own script tags, and each inline script parses', () => {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path'); const vm = require('node:vm');
+      const W = require('../dist/core/webviewSecurity.js');
+      const root = nodePath.join(__dirname, '..');
+      const text = 'a ' + BT + ' b ' + BS + BT + ' </script><script>x()</script> $& \u2028 \u2029 "q"\nend';
+      const value = W.scriptValue(text);
+      assert.ok(!value.includes('<'), 'no raw <');
+      assert.strictEqual(new Function('return ' + value)(), text);
+      assert.strictEqual(W.escapeHtmlText('&<>"\''), '&amp;&lt;&gt;&quot;&#39;');
+      const editors = [['DocEditorProvider', 'docEditor'], ['ProfileEditorProvider', 'profileEditor'], ['SttmEditorProvider', 'sttmEditor'], ['DataModelEditorProvider', 'dataModelEditor'], ['GraphEditorProvider', 'graphEditor']];
+      const count = (s) => (s.match(/<script\b/gi) || []).length;
+      for (const [prov, file] of editors) {
+        const src = nodeFs.readFileSync(nodePath.join(root, 'src', 'editors', prov + '.ts'), 'utf8');
+        assert.ok(src.includes("html.replace('{{CONTENT}}', () => scriptValue(content))"), prov + ' fills content with a replacer function');
+        assert.ok(src.includes(`'${file}.html'`), prov + ' reads its own template');
+        const template = nodeFs.readFileSync(nodePath.join(root, 'media', 'editors', file + '.html'), 'utf8');
+        let html = template.replace('{{CONTENT}}', () => value);
+        html = html.replace('{{FILENAME}}', () => W.escapeHtmlText('name <x> "y".md'));
+        html = W.applyCspNonce(html, 'vscode-resource:');
+        assert.strictEqual(count(html), count(template), prov + ': only the template\'s own script tags');
+        let n = 0;
+        const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+        let m;
+        while ((m = re.exec(html))) {
+          if (/\bsrc\s*=/i.test(m[1])) continue;
+          n++;
+          assert.match(m[1], /nonce=/, prov + ': inline script carries the nonce');
+          new vm.Script(m[2], { filename: file + '.html' });
+        }
+        assert.ok(n >= 1, prov + ': an inline script was checked');
+      }
+    });
+
+    await test('CR1b: paths: insideFolder keeps an inside path (a file, or a new file in a folder not yet there) and refuses "..", an absolute path outside and a junction pointing outside (a file through it or a file not yet there); the sandboxed and workspace resolvers refuse the junction too', () => {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+      const PG = require('../dist/engine/pathGuard.js');
+      const root = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cr1b-root-'));
+      const outside = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cr1b-out-'));
+      const link = nodePath.join(root, 'link');
+      let linked = false;
+      try {
+        nodeFs.mkdirSync(nodePath.join(root, 'docs'));
+        nodeFs.writeFileSync(nodePath.join(root, 'docs', 'a.txt'), 'x');
+        nodeFs.writeFileSync(nodePath.join(outside, 'secret.txt'), 'secret');
+        assert.strictEqual(PG.insideFolder(root, 'docs/a.txt'), nodePath.resolve(root, 'docs', 'a.txt'));
+        assert.strictEqual(PG.insideFolder(root, 'docs/fresh/new.txt'), nodePath.resolve(root, 'docs', 'fresh', 'new.txt'), 'a new file in a folder not yet there');
+        assert.strictEqual(PG.insideFolder(root, '../x.txt'), undefined, '..');
+        assert.strictEqual(PG.insideFolder(root, nodePath.join(outside, 'x.txt')), undefined, 'an absolute path outside');
+        try { nodeFs.symlinkSync(outside, link, 'junction'); linked = true; }
+        catch (e) { console.log('    (junction case skipped: ' + e.message + ')'); }
+        if (linked) {
+          assert.strictEqual(PG.insideFolder(root, 'link/secret.txt'), undefined, 'a file through a junction');
+          assert.strictEqual(PG.insideFolder(root, 'link/new.txt'), undefined, 'a new file through a junction');
+          const T = withMock(createMock(), () => require('../dist/core/agenticTools.js'));
+          assert.throws(() => T.resolveSandboxedPath(root, 'link/secret.txt'), /escapes the workspace root/);
+          assert.throws(() => T.resolveSandboxedPath(root, 'link/new.txt'), /escapes the workspace root/);
+          const { EngineWorkspace } = require('../dist/mcp/workspace.js');
+          const ws = new EngineWorkspace({ workspaceRoot: root });
+          assert.throws(() => ws.resolveInWorkspace('link/secret.txt'), /outside the workspace/);
+          assert.throws(() => ws.resolveInWorkspace('link/new.txt'), /outside the workspace/);
+        }
+      } finally {
+        // The junction is removed as a link (its target is left alone) before the folders go.
+        if (linked) { try { nodeFs.rmdirSync(link); } catch { /* already gone */ } }
+        nodeFs.rmSync(root, { recursive: true, force: true });
+        nodeFs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    await test('CR1b: run log: an intact log verifies ok; a garbage line makes verification fail, and the reason names that line', () => {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+      const RL = require('../dist/engine/runner/runLog.js');
+      const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cr1b-log-'));
+      const file = nodePath.join(dir, 'run.jsonl');
+      try {
+        RL.appendRunLog(file, { step: 'one' });
+        RL.appendRunLog(file, { step: 'two' });
+        assert.strictEqual(RL.verifyRunLog(file).ok, true, JSON.stringify(RL.verifyRunLog(file)));
+        nodeFs.appendFileSync(file, 'this is not json\n');
+        const bad = RL.verifyRunLog(file);
+        assert.strictEqual(bad.ok, false);
+        assert.strictEqual(bad.brokenAt, 3);
+        assert.match(bad.reason, /line 3 of the run log/);
+      } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    await test('CR1b: grounding: an element named "(" does not throw the grounding check, and a name with "." matches only itself', () => {
+      const { parseSemanticModel } = require('../dist/engine/semantic/model.js');
+      const L = require('../dist/engine/semantic/layer.js');
+      const { checkSemanticGrounding } = require('../dist/engine/grounding/semanticGrounding.js');
+      const indexOf = (lines) => {
+        const { model, errors } = parseSemanticModel(lines.join('\n'));
+        assert.deepStrictEqual(errors, []);
+        return L.indexSemanticLayer([{ name: 'sales', source: 'shared', revision: 'r1', approved: true, file: 'x', model }]);
+      };
+      const paren = indexOf(['name: sales', 'tables:', '  - name: orders', '    base_table: { database: RETAIL, schema: shop, table: orders }', '    primary_key: { columns: [order_id] }', '    dimensions:', '      - { name: order_id, expr: order_id }', '      - { name: "(", expr: order_id }', '    facts:', '      - { name: tax_amount, expr: tax_amount }', '    metrics:', '      - { name: total_tax, expr: SUM(tax_amount) }']);
+      const content = [
+        'SELECT SUM(o.tax_amount) AS total_tax FROM shop.orders o',
+        'SELECT SUM((o.tax_amount)) AS total_tax FROM shop.orders o',
+        'SELECT ( o.order_id FROM shop.orders o'
+      ];
+      for (const sql of content) {
+        const r = checkSemanticGrounding([{ name: 'a.sql', content: sql }], paren);
+        assert.strictEqual(r.checked, true, sql);
+      }
+      assert.deepStrictEqual(checkSemanticGrounding([{ name: 'a.sql', content: content[0] }], paren).issues, [], 'the layer\'s own definition passes');
+      const dotted = indexOf(['name: sales', 'tables:', '  - name: orders', '    base_table: { database: RETAIL, schema: shop, table: orders }', '    primary_key: { columns: [order_id] }', '    dimensions:', '      - { name: order_id, expr: order_id }', '      - { name: "amount.net", expr: x }', '    metrics:', '      - { name: total, expr: SUM(axb) }']);
+      const check = (sql) => checkSemanticGrounding([{ name: 'a.sql', content: sql }], dotted).issues.map((i) => i.detail);
+      assert.deepStrictEqual(check('SELECT SUM(axb) AS total FROM shop.orders'), [], 'the name itself is the metric\'s own expression');
+      assert.strictEqual(check('SELECT SUM(x) AS total FROM shop.orders').length, 1, 'a "." in the element name does not match any character');
+    });
+
+    await test('CR1b: drivers: an install command refuses a drivers folder holding $, a backtick or %; a plain folder works', () => {
+      const D = require('../dist/engine/platform/driverStore.js');
+      const os = require('node:os'); const nodePath = require('node:path');
+      for (const bad of ['C:/x$y', 'C:/x' + BT + 'y', 'C:/x%y']) assert.throws(() => D.installCommand(bad, 'oracle'), /can't be quoted safely/, bad);
+      const plain = nodePath.join(os.tmpdir(), 'autode drivers');
+      const dir = nodePath.join(plain, 'oracle');
+      const c = D.installCommand(plain, 'oracle');
+      assert.strictEqual(c.cwd, dir);
+      assert.ok(c.command.startsWith('npm install --prefix "' + dir + '" --ignore-scripts'), c.command);
+    });
+
+    await test('CR1b: search: a pattern that repeats a repeated group is refused, the usual patterns run, and a long line does not hang', async () => {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+      const T = withMock(createMock(), () => require('../dist/core/agenticTools.js'));
+      const root = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cr1b-search-'));
+      const run = (pattern) => T.executeAgenticTool({ id: 'q', name: 'autode_search_files', input: { pattern } }, root, []);
+      try {
+        nodeFs.writeFileSync(nodePath.join(root, 'a.txt'), ['foo bar', 'foofoo', 'aaaa b', 'x 1.2'].join('\n'));
+        for (const p of ['(a+)+', '(a*)*', '(a|a)+', '((a+))+', '(.*)*']) assert.match(await run(p), /repeats a repeated group/, p);
+        for (const p of ['(foo)+', 'foo.*bar', '(?:ab|cd)?x', '(\\d+)\\.(\\d+)']) assert.doesNotMatch(await run(p), /repeats a repeated group/, p);
+        assert.match(await run('(foo)+'), /a\.txt/);
+        assert.match(await run('foo.*bar'), /a\.txt/);
+        nodeFs.writeFileSync(nodePath.join(root, 'long.txt'), 'a'.repeat(200000) + '\n');
+        const t0 = Date.now();
+        const out = await run('a+b');
+        assert.ok(Date.now() - t0 < 5000, 'a long line took ' + (Date.now() - t0) + ' ms');
+        assert.strictEqual(typeof out, 'string');
+      } finally { nodeFs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    await test('CR1b: LLM endpoint: https passes, and http to localhost or 127.0.0.1 passes; http elsewhere and a malformed URL are refused before any request', async () => {
+      const LL = withMock(createMock(), () => require('../dist/core/llmProviders.js'));
+      const origFetch = global.fetch;
+      let calls = [];
+      global.fetch = async (url) => { calls.push(url); return { ok: true, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) }; };
+      const ctx = (endpoint) => ({ getSettings: () => ({ llmEndpoint: endpoint }), getLlmApiKey: async () => 'k-test', getExtensionContext: () => undefined, getWorkspaceRoot: () => undefined, log: () => {} });
+      const azure = (endpoint) => LL.getLlmAdapter('azure-openai').complete('x', { model: 'gpt', systemPrompt: 'sys' }, ctx(endpoint));
+      try {
+        for (const ep of ['https://example.openai.azure.com/v1', 'http://localhost:8080/v1', 'http://127.0.0.1:8080/v1']) {
+          calls = [];
+          await azure(ep);
+          assert.deepStrictEqual(calls, [ep], ep);
+        }
+        for (const ep of ['http://example.com/v1', 'http://10.0.0.5/v1']) {
+          calls = [];
+          await assert.rejects(() => azure(ep), /must start with https/, ep);
+          assert.deepStrictEqual(calls, [], ep + ': no request');
+        }
+        calls = [];
+        await assert.rejects(() => azure('not a url'), /not a valid URL/);
+        assert.deepStrictEqual(calls, [], 'malformed: no request');
+      } finally { global.fetch = origFetch; }
+    });
+
+    await test('CR1b: package.json: the machine-scoped settings (paths, CLI locations, consents, the endpoint, read-only mode) are declared with scope machine', () => {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path');
+      const pkg = JSON.parse(nodeFs.readFileSync(nodePath.join(__dirname, '..', 'package.json'), 'utf8'));
+      const blocks = [].concat(pkg.contributes.configuration);
+      const props = Object.assign({}, ...blocks.map((b) => b.properties || {}));
+      const names = ['claudeCodePath', 'snowflakeCliPath', 'databricksCliPath', 'targetSnowflakeCliPath', 'targetDatabricksCliPath', 'driversDirectory', 'oracleConfigDir', 'oracleWalletLocation', 'snowflakePrivateKeyPath', 'targetSnowflakePrivateKeyPath', 'llmEndpoint', 'dataPlatformCliConsent', 'languageModelProgrammaticConsent', 'copilotProgrammaticConsent', 'readOnlyMode'];
+      for (const n of names) {
+        const key = 'autoDataEngineeringHub.' + n;
+        assert.ok(props[key], key + ' is declared');
+        assert.strictEqual(props[key].scope, 'machine', key);
+      }
+    });
+
+    await test('CR1b: nonces: none of the five views uses Math.random and each takes its nonce from getNonce; getNonce gives a different value each time', () => {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path');
+      const W = require('../dist/core/webviewSecurity.js');
+      for (const f of ['runbookView', 'knowledgeExplorer', 'platformCatalogView', 'portSkillView', 'workflowView']) {
+        const src = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'src', 'core', f + '.ts'), 'utf8');
+        assert.ok(!/Math\.random/.test(src), f + ' uses Math.random');
+        assert.ok(/getNonce\(\)/.test(src), f + ' takes its nonce from getNonce');
+      }
+      const a = W.getNonce();
+      const b = W.getNonce();
+      assert.notStrictEqual(a, b);
+      assert.ok(a.length >= 32, 'a nonce of at least 24 random bytes');
+    });
+
+    await test('CR1b: the complexity gate: test/architecture.test.cjs passes as a child, and test/architecture/complexity.json has a limit of 20', () => {
+      const nodeFs = require('node:fs'); const nodePath = require('node:path'); const { spawnSync } = require('node:child_process');
+      const root = nodePath.join(__dirname, '..');
+      const r = spawnSync(process.execPath, [nodePath.join(root, 'test', 'architecture.test.cjs')], { cwd: root, encoding: 'utf8', timeout: 400000 });
+      assert.strictEqual(r.status, 0, `status ${r.status}\n${String(r.stdout).slice(-2000)}\n${String(r.stderr).slice(-2000)}`);
+      const cx = JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'test', 'architecture', 'complexity.json'), 'utf8'));
+      assert.strictEqual(cx.limit, 20);
+    });
+  }
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));
@@ -16522,8 +16787,8 @@ async function main() {
       while ((m = re.exec(html))) {
         if (/\bsrc\s*=/i.test(m[1])) continue;
         scripts++;
-        // The editors keep {{FILENAME}} / {{CONTENT}} inside a string or template literal in the script body, so the unfilled template parses.
-        try { new vm.Script(m[2], { filename: file }); }
+        // CR1b (v0.61.4): the editors put {{CONTENT}} where scriptValue's JSON string literal goes, so the unfilled template parses with an empty string standing in for it.
+        try { new vm.Script(m[2].split('{{CONTENT}}').join('""'), { filename: file }); }
         catch (e) { assert.fail(nodePath.basename(file) + ': inline script does not parse: ' + e.message); }
       }
     }

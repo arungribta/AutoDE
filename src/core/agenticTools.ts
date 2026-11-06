@@ -1,3 +1,4 @@
+import { insideFolder } from '../engine/pathGuard';
 import { stepText, toolResultSummary } from '../engine/agents/answerTrace';
 import * as vscode from 'vscode';
 import * as path from 'node:path';
@@ -119,11 +120,8 @@ export function geminiSchema(schema: unknown): unknown {
 
 /** Resolves a model-supplied relative path against the workspace root, rejecting any escape (`..`, absolute paths elsewhere). */
 export function resolveSandboxedPath(workspaceRoot: string, requestedPath: string): string {
-  const root = path.resolve(workspaceRoot);
-  const resolved = path.resolve(root, requestedPath || '.');
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    throw new Error(`Path "${requestedPath}" escapes the workspace root — denied.`);
-  }
+  const resolved = insideFolder(workspaceRoot, requestedPath);
+  if (!resolved) throw new Error(`Path "${requestedPath}" escapes the workspace root — denied.`);
   return resolved;
 }
 
@@ -141,7 +139,26 @@ function runShellCommand(command: string, cwd: string): Promise<string> {
   });
 }
 
+const MAX_SEARCH_LINE_CHARS = 2000;
+// A group that repeats something repeatable, or repeats alternatives, can take exponential time on a long line.
+const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d*,\d*\}|\|)(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+,\d*\})/;
+
+function repeatsRepeatedGroup(pattern: string): boolean {
+  // Unwrap groups that are not themselves repeated, so ((a+))+ is seen as (a+)+.
+  let p = pattern;
+  for (let i = 0; i < 20; i++) {
+    if (NESTED_QUANTIFIER.test(p)) { return true; }
+    const next = p.replace(/\(([^()]*)\)(?![+*{])/, '$1');
+    if (next === p) { return false; }
+    p = next;
+  }
+  return false;
+}
+
 function searchFiles(root: string, startDir: string, pattern: string): string {
+  if (repeatsRepeatedGroup(pattern)) {
+    return 'Error: that search pattern repeats a repeated group (like (a+)+ or (a|b)*), which can hang the search. Use a simpler pattern.';
+  }
   let regex: RegExp;
   try {
     regex = new RegExp(pattern);
@@ -179,7 +196,7 @@ function searchFiles(root: string, startDir: string, pattern: string): string {
       }
       const lines = content.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
-        if (regex.test(lines[i])) {
+        if (regex.test(lines[i].length > MAX_SEARCH_LINE_CHARS ? lines[i].slice(0, MAX_SEARCH_LINE_CHARS) : lines[i])) {
           matches.push(`${path.relative(root, full)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
           if (matches.length >= MAX_SEARCH_MATCHES) { break; }
         }

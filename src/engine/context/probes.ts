@@ -108,7 +108,8 @@ function literal(v: unknown, dialect: ProbeDialect = ANSI): string {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   // As the platform writes them (Oracle before 23ai: 1 and 0).
   if (typeof v === 'boolean') return v ? dialect.booleans[0] : dialect.booleans[1];
-  return `'${String(v).replace(/'/g, "''")}'`;
+  const text = dialect.backslashEscapes === false ? String(v) : String(v).replace(/\\/g, '\\\\');
+  return `'${text.replace(/'/g, "''")}'`;
 }
 
 function sampled(table: string, dialect: ProbeDialect, sampleRows: number | undefined): string {

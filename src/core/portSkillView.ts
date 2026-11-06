@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PortSkillHost, PortSkillMsg, PortSkillSession } from './portSkillSession';
+import { getNonce } from './webviewSecurity';
 
 /**
  * The Port a Skill tab (PA4): bring a skill written for any agent into AutoDE — from a Git repository, a
@@ -31,7 +32,7 @@ export class PortSkillPanel {
     if (!PortSkillPanel.current) {
       const panel = vscode.window.createWebviewPanel('autodePortSkill', 'Port a Skill', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'autode-icon-64.png');
-      const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const nonce = getNonce();
       panel.webview.html = fs.readFileSync(path.join(context.extensionUri.fsPath, 'media', 'port-skill.html'), 'utf8').replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, panel.webview.cspSource);
       PortSkillPanel.current = new PortSkillPanel(panel, context, host);
     }

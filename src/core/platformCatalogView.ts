@@ -18,6 +18,7 @@ import { loadConnectionsConfig } from '../engine/platform/connectionsConfig';
 import { OnboardingAnswers, OnboardingError, loadTemplates, planOnboarding, proposeConformanceReview, proposeOnboarding, templateAnswers } from '../engine/platform/onboarding';
 import { parseYaml, stringifyYaml } from '../engine/context/Yaml';
 import { PackError, exportPack, importPack, inspectPack } from '../engine/platform/packs';
+import { getNonce } from './webviewSecurity';
 
 /**
  * The Platform catalog tab (POP4a; docs/specs/platform-operations.md §6.3): the capability matrix, each platform's
@@ -62,7 +63,7 @@ export class PlatformCatalogPanel {
     if (!PlatformCatalogPanel.current) {
       const panel = vscode.window.createWebviewPanel('autodePlatformCatalog', 'AutoDE · Platform catalog', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')] });
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'autode-icon-64.png');
-      const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const nonce = getNonce();
       panel.webview.html = fs.readFileSync(path.join(context.extensionUri.fsPath, 'media', 'platforms.html'), 'utf8').replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, panel.webview.cspSource);
       PlatformCatalogPanel.current = new PlatformCatalogPanel(panel, host, context.extensionUri.fsPath);
     }

@@ -85,6 +85,54 @@ test('the rule is written where every coding agent reads it', () => {
   assert.ok(/Platform-specific work belongs in skills and platform operations, not in engine code/.test(md) && md.includes('test/architecture.test.cjs'));
 });
 
+// The complexity ratchet (code review, 2026-11-06): a function's branches, counted from the source. Nothing new goes
+// above the limit, and a recorded function can only come down. The way out of a failure is a table of handlers or a
+// smaller function, never a higher number. `AUTODE_COMPLEXITY_REPORT=1` prints what is there now.
+const ts = require('typescript');
+const COMPLEXITY = JSON.parse(fs.readFileSync(path.join(__dirname, 'architecture', 'complexity.json'), 'utf8'));
+const K = ts.SyntaxKind;
+const LOGICAL = [K.AmpersandAmpersandToken, K.BarBarToken, K.QuestionQuestionToken];
+const isBranch = (n) => ts.isIfStatement(n) || ts.isConditionalExpression(n) || ts.isCaseClause(n) || ts.isForStatement(n) || ts.isForOfStatement(n) || ts.isForInStatement(n) || ts.isWhileStatement(n) || ts.isCatchClause(n) || (ts.isBinaryExpression(n) && LOGICAL.includes(n.operatorToken.kind));
+const isFunction = (n) => ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n) || ts.isArrowFunction(n) || ts.isFunctionExpression(n);
+function complexityOf() {
+  const found = {};
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!p.endsWith('.ts')) continue;
+      const rel = path.relative(ROOT, p).split(path.sep).join('/');
+      const sf = ts.createSourceFile(p, fs.readFileSync(p, 'utf8'), ts.ScriptTarget.Latest, true);
+      const visit = (n) => {
+        if (isFunction(n) && n.body) {
+          let c = 1;
+          const count = (m) => { if (isBranch(m)) c++; if (m !== n.body && isFunction(m)) return; ts.forEachChild(m, count); };
+          count(n.body);
+          const named = n.name?.getText?.() ?? n.parent?.name?.getText?.() ?? '(anonymous)';
+          const key = `${rel}::${named}`;
+          found[key] = Math.max(found[key] ?? 0, c);
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+  };
+  walk(path.join(ROOT, 'src'));
+  return found;
+}
+const measured = complexityOf();
+if (process.env.AUTODE_COMPLEXITY_REPORT) console.log(JSON.stringify(Object.fromEntries(Object.entries(measured).filter(([, c]) => c > COMPLEXITY.limit).sort(([a], [b]) => a.localeCompare(b))), null, 2));
+
+test(`no new function has a complexity over ${COMPLEXITY.limit}, and no recorded one grows`, () => {
+  const over = Object.entries(measured).filter(([k, c]) => c > (COMPLEXITY.functions[k] ?? COMPLEXITY.limit)).map(([k, c]) => `${k}: ${c} (allowed ${COMPLEXITY.functions[k] ?? COMPLEXITY.limit})`);
+  assert.deepStrictEqual(over, [], `Too complex: split it, or use a table of handlers. Don't raise the number.\n${over.join('\n')}`);
+});
+
+test('a recorded function that came down is lowered in the baseline, and one that is gone is removed', () => {
+  const stale = Object.entries(COMPLEXITY.functions).filter(([k, c]) => (measured[k] ?? 0) < c).map(([k, c]) => `${k}: recorded ${c}, now ${measured[k] ?? 'gone'}`);
+  assert.deepStrictEqual(stale, [], `Lower test/architecture/complexity.json (or remove the entry):\n${stale.join('\n')}`);
+});
+
 const passed = results.filter(Boolean).length;
 console.log(`\n${passed}/${results.length} passed`);
 if (passed !== results.length) process.exitCode = 1;

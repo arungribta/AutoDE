@@ -9,6 +9,8 @@ import { onPlatformResourcesRootChange, platformResourcesRoot, platformWorkspace
  */
 
 export interface SqlFragments {
+  /** Whether a backslash inside a string is an escape; unsaid: treated as true. */
+  backslashEscapes?: boolean;
   /** The platform id, or `ansi` for none. */
   id: string;
   /** A sampled table: `{table}` and `{n}`. */
@@ -52,6 +54,7 @@ export function fragmentsFor(platformId: string | undefined, scope: { resourcesR
     sample: f.sample ?? ANSI.sample,
     ...(f.regexMatch ? { regexMatch: f.regexMatch } : {}),
     booleans: d.booleans ?? ANSI.booleans,
+    ...(d.backslashEscapes !== undefined ? { backslashEscapes: d.backslashEscapes } : {}),
     distinctTuples: f.distinctTuples === 'native' ? 'native' : 'emulated',
     ...(f.keyHash ? { keyHash: f.keyHash } : {}),
     explain: f.explain ?? ANSI.explain,

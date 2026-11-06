@@ -218,9 +218,11 @@ class ClaudeLlmAdapter implements LlmAdapter {
       const extensionPath = ctx.getExtensionContext()?.extensionPath;
       const names = opts.engineTools?.specs.map((s) => s.name) ?? [];
       let mcp: { configFile: string; allowedTools: string[] } | undefined;
+      let configDir: string | undefined;
       if (names.length && root && extensionPath && mode !== 'none') {
-        const configFile = path.join(os.tmpdir(), `autode-mcp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
-        fs.writeFileSync(configFile, JSON.stringify({ mcpServers: { autode: panelServerEntry({ extensionPath, workspaceRoot: root, agentName: opts.agentName, tools: names }) } }));
+        configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-mcp-'));
+        const configFile = path.join(configDir, 'mcp.json');
+        fs.writeFileSync(configFile, JSON.stringify({ mcpServers: { autode: panelServerEntry({ extensionPath, workspaceRoot: root, agentName: opts.agentName, tools: names }) } }), { mode: 0o600 });
         mcp = { configFile, allowedTools: names.map((n) => `mcp__autode__${n}`) };
       }
       // With AutoDE's server attached, read the run as it streams: progress in AutoDE's log, every tool call in the audit.
@@ -243,7 +245,7 @@ class ClaudeLlmAdapter implements LlmAdapter {
       } finally {
         stop.dispose();
         if (stream && opts.auditSink) opts.auditSink.push(...stream.audit);
-        if (mcp) { try { fs.rmSync(mcp.configFile, { force: true }); } catch { /* temp file */ } }
+        if (configDir) { try { fs.rmSync(configDir, { recursive: true, force: true }); } catch { /* temp folder */ } }
       }
     } catch (err) {
       if (opts.signal?.aborted) throw new RunStoppedError();
@@ -343,6 +345,15 @@ class AnthropicLlmAdapter implements LlmAdapter {
   }
 }
 
+/** The API key goes to this address, so it must be https; plain http only for a machine's own loopback. */
+function checkLlmEndpoint(endpoint: string): string {
+  let u: URL;
+  try { u = new URL(endpoint); } catch { throw new Error('The llmEndpoint setting is not a valid URL.'); }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+  if (u.protocol === 'https:' || (u.protocol === 'http:' && loopback)) { return endpoint; }
+  throw new Error('The llmEndpoint setting must start with https:// (plain http is allowed only for localhost), because your API key is sent to it.');
+}
+
 class AzureOpenAiLlmAdapter implements LlmAdapter {
   readonly id: LlmProvider = 'azure-openai';
   readonly displayName = 'Azure OpenAI';
@@ -354,7 +365,7 @@ class AzureOpenAiLlmAdapter implements LlmAdapter {
     const apiKey = await ctx.getLlmApiKey();
     const endpoint = ctx.getSettings().llmEndpoint;
     const url = endpoint && endpoint.trim().length > 0
-      ? endpoint.trim()
+      ? checkLlmEndpoint(endpoint.trim())
       : `https://<your-resource>.openai.azure.com/openai/deployments/${opts.model}/chat/completions?api-version=2024-02-01`;
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error('Azure OpenAI API key is missing. Add it in the settings panel.');

@@ -2,7 +2,7 @@
 
 **The single place for order and status.** Specifications say *what* each phase delivers and *why*; this document says *when*, and whether it's done. If another document's plan disagrees with this one, this one wins. Document map: [README.md](README.md).
 
-Last updated: 2026-11-06 · Current version: **0.61.3** · Branch: `feature/engine-boundary`
+Last updated: 2026-11-06 · Current version: **0.61.4** · Branch: `feature/engine-boundary`
 
 ---
 
@@ -93,6 +93,7 @@ Each row is one minor version, implemented in this order. ✅ = shipped (see [CH
 | v0.61.1 | ✅ **POP5b** Onboarding new systems from a template (category, transports, connection fields, version detection, starter operations, skills), on trial until its examples pass and a person reviews a conformance run on a real connection (it must reproduce POP2's Redshift); a team adds one platform's implementation to an existing operation without copying it | [platform-operations.md §6.5](specs/platform-operations.md) | |
 | v0.61.2 | ✅ **POP5c** Packs of platform definitions, operations and skills to share between workspaces, imported with one review | [platform-operations.md §6.5](specs/platform-operations.md) | |
 | v0.61.3 | ✅ **CR1** The critical code review, and its safety fixes: read-only guarantees, a person approves, safe applying, credentials, quietly wrong answers, and the test gate | [code-review-2026-11.md](design/code-review-2026-11.md) | Owner, 2026-11-06: functionality first, but maintainable for the long run. After POP5, before IMP1. |
+| v0.61.4 | ✅ **CR1b** Security review against OWASP ASVS and its fixes; production dependencies clean; a complexity gate | [code-review-2026-11.md](design/code-review-2026-11.md) §7, §8 | Owner, 2026-11-06: was it reviewed against OWASP, SOLID and similar; is the branching the right approach. |
 | proposed | **CR2** One approval for the specification and for decisions across surfaces, the plan gate in the engine, running a runbook outside the panel | [code-review-2026-11.md](design/code-review-2026-11.md) §4 A, B, C, J | Proposed by the review, before IMP1: for the owner to confirm. |
 | proposed | **CR3** Structure: a handler per decision kind, the scope passed rather than held, platform and decisions layered one way, the context managers over the engine | [code-review-2026-11.md](design/code-review-2026-11.md) §4 F, G, H, I | Proposed by the review: for the owner to schedule. |
 | v0.62.0 | **IMP1** AtScale SML import and export | [context-layer §6.9](specs/context-layer.md) | Owner: AtScale first among imports. |
@@ -199,6 +200,7 @@ Requirements in the previous requirements.md that were unmet or contradicted by 
 
 | Date | Decision |
 |---|---|
+| 2026-11-06 | **Settings a repository can't set, and a ratchet for complexity** (AutoDE, on the owner's questions). Executable paths, endpoints and consents became `machine` scope: a cloned repository's settings are untrusted input, and this is a behaviour change for a team that kept them in workspace settings. Complexity is held by a ratchet, not a rewrite: nothing new above 20, and the 180 existing functions may only come down. Rejected for now: rewriting the worst functions at once, which is CR3's work and needs the owner's scheduling. |
 | 2026-11-06 | **The code review, and where its line was drawn** (AutoDE). Safety defects and gates that could falsely pass were fixed at once (CR1, v0.61.3), as agreed: credentials and safety aren't deferred. Structural findings were written up and not acted on: they are design choices for the owner (CR2, CR3 proposed). Accepted and stated: an approver's name is text, not an identity; `.autode/config` counts as reviewed repository content; the host guard stops mistakes, not a determined script. |
 | 2026-11-06 | **POP5 complete; what a pack may carry** (AutoDE). A recorded example of an operation reading row values holds a client's data, so export refuses it; metadata examples travel. An imported system isn't on trial: the import review is the workspace's act of trust, and the acceptance asks for the same catalog. Agents' pack paths stay inside the workspace. v0.61.2. |
 | 2026-11-06 | **On trial, implementation files and one review** (AutoDE, for POP5b). (1) A system can't pass a conformance run while drafts never run, so approval puts it on trial: it connects, and only conformance and Try it read, until a person reviews a run; the review is bound to the definition's content. (2) A team adding a platform to a shipped operation would have copied it, freezing every other platform's statement, so one platform's block is its own file. (3) Twenty files reviewed one by one wouldn't be reviewed, so a system (and POP5c's pack) is one decision. Rejected: recording examples from the conformance run, which would change approved files. |

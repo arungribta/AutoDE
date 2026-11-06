@@ -10,6 +10,7 @@ import { ContextPackSources } from '../engine/context/contextPack';
 import { ExplorerAction, ExplorerMessage, answerExplorerMessage } from './knowledgeExplorerModel';
 import { SetMetadataInput } from '../engine/metadata/record';
 import { CERTIFICATIONS_SET, OWNER_ROLES, loadMetadataConfig } from '../engine/metadata/model';
+import { getNonce } from './webviewSecurity';
 
 /**
  * The Knowledge Explorer (C5b; docs/specs/context-layer.md §6.10): an
@@ -57,7 +58,7 @@ export class KnowledgeExplorerPanel {
     if (!KnowledgeExplorerPanel.current) {
       const panel = vscode.window.createWebviewPanel('autodeKnowledgeExplorer', 'AutoDE · Knowledge Explorer', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist'), vscode.Uri.joinPath(context.extensionUri, 'media')] });
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'autode-icon-64.png');
-      const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const nonce = getNonce();
       const cytoscape = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'cytoscape.min.js')).toString();
       panel.webview.html = fs.readFileSync(path.join(context.extensionUri.fsPath, 'media', 'explorer.html'), 'utf8')
         .replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, panel.webview.cspSource).replace(/\{\{cytoscapeUri\}\}/g, cytoscape);

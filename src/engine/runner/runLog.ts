@@ -51,6 +51,10 @@ export function appendRunLog(file: string, e: Omit<RunLogEntry, 'seq' | 'prev' |
 
 /** Whether every entry links to the one before and hashes to what it says. */
 export function verifyRunLog(file: string): { ok: boolean; entries: number; brokenAt?: number; reason?: string } {
+  if (fs.existsSync(file)) {
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((l) => l.trim());
+    for (const [i, l] of lines.entries()) { try { JSON.parse(l); } catch { return { ok: false, entries: lines.length, brokenAt: i + 1, reason: `line ${i + 1} of the run log can't be read.` }; } }
+  }
   const all = readRunLog(file);
   let prev = GENESIS;
   for (const [i, e] of all.entries()) {

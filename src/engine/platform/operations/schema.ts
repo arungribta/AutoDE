@@ -198,6 +198,7 @@ export const PLATFORM_SCHEMA = {
         identifierQuote: { enum: ['"', '`'] },
         unquotedCase: { enum: ['upper', 'lower', 'preserve'] },
         booleans: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string' } },
+        backslashEscapes: { type: 'boolean', description: 'Whether a backslash inside a string is an escape. Unsaid: treated as true, the safe reading.' },
         fragments: { type: 'object', additionalProperties: { type: 'string' } },
         compile: { enum: ['snowflake', 'spark_sql', 'google_sql', 'postgres', 'tsql', 'redshift', 'ansi'], description: 'The SQL dialect AutoDE compiles deliverables (Pipeline Specs, primitives) to for this platform, where it is a target.' }
       }

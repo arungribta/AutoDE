@@ -49,6 +49,7 @@ connection:
   roles: [source, target]
 versionOperation: platform.version
 dialect:
+  backslashEscapes: false
   compile: redshift
   identifierQuote: '"'
   unquotedCase: lower

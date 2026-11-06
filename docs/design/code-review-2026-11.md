@@ -1,10 +1,10 @@
 # Critical code review, November 2026
 
-> **Reviewed:** v0.61.2 (2026-11-06), the point where POP5 finished the platform model and before IMP1 builds on it. **Fixes from it:** v0.61.3 (CR1). The rest is proposed below, for the owner to decide.
+> **Reviewed:** v0.61.2 (2026-11-06), the point where POP5 finished the platform model and before IMP1 builds on it. **Fixes from it:** v0.61.3 (CR1) and v0.61.4 (CR1b). The rest is proposed below, for the owner to decide.
 
 ## 1. The verdict
 
-The architecture is sound where it matters most, and the next phases can build on it. The engine really is independent of its hosts: nothing under `src/engine` imports a surface or `vscode`, measured over every file. The platform model holds up: Redshift, and now a catalog system, are added by files alone. Transports, binding and the review lifecycle are well built.
+The architecture is sound where it matters most, and the next phases can build on it. On maintainability that verdict was too generous at first: see section 8. The engine really is independent of its hosts: nothing under `src/engine` imports a surface or `vscode`, measured over every file. The platform model holds up: Redshift, and now a catalog system, are added by files alone. Transports, binding and the review lifecycle are well built.
 
 The review found two kinds of problem:
 
@@ -81,3 +81,56 @@ Ranked by what they cost the next phases. None is a safety defect.
 - Webviews weren't opened. Layout, focus order and screen readers are unverified, including for the corrected escaping.
 - Not read in depth: `explore/`, `transforms/`, `quality/`, `ontology/`, `maintenance/`, the Oracle adapter, and each MCP tool one by one.
 - Items 7, E and the concurrency findings come from reading the code. No race was reproduced.
+
+## 7. Against OWASP ASVS 4.0.3
+
+Added at the owner's request: sections 1 to 6 were a review against AutoDE's own rules, not a named standard. This one followed ASVS at about Level 2, using the chapters that apply to a local tool with an agent interface. It is a structured review, not a certification or a penetration test.
+
+| Chapter | Result | Note |
+|---|---|---|
+| V1 Architecture | Partial | Trust boundaries are drawn well; workspace settings and SQL literals leaked through them (fixed) |
+| V5 Validation and encoding | Partial | Almost every `innerHTML` escapes its data. The custom editors, SQL backslashes and regular expressions from names did not (fixed) |
+| V6 Cryptography | Partial | Nonces fixed. Key handling wasn't reviewed in depth |
+| V7 Errors and logging | Partial | Redaction is a good pattern. The run log's chain can't detect a removed last entry, and it is unkeyed |
+| V8 Data protection | Partial | Sample-data gate sound by design. Name-based masking can be evaded by aliasing a column |
+| V10 Malicious code | Partial | Git ingestion is careful. The Oracle driver range has no integrity pin |
+| V12 Files | Partial | Links now followed everywhere; `ingestFile` has no size cap |
+| V13 API | Pass, with gaps | Every tool has a schema and annotations; handlers weren't each checked against their annotation |
+| V14 Configuration | Partial | Settings scope fixed. `style-src 'unsafe-inline'` remains on every webview |
+
+**Fixed in v0.61.4:** SQL literal backslashes, workspace-settable executables and consents, custom editor breakouts, regular expressions from model input, links escaping the workspace, the run log's false pass, weak nonces and temporary files, and the drivers folder.
+
+**Remaining, accepted for now:** name-based masking is best effort, the run log can't detect tail loss, `style-src 'unsafe-inline'`, the Oracle driver's range, no size cap on ingestion.
+
+**Not checked:** `mode: 'full'` Claude Code as a prompt-injection path, per-tool tier enforcement across all MCP handlers, licences of fetched content, and anything on a live platform or in a real webview.
+
+## 8. Maintainability, measured
+
+The figures are for v0.61.3: 282 files, 58,869 lines, 5,191 `if` statements, 4,230 ternaries. Complexity counts branches per function; a common guideline is about 10.
+
+| Complexity | Functions, of 6,931 |
+|---|---|
+| Median | 1 |
+| 90th percentile | 8 |
+| Over 10 | 461 |
+| Over 20 | 180 |
+| Over 50 | 28 |
+
+The worst are dispatchers: `handleMessage` 456, `journeyFor` 165, `cmdPlatform` 142, `cmdWorkflow` 107, `applyClaimed` 105, `onMessage` 99. The last three grew during POP5, and `planOnboarding`, written in POP5, is 68.
+
+**Is this the best approach? Not for everything.** Adding a platform scales well, since it is files. Adding a decision kind, a panel message or a command doesn't: each lengthens a central `switch`. Those need tables of handlers (CR3). Validators and guards are conditional by nature and should stay so. There are 70 checks of a platform's name left, some of them deliberate safety code.
+
+| SOLID principle | Assessment |
+|---|---|
+| Single responsibility | Broken in the dispatchers and `catalogView.ts` |
+| Open/closed | Met for platforms, broken for decision kinds |
+| Dependency inversion | Weak: the platform and decision layers import each other |
+| Liskov, interface segregation | Not evaluated |
+
+| Quality | How it was evaluated | Assessment |
+|---|---|---|
+| Maintainability | Reviewers' judgement, then measured | Weak in the dispatchers. Now held by a ratchet |
+| Extensibility | Against the next phases | Strong for platforms, weak elsewhere |
+| Readability | Not evaluated: style was excluded from the review | Unknown. Very long single-line statements are a concern |
+| Testability | Reviewed | Good in the engine. `handleMessage` has no tests |
+| Operational support | Barely: logging, diagnostics and upgrades weren't reviewed | Unknown, and the biggest gap |

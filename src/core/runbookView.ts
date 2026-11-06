@@ -9,6 +9,7 @@ import { approveRunbook, readRunbook, runLogFile } from '../engine/runner/runboo
 import { runRemaining, runStep } from '../engine/runner/run';
 import { createRunnerHost } from '../mcp/runnerHost';
 import { buildRunbookModel, listRunbookItems } from './runbookViewModel';
+import { getNonce } from './webviewSecurity';
 
 /**
  * The Runbook tab (v0.45.6): the wizard for platform changes. A person reviews
@@ -45,7 +46,7 @@ export class RunbookPanel {
     if (!p) {
       const panel = vscode.window.createWebviewPanel('autodeRunbook', `Runbook: ${id}`, vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'autode-icon-64.png');
-      const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const nonce = getNonce();
       panel.webview.html = fs.readFileSync(path.join(context.extensionUri.fsPath, 'media', 'runbook.html'), 'utf8').replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, panel.webview.cspSource);
       p = new RunbookPanel(panel, id, host);
       RunbookPanel.open.set(id, p);

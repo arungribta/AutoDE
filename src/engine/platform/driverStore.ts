@@ -81,7 +81,7 @@ export function driverDir(root: string, id: DriverId): string {
 export function installCommand(root: string, id: DriverId): { command: string; cwd: string } {
   const spec = DRIVERS[id];
   const dir = driverDir(root, id);
-  if (/["\r\n]/.test(dir)) throw new Error(`The drivers folder "${dir}" contains a character that can't be quoted safely; choose another folder (setting driversDirectory).`);
+  if (/["\r\n$`%]/.test(dir)) throw new Error(`The drivers folder "${dir}" contains a character that can't be quoted safely; choose another folder (setting driversDirectory).`);
   return { command: `npm install --prefix "${dir}" --ignore-scripts --no-audit --no-fund "${spec.package}@${spec.range}"`, cwd: dir };
 }
 

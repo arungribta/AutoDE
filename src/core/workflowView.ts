@@ -11,6 +11,7 @@ import { layoutPath } from '../engine/workspaceLayout';
 import { EXPLORATION_LABEL, problemMode } from '../engine/documents/problemMode';
 import { Journey } from '../engine/workflows/journey';
 import { CoverageStatus, placeCoverageItem, specCoverage } from '../engine/workflows/coverage';
+import { getNonce } from './webviewSecurity';
 
 /**
  * The Workflow view (v0.44.1): a tree in AutoDE's activity bar, a full editor
@@ -133,7 +134,7 @@ export class WorkflowPanel {
     if (!WorkflowPanel.current) {
       const panel = vscode.window.createWebviewPanel('autodeWorkflow', 'AutoDE · Workflow', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'autode-icon-64.png');
-      const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const nonce = getNonce();
       const html = fs.readFileSync(path.join(context.extensionUri.fsPath, 'media', 'workflow.html'), 'utf8').replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, panel.webview.cspSource);
       panel.webview.html = html;
       WorkflowPanel.current = new WorkflowPanel(panel, context, host, onChange);

@@ -261,6 +261,8 @@ export interface PlatformDefinition {
     /** How the platform stores an unquoted name. */
     unquotedCase?: 'upper' | 'lower' | 'preserve';
     booleans?: [string, string];
+    /** Whether a backslash inside a string is an escape (Snowflake, Spark: true; standard strings: false). Unsaid: treated as true. */
+    backslashEscapes?: boolean;
     /** v0.54.1: the dialect fragments probes and reconciliation use. */
     fragments?: Record<string, string>;
     /** POP4a: the SQL dialect deliverables compile to here (a warehouse or lakehouse that is a target). */

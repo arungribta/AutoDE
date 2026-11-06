@@ -15,6 +15,7 @@ import { driftReport } from '../engine/platform/operations/drift';
 import { ProposalValidationError, propose } from '../engine/decisions/proposals';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { insideFolder } from '../engine/pathGuard';
 import { parseYaml } from '../engine/context/Yaml';
 import { layoutPath } from '../engine/workspaceLayout';
 import { OnboardingAnswers, OnboardingError, likeAnswers, loadTemplates, onboardingStatus, planOnboarding, proposeConformanceReview, proposeOnboarding, skillName, templateAnswers } from '../engine/platform/onboarding';
@@ -72,13 +73,8 @@ const failure = (err: unknown) => new EngineToolError('VALIDATION_FAILED', err i
 
 /** An agent reads and writes packs only inside the workspace: a folder outside it is refused. */
 function insideWorkspace(ws: EngineWorkspace, dir: string, what: string): string {
-  const root = fs.realpathSync(path.resolve(ws.options.workspaceRoot));
-  const full = path.resolve(root, dir);
-  // A link is followed before the check: the nearest folder that exists decides where the path really is.
-  let existing = full;
-  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
-  const rel = path.relative(root, path.join(fs.realpathSync(existing), path.relative(existing, full)));
-  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) throw new EngineToolError('VALIDATION_FAILED', `${what} must be a folder inside the workspace (${root}); ${dir} is outside it.`);
+  const full = insideFolder(ws.options.workspaceRoot, dir);
+  if (!full) throw new EngineToolError('VALIDATION_FAILED', `${what} must be a folder inside the workspace (${ws.options.workspaceRoot}); ${dir} is outside it.`);
   return full;
 }
 

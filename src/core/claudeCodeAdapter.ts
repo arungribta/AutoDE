@@ -239,9 +239,11 @@ export class ClaudeCodeAdapter {
     // v0.52.4: the instructions go in a file, never on the command line. An agent's assignment (role, skills, brief)
     // runs to tens of thousands of characters, past Windows' 32,767-character command-line limit (spawn ENAMETOOLONG).
     let promptFile: string | undefined;
+    let promptDir: string | undefined;
     if (opts?.systemPrompt && opts.systemPrompt.trim().length > 0) {
-      promptFile = path.join(os.tmpdir(), `autode-prompt-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.md`);
-      fs.writeFileSync(promptFile, opts.systemPrompt.trim(), 'utf8');
+      promptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autode-prompt-'));
+      promptFile = path.join(promptDir, 'prompt.md');
+      fs.writeFileSync(promptFile, opts.systemPrompt.trim(), { encoding: 'utf8', mode: 0o600 });
       args.push('--append-system-prompt-file', promptFile);
     }
 
@@ -286,7 +288,7 @@ export class ClaudeCodeAdapter {
     try {
       return await this.run(args, prompt, timeoutMs, opts?.cwd, opts?.cancellationToken, opts?.stream, opts?.env);
     } finally {
-      if (promptFile) { try { fs.rmSync(promptFile, { force: true }); } catch { /* a temp file */ } }
+      if (promptDir) { try { fs.rmSync(promptDir, { recursive: true, force: true }); } catch { /* a temp folder */ } }
     }
   }
 

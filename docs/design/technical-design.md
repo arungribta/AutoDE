@@ -1,7 +1,7 @@
 # AutoDE — Technical Design Document
 
 **Last Updated:** 2026-11-06
-**Version:** 0.61.3
+**Version:** 0.61.4
 **Scope:** HOW AutoDE is built — architecture, modules, data formats, algorithms and design trade-offs. What AutoDE must do and why: [requirements.md](../requirements.md) and the forward specifications. Order and status: [roadmap.md](../roadmap.md). Release history (moved out of this document on 2026-10-15): [CHANGELOG.md](../../CHANGELOG.md). Document map: [README.md](../README.md).
 
 > Restructured on 2026-10-15: sections 1, 2, 5, 7, 10.1–10.2, 11 and 12 were rewritten against the code at v0.30.0; the others were carried over with paths updated for the v0.26.0 move to `src/engine/`, and some still describe their version's design in narrative form. The historical phase list (old §10) was removed — release history is in CHANGELOG.md. Where this document and the code disagree, the code and the latest CHANGELOG entry win; corrections are tracked in the roadmap.
@@ -1704,6 +1704,11 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - **Proposals** (`proposal.ts`, `proposeService.ts`): `prepareOperationProposal()` parses (object or YAML), requires `reason`, an id, `example.rows`, known platforms, and `checkOperation` with the approved platforms; `resemblingOperations()` scores approved operations (area, shared platforms, shared parameter names, shared names read — `{…}` placeholders and `SQL_WORDS` left out). `proposalFile(id, text)` = `proposed/<id>.<checksum 8>.yaml`. `proposeOperation()` supersedes pending proposals of the same operation (`PlatformFilePayload.operation`) and removes their draft files (never the approved one), writes the file with a header comment, and `propose(…, 'platform_operation', { file, checksum, operation, reason, fixes, resembles })`. `validatePlatformFileProposal` requires `example.rows` for a `/proposed/` file. Applying calls `retireReplaced()`: the team's other files of that id, now drafts, move to `.autode/local/replaced-operations/`. `pendingOperationProposals()` feeds `operationPage().proposals` and `platformPage().health.proposals`; `drift` and `health.drift`/`unreadKinds` come from `driftReport`.
   - **Surfaces:** MCP `autode_propose_platform_operation` (propose tier), `autode_platform_drift` (read); CLI `platform propose-operation <file> --reason [--fixes]` and `platform drift` (both call those handlers); `platform operation` adds drift and proposals. VS Code: `PlatformCatalogHost.resolveDecision` → `SidebarProvider.resolveFromView` (message `resolveDecision`, Reject asks for the note).
   - **Role and skill:** `agents/platform-maintainer.md`; `skills/autode-core-platform-operations` (core, no stage kinds; maintenance work orders give it to the role).
+- **CR1b** (v0.61.4).
+  - **`src/engine/pathGuard.ts` `insideFolder`:** the one check for paths a model or agent names, links followed; used by `resolveSandboxedPath`, `resolveInWorkspace` and the pack tools.
+  - **`bind.ts` `literal(value, dialect)`:** `dialect.backslashEscapes`, in each platform's definition; `probes.ts` follows it through `SqlFragments`.
+  - **`webviewSecurity.ts`:** one nonce source, and the helpers the custom editors use to place file text in a page.
+  - **`test/architecture.test.cjs`:** `complexityOf()` counts branches per function from the TypeScript AST; `test/architecture/complexity.json` holds the limit and the recorded functions. `AUTODE_COMPLEXITY_REPORT=1` prints what is over the limit.
 - **CR1** (v0.61.3; [code-review-2026-11.md](code-review-2026-11.md)).
   - **Guard:** `sqlGuard.ts` `CONVENTIONS` adds a `lineComment` reading for `//` and `#`; every reading must agree. `bind.ts` `cliReadProblem` checks `access.cli.readCommands`, in `checkOperation` and again in `runBound`.
   - **Decisions:** `Decision.proposalHash`, checked in `applyClaimed`. `DecisionStore.claim()` exclusive-creates `<id>.applying`; `applyDecision` wraps `applyClaimed`. `syncFileResolutions({ fileStakes })` and `processResolved(…, { fileStakes })`: MCP passes `low`. `unreadable()` reports files `list()` can't read.
@@ -2435,7 +2440,7 @@ src/core/credentials/    # VS Code SecretStorage credential resolver
 src/editors/    # custom editors
   DataModelEditorProvider.ts, DocEditorProvider.ts, GraphEditorProvider.ts, ProfileEditorProvider.ts, SemanticModelEditorProvider.ts, SttmEditorProvider.ts
 src/engine/    # shared types (everything under src/engine/ is free of vscode)
-  types.ts, workspaceCreate.ts, workspaceLayout.ts, workspaceMigration.ts
+  pathGuard.ts, types.ts, workspaceCreate.ts, workspaceLayout.ts, workspaceMigration.ts
 src/engine/agents/    # role templates, skills, assignments, the skill catalog, the plugin, and the deterministic helpers agents build on
   answerTrace.ts, artifacts.ts, assignment.ts, chatFrontDoor.ts, columnMatch.ts, definitions.ts, modelDraft.ts, plugin.ts, primitiveCandidates.ts, reconcilePlan.ts, skillCatalog.ts, sourceContextDraft.ts, stageGaps.ts
 src/engine/approvals/    # what waits for a person, gathered from every mechanism (SIMP-1)

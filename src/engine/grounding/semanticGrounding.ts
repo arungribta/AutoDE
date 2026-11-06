@@ -62,7 +62,7 @@ export function normalizeExpr(expr: string): string {
 function expandedForms(metric: LayerElement, index: SemanticLayerIndex): string[] {
   const own = index.elements.filter((e) => e.model === metric.model && e.table === metric.table && e.list !== 'metrics' && e.list !== 'filters');
   let expanded = metric.expr;
-  for (const e of own) expanded = expanded.replace(new RegExp(`(?<![\\w.])${e.name}(?![\\w(])`, 'gi'), `(${e.expr})`);
+  for (const e of own) expanded = expanded.replace(new RegExp(`(?<![\\w.])${e.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w(])`, 'gi'), () => `(${e.expr})`);
   return [...new Set([metric.expr, expanded, expanded.replace(/\((\w+)\)/g, '$1')].map(normalizeExpr))];
 }
 

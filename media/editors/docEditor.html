@@ -29,9 +29,10 @@ body { background: var(--vscode-editor-background, #1f1f1f); color: var(--vscode
 <div class="content" id="content"></div>
 <script>
 (function() {
-  var content = `{{CONTENT}}`;
+  function esc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var content = {{CONTENT}};
   var el = document.getElementById('content');
-  var html = content
+  var html = esc(content)
     .replace(/### (.+)/g, '<h3>$1</h3>')
     .replace(/## (.+)/g, '<h2>$1</h2>')
     .replace(/# (.+)/g, '<h1>$1</h1>')
@@ -39,7 +40,7 @@ body { background: var(--vscode-editor-background, #1f1f1f); color: var(--vscode
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-    .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br>');

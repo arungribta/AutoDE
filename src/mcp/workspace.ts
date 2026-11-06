@@ -1,3 +1,4 @@
+import { insideFolder } from '../engine/pathGuard';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseYaml } from '../engine/context/Yaml';
@@ -87,9 +88,8 @@ export class EngineWorkspace {
 
   /** A workspace-relative path, refused if it escapes the workspace. */
   public resolveInWorkspace(rel: string): string {
-    const full = path.resolve(this.options.workspaceRoot, rel);
-    const root = path.resolve(this.options.workspaceRoot);
-    if (full !== root && !full.startsWith(root + path.sep)) {
+    const full = insideFolder(this.options.workspaceRoot, rel);
+    if (!full) {
       throw new EngineToolError('PERMISSION_DENIED', `Path "${rel}" is outside the workspace.`);
     }
     return full;

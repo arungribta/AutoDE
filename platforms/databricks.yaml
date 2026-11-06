@@ -10,6 +10,7 @@ access:
   api: { name: Databricks Statement Execution API }
 versionOperation: platform.version
 dialect:
+  backslashEscapes: true
   compile: spark_sql
   identifierQuote: '`'
   unquotedCase: lower

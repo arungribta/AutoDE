@@ -28,7 +28,8 @@ pre { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); bor
 <pre id="content"></pre>
 <script>
 (function() {
-  var content = `{{CONTENT}}`;
+  function esc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var content = {{CONTENT}};
   var el = document.getElementById('content');
   var statsEl = document.getElementById('stats');
   try {
@@ -45,7 +46,7 @@ pre { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); bor
       '<div class="stat-card"><div class="stat-value">' + edges.length + '</div><div class="stat-label">Edges</div></div>' +
       '<div class="stat-card"><div class="stat-value">' + views.length + '</div><div class="stat-label">Views</div></div>';
   } catch(e) { statsEl.innerHTML = ''; }
-  var highlighted = JSON.stringify(JSON.parse(content), null, 2)
+  var highlighted = esc(JSON.stringify(JSON.parse(content), null, 2))
     .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
     .replace(/: "([^"]*)"/g, ': <span class="json-string">"$1"</span>')
     .replace(/: (\d+)/g, ': <span class="json-number">$1</span>');

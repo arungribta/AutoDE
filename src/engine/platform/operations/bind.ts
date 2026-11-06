@@ -33,9 +33,15 @@ export function identifier(value: unknown, d: Dialect = {}): string {
   return parts.map((p) => (/^["`]/.test(p) ? identPart(p.slice(1, -1).replace(/""|``/g, (m) => m[0]), d) : identPart(p, d))).join('.');
 }
 
-export function literal(value: unknown): string {
+/**
+ * A value as a quoted literal. Where the platform reads a backslash inside a string as an escape (Snowflake, Spark) it
+ * is doubled, or `\\'` would end the string and what follows would run. A dialect that doesn't say is treated as one
+ * that does: a doubled backslash can only make a comparison miss, never run anything.
+ */
+export function literal(value: unknown, d: Pick<Dialect, 'backslashEscapes'> = {}): string {
   if (value === null || value === undefined) return 'NULL';
-  return `'${String(value).replace(/'/g, "''")}'`;
+  const text = d.backslashEscapes === false ? String(value) : String(value).replace(/\\/g, '\\\\');
+  return `'${text.replace(/'/g, "''")}'`;
 }
 
 function number(value: unknown, p: OperationParam): string {
@@ -49,17 +55,17 @@ function number(value: unknown, p: OperationParam): string {
 const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(',').map((x) => x.trim()).filter(Boolean) : [v]);
 
 function render(p: OperationParam, value: unknown, mode: string | undefined, d: Dialect): string {
-  if (mode === 'literal') return p.type.endsWith('_list') ? asList(value).map(literal).join(', ') : literal(value);
+  if (mode === 'literal') return p.type.endsWith('_list') ? asList(value).map((x) => literal(x, d)).join(', ') : literal(value, d);
   if (mode === 'lower' || mode === 'upper') {
-    const f = (x: unknown) => literal(mode === 'lower' ? String(x).toLowerCase() : String(x).toUpperCase());
+    const f = (x: unknown) => literal(mode === 'lower' ? String(x).toLowerCase() : String(x).toUpperCase(), d);
     return p.type.endsWith('_list') ? asList(value).map(f).join(', ') : f(value);
   }
   if (mode) throw new BindError(`unknown binding {${p.name}:${mode}} (literal, lower or upper).`);
   switch (p.type) {
     case 'identifier': return identifier(value, d);
     case 'identifier_list': { const l = asList(value); if (!l.length) throw new BindError(`${p.name} needs at least one name.`); return l.map((x) => identifier(x, d)).join(', '); }
-    case 'literal': return literal(value);
-    case 'literal_list': { const l = asList(value); if (!l.length) throw new BindError(`${p.name} needs at least one value.`); return l.map(literal).join(', '); }
+    case 'literal': return literal(value, d);
+    case 'literal_list': { const l = asList(value); if (!l.length) throw new BindError(`${p.name} needs at least one value.`); return l.map((x) => literal(x, d)).join(', '); }
     case 'number': return number(value, p);
     case 'boolean': { const b = d.booleans ?? ['TRUE', 'FALSE']; if (typeof value !== 'boolean' && !/^(true|false)$/i.test(String(value))) throw new BindError(`${p.name} must be true or false.`); return value === true || /^true$/i.test(String(value)) ? b[0] : b[1]; }
     case 'statement': {
