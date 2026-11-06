@@ -114,6 +114,9 @@ export function backendFor(platform: DataPlatformProvider, authMode?: string, vi
   const d = platformDefinition(platform);
   const cli = d?.connection ? d.access?.cli : undefined;
   if (d && cli?.statement) return { backend: `The ${cli.command} CLI${cli.statement.mode === 'async' ? ' (statements submitted, then fetched)' : ''}`, caveat: `Needs the ${cli.command} CLI${cli.minVersion ? ` ${cli.minVersion} or later` : ''} and your consent for AutoDE to run it; MCP clients need the server started with --allow-cli. Defined by platforms/${d.id}.yaml.` };
+  // POP5: a platform reached through its API or a folder of files.
+  if (d?.connection && d.access?.api?.baseUrlField) return { backend: `${d.access.api.name} (REST)`, caveat: `Called over https with the connection's own sign-in; nothing to install. Defined by ${d.id}'s platform definition.` };
+  if (d?.connection && d.access?.file?.rootField) return { backend: 'Files in a folder', caveat: `Reads a folder on this machine, which may be a Git checkout; AutoDE doesn't clone it. Defined by ${d.id}'s platform definition.` };
   return { backend: 'not supported', caveat: '' };
 }
 
@@ -201,6 +204,7 @@ export class PlatformOnboarding {
       const items = await descriptor.listConnections(found.cliPath);
       return { kind: 'cli', where: `${d.access?.cli?.command} ${(d.access?.cli?.listProfiles ?? []).join(' ')}`, items: items.map((i) => ({ name: i.name, usable: true })), problem: items.length ? undefined : `No ${d.access?.cli?.command} profiles yet: the autode-${d.id}-* skills say how to add one.` };
     }
+    if (d?.connection) return { kind: 'cli', where: '', items: [] };
     return { kind: 'cli', where: '', items: [], problem: `No onboarding for ${platform}.` };
   }
 

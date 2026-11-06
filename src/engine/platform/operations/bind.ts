@@ -101,6 +101,32 @@ export function bindTemplate(template: string, params: readonly OperationParam[]
   });
 }
 
+/**
+ * POP5: binds a template for a place that isn't SQL (a URL, a JSON body, a file pattern), so values go in as
+ * themselves, not quoted. Lists are comma-separated. `encode` makes a value safe for where it lands. Numbers,
+ * booleans and statements are checked as in SQL; `[[ … ]]` works the same way.
+ */
+export function bindPlain(template: string, params: readonly OperationParam[], values: Record<string, unknown>, encode: (s: string) => string = (s) => s): string {
+  const byName = new Map(params.map((p) => [p.name, p] as const));
+  const named = (section: string) => [...section.matchAll(/\{([a-z][a-z0-9_]*)(?::[a-z_]+)?\}/g)].map((m) => m[1]);
+  const kept = template.replace(/\[\[([\s\S]*?)\]\]/g, (_m, section: string) => (named(section).every((n) => values[n] !== undefined) ? section : ''));
+  return kept.replace(/\{\{|\}\}|\{([a-z][a-z0-9_]*)(?::([a-z_]+))?\}/g, (m, nm: string | undefined, mode: string | undefined) => {
+    if (m === '{{') return '{';
+    if (m === '}}') return '}';
+    const p = byName.get(nm!);
+    if (!p) throw new BindError(`the template names {${nm}}, which isn't a parameter.`);
+    const v = values[nm!];
+    if (v === undefined) throw new BindError(`${nm} has no value.`);
+    if (mode && mode !== 'lower' && mode !== 'upper') throw new BindError(`unknown binding {${p.name}:${mode}} here (lower or upper).`);
+    const cased = (s: string) => (mode === 'lower' ? s.toLowerCase() : mode === 'upper' ? s.toUpperCase() : s);
+    if (p.type === 'number') return encode(number(v, p));
+    if (p.type === 'boolean') { if (typeof v !== 'boolean' && !/^(true|false)$/i.test(String(v))) throw new BindError(`${p.name} must be true or false.`); return encode(String(v === true || /^true$/i.test(String(v)))); }
+    if (p.type === 'statement') return encode(render(p, v, undefined, {}));
+    if (p.type.endsWith('_list')) { const l = asList(v); if (!l.length) throw new BindError(`${p.name} needs at least one value.`); return l.map((x) => encode(cased(String(x)))).join(','); }
+    return encode(cased(String(v)));
+  });
+}
+
 /** A value of each parameter's type, for checking templates when a file is loaded. */
 export function sampleValues(params: readonly OperationParam[]): Record<string, unknown> {
   const sample: Record<ParamTypeKey, unknown> = { identifier: 'a.b', identifier_list: ['a', 'b'], literal: 'x', literal_list: ['x', 'y'], number: 1, boolean: true, statement: 'SELECT 1' };

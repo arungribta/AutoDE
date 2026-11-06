@@ -1,3 +1,4 @@
+import { valueAt } from '../fileTransport';
 import { OperationReturn } from './types';
 
 /** A result column found without regard to case (platforms differ: Snowflake upper-cases, Databricks keeps). */
@@ -5,7 +6,8 @@ function column(row: Record<string, unknown>, name: string): unknown {
   if (name in row) return row[name];
   const lower = name.toLowerCase();
   for (const [k, v] of Object.entries(row)) if (k.toLowerCase() === lower) return v;
-  return undefined;
+  // POP5: a field nested in a JSON or YAML row (`owner.name`).
+  return name.includes('.') ? valueAt(row, name) : undefined;
 }
 
 function convert(v: unknown, as: OperationReturn['as']): unknown {

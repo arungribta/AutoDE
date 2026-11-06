@@ -1,7 +1,7 @@
 # AutoDE — Technical Design Document
 
-**Last Updated:** 2026-10-15
-**Version:** 0.31.0
+**Last Updated:** 2026-11-06
+**Version:** 0.61.0
 **Scope:** HOW AutoDE is built — architecture, modules, data formats, algorithms and design trade-offs. What AutoDE must do and why: [requirements.md](../requirements.md) and the forward specifications. Order and status: [roadmap.md](../roadmap.md). Release history (moved out of this document on 2026-10-15): [CHANGELOG.md](../../CHANGELOG.md). Document map: [README.md](../README.md).
 
 > Restructured on 2026-10-15: sections 1, 2, 5, 7, 10.1–10.2, 11 and 12 were rewritten against the code at v0.30.0; the others were carried over with paths updated for the v0.26.0 move to `src/engine/`, and some still describe their version's design in narrative form. The historical phase list (old §10) was removed — release history is in CHANGELOG.md. Where this document and the code disagree, the code and the latest CHANGELOG entry win; corrections are tracked in the roadmap.
@@ -1704,6 +1704,14 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - **Proposals** (`proposal.ts`, `proposeService.ts`): `prepareOperationProposal()` parses (object or YAML), requires `reason`, an id, `example.rows`, known platforms, and `checkOperation` with the approved platforms; `resemblingOperations()` scores approved operations (area, shared platforms, shared parameter names, shared names read — `{…}` placeholders and `SQL_WORDS` left out). `proposalFile(id, text)` = `proposed/<id>.<checksum 8>.yaml`. `proposeOperation()` supersedes pending proposals of the same operation (`PlatformFilePayload.operation`) and removes their draft files (never the approved one), writes the file with a header comment, and `propose(…, 'platform_operation', { file, checksum, operation, reason, fixes, resembles })`. `validatePlatformFileProposal` requires `example.rows` for a `/proposed/` file. Applying calls `retireReplaced()`: the team's other files of that id, now drafts, move to `.autode/local/replaced-operations/`. `pendingOperationProposals()` feeds `operationPage().proposals` and `platformPage().health.proposals`; `drift` and `health.drift`/`unreadKinds` come from `driftReport`.
   - **Surfaces:** MCP `autode_propose_platform_operation` (propose tier), `autode_platform_drift` (read); CLI `platform propose-operation <file> --reason [--fixes]` and `platform drift` (both call those handlers); `platform operation` adds drift and proposals. VS Code: `PlatformCatalogHost.resolveDecision` → `SidebarProvider.resolveFromView` (message `resolveDecision`, Reject asks for the note).
   - **Role and skill:** `agents/platform-maintainer.md`; `skills/autode-core-platform-operations` (core, no stage kinds; maintenance work orders give it to the role).
+- **POP5a, the `http` and `file` transports** (v0.61.0).
+  - **`httpTransport.ts`:** `httpConnection(api, title, values, options)` returns an `HttpCall`. `baseUrlOf` checks the address (https, or http to loopback; no credentials or query in it); `requestUrl` builds each URL and refuses one off the connection's origin or base path, including a next-page link; `chooseAuth` picks the first complete method. `redirect: 'manual'` everywhere. Retries 429 and 503 up to three times; a 401 on OAuth signs in once more. `scrub` removes every secret from error text.
+  - **`operations/httpRead.ts`:** `bindHttp` (path values encoded as one segment; an empty optional query value dropped; `"{param}"` alone in a body keeps its type), `httpReadProblem` (the guard, also in `checkOperation`), `readHttp` (the paging loop, `MAX_PAGES`). `ShapeError` becomes gap kind `missing-object`.
+  - **`fileTransport.ts`:** `fileConnection(root, title, baseDir, caps)` returns a `FileCall`; `checkGlob`, `globRegex`, `parseCsvRows`, and `valueAt`, the dotted-path reader `map.ts` and `httpRead.ts` share.
+  - **`bind.ts` `bindPlain`:** binding outside SQL: values as themselves, through an `encode` for where they land.
+  - **`execute.ts`:** `OperationRunner` gains `http` and `file`; `finishRead` maps rows and turns rows without any declared field into drift.
+  - **Connecting:** `connectsByDefinition` (a CLI statement, an API or a folder) replaces the CLI-only test in `definedConnectionPlatforms` and `ConnectionManager.factoryFor`. `DefinitionAdapter.operationRunner()` gives the executor every transport the connection has, and `ConnectionManager.operationTransports()` passes them into a `ConnectionTarget`. `usePlatformWorkspace` (definitions.ts), called by `loadConnectionsConfig` and `saveConnection`, lets id-only lookups find a team's definition: shipped first, then the registered workspace, cached on the team files' times and the approvals file.
+  - **`cliStatement.ts` `waitsOnBrowser`:** looks only at text before any data; `cliCall` stops the process on a match.
 - **Copilot's Auto model** (v0.56.7; `languageModelAdapter.ts`). It routes each request by its prompt, so in `completeWithTools` a message of tool results gets a text part (`TOOL_RESULTS_PROMPT`) when `isAutoRouted(model)`; other models are unchanged.
 - **The Workflow tab** (v0.56.0): `WorkflowPanel` posts the journey with the model; messages `journeyAction`, `preview` (template), `placeCoverage` (quick picks: stages, or a reason), `openTab`. `media/workflow.html` renders the tab bar, the rail, steps with *About this step*, coverage, the plan panel, and the stage board or the preview. The palette (`#paletteJourney`) asks for `journey` and sends `journeyAction`; its older sections are under `<details id="paletteMore">`. The Knowledge Explorer has the same tab bar (`openTab`).
 - **Several live sources** (v0.56.0, `extension.ts`): `sourcePool` (connection id → `ConnectionManager`); `runConnectionTest('source')` adds to it and keeps other live sources; `pickSource(verb)` asks when several are live (Disconnect, Browse, Refresh Observed Lineage); `disconnectConnection` (by id) from the Saved connections list; `SidebarProvider.setLiveConnections()` adds `live` to the platforms state.
@@ -2440,7 +2448,7 @@ src/engine/ontology/
 src/engine/pipelineSpec/    # Pipeline Specification
   compiler.ts, designDocGenerator.ts, schema.ts, types.ts, validator.ts
 src/engine/platform/    # connections and adapters
-  BaseAdapter.ts, cliStatement.ts, ConnectionManager.ts, connectionReadiness.ts, connectionsConfig.ts, connectionSetup.ts, definitions.ts, dialectMarkers.ts, dialects.ts, driverStore.ts, prerequisites.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
+  BaseAdapter.ts, cliStatement.ts, ConnectionManager.ts, connectionReadiness.ts, connectionsConfig.ts, connectionSetup.ts, definitions.ts, dialectMarkers.ts, dialects.ts, driverStore.ts, fileTransport.ts, httpTransport.ts, prerequisites.ts, providerRegistry.ts, sampleData.ts, sqlGuard.ts, types.ts
 src/engine/platform/adapters/    # Snowflake and Databricks adapters
   DatabricksAdapter.ts, DefinitionAdapter.ts, OracleAdapter.ts, SnowflakeAdapter.ts, snowflakeJwt.ts
 src/engine/platform/credentials/    # credential resolvers and CLI detection
@@ -2448,7 +2456,7 @@ src/engine/platform/credentials/    # credential resolvers and CLI detection
 src/engine/platform/executionBackends/    # CLI and REST execution
   DatabricksRestBackend.ts, SnowflakeCliBackend.ts, SnowflakeRestBackend.ts, types.ts
 src/engine/platform/operations/
-  bind.ts, catalogView.ts, drift.ts, execute.ts, form.ts, load.ts, map.ts, proposal.ts, proposeService.ts, runLog.ts, schema.ts, service.ts, types.ts
+  bind.ts, catalogView.ts, drift.ts, execute.ts, form.ts, httpRead.ts, load.ts, map.ts, proposal.ts, proposeService.ts, runLog.ts, schema.ts, service.ts, types.ts
 src/engine/quality/
   candidates.ts
 src/engine/runner/    # runbooks: checks, policy, the runner and its log

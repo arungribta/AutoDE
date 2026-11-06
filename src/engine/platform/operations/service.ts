@@ -44,6 +44,9 @@ export interface ConnectionTarget {
   /** Runs one statement on the connection (its CLI or API, read-only: the executor checks it again). */
   query(sql: string, maxRows: number): Promise<Array<Record<string, unknown>>>;
   cli?: OperationRunner['cli'];
+  /** POP5: the connection's API and folder, where it has them. */
+  http?: OperationRunner['http'];
+  file?: OperationRunner['file'];
 }
 
 export class OperationError extends Error {
@@ -63,9 +66,10 @@ export async function runOnConnection(scope: { resourcesRoot?: string; workspace
   if (op.kind === 'change') {
     let bound;
     try { bound = bindOperation(op, target.platform, params, platform); } catch (err) { throw new OperationError('VALIDATION_FAILED', err instanceof Error ? err.message : String(err)); }
+    if (!bound.statement && !bound.argv) throw new OperationError('VALIDATION_FAILED', `${operationId} changes the platform over ${bound.impl.http ? 'http' : 'a file'}, and a runbook step can't do that yet (SQL and CLI steps only; IMP1 and IMP3 add it). Nothing ran.`);
     throw new OperationError('CHANGE', `${operationId} changes the platform: propose it as a runbook step (autode_propose_runbook); a person approves it and AutoDE's runner runs it.`, { kind: bound.statement ? 'sql' : 'cli', title: op.title, ...(bound.statement ? { sql: bound.statement } : {}), ...(bound.argv ? { argv: bound.argv } : {}), expect: op.description });
   }
-  const runner: OperationRunner = { sql: (s, n) => target.query(s, n), ...(target.cli ? { cli: target.cli } : {}) };
+  const runner: OperationRunner = { sql: (s, n) => target.query(s, n), ...(target.cli ? { cli: target.cli } : {}), ...(target.http ? { http: target.http } : {}), ...(target.file ? { file: target.file } : {}) };
   const versionOp = platform?.versionOperation ? operationById(catalog, platform.versionOperation)?.item : undefined;
   const version = await connectionVersion(target.connectionId, platform, versionOp, runner);
   // POP4a: each run's outcome (never its rows) for the catalog's last runs and health.

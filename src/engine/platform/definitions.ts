@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Catalog, loadCatalog, operationById, platformById } from './operations/load';
+import { Catalog, loadCatalog, operationById, platformById, readApprovalsStamp } from './operations/load';
+import { layoutPath } from '../workspaceLayout';
 import { PlatformDefinition, PlatformOperation } from './operations/types';
 
 /**
@@ -10,6 +11,11 @@ import { PlatformDefinition, PlatformOperation } from './operations/types';
  * it is the package this module ships in. The shipped catalog is read once;
  * a workspace's (with the team's approved files) is read on each call, so
  * an approval or an edit takes effect at once.
+ *
+ * POP5: code that knows only a platform's id (connection fields, credential
+ * variables, dialects) finds a team-defined platform through the workspace last
+ * registered (`usePlatformWorkspace`, called wherever a workspace's connections
+ * are read). Shipped platforms are found first, without touching the workspace.
  */
 
 export interface PlatformScope { resourcesRoot?: string; workspaceRoot?: string }
@@ -48,15 +54,48 @@ export function platformCatalog(scope: PlatformScope = {}): Catalog {
   return shippedCatalog.catalog;
 }
 
+let workspaceRoot: string | undefined;
+let teamCatalog: { key: string; catalog: Catalog } | undefined;
+
+/** POP5: the workspace whose team platforms count where a caller has only a platform's id. */
+export function usePlatformWorkspace(root: string | undefined): void {
+  if (root !== workspaceRoot) teamCatalog = undefined;
+  workspaceRoot = root;
+}
+
+/** The team's definitions change only with their files or an approval: their names, times and the approvals are the key. */
+function teamDefinitionsStamp(root: string): string {
+  const dir = layoutPath(root, 'platformDefinitions');
+  let names: string[] = [];
+  try { names = fs.readdirSync(dir).filter((n) => /\.ya?ml$/i.test(n)).sort(); } catch { return ''; }
+  const stamps = names.map((n) => { try { return `${n}:${fs.statSync(path.join(dir, n)).mtimeMs}`; } catch { return n; } });
+  return `${stamps.join('|')}#${readApprovalsStamp(root)}`;
+}
+
+function registeredTeamDefinition(platformId: string, scope: PlatformScope): PlatformDefinition | undefined {
+  if (!workspaceRoot) return undefined;
+  const stamp = teamDefinitionsStamp(workspaceRoot);
+  if (!stamp) return undefined;
+  const key = `${workspaceRoot}#${platformResourcesRoot(scope) ?? ''}#${stamp}`;
+  if (teamCatalog?.key !== key) teamCatalog = { key, catalog: platformCatalog({ ...scope, workspaceRoot }) };
+  return platformById(teamCatalog.catalog, platformId);
+}
+
 export function platformDefinition(platformId: string | undefined, scope: PlatformScope = {}): PlatformDefinition | undefined {
-  return platformId ? platformById(platformCatalog(scope), platformId) : undefined;
+  if (!platformId) return undefined;
+  return platformById(platformCatalog(scope), platformId) ?? (scope.workspaceRoot ? undefined : registeredTeamDefinition(platformId, scope));
 }
 
 export function platformOperation(operationId: string, scope: PlatformScope = {}): PlatformOperation | undefined {
   return operationById(platformCatalog(scope), operationId)?.item;
 }
 
+/** Whether a definition says enough to connect without an adapter or a card written for it: a CLI statement, an API or a folder (POP5). */
+export function connectsByDefinition(p: PlatformDefinition): boolean {
+  return !!p.connection && (!!p.access?.cli?.statement || !!p.access?.api?.baseUrlField || !!p.access?.file?.rootField);
+}
+
 /** The platforms whose connection is described by their definition (no card or adapter written for them). */
 export function definedConnectionPlatforms(scope: PlatformScope = {}): PlatformDefinition[] {
-  return platformCatalog(scope).platforms.filter((p) => p.status === 'approved' && !!p.item.connection && !!p.item.access?.cli?.statement).map((p) => p.item);
+  return platformCatalog(scope.workspaceRoot ? scope : { ...scope, workspaceRoot }).platforms.filter((p) => p.status === 'approved' && connectsByDefinition(p.item)).map((p) => p.item);
 }

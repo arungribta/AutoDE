@@ -30,7 +30,7 @@ export async function connectionTarget(session: PlatformSession, connectionId: s
   const manager = await session.connect(entry);
   return {
     allowSampleData: entry.allowSampleDataInPrompts,
-    target: { connectionId: entry.id, platform: entry.platform, query: async (sql, maxRows) => (await manager.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>> }
+    target: { connectionId: entry.id, platform: entry.platform, query: async (sql, maxRows) => (await manager.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>>, ...manager.operationTransports() }
   };
 }
 

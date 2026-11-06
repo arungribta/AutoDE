@@ -2421,7 +2421,7 @@ async function main() {
   });
 
   await test('registerCredentialResolver() lets a test register a fake vault resolver that participates in resolution untouched by ConnectionManager/adapters', async () => {
-    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/engine/platform/credentials/registry.js');
+    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = require('../dist/engine/platform/credentials/registry.js');
     const fakeVault = {
       id: 'fake-vault',
       supportedPrincipalTypes: ['service-account'],
@@ -2459,7 +2459,7 @@ async function main() {
   });
 
   await test('No resolver-resolved secret is ever written to VS Code SecretStorage when the active resolver is cli or env', async () => {
-    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = fresh('../dist/engine/platform/credentials/registry.js');
+    const { registerCredentialResolver, unregisterCredentialResolver, resolveCredential } = require('../dist/engine/platform/credentials/registry.js');
     const { EnvVarCredentialResolver } = fresh('../dist/engine/platform/credentials/EnvVarCredentialResolver.js');
     const { CliConfigResolver } = fresh('../dist/engine/platform/credentials/CliConfigResolver.js');
     const { VsCodeSecretStorageResolver } = withMock(createMock(), () => fresh('../dist/core/credentials/VsCodeSecretStorageResolver.js'));
@@ -12891,7 +12891,7 @@ async function main() {
   await test('v0.55.0 POP2: a statement through a CLI, from the platform definition alone — submitted, polled until it finishes, fetched page by page with typed cells; a failed statement says why; a slow one is cancelled; nothing secret is ever an argument', async () => {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const CS = fresh('../dist/engine/platform/cliStatement.js');
-    const D = fresh('../dist/engine/platform/definitions.js');
+    const D = require('../dist/engine/platform/definitions.js');
     const def = D.platformDefinition('redshift', { resourcesRoot: nodePath.join(__dirname, '..') });
     const spec = def.access.cli.statement;
     const values = { workgroupName: 'wg', database: 'dev', region: 'eu-west-1', profile: 'work', secretArn: 'arn:aws:secretsmanager:x', accessKeyId: 'AKIA-SECRET', secretAccessKey: 'shh' };
@@ -12920,7 +12920,7 @@ async function main() {
   await test('v0.55.0 POP2: Redshift connects and its estate comes in with no Redshift code — the version read, tables, columns, views and keys through its estate operations; a read the account can\'t do is a gap and the rest still come in; the ingest reports it', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const root = nodePath.join(__dirname, '..');
-    const D = fresh('../dist/engine/platform/definitions.js');
+    const D = require('../dist/engine/platform/definitions.js');
     D.setPlatformResourcesRoot(root);
     const { DefinitionAdapter } = fresh('../dist/engine/platform/adapters/DefinitionAdapter.js');
     const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
@@ -12964,7 +12964,7 @@ async function main() {
   await test('v0.55.0 POP2: a Redshift connection in the files and the cards — fields, sign-in, id and secrets from its definition; a secret is refused in a file and stored in secret storage; both roles; the card saves only what connects; env and CLI-profile credentials', async () => {
     const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const root = nodePath.join(__dirname, '..');
-    fresh('../dist/engine/platform/definitions.js').setPlatformResourcesRoot(root);
+    require('../dist/engine/platform/definitions.js').setPlatformResourcesRoot(root);
     const C = fresh('../dist/engine/platform/connectionsConfig.js');
     const S = fresh('../dist/engine/platform/connectionSetup.js');
     const E = fresh('../dist/engine/platform/credentials/EnvVarCredentialResolver.js');
@@ -13086,7 +13086,7 @@ async function main() {
   await test('v0.55.1 POP2: Snowflake\'s and Databricks\' estate through operations gives the same estate as the adapters\' own queries, node for node; query-through still asks only for the named tables; last-altered comes from its operation; the Hive metastore keeps its own path', async () => {
     const nodePath = require('node:path');
     const root = nodePath.join(__dirname, '..');
-    const D = fresh('../dist/engine/platform/definitions.js');
+    const D = require('../dist/engine/platform/definitions.js');
     D.setPlatformResourcesRoot(root);
     const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
     const { DatabricksAdapter } = fresh('../dist/engine/platform/adapters/DatabricksAdapter.js');
@@ -13131,7 +13131,7 @@ async function main() {
   await test('v0.55.1 POP2: a new object kind comes into the estate from a team\'s operation file, with no code — approved with its platform definition, its objects arrive as their kind; an unapproved file changes nothing', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const root = nodePath.join(__dirname, '..');
-    const D = fresh('../dist/engine/platform/definitions.js');
+    const D = require('../dist/engine/platform/definitions.js');
     D.setPlatformResourcesRoot(root);
     const L = fresh('../dist/engine/platform/operations/load.js');
     const { SnowflakeAdapter } = fresh('../dist/engine/platform/adapters/SnowflakeAdapter.js');
@@ -13220,7 +13220,7 @@ async function main() {
   await test('v0.55.2: an approved change on Redshift runs through the statement runner — done, or failed with Redshift\'s own error; the governance change operations become runbook steps, never run', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
     const root = nodePath.join(__dirname, '..');
-    const D = fresh('../dist/engine/platform/definitions.js');
+    const D = require('../dist/engine/platform/definitions.js');
     D.setPlatformResourcesRoot(root);
     const { DefinitionAdapter } = fresh('../dist/engine/platform/adapters/DefinitionAdapter.js');
     const { ConnectionManager } = fresh('../dist/engine/platform/ConnectionManager.js');
@@ -14876,6 +14876,309 @@ async function main() {
     assert.ok(/pick any, comma-separated/.test(cli) && /pick one: /.test(cli) && /\(yes \/ no\)/.test(cli), 'interview show says how to answer');
   });
 
+  // ── POP5a (v0.61.0): the http and file transports, and team-defined platforms that connect ──
+  const pop5 = (() => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os'); const http = require('node:http');
+    const root = nodePath.join(__dirname, '..');
+    const X = require('../dist/engine/platform/operations/execute.js');
+    const L = require('../dist/engine/platform/operations/load.js');
+    const H = require('../dist/engine/platform/httpTransport.js');
+    const F = require('../dist/engine/platform/fileTransport.js');
+    /** A real server on this machine: `handler(req, res, url, body)`. */
+    const serve = async (handler, run) => {
+      const seen = [];
+      const server = http.createServer((req, res) => {
+        let body = ''; req.on('data', (d) => { body += d; });
+        req.on('end', () => { const url = new URL(req.url, 'http://x'); seen.push({ method: req.method, url: req.url, path: url.pathname, headers: req.headers, body }); handler(req, res, url, body); });
+      });
+      await new Promise((r) => server.listen(0, '127.0.0.1', r));
+      try { return await run(`http://127.0.0.1:${server.address().port}`, seen); } finally { server.closeAllConnections?.(); await new Promise((r) => server.close(r)); }
+    };
+    const json = (res, value, status = 200, headers = {}) => { res.writeHead(status, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(value)); };
+    const api = { name: 'Acme API', baseUrlField: 'baseUrl', auth: [{ method: 'bearer', tokenField: 'token' }] };
+    const op = (impl, extra = {}) => ({ formatVersion: 1, id: 'knowledge.terms', title: 'List terms', description: 'Lists the business terms.', kind: 'read', content: 'metadata', area: 'knowledge', params: [{ name: 'domain', type: 'literal', label: 'Domain', required: false }], returns: [{ name: 'name' }, { name: 'owner', from: 'owner.name' }], platforms: { acme: impl }, ...extra });
+    const runner = (url, values = {}, opts = {}) => ({ http: H.httpConnection(api, 'Acme', { baseUrl: url, token: 'sekret-token', ...values }, { sleep: async () => {}, ...opts }) });
+    const run = (operation, r, params = {}, maxRows) => X.runOperation({ operation, platformId: 'acme', params, runner: r, maxRows });
+    return { nodeFs, nodePath, os, root, X, L, H, F, serve, json, api, op, runner, run };
+  })();
+
+  await test('POP5a: an http read follows its declared pages, signs in, reads nested fields and encodes values for where they land', async () => {
+    const { serve, json, op, runner, run } = pop5;
+    await serve((req, res, url) => {
+      const offset = Number(url.searchParams.get('offset'));
+      const all = [1, 2, 3, 4, 5].map((n) => ({ name: `t${n}`, owner: { name: `o${n}` } }));
+      json(res, { data: { items: all.slice(offset, offset + 2) }, total: 5 });
+    }, async (base, seen) => {
+      const r = await run(op({ http: { method: 'GET', path: '/terms/{domain}', query: { kind: 'term' }, results: '$.data.items', paging: { style: 'offset', param: 'offset', sizeParam: 'limit', size: 2, total: 'total' } } }), runner(base), { domain: 'a b/../c' });
+      assert.ok(r.ok && !r.gap, r.gap);
+      assert.strictEqual(r.transport, 'http');
+      assert.deepStrictEqual(r.rows.map((x) => x.owner), ['o1', 'o2', 'o3', 'o4', 'o5']);
+      assert.strictEqual(seen.length, 3, 'three pages');
+      assert.ok(seen.every((s) => s.headers.authorization === 'Bearer sekret-token'));
+      assert.strictEqual(seen[0].path, '/terms/a%20b%2F..%2Fc', 'one path segment: a value adds no path');
+      assert.ok(/GET \/terms\/a%20b/.test(r.statement), 'what ran is shown');
+      assert.ok(!JSON.stringify(r).includes('sekret-token'));
+    });
+  });
+
+  await test('POP5a: a cursor that repeats stops with a gap; a link off the connection is refused; maxRows truncates', async () => {
+    const { serve, json, op, runner, run } = pop5;
+    await serve((req, res) => { json(res, { results: [{ name: 'a' }], next: 'same' }); }, async (base, seen) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t', results: 'results', paging: { style: 'cursor', param: 'c', next: 'next' } } }), runner(base));
+      assert.ok(r.truncated && /same next page/.test(r.gap), r.gap);
+      assert.strictEqual(seen.length, 2);
+      const capped = await run(op({ http: { method: 'GET', path: '/t', results: 'results', paging: { style: 'cursor', param: 'c', next: 'next' } } }), runner(base), {}, 1);
+      assert.ok(capped.truncated && capped.rows.length === 1);
+    });
+    await serve((req, res) => { json(res, { results: [{ name: 'a' }], next: 'https://evil.example.com/steal' }); }, async (base, seen) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t', results: 'results', paging: { style: 'link', next: 'next' } } }), runner(base));
+      assert.ok(!r.ok && /outside the connection/.test(r.gap), r.gap);
+      assert.strictEqual(seen.length, 1, 'nothing was sent to the other host');
+    });
+  });
+
+  await test('POP5a: credentials stay on the connection: redirects aren\'t followed, plain http is for this machine only, the base path holds, and no secret reaches an error', async () => {
+    const { serve, json, op, runner, run, H } = pop5;
+    let other = 0;
+    await serve((req, res) => { other++; json(res, {}); }, async (elsewhere) => {
+      await serve((req, res) => { res.writeHead(302, { Location: `${elsewhere}/x` }); res.end(); }, async (base) => {
+        const r = await run(op({ http: { method: 'GET', path: '/t' } }), runner(base));
+        assert.ok(!r.ok && /doesn't follow redirects/.test(r.gap), r.gap);
+      });
+    });
+    assert.strictEqual(other, 0, 'the redirect target saw nothing');
+    assert.throws(() => H.baseUrlOf('http://acme.example.com', 'Acme'), /over https/);
+    assert.throws(() => H.baseUrlOf('https://me:pw@acme.example.com', 'Acme'), /must not hold a user name/);
+    const base = H.baseUrlOf('https://acme.example.com/api/', 'Acme');
+    assert.strictEqual(H.requestUrl(base, { path: '/v1/x' }).href, 'https://acme.example.com/api/v1/x');
+    assert.throws(() => H.requestUrl(base, { path: '//evil.example.com/x' }), /start with one/);
+    assert.throws(() => H.requestUrl(base, { path: '/../other' }), /outside the connection/);
+    assert.throws(() => H.requestUrl(base, { url: 'https://acme.example.com/other' }), /outside the connection/);
+    assert.throws(() => H.requestUrl(base, { url: 'https://acme.example.com.evil.net/api/x' }), /outside the connection/);
+    const bare = H.baseUrlOf('https://acme.example.com', 'Acme');
+    assert.strictEqual(H.requestUrl(bare, { path: '/v1/x' }).href, 'https://acme.example.com/v1/x');
+    assert.throws(() => H.requestUrl(bare, { url: 'https://evil.example.com/x' }), /outside the connection/);
+    assert.strictEqual(H.requestUrl(H.baseUrlOf('https://acme.example.com/', 'Acme'), { path: '/v1/x' }).href, 'https://acme.example.com/v1/x');
+    await serve((req, res) => { json(res, { error: `bad token sekret-token in ${req.headers.authorization}` }, 401); }, async (b) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t' } }), runner(b));
+      assert.ok(!r.ok && /HTTP 401/.test(r.gap) && /credentials/.test(r.gap), r.gap);
+      assert.ok(!r.gap.includes('sekret-token'), r.gap);
+    });
+    await serve((req, res) => { json(res, { error: Buffer.from('me:pw').toString('base64') }, 500); }, async (b) => {
+      const basic = H.httpConnection({ ...pop5.api, auth: [{ method: 'basic', usernameField: 'u', passwordField: 'p' }] }, 'Acme', { baseUrl: b, u: 'me', p: 'pw' });
+      await assert.rejects(basic({ method: 'GET', path: '/t' }), (e) => /HTTP 500/.test(e.message) && !e.message.includes(Buffer.from('me:pw').toString('base64')));
+    });
+  });
+
+  await test('POP5a: sign-in: an API key in its own header, OAuth client credentials cached and renewed on a 401; a connection with no complete sign-in says what it needs', async () => {
+    const { serve, json, H, api } = pop5;
+    await serve((req, res) => { json(res, {}); }, async (b, seen) => {
+      const c = H.httpConnection({ ...api, auth: [{ method: 'bearer', tokenField: 'key', header: 'X-Api-Key', scheme: '' }] }, 'Acme', { baseUrl: b, key: 'k1' });
+      await c({ method: 'GET', path: '/t' });
+      assert.strictEqual(seen[0].headers['x-api-key'], 'k1');
+      assert.ok(!seen[0].headers.authorization);
+    });
+    let issued = 0;
+    await serve((req, res, url, body) => {
+      if (url.pathname === '/oauth/token') { assert.ok(/grant_type=client_credentials/.test(body) && /client_id=id1/.test(body)); issued++; return json(res, { access_token: `tok${issued}`, expires_in: 3600 }); }
+      if (req.headers.authorization === 'Bearer tok1' && url.pathname === '/expired') return json(res, {}, 401);
+      json(res, { ok: req.headers.authorization });
+    }, async (b) => {
+      const c = H.httpConnection({ ...api, auth: [{ method: 'oauth_client_credentials', clientIdField: 'id', clientSecretField: 'secret', tokenPath: '/oauth/token' }] }, 'Acme', { baseUrl: b, id: 'id1', secret: 's1' });
+      assert.strictEqual((await c({ method: 'GET', path: '/a' })).json.ok, 'Bearer tok1');
+      assert.strictEqual((await c({ method: 'GET', path: '/b' })).json.ok, 'Bearer tok1');
+      assert.strictEqual(issued, 1, 'the token is reused');
+      assert.strictEqual((await c({ method: 'GET', path: '/expired' })).json.ok, 'Bearer tok2', 'a 401 signs in again, once');
+    });
+    assert.throws(() => H.httpConnection(api, 'Acme', { baseUrl: 'https://a.example.com' }), /no complete sign-in: it needs token/);
+  });
+
+  await test('POP5a: a busy server is retried; a web page instead of JSON, a missing results path and rows without the declared fields are gaps, never an empty read', async () => {
+    const { serve, json, op, runner, run } = pop5;
+    let n = 0;
+    await serve((req, res) => { if (n++ < 2) return json(res, {}, 429, { 'Retry-After': '1' }); json(res, [{ name: 'a' }]); }, async (b) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t' } }), runner(b));
+      assert.ok(r.ok && r.rows.length === 1, r.gap);
+    });
+    await serve((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>Sign in</html>'); }, async (b) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t' } }), runner(b));
+      assert.ok(!r.ok && /sign-in page/.test(r.gap), r.gap);
+    });
+    await serve((req, res) => { json(res, { renamed: [] }); }, async (b) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t', results: 'results' } }), runner(b));
+      assert.ok(!r.ok && r.gapKind === 'missing-object' && /has no results/.test(r.gap), r.gap);
+    });
+    await serve((req, res) => { json(res, { results: [{ label: 'x' }] }); }, async (b) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t', results: 'results' } }), runner(b));
+      assert.ok(!r.ok && r.gapKind === 'missing-object' && /format may have changed/.test(r.gap), r.gap);
+    });
+    await serve((req, res) => { json(res, { results: [] }); }, async (b) => {
+      const r = await run(op({ http: { method: 'GET', path: '/t', results: 'results' } }), runner(b));
+      assert.ok(r.ok && !r.gap && r.rows.length === 0, 'a truly empty list is fine');
+    });
+  });
+
+  await test('POP5a: the guard: a read is a GET or a declared read-only POST, SQL in a body must be read-only, a body keeps a value\'s type, and a path or pattern can\'t leave its place', async () => {
+    const { serve, json, op, runner, run, L } = pop5;
+    const problems = (impl) => L.checkOperation(op(impl)).join('; ');
+    assert.ok(/a GET, or a POST declared readOnly/.test(problems({ http: { method: 'POST', path: '/t' } })));
+    assert.strictEqual(problems({ http: { method: 'POST', path: '/search', readOnly: true, body: { q: '{domain}' } } }), '');
+    assert.ok(/isn't read-only/.test(problems({ http: { method: 'POST', path: '/q', readOnly: true, body: { nested: { statement: 'DROP TABLE t' } } } })));
+    assert.ok(/starts with one/.test(problems({ http: { method: 'GET', path: 'https://evil.example.com/x' } })));
+    assert.ok(/stays on the connection/.test(problems({ http: { method: 'GET', path: '/a/../b' } })));
+    assert.ok(/cursor paging needs param/.test(problems({ http: { method: 'GET', path: '/a', paging: { style: 'cursor', next: 'n' } } })));
+    assert.ok(/link paging needs next/.test(problems({ http: { method: 'GET', path: '/a', paging: { style: 'link' } } })));
+    assert.ok(/goes outside the folder/.test(problems({ file: { glob: '../secrets/*.yaml', parse: 'yaml' } })));
+    assert.ok(/isn't relative/.test(problems({ file: { glob: '/etc/*.yaml', parse: 'yaml' } })));
+    const typed = { ...op({ http: { method: 'POST', path: '/q', readOnly: true, body: { limit: '{n}', tags: '{tags}', on: '{flag}', skip: '{none}', text: 'for {who}' } } }), params: [{ name: 'n', type: 'number', label: 'n' }, { name: 'tags', type: 'literal_list', label: 't' }, { name: 'flag', type: 'boolean', label: 'f' }, { name: 'none', type: 'literal', label: 'x', required: false }, { name: 'who', type: 'literal', label: 'w' }] };
+    await serve((req, res) => { json(res, [{ name: 'a' }]); }, async (b, seen) => {
+      const r = await run(typed, runner(b), { n: 5, tags: ['x', 'y'], flag: true, who: "o'brien" });
+      assert.ok(r.ok, r.gap);
+      assert.deepStrictEqual(JSON.parse(seen[0].body), { limit: 5, tags: ['x', 'y'], on: true, text: "for o'brien" });
+    });
+    await serve((req, res) => { json(res, []); }, async (b, seen) => {
+      const stmt = { ...op({ http: { method: 'POST', path: '/q', readOnly: true, body: { statement: '{sql}' } } }), params: [{ name: 'sql', type: 'literal', label: 'sql' }] };
+      const r = await run(stmt, runner(b), { sql: 'DELETE FROM t' });
+      assert.ok(!r.ok && r.gapKind === 'refused' && /isn't read-only/.test(r.gap), r.gap);
+      assert.strictEqual(seen.length, 0, 'nothing was sent');
+    });
+    // A change over http is refused plainly: no runbook step can run it yet.
+    const O = require('../dist/engine/platform/operations/service.js');
+    const change = { ...op({ http: { method: 'POST', path: '/t' } }), id: 'knowledge.push', kind: 'change', params: [] };
+    await assert.rejects(O.runOnConnection({ catalog: { operations: [{ item: change, origin: 'team', status: 'approved', file: 'x', checksum: 'c' }], platforms: [], errors: [] } }, { connectionId: 'acme:x', platform: 'acme', query: async () => [] }, 'knowledge.push', {}), (e) => e.code === 'VALIDATION_FAILED' && /runbook step can't do that yet/.test(e.message));
+  });
+
+  await test('POP5a: a file read walks a messy folder: yaml, json and csv, a row per file or per item, _file, nested fields; a broken file is reported and the rest read; no match and a missing folder are gaps', async () => {
+    const { nodeFs, nodePath, os, op, run, F } = pop5;
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-file-'));
+    try {
+      const w = (rel, text) => { nodeFs.mkdirSync(nodePath.dirname(nodePath.join(dir, rel)), { recursive: true }); nodeFs.writeFileSync(nodePath.join(dir, rel), text); };
+      w('models/sales/orders.yml', 'name: orders\nowner: { name: ann }\n');
+      w('models/hr/people.yml', '﻿name: people\nowner: { name: bob }\n');
+      w('models/broken.yml', 'name: [unclosed\n');
+      w('models/notes.txt', 'not a model');
+      w('.git/config.yml', 'name: hidden\n');
+      w('node_modules/x/m.yml', 'name: hidden2\n');
+      w('dims.json', JSON.stringify({ dimensions: [{ name: 'd1', owner: { name: 'c' } }, { name: 'd2' }] }));
+      w('terms.csv', 'name,note\n"a, b","say ""hi"""\nc,\n');
+      const r0 = { file: F.fileConnection(dir, 'Acme') };
+      const yaml = await run(op({ file: { glob: '**/*.yml', parse: 'yaml' } }, { returns: [{ name: 'name' }, { name: 'owner', from: 'owner.name' }, { name: 'file', from: '_file' }] }), r0);
+      assert.deepStrictEqual(yaml.rows.map((x) => x.name).sort(), ['orders', 'people']);
+      assert.strictEqual(yaml.rows.find((x) => x.name === 'orders').file, 'models/sales/orders.yml');
+      assert.ok(yaml.ok && yaml.gapKind === 'failed' && /1 of 3 file\(s\) couldn't be read: models\/broken\.yml/.test(yaml.gap), yaml.gap);
+      const items = await run(op({ file: { glob: 'dims.json', parse: 'json', results: 'dimensions' } }), r0);
+      assert.deepStrictEqual(items.rows.map((x) => x.name), ['d1', 'd2']);
+      const csv = await run(op({ file: { glob: '*.csv', parse: 'csv' } }, { returns: [{ name: 'name' }, { name: 'note' }] }), r0);
+      assert.deepStrictEqual(csv.rows[0], { name: 'a, b', note: 'say "hi"' });
+      const bound = await run(op({ file: { glob: 'models/{domain}/*.{yml,yaml}', parse: 'yaml' } }), r0, { domain: 'hr' });
+      assert.deepStrictEqual(bound.rows.map((x) => x.name), ['people']);
+      const none = await run(op({ file: { glob: 'nope/*.yml', parse: 'yaml' } }), r0);
+      assert.ok(/no file matches/.test(none.gap) && !none.rows.length, 'a wrong folder is never an empty success');
+      const changed = await run(op({ file: { glob: 'dims.json', parse: 'json' } }, { returns: [{ name: 'title' }] }), r0);
+      assert.ok(!changed.ok && changed.gapKind === 'missing-object', changed.gap);
+      const gone = await run(op({ file: { glob: '*.yml', parse: 'yaml' } }), { file: F.fileConnection(nodePath.join(dir, 'missing'), 'Acme') });
+      assert.ok(!gone.ok && /doesn't exist/.test(gone.gap), gone.gap);
+      await assert.rejects(run(op({ file: { glob: 'x/{domain}/*.yml', parse: 'yaml' } }), r0, { domain: '../..' }), /goes outside the folder/);
+      const capped = await run(op({ file: { glob: '**/*.yml', parse: 'yaml' } }), { file: F.fileConnection(dir, 'Acme', undefined, { maxFiles: 1, maxFileBytes: 1000, maxBytes: 1000 }) });
+      assert.ok(capped.truncated, 'over the caps is reported');
+      // A link out of the folder is not followed (needs a privilege on Windows: skipped where it can't be made).
+      const outside = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-out-'));
+      nodeFs.writeFileSync(nodePath.join(outside, 'secret.yml'), 'name: outside\n');
+      let linked = true;
+      try { nodeFs.symlinkSync(outside, nodePath.join(dir, 'link'), 'junction'); } catch { linked = false; }
+      if (linked) { const l = await run(op({ file: { glob: 'link/*.yml', parse: 'yaml' } }), r0); assert.ok(!l.rows.length, 'links are not followed'); }
+      nodeFs.rmSync(outside, { recursive: true, force: true });
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('POP5a: a browser-only CLI profile is stopped at once and said so, instead of waiting out the timeout; data that mentions a browser is not', async () => {
+    const { nodeFs, nodePath, os } = pop5;
+    const C = require('../dist/engine/platform/cliStatement.js');
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cli-'));
+    try {
+      const script = nodePath.join(dir, 'fake.js');
+      nodeFs.writeFileSync(script, 'if (process.argv[2] === "sso") { console.error("Initiating login. A browser window should have opened."); setTimeout(() => {}, 60000); } else if (process.argv[2] === "own") { console.log("Waiting for Acme Identity approval"); setTimeout(() => {}, 60000); } else { console.log(JSON.stringify([{ note: "open the browser now" }])); }');
+      const call = C.cliCall(process.execPath, {}, 30000, ['Acme Identity']);
+      const started = Date.now();
+      await assert.rejects(call([script, 'sso']), /signs in through a browser/);
+      await assert.rejects(call([script, 'own']), /signs in through a browser/, 'the definition adds its own wording');
+      assert.ok(Date.now() - started < 15000, 'it did not wait for the timeout');
+      assert.ok(/open the browser now/.test(await call([script, 'data'])), 'rows are not sign-in prompts');
+    } finally { nodeFs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await test('POP5a: a team-defined catalog system end to end, with no code: approved files, a connection with an env secret, connect, Try-it read, conformance; its estate says it has none; a definition with holes is refused', async () => {
+    const { nodeFs, nodePath, os, root, L, serve, json } = pop5;
+    const CC = require('../dist/engine/platform/connectionsConfig.js');
+    const { ConnectionManager } = require('../dist/engine/platform/ConnectionManager.js');
+    const D = require('../dist/engine/platform/definitions.js');
+    const O = require('../dist/engine/platform/operations/service.js');
+    const V = require('../dist/engine/platform/operations/catalogView.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-team-'));
+    const models = nodePath.join(ws, 'models');
+    const def = ['formatVersion: 1', 'id: acme_catalog', 'title: Acme Catalog', 'category: catalog', 'transports: [http, file]',
+      'access:', '  api:', '    name: Acme REST API', '    baseUrlField: baseUrl', '    auth:', '      - { method: bearer, tokenField: token }', '  file: { rootField: modelsFolder }',
+      'connection:', '  fields:', '    - { name: instance, label: Instance, required: true }', '    - { name: baseUrl, label: Base URL }', '    - { name: modelsFolder, label: Models folder, personal: true }', '    - { name: token, label: API token, secret: true }', '  idFields: [instance]', '  roles: [source]',
+      'versionOperation: acme.version', 'capabilities:', '  knowledge.import:', '    support: supported', '    operations: [acme.version, acme.terms, acme.models]', ''].join('\n');
+    const opYaml = (id, impl, returns) => ['formatVersion: 1', `id: ${id}`, `title: ${id} read`, 'description: A read for the test system.', 'kind: read', 'content: metadata', 'area: knowledge', 'params: []', `returns: ${returns}`, 'platforms:', '  acme_catalog:', ...impl.map((l) => `    ${l}`), ''].join('\n');
+    const files = { 'acme.version': opYaml('acme.version', ['http: { method: GET, path: /version }'], '[{ name: version }]'), 'acme.terms': opYaml('acme.terms', ['http: { method: GET, path: /terms, results: items }'], '[{ name: name }]'), 'acme.models': opYaml('acme.models', ['file: { glob: "*.yml", parse: yaml }'], '[{ name: name }]') };
+    try {
+      await serve((req, res, url) => {
+        if (req.headers.authorization !== 'Bearer env-token') return json(res, {}, 401);
+        json(res, url.pathname === '/version' ? { version: '2026.3.1' } : { items: [{ name: 'Customer' }] });
+      }, async (base) => {
+        const dDir = nodePath.join(ws, '.autode', 'config', 'platforms'); const oDir = nodePath.join(ws, '.autode', 'config', 'platform-operations');
+        nodeFs.mkdirSync(dDir, { recursive: true }); nodeFs.mkdirSync(oDir, { recursive: true }); nodeFs.mkdirSync(models);
+        nodeFs.writeFileSync(nodePath.join(models, 'sales.yml'), 'name: sales\n');
+        nodeFs.writeFileSync(nodePath.join(dDir, 'acme_catalog.yaml'), def);
+        for (const [id, text] of Object.entries(files)) nodeFs.writeFileSync(nodePath.join(oDir, `${id}.yaml`), text);
+        const conn = `connections:\n  - platform: acme_catalog\n    instance: main\n    baseUrl: ${base}\n    modelsFolder: models\n    credentials: { resolver: env }\n`;
+        nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), conn);
+        const before = CC.loadConnectionsConfig(ws, {});
+        assert.ok(before.errors.some((e) => /acme_catalog" is not supported/.test(e)), 'a draft platform connects nowhere: ' + before.errors.join(';'));
+        const approve = (what, id, text) => L.writeApproval(ws, what, id, { checksum: L.checksumOf(text), by: 'test', at: 'now' });
+        approve('platforms', 'acme_catalog', def);
+        for (const [id, text] of Object.entries(files)) approve('operations', id, text);
+        const cfg = CC.loadConnectionsConfig(ws, {});
+        assert.deepStrictEqual(cfg.errors, []);
+        assert.strictEqual(cfg.connections[0].id, 'acme_catalog:main');
+        nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), conn.replace('credentials:', 'token: oops\n    credentials:'));
+        assert.ok(CC.loadConnectionsConfig(ws, {}).errors.some((e) => /token must not be in this file/.test(e)), 'a secret in the file is refused');
+        nodeFs.writeFileSync(nodePath.join(ws, '.autode', 'config', 'connections.yaml'), conn);
+        const saved = process.env.AUTODE_ACME_CATALOG_TOKEN;
+        process.env.AUTODE_ACME_CATALOG_TOKEN = 'env-token'; const RG = require('../dist/engine/platform/credentials/registry.js'); require('../dist/engine/platform/credentials/index.js').registerBuiltInCredentialResolvers();
+        try {
+          const entry = CC.loadConnectionsConfig(ws).connections[0];
+          const creds = await CC.resolveConnectionCredentials(entry);
+          assert.strictEqual(creds.token, 'env-token');
+          const m = new ConnectionManager(() => {}, { workspaceRoot: () => ws });
+          const info = await m.connect('acme_catalog', creds);
+          assert.strictEqual(info.version, '2026.3.1');
+          const target = { connectionId: entry.id, platform: 'acme_catalog', query: async () => { throw new Error('no SQL'); }, ...m.operationTransports() };
+          const scope = { resourcesRoot: root, workspaceRoot: ws };
+          assert.deepStrictEqual((await O.runOnConnection(scope, target, 'acme.terms', {})).rows, [{ name: 'Customer' }]);
+          assert.deepStrictEqual((await O.runOnConnection(scope, target, 'acme.models', {})).rows, [{ name: 'sales' }], 'a relative folder is the workspace\'s');
+          const conf = await V.conformanceRun(scope, target, entry.fields);
+          assert.strictEqual(conf.capabilities['knowledge.import'].status, 'ok', conf.summary);
+          await assert.rejects(m.executeQuery('SELECT 1'), /takes no SQL/);
+          await assert.rejects(m.extractMetadata?.() ?? Promise.reject(new Error('no tables to read')), /no tables to read/);
+          assert.ok(D.definedConnectionPlatforms({ workspaceRoot: ws, resourcesRoot: root }).some((d) => d.id === 'acme_catalog'));
+          m.dispose();
+        } finally { RG.unregisterCredentialResolver('env'); RG.unregisterCredentialResolver('cli'); if (saved === undefined) delete process.env.AUTODE_ACME_CATALOG_TOKEN; else process.env.AUTODE_ACME_CATALOG_TOKEN = saved; }
+        // A changed file is a draft again, at once: the id no longer connects.
+        nodeFs.writeFileSync(nodePath.join(dDir, 'acme_catalog.yaml'), def.replace('Acme Catalog', 'Acme Catalogue'));
+        assert.ok(CC.loadConnectionsConfig(ws, {}).errors.some((e) => /is not supported/.test(e)));
+      });
+      const holes = (over) => L.checkPlatform({ formatVersion: 1, id: 'x1', title: 'X one', category: 'catalog', transports: ['http'], capabilities: {}, versionOperation: 'x.v', access: { api: { name: 'X', baseUrlField: 'url', auth: [{ method: 'bearer', tokenField: 'token' }] } }, connection: { fields: [{ name: 'url', label: 'URL' }, { name: 'token', label: 'Token', secret: true }] }, ...over }).join('; ');
+      assert.strictEqual(holes({}), '');
+      assert.ok(/names a versionOperation/.test(holes({ versionOperation: undefined })));
+      assert.ok(/mark the connection field secret/.test(holes({ connection: { fields: [{ name: 'url', label: 'URL' }, { name: 'token', label: 'Token' }] } })));
+      assert.ok(/names its base URL/.test(holes({ access: { api: { name: 'X' } } })));
+      assert.ok(/names its folder/.test(holes({ transports: ['file'] })));
+      assert.ok(/method/.test(holes({ access: { api: { name: 'X', baseUrlField: 'url', auth: [{ method: 'kerberos' }] } } })), 'a sign-in method outside the fixed set is refused');
+    } finally { D.usePlatformWorkspace(undefined); nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));
@@ -14893,6 +15196,26 @@ async function main() {
       assert.ok(!nodeFs.existsSync(nodePath.join(out, '.autode', 'problems')), 'the pre-checks ran in a throwaway copy');
       assert.strictEqual(run(['--out', out]).status, 2, 'an existing kit folder needs --force');
     } finally { nodeFs.rmSync(out, { recursive: true, force: true }); }
+  });
+
+  await test('docs: the version stamps of the design, roadmap and guides match package.json', () => {
+    const nodeFs = require('node:fs');
+    const nodePath = require('node:path');
+    const root = nodePath.join(__dirname, '..');
+    const V = JSON.parse(nodeFs.readFileSync(nodePath.join(root, 'package.json'), 'utf8')).version;
+    const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // The stamp must not run on into more digits or dots, so 0.61.0 does not match 0.61.01.
+    const stamp = (s) => new RegExp(escapeRe(s) + '(?!\\.?[0-9])', 'm');
+    const checks = [
+      { file: 'docs/design/technical-design.md', line: `**Version:** ${V}`, re: new RegExp('^' + escapeRe(`**Version:** ${V}`) + '(?!\\.?[0-9])', 'm'), fix: `change its "**Version:**" line to **Version:** ${V}` },
+      { file: 'docs/roadmap.md', line: `Current version: **${V}**`, re: stamp(`Current version: **${V}**`), fix: `change "Current version" in its header to **${V}**` },
+      { file: 'docs/guides/user-guide.md', line: `**Describes:** v${V}`, re: stamp(`**Describes:** v${V}`), fix: `change its "**Describes:**" line to **Describes:** v${V}` },
+      { file: 'docs/guides/engineering-onboarding-guide.md', line: `**Describes:** v${V}`, re: stamp(`**Describes:** v${V}`), fix: `change its "**Describes:**" line to **Describes:** v${V}` }
+    ];
+    for (const c of checks) {
+      const text = nodeFs.readFileSync(nodePath.join(root, c.file), 'utf8');
+      assert.ok(c.re.test(text), `${c.file} is out of date with package.json (${V}): it must contain the line \`${c.line}\`; ${c.fix}`);
+    }
   });
 
   await test('docs: the generated sections of technical-design.md (settings, source tree) match package.json and src/', () => {

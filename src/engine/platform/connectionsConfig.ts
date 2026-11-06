@@ -7,7 +7,7 @@ import { ensureLayout, layoutPath, layoutRel } from '../workspaceLayout';
 import { CredentialReference, VSCODE_SECRET_RESOLVER_ID } from './credentials/types';
 import { getCredentialResolver, resolveCredential } from './credentials/registry';
 import { envCredentialVariable } from './credentials/EnvVarCredentialResolver';
-import { definedConnectionPlatforms, platformDefinition } from './definitions';
+import { definedConnectionPlatforms, platformDefinition, usePlatformWorkspace } from './definitions';
 
 /**
  * The connections the MCP server and the extension can use (docs/mcp-engine-
@@ -266,6 +266,7 @@ function readText(file: string): string | undefined {
 
 /** Reads `.autode/config/connections.yaml` and the personal `.autode/local/connections.yaml` (missing = no entries). */
 export function loadConnectionsConfig(workspaceRoot: string, env: NodeJS.ProcessEnv = process.env): ConnectionsConfig {
+  usePlatformWorkspace(workspaceRoot);
   const text = readText(layoutPath(workspaceRoot, 'connections'));
   const localText = readText(layoutPath(workspaceRoot, 'localConnections'));
   return {
@@ -447,6 +448,7 @@ export function validateConnectionDraft(draft: ConnectionDraft): string[] {
 }
 
 export function saveConnection(workspaceRoot: string, draft: ConnectionDraft, env: NodeJS.ProcessEnv = process.env): SavedConnection {
+  usePlatformWorkspace(workspaceRoot);
   const problems = validateConnectionDraft(draft);
   if (problems.length) throw new Error(problems[0]);
   const fields: Record<string, string> = {};

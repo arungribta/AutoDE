@@ -143,7 +143,7 @@ export class PlatformCatalogPanel {
           const op = operationById(catalog, m.operation)?.item;
           if (!op) { this.post({ type: 'preview', error: `No approved operation ${m.operation}.` }); return; }
           const b = bindOperation(op, m.platform, coerce(op, m.params), platformById(catalog, m.platform));
-          this.post({ type: 'preview', operation: m.operation, kind: op.kind, statement: b.statement ?? (b.argv ? b.argv.join(' ') : '') });
+          this.post({ type: 'preview', operation: m.operation, kind: op.kind, statement: b.statement ?? b.shown ?? (b.argv ? b.argv.join(' ') : '') });
           return;
         }
         case 'try': {

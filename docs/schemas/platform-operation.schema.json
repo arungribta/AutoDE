@@ -177,7 +177,8 @@
                 ]
               },
               "path": {
-                "type": "string"
+                "type": "string",
+                "description": "After the connection's base URL; {param} is encoded as one path segment."
               },
               "query": {
                 "type": "object",
@@ -185,13 +186,56 @@
                   "type": "string"
                 }
               },
-              "body": {},
+              "body": {
+                "description": "A JSON template: \"{param}\" alone keeps the value's type; an optional parameter with no value drops the key."
+              },
               "readOnly": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "A POST that changes nothing (a search)."
               },
               "results": {
                 "type": "string",
-                "description": "A JSON path to the result rows."
+                "description": "A JSON path to the result rows; absent: the response is the rows."
+              },
+              "paging": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "style"
+                ],
+                "description": "How the pages are followed.",
+                "properties": {
+                  "style": {
+                    "enum": [
+                      "offset",
+                      "page",
+                      "cursor",
+                      "link"
+                    ]
+                  },
+                  "param": {
+                    "type": "string",
+                    "description": "offset, page, cursor: the query parameter that says where to read from."
+                  },
+                  "sizeParam": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "number",
+                    "minimum": 1
+                  },
+                  "start": {
+                    "type": "number"
+                  },
+                  "next": {
+                    "type": "string",
+                    "description": "cursor, link: the path to the next cursor or link in the response."
+                  },
+                  "total": {
+                    "type": "string",
+                    "description": "offset, page: the path to the total count."
+                  }
+                }
               }
             }
           },
@@ -204,7 +248,8 @@
             ],
             "properties": {
               "glob": {
-                "type": "string"
+                "type": "string",
+                "description": "Relative to the connection's folder: *, **, ?, {a,b}; {param} is bound."
               },
               "parse": {
                 "enum": [
@@ -212,6 +257,10 @@
                   "json",
                   "csv"
                 ]
+              },
+              "results": {
+                "type": "string",
+                "description": "yaml, json: the path to the rows in each file; absent: one row per file."
               }
             }
           },

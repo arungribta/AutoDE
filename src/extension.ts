@@ -1016,7 +1016,7 @@ Write what the facts can't say, and cite the facts it rests on as [fact:<id>] (a
       const t = targetConnectionManager;
       const tid = t?.isConnected() ? t.activeConnectionId() : undefined;
       if (t && tid && !managers.some(([id]) => id === tid)) managers.push([tid, t]);
-      return managers.flatMap(([id, m]) => { const platform = m.getActivePlatform(); return platform ? [{ id, platform, target: { connectionId: id, platform, query: async (sql: string, maxRows: number) => (await m.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>> } }] : []; });
+      return managers.flatMap(([id, m]) => { const platform = m.getActivePlatform(); return platform ? [{ id, platform, target: { connectionId: id, platform, query: async (sql: string, maxRows: number) => (await m.executeQuery(sql, { maxRows, timeoutMs: 300_000 })).rows as Array<Record<string, unknown>>, ...m.operationTransports() } }] : []; });
     };
     PlatformCatalogPanel.show(context, { workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, liveConnections: live, actor: skillActor, resolveDecision: (id, decision, note) => sidebarProvider.resolveFromView(id, decision, note) }, open);
   });

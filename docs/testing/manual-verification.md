@@ -1543,6 +1543,23 @@ Use the lending workspace of Part 69 (FIBO onboarded, the vocabulary aligned and
   Do: write the example `.autode/config/policies.yaml` (user guide §8.10), classify `loansys.brwr.brwr_nm` as pii, open loansys.brwr's Governance tab; run `autode governance policies`.
   Expect: brwr_nm lists the GDPR policy with masking and retention; a Pipeline Spec that doesn't mask brwr_nm can't be approved (the reason names the policy).
 
+## Part 72 — v0.61.0 POP5a: systems over an API or in a folder
+
+You need a REST API you may read (any test instance with a token) and a folder of YAML files. Write a team platform definition and two read operations by hand under `.autode/config/`, with `transports: [http, file]`, and propose them for approval.
+
+- [ ] **72.1 It connects with no code.**
+  Do: approve the files; add a connection in Settings → Connections; save it with the token.
+  Expect: the card comes from the definition and says how it is reached; the token is in VS Code's secret storage, not in a file; the check shows the version.
+- [ ] **72.2 It reads, and shows what ran.**
+  Do: in the Platform catalog, Try it on both operations; then a conformance run.
+  Expect: the request or file pattern is shown before it runs; rows come back; the capability shows supported.
+- [ ] **72.3 Wrong settings are said, not silent.**
+  Do: point the folder at an empty one; use a wrong token; change a `results` path to one the API doesn't have.
+  Expect: no file matches; HTTP 401 with a hint and no token in the text; the response has no such path, and the maintenance queue raises drift.
+- [ ] **72.4 A system without tables.**
+  Do: make it the active source and run discovery; with a Redshift or Snowflake profile that signs in through a browser, test the connection.
+  Expect: discovery says the system has no tables; the browser profile fails at once, saying why.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1936,5 +1953,9 @@ Use the lending workspace of Part 69 (FIBO onboarded, the vocabulary aligned and
 | 71.2 |  |  |
 | 71.3 |  |  |
 | 71.4 |  |  |
+| 72.1 |  |  |
+| 72.2 |  |  |
+| 72.3 |  |  |
+| 72.4 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

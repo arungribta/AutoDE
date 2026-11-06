@@ -24,14 +24,29 @@ export interface CliStatementOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-/** Runs the CLI with no shell, the connection's environment and a timeout; a failure carries the CLI's own message. */
-export function cliCall(cliPath: string, env: Record<string, string>, timeoutMs = 120_000): CliCall {
+/** What most CLIs print while they wait on a person in a browser; a platform definition adds its own (`access.cli.browserSignIn`). */
+const BROWSER_SIGN_IN = [/\b(open(ing|ed)?|launch(ing)?)\b[^\n]{0,60}\bbrowser\b/i, /\bbrowser (window )?(should|will|has) /i, /\bexternalbrowser\b/i, /\bdevice (login|code)\b/i];
+
+/** Whether this much of a CLI's output says it is waiting on a browser (POP5). Only text before any data is looked at. */
+export function waitsOnBrowser(text: string, patterns: readonly string[] = []): boolean {
+  const head = text.slice(0, 4000);
+  if (/^\s*[[{]/.test(head)) return false;
+  return BROWSER_SIGN_IN.some((p) => p.test(head)) || patterns.some((p) => { try { return new RegExp(p, 'i').test(head); } catch { return false; } });
+}
+
+/** Runs the CLI with no shell, the connection's environment and a timeout; a failure carries the CLI's own message. A browser sign-in is stopped at once and reported. */
+export function cliCall(cliPath: string, env: Record<string, string>, timeoutMs = 120_000, browserSignIn: readonly string[] = []): CliCall {
   return (args) => new Promise((resolve, reject) => {
     const child = spawn(cliPath, args, { windowsHide: true, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = ''; let stderr = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error(`The CLI didn't answer within ${Math.round(timeoutMs / 1000)}s.`)); }, timeoutMs);
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    const watch = () => {
+      if (!waitsOnBrowser(stderr, browserSignIn) && !waitsOnBrowser(stdout, browserSignIn)) return;
+      clearTimeout(timer); child.kill();
+      reject(new Error('This profile signs in through a browser, which AutoDE can\'t use: it runs the CLI without a person at it. Use a non-interactive profile (a key pair, a token or a service principal); the platform\'s skill says how.'));
+    };
+    child.stdout.on('data', (d) => { stdout += d.toString(); watch(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); watch(); });
     child.on('error', (e) => { clearTimeout(timer); reject(new Error(`The CLI couldn't start (${cliPath}): ${e.message}`)); });
     child.on('close', (code) => {
       clearTimeout(timer);

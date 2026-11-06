@@ -17,7 +17,8 @@ import { sanitizeSnapshot } from './sampleData';
 import { checkReadOnlySql } from './sqlGuard';
 import { fragmentsFor } from './dialects';
 import { DefinitionAdapter } from './adapters/DefinitionAdapter';
-import { platformDefinition, platformOperation } from './definitions';
+import type { OperationRunner } from './operations/execute';
+import { connectsByDefinition, platformDefinition, platformOperation } from './definitions';
 
 export type AdapterFactory = (credentials: Record<string, string>, log: (msg: string) => void) => IDataSourceAdapter;
 
@@ -84,13 +85,23 @@ export class ConnectionManager implements Disposable {
     if (registered) return registered;
     const scope = { workspaceRoot: this.workspaceRoot() };
     const definition = platformDefinition(platform, scope);
-    if (!definition?.connection || !definition.access?.cli?.statement) return undefined;
-    return (creds, l) => new DefinitionAdapter(platform, creds, l, { definition, operation: (id) => platformOperation(id, scope), cliConsent: this.cliConsent() });
+    if (!definition || !connectsByDefinition(definition)) return undefined;
+    return (creds, l) => new DefinitionAdapter(platform, creds, l, { definition, operation: (id) => platformOperation(id, scope), cliConsent: this.cliConsent(), baseDir: scope.workspaceRoot });
   }
 
   /** Registers (or replaces) the adapter for a platform — further platforms, and fakes in tests. */
   registerAdapterFactory(platform: DataPlatformProvider, factory: AdapterFactory): void {
     this.adapterFactories.set(platform, factory);
+  }
+
+  /**
+   * POP5: the connection's other ways to its platform (`cli`, `http`, `file`), for a `ConnectionTarget`. Only a
+   * platform defined by files has them here; the others' statements go through `executeQuery`.
+   */
+  operationTransports(): Pick<OperationRunner, 'cli' | 'http' | 'file'> {
+    if (!(this.activeAdapter instanceof DefinitionAdapter)) return {};
+    const { cli, http, file } = this.activeAdapter.operationRunner();
+    return { ...(cli ? { cli } : {}), ...(http ? { http } : {}), ...(file ? { file } : {}) };
   }
 
   /** Whether row values from the active connection may reach a prompt (phase 4). */

@@ -56,9 +56,21 @@ export const OPERATION_SCHEMA = {
           cli: { type: 'array', minItems: 1, items: { type: 'string' }, description: 'An argument list, never a shell line.' },
           http: {
             type: 'object', additionalProperties: false, required: ['method', 'path'],
-            properties: { method: { enum: ['GET', 'POST'] }, path: { type: 'string' }, query: { type: 'object', additionalProperties: { type: 'string' } }, body: {}, readOnly: { type: 'boolean' }, results: { type: 'string', description: 'A JSON path to the result rows.' } }
+            properties: {
+              method: { enum: ['GET', 'POST'] }, path: { type: 'string', description: 'After the connection\'s base URL; {param} is encoded as one path segment.' },
+              query: { type: 'object', additionalProperties: { type: 'string' } }, body: { description: 'A JSON template: "{param}" alone keeps the value\'s type; an optional parameter with no value drops the key.' },
+              readOnly: { type: 'boolean', description: 'A POST that changes nothing (a search).' }, results: { type: 'string', description: 'A JSON path to the result rows; absent: the response is the rows.' },
+              paging: {
+                type: 'object', additionalProperties: false, required: ['style'], description: 'How the pages are followed.',
+                properties: {
+                  style: { enum: ['offset', 'page', 'cursor', 'link'] }, param: { type: 'string', description: 'offset, page, cursor: the query parameter that says where to read from.' },
+                  sizeParam: { type: 'string' }, size: { type: 'number', minimum: 1 }, start: { type: 'number' },
+                  next: { type: 'string', description: 'cursor, link: the path to the next cursor or link in the response.' }, total: { type: 'string', description: 'offset, page: the path to the total count.' }
+                }
+              }
+            }
           },
-          file: { type: 'object', additionalProperties: false, required: ['glob', 'parse'], properties: { glob: { type: 'string' }, parse: { enum: ['yaml', 'json', 'csv'] } } },
+          file: { type: 'object', additionalProperties: false, required: ['glob', 'parse'], properties: { glob: { type: 'string', description: 'Relative to the connection\'s folder: *, **, ?, {a,b}; {param} is bound.' }, parse: { enum: ['yaml', 'json', 'csv'] }, results: { type: 'string', description: 'yaml, json: the path to the rows in each file; absent: one row per file.' } } },
           parse: { enum: ['json', 'table'] },
           since: version, until: version
         },
@@ -100,6 +112,7 @@ export const PLATFORM_SCHEMA = {
             versionArgs: strings,
             env: { type: 'object', additionalProperties: { type: 'string' }, propertyNames: { pattern: '^[A-Z][A-Z0-9_]*$' }, description: 'Environment variables set on every call (never a secret): for example turning the CLI\'s pager off.' },
             listProfiles: { ...strings, description: 'The arguments that list the CLI\'s own profiles, one per line.' },
+            browserSignIn: { ...strings, description: 'Regular expressions for what the CLI prints while it waits on a browser sign-in: AutoDE stops it and says so.' },
             statement: {
               type: 'object', additionalProperties: false, required: ['mode'],
               description: 'How a statement runs through the CLI, for a platform without an adapter class: {sql} and {id} are filled in, and the connection\'s arguments added.',
@@ -114,7 +127,25 @@ export const PLATFORM_SCHEMA = {
             }
           }
         },
-        api: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string' } } }
+        api: {
+          type: 'object', additionalProperties: false, required: ['name'],
+          properties: {
+            name: { type: 'string' }, baseUrlField: { type: 'string', description: 'The connection field holding the base URL.' },
+            auth: {
+              type: 'array', description: 'The ways to sign in: the first whose fields the connection has is used.',
+              items: {
+                type: 'object', additionalProperties: false, required: ['method'],
+                properties: {
+                  method: { enum: ['bearer', 'basic', 'oauth_client_credentials'], description: 'The fixed sign-in methods; a new one is code.' },
+                  tokenField: { type: 'string' }, header: { type: 'string' }, scheme: { type: 'string' }, usernameField: { type: 'string' }, passwordField: { type: 'string' },
+                  clientIdField: { type: 'string' }, clientSecretField: { type: 'string' }, tokenPath: { type: 'string' }, scope: { type: 'string' }
+                }
+              }
+            },
+            headers: { type: 'object', additionalProperties: { type: 'string' }, description: 'Headers sent on every call (never a secret).' }
+          }
+        },
+        file: { type: 'object', additionalProperties: false, required: ['rootField'], properties: { rootField: { type: 'string', description: 'The connection field naming the folder file operations read (it may be a Git checkout).' } } }
       }
     },
     versionOperation: { type: 'string' },

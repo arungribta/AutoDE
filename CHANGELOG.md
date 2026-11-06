@@ -6,6 +6,31 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.61.0
+
+POP5a, the `http` and `file` transports live ([platform-operations.md](docs/specs/platform-operations.md) §2.1, §6.5), the first of POP5's three releases. A system reached over a REST API or through files in a folder now connects and reads with no adapter and no card written for it, from a platform definition and operations alone. No system of that kind ships yet: AtScale and Collibra arrive through IMP1 and IMP3.
+
+- **`http` operations run** (`src/engine/platform/httpTransport.ts`, `operations/httpRead.ts`). A REST call on the connection's base URL: method, path, query, a JSON body template, `results` (the path to the rows), and declared paging (`offset`, `page`, `cursor`, `link`), which the executor follows. `returns[].from` can be a nested path (`owner.name`).
+  - **Sign-in** is a fixed set, chosen in `access.api.auth`: `bearer` (also an API key in its own header), `basic`, `oauth_client_credentials`. The first method whose fields the connection has is used.
+  - **Credentials stay on the connection.** Every call is kept to the connection's origin and base path, including a server's next-page link; values are encoded for where they land, so a parameter can't add a path or a host. Redirects aren't followed. Plain `http://` works only to this machine. A secret never reaches an error message.
+  - **The guard:** a read is a `GET`, or a `POST` declared `readOnly`; SQL under a `statement` or `sql` key in a body must pass the read-only guard, when the file loads and again when it runs.
+  - Busy servers (429, 503) are retried, honouring `Retry-After`. A web page instead of JSON is reported as such, usually a sign-in page. A response is capped at 64 MB and a read at 1000 pages; a server repeating its next page stops the read with a gap.
+- **`file` operations run** (`src/engine/platform/fileTransport.ts`). Files in the connection's bound folder (`access.file.rootField`): a glob (`*`, `**`, `?`, `{a,b}`) and a parser (`yaml`, `json`, `csv`), a row per file or, with `results`, per item, each carrying `_file`. Reading stays in the folder: relative patterns only, no `..`, symbolic links skipped, sizes capped, `.git` and `node_modules` never walked. A file that can't be read is reported and the rest are read.
+- **Silence is never success.** A response without its `results` path, or rows with none of the declared fields, is drift (`missing-object`, so the maintenance queue raises it), and no file matching a pattern is a gap.
+- **Team-defined platforms connect.** Connection fields, secrets, credential variables and dialects used to look only at shipped definitions, so a team's platform could be listed but never connected. `usePlatformWorkspace` (set wherever a workspace's connections are read) closes that; shipped platforms are found first. `DefinitionAdapter` and `ConnectionManager` now take a platform with no CLI statement at all, and cards say how it is reached.
+- **A system without tables says so.** A catalog or semantic connection refuses SQL and estate extraction with the reason and where to look, instead of failing on an empty query.
+- **`cli` operations run on connections defined by files.** No surface passed a command runner before, so they couldn't run live. Each is kept to the platform's own CLI command.
+- **Browser-only CLI profiles are stopped at once** and reported, instead of waiting out the timeout (`access.cli.browserSignIn` adds a platform's own wording).
+- **Definitions are checked for it:** an `http` platform names its base URL field and a `versionOperation`, every credential is a secret connection field, a `file` platform names its folder field.
+
+Deliberate deviations:
+- **`file` binds a folder, not a repository.** It may be a Git checkout, which the team keeps up to date; AutoDE doesn't clone. (Spec: "a bound Git repository or folder".)
+- **`http` has no `async: submit_poll_fetch` yet.** Nothing needs it: the Snowflake and Databricks REST paths do this in code, and neither AtScale's nor Collibra's reads require it. It comes with the first system that does.
+- **No Snowflake key-pair method for `http`.** It stays in the Snowflake adapter; a definition-driven platform has the three generic methods.
+- **A change over `http` or `file` is refused plainly.** Runbook steps run SQL and CLI only; IMP1 and IMP3 add the step they need. Nothing has changed about writes: a person approves them.
+
+Checked against a real local server, real folders and real child processes; not against a live vendor API.
+
 ## 0.60.0
 
 ONT2, reasoning through meaning ([context-layer.md](docs/specs/context-layer.md) §6.8, §11). The ontology and the glossary's links to it now work in AutoDE's deterministic tools. Each result names the concept and the facts it went through. No model is involved.

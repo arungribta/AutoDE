@@ -423,7 +423,9 @@ Acceptance:
 - **Noticed:** on a fixture platform version where a view is renamed, the failing operation raises one item; fixing the file closes it. An unread object kind raises one item.
 - **Never silent:** drift never turns into an empty result; the gap stays visible until it is fixed or dismissed with a reason.
 
-### 6.5 POP5 — onboarding new systems, and sharing them (v0.61.0)
+### 6.5 POP5 — onboarding new systems, and sharing them (v0.61.0–v0.61.2)
+
+**Status:** in three releases. POP5a shipped in v0.61.0: the `http` and `file` transports and team-defined platforms that connect (CHANGELOG.md 0.61.0, with its deviations; HOW: technical-design.md, POP5a). POP5b (the template) and POP5c (packs) follow.
 
 Scope:
 - **A new system from a template:** the steps are category, transports, access paths (CLI, API), connection fields, version detection, starter operations for the category's capabilities, then skills. It counts only once its recorded examples pass and a conformance run on a real connection is reviewed.

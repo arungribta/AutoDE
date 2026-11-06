@@ -5,7 +5,9 @@ import Ajv, { ValidateFunction } from 'ajv';
 import { parseYaml } from '../../context/Yaml';
 import { layoutPath } from '../../workspaceLayout';
 import { checkReadOnlySql } from '../sqlGuard';
-import { BindError, bindTemplate, sampleValues, valuesFor } from './bind';
+import { BindError, bindPlain, bindTemplate, sampleValues, valuesFor } from './bind';
+import { checkGlob } from '../fileTransport';
+import { bindHttp, httpReadProblem } from './httpRead';
 import { mapRows } from './map';
 import { OPERATION_SCHEMA, PLATFORM_SCHEMA } from './schema';
 import { Loaded, PlatformDefinition, PlatformOperation } from './types';
@@ -62,7 +64,19 @@ export function checkOperation(op: PlatformOperation, platforms: ReadonlyMap<str
         if (op.kind === 'read' && !c.ok) errors.push(`${pid}: a read operation must be one read-only statement (${c.reason})`);
       }
       if (impl.cli) for (const a of impl.cli) bindTemplate(a, op.params, sampleValues(op.params), d);
-      if (impl.http && op.kind === 'read' && impl.http.method === 'POST' && !impl.http.readOnly) errors.push(`${pid}: a read over http is a GET, or a POST declared readOnly (a search)`);
+      if (impl.http) {
+        const request = bindHttp(impl.http, op.params, sampleValues(op.params));
+        if (!impl.http.path.startsWith('/') || impl.http.path.startsWith('//') || impl.http.path.split('/').includes('..')) errors.push(`${pid}: an http path starts with one / and stays on the connection (${impl.http.path})`);
+        const problem = op.kind === 'read' ? httpReadProblem(impl.http, request.body) : undefined;
+        if (problem) errors.push(`${pid}: ${problem}`);
+        const pg = impl.http.paging;
+        if (pg && (pg.style === 'cursor' || pg.style === 'offset' || pg.style === 'page') && !pg.param) errors.push(`${pid}: ${pg.style} paging needs param`);
+        if (pg && (pg.style === 'cursor' || pg.style === 'link') && !pg.next) errors.push(`${pid}: ${pg.style} paging needs next`);
+      }
+      if (impl.file) {
+        const bad = checkGlob(bindPlain(impl.file.glob, op.params, sampleValues(op.params)));
+        if (bad) errors.push(`${pid}: ${bad}`);
+      }
     } catch (err) { errors.push(`${pid}: ${err instanceof Error ? err.message : String(err)}`); }
   }
   if (op.example) {
@@ -82,7 +96,28 @@ export function checkOperation(op: PlatformOperation, platforms: ReadonlyMap<str
 
 export function checkPlatform(p: PlatformDefinition): string[] {
   const v = validators().platform;
-  return v(p) ? [] : schemaErrors(v);
+  return v(p) ? checkAccess(p) : schemaErrors(v);
+}
+
+/** POP5: what a definition with a connection needs for its API or folder; every credential is a secret connection field. */
+function checkAccess(p: PlatformDefinition): string[] {
+  const c = p.connection;
+  if (!c) return [];
+  const errors: string[] = [];
+  const field = (name: string | undefined) => c.fields.find((f) => f.name === name);
+  if (p.transports.includes('http')) {
+    const api = p.access?.api;
+    if (!api?.baseUrlField || !field(api.baseUrlField)) errors.push('an http platform names its base URL: access.api.baseUrlField, one of its connection fields');
+    else if (field(api.baseUrlField)?.secret) errors.push(`${api.baseUrlField} is the address, not a secret`);
+    if (!p.versionOperation) errors.push('an http platform names a versionOperation: the read that proves a connection works');
+    for (const a of api?.auth ?? []) {
+      const needs = a.method === 'bearer' ? [a.tokenField] : a.method === 'basic' ? [a.usernameField, a.passwordField] : [a.clientIdField, a.clientSecretField];
+      if (needs.some((n) => !n || !field(n))) errors.push(`${a.method} sign-in names connection fields it needs (${needs.map((n) => n ?? '?').join(', ')})`);
+      for (const s of [a.tokenField, a.passwordField, a.clientSecretField]) if (s && field(s) && !field(s)?.secret) errors.push(`${s} holds a credential: mark the connection field secret`);
+    }
+  }
+  if (p.transports.includes('file') && (!p.access?.file?.rootField || !field(p.access.file.rootField))) errors.push('a file platform names its folder: access.file.rootField, one of its connection fields');
+  return errors;
 }
 
 function yamlFiles(dir: string): string[] {
@@ -100,6 +135,11 @@ export function readApprovals(workspaceRoot: string | undefined): Approvals {
     const raw = JSON.parse(fs.readFileSync(layoutPath(workspaceRoot, 'platformApprovals'), 'utf8')) as Partial<Approvals>;
     return { operations: raw.operations ?? {}, platforms: raw.platforms ?? {} };
   } catch { return { operations: {}, platforms: {} }; }
+}
+
+/** POP5: changes whenever an approval is written. */
+export function readApprovalsStamp(workspaceRoot: string): string {
+  try { return String(fs.statSync(layoutPath(workspaceRoot, 'platformApprovals')).mtimeMs); } catch { return '0'; }
 }
 
 export function writeApproval(workspaceRoot: string, what: 'operations' | 'platforms', id: string, approval: Approval): void {

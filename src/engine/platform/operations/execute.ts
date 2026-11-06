@@ -2,8 +2,11 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { recordOperationRun } from './runLog';
 import { checkReadOnlySql } from '../sqlGuard';
-import { bindTemplate, valuesFor } from './bind';
+import { BindError, bindPlain, bindTemplate, valuesFor } from './bind';
 import { mapRows } from './map';
+import { HttpCall, HttpRequest } from '../httpTransport';
+import { FileCall, checkGlob } from '../fileTransport';
+import { ShapeError, bindHttp, httpReadProblem, readHttp } from './httpRead';
 import { PlatformDefinition, PlatformImpl, PlatformOperation } from './types';
 
 /**
@@ -20,6 +23,10 @@ export interface OperationRunner {
   sql?(statement: string, maxRows: number): Promise<Array<Record<string, unknown>>>;
   /** Runs a command (an argument list, no shell) with the connection's environment. */
   cli?(argv: string[]): Promise<{ stdout: string }>;
+  /** POP5: one call to the connection's API (authenticated and kept on its address by the transport). */
+  http?: HttpCall;
+  /** POP5: reads files in the connection's bound folder. */
+  file?: FileCall;
 }
 
 export interface RunInput {
@@ -92,13 +99,24 @@ function inRange(impl: PlatformImpl, version: string | undefined): string | unde
 }
 
 /** Binds an operation for one platform: what would run (a read's statement, or a change's step). Throws `BindError` on a bad value. */
-export function bindOperation(operation: PlatformOperation, platformId: string, params: Record<string, unknown>, platform?: PlatformDefinition): { impl: PlatformImpl; statement?: string; argv?: string[] } {
+export function bindOperation(operation: PlatformOperation, platformId: string, params: Record<string, unknown>, platform?: PlatformDefinition): { impl: PlatformImpl; statement?: string; argv?: string[]; request?: HttpRequest; glob?: string; shown?: string } {
   const impl = operation.platforms[platformId];
   if (!impl) throw new Error(`${operation.id} has no implementation for ${platformId} (it has ${Object.keys(operation.platforms).join(', ')}).`);
   const values = valuesFor(operation.params, params);
   const d = platform?.dialect ?? {};
   if (impl.sql) return { impl, statement: bindTemplate(impl.sql, operation.params, values, d).trim().replace(/;\s*$/, '') };
   if (impl.cli) return { impl, argv: impl.cli.map((a) => bindTemplate(a, operation.params, values, d)) };
+  if (impl.http) {
+    const request = bindHttp(impl.http, operation.params, values);
+    const q = new URLSearchParams(request.query as Record<string, string>).toString();
+    return { impl, request, shown: `${request.method} ${request.path}${q ? `?${q}` : ''}${request.body !== undefined ? ` ${JSON.stringify(request.body)}` : ''}` };
+  }
+  if (impl.file) {
+    const glob = bindPlain(impl.file.glob, operation.params, values);
+    const bad = checkGlob(glob);
+    if (bad) throw new BindError(`${bad}.`);
+    return { impl, glob, shown: `files ${glob} (${impl.file.parse})` };
+  }
   return { impl };
 }
 
@@ -120,7 +138,8 @@ async function runBound(input: RunInput): Promise<RunResult> {
   const base: RunResult = { ok: false, operation: op.id, platform: platformId, rows: [], truncated: false, ...(input.version ? { version: input.version } : {}) };
   if (op.kind !== 'read') return { ...base, gapKind: 'refused', gap: `${op.id} changes the platform: it runs only as a runbook step a person approves (propose it with autode_propose_runbook).` };
   const bound = bindOperation(op, platformId, input.params, input.platform);
-  const out = { ...base, ...(bound.statement ? { statement: bound.statement } : {}), ...(bound.argv ? { argv: bound.argv } : {}) };
+  const shown = bound.statement ?? bound.shown;
+  const out = { ...base, ...(shown ? { statement: shown } : {}), ...(bound.argv ? { argv: bound.argv } : {}) };
   const range = inRange(bound.impl, input.version);
   if (range) return { ...out, gapKind: 'version', gap: `${op.id} on ${platformId} ${range}.` };
   const maxRows = Math.max(1, Math.min(100_000, input.maxRows ?? DEFAULT_MAX_ROWS));
@@ -138,11 +157,42 @@ async function runBound(input: RunInput): Promise<RunResult> {
       const rows = parseCliOutput(stdout, bound.impl.parse);
       return { ...out, ok: true, transport: 'cli', rows: mapRows(op.returns, rows.slice(0, maxRows)), truncated: rows.length > maxRows };
     }
-    const t = bound.impl.http ? 'http' : 'file';
-    return { ...out, transport: t, gap: `${t} operations run from POP5; this one is checked, not run.` };
+    if (bound.request && bound.impl.http) {
+      const problem = httpReadProblem(bound.impl.http, bound.request.body);
+      if (problem) return { ...out, transport: 'http', gapKind: 'refused', gap: `refused: ${problem}` };
+      if (!input.runner.http) return { ...out, transport: 'http', gap: `no API on this connection (${op.id} needs its base URL and sign-in).` };
+      const r = await readHttp(bound.impl.http, bound.request, input.runner.http, maxRows);
+      return finishRead({ ...out, transport: 'http' }, op, r.rows, r.truncated, r.gap);
+    }
+    if (bound.glob !== undefined && bound.impl.file) {
+      if (!input.runner.file) return { ...out, transport: 'file', gap: `no folder on this connection (${op.id} reads files).` };
+      const r = await input.runner.file({ glob: bound.glob, parse: bound.impl.file.parse, ...(bound.impl.file.results ? { results: bound.impl.file.results } : {}) }, maxRows);
+      if (!r.files) return { ...out, ok: true, transport: 'file', gapKind: 'failed', gap: `no file matches ${bound.glob} in the connection's folder.` };
+      const gap = r.problems.length ? `${r.problems.length} of ${r.files} file(s) couldn't be read: ${r.problems.slice(0, 5).join('; ')}` : undefined;
+      return finishRead({ ...out, transport: 'file' }, op, r.rows, r.truncated, gap);
+    }
+    return { ...out, gap: `${op.id} has no implementation AutoDE can run on ${platformId}.` };
   } catch (err) {
-    return { ...out, transport: bound.statement ? 'sql' : 'cli', gap: err instanceof Error ? err.message : String(err) };
+    const transport = transportOf(bound.impl);
+    if (err instanceof ShapeError) return { ...out, transport, gapKind: 'missing-object', gap: err.message };
+    return { ...out, transport, gap: err instanceof Error ? err.message : String(err) };
   }
+}
+
+function transportOf(impl: PlatformImpl): NonNullable<RunResult['transport']> {
+  return impl.sql ? 'sql' : impl.cli ? 'cli' : impl.http ? 'http' : 'file';
+}
+
+/**
+ * POP5: rows from an API or files mapped to the declared result. Rows in which none of the declared fields is
+ * present are a changed shape (drift), never a page of empty cells. A gap with rows is a partial read.
+ */
+function finishRead(out: RunResult, op: PlatformOperation, rows: Array<Record<string, unknown>>, truncated: boolean, gap?: string): RunResult {
+  const mapped = mapRows(op.returns, rows);
+  if (rows.length && op.returns.length && mapped.every((m) => Object.values(m).every((v) => v === null))) {
+    return { ...out, gapKind: 'missing-object', gap: `none of the fields ${op.id} reads (${op.returns.map((r) => r.from ?? r.name).join(', ')}) are in what came back: the format may have changed.` };
+  }
+  return { ...out, ok: true, rows: mapped, truncated, ...(gap ? { gap, gapKind: 'failed' as const } : {}) };
 }
 
 /** A CLI's output as rows: a JSON array (or an object holding one), or a table with a header line. */

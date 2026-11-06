@@ -32,16 +32,54 @@ export interface OperationReturn {
   label?: string;
 }
 
+/** How a REST read's pages are followed (POP5): declared here, looped by the executor. */
+export interface HttpPaging {
+  style: 'offset' | 'page' | 'cursor' | 'link';
+  /** offset, page, cursor: the query parameter that says where to read from. */
+  param?: string;
+  /** offset, page: the query parameter for the page size, and that size (default 100). */
+  sizeParam?: string;
+  size?: number;
+  /** offset, page: the first value (default 0 for offset, 1 for page). */
+  start?: number;
+  /** cursor, link: the path in the response to the next cursor or link; absent or empty ends the read. */
+  next?: string;
+  /** offset, page: the path to the total count, when the API gives one. */
+  total?: string;
+}
+
+export interface HttpImpl {
+  method: 'GET' | 'POST';
+  /** After the connection's base URL; `{param}` is encoded as one path segment. */
+  path: string;
+  query?: Record<string, string>;
+  /** A JSON template: `"{param}"` alone keeps the value's type; an optional parameter with no value drops the key. */
+  body?: unknown;
+  /** A POST that changes nothing (a search). */
+  readOnly?: boolean;
+  /** The path to the rows in the response (`results`, `$.data.items`); absent: the response is the rows. */
+  results?: string;
+  paging?: HttpPaging;
+}
+
+export interface FileImpl {
+  /** Relative to the connection's folder: `*`, `**`, `?`, `{a,b}`; `{param}` is bound. */
+  glob: string;
+  parse: 'yaml' | 'json' | 'csv';
+  /** yaml, json: the path to the rows in each file; absent: one row per file. */
+  results?: string;
+}
+
 /** One platform's implementation, over one transport. */
 export interface PlatformImpl {
   /** `sql`: a statement run on the connection (its CLI or API). */
   sql?: string;
   /** `cli`: an argument list (never a shell line); `{param}` in an argument is bound. */
   cli?: string[];
-  /** `http`: a REST call (runs from POP5). */
-  http?: { method: 'GET' | 'POST'; path: string; query?: Record<string, string>; body?: unknown; readOnly?: boolean; results?: string };
-  /** `file`: files in a bound repository or folder (runs from POP5). */
-  file?: { glob: string; parse: 'yaml' | 'json' | 'csv' };
+  /** `http`: a REST call on the connection's base URL (POP5). */
+  http?: HttpImpl;
+  /** `file`: files in the connection's bound folder (POP5). */
+  file?: FileImpl;
   /** cli and http: how the output is read. */
   parse?: 'json' | 'table';
   /** The oldest platform version it works on (inclusive) and the first it doesn't. */
@@ -139,6 +177,35 @@ export interface ConnectionDefinition {
   targetNote?: string;
 }
 
+/** One of the fixed sign-in methods for an API (POP5; a new one is code, §6.5), and the connection fields it uses. */
+export interface ApiAuth {
+  method: 'bearer' | 'basic' | 'oauth_client_credentials';
+  /** bearer: the secret field holding the token. */
+  tokenField?: string;
+  /** bearer: the header it goes in (default Authorization) and the word before it (default Bearer; empty for an API key). */
+  header?: string;
+  scheme?: string;
+  /** basic. */
+  usernameField?: string;
+  passwordField?: string;
+  /** oauth_client_credentials: the fields, and the token endpoint on the connection's own address. */
+  clientIdField?: string;
+  clientSecretField?: string;
+  tokenPath?: string;
+  scope?: string;
+}
+
+/** The vendor's API, as `http` operations reach it. */
+export interface ApiAccess {
+  name: string;
+  /** POP5: the connection field holding the base URL. */
+  baseUrlField?: string;
+  /** POP5: the ways to sign in; the first whose fields the connection has is used. */
+  auth?: ApiAuth[];
+  /** POP5: headers sent on every call (never a secret). */
+  headers?: Record<string, string>;
+}
+
 /** What a platform is and what AutoDE can do with it (§2.2). */
 export interface PlatformDefinition {
   formatVersion: number;
@@ -161,8 +228,12 @@ export interface PlatformDefinition {
       listProfiles?: string[];
       /** v0.55.0: how a statement runs through the CLI, for a platform without an adapter class. */
       statement?: CliStatement;
+      /** POP5: what the CLI prints when it is waiting on a browser sign-in (regular expressions); AutoDE stops it and says so. */
+      browserSignIn?: string[];
     };
-    api?: { name: string };
+    api?: ApiAccess;
+    /** POP5: `file` operations read the folder this connection field names (it may be a Git checkout). */
+    file?: { rootField: string };
   };
   /** v0.55.0: the connection's fields and sign-in, for a platform without a card written for it. */
   connection?: ConnectionDefinition;
