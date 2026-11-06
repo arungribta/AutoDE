@@ -127,6 +127,17 @@ export function bindPlain(template: string, params: readonly OperationParam[], v
   });
 }
 
+/** CR1: why this command can't be a read: only a sub-command the platform definition lists as reading can run. */
+export function cliReadProblem(argv: readonly string[], platform: PlatformDefinition | undefined): string | undefined {
+  const cli = platform?.access?.cli;
+  if (!cli) return `${platform?.id ?? 'this platform'} names no CLI`;
+  if (argv[0] !== cli.command) return `its operations run ${cli.command}, not ${argv[0]}`;
+  const allowed = cli.readCommands ?? [];
+  if (!allowed.length) return `${platform?.id} lists no read-only CLI commands (access.cli.readCommands)`;
+  const rest = argv.slice(1);
+  return allowed.some((c) => c.length > 0 && c.every((word, i) => rest[i] === word)) ? undefined : `${argv.slice(0, 4).join(' ')} isn't one of ${platform?.id}'s read-only CLI commands`;
+}
+
 /** A value of each parameter's type, for checking templates when a file is loaded. */
 export function sampleValues(params: readonly OperationParam[]): Record<string, unknown> {
   const sample: Record<ParamTypeKey, unknown> = { identifier: 'a.b', identifier_list: ['a', 'b'], literal: 'x', literal_list: ['x', 'y'], number: 1, boolean: true, statement: 'SELECT 1' };

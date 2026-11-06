@@ -5,7 +5,7 @@ import Ajv, { ValidateFunction } from 'ajv';
 import { parseYaml } from '../../context/Yaml';
 import { layoutPath } from '../../workspaceLayout';
 import { checkReadOnlySql } from '../sqlGuard';
-import { BindError, bindPlain, bindTemplate, sampleValues, valuesFor } from './bind';
+import { BindError, bindPlain, bindTemplate, cliReadProblem, sampleValues, valuesFor } from './bind';
 import { checkGlob } from '../fileTransport';
 import { bindHttp, httpReadProblem } from './httpRead';
 import { mapRows } from './map';
@@ -72,7 +72,12 @@ export function checkOperation(op: PlatformOperation, platforms: ReadonlyMap<str
         const c = checkReadOnlySql(bound);
         if (op.kind === 'read' && !c.ok) errors.push(`${pid}: a read operation must be one read-only statement (${c.reason})`);
       }
-      if (impl.cli) for (const a of impl.cli) bindTemplate(a, op.params, sampleValues(op.params), d);
+      if (impl.cli) {
+        const argv = impl.cli.map((a) => bindPlain(a, op.params, sampleValues(op.params)));
+        const known = platforms.get(pid);
+        const problem = op.kind === 'read' && known ? cliReadProblem(argv, known) : undefined;
+        if (problem) errors.push(`${pid}: ${problem}`);
+      }
       if (impl.http) {
         const request = bindHttp(impl.http, op.params, sampleValues(op.params));
         if (!impl.http.path.startsWith('/') || impl.http.path.startsWith('//') || impl.http.path.split('/').includes('..')) errors.push(`${pid}: an http path starts with one / and stays on the connection (${impl.http.path})`);
@@ -110,9 +115,14 @@ export function checkPlatform(p: PlatformDefinition): string[] {
 
 /** POP5: what a definition with a connection needs for its API or folder; every credential is a secret connection field. */
 function checkAccess(p: PlatformDefinition): string[] {
-  const c = p.connection;
-  if (!c) return [];
   const errors: string[] = [];
+  const cli = p.access?.cli;
+  if (cli) {
+    if (/[\\/]/.test(cli.command)) errors.push(`access.cli.command is a program's name, not a path (${cli.command})`);
+    for (const k of Object.keys(cli.env ?? {})) if (/^(PATH|PATHEXT|NODE_.*|LD_.*|DYLD_.*|PYTHONPATH|PYTHONHOME|COMSPEC)$/.test(k)) errors.push(`access.cli.env can't set ${k}: it decides what program really runs`);
+  }
+  const c = p.connection;
+  if (!c) return errors;
   const field = (name: string | undefined) => c.fields.find((f) => f.name === name);
   if (p.transports.includes('http')) {
     const api = p.access?.api;
@@ -139,11 +149,16 @@ function yamlFiles(dir: string): string[] {
 }
 
 export function readApprovals(workspaceRoot: string | undefined): Approvals {
+  return readApprovalsOf(workspaceRoot).approvals;
+}
+
+function readApprovalsOf(workspaceRoot: string | undefined): { approvals: Approvals; corrupt?: string } {
   const none: Approvals = { operations: {}, platforms: {}, implementations: {}, conformance: {} };
-  if (!workspaceRoot) return none;
-  try {
-    return { ...none, ...(JSON.parse(fs.readFileSync(layoutPath(workspaceRoot, 'platformApprovals'), 'utf8')) as Partial<Approvals>) };
-  } catch { return none; }
+  if (!workspaceRoot) return { approvals: none };
+  let text: string;
+  try { text = fs.readFileSync(layoutPath(workspaceRoot, 'platformApprovals'), 'utf8'); } catch { return { approvals: none }; }
+  try { return { approvals: { ...none, ...(JSON.parse(text) as Partial<Approvals>) } }; }
+  catch (err) { return { approvals: none, corrupt: err instanceof Error ? err.message : String(err) }; }
 }
 
 /** POP5: changes whenever an approval is written. */
@@ -152,11 +167,15 @@ export function readApprovalsStamp(workspaceRoot: string): string {
 }
 
 export function writeApproval(workspaceRoot: string, what: keyof Approvals, id: string, approval: Approval): void {
-  const all = readApprovals(workspaceRoot);
+  const { approvals: all, corrupt } = readApprovalsOf(workspaceRoot);
+  // Rewriting a file that can't be read would forget every approval in it.
+  if (corrupt) throw new Error(`.autode/config/platform-approvals.json can't be read (${corrupt}): restore it from Git first. Nothing was approved.`);
   all[what][id] = approval;
   const file = layoutPath(workspaceRoot, 'platformApprovals');
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(all, null, 2) + '\n');
+  fs.renameSync(tmp, file);
 }
 
 function loadKind<T extends { id: string }>(dirs: Array<{ dir: string; origin: 'shipped' | 'team' }>, approvals: Record<string, Approval>, check: (item: T) => string[], label: string, root: string | undefined, errors: string[]): Array<Loaded<T>> {
@@ -184,7 +203,8 @@ function loadKind<T extends { id: string }>(dirs: Array<{ dir: string; origin: '
 /** The catalog in effect: shipped files, replaced by approved team files; team drafts are listed, never run. */
 export function loadCatalog(scope: CatalogScope): Catalog {
   const errors: string[] = [];
-  const approvals = readApprovals(scope.workspaceRoot);
+  const { approvals, corrupt } = readApprovalsOf(scope.workspaceRoot);
+  if (corrupt) errors.push(`.autode/config/platform-approvals.json can't be read (${corrupt}): every team file counts as a draft until it is restored.`);
   const root = scope.workspaceRoot ?? scope.resourcesRoot;
   const dirs = (shipped: string, team: Parameters<typeof layoutPath>[1]) => [
     ...(scope.resourcesRoot ? [{ dir: path.join(scope.resourcesRoot, shipped), origin: 'shipped' as const }] : []),

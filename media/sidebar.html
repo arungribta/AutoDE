@@ -603,7 +603,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   // ── Toast ──
   function showToast(msg, type) { if (toastTimer) clearTimeout(toastTimer); toast.textContent = msg; toast.className = 'toast visible ' + (type || ''); toastTimer = setTimeout(function () { toast.classList.remove('visible'); }, 2500); }
   function post(type, payload) { vscode.postMessage(Object.assign({ type: type }, payload || {})); }
-  function escapeHtml(str) { return String(str).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"'); }
+  function escapeHtml(str) { return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
   // ── Chat ──
   /** v0.52.2: how a reply was made — built by AutoDE from what it recorded, collapsed under the reply. */
@@ -648,7 +648,7 @@ label { font-size: var(--font-size-sm); color: var(--text-muted); display: block
   function addMessage(role, content, label, citations) { if (welcomeBlock) welcomeBlock.style.display = 'none'; var div = document.createElement('div'); div.className = 'message ' + role; var labelHtml = label ? '<div class="msg-label">' + escapeHtml(label) + '</div>' : ''; div.innerHTML = labelHtml + '<div class="msg-content">' + withCitations(formatContent(content), citations) + '</div>' + COPY_BTN; chatStream.appendChild(div); chatStream.scrollTop = chatStream.scrollHeight; return div; }
   // C4b: [fact:<id>] in an answer becomes a chip; hovering shows the fact it rests on.
   function withCitations(html, citations) { var n = 0; return html.replace(/\[fact:([0-9A-Z]{26})\]/g, function (_, id) { n++; var t = citations && citations[id] ? citations[id] : 'fact ' + id + ' (not found)'; return '<span class="fact-chip" title="' + escapeHtml(t) + '">fact ' + n + '</span>'; }); }
-  function formatContent(text) { var escaped = escapeHtml(String(text)); escaped = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) { return '<pre><code>' + escapeHtml(code.trim()) + '</code></pre>'; }); escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>'); return escaped; }
+  function formatContent(text) { var escaped = escapeHtml(String(text)); escaped = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) { return '<pre><code>' + code.trim() + '</code></pre>'; /* already escaped above: escaping again would show &amp;lt; */ }); escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>'); return escaped; }
   function showSpecHistory(text, error) {
     if (error) { showToast(error, 'error'); return; }
     closePalette();

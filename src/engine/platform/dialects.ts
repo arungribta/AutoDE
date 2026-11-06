@@ -1,5 +1,5 @@
 import { loadCatalog, platformById } from './operations/load';
-import { onPlatformResourcesRootChange, platformResourcesRoot } from './definitions';
+import { onPlatformResourcesRootChange, platformResourcesRoot, platformWorkspace, teamDefinitionsStamp } from './definitions';
 
 /**
  * A platform's SQL dialect, as its platform definition states it (POP1 part 2;
@@ -41,10 +41,11 @@ onPlatformResourcesRootChange(() => cache.clear());
 export function fragmentsFor(platformId: string | undefined, scope: { resourcesRoot?: string; workspaceRoot?: string } = {}): SqlFragments {
   if (!platformId) return ANSI;
   const resourcesRoot = platformResourcesRoot(scope);
-  const key = `${resourcesRoot ?? ''}|${scope.workspaceRoot ?? ''}|${platformId}`;
+  const workspaceRoot = scope.workspaceRoot ?? platformWorkspace();
+  const key = `${resourcesRoot ?? ''}|${workspaceRoot ?? ''}|${workspaceRoot ? teamDefinitionsStamp(workspaceRoot) : ''}|${platformId}`;
   const hit = cache.get(key);
   if (hit) return hit;
-  const d = resourcesRoot || scope.workspaceRoot ? platformById(loadCatalog({ resourcesRoot, workspaceRoot: scope.workspaceRoot }), platformId)?.dialect : undefined;
+  const d = resourcesRoot || workspaceRoot ? platformById(loadCatalog({ resourcesRoot, workspaceRoot }), platformId)?.dialect : undefined;
   const f = d?.fragments ?? {};
   const out: SqlFragments = d ? {
     id: platformId,

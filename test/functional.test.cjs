@@ -161,10 +161,33 @@ function freshClaude(mock) {
 const results = [];
 // AUTODE_TEST_GREP=<regex> runs only the tests whose names match (development; the full suite is the gate).
 const testGrep = process.env.AUTODE_TEST_GREP ? new RegExp(process.env.AUTODE_TEST_GREP) : undefined;
+// A run that stops without a summary (an awaited promise that never settles lets Node exit 0 once the event loop empties) must not look green.
+let summaryPrinted = false;
+let currentTest = '(before the first test)';
+let seenTests = 0; // every test() call reached, including ones the grep skipped
+// Above the longest legitimate test (the manual kit allows 240 s); AUTODE_TEST_TIMEOUT_MS overrides it.
+const TEST_TIMEOUT_MS = Number(process.env.AUTODE_TEST_TIMEOUT_MS) || 5 * 60 * 1000;
+const SLOW_MS = 5000;
+process.on('exit', () => {
+  if (summaryPrinted) return;
+  console.error('INCOMPLETE: the run stopped after "' + currentTest + '"');
+  process.exitCode = 1;
+});
 async function test(name, fn) {
+  seenTests++;
   if (testGrep && !testGrep.test(name)) return;
-  try { await fn(); results.push({ name, ok: true }); console.log('  PASS  ' + name); }
-  catch (e) { results.push({ name, ok: false, err: e }); console.error('  FAIL  ' + name + '\n    ' + (e?.stack || e)); }
+  currentTest = name;
+  const started = Date.now();
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('test timed out after ' + (TEST_TIMEOUT_MS / 1000) + 's without finishing')), TEST_TIMEOUT_MS); });
+  try {
+    await Promise.race([Promise.resolve().then(fn), timeout]);
+    const ms = Date.now() - started;
+    results.push({ name, ok: true, ms }); console.log('  PASS  ' + name);
+    if (ms > SLOW_MS) console.log('    (' + (ms / 1000).toFixed(1) + 's)');
+  }
+  catch (e) { results.push({ name, ok: false, err: e, ms: Date.now() - started }); console.error('  FAIL  ' + name + '\n    ' + (e?.stack || e)); }
+  finally { clearTimeout(timer); }
 }
 
 // ---------- main ----------
@@ -7240,10 +7263,12 @@ async function main() {
       assert.strictEqual((await call('autode_resolve_decision', { id, decision: 'approved', by: 'agent' })).code, 'PERMISSION_DENIED', 'stakes are recomputed, never read from the file');
       nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('decision: ""', 'decision: approved'));
       let listed = await call('autode_list_decisions', {});
-      assert.deepStrictEqual(listed.incompleteFileResolutions, [id]);
+      // CR1 (v0.61.3): stakes are checked before `by`, so an agent's read holds a high-stakes file resolution for a person rather than calling it incomplete.
+      assert.deepStrictEqual(listed.heldForAPerson, [id]);
       nodeFs.writeFileSync(file, nodeFs.readFileSync(file, 'utf8').replace('by: ""', 'by: priya'));
       listed = await call('autode_list_decisions', {});
-      assert.ok(listed.appliedNow.some((m) => /Applied/.test(m)), JSON.stringify(listed));
+      // CR1 (v0.61.3): an agent's read never applies a high-stakes file resolution; it is held for a person (CLI or panel).
+      assert.ok(!listed.appliedNow.some((m) => /Applied/.test(m)) && listed.heldForAPerson.includes(id), JSON.stringify(listed));
       // Mappings: no proposal tool, no fact kind.
       assert.ok(!(await client.listTools()).tools.some((t) => t.name === 'autode_propose_mapping'));
       const fact = await call('autode_propose_assertion', { assertion: { kind: 'mapping', subject: ['shop.orders'], predicate: 'maps_to', value: { from: ['a'], to: 'b' }, statement: 'a maps to b', evidence: [{ type: 'file', ref: 'x' }] } });
@@ -9965,7 +9990,8 @@ async function main() {
       const out = nodePath.join(ws, 'plugin');
       Pl.buildPlugin({ resourcesRoot: wfRes(), outDir: out, version: '0.0.0', entry });
       const hooks = JSON.parse(nodeFs.readFileSync(nodePath.join(out, 'hooks', 'hooks.json'), 'utf8'));
-      assert.deepStrictEqual(hooks, { hooks: { PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook guard', timeout: 15 }] }], UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook turn', timeout: 10 }] }] } });
+      // CR1 (v0.61.3): the guard also covers the file-writing tools, so the agent's writes to decision files are refused too.
+      assert.deepStrictEqual(hooks, { hooks: { PreToolUse: [{ matcher: 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook guard', timeout: 15 }] }], UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node /x/dist/autode.js hook turn', timeout: 10 }] }] } });
       assert.ok(nodeFs.existsSync(nodePath.join(out, 'agents', 'target-architect.md')) && nodeFs.existsSync(nodePath.join(out, 'skills', 'autode-databricks-deployment', 'SKILL.md')));
       const settings = nodePath.join(ws, '.claude', 'settings.json');
       nodeFs.mkdirSync(nodePath.dirname(settings), { recursive: true });
@@ -14862,7 +14888,13 @@ async function main() {
     const html = nodeFs.readFileSync(nodePath.join(__dirname, '..', 'media', 'sidebar.html'), 'utf8');
     const from = html.indexOf('var specQuestionSeq = 0;');
     const src = html.slice(from, html.indexOf('function readSpecQuestionAnswer', from));
-    const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    // The page's own escapeHtml (this test used a private working copy, which hid that the page's own escaped nothing).
+    const escFrom = html.indexOf('function escapeHtml(');
+    const escapeHtml = new Function(html.slice(escFrom, html.indexOf('\n', escFrom)) + '; return escapeHtml;')();
+    assert.strictEqual(escapeHtml('<img src=x>'), '&lt;img src=x&gt;', 'the page escapes angle brackets');
+    assert.strictEqual(escapeHtml('a & b'), 'a &amp; b', 'the page escapes ampersands');
+    assert.strictEqual(escapeHtml('say "hi"'), 'say &quot;hi&quot;', 'the page escapes double quotes');
+    assert.strictEqual(escapeHtml('&lt;'), '&amp;lt;', 'ampersand first: no double-decoding');
     const h = new Function('escapeHtml', `${src}; return { specQuestionInputHtml, combineSpecAnswer };`)(escapeHtml);
     const one = h.specQuestionInputHtml({ kind: 'single-select', options: ['Daily', 'Hourly'] });
     assert.ok((one.match(/type="radio"/g) || []).length === 2 && /role="radiogroup"/.test(one) && /spec-q-other/.test(one), one);
@@ -16053,6 +16085,380 @@ async function main() {
     assert.match(html, /<button class="btn" type="button" data-pack-import>Import a pack…<\/button>/);
   });
 
+  // ── CR1 (v0.61.3): the code review's fixes ──
+  // Each test keeps its temp folders and removes them in finally. The decision tests use a fresh store per test.
+  const cr1Decisions = () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { DecisionStore } = fresh('../dist/engine/decisions/decisionStore.js');
+    const P = fresh('../dist/engine/decisions/proposals.js');
+    const { AssertionLedger } = require('../dist/engine/context/ledger.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const { parseYaml, stringifyYaml } = require('../dist/engine/context/Yaml.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cr1-dec-'));
+    const store = new DecisionStore(ws);
+    const ctx = { workspaceRoot: ws };
+    const valid = { ok: true, errors: [], warnings: [], checks: [] };
+    const fact = (kind, predicate, value = kind === 'metadata' ? { role: 'business_owner', person: 'ana' } : { term: 'orders', formula: 'count' }) => ({ kind, subject: ['orders'], predicate, value, statement: `${predicate} of orders`, evidence: [{ type: 'attachment', ref: 'cr1' }] });
+    const make = (proposal, kind = 'assertion') => store.create({ kind, title: `${kind} for test`, summary: 's', proposal, proposedBy: { host: 'mcp', client: 'cr1' }, validation: valid });
+    const approve = (d, by = 'ana') => store.resolve(d.id, { decision: 'approved', by, channel: 'cli' });
+    const editYaml = (id, edit) => { const f = nodePath.join(store.directory, `${id}.yaml`); const o = parseYaml(nodeFs.readFileSync(f, 'utf8')); edit(o); nodeFs.writeFileSync(f, stringifyYaml(o)); };
+    const fileResolve = (d, decision = 'approved') => editYaml(d.id, (o) => { o.resolution = { decision, by: 'ana', note: '' }; });
+    const facts = async (id) => { const l = new AssertionLedger(layoutPath(ws, 'ledger')); await l.load(); return l.assertions().filter((a) => a.createdBy === `decision:${id}`); };
+    return { ws, store, ctx, P, nodeFs, nodePath, layoutPath, fact, make, approve, fileResolve, editYaml, facts, cleanup: () => nodeFs.rmSync(ws, { recursive: true, force: true }) };
+  };
+
+  await test('CR1: SQL guard — a quote hidden by a # or // comment reading is still text on the other readings; real comments stay comments', () => {
+    const { checkReadOnlySql } = fresh('../dist/engine/platform/sqlGuard.js');
+    for (const sql of ["SELECT 1 //'\n; DROP TABLE t; --'", "SELECT 1 #'\n; DROP TABLE t; --'"]) {
+      assert.strictEqual(checkReadOnlySql(sql).ok, false, JSON.stringify(sql));
+    }
+    for (const sql of ['SELECT 1 // a comment', "SELECT a FROM t WHERE u = 'http://x#y'", 'SELECT * FROM t -- c', 'SELECT emp# FROM t']) {
+      assert.strictEqual(checkReadOnlySql(sql).ok, true, sql);
+    }
+  });
+
+  await test('CR1: cli reads — only a sub-command the platform lists as reading runs; a refused read never calls the runner; a value with a dash is bound without quotes', async () => {
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const E = fresh('../dist/engine/platform/operations/execute.js');
+    const acme = { formatVersion: 1, id: 'acme', title: 'Acme', category: 'warehouse', transports: ['cli'], capabilities: {}, access: { cli: { command: 'acme', readCommands: [['tables', 'list']] } } };
+    const bare = { ...acme, id: 'bare', access: { cli: { command: 'acme' } } };
+    const op = (name, argv, params = []) => ({ formatVersion: 1, id: `estate.${name}`, title: 'List tables', description: 'Lists the tables of a catalog, read over the CLI.', kind: 'read', area: 'estate', params, returns: [{ name: 'name' }], platforms: { acme: { cli: argv } } });
+    const platforms = new Map([['acme', acme]]);
+    const calls = [];
+    const runner = { cli: async (argv) => { calls.push(argv); return { stdout: '[{"name":"orders"}]' }; } };
+    // Loading: a listed read is fine; an unlisted sub-command, another program, and a platform with no list are load errors.
+    assert.deepStrictEqual(L.checkOperation(op('ok', ['acme', 'tables', 'list']), platforms), []);
+    assert.ok(L.checkOperation(op('drop', ['acme', 'tables', 'drop']), platforms).some((e) => /isn't one of/.test(e)));
+    assert.ok(L.checkOperation(op('other', ['other', 'tables', 'list']), platforms).some((e) => /its operations run acme, not other/.test(e)));
+    assert.ok(L.checkOperation(op('bare', ['acme', 'tables', 'list']), new Map([['acme', bare]])).some((e) => /lists no read-only CLI commands/.test(e)));
+    // Running: the listed read runs through the runner; the others are refused with the runner not called.
+    const good = await E.runOperation({ operation: op('ok', ['acme', 'tables', 'list']), platformId: 'acme', platform: acme, params: {}, runner });
+    assert.deepStrictEqual([good.ok, good.rows, calls[0]], [true, [{ name: 'orders' }], ['acme', 'tables', 'list']]);
+    for (const [o, platform] of [[op('drop', ['acme', 'tables', 'drop']), acme], [op('other', ['other', 'tables', 'list']), acme], [op('bare', ['acme', 'tables', 'list']), bare]]) {
+      const r = await E.runOperation({ operation: o, platformId: 'acme', platform, params: {}, runner });
+      assert.strictEqual(r.gapKind, 'refused', `${o.id}: ${JSON.stringify(r)}`);
+    }
+    assert.strictEqual(calls.length, 1, 'the runner ran only for the listed read');
+    // A value with a dash is one argument, bound without quotes.
+    const withCatalog = op('dash', ['acme', 'tables', 'list', '{catalog}'], [{ name: 'catalog', type: 'identifier', label: 'Catalog' }]);
+    assert.deepStrictEqual(L.checkOperation(withCatalog, platforms), []);
+    const d = await E.runOperation({ operation: withCatalog, platformId: 'acme', platform: acme, params: { catalog: 'my-catalog' }, runner });
+    assert.ok(d.ok && d.argv.join(' ') === 'acme tables list my-catalog' && calls[calls.length - 1][3] === 'my-catalog', JSON.stringify(d));
+  });
+
+  await test('CR1: platform definitions — a CLI command is a program name, never a path; PATH, NODE_OPTIONS and LD_PRELOAD cannot be set for it; AWS_PAGER can', () => {
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const base = { formatVersion: 1, id: 'acme', title: 'Acme', category: 'warehouse', transports: ['cli'], capabilities: {} };
+    const withCli = (cli) => ({ ...base, access: { cli: { command: 'acme', ...cli } } });
+    assert.deepStrictEqual(L.checkPlatform(withCli({})), []);
+    assert.ok(L.checkPlatform({ ...base, access: { cli: { command: 'bin/acme' } } }).some((e) => /program's name, not a path/.test(e)));
+    assert.ok(L.checkPlatform({ ...base, access: { cli: { command: 'C:\\tools\\acme.exe' } } }).some((e) => /program's name, not a path/.test(e)));
+    for (const k of ['PATH', 'NODE_OPTIONS', 'LD_PRELOAD']) {
+      assert.ok(L.checkPlatform(withCli({ env: { [k]: 'x' } })).some((e) => e.includes(`can't set ${k}`)), k);
+    }
+    assert.deepStrictEqual(L.checkPlatform(withCli({ env: { AWS_PAGER: '' } })), []);
+  });
+
+  await test('CR1: Snowflake CLI — a rejected password is never retried as --password; a CLI without the environment option still falls back', async () => {
+    const spec = { kind: 'adhoc', account: 'ACME', username: 'jdoe', password: 'secret-pw' };
+    const scripted = (stderr, status) => {
+      const calls = [];
+      const mock = createMock();
+      mock.__childProcess = { spawnSync: (bin, args, opts) => { calls.push({ args, env: opts.env.SNOWFLAKE_PASSWORD }); return calls.length === 1 ? { status, stderr, stdout: '' } : { status: 0, stderr: '', stdout: '[{"X":1}]' }; } };
+      const { SnowflakeCliBackend } = withMock(mock, () => fresh('../dist/engine/platform/executionBackends/SnowflakeCliBackend.js'));
+      return { calls, mock, backend: new SnowflakeCliBackend('/mock/bin/snow', spec, () => {}) };
+    };
+    // An account's answer is final: one attempt, and the password is not an argument.
+    const denied = scripted('Incorrect username or password was specified.', 1);
+    await assert.rejects(() => withMock(denied.mock, () => denied.backend.executeQuery('SELECT 1')), /Incorrect username or password/);
+    assert.strictEqual(denied.calls.length, 1, JSON.stringify(denied.calls));
+    assert.ok(!denied.calls[0].args.includes('--password'));
+    // An older CLI that doesn't know the option: the password goes as --password, once.
+    const older = scripted('Error: No such option: -x', 2);
+    const r = await withMock(older.mock, () => older.backend.executeQuery('SELECT 1'));
+    assert.deepStrictEqual([r.rowCount, older.calls.length], [1, 2]);
+    assert.ok(older.calls[1].args.includes('--password') && older.calls[1].args.includes('secret-pw') && older.calls[1].env === undefined, JSON.stringify(older.calls));
+  });
+
+  await test('CR1: approvals — a corrupt platform-approvals.json is never overwritten and the catalog names it; a good write leaves no temp file', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const L = fresh('../dist/engine/platform/operations/load.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cr1-appr-'));
+    try {
+      const file = layoutPath(ws, 'platformApprovals');
+      nodeFs.mkdirSync(nodePath.dirname(file), { recursive: true });
+      const corrupt = '{ "platforms": { "acme": ';
+      nodeFs.writeFileSync(file, corrupt);
+      const approval = { checksum: 'abc123', by: 'priya', at: '2026-11-06T00:00:00.000Z' };
+      assert.throws(() => L.writeApproval(ws, 'platforms', 'acme', approval), /platform-approvals\.json can't be read/);
+      assert.strictEqual(nodeFs.readFileSync(file, 'utf8'), corrupt, 'the file is unchanged');
+      const cat = L.loadCatalog({ resourcesRoot: nodePath.join(__dirname, '..'), workspaceRoot: ws });
+      assert.ok(cat.errors.some((e) => /platform-approvals\.json can't be read/.test(e)), cat.errors.join('\n'));
+      nodeFs.rmSync(file);
+      L.writeApproval(ws, 'platforms', 'acme', approval);
+      assert.deepStrictEqual(JSON.parse(nodeFs.readFileSync(file, 'utf8')).platforms.acme, approval);
+      assert.deepStrictEqual(nodeFs.readdirSync(nodePath.dirname(file)).filter((n) => n.endsWith('.tmp')), [], 'no temp file left');
+    } finally { nodeFs.rmSync(ws, { recursive: true, force: true }); }
+  });
+
+  await test('CR1: team dialects — an approved team platform\'s sample fragment is used, and a re-approved change takes effect without a restart', () => {
+    const os = require('node:os'); const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const D = require('../dist/engine/platform/dialects.js');
+    const Defs = require('../dist/engine/platform/definitions.js');
+    const { writeApproval, checksumOf } = require('../dist/engine/platform/operations/load.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const ws = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-cr1-dialect-'));
+    const file = layoutPath(ws, 'platformDefinitions', 'acme_wh.yaml');
+    const definition = (sample) => ['formatVersion: 1', 'id: acme_wh', 'title: Acme Warehouse', 'category: warehouse', 'transports: [sql]', 'capabilities: {}', 'dialect:', '  fragments:', `    sample: '${sample}'`, ''].join('\n');
+    const v1 = '(SELECT * FROM {table} SAMPLE ({n} ROWS)) s0';
+    const v2 = '(SELECT * FROM {table} LIMIT {n}) team2';
+    try {
+      nodeFs.mkdirSync(nodePath.dirname(file), { recursive: true });
+      const text1 = definition(v1);
+      nodeFs.writeFileSync(file, text1);
+      writeApproval(ws, 'platforms', 'acme_wh', { checksum: checksumOf(text1), by: 'priya', at: '2026-11-06T00:00:00.000Z' });
+      Defs.usePlatformWorkspace(ws);
+      assert.strictEqual(D.fragmentsFor('acme_wh').sample, v1, 'the team\'s sample');
+      // Changed but not yet approved: the draft does not run.
+      const text2 = definition(v2);
+      nodeFs.writeFileSync(file, text2);
+      assert.notStrictEqual(D.fragmentsFor('acme_wh').sample, v2, 'a draft is not used');
+      writeApproval(ws, 'platforms', 'acme_wh', { checksum: checksumOf(text2), by: 'priya', at: '2026-11-06T00:01:00.000Z' });
+      assert.strictEqual(D.fragmentsFor('acme_wh').sample, v2, 'the re-approved change, no restart');
+    } finally {
+      Defs.usePlatformWorkspace(undefined);
+      nodeFs.rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  await test('CR1: Snowflake REST partitions — every partition is read in order, a failed one is named, and maxRows stops further fetches', async () => {
+    const { SnowflakeRestBackend } = fresh('../dist/engine/platform/executionBackends/SnowflakeRestBackend.js');
+    const origFetch = global.fetch;
+    const asked = [];
+    const json = (status, body) => ({ status, ok: status < 400, json: async () => body });
+    const meta = { rowType: [{ name: 'A', type: 'fixed' }], partitionInfo: [{}, {}, {}] };
+    const install = (failPartition1) => {
+      global.fetch = async (url) => {
+        const u = String(url); asked.push(u);
+        if (/\?partition=1$/.test(u)) return failPartition1 ? json(500, {}) : json(200, { data: [['3']] });
+        if (/\?partition=2$/.test(u)) return json(200, { data: [['4'], ['5']] });
+        return json(200, { resultSetMetaData: meta, data: [['1'], ['2']] });
+      };
+    };
+    try {
+      const backend = new SnowflakeRestBackend({ account: 'acme', username: 'u', token: 't' }, () => {});
+      install(false);
+      const all = await backend.executeQuery('SELECT a FROM t');
+      assert.deepStrictEqual(all.rows.map((x) => x.A), [1, 2, 3, 4, 5]);
+      assert.ok(asked.some((u) => /\?partition=1$/.test(u)) && asked.some((u) => /\?partition=2$/.test(u)), asked.join('\n'));
+      install(true);
+      await assert.rejects(() => backend.executeQuery('SELECT a FROM t'), /partition 1 of 3 couldn't be read \(500\)/);
+      asked.length = 0;
+      install(false);
+      const capped = await backend.executeQuery('SELECT a FROM t', { maxRows: 3 });
+      assert.deepStrictEqual(capped.rows.map((x) => x.A), [1, 2, 3]);
+      assert.ok(!asked.some((u) => /partition=2/.test(u)), 'no fetch past maxRows: ' + asked.join(' '));
+    } finally { global.fetch = origFetch; }
+  });
+
+  await test('CR1: connection version — a failed version read is not kept; the next read is, and then it is served from the cache', async () => {
+    const E = fresh('../dist/engine/platform/operations/execute.js');
+    const versionOp = { formatVersion: 1, id: 'platform.version', title: 'Platform version', description: 'Reads the version of the platform.', kind: 'read', area: 'platform', params: [], returns: [{ name: 'version' }], platforms: { snowflake: { sql: 'SELECT CURRENT_VERSION() AS version' } } };
+    const id = 'cr1-version-cache';
+    E.forgetVersion(id);
+    try {
+      const failing = { sql: async () => { throw new Error('connection reset'); } };
+      assert.strictEqual(await E.connectionVersion(id, { id: 'snowflake' }, versionOp, failing), undefined);
+      const working = { sql: async () => [{ VERSION: '8.40.1' }] };
+      assert.strictEqual(await E.connectionVersion(id, { id: 'snowflake' }, versionOp, working), '8.40.1');
+      assert.strictEqual(await E.connectionVersion(id, { id: 'snowflake' }, versionOp, failing), '8.40.1', 'kept once read');
+    } finally { E.forgetVersion(id); }
+  });
+
+  await test('CR1: trial — raw SQL on a platform on trial is refused with VALIDATION_FAILED before anything reaches the platform', async () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const h = await platformHarness();
+    try {
+      // A platform is on trial once its onboarding file exists and no conformance run is reviewed (onboardingState).
+      const onboarding = layoutPath(h.ws, 'platformOnboarding', 'snowflake.yaml');
+      nodeFs.mkdirSync(nodePath.dirname(onboarding), { recursive: true });
+      nodeFs.writeFileSync(onboarding, 'platform: snowflake\n');
+      const r = (await h.call('autode_execute_query', { connectionId: 'snowflake:ACME', sql: 'SELECT 1' })).structuredContent;
+      assert.ok(r.code === 'VALIDATION_FAILED' && /on trial/.test(r.message), JSON.stringify(r));
+      assert.ok(!h.executed.some((e) => /SELECT 1/.test(e.sql || '')), 'nothing ran');
+    } finally { await h.done(); }
+  });
+
+  await test('CR1: recording SQL — a .sql file is checked against the semantic layer whatever language the caller gives', () => {
+    const fs = require('node:fs'); const p = require('node:path');
+    const { recordArtifact } = fresh('../dist/engine/agents/artifacts.js');
+    const { layoutPath } = require('../dist/engine/workspaceLayout.js');
+    const w = c5a.ws();
+    try {
+      const root = layoutPath(w.ws, 'problems', 'p1');
+      fs.mkdirSync(root, { recursive: true });
+      const sources = { graph: c5a.graph(), assertions: [], conflicts: [], semantic: c5b.index(), catalogRevisions: { 'shop/prod': 'rev1' } };
+      const bad = 'SELECT * FROM shop.orders o JOIN shop.customers c ON o.order_id = c.customer_id';
+      assert.throws(() => recordArtifact({ workspaceRoot: w.ws, problemId: 'p1', problemRoot: root, stage: { id: 'b1', kind: 'build' }, path: 'bad.sql', content: bad, language: 'text', who: { kind: 'agent', name: 'pipeline-engineer' }, channel: 'tool', sources }), /bad\.sql was not recorded: it doesn't follow the approved semantic layer/);
+      assert.ok(!fs.existsSync(p.join(w.ws, 'autode-output', 'p1', '03-build', 'b1', 'bad.sql')), 'nothing is written');
+    } finally { fs.rmSync(w.ws, { recursive: true, force: true }); }
+  });
+
+  await test('CR1: decisions (a) — a high-stakes file resolution waits for a person under the agent channel and is applied by default; a low-stakes one is applied there; an approved high-stakes decision on disk is not applied there', async () => {
+    const k = cr1Decisions();
+    try {
+      const high = k.make(k.fact('metadata', 'owner'));
+      const low = k.make(k.fact('business_term', 'defined_as'));
+      assert.deepStrictEqual([high.stakes, low.stakes], ['high', 'low']);
+      k.fileResolve(high);
+      k.fileResolve(low);
+      const agent = await k.P.processResolved(k.store, k.ctx, {}, { fileStakes: 'low' });
+      assert.ok(agent.held.includes(high.id), 'held: ' + agent.held.join(','));
+      assert.strictEqual(k.store.get(high.id).status, 'pending');
+      assert.ok(!agent.applied.some((a) => a.decision.id === high.id));
+      assert.ok(agent.applied.some((a) => a.decision.id === low.id && a.applied), agent.applied.map((a) => a.message).join('\n'));
+      const byDefault = await k.P.processResolved(k.store, k.ctx);
+      assert.ok(byDefault.applied.some((a) => a.decision.id === high.id && a.applied), byDefault.applied.map((a) => a.message).join('\n'));
+      assert.strictEqual(k.store.get(high.id).status, 'applied');
+      // An approved high-stakes decision on disk is not applied through the agent channel.
+      const onDisk = k.make(k.fact('metadata', 'certification', { status: 'verified' }));
+      k.approve(onDisk);
+      const again = await k.P.processResolved(k.store, k.ctx, {}, { fileStakes: 'low' });
+      assert.ok(again.held.includes(onDisk.id) && !again.applied.some((a) => a.decision.id === onDisk.id));
+      assert.strictEqual(k.store.get(onDisk.id).status, 'approved');
+      assert.deepStrictEqual(await k.facts(onDisk.id), []);
+    } finally { k.cleanup(); }
+  });
+
+  await test('CR1: decisions (b) — a proposal edited after its decision was made fails and applies nothing; a decision with no proposalHash still applies', async () => {
+    const k = cr1Decisions();
+    try {
+      const edited = k.make(k.fact('business_term', 'defined_as'));
+      k.approve(edited);
+      k.nodeFs.appendFileSync(k.nodePath.join(k.store.directory, `${edited.id}.proposal.json`), '\n');
+      const r = await k.P.applyDecision(k.store, edited.id, k.ctx);
+      assert.deepStrictEqual([r.applied, r.decision.status], [false, 'failed'], r.message);
+      assert.deepStrictEqual(await k.facts(edited.id), []);
+      const bare = k.make(k.fact('business_term', 'defined_as'));
+      k.approve(bare);
+      k.editYaml(bare.id, (o) => { delete o.proposalHash; });
+      const ok = await k.P.applyDecision(k.store, bare.id, k.ctx);
+      assert.ok(ok.applied, ok.message);
+      assert.strictEqual((await k.facts(bare.id)).length, 1);
+    } finally { k.cleanup(); }
+  });
+
+  await test('CR1: decisions (c) — a fresh .applying lock makes applying wait (applied false); a stale one is taken over; the lock is gone after apply and after an error; two concurrent applies write one fact', async () => {
+    const k = cr1Decisions();
+    try {
+      const d = k.make(k.fact('business_term', 'defined_as'));
+      k.approve(d);
+      const lock = k.nodePath.join(k.store.directory, `${d.id}.applying`);
+      k.nodeFs.writeFileSync(lock, `${process.pid} now\n`);
+      const held = await k.P.applyDecision(k.store, d.id, k.ctx);
+      assert.strictEqual(held.applied, false, held.message);
+      assert.ok(k.nodeFs.existsSync(lock), 'a fresh lock is left alone');
+      const old = new Date(Date.now() - 20 * 60 * 1000);
+      k.nodeFs.utimesSync(lock, old, old);
+      const taken = await k.P.applyDecision(k.store, d.id, k.ctx);
+      assert.ok(taken.applied, taken.message);
+      assert.ok(!k.nodeFs.existsSync(lock), 'the lock is gone after apply');
+      // An error (a decision that is not approved) still releases the lock.
+      const pending = k.make(k.fact('business_term', 'defined_as'));
+      await assert.rejects(() => k.P.applyDecision(k.store, pending.id, k.ctx), (e) => e.code === 'NOT_APPROVED');
+      assert.ok(!k.nodeFs.existsSync(k.nodePath.join(k.store.directory, `${pending.id}.applying`)), 'the lock is gone after an error');
+      // Two applies at once: one fact.
+      const twice = k.make(k.fact('business_term', 'defined_as'));
+      k.approve(twice);
+      const [x, y] = await Promise.all([k.P.applyDecision(k.store, twice.id, k.ctx), k.P.applyDecision(k.store, twice.id, k.ctx)]);
+      assert.deepStrictEqual([x.applied, y.applied].sort(), [false, true]);
+      assert.strictEqual((await k.facts(twice.id)).length, 1);
+      // An applied decision: processResolved does not throw and writes nothing more; the lock list ignores locks.
+      await k.P.processResolved(k.store, k.ctx);
+      assert.strictEqual((await k.facts(twice.id)).length, 1);
+      assert.ok(k.store.list().every((x2) => /^dec-[0-9A-Z]{26}$/.test(x2.id)), 'list() ignores .applying');
+    } finally { k.cleanup(); }
+  });
+
+  await test('CR1: decisions (d) — an unreadable decision file is left out of list(), reported by unreadable() and processResolved, and get() says why', async () => {
+    const k = cr1Decisions();
+    try {
+      const good = k.make(k.fact('business_term', 'defined_as'));
+      const badId = 'dec-01ARZ3NDEKTSV4RRFFQ69G5FAV';
+      k.nodeFs.writeFileSync(k.nodePath.join(k.store.directory, `${badId}.yaml`), 'resolution: [unclosed\n  : : garbage\n');
+      assert.ok(k.store.list().some((d) => d.id === good.id) && !k.store.list().some((d) => d.id === badId));
+      assert.ok(k.store.unreadable().some((u) => u.id === badId && u.reason), JSON.stringify(k.store.unreadable()));
+      const r = await k.P.processResolved(k.store, k.ctx);
+      assert.ok(r.unreadable.some((u) => u.id === badId), JSON.stringify(r.unreadable));
+      assert.throws(() => k.store.get(badId), (e) => e.code === 'UNREADABLE');
+      assert.throws(() => k.store.get('dec-01ARZ3NDEKTSV4RRFFQ69G5FAW'), (e) => e.code === 'NOT_FOUND');
+    } finally { k.cleanup(); }
+  });
+
+  await test('CR1: decisions (e) — approvalBlockers gives a blocker when the problem\'s specification is corrupt', () => {
+    const k = cr1Decisions();
+    try {
+      const wf = k.store.create({ kind: 'workflow', title: 'plan', summary: 's', proposal: { problemId: 'p1' }, proposedBy: { host: 'mcp', client: 'cr1' }, validation: k.valid, problemId: 'p1' });
+      const root = k.layoutPath(k.ws, 'problems', 'p1');
+      k.nodeFs.mkdirSync(k.nodePath.join(root, 'spec'), { recursive: true });
+      k.nodeFs.writeFileSync(k.nodePath.join(root, 'spec', 'business-problem.yaml'), 'id: [unclosed\n  : : :\n');
+      const blockers = k.P.approvalBlockers(k.store, wf.id, { workspaceRoot: k.ws, problemRoot: root });
+      assert.ok(blockers.length === 1 && /can't be read/.test(blockers[0]), JSON.stringify(blockers));
+    } finally { k.cleanup(); }
+  });
+
+  await test('CR1: host guard — file writes to decisions and platform approvals are refused, shell writes to them too; reads and 2>/dev/null pass; the hook merge replaces an old guard entry and keeps the team\'s hooks', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const os = require('node:os');
+    const G = fresh('../dist/engine/runner/hostGuard.js');
+    const Pl = fresh('../dist/engine/agents/plugin.js');
+    const writes = (tool, input) => G.guardHookEvent({ tool_name: tool, tool_input: input }, '.').block;
+    for (const p of ['.autode\\decisions\\x.yaml', 'C:\\w\\.AUTODE\\Decisions\\x.yaml', './.autode/../.autode/decisions/x.yaml', '.autode/config/platform-approvals.json']) {
+      for (const tool of ['Write', 'Edit', 'MultiEdit']) assert.strictEqual(writes(tool, { file_path: p }), true, `${tool} ${p}`);
+    }
+    assert.strictEqual(writes('NotebookEdit', { notebook_path: '.autode/decisions/x.yaml' }), true, 'notebook');
+    assert.strictEqual(writes('Write', { file_path: 'src/x.ts' }), false, 'an unrelated path passes');
+    for (const cmd of ['echo x > .autode/decisions/a.yaml', "sed -i 's/a/b/' .autode/decisions/a.yaml", 'Set-Content .autode/decisions/a.yaml "x"', 'bash -c "echo x > .autode/decisions/a.yaml"']) {
+      assert.strictEqual(writes('Bash', { command: cmd }), true, cmd);
+    }
+    for (const cmd of ['cat .autode/decisions/a.yaml', 'ls .autode/decisions', 'cat .autode/decisions/a.yaml 2>/dev/null']) {
+      assert.strictEqual(writes('Bash', { command: cmd }), false, cmd);
+    }
+    const entry = { command: 'node', args: ['/x/dist/autode.js', 'mcp', '--workspace', '.'] };
+    const theirs = { matcher: 'Write', hooks: [{ type: 'command', command: 'prettier --check' }] };
+    const old = { matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node /old/dist/autode.js hook guard', timeout: 15 }] };
+    const existing = JSON.stringify({ permissions: { allow: ['Bash(npm test)'] }, hooks: { PreToolUse: [old, theirs] } });
+    const merged = Pl.mergeGuardHook(existing, entry);
+    const s = JSON.parse(merged.text);
+    assert.strictEqual(merged.changed, true);
+    assert.deepStrictEqual(s.permissions, { allow: ['Bash(npm test)'] });
+    assert.strictEqual(s.hooks.PreToolUse.length, 2, JSON.stringify(s.hooks.PreToolUse));
+    assert.ok(!s.hooks.PreToolUse.some((m) => m.matcher === 'Bash|PowerShell'), 'the old guard entry is replaced');
+    assert.ok(s.hooks.PreToolUse.some((m) => m.matcher === 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit' && m.hooks[0].command === 'node /x/dist/autode.js hook guard'), 'the new guard entry');
+    assert.deepStrictEqual(s.hooks.PreToolUse.find((m) => m.matcher === 'Write'), theirs, 'the team hook is kept');
+    void nodeFs; void nodePath; void os;
+  });
+
+  await test('CR1: the runner — a filtered run prints PARTIAL RUN and passes; a run that stops before its summary is INCOMPLETE and exits 1', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const { spawnSync } = require('node:child_process');
+    const root = nodePath.join(__dirname, '..');
+    const file = nodePath.join(__dirname, 'functional.test.cjs');
+    const one = spawnSync(process.execPath, [file], { cwd: root, encoding: 'utf8', env: { ...process.env, AUTODE_TEST_GREP: '^CR1: SQL guard' }, timeout: 120000 });
+    assert.ok(one.status === 0 && /PARTIAL RUN: 1 of \d+ tests/.test(one.stdout) && /1\/1 passed/.test(one.stdout), `status ${one.status}\n${one.stdout}\n${one.stderr}`);
+    // The probe is a copy with an await that never settles as the first step of main(); the runner must report INCOMPLETE.
+    const marker = 'async function main() {\n';
+    const src = nodeFs.readFileSync(file, 'utf8');
+    assert.strictEqual(src.split(marker).length, 2, 'one main()');
+    const probe = nodePath.join(__dirname, 'functional-cr1-incomplete-probe.cjs');
+    try {
+      nodeFs.writeFileSync(probe, src.replace(marker, marker + '  await new Promise(() => {});\n'));
+      const r = spawnSync(process.execPath, [probe], { cwd: root, encoding: 'utf8', timeout: 120000 });
+      assert.strictEqual(r.status, 1, `status ${r.status}\n${r.stdout}\n${r.stderr}`);
+      assert.ok(/INCOMPLETE/.test(r.stderr), r.stderr);
+    } finally { nodeFs.rmSync(probe, { force: true }); }
+  });
+
   await test('manual kit: builds the workspace (sources, pack documents, connection template, Claude plugin with its guard hook), pre-runs every person-free step and writes MANUAL-KIT.md; refuses to replace a folder that is not its own', async () => {
     const os = require('node:os'); const nodeFs = require('node:fs');
     const out = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'autode-kit-test-'));
@@ -16099,9 +16505,52 @@ async function main() {
     assert.strictEqual(r.status, 0, (r.stderr || r.stdout).trim());
   });
 
+  await test('media: every inline <script> in media/*.html and media/editors/*.html parses (a syntax error blanks a whole panel and nothing else notices)', () => {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path'); const vm = require('node:vm');
+    const root = nodePath.join(__dirname, '..', 'media');
+    const files = [];
+    for (const dir of [root, nodePath.join(root, 'editors')]) {
+      if (!nodeFs.existsSync(dir)) continue;
+      for (const f of nodeFs.readdirSync(dir)) if (f.endsWith('.html')) files.push(nodePath.join(dir, f));
+    }
+    assert.ok(files.length >= 6, 'found the media pages: ' + files.length);
+    let scripts = 0;
+    for (const file of files) {
+      const html = nodeFs.readFileSync(file, 'utf8');
+      const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+      let m;
+      while ((m = re.exec(html))) {
+        if (/\bsrc\s*=/i.test(m[1])) continue;
+        scripts++;
+        // The editors keep {{FILENAME}} / {{CONTENT}} inside a string or template literal in the script body, so the unfilled template parses.
+        try { new vm.Script(m[2], { filename: file }); }
+        catch (e) { assert.fail(nodePath.basename(file) + ': inline script does not parse: ' + e.message); }
+      }
+    }
+    assert.ok(scripts >= files.length - 1, 'scripts were found and checked: ' + scripts);
+  });
+
   const failed = results.filter(r => !r.ok);
+  const slowest = results.slice().sort((a, b) => (b.ms || 0) - (a.ms || 0)).slice(0, 10);
+  if (slowest.length) {
+    console.log('\nSlowest tests:');
+    for (const r of slowest) console.log('  ' + ((r.ms || 0) / 1000).toFixed(1).padStart(6) + 's  ' + (r.name.length > 110 ? r.name.slice(0, 107) + '...' : r.name));
+  }
+  let exitCode = failed.length ? 1 : 0;
+  if (testGrep) {
+    console.log('\nPARTIAL RUN: ' + results.length + ' of ' + seenTests + ' tests (AUTODE_TEST_GREP=' + process.env.AUTODE_TEST_GREP + ')');
+    if (results.length === 0) { console.error('AUTODE_TEST_GREP matched no test: nothing was checked.'); if (!exitCode) exitCode = 2; }
+  } else {
+    const nodeFs = require('node:fs'); const nodePath = require('node:path');
+    const minimum = JSON.parse(nodeFs.readFileSync(nodePath.join(__dirname, 'test-count.json'), 'utf8')).minimum;
+    if (results.length < minimum) {
+      console.error('SHORTFALL: only ' + results.length + ' tests ran; test/test-count.json expects at least ' + minimum + ' (' + (minimum - results.length) + ' missing). A test was removed or the run was cut short.');
+      exitCode = 1;
+    }
+  }
+  summaryPrinted = true;
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
-  process.exit(failed.length ? 1 : 0);
+  process.exit(exitCode);
 }
 
 main().catch(e => { console.error('Fatal:', e); process.exit(1); });

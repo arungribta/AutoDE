@@ -41,7 +41,8 @@ function parseSnowCliJson(stdout: string): Array<Record<string, unknown>> {
 
 /** An older CLI without `-x`, or one that didn't read the password from the environment. */
 function refusedEnvPassword(output: string): boolean {
-  return /no such option|unrecognized|temporary.connection|password (is )?(required|missing|empty)|incorrect username or password|authenticat/i.test(output);
+  // Only "this CLI can't take it that way". A rejected password is the account's answer: retrying it as an argument only exposes it.
+  return /no such option|unrecognized|temporary.connection|password (is )?(required|missing|empty)/i.test(output);
 }
 
 /**

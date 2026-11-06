@@ -8,18 +8,16 @@
  * single-file HTML webviews can execute their scripts.
  */
 
+import { randomBytes } from 'crypto';
+
 export function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
+  // Cryptographically random, base64: a predictable nonce would defeat the CSP.
+  return randomBytes(24).toString('base64');
 }
 
 export function applyCspNonce(html: string, cspSource: string): string {
   const nonce = getNonce();
-  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:;">`;
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} data:;">`;
 
   return html
     .replace('</head>', `${csp}\n  </head>`)

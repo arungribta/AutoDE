@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master, 'feature/**']
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   build:
@@ -25,6 +25,9 @@ jobs:
 
       - name: Test
         run: node test/functional.test.cjs
+
+      - name: Architecture (platform boundary)
+        run: node test/architecture.test.cjs
 
       - name: Lint
         run: npm run lint

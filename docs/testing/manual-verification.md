@@ -1594,6 +1594,20 @@ Use the system onboarded in Part 73, and a second, empty workspace.
   Do: edit one file in the pack and import it. Restore it, change that file in the second workspace, approve it there, and import again.
   Expect: the first says the file changed after export; the second is refused until *Replace approved files* is chosen, and the replaced file is a draft until approved.
 
+## Part 75 — v0.61.3 CR1: the review's fixes, on the real thing
+
+These are what the automated tests can't reach.
+
+- [ ] **75.1 The chat panel after the escaping fix.**
+  Do: ask something whose answer has a fenced SQL block with `<>`, inline code, a citation chip and a sentence with `a < b`.
+  Expect: all of it reads normally: no `&lt;` on screen, no swallowed text, and the code block keeps its `<>`.
+- [ ] **75.2 Comments on a live Snowflake.**
+  Do: through `autode_execute_query`, send a `SELECT` with a `//` comment; then the same with a quote in the comment and a second statement after the line break.
+  Expect: a plain comment is fine; the second is refused and nothing runs.
+- [ ] **75.3 A large read over the Snowflake SQL API.**
+  Do: on a key-pair connection, read a table large enough for several result partitions, and compare the row count.
+  Expect: the count matches `SELECT COUNT(*)`.
+
 ## Results
 
 | Check | Pass / Fail | Notes |
@@ -1999,5 +2013,8 @@ Use the system onboarded in Part 73, and a second, empty workspace.
 | 74.1 |  |  |
 | 74.2 |  |  |
 | 74.3 |  |  |
+| 75.1 |  |  |
+| 75.2 |  |  |
+| 75.3 |  |  |
 
 For a failure, the most useful notes are: the log lines around it, the relevant `.autode` file, and for packs the What the Agent Saw document.

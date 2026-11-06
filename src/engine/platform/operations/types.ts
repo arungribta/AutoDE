@@ -241,6 +241,8 @@ export interface PlatformDefinition {
       listProfiles?: string[];
       /** v0.55.0: how a statement runs through the CLI, for a platform without an adapter class. */
       statement?: CliStatement;
+      /** CR1: the sub-commands that only read (`[tables, list]`): a `cli` read must start with one of them. */
+      readCommands?: string[][];
       /** POP5: what the CLI prints when it is waiting on a browser sign-in (regular expressions); AutoDE stops it and says so. */
       browserSignIn?: string[];
     };

@@ -57,7 +57,8 @@ export function recordArtifact(input: RecordArtifactInput): RecordedArtifact {
   if (!rel || rel.split('/').includes('..') || path.isAbsolute(input.path) || /^[A-Za-z]:/.test(input.path)) throw new Error(`"${input.path}" must be a relative path inside the stage's folder.`);
   const segs = [...outputDirSegments(input.problemId, input.outputDir), PHASE_OF[input.stage.kind], input.stage.id, ...rel.split('/')];
   const file = path.join(input.workspaceRoot, ...segs);
-  const language = input.language ?? LANG[path.extname(file).toLowerCase()] ?? 'text';
+  const byExtension = LANG[path.extname(file).toLowerCase()];
+  const language = byExtension === 'sql' ? 'sql' : input.language ?? byExtension ?? 'text';
   const exploration = isExploration(input.problemRoot);
   if (language === 'sql' && !exploration) {
     const sem = checkSemanticGrounding([{ name: rel, content: input.content }], input.sources.semantic, { knownMetrics: knownMetricNames(input.sources.assertions) });

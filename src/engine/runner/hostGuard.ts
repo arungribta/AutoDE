@@ -11,11 +11,20 @@ import { classifySql } from './runbook';
  * AutoDE's runner runs. Reads (listing, describing, validating, read-only
  * `snow sql`) pass, as does anything that only touches the local CLI setup.
  *
+ * The guard also protects the approval record: an agent's file-writing tools
+ * (Write, Edit, MultiEdit, NotebookEdit) are refused on `.autode/decisions/` and
+ * `.autode/config/platform-approvals.json`, and so is a shell command that names
+ * those paths with an obvious write (a redirect, `tee`, `sed -i`, `cp`, `mv`,
+ * `rm`, Set-Content, Out-File and the like). Approving is a person's act.
+ *
  * A guard against an agent's mistakes, not a sandbox: a command it can't read
  * (a script, an alias, a `snow sql` file it can't open) is blocked rather than
  * guessed, and a command that doesn't name the CLI (a Python script calling the
- * connector) is outside what it sees. Hosts without hooks keep this as a
- * convention, stated in the skills.
+ * connector) is outside what it sees. The same holds for the protected paths: a
+ * script, or a path built at run time, gets past it. The engine does not rely
+ * on it alone (the MCP server never applies a high-stakes file resolution, and a
+ * proposal changed after its decision was created is never applied). Hosts
+ * without hooks keep this as a convention, stated in the skills.
  */
 
 export interface GuardedCommand { argv: string[]; class: 'read' | 'local' | 'change'; why: string }
@@ -111,8 +120,37 @@ function classifyCli(cli: 'snow' | 'databricks', args: readonly string[], cwd: s
   return verb ? { argv, class: 'read', why: verb } : { argv, class: 'change', why: `\`${[cli, ...words.slice(0, 2)].join(' ')}\` changes the platform, or the guard can't tell that it doesn't` };
 }
 
+/** A path with forward slashes, lower case and `.`/`..` folded: how protected paths are compared (Windows paths are case-insensitive). */
+function normalisePath(p: string): string {
+  return path.posix.normalize(p.replace(/\\/g, '/').toLowerCase());
+}
+
+const PROTECTED_PATH = /(^|\/)\.autode\/(decisions(\/|$)|config\/platform-approvals\.json$)/;
+/** For a command line (not one path): the protected paths anywhere in the text. */
+const PROTECTED_IN_TEXT = /\.autode\/(decisions(\/|\b)|config\/platform-approvals\.json)/;
+/** Shell words and cmdlets that write, move or delete a file, and the usual ways a script writes one. */
+const WRITE_WORDS = /\b(tee|cp|mv|rm|del|erase|rmdir|rd|ln|touch|truncate|dd|install|copy|move|ren|rename|xcopy|robocopy|(set|add|out|clear|remove|copy|move|rename|new)-(content|item|itemproperty|file)|writealltext|writeallbytes|writefile\w*|write_text|write_bytes)\b|\bsed\b[^|;&\n]*\s-[a-z]*i|\bopen\([^)]*,\s*['"][wa+]|\bwrite\(/;
+
+/** Whether a file path is one an agent must not write: a decision file or the platform approvals. */
+export function isProtectedPath(file: string): boolean {
+  return PROTECTED_PATH.test(normalisePath(file));
+}
+
+/** A reason when the shell command names a protected path together with an obvious write; otherwise undefined. */
+function protectedWriteReason(command: string): string | undefined {
+  const text = command.replace(/\\/g, '/').toLowerCase();
+  if (!PROTECTED_IN_TEXT.test(text)) return undefined;
+  // `2>/dev/null` and `2>&1` are not writes to a file.
+  const bare = text.replace(/\d*>&\d+|\d*>>?\s*\/dev\/null|\d*>>?\s*\$null|\d*>>?\s*nul\b/g, ' ');
+  if (!(/>/.test(bare) || WRITE_WORDS.test(bare))) return undefined;
+  return PROTECTED_REASON;
+}
+
+const PROTECTED_REASON = 'AutoDE blocks writes to its decision files (.autode/decisions/) and to .autode/config/platform-approvals.json: approving is a person\'s act. Propose with the autode_propose_* tools; a person approves in the AutoDE panel, with `autode decisions approve <id>`, or by editing the decision file themselves.';
+
 /** The guard's verdict on one shell command, as the host would run it in `cwd`. */
 export function guardShellCommand(command: string, cwd: string, depth = 0): GuardVerdict {
+  const protectedReason = depth === 0 ? protectedWriteReason(String(command ?? '')) : undefined;
   const words = shellWords(String(command ?? ''));
   const commands: GuardedCommand[] = [];
   let seg: string[] = [];
@@ -134,18 +172,25 @@ export function guardShellCommand(command: string, cwd: string, depth = 0): Guar
     if (cli) commands.push(classifyCli(cli, s.slice(i + 1), cwd));
   }
   const blocked = commands.filter((c) => c.class === 'change');
-  if (!blocked.length) return { block: false, commands };
-  return {
-    block: true, commands,
-    reason: `AutoDE blocks platform-changing commands outside its runner: ${blocked.map((c) => `\`${c.argv.slice(0, 4).join(' ')}\` (${c.why})`).join('; ')}. `
+  if (!blocked.length && !protectedReason) return { block: false, commands };
+  const platformReason = blocked.length
+    ? `AutoDE blocks platform-changing commands outside its runner: ${blocked.map((c) => `\`${c.argv.slice(0, 4).join(' ')}\` (${c.why})`).join('; ')}. `
       + 'Put the change in a runbook instead (autode_propose_runbook): a person approves it, and AutoDE\'s runner runs it with dry runs, rollback and a log. Reads (list, describe, validate, read-only SQL) are allowed.'
-  };
+    : undefined;
+  return { block: true, commands, reason: [platformReason, protectedReason].filter(Boolean).join(' ') };
 }
 
-/** The verdict on a host's PreToolUse event (Claude Code's JSON on stdin): shell tools only. */
+/** Tools that write a file, by the hosts' names; the path is in `file_path` (`notebook_path` for notebooks). */
+const FILE_WRITE_TOOLS = /^(write|edit|multiedit|notebookedit)$/i;
+
+/** The verdict on a host's PreToolUse event (Claude Code's JSON on stdin): shell tools, and file-writing tools on protected paths. */
 export function guardHookEvent(event: unknown, fallbackCwd: string): GuardVerdict {
-  const e = (event && typeof event === 'object' ? event : {}) as { tool_name?: unknown; tool_input?: { command?: unknown }; cwd?: unknown };
+  const e = (event && typeof event === 'object' ? event : {}) as { tool_name?: unknown; tool_input?: { command?: unknown; file_path?: unknown; notebook_path?: unknown }; cwd?: unknown };
   const tool = String(e.tool_name ?? '');
+  if (FILE_WRITE_TOOLS.test(tool)) {
+    const files = [e.tool_input?.file_path, e.tool_input?.notebook_path].filter((x): x is string => typeof x === 'string');
+    return files.some(isProtectedPath) ? { block: true, commands: [], reason: PROTECTED_REASON } : { block: false, commands: [] };
+  }
   const command = e.tool_input?.command;
   if (!/^(bash|powershell|shell|run_shell_command|terminal)$/i.test(tool) || typeof command !== 'string') return { block: false, commands: [] };
   return guardShellCommand(command, typeof e.cwd === 'string' ? e.cwd : fallbackCwd);

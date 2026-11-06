@@ -23,7 +23,7 @@ interface SnowflakeColumnDesc {
 interface SnowflakeStatementResponse {
   statementHandle?: string;
   message?: string;
-  resultSetMetaData?: { rowType: SnowflakeColumnDesc[] };
+  resultSetMetaData?: { rowType: SnowflakeColumnDesc[]; partitionInfo?: unknown[] };
   data?: unknown[][];
 }
 
@@ -129,7 +129,14 @@ export class SnowflakeRestBackend implements ExecutionBackend {
 
     const columnDefs = result.resultSetMetaData?.rowType ?? [];
     const columns = columnDefs.map((c) => c.name);
-    const rawRows = result.data ?? [];
+    // A large result comes in partitions: `data` is only the first. Reading just that would pass a prefix off as the whole.
+    const rawRows = [...(result.data ?? [])];
+    const partitions = result.resultSetMetaData?.partitionInfo?.length ?? 1;
+    for (let p = 1; p < partitions && (options?.maxRows === undefined || rawRows.length < options.maxRows); p++) {
+      const part = await fetch(`${this.baseUrl()}/api/v2/statements/${result.statementHandle}?partition=${p}`, { headers });
+      if (!part.ok) throw new Error(`Snowflake result partition ${p} of ${partitions} couldn't be read (${part.status}).`);
+      rawRows.push(...(((await part.json()) as SnowflakeStatementResponse).data ?? []));
+    }
     const rows = rawRows.map((row) => {
       const obj: Record<string, unknown> = {};
       row.forEach((value, i) => { obj[columns[i]] = castSnowflakeValue(value, columnDefs[i]?.type); });

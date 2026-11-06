@@ -63,8 +63,11 @@ export function usePlatformWorkspace(root: string | undefined): void {
   workspaceRoot = root;
 }
 
+/** The workspace registered for id-only lookups. */
+export function platformWorkspace(): string | undefined { return workspaceRoot; }
+
 /** The team's definitions change only with their files or an approval: their names, times and the approvals are the key. */
-function teamDefinitionsStamp(root: string): string {
+export function teamDefinitionsStamp(root: string): string {
   const dir = layoutPath(root, 'platformDefinitions');
   let names: string[] = [];
   try { names = fs.readdirSync(dir).filter((n) => /\.ya?ml$/i.test(n)).sort(); } catch { return ''; }

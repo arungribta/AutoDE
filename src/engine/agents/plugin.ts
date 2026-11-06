@@ -48,8 +48,8 @@ export function guardEntry(entry: ServerEntry, sub: 'guard' | 'turn' = 'guard'):
   return { command: entry.command, args: [...(i >= 0 ? entry.args.slice(0, i) : entry.args), 'hook', sub] };
 }
 
-/** Shell tools the guard checks, by the hosts' tool names. */
-const GUARDED_TOOLS = 'Bash|PowerShell';
+/** Tools the guard checks, by the hosts' tool names: shell tools, and the file-writing tools (decision files are a person's to resolve). */
+const GUARDED_TOOLS = 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit';
 
 type HookEntry = { matcher?: string; hooks: Array<{ type: 'command'; command: string; timeout: number }> };
 

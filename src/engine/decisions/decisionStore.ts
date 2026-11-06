@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { parseYaml, stringifyYaml } from '../context/Yaml';
 import { createUlidFactory } from '../context/assertions';
 import { layoutPath } from '../workspaceLayout';
@@ -98,9 +99,11 @@ export interface Decision {
   /** The file channel: a person fills this in. */
   resolution: { decision: '' | 'approved' | 'rejected'; by: string; note: string };
   events: DecisionEvent[];
+  /** sha256 of the proposal's JSON text when the decision was created: what the reviewer saw. Older decisions have none. */
+  proposalHash?: string;
 }
 
-export type DecisionErrorCode = 'NOT_FOUND' | 'NOT_PENDING' | 'CHANNEL_NOT_ALLOWED' | 'NOT_APPROVED';
+export type DecisionErrorCode = 'NOT_FOUND' | 'NOT_PENDING' | 'CHANNEL_NOT_ALLOWED' | 'NOT_APPROVED' | 'UNREADABLE';
 
 export class DecisionError extends Error {
   public constructor(public readonly code: DecisionErrorCode, message: string, public readonly details: Record<string, unknown> = {}) {
@@ -145,6 +148,13 @@ export interface NewDecision {
 
 const HEADER = '# AutoDE decision (docs/specs/mcp-engine.md §9.2 PA1).\n# To resolve it here: set resolution.decision to approved or rejected, fill resolution.by, and commit.\n# AutoDE applies an approved decision; never edit the other fields.\n';
 const ID_RE = /^dec-[0-9A-Z]{26}$/;
+/** A claim on a decision being applied is taken over after this long. */
+const CLAIM_STALE_MS = 10 * 60 * 1000;
+const STATUSES: readonly string[] = ['pending', 'approved', 'rejected', 'applied', 'superseded', 'withdrawn', 'failed'];
+
+function sha256(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
 
 function writeAtomic(file: string, text: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -191,7 +201,9 @@ export class DecisionStore {
       resolution: { decision: '', by: '', note: '' },
       events: [{ at, type: 'proposed', actor: proposerLabel(input.proposedBy) }]
     };
-    writeAtomic(this.file(d.id, '.proposal.json'), JSON.stringify(input.proposal, null, 2) + '\n');
+    const proposalText = JSON.stringify(input.proposal, null, 2) + '\n';
+    d.proposalHash = sha256(proposalText);
+    writeAtomic(this.file(d.id, '.proposal.json'), proposalText);
     this.save(d);
     return d;
   }
@@ -209,8 +221,44 @@ export class DecisionStore {
 
   public get(id: string): Decision {
     let text: string;
-    try { text = fs.readFileSync(this.file(id, '.yaml'), 'utf8'); } catch { throw new DecisionError('NOT_FOUND', `No decision "${id}".`); }
-    return normalise(parseYaml(text));
+    const file = this.file(id, '.yaml');
+    try { text = fs.readFileSync(file, 'utf8'); } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new DecisionError('NOT_FOUND', `No decision "${id}".`);
+      throw new DecisionError('UNREADABLE', `Decision "${id}" can't be read: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    let raw: unknown;
+    try { raw = parseYaml(text); } catch (err) { throw new DecisionError('UNREADABLE', `Decision "${id}" is not valid YAML: ${err instanceof Error ? err.message : String(err)}`); }
+    const r = raw as { id?: unknown; status?: unknown } | null;
+    if (!r || typeof r !== 'object' || r.id !== id || !STATUSES.includes(String(r.status))) throw new DecisionError('UNREADABLE', `Decision "${id}" is damaged: its id or status is missing or wrong.`);
+    return normalise(raw);
+  }
+
+  /** sha256 of the proposal file's text as it is on disk now (undefined when it can't be read). */
+  public proposalHashOnDisk(id: string): string | undefined {
+    try { return sha256(fs.readFileSync(this.file(id, '.proposal.json'), 'utf8')); } catch { return undefined; }
+  }
+
+  /**
+   * Claims a decision for applying: an exclusive lock file `<id>.applying`. Undefined when another process holds
+   * it (fresher than 10 minutes); an older one is taken over. Call `release` when done.
+   */
+  public claim(id: string): { release: () => void } | undefined {
+    const lock = this.file(id, '.yaml').replace(/\.yaml$/, '.applying');
+    fs.mkdirSync(this.directory, { recursive: true });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const fd = fs.openSync(lock, 'wx');
+        try { fs.writeSync(fd, `${process.pid} ${this.now().toISOString()}\n`); } finally { fs.closeSync(fd); }
+        return { release: () => { try { fs.unlinkSync(lock); } catch { /* already gone */ } } };
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        let age = 0;
+        try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
+        if (age < CLAIM_STALE_MS) return undefined;
+        try { fs.unlinkSync(lock); } catch { /* another process took it over */ }
+      }
+    }
+    return undefined;
   }
 
   public proposal<T = unknown>(id: string): T {
@@ -218,19 +266,34 @@ export class DecisionStore {
   }
 
   public list(filter: { status?: DecisionStatus | DecisionStatus[]; kind?: DecisionKind; problemId?: string } = {}): Decision[] {
+    return this.scan(filter).decisions;
+  }
+
+  /** Decision files that can't be read, each with why. They are not in `list()`: a caller that shows decisions must show these too. */
+  public unreadable(): Array<{ id: string; reason: string }> {
+    return this.scan().unreadable;
+  }
+
+  private scan(filter: { status?: DecisionStatus | DecisionStatus[]; kind?: DecisionKind; problemId?: string } = {}): { decisions: Decision[]; unreadable: Array<{ id: string; reason: string }> } {
     let names: string[];
-    try { names = fs.readdirSync(this.directory).filter((n) => /^dec-[0-9A-Z]{26}\.yaml$/.test(n)).sort(); } catch { return []; }
+    try { names = fs.readdirSync(this.directory).filter((n) => /^dec-[0-9A-Z]{26}\.yaml$/.test(n)).sort(); } catch { return { decisions: [], unreadable: [] }; }
     const statuses = filter.status === undefined ? undefined : Array.isArray(filter.status) ? filter.status : [filter.status];
     const out: Decision[] = [];
+    const unreadable: Array<{ id: string; reason: string }> = [];
     for (const n of names) {
       let d: Decision;
-      try { d = this.get(n.slice(0, -5)); } catch { continue; }
+      const id = n.slice(0, -5);
+      try { d = this.get(id); } catch (err) {
+        if (err instanceof DecisionError && err.code === 'NOT_FOUND') continue;
+        unreadable.push({ id, reason: err instanceof Error ? err.message : String(err) });
+        continue;
+      }
       if (statuses && !statuses.includes(d.status)) continue;
       if (filter.kind && d.kind !== filter.kind) continue;
       if (filter.problemId && d.problemId && d.problemId !== filter.problemId) continue;
       out.push(d);
     }
-    return out;
+    return { decisions: out, unreadable };
   }
 
   /** Resolves a pending decision through a channel its stakes allow. */
@@ -279,18 +342,26 @@ export class DecisionStore {
   /**
    * The file channel: pending decisions whose `resolution` a person filled in
    * become resolved (`by` is required). Returns the ones resolved now, and
-   * those left alone because `by` is missing.
+   * those left alone because `by` is missing. With `fileStakes: 'low'` (an agent's channel, the MCP server) a
+   * high-stakes decision's file resolution is left alone and listed in `held`: a person's CLI or panel picks it up.
+   * Stakes are recomputed from the proposal, never read from the file.
    */
-  public syncFileResolutions(): { resolved: Decision[]; incomplete: string[] } {
+  public syncFileResolutions(opts: { fileStakes?: 'all' | 'low' } = {}): { resolved: Decision[]; incomplete: string[]; held: string[] } {
     const resolved: Decision[] = [];
     const incomplete: string[] = [];
+    const held: string[] = [];
     for (const d of this.list({ status: 'pending' })) {
       const r = d.resolution;
       if (r.decision !== 'approved' && r.decision !== 'rejected') continue;
+      if (opts.fileStakes === 'low') {
+        let stakes: Stakes = 'high';
+        try { stakes = stakesFor(d.kind, this.proposal(d.id)); } catch { /* an unreadable proposal counts as high */ }
+        if (stakes !== 'low') { held.push(d.id); continue; }
+      }
       if (!r.by.trim()) { incomplete.push(d.id); continue; }
       resolved.push(this.resolve(d.id, { decision: r.decision, by: r.by, channel: 'file', note: r.note || undefined }));
     }
-    return { resolved, incomplete };
+    return { resolved, incomplete, held };
   }
 }
 

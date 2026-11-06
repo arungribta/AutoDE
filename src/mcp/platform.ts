@@ -1,6 +1,7 @@
 import { ConnectionManager, ConnectionManagerOptions } from '../engine/platform/ConnectionManager';
 import { ConnectionEntry, ConnectionsConfig, envStandInVariables, loadConnectionsConfig, resolveConnectionCredentials } from '../engine/platform/connectionsConfig';
 import { registerBuiltInCredentialResolvers } from '../engine/platform/credentials';
+import { onTrial } from '../engine/platform/onboarding';
 import { gateQueryResult, sanitizeSnapshot } from '../engine/platform/sampleData';
 import { checkReadOnlySql, checkSingleStatement, stripTrailingSemicolon } from '../engine/platform/sqlGuard';
 import { explainCovers, explainStatements } from '../engine/platform/dialects';
@@ -311,6 +312,7 @@ export function platformTools(session: PlatformSession): EngineTool[] {
         const check = checkReadOnlySql(sql);
         if (!check.ok) throw new EngineToolError('WRITE_NOT_ALLOWED', `${check.reason} Propose it as a runbook with autode_propose_runbook: a person approves it, then AutoDE's runner runs it.`, { statement: check.firstKeyword });
         const entry = session.entry(String(args.connectionId));
+        if (onTrial({ resourcesRoot: ws.options.resourcesRoot, workspaceRoot: ws.options.workspaceRoot }, entry.platform)) throw new EngineToolError('VALIDATION_FAILED', `${entry.platform} is on trial: until a person reviews a conformance run, only conformance and Try it read from it (autode platform onboard status ${entry.platform}).`);
         const maxRows = Math.min(MAX_ROWS_CAP, (args.maxRows as number | undefined) ?? DEFAULT_MAX_ROWS);
         const timeoutSeconds = (args.timeoutSeconds as number | undefined) ?? DEFAULT_TIMEOUT_S;
         const result = await run(entry.id, (m) => m.executeQuery(stripTrailingSemicolon(sql), { maxRows, timeoutMs: timeoutSeconds * 1000 }), timeoutSeconds);

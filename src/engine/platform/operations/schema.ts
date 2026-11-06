@@ -130,6 +130,7 @@ export const PLATFORM_SCHEMA = {
             versionArgs: strings,
             env: { type: 'object', additionalProperties: { type: 'string' }, propertyNames: { pattern: '^[A-Z][A-Z0-9_]*$' }, description: 'Environment variables set on every call (never a secret): for example turning the CLI\'s pager off.' },
             listProfiles: { ...strings, description: 'The arguments that list the CLI\'s own profiles, one per line.' },
+            readCommands: { type: 'array', items: strings, description: 'The sub-commands that only read, such as [tables, list]: a cli read must start with one of them. A read over the CLI is refused without this list.' },
             browserSignIn: { ...strings, description: 'Regular expressions for what the CLI prints while it waits on a browser sign-in: AutoDE stops it and says so.' },
             statement: {
               type: 'object', additionalProperties: false, required: ['mode'],

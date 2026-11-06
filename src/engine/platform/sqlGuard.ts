@@ -41,6 +41,8 @@ interface Convention {
   backtick: boolean;
   /** `$$…$$` strings. */
   dollar: boolean;
+  /** A line comment beyond `--`: Snowflake's `//`, Spark's and MySQL's `#`. */
+  lineComment?: string;
   /** Oracle's alternative quoting `q'<d>…<d>'` (also `nq'…'`); `[ { < (` close with `] } > )`. */
   qQuote?: boolean;
 }
@@ -48,7 +50,10 @@ interface Convention {
 const CONVENTIONS: readonly Convention[] = [
   { backslash: false, backtick: false, dollar: false },
   { backslash: true, backtick: true, dollar: true },
-  { backslash: false, backtick: false, dollar: false, qQuote: true }
+  { backslash: false, backtick: false, dollar: false, qQuote: true },
+  // Line comments only some dialects have: what is a comment on one platform is text on another, and every reading must agree.
+  { backslash: false, backtick: false, dollar: false, lineComment: '//' },
+  { backslash: true, backtick: true, dollar: false, lineComment: '#' }
 ];
 
 const Q_CLOSE: Readonly<Record<string, string>> = { '[': ']', '{': '}', '<': '>', '(': ')' };
@@ -79,7 +84,7 @@ function lex(sql: string, c: Convention): Lexed {
   };
   while (i < n) {
     const ch = sql[i];
-    if (ch === '-' && sql[i + 1] === '-') {
+    if ((ch === '-' && sql[i + 1] === '-') || (c.lineComment && sql.startsWith(c.lineComment, i))) {
       while (i < n && sql[i] !== '\n') i++;
       continue;
     }

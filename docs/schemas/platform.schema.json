@@ -130,6 +130,16 @@
               },
               "description": "The arguments that list the CLI's own profiles, one per line."
             },
+            "readCommands": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "description": "The sub-commands that only read, such as [tables, list]: a cli read must start with one of them. A read over the CLI is refused without this list."
+            },
             "browserSignIn": {
               "type": "array",
               "items": {

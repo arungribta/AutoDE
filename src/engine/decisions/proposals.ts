@@ -44,7 +44,7 @@ import {
   ProblemDocumentKind, parseBusinessProblemSpec, parsePipelineSpecDocument, readProblemDocument,
   writeBusinessProblemSpec, writeMappingUpsert, writePipelineSpec
 } from '../documents/problemDocuments';
-import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, ValidationReport } from './decisionStore';
+import { Decision, DecisionError, DecisionKind, DecisionStore, Proposer, ValidationReport, stakesFor } from './decisionStore';
 
 /**
  * Proposals (docs/specs/mcp-engine.md §9.2 Phase PA1): validate what
@@ -475,7 +475,7 @@ export function approvalBlockers(store: DecisionStore, id: string, ctx: Pick<Pro
   const p = store.proposal<WorkflowInstance>(id);
   const root = ctx.problemRoot ?? layoutPath(ctx.workspaceRoot, 'problems', p.problemId);
   let spec: BusinessProblemSpec | undefined;
-  try { spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? ''); } catch { return []; }
+  try { spec = parseBusinessProblemSpec(readProblemDocument(root, 'spec') ?? ''); } catch (err) { return [`The problem's specification can't be read (${err instanceof Error ? err.message : String(err)}), so the plan can't be checked against it. Fix the specification first, then approve.`]; }
   const c = effectiveCoverage(spec, p, pendingCoverage(ctx.workspaceRoot, p.problemId)?.coverage ?? readCoverage(root));
   const check = checkCoverage(c, spec, p, readPlanning(root));
   if (!check.ok) return [`The specification's coverage isn't complete (${check.counts.question} item(s) to place): ${check.errors.join(' ')} Place them in the plan step (or autode workflow coverage place), then approve the coverage and the workflow.`];
@@ -485,8 +485,21 @@ export function approvalBlockers(store: DecisionStore, id: string, ctx: Pick<Pro
 }
 
 export async function applyDecision(store: DecisionStore, id: string, ctx: ProposalContext, deps: ApplyDeps = {}): Promise<ApplyResult> {
+  // The extension's watcher, the MCP server and the CLI can all apply: claim the decision first so only one does.
+  const claim = store.claim(id);
+  if (!claim) return { decision: store.get(id), applied: false, message: `Decision ${id} is being applied by another AutoDE process; try again in a moment.` };
+  try { return await applyClaimed(store, id, ctx, deps); } finally { claim.release(); }
+}
+
+async function applyClaimed(store: DecisionStore, id: string, ctx: ProposalContext, deps: ApplyDeps): Promise<ApplyResult> {
+  // Read after claiming: another process may have finished it meanwhile.
   const d = store.get(id);
   if (d.status !== 'approved') throw new DecisionError('NOT_APPROVED', `Decision ${id} is ${d.status}; only an approved decision is applied.`, { status: d.status });
+  // Approval is bound to what the reviewer saw: a proposal changed on disk since the decision was created is never applied.
+  if (d.proposalHash && store.proposalHashOnDisk(id) !== d.proposalHash) {
+    const note = 'The proposal file changed after this decision was created, so what was approved is not what is on disk. Nothing was applied; propose again.';
+    return finishFailed(store, id, note);
+  }
   const kind = d.kind;
   // A stage gate (PA3a): the workflow runtime reads the decision itself; nothing else to write.
   if (d.kind === 'gate') { const done = store.markApplied(id, `Approved by ${d.resolution.by || 'unknown'}.`); return { decision: done, applied: true, message: `Approved: ${d.title}.` }; }
@@ -513,6 +526,8 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         const p = store.proposal<AssertionProposal>(id);
         const ledger = new AssertionLedger(layoutPath(ctx.workspaceRoot, 'ledger'));
         await ledger.load();
+        // Idempotent: a fact this decision already wrote (a crash after the write, a second host) is not written twice.
+        if (ledger.assertions().some((a) => a.createdBy === `decision:${id}`)) break;
         const evidence: Evidence[] = p.evidence;
         await ledger.assert({ ...p, evidence, status: 'active', trust: 'confirmed', createdBy: `decision:${id}`, specId: p.specId }, id);
         break;
@@ -704,11 +719,28 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
         return { decision: d, applied: false, message: `Decision ${id} (${d.kind}) has nothing to apply.` };
     }
   } catch (err) {
-    const failed = store.markFailed(id, err instanceof Error ? err.message : String(err));
-    return { decision: failed, applied: false, message: `Applying ${id} failed: ${failed.events[failed.events.length - 1].note}` };
+    return finishFailed(store, id, err instanceof Error ? err.message : String(err), true);
   }
-  const done = store.markApplied(id, `Approved by ${approver}.`);
-  return { decision: done, applied: true, message: `Applied ${id}: ${d.title} (approved by ${approver}).` };
+  try {
+    const done = store.markApplied(id, `Approved by ${approver}.`);
+    return { decision: done, applied: true, message: `Applied ${id}: ${d.title} (approved by ${approver}).` };
+  } catch (err) {
+    if (!(err instanceof DecisionError && err.code === 'NOT_PENDING')) throw err;
+    const cur = store.get(id);
+    return { decision: cur, applied: false, message: `Decision ${id} is ${cur.status}: another AutoDE process finished it.` };
+  }
+}
+
+/** Marks a decision failed; when another process already finished it, says so instead of throwing. */
+function finishFailed(store: DecisionStore, id: string, note: string, applying = false): ApplyResult {
+  try {
+    const failed = store.markFailed(id, note);
+    return { decision: failed, applied: false, message: applying ? `Applying ${id} failed: ${failed.events[failed.events.length - 1].note}` : note };
+  } catch (err) {
+    if (!(err instanceof DecisionError && err.code === 'NOT_PENDING')) throw err;
+    const cur = store.get(id);
+    return { decision: cur, applied: false, message: `Decision ${id} is ${cur.status}: another AutoDE process finished it.` };
+  }
 }
 
 /**
@@ -716,12 +748,23 @@ export async function applyDecision(store: DecisionStore, id: string, ctx: Propo
  * this process can apply.
  * Call it before answering about decisions, and when decision files change.
  */
-export async function processResolved(store: DecisionStore, ctx: ProposalContext, deps: ApplyDeps = {}): Promise<{ applied: ApplyResult[]; incomplete: string[] }> {
-  const { incomplete } = store.syncFileResolutions();
+export async function processResolved(store: DecisionStore, ctx: ProposalContext, deps: ApplyDeps = {}, opts: { fileStakes?: 'all' | 'low' } = {}): Promise<{ applied: ApplyResult[]; incomplete: string[]; unreadable: Array<{ id: string; reason: string }>; held: string[] }> {
+  // `fileStakes: 'low'` is an agent's channel (the MCP server): a high-stakes decision a file says is approved stays
+  // pending there, and one already approved on disk is not applied there; a person's CLI or the panel does both.
+  const { incomplete, held } = store.syncFileResolutions(opts);
   const applied: ApplyResult[] = [];
   for (const d of store.list({ status: 'approved' })) {
     if (d.problemId && ctx.problemId && d.problemId !== ctx.problemId) continue;
-    applied.push(await applyDecision(store, d.id, ctx, deps));
+    if (opts.fileStakes === 'low') {
+      let stakes = 'high';
+      try { stakes = stakesFor(d.kind, store.proposal(d.id)); } catch { /* an unreadable proposal counts as high */ }
+      if (stakes !== 'low') { held.push(d.id); continue; }
+    }
+    try { applied.push(await applyDecision(store, d.id, ctx, deps)); } catch (err) {
+      // Another process applied it between the list and the claim.
+      if (err instanceof DecisionError && err.code === 'NOT_APPROVED') continue;
+      throw err;
+    }
   }
-  return { applied, incomplete };
+  return { applied, incomplete, unreadable: store.unreadable(), held };
 }

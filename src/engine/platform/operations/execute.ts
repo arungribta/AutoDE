@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { recordOperationRun } from './runLog';
 import { checkReadOnlySql } from '../sqlGuard';
-import { BindError, bindPlain, bindTemplate, valuesFor } from './bind';
+import { BindError, bindPlain, bindTemplate, cliReadProblem, valuesFor } from './bind';
 import { mapRows } from './map';
 import { HttpCall, HttpRequest } from '../httpTransport';
 import { FileCall, checkGlob } from '../fileTransport';
@@ -105,7 +105,8 @@ export function bindOperation(operation: PlatformOperation, platformId: string, 
   const values = valuesFor(operation.params, params);
   const d = platform?.dialect ?? {};
   if (impl.sql) return { impl, statement: bindTemplate(impl.sql, operation.params, values, d).trim().replace(/;\s*$/, '') };
-  if (impl.cli) return { impl, argv: impl.cli.map((a) => bindTemplate(a, operation.params, values, d)) };
+  // An argument is a value, not SQL: no quotes around it.
+  if (impl.cli) return { impl, argv: impl.cli.map((a) => bindPlain(a, operation.params, values)) };
   if (impl.http) {
     const request = bindHttp(impl.http, operation.params, values);
     const q = new URLSearchParams(request.query as Record<string, string>).toString();
@@ -152,6 +153,8 @@ async function runBound(input: RunInput): Promise<RunResult> {
       return { ...out, ok: true, transport: 'sql', rows: mapRows(op.returns, rows.slice(0, maxRows)), truncated: rows.length > maxRows };
     }
     if (bound.argv) {
+      const problem = cliReadProblem(bound.argv, input.platform);
+      if (problem) return { ...out, transport: 'cli', gapKind: 'refused', gap: `refused: ${problem}.` };
       if (!input.runner.cli) return { ...out, transport: 'cli', gap: 'no command runner for this connection.' };
       const { stdout } = await input.runner.cli(bound.argv);
       const rows = parseCliOutput(stdout, bound.impl.parse);
@@ -238,7 +241,8 @@ export async function connectionVersion(connectionId: string, platform: Platform
     const r = await runOperation({ operation: versionOp, platformId: platform.id, platform, params: {}, runner, maxRows: 1 });
     v = r.ok ? versionOf(r.rows[0]?.version) : undefined;
   }
-  versions.set(connectionId, v ?? null);
+  // Only a version that was read is kept: a passing failure must not turn range checks off for the rest of the session.
+  if (v) versions.set(connectionId, v);
   return v;
 }
 

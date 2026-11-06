@@ -6,6 +6,43 @@ Where things are documented: requirements (WHAT and WHY) in [docs/requirements.m
 
 > Section references in older entries (e.g. "§4.9", "§2.12") point into `docs/technical-design.md` or `docs/requirements.md` as they were at that version; use git history for the exact text.
 
+## 0.61.3
+
+CR1, the fixes from the critical code review ([code-review-2026-11.md](docs/design/code-review-2026-11.md)). Every item is a safety defect, or a gate that could falsely pass. Structural findings are left for the owner to decide.
+
+**Read-only means read-only**
+- The SQL guard knows `//` and `#` line comments, which could hide a second statement from it.
+- `cli` read operations are checked: only a sub-command the platform definition lists in `access.cli.readCommands` runs as a read. This gap opened in v0.61.0, when `cli` operations became runnable. Arguments are now bound as values, without SQL quotes.
+- A definition's CLI is a program's name, not a path, and it can't set `PATH`, `NODE_*`, `LD_*` or similar.
+- A system on trial refuses an agent's raw SQL too.
+
+**A person approves**
+- The MCP server no longer picks up or applies a high-stakes decision resolved in a file: it stays for a person's CLI or panel, listed as `heldForAPerson`.
+- The guard hook also covers Write, Edit, MultiEdit and NotebookEdit, and obvious shell writes, on `.autode/decisions/` and `platform-approvals.json`. It still guards against mistakes; it isn't a sandbox.
+- An approval is tied to the proposal's content (`proposalHash`): a proposal changed after review fails rather than applies.
+
+**Applying safely**
+- One process applies a decision at a time (`<id>.applying`, taken over when stale), an assertion isn't applied twice, and a race no longer throws.
+- `platform-approvals.json` is written atomically, and a corrupt file is reported, not read as "nothing approved".
+- A decision file that can't be read is reported (`unreadable`), not dropped from every inbox. An unreadable specification blocks approval rather than clearing it.
+
+**Credentials and content**
+- A rejected Snowflake password is no longer retried on the command line.
+- The chat panel's `escapeHtml` works. It had escaped nothing since v0.4.0. Webview images are limited to the extension's own and inline ones, and the CSP nonce comes from a secure random source.
+
+**Answers that were quietly wrong**
+- The Snowflake SQL API path reads every result partition, not only the first.
+- Dialect fragments see team definitions and approvals, so a team platform no longer falls back to ANSI SQL silently.
+- A failed version read no longer turns version ranges off for the session.
+- An agent's `language` argument can't switch off the semantic grounding check on a `.sql` file.
+
+**The gate itself**
+- A test run that stops early says `INCOMPLETE` and fails, a filtered run says `PARTIAL RUN` and fails if nothing matched, a shortfall against `test/test-count.json` fails, each test has a timeout, and the slowest tests are printed.
+- Every inline script in `media/` is parsed by a test.
+- CI runs on `main`, `master` and feature branches, and now runs the architecture test.
+
+Known limits are in the review: nothing here was tried on a live Snowflake or in a real panel, and the guard hook can be walked around by a determined script.
+
 ## 0.61.2
 
 POP5c, packs ([platform-operations.md](docs/specs/platform-operations.md) §6.5), which completes POP5. A team's platform definitions, operations, implementations and skills go to another workspace as a folder, and arrive with one review.

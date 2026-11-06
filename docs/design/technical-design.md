@@ -1,7 +1,7 @@
 # AutoDE — Technical Design Document
 
 **Last Updated:** 2026-11-06
-**Version:** 0.61.2
+**Version:** 0.61.3
 **Scope:** HOW AutoDE is built — architecture, modules, data formats, algorithms and design trade-offs. What AutoDE must do and why: [requirements.md](../requirements.md) and the forward specifications. Order and status: [roadmap.md](../roadmap.md). Release history (moved out of this document on 2026-10-15): [CHANGELOG.md](../../CHANGELOG.md). Document map: [README.md](../README.md).
 
 > Restructured on 2026-10-15: sections 1, 2, 5, 7, 10.1–10.2, 11 and 12 were rewritten against the code at v0.30.0; the others were carried over with paths updated for the v0.26.0 move to `src/engine/`, and some still describe their version's design in narrative form. The historical phase list (old §10) was removed — release history is in CHANGELOG.md. Where this document and the code disagree, the code and the latest CHANGELOG entry win; corrections are tracked in the roadmap.
@@ -1704,6 +1704,13 @@ A stage whose work rests on joins, keys and grain (mapping, modelling, build, qu
   - **Proposals** (`proposal.ts`, `proposeService.ts`): `prepareOperationProposal()` parses (object or YAML), requires `reason`, an id, `example.rows`, known platforms, and `checkOperation` with the approved platforms; `resemblingOperations()` scores approved operations (area, shared platforms, shared parameter names, shared names read — `{…}` placeholders and `SQL_WORDS` left out). `proposalFile(id, text)` = `proposed/<id>.<checksum 8>.yaml`. `proposeOperation()` supersedes pending proposals of the same operation (`PlatformFilePayload.operation`) and removes their draft files (never the approved one), writes the file with a header comment, and `propose(…, 'platform_operation', { file, checksum, operation, reason, fixes, resembles })`. `validatePlatformFileProposal` requires `example.rows` for a `/proposed/` file. Applying calls `retireReplaced()`: the team's other files of that id, now drafts, move to `.autode/local/replaced-operations/`. `pendingOperationProposals()` feeds `operationPage().proposals` and `platformPage().health.proposals`; `drift` and `health.drift`/`unreadKinds` come from `driftReport`.
   - **Surfaces:** MCP `autode_propose_platform_operation` (propose tier), `autode_platform_drift` (read); CLI `platform propose-operation <file> --reason [--fixes]` and `platform drift` (both call those handlers); `platform operation` adds drift and proposals. VS Code: `PlatformCatalogHost.resolveDecision` → `SidebarProvider.resolveFromView` (message `resolveDecision`, Reject asks for the note).
   - **Role and skill:** `agents/platform-maintainer.md`; `skills/autode-core-platform-operations` (core, no stage kinds; maintenance work orders give it to the role).
+- **CR1** (v0.61.3; [code-review-2026-11.md](code-review-2026-11.md)).
+  - **Guard:** `sqlGuard.ts` `CONVENTIONS` adds a `lineComment` reading for `//` and `#`; every reading must agree. `bind.ts` `cliReadProblem` checks `access.cli.readCommands`, in `checkOperation` and again in `runBound`.
+  - **Decisions:** `Decision.proposalHash`, checked in `applyClaimed`. `DecisionStore.claim()` exclusive-creates `<id>.applying`; `applyDecision` wraps `applyClaimed`. `syncFileResolutions({ fileStakes })` and `processResolved(…, { fileStakes })`: MCP passes `low`. `unreadable()` reports files `list()` can't read.
+  - **Guard hook:** `hostGuard.ts` `isProtectedPath`, checked for file tools in `guardHookEvent` and for obvious writes in `guardShellCommand`; `GUARDED_TOOLS` names them.
+  - **Approvals:** `load.ts` `readApprovalsOf` tells absent from corrupt; `writeApproval` writes through a temporary file and refuses to rewrite a corrupt one.
+  - **Dialects:** `fragmentsFor` reads the registered workspace, keyed by `teamDefinitionsStamp`.
+  - **Test gate:** `test/test-count.json` holds the floor; the runner's `exit` handler reports an incomplete run.
 - **POP5c, packs** (v0.61.2; `src/engine/platform/packs.ts`).
   - **Format:** a folder with `autode-pack.yaml` (`autode-platform-pack/1`): items (`what`, `id`, `file`, `checksum`), skills (`name`, `dir`, `checksum`), and `reviewed`, the exporter's statement.
   - **`exportPack`:** collects every reason to refuse before writing: drafts, on trial, rows in a non-metadata operation's example, `secretIn` (known credential shapes), a non-empty folder.

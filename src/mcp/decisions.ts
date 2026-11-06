@@ -81,7 +81,8 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
   });
   const deps = () => ({});
   // Decisions resolved in their files (or in the panel) are applied before any answer.
-  const sync = async (ws: EngineWorkspace) => processResolved(store(ws), await context(ws), deps());
+  // This is an agent's channel: a high-stakes decision a file says is approved is left for a person's CLI or panel.
+  const sync = async (ws: EngineWorkspace) => processResolved(store(ws), await context(ws), deps(), { fileStakes: 'low' });
 
   const proposalTool = (name: string, kind: ProposalKind, title: string, description: string, payloadKey: string, payloadSchema: Record<string, unknown>, withSchema = false): EngineTool => ({
     name,
@@ -293,7 +294,7 @@ export function decisionTools(options: DecisionToolsOptions): EngineTool[] {
       handler: async (args, ws) => {
         const synced = await sync(ws);
         const list = store(ws).list({ status: args.status as Decision['status'] | undefined, kind: args.kind as Decision['kind'] | undefined });
-        return { decisions: list.map(view), appliedNow: synced.applied.map((a) => a.message), incompleteFileResolutions: synced.incomplete };
+        return { decisions: list.map(view), appliedNow: synced.applied.map((a) => a.message), incompleteFileResolutions: synced.incomplete, heldForAPerson: synced.held, unreadableDecisionFiles: synced.unreadable };
       }
     },
     {
